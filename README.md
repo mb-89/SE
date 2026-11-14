@@ -1204,6 +1204,7 @@ work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SES
 
 work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)
                              [--issue-body FILE] [--comment-count N] [--newest-comment ID]
+                             [--check-runs FILE]
     draft or check the field report a pull request description carries, in the form of
     .github/pull_request_template.md
 

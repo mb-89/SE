@@ -2794,6 +2794,150 @@ def merge_current_main(root: Path, branch: str) -> None:
         print(f"Merged {integration_ref(root)} ({commit}) into {branch}; checking against it")
 
 
+# Platform code waits for its own platform legs (src/agents/worker.md "Platform code"): a branch
+# that changes code only Windows or macOS runs differently is delivered once its work pull
+# request's kern-platforms legs passed and its field report links them; `deliver` and
+# `field-report --check` warn otherwise, and never refuse, so a GitHub outage stops no delivery.
+PLATFORM_JOB = "kern-platforms"
+CHECK_WORKFLOW = Path(".github") / "workflows" / "check.yml"
+#: Files platform-specific by name: Go files built for one platform, PowerShell scripts.
+PLATFORM_FILE = re.compile(r"_(?:windows|darwin)(?:_test)?\.go$|\.ps1$")
+#: SE's start and hook scripts with their tests, which kern-platforms runs on each platform
+#: (CHECK_WORKFLOW, its step "SE's start and hook scripts on this platform").
+PLATFORM_SCRIPTS = ("scripts/bootstrap.sh", "scripts/se_hook.sh", "tests/test_bootstrap.py",
+                    "tests/test_se_hook.py")
+#: Code that branches on the platform, in a changed hunk: build tags, Go's and Python's tests of it.
+PLATFORM_BRANCH = re.compile(
+    r"//go:build|// \+build|runtime\.GOOS|sys\.platform|\bos\.name\b|platform\.system\(")
+#: A GitHub Actions job's page, as a field report links it: its run's and its job's id.
+JOB_LINK = re.compile(r"https://[^\s)<>\]`'\"]+/actions/runs/(\d+)/job/(\d+)")
+
+
+def platform_legs(root: Path) -> list[str]:
+    """The kern-platforms legs the checkout's CI runs, its matrix's `os` list in CHECK_WORKFLOW;
+    [] where it has no such job, and nothing is warned."""
+    try:
+        text = (root / CHECK_WORKFLOW).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    job = re.search(rf"^  {PLATFORM_JOB}:\n((?:\n|    .*\n|      .*\n)*)", text, re.MULTILINE)
+    found = re.search(r"^\s+os:\s*\[([^\]]*)\]", job[1], re.MULTILINE) if job else None
+    return [leg.strip() for leg in found[1].split(",") if leg.strip()] if found else []
+
+
+def platform_changes(root: Path) -> list[str]:
+    """The files the branch changes since the integration branch that are platform-specific: by
+    name (PLATFORM_FILE, PLATFORM_SCRIPTS) or where a changed hunk, its context lines included,
+    branches on the platform (PLATFORM_BRANCH); [] where git cannot tell."""
+    result = run_git(root, "diff", "--unified=3", f"{integration_ref(root)}...HEAD")
+    if result.returncode != 0:
+        return []
+    found: dict[str, None] = {}
+    path = ""
+    for line in result.stdout.splitlines():
+        if line.startswith("diff --git "):
+            path = line.rsplit(" b/", 1)[-1]
+            if PLATFORM_FILE.search(path) or path in PLATFORM_SCRIPTS:
+                found[path] = None
+        elif path and line[:1] in "+- " and not line.startswith(("+++", "---")) and (
+                PLATFORM_BRANCH.search(line)):
+            found[path] = None
+    return list(found)
+
+
+def job_id(run: dict[str, object]) -> str:
+    """The job id of a check run or job as GitHub answers it: the id its page names, else `id`
+    (an Actions job's check run carries the job's id)."""
+    for key in ("html_url", "details_url"):
+        found = JOB_LINK.search(str(run.get(key) or ""))
+        if found:
+            return found[2]
+    return str(run.get("id") or "")
+
+
+def read_platform_runs(root: Path, branch: str, linked: list[str],
+                       check_runs: Path | None) -> tuple[list[dict[str, object]], str | None]:
+    """The work pull request's kern-platforms check runs and the jobs the report links, as
+    GitHub answers them, read the way `deliver` reads GitHub: the hand-off file `check_runs` (the
+    answer of pull_request_read get_check_runs), else gh, else kern's relay; with why they could
+    not be read, where they could not."""
+    if check_runs is not None:
+        try:
+            return tool_items(json.loads(check_runs.read_text(encoding="utf-8")), "check_runs"), None
+        except (OSError, UnicodeError, ValueError) as error:
+            return [], f"{check_runs} is no check-run answer ({error})"
+    remote = remote_repo(root)
+    if remote is None:
+        return [], "the checkout has no origin remote"
+    if gh_usable():
+        try:
+            # The pushed head, the one the work pull request's legs ran on.
+            head = run_git(root, "rev-parse", "--verify", "--quiet", published_ref(root, branch))
+            runs = tool_items(issue_api(root, remote, f"commits/{head.stdout.strip() or branch}"
+                                        "/check-runs?per_page=100"), "check_runs")
+            runs += [issue_api(root, remote, f"actions/jobs/{job}") for job in linked
+                     if not any(job_id(run) == job for run in runs)]
+            return runs, None
+        except (QueueError, ValueError) as error:
+            return [], f"gh could not read them ({error})"
+    pull = recorded_pull_number(root, branch)
+    relay = relay_for(root)
+    if relay is None or pull is None:
+        return [], ("gh is not usable" + ("" if relay is not None else " and kern's relay does "
+                    "not serve the checkout") + ("" if pull is not None else
+                    "; no pull request is recorded for the branch (stop-check --pull)"))
+    owner, name = api_repo(remote).split("/")
+    try:
+        data = json.loads(relay.answer_file("checks", owner, name, pull, "check runs")
+                          .read_text(encoding="utf-8"))
+    except Exception as error:  # the relay's own refusal names the tool call to run
+        return [], str(error)
+    return tool_items(data, "check_runs"), None
+
+
+def recorded_pull_number(root: Path, branch: str) -> int | None:
+    """The number of the branch's pull request as `stop-check --pull` recorded it; None without."""
+    try:
+        recorded = json.loads(delivered_pull_path(root).read_text(encoding="utf-8"))
+        return int(recorded["number"]) if recorded.get("branch") == branch else None
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def platform_warning(root: Path, report: str, check_runs: Path | None = None) -> str | None:
+    """The warning `deliver` and `field-report --check` print where the branch changes
+    platform-specific code and the field report links no green kern-platforms job of each leg;
+    None otherwise. It names the files, the legs and their jobs as read; it never raises."""
+    try:
+        legs = platform_legs(root)
+        changed = platform_changes(root) if legs else []
+        if not changed:
+            return None
+        linked = list(dict.fromkeys(match[2] for match in JOB_LINK.finditer(report)))
+        runs, unread = read_platform_runs(root, current_branch(root), linked, check_runs)
+    except Exception as error:  # a warning never stops a delivery
+        return f"Warning: could not check the branch's platform code against its legs ({error})"
+    names = {leg: f"{PLATFORM_JOB} ({leg})" for leg in legs}
+    missing = [leg for leg in legs if not any(
+        run.get("name") == names[leg] and run.get("conclusion") == "success"
+        and job_id(run) in linked for run in runs)]
+    if not missing:
+        return None
+    seen = [f"{run.get('name')} {run.get('conclusion') or run.get('status') or 'unknown'} "
+            f"{run.get('html_url') or run.get('details_url') or ''}".rstrip()
+            for run in runs if run.get("name") in names.values()]
+    return (
+        f"Warning: this branch changes platform-specific code ({', '.join(changed)}), and its "
+        f"field report links no green {PLATFORM_JOB} job for {', '.join(missing)}. Wait until the "
+        f"work pull request's own {PLATFORM_JOB} legs pass, link their jobs in the report, check it "
+        "again and deliver (worker step \"Platform code\"). "
+        + (f"The legs as read: {'; '.join(seen)}." if seen else
+           f"No leg could be read: {unread}; read them with pull_request_read get_check_runs and "
+           "pass its answer as field-report --check --check-runs <file>." if unread else
+           "The work pull request has no such leg yet.")
+    )
+
+
 def deliver(root: Path) -> int:
     """Merge current main, check the field report against it, push, and open or update the pull
     request whose description carries the report; returns the pull request's number. No issue is
@@ -2808,6 +2952,8 @@ def deliver(root: Path) -> int:
     report = checked_report(root, file, body)
     if f"#{issue['number']}" not in report and str(issue["url"]) not in report:
         raise field_report_error(file.name, [f"does not link work issue #{issue['number']}"])
+    if (warning := platform_warning(root, report)) is not None:
+        print(warning)
     remote = remote_repo(root)
     if remote is None:
         raise QueueError(
@@ -3679,13 +3825,14 @@ def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
 
 def check_field_report(
     root: Path | None, file: Path, issue_body_file: Path | None,
-    comments: dict[str, object] | None = None,
+    comments: dict[str, object] | None = None, check_runs: Path | None = None,
 ) -> None:
     """Validate a field report, the one a pull request description carries between its markers,
     against the template without writing GitHub or, given the issue body, without a worktree; in a
     worktree with a comments-read or body-read record, also refuse comments that arrived after it
     and a body changed since (read with gh, unless `comments` and the issue body file give them).
-    In a worktree its Branch tip is first set to the branch's commit."""
+    In a worktree its Branch tip is first set to the branch's commit, and the report is held to
+    the branch's platform code (platform_warning), with a warning, never a refusal."""
     if issue_body_file is not None:
         issue_body = issue_body_text(issue_body_file)
     elif root is None:
@@ -3711,7 +3858,9 @@ def check_field_report(
                  else f"#{named[1]}" if named else "named in the field report")
         issue_body = body_at_delivery(root, check_issue_read(
             root, comments, None if issue_body_file is None else issue_body, issue))
-    checked_report(root, file, issue_body)
+    report = checked_report(root, file, issue_body)
+    if root is not None and (warning := platform_warning(root, report, check_runs)) is not None:
+        print(warning)
 
 
 def branch_tip(root: Path) -> str | None:
@@ -7594,7 +7743,11 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
                   "default: read with gh"),
          arg("--newest-comment", metavar="ID",
              help="with --check: the id of the work issue's newest comment, as your GitHub tools "
-                  "read it now ('' for none)"))
+                  "read it now ('' for none)"),
+         arg("--check-runs", type=Path, metavar="FILE",
+             help="with --check in a worktree: the work pull request's check runs as "
+                  "pull_request_read get_check_runs answered them, which the warning on platform "
+                  "code reads; default: read with gh, else from kern's relay"))
 def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     if args.check is not None:
         if (args.comment_count is None) != (args.newest_comment is None):
@@ -7602,7 +7755,7 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
                 "field-report --check: --comment-count and --newest-comment go together")
         comments = None if args.comment_count is None else {
             "count": args.comment_count, "newest": args.newest_comment}
-        check_field_report(root, args.check, args.issue_body, comments)
+        check_field_report(root, args.check, args.issue_body, comments, args.check_runs)
         print(f"Field report {args.check.name} follows the template")
     elif root is None:
         raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")

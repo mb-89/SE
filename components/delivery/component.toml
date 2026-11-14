@@ -4,7 +4,7 @@ contract = 1
 help = "A worker's delivery: the field report and its guard, sync and identity, the gated push and the pull request, and the Stop hook's check."
 
 [commands."work_tickets.py field-report"]
-usage = "work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)\n                             [--issue-body FILE] [--comment-count N] [--newest-comment ID]"
+usage = "work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)\n                             [--issue-body FILE] [--comment-count N] [--newest-comment ID]\n                             [--check-runs FILE]"
 summary = "draft or check the field report a pull request description carries, ..."
 group = "Delivery"
 help = "draft or check the field report a pull request description carries, in the form of .github/pull_request_template.md"
