@@ -635,3 +635,62 @@ def test_what_each_value_of_the_setting_means_per_host(checkout, tmp_path, setti
     tree = built_with_manifest_setting(checkout, tmp_path / "tree", setting)
     pick = se_plugin.manifest_pick([path.as_posix() for path in tree], host)
     assert (pick.path.as_posix(), pick.format, pick.evidence) == (picked, form, "documented")
+
+
+HOOKS_FILES = (se_plugin.COPILOT_HOOKS_FILE, se_plugin.PLUGIN_HOOKS_FILE)
+
+
+def test_the_powershell_hooks_setting_is_unset_and_unset_builds_todays_files_byte_for_byte(tmp_path):
+    """Off stays off: SE's se.toml leaves [plugin] powershell_hooks unset, and unset (or set to its
+    default) the build writes exactly the committed files, the bare `bash` lines among them."""
+    assert "powershell_hooks" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["plugin"]
+    assert se_plugin.powershell_hooks(ROOT) == "bash"
+    committed = {path: (ROOT / path).read_bytes() for path in se_plugin._existing(ROOT)}
+    assert se_plugin.expected(ROOT) == committed
+    hooks = json.loads(committed[se_plugin.COPILOT_HOOKS_FILE])["hooks"]
+    assert hooks["SessionStart"][0]["powershell"] == "bash scripts/bootstrap.sh --hook; exit 0"
+    shutil.copytree(ROOT / "src", tmp_path / "src")
+    (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
+        "[plugin]\n", '[plugin]\npowershell_hooks = "bash"\n', 1), encoding="utf-8")
+    assert se_plugin.expected(tmp_path) == committed
+
+
+def test_the_handoff_setting_changes_only_the_powershell_lines_of_both_hooks_files(checkout, tmp_path):
+    """Set to "handoff", each PowerShell line of .github/hooks/se.json and .github/plugin/hooks.json
+    starts scripts/bash.ps1 and still ends in `exit 0`; its bash line and every other file stay."""
+    off = built_with_manifest_setting(checkout, tmp_path / "off", None)
+    on = built_with_manifest_setting(checkout, tmp_path / "on", 'powershell_hooks = "handoff"')
+    assert set(on) == set(off)
+    assert {path for path in on if on[path] != off[path]} == set(HOOKS_FILES)
+    for path in HOOKS_FILES:
+        before, after = json.loads(off[path]), json.loads(on[path])
+        for event, entries in after["hooks"].items():
+            for old, new in zip(before["hooks"][event], entries, strict=True):
+                assert {k: v for k, v in new.items() if k != "powershell"} == \
+                    {k: v for k, v in old.items() if k != "powershell"}, (path, event)
+                assert new["powershell"] != old["powershell"] and new["powershell"].endswith("; exit 0")
+                assert se_plugin.HANDOFF in new["powershell"] and " bash " not in f" {new['powershell']}"
+        for event in after["hooks"]:
+            before["hooks"][event] = after["hooks"][event] = None
+        assert after == before, path
+
+
+def test_the_handoff_lines_name_the_same_script_and_arguments():
+    assert se_plugin.hook_commands("scripts/se_hook.sh Stop", "handoff") == (
+        "bash scripts/se_hook.sh Stop || true",
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/bash.ps1 "
+        "scripts/se_hook.sh Stop; exit 0")
+    bash, powershell = se_plugin.plugin_hook_commands("scripts/bootstrap.sh --hook", "handoff")
+    assert bash == se_plugin.plugin_hook_commands("scripts/bootstrap.sh --hook")[0]
+    assert powershell == (
+        "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) { powershell -NoProfile "
+        '-NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/scripts/bash.ps1" '
+        '"$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/scripts/bootstrap.sh" --hook }; exit 0')
+
+
+def test_a_powershell_hooks_value_the_build_cannot_read_is_refused(tmp_path, capsys):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\npowershell_hooks = "pwsh"\n',
+                                      encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert '`powershell_hooks = "bash"|"handoff"`' in capsys.readouterr().err
