@@ -493,3 +493,72 @@ def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_conten
     without = se_plugin.expected(stripped, copilot=False)
     assert not any(path.parts[0] == ".github" for path in without)
     assert claude_layout(without) == claude_layout(files)
+
+
+def built_with_manifest_setting(checkout: Path, root: Path, line: str | None) -> dict:
+    """A build of the checkout's sources whose se.toml [plugin] carries `line` (None: as tracked)."""
+    shutil.copytree(checkout / "src", root / "src")
+    text = (checkout / "se.toml").read_text(encoding="utf-8")
+    if line is not None:
+        text = text.replace("[plugin]\n", f"[plugin]\n{line}\n", 1)
+    (root / "se.toml").write_text(text, encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    return {se_plugin.PurePosixPath(path.relative_to(root).as_posix()): path.read_bytes()
+            for path in root.rglob("*") if path.is_file() and path.parts[len(root.parts)] not in ("src", "se.toml")}
+
+
+def test_the_copilot_manifest_setting_is_unset_and_unset_builds_todays_files_byte_for_byte(tmp_path):
+    """Off stays off: SE's se.toml leaves [plugin] copilot_manifest unset, and unset (or set to its
+    default) the build writes exactly the committed files."""
+    assert "copilot_manifest" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["plugin"]
+    assert se_plugin.copilot_manifest(ROOT) == se_plugin.PurePosixPath(".github/plugin/plugin.json")
+    committed = {path: (ROOT / path).read_bytes() for path in se_plugin._existing(ROOT)}
+    assert se_plugin.PurePosixPath(".github/plugin/plugin.json") in committed
+    assert not (ROOT / "plugin.json").exists()
+    assert se_plugin.expected(ROOT) == committed
+    shutil.copytree(ROOT / "src", tmp_path / "src")
+    (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
+        "[plugin]\n", '[plugin]\ncopilot_manifest = "github"\n', 1), encoding="utf-8")
+    assert se_plugin.expected(tmp_path) == committed
+
+
+def test_a_root_copilot_manifest_moves_only_the_manifest(checkout, tmp_path):
+    """Set to "root", the one Copilot manifest lies at the repository root with the same content,
+    its paths naming the same files under .github/; every other file, the Claude layout among them,
+    is byte-identical."""
+    off = built_with_manifest_setting(checkout, tmp_path / "off", None)
+    on = built_with_manifest_setting(checkout, tmp_path / "on", 'copilot_manifest = "root"')
+    github, root = se_plugin.PurePosixPath(".github/plugin/plugin.json"), se_plugin.PurePosixPath("plugin.json")
+    assert set(off) - set(on) == {github} and set(on) - set(off) == {root}
+    assert on[root] == off[github]
+    manifest = json.loads(on[root])
+    for key in ("agents", "skills", "hooks"):
+        assert manifest[key].startswith(".github/") and (tmp_path / "on" / manifest[key]).exists(), key
+    assert {path: data for path, data in on.items() if path != root} == \
+        {path: data for path, data in off.items() if path != github}
+    assert claude_layout(on) == claude_layout(off) and claude_layout(on)
+
+
+@pytest.mark.parametrize("setting, leftover", ((None, "plugin.json"),
+                                               ('copilot_manifest = "root"', ".github/plugin/plugin.json")))
+def test_check_names_a_copilot_manifest_at_the_other_place_as_not_generated(checkout, tmp_path, capsys,
+                                                                           setting, leftover):
+    root = tmp_path / "tree"
+    built_with_manifest_setting(checkout, root, setting)
+    (root / leftover).parent.mkdir(parents=True, exist_ok=True)
+    (root / leftover).write_text("{}\n", encoding="utf-8")
+    capsys.readouterr()
+    assert se_plugin.main(["check", "--root", str(root)]) == 1
+    assert f"{leftover}: not generated from src/" in capsys.readouterr().err
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    assert not (root / leftover).exists()
+    assert se_plugin.main(["check", "--root", str(root)]) == 0
+
+
+def test_a_copilot_manifest_place_the_build_cannot_read_is_refused(tmp_path, capsys):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\ncopilot_manifest = ".plugin"\n',
+                                      encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert '`copilot_manifest = "github"|"root"`' in capsys.readouterr().err
+
