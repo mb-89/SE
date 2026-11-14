@@ -1535,6 +1535,8 @@ Each issue comes with the field report of the work pull request its landing pull
 - the previous retro's findings, from the block of the retro doc its report links, each with the work issues of the window
   that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
   whether the rule check it names broke again (recurred).
+  - A finding an issue still open takes is `too early to score`: filed after the previous retro's
+    cut-off, it had no time to land, so it is listed and scored neither as failed nor as recurred.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
@@ -1586,10 +1588,13 @@ filing path (`file --label discovery`): once, so an open overhaul answers a seco
   neither);
 - the retros closed since the last closed overhaul (titled `docs/overhaul-...`), or in the whole
   history where none has, each from the block of the retro doc its report links: its sizes, its
-  broken rule checks, its findings by kind and how many of the previous retro's findings closed or
-  recurred, and the finding classes more than one of them named;
+  broken rule checks, its findings by kind and the previous retro's findings it scored, and the
+  finding classes more than one of them named;
+  - of those findings, how many closed or recurred among those scored, and how many were too
+    early to score;
 - the previous overhaul's findings, each with the issues that name it
-  (`overhaul #<n> finding <k>`) and their state (`closed`, `open` or `none`);
+  (`overhaul #<n> finding <k>`) and their state (`closed`, `too early to score` where one is still
+  open, or `none`);
 - the pruning facts (`facts`, below), beside the previous overhaul's counts.
 
 It ends in a JSON block under `<!-- se:overhaul-yaml -->`, which the next overhaul reads. Without

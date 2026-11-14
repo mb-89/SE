@@ -227,7 +227,8 @@ def retro_block(number: int, classes: list[str], broken: bool) -> str:
              "classes": [{"name": name, "fix": "f"} for name in classes],
              "findings": [finding(False), finding(False), finding(True)], "went_well": ["w"],
              "previous": {"findings": [{"state": "closed", "recurred": False},
-                                       {"state": "none", "recurred": True}]}}
+                                       {"state": "none", "recurred": True},
+                                       {"state": "too early to score", "recurred": False}]}}
     sha, path = f"{number:040x}", f"docs/retro-{number}.md"
     DOCS[(sha, path)] = f"# Retro draft\n\n{retro.BLOCK_MARKER}\n```yaml\n{json.dumps(block)}\n```\n"
     return f"Report.\n\n{retro.DOC_MARKER.format(sha=sha, path=path)}\n"
@@ -324,17 +325,18 @@ def test_the_draft_holds_the_retros_since_the_last_overhaul_and_its_findings(che
     assert [row["retro"] for row in found.retros] == [42, 43, 46]
     assert found.retros[0]["broken"] == ["field-report"]
     assert found.retros[0]["findings"] == {"work": 2, "decision": 1}
-    assert found.retros[0]["previous"] == {"scored": 2, "closed": 1, "recurred": 1}
+    assert found.retros[0]["previous"] == {"scored": 2, "closed": 1, "recurred": 1, "too_early": 1}
     assert found.retros[2] == {"retro": 46, "closed_at": "2026-11-05T00:00:00Z", "block": False}
     assert [(item["finding"], item["issues"], item["state"])
-            for item in found.previous["findings"]] == [(1, [44], "closed"), (2, [45], "open"),
+            for item in found.previous["findings"]] == [(1, [44], "closed"),
+                                                        (2, [45], "too early to score"),
                                                         (3, [], "none")]
     text = overhaul.draft(found)
     assert "Since overhaul #40 closed, 2026-10-01T00:00:00Z" in text
-    assert "| #42 | 6 | 5 | 1 | field-report | 2, 1 | 1 of 2, 1 |" in text
+    assert "| #42 | 6 | 5 | 1 | field-report | 2, 1 | 1 of 2, 1, 1 |" in text
     assert "| #46 | no report block found | | | | | |" in text
     assert "Finding classes more than one retro named: Lost reports." in text
-    assert "| 2. Split the long command | des-007 | work | #45 | open |" in text
+    assert "| 2. Split the long command | des-007 | work | #45 | too early to score |" in text
     assert "Against overhaul #40: unreached 9 then, 3 now" in text
     assert "### Reached by nothing but tests" in text
 
@@ -534,7 +536,7 @@ def test_the_next_read_scores_the_findings_file_posted(checkout, tmp_path, monke
     assert found.since_overhaul == THIS and found.retros == []
     assert [(item["finding"], item["kind"], item["issues"], item["state"])
             for item in found.previous["findings"]] == [
-        (1, "work", [], "none"), (2, "decision", [51], "open"), (3, "decision", [], "none")]
+        (1, "work", [], "none"), (2, "decision", [51], "too early to score"), (3, "decision", [], "none")]
 
 
 def test_file_without_gh_prints_the_comment_and_the_close(checkout, tmp_path, monkeypatch, capsys):

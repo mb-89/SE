@@ -8,7 +8,8 @@ once, an open overhaul answering a second `new`.
 `overhaul.py read <issue> [--out FILE] [--json] [--answers DIR]` writes the draft the judge starts
 from: every rule of the rule book with what checks it (a test, a check, or judgment); the retros
 closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
-and the state of the issues that name them (`overhaul #<n> finding <k>`); and the pruning facts.
+and the state of the issues that name them (`overhaul #<n> finding <k>`), too early to score where
+one is still open; and the pruning facts.
 It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
 
 `overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, writing nothing; it files
@@ -677,8 +678,10 @@ def retro_row(issue, block: dict | None) -> dict:
     if block is None:
         return {"retro": issue.number, "closed_at": issue.closed_at, "block": False}
     findings = [item for item in block.get("findings") or [] if isinstance(item, dict)]
-    scored = [item for item in ((block.get("previous") or {}).get("findings") or [])
-              if isinstance(item, dict)]
+    earlier = [item for item in ((block.get("previous") or {}).get("findings") or [])
+               if isinstance(item, dict)]
+    too_early = sibling("retro").TOO_EARLY
+    scored = [item for item in earlier if item.get("state") != too_early]
     return {
         "retro": issue.number, "closed_at": issue.closed_at, "block": True,
         "sizes": block.get("sizes") or {},
@@ -690,13 +693,15 @@ def retro_row(issue, block: dict | None) -> dict:
                            if isinstance(item, dict) and item.get("name")}),
         "previous": {"scored": len(scored),
                      "closed": sum(item.get("state") == "closed" for item in scored),
-                     "recurred": sum(bool(item.get("recurred")) for item in scored)}}
+                     "recurred": sum(bool(item.get("recurred")) for item in scored),
+                     "too_early": len(earlier) - len(scored)}}
 
 
 def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: list) -> list[dict]:
     """Each finding of the previous overhaul's block with the issues that name it
     (`overhaul #<overhaul> finding <k>`) and their state: closed where one closed as completed,
-    open where one is open, else the reason they closed with, else none."""
+    too early to score where one is still open (it had no time to land, so it is no failure), else
+    the reason they closed with, else none."""
     found: list[dict] = []
     for index, finding in enumerate((previous or {}).get("findings") or [], 1):
         if not isinstance(finding, dict):
@@ -710,7 +715,7 @@ def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: 
         shut = [issue for issue in closed if names(issue)]
         still = [issue for issue in opened if names(issue)]
         reasons = [issue.state_reason or "completed" for issue in shut]
-        state = ("closed" if "completed" in reasons else "open" if still
+        state = ("closed" if "completed" in reasons else sibling("retro").TOO_EARLY if still
                  else reasons[0] if reasons else "none")
         found.append({"finding": number, "title": str(finding.get("title") or ""),
                       "rule": str(finding.get("rule") or ""), "kind": finding.get("kind"),
@@ -826,7 +831,7 @@ def draft(found: Gathered) -> str:
     lines += ["", "## The retros since the last overhaul", ""]
     if found.retros:
         lines += ["| retro | closed | landed | escalated | broken checks | findings (work, "
-                  "decision) | previous findings closed, recurred |", "|---|---|---|---|---|---|---|"]
+                  "decision) | previous findings closed, recurred, too early |", "|---|---|---|---|---|---|---|"]
         for row in found.retros:
             if not row["block"]:
                 lines.append(f"| #{row['retro']} | no report block found | | | | | |")
@@ -836,7 +841,8 @@ def draft(found: Gathered) -> str:
                 f"| #{row['retro']} | {sizes.get('closed', '')} | {sizes.get('landed', '')} | "
                 f"{sizes.get('escalated', '')} | {', '.join(row['broken']) or 'none'} | "
                 f"{row['findings'][WORK]}, {row['findings'][DECISION]} | "
-                f"{previous['closed']} of {previous['scored']}, {previous['recurred']} |")
+                f"{previous['closed']} of {previous['scored']}, {previous['recurred']}, "
+                f"{previous['too_early']} |")
         named = Counter(name for row in found.retros if row["block"] for name in row["classes"])
         repeated = sorted(name for name, count in named.items() if count > 1)
         lines += ["", "Finding classes more than one retro named: "
