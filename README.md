@@ -354,6 +354,20 @@ exits 1 on a problem; otherwise it exits 0.
   checkout; home is `~`, the checkout `<checkout>`.
 - Its checks are pure functions of the facts it gathers, which its docstring owns.
 
+### Host sizes
+
+`uv run python <se>/scripts/host_size.py report [--root DIR] [--tools FILE] [--json]` measures
+the generated layouts (`AGENTS.md`, `.github/agents`, `.github/skills`, `agents/`, `skills/`) and,
+with `--tools`, the JSON of a `tools/list` answer, against what each agent host caps.
+
+It prints one row per host, file or tool and subject, "over", "under" or "not measured", the
+largest overrun first, then the bytes a session is always handed apart from those it loads on
+demand.
+
+- **The host facts** are one dated data file, `scripts/host-limits.toml`, whose header owns its
+  layout; a limit it lacks is "not measured", never "under".
+- **A report only**: it writes nothing, always exits 0, and no hook, check, build or suite runs it.
+
 ## Documentation
 
 se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`
