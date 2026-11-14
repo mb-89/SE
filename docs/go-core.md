@@ -227,9 +227,11 @@ lives, not a fixed time:
 - **Calls run side by side.** The core runs each call in its own goroutine, and the Python runner
   each step in its own thread, so a long call never holds another of the same component. Each
   call's words ride its own subject, so each caller hears only its own call's lines.
-- **The step wait counts silence.** `StepWait` (60 s, `KERN_STEP_WAIT` for a served core) is the
-  longest the core waits for word from a step: its answer, a line or a beat. A step that beats runs
-  as long as its process does; a process that hangs or dies fails its step after 60 s of silence.
+- **The step wait counts silence.** `StepWait` (10 minutes, `KERN_STEP_WAIT` for a served core) is
+  the longest the core waits for word from a step: its answer, a line or a beat. A step that beats
+  runs as long as its process does, and beats until its answer is out; a process that hangs or dies
+  fails its step after ten minutes of silence, the work model's stall rule. A verb's request waits
+  `VerbWait`, 60 s.
 - **An in-process verb waits on its own.** The GitHub component's `step` verb waits up to its
   `step-wait` (60 minutes) for the session's tool call, while the core beats to the caller, so a
   command that asks it, `integrate` among them, waits out a real check run in one call.

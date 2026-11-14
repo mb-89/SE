@@ -493,6 +493,9 @@ no token), the hand-off needs neither a retyped file nor a second run
   - Each step's line, `GitHub step through kern's relay: <tool>`, and every phase reach the caller
     as they are said, and the call waits as long as kern beats: a check run of many minutes fits
     ([docs/go-core.md "Progress and long calls"](docs/go-core.md#progress-and-long-calls)).
+  - The core fails a step of the command only after ten minutes without its answer, a line or a
+    beat (`StepWait`, the work model's stall rule), not after one: the wait was raised, the hook's
+    beat does not count, and the command's process beats every 5 s until its answer is out.
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
