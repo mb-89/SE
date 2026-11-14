@@ -8324,6 +8324,65 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     return 1 if any(finding.stuck for finding in found) else 0
 
 
+@command("settings-check", "compare the fleet's settings the repository records (fleet/settings.toml) "
+                           "with the live ones, each difference in one line: main's ruleset "
+                           "through gh where it is signed in or from --ruleset, the scheduled "
+                           "tasks and the cloud environment from the answers of the session's "
+                           "list_triggers and get_environment tools; a part whose door is missing "
+                           "and a value recorded as unchecked are reported unchecked, never as a "
+                           "difference. Exit code 1 where a setting differs, 0 otherwise. It only "
+                           "reads",
+         OPTIONAL_WORKTREE, REPO,
+         arg("--ruleset", type=Path, metavar="FILE",
+             help="the REST answer of GET repos/<owner>/<repo>/rules/branches/<branch>; default: "
+                  "read through gh where it is signed in"),
+         arg("--scheduled-tasks", type=Path, metavar="FILE",
+             help="the answer of the session's list_triggers tool (claude-code-remote)"),
+         arg("--environment", type=Path, metavar="FILE",
+             help="the answer of the session's get_environment tool (claude-code-remote), run in "
+                  "a session on the recorded environment"))
+def run_settings_check(root: Path, args: argparse.Namespace) -> int:
+    settings = sibling("fleet_settings")
+
+    def answer(file: Path | None, what: str) -> object | None:
+        if file is None:
+            return None
+        try:
+            return json.loads(read_file(file, what))
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{file} is not the JSON answer of {what}: {error}") from error
+
+    try:
+        recorded = settings.load(root)
+        branch = str(recorded["ruleset"].get("branch") or integration_branch(root))
+        rules = answer(args.ruleset, "the ruleset read")
+        missing_rules = ""
+        if rules is None:
+            try:
+                repo = resolve_repo(root, args.repo)
+            except QueueError as error:
+                repo, missing_rules = None, f"no door: {error}"
+            if repo is not None and hand_off():
+                missing_rules = (f"no door: gh is not signed in; save the answer of GET "
+                                 f"repos/{api_repo(repo)}/rules/branches/{branch} and pass "
+                                 "--ruleset <file>")
+            elif repo is not None:
+                try:
+                    rules = GitHub(root, repo).api(f"rules/branches/{branch}")
+                except QueueError as error:
+                    missing_rules = f"gh could not read it: {error}"
+        lines = settings.check(
+            recorded, (rules, missing_rules),
+            (answer(args.scheduled_tasks, "list_triggers"),
+             "no door: pass the session's list_triggers answer as --scheduled-tasks <file>"),
+            (answer(args.environment, "get_environment"),
+             "no door: pass the session's get_environment answer as --environment <file>"))
+    except settings.SettingsError as error:
+        raise QueueError(str(error)) from error
+    print(settings.report(lines))
+    return 1 if any(line.kind == "difference" for line in lines) else 0
+
+
 @command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "
                        "is for a work issue, refuse the turn's end while its branch has no open "
                        "pull request whose description carries a field report that passes "
@@ -8396,18 +8455,18 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
       "stop-check")),
     ("integration", "Integration",
      "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
-     "its budget, metrics, settings, starting work, the queue, the fleet check and the generated "
-     "docs.",
+     "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
+     "generated docs.",
      ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
-      "docs", "format")),
+      "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
 COMPONENT_SOURCE = "its command registry"
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
-    {"status", "config", "ready", "capacity", "queue", "fleet-check", "metrics"})
+    {"status", "config", "ready", "capacity", "queue", "fleet-check", "settings-check", "metrics"})
 #: The batch commands that run as one call through kern where its GitHub relay serves the
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.

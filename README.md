@@ -1254,8 +1254,8 @@ work_tickets.py verified [--worktree WORKTREE] remote_ref commit
 #### Integration
 
 `components/integration`: The integrator's and SE's work: integrate and its release, ref
-maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet check
-and the generated docs.
+maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and
+settings checks and the generated docs.
 
 ```text
 work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]
@@ -1333,6 +1333,15 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 branch
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
+
+work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]
+                               [--scheduled-tasks FILE] [--environment FILE]
+    compare the fleet's settings the repository records (fleet/settings.toml) with the live ones,
+    each difference in one line: main's ruleset through gh where it is signed in or from --ruleset,
+    the scheduled tasks and the cloud environment from the answers of the session's list_triggers
+    and get_environment tools; a part whose door is missing and a value recorded as unchecked are
+    reported unchecked, never as a difference. Exit code 1 where a setting differs, 0 otherwise. It
+    only reads
 
 work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                       [--no-create] [--cloud-agent CLOUD_AGENT]
