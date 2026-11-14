@@ -1,0 +1,102 @@
+[
+  {
+    "query": "You're the worker on issue 42; run intake and set up the tickets.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Fill in the field report for my branch before I deliver the pull request.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "As the integrator, which delivered pull requests are waiting to land?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "How should a worker escalate something it isn't allowed to decide?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "run work_tickets.py sync and tell me what it merged",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "what goes into the Not delivered section of a field report",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Is this work issue small enough, or should it become several issues?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Write the retro for last week's closed work issues.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Where does a worker's worktree live, and what may it touch outside it?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Which commit identity and checks does a project have to provide before workers can start on it?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Write a pull request description for a typo fix in a library's README.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "What are the git commands to check out two branches side by side in worktrees?",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Explain cron scheduling syntax for a nightly backup job.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Update the npm dependencies in package.json to their latest versions.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Draft a field report form for our volunteer park cleanup.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Our support desk wants a better way to triage customer tickets in a help desk tool.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Summarize the notes from yesterday's design review meeting.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Set up role-based access control for an Express API.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Write a Python script that checks the freshness of cached HTTP responses.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "How do I escalate a billing issue with my internet service?",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]
