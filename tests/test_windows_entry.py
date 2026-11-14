@@ -3,11 +3,13 @@
 Its choice is one pure function, Select-SeBash, of git's location and the paths that exist; the
 cases below list it. The real runs start the hand-off from PowerShell, as a PowerShell hook line
 would, so they run only where PowerShell is: the Windows leg of kern-platforms runs this file from
-a PowerShell step. That nothing names the file yet runs everywhere.
+a PowerShell step, with the hooks' PowerShell lines the build writes where se.toml [plugin]
+powershell_hooks is "handoff". That nothing but that setting names the file runs everywhere.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -34,10 +36,10 @@ def quoted(text: str) -> str:
 
 
 def powershell(shell: str, command: str, env: dict[str, str] | None = None,
-               stdin: str = "") -> subprocess.CompletedProcess[str]:
+               stdin: str = "", cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run([shutil.which(shell) or shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                            "-Command", command], input=stdin, capture_output=True, text=True, check=False,
-                          env=env, timeout=120)
+                          env=env, timeout=120, cwd=cwd)
 
 
 def select(shell: str, git: str = "", places: tuple[PureWindowsPath, ...] = (), path_bash: str = "",
@@ -187,20 +189,91 @@ def test_from_a_powershell_whose_path_has_no_git_the_script_finds_bootstraps_too
     assert lines[6:] == ["from stdin"], lines
 
 
+_spec = importlib.util.spec_from_file_location("se_plugin", PROJECT / "scripts" / "se_plugin.py")
+se_plugin = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(se_plugin)
+
+# The payload a host sends a hook on stdin, which the hook script must still read.
+PAYLOAD = '{"session_id": "s-1", "hook_event_name": "Stop"}'
+
+
+def handoff_lines(plugin: bool) -> list[tuple[str, str]]:
+    """Each (script, PowerShell line) of the hooks file the build writes with powershell_hooks set to
+    "handoff": the repository's (.github/hooks/se.json) or a plugin install's (.github/plugin/hooks.json)."""
+    hooks = json.loads(se_plugin._copilot_hooks(plugin=plugin, setting="handoff"))["hooks"]
+    return [(se_plugin.COPILOT_HOOKS[event][0], entry["powershell"])
+            for event, entries in hooks.items() for entry in entries]
+
+
+def hook_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """A folder holding the hand-off and, in place of each hook script, one that prints its
+    arguments and its input and fails; and an empty project folder a plugin's hooks run in."""
+    folder, project = tmp_path / "se", tmp_path / "project"
+    (folder / "scripts").mkdir(parents=True)
+    project.mkdir()
+    shutil.copy(HANDOFF, folder / "scripts" / "bash.ps1")
+    for command, _ in se_plugin.COPILOT_HOOKS.values():
+        (folder / command.split(" ")[0]).write_text(
+            "for a in \"$@\"; do printf '<%s>\\n' \"$a\"; done\ncat\nexit 3\n", encoding="utf-8", newline="\n")
+    return folder, project
+
+
+def run_hook_line(shell: str, line: str, plugin: bool, folder: Path, project: Path,
+                  env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ if env is None else env)
+    if plugin:
+        env["PLUGIN_ROOT"] = str(folder)
+    return powershell(shell, line, env=env, stdin=PAYLOAD, cwd=project if plugin else folder)
+
+
+@windows
+@pytest.mark.parametrize("shell", POWERSHELLS)
+@pytest.mark.parametrize("plugin", [False, True], ids=["repository-hooks", "plugin-hooks"])
+def test_a_generated_handoff_hook_line_reaches_its_script_with_its_input_and_exits_0(
+        shell: str, plugin: bool, tmp_path: Path) -> None:
+    folder, project = hook_tree(tmp_path)
+    for command, line in handoff_lines(plugin):
+        result = run_hook_line(shell, line, plugin, folder, project)
+        arguments = [f"<{argument}>" for argument in command.split(" ")[1:]]
+        assert (result.returncode, result.stdout.splitlines()) == (0, [*arguments, PAYLOAD]), \
+            (line, result.stderr)
+
+
+@windows
+@pytest.mark.parametrize("shell", POWERSHELLS)
+@pytest.mark.parametrize("plugin", [False, True], ids=["repository-hooks", "plugin-hooks"])
+def test_with_no_git_bash_a_generated_handoff_hook_line_prints_the_install_line_and_exits_0(
+        shell: str, plugin: bool, tmp_path: Path) -> None:
+    folder, project = hook_tree(tmp_path)
+    places = tmp_path / "Program Files"
+    places.mkdir()
+    # Only Windows PowerShell's own folder: the line starts it by name, and it holds no bash.
+    starter = Path(shutil.which("powershell") or "").parent
+    for command, line in handoff_lines(plugin):
+        result = run_hook_line(shell, line, plugin, folder, project,
+                               env=bare_environment(tmp_path, [starter], places))
+        assert (result.returncode, result.stdout) == (0, ""), (line, result.stderr)
+        assert INSTALL_LINE in result.stderr.splitlines(), (line, result.stderr)
+
+
 # What names a script: the plugin build, the layouts it generates (Copilot's and Claude Code's),
-# the hooks, the start and setup scripts, the agents and the README.
-NAMERS = ["scripts/se_plugin.py", ".github/hooks", ".github/agents", ".github/skills", "agents", "skills",
+# the hooks, the start and setup scripts, the agents and the README. The build names the hand-off
+# only behind powershell_hooks, unset in SE's se.toml, so the layouts it writes name it nowhere.
+NAMERS = [".github/hooks", ".github/plugin", ".github/agents", ".github/skills", "agents", "skills",
           ".claude-plugin", ".githooks", "scripts", "src/agents", "src/skills", "README.md", "AGENTS.md"]
+SETTING_OWNER = PROJECT / "scripts" / "se_plugin.py"
 
 
-def test_nothing_names_the_handoff_yet() -> None:
+def test_nothing_but_the_unset_build_setting_names_the_handoff() -> None:
+    assert "powershell_hooks" not in (PROJECT / "se.toml").read_text(encoding="utf-8")
+    assert se_plugin.HANDOFF in SETTING_OWNER.read_text(encoding="utf-8")
     named = []
     for namer in NAMERS:
         root = PROJECT / namer
         files = [root] if root.is_file() else sorted(path for path in root.rglob("*") if path.is_file())
         assert files, namer
         for path in files:
-            if path == HANDOFF or "__pycache__" in path.parts:
+            if path in (HANDOFF, SETTING_OWNER) or "__pycache__" in path.parts:
                 continue
             if "bash.ps1" in path.read_text(encoding="utf-8", errors="replace"):
                 named.append(path.relative_to(PROJECT).as_posix())
