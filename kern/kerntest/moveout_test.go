@@ -39,6 +39,16 @@ type moveOutPattern struct {
 // relative to kern/ (slash-separated) and the text matched.
 type moveOutEntry struct{ kind, file, match string }
 
+// releaseTag is a kern or se release tag of three dot-separated numbers.
+var releaseTag = regexp.MustCompile(`(kern|se)-v[0-9]+\.[0-9]+\.[0-9]+`)
+
+// withoutVersion answers a match with each kern-v or se-v tag of three
+// dot-separated numbers written as kern-v<version> or se-v<version>, so a
+// release changes no entry. Other text, and a tag of fewer numbers, stay.
+func withoutVersion(match string) string {
+	return releaseTag.ReplaceAllString(match, "${1}-v<version>")
+}
+
 func (e moveOutEntry) String() string { return e.kind + "\t" + e.file + "\t" + e.match }
 
 // moveOutSkipped are the files the scan never reads, by their path under
@@ -93,7 +103,8 @@ func parseMoveOutList(text string) (map[moveOutEntry]bool, error) {
 }
 
 // scanMoveOut walks fsys and answers every place a pattern names, each
-// distinct kind, file and match once, sorted. On a line, a span the first
+// distinct kind, file and match once, sorted, the match without its release
+// version (withoutVersion). On a line, a span the first
 // matching pattern claims is never listed again under a later one. Folders
 // .git and __pycache__, files with a NUL byte and the skipped files are not
 // read.
@@ -130,7 +141,7 @@ func scanMoveOut(fsys fs.FS, patterns []moveOutPattern, skipped map[string]bool)
 						continue
 					}
 					claimed = append(claimed, [2]int{at[0], at[1]})
-					found[moveOutEntry{p.kind, name, line[at[0]:at[1]]}] = true
+					found[moveOutEntry{p.kind, name, withoutVersion(line[at[0]:at[1]])}] = true
 				}
 			}
 		}
@@ -317,5 +328,46 @@ func TestMoveOutRefusesMalformedData(t *testing.T) {
 	}
 	if _, err := parseMoveOutList("se-name only-two\n"); err == nil {
 		t.Error("a list line of one field passes, want refused")
+	}
+}
+
+// A release tag's version is written as <version>, whichever release it
+// names; a tag of fewer numbers and a placeholder stay as they are.
+func TestWithoutVersionDropsTheReleaseVersion(t *testing.T) {
+	const want = "mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>"
+	// The versions are joined in, so this file pins no release itself.
+	for _, version := range []string{"0.6.0", "0.7.0"} {
+		match := "mb-89/SE/.github/workflows/kern-battery.yml@kern-v" + version
+		if got := withoutVersion(match); got != want {
+			t.Errorf("withoutVersion(%q) = %q, want %q", match, got, want)
+		}
+	}
+	if got := withoutVersion("releases/download/se-v1.2.3/x"); got != "releases/download/se-v<version>/x" {
+		t.Errorf("an se tag answers %q, want se-v<version>", got)
+	}
+	for _, match := range []string{
+		"mb-89/SE/.github/workflows/kern-battery.yml@kern-v1",
+		"mb-89/SE/releases/download/kern-v{version}",
+		"SE_GIT_DOOR",
+	} {
+		if got := withoutVersion(match); got != match {
+			t.Errorf("withoutVersion(%q) = %q, want it unchanged", match, got)
+		}
+	}
+}
+
+// The scan stores a pinned workflow's match without its version, so the
+// list, its notices and -update hold no release.
+func TestMoveOutStoresAPinWithoutItsVersion(t *testing.T) {
+	patterns := readMoveOutPatterns(t)
+	tree := fstest.MapFS{
+		"check.yml": {Data: []byte("uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v9.9.9\n")},
+	}
+	found, err := scanMoveOut(tree, patterns, moveOutSkipped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || !strings.HasSuffix(found[0].match, "@kern-v<version>") {
+		t.Fatalf("the scan answers %v, want one entry ending @kern-v<version>", found)
 	}
 }
