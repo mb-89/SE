@@ -1250,6 +1250,16 @@ It is off by default, and nothing runs it. Adding `[tests.beside.host-validators
 running `tests/beside_host_validators.py`, puts the hosts' validators into every integration: that
 step is the owner's.
 
+## Decision rows
+
+`uv run python scripts/decision_rows.py list --since DATE [--until DATE] [--json]` lists every row
+of the Decisions table in the field reports of the pull requests merged into the integration branch
+in the window, grouped by pull request, newest first, each with its work issue and the report's
+Result. A landing without a Decisions section or without a field report is named as such.
+
+It reads GitHub as `retro.py collect` does (without gh, from the answers saved into `--answers DIR`),
+writes and files nothing, and nothing runs it.
+
 ## Ad hoc components
 
 `se.py component add` ([its usage](#scaffold)) scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
