@@ -182,7 +182,8 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     start = [line for line in calls(home) if "se_start.py" in line]
     assert len(start) == 1
     assert start[0].startswith(f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
-                               f"--root {sh(project)} status --hook --note se bootstrap: installing uv into ")
+                               f"--root {sh(project)} status --hook --host claude --note se bootstrap: "
+                               "installing uv into ")
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
@@ -208,7 +209,7 @@ def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
     result = run(home, fake_bin(base), project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert (home / "refreshes").read_text(encoding="utf-8").splitlines() == ["refresh"]  # once: no loop
-    notes = greeting_call(home).split(" status --hook ")[1]
+    notes = greeting_call(home).split(" status --hook --host claude ")[1]
     assert notes.startswith("--note se bootstrap: installing uv into ")
     assert "--note se bootstrap: installing Python 3.11" in notes
     assert notes.index("installing Python") < notes.index("--note SE: 1.0.0 -> 1.0.1, refreshed at this start")
@@ -302,6 +303,41 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary --project {sh(project)}" in calls(home)
     # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
     assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
+
+
+# Copilot's sessionStart payload (.github/hooks/se.json): camelCase, and its CLI hooks may lack any
+# project variable, so the project is the payload's cwd (scripts/hosts.sh).
+COPILOT_START = '{"sessionId":"s1","timestamp":1,"cwd":"%s","source":"startup"}'
+
+
+def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hands_kern_snake_case(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)  # uv and Python in place
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    (home / "calls").unlink()
+    env = {"HOME": sh(home), "PATH": sh(path)}
+    result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
+                            input=COPILOT_START % sh(project), cwd=base)
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
+    handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","source":"startup"}' % sh(project)
+    log = [line for line in calls(home) if line.startswith("kern ")]
+    assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{handed}"]
+
+
+def test_copilots_project_variable_names_the_project_where_claudes_is_unset(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    env = {"HOME": sh(home), "PATH": sh(path), "COPILOT_PROJECT_DIR": sh(project)}
+    result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
+                            input=COPILOT_START % sh(base), cwd=base)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
 
 
 def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):

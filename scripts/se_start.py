@@ -32,7 +32,6 @@ CACHE_ENV = "SE_START_CACHE"
 MAX_AGE = 3600  # seconds a cached update check stays fresh
 RUNNING_FOR = 120  # seconds a started background check counts as running
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
-CLOUD_ENV = "CLAUDE_CODE_REMOTE"  # "true" in a Claude Code cloud session
 CLOUD_PLUGINS = "README \"Claude Code cloud\""
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 START_TIMEOUT = 15  # seconds each network read of the refresh at start may take
@@ -56,6 +55,7 @@ metrics = _load("metrics")
 feedback = _load("feedback")
 kern_names = _load("kern_names")
 se_plugin = _load("se_plugin")
+hosts = _load("hosts")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -448,7 +448,7 @@ def skill_lines(local: Local) -> list[str]:
     if not local.lacking:
         return []
     named = "; ".join(f"{skill.name} ({', '.join(roles)})" for skill, roles in local.lacking)
-    if os.environ.get(CLOUD_ENV, "").lower() == "true":
+    if hosts.in_cloud("claude"):
         return [f"Missing for SE's agents: {named}. This cloud session lacks them; the cloud "
                 f"environment provides plugins ({CLOUD_PLUGINS})"]
     installs = list(dict.fromkeys(skill.install for skill, _ in local.lacking))
@@ -937,14 +937,17 @@ def root_line(se_root: Path) -> str:
     return f"{ROOT_NAME}: {se_root}"
 
 
-def hook_output(lines: list[str], notes: list[str], se_root: Path) -> str:
-    """Claude Code's SessionStart hook output: the greeting shown to the person (systemMessage) and
-    handed to the session, which opens its first message with it, and SE's root for the session."""
+def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude") -> str:
+    """The SessionStart hook output of `host` (scripts/hosts.sh): the greeting handed to the session,
+    which opens its first message with it, and SE's root for the session. Claude Code also shows it
+    to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`."""
     text = "\n".join(notes + lines)
     context = (f"{text}\n\nSE's start greeting, already shown to the person. As SE, open your first "
                "message with it as it is; pass on any line that names a command to run.\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
+    if host == "copilot":
+        return json.dumps({"additionalContext": context})
     return json.dumps({"systemMessage": text,
                        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
 
@@ -952,7 +955,7 @@ def hook_output(lines: list[str], notes: list[str], se_root: Path) -> str:
 def find_project(given: Path | None) -> Path | None:
     if given is not None:
         return given.resolve()
-    start = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
+    start = Path(hosts.project_dir() or Path.cwd())
     try:
         return se_modules.find_root(start)
     except ModuleError:
@@ -961,7 +964,7 @@ def find_project(given: Path | None) -> Path | None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="se_start.py", description=__doc__.splitlines()[0])
-    parser.add_argument("--root", type=Path, help="the project; default: $CLAUDE_PROJECT_DIR or the nearest "
+    parser.add_argument("--root", type=Path, help="the project; default: the host's project variable (scripts/hosts.sh) or the nearest "
                         "ancestor with se.toml")
     parser.add_argument("--local", type=Path, help="machine-local configuration; default: ~/.se/local.toml")
     parser.add_argument("--cache", type=Path, help=f"the update check's cache; default: ${CACHE_ENV} or {CACHE_DEFAULT}")
@@ -969,7 +972,9 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = commands.add_parser("status", help="SE's version, what it loaded, each module and the "
                                         "documentation, from the cached update check")
     status_parser.add_argument("--greeting", action="store_true", help="only the greeting: out-of-date lines only")
-    status_parser.add_argument("--hook", action="store_true", help="the greeting as Claude Code SessionStart JSON")
+    status_parser.add_argument("--hook", action="store_true", help="the greeting as the host's SessionStart JSON")
+    status_parser.add_argument("--host", choices=("claude", "copilot"), default="claude",
+                               help="with --hook: the host whose payload started the session (scripts/hosts.sh)")
     status_parser.add_argument("--note", action="append", default=[], help="a line to show above the greeting")
     status_parser.add_argument("--offline", action="store_true", help="never start the update check")
     status_parser.add_argument("--kern-bin", type=Path, help="bootstrap.sh: the kern binary it started for the project")
@@ -1016,7 +1021,7 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
     lines = lines[:1] + kern + lines[1:]
     if args.hook:
-        print(hook_output(lines, args.note, SE_ROOT))
+        print(hook_output(lines, args.note, SE_ROOT, args.host))
     else:
         print("\n".join(args.note + lines))
     return 0

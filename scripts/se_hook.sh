@@ -19,11 +19,20 @@
 # the session's start, so SessionStart never ran for it), the first hook there starts it as
 # SessionStart would have, `bootstrap.sh --hook` for that checkout in the background, claimed once
 # per ten minutes; once it has named its binary, the hooks post to that checkout's core.
-project="${CLAUDE_PROJECT_DIR:-$PWD}"
+#
+# Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
+# Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
+# variable, else the checkout holding the payload's cwd, else the working directory.
 event="${1:-}"
 here="${BASH_SOURCE[0]%/*}"
 [ "$here" = "${BASH_SOURCE[0]}" ] && here=.
 IFS= read -r -d '' payload
+# shellcheck source=hosts.sh
+. "$here/hosts.sh"
+se_payload "$payload"
+payload="$se_payload_text"
+se_project "$payload"
+project="$se_project"
 checkout=""
 if [[ $payload =~ \"cwd\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
   dir="${BASH_REMATCH[1]//\\\\/\\}"
@@ -37,7 +46,10 @@ if [[ $payload =~ \"cwd\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
     dir="$up"
   done
 fi
-if [ -n "$checkout" ] && [ "$checkout" != "$project" ]; then
+if [ "$se_project_from" = cwd ]; then
+  # No project variable: the session's start ran for the checkout holding the cwd.
+  [ -n "$checkout" ] && project="$checkout"
+elif [ -n "$checkout" ] && [ "$checkout" != "$project" ]; then
   if [ -f "$checkout/.se/.runtime/kern.path" ]; then
     project="$checkout"
   else

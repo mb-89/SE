@@ -175,10 +175,12 @@ def test_no_test_starts_with_a_runner_variable() -> None:
     assert runner_variables(os.environ) == []
 
 
-def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() -> None:
+def test_the_runner_variables_are_ci_se_cloud_agent_every_cloud_mark_and_every_github_variable() -> None:
     environment = {"CI": "true", "SE_CLOUD_AGENT": "a", "GITHUB_ACTIONS": "true", "GITHUB_SHA": "1",
+                   "CLAUDE_CODE_REMOTE": "true", "COPILOT_AGENT_PROMPT": "p", "SE_CLOUD": "true",
                    "PATH": "/bin", "SE_METRICS": "x", "CIRCLE": "y"}
-    assert runner_variables(environment) == ["CI", "SE_CLOUD_AGENT", "GITHUB_ACTIONS", "GITHUB_SHA"]
+    assert runner_variables(environment) == ["CI", "SE_CLOUD_AGENT", "GITHUB_ACTIONS", "GITHUB_SHA",
+                                             "CLAUDE_CODE_REMOTE", "COPILOT_AGENT_PROMPT", "SE_CLOUD"]
 
 
 def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:

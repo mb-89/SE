@@ -3285,12 +3285,13 @@ def hook_event() -> dict[str, object]:
 
 
 def hook_event_of(text: str) -> dict[str, object]:
-    """The hook's JSON from its text; {} where it is none."""
+    """The hook's JSON from its text in snake_case, whichever host wrote it (scripts/hosts.sh); {}
+    where it is none."""
     try:
         data = json.loads(text or "{}")
     except ValueError:
         return {}
-    return data if isinstance(data, dict) else {}
+    return sibling("hosts").payload(data) if isinstance(data, dict) else {}
 
 
 def block(root: Path, number: int, blocker: int, repo: str | None) -> None:
@@ -3386,7 +3387,7 @@ def start(
     if slots is not None and slots <= 0:
         raise QueueError(f"Issue #{number} is not startable: local capacity is exhausted")
 
-    cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
+    cloud = sibling("hosts").in_cloud("ci") or cloud_agent is not None
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
     if cloud:
         if not agent:
@@ -3535,7 +3536,7 @@ def ready_issues(
 
 
 def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | None:
-    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+    if sibling("hosts").in_cloud("ci"):
         return None
     if repo is None:
         raise QueueError("No repository for local capacity")
@@ -4836,7 +4837,6 @@ def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: 
 
 
 # The reference run of the budget (README "Test budget"): the CI `check` job on GitHub's runner.
-CI_VARIABLE = "GITHUB_ACTIONS"
 CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
 CI_SUITE_COMMITS = 8  # first-parent commits of the integration branch searched for CI's time
@@ -4847,7 +4847,7 @@ CI_READ_SECONDS = 10
 
 def suite_is_reference() -> bool:
     """Whether this run is the budget's reference: the CI `check` job (GitHub Actions)."""
-    return os.environ.get(CI_VARIABLE) == "true"
+    return sibling("hosts").in_cloud("ci")
 
 
 @dataclass(frozen=True)
