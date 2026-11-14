@@ -56,8 +56,8 @@
   first two goes in its allow list there, with its reason.
   - It also fails on a git subprocess outside `scripts/git_door.py`, git's one door, in scripts,
     tests, kern and the components; a test that needs git uses the door's fake (`fake_git_door`
-    fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Today's other
-    git subprocesses sit on its allow list, which may only shrink.
+    fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Its allow
+    list of other git subprocesses is empty.
   - A shell script runs git through the door as a command, `git_door.py <git arguments>`: the
     hooks, `scripts/setup.sh`, `setup.ps1` and the `check` job's gate. The guard reads no shell.
   - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the

@@ -637,6 +637,194 @@ def test_commit_tree_for_each_ref_and_plain_worktree_list(door, tmp_path: Path) 
     assert lines[1].split()[1] == second[:len(lines[1].split()[1])] and lines[1].endswith("[worker]")
 
 
+# What releases and their workflow ask of git (tests/test_releases.py)
+
+
+def test_a_second_merge_of_a_branch_merges_from_its_last_merged_tip(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"a.txt": "a\n"})
+    git(root, "switch", "-q", "-c", "side")
+    first = commit(root, {"side.txt": "one\n"})
+    git(root, "switch", "-q", "main")
+    git(root, "merge", "-q", "--no-ff", "-m", "merge one", "side")
+    git(root, "switch", "-q", "side")
+    commit(root, {"side.txt": "two\n"})
+    git(root, "switch", "-q", "main")
+    assert git(root, "merge-base", "main", "side") == first
+    git(root, "merge", "-q", "--no-ff", "-m", "merge two", "side")
+    assert (root / "side.txt").read_text(encoding="utf-8") == "two\n"
+
+
+def test_commit_amend_replaces_head_on_its_parents(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"}, "old message")
+    git(root, "commit", "-q", "--amend", "-m", "new message")
+    amended = git(root, "rev-parse", "HEAD")
+    assert amended != second
+    assert git(root, "log", "-1", "--format=%P|%s", amended) == f"{first}|new message"
+    assert git(root, "rev-parse", f"{amended}^{{tree}}") == git(root, "rev-parse", f"{second}^{{tree}}")
+
+
+def test_a_tag_moves_only_with_force_locally_and_on_the_remote(door, tmp_path: Path) -> None:
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"})
+    git(root, "tag", "v1", first)
+    assert git_door.run("tag", "v1", second, root=root).returncode != 0
+    assert git(root, "rev-parse", "v1^{commit}") == first
+    git(root, "push", "-q", "origin", "main", "refs/tags/v1")
+    git(root, "tag", "--force", "v1", second)
+    assert git(root, "rev-parse", "v1^{commit}") == second
+    assert git_door.run("push", "origin", "refs/tags/v1", root=root).returncode != 0
+    assert git(origin, "rev-parse", "v1^{commit}") == first
+    git(root, "push", "-q", "origin", "+refs/tags/v1")
+    assert git(origin, "rev-parse", "v1^{commit}") == second
+    git(root, "tag", "-d", "v1")
+    assert git(root, "tag", "--list") == ""
+    assert git_door.run("tag", "-d", "v1", root=root).returncode != 0
+    git(root, "branch", "-q", "gone")
+    git(root, "branch", "-q", "-D", "gone")
+    assert git_door.run("show-ref", "--verify", "--quiet", "refs/heads/gone", root=root).returncode == 1
+    listed = git(origin, "for-each-ref", "--format=%(refname:strip=2) %(objectname) %(*objectname)", "refs/tags")
+    assert listed.split() == ["v1", second], "a lightweight tag peels to nothing"
+
+
+def test_log_with_a_path_lists_the_main_line_commits_that_change_it_oldest_first(door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    created = commit(root, {"se.toml": "1\n", "a.txt": "a\n"})
+    commit(root, {"a.txt": "a2\n"})
+    git(root, "switch", "-q", "-c", "side")
+    commit(root, {"se.toml": "2\n"})
+    git(root, "switch", "-q", "main")
+    git(root, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+    merge = git(root, "rev-parse", "HEAD")
+    commit(root, {"a.txt": "a3\n"})
+    changed = commit(root, {"se.toml": "3\n"})
+    assert git(root, "log", "--first-parent", "--reverse", "--format=%H", "HEAD", "--", "se.toml").split() == [
+        created, merge, changed]
+
+
+def test_an_orphan_branch_starts_without_files_or_parents_and_takes_another_branch_files(
+        door, tmp_path: Path) -> None:
+    root = project(tmp_path)
+    commit(root, {"a.txt": "a\n", "sub/b.txt": "b\n"})
+    git(root, "switch", "-q", "--orphan", "fresh")
+    assert not (root / "a.txt").exists() and git(root, "status", "--porcelain", "--untracked-files=no") == ""
+    alone = commit(root, {"go.mod": "go\n"})
+    assert git(root, "log", "-1", "--format=%P", alone) == ""
+    git(root, "rm", "-q", "go.mod")
+    git(root, "checkout", "-q", "main", "--", ".")
+    assert (root / "sub" / "b.txt").read_text(encoding="utf-8") == "b\n"
+    joined = commit(root, {})
+    assert git(root, "rev-parse", f"{joined}^{{tree}}") == git(root, "rev-parse", "main^{tree}")
+
+
+# What the history rewrite asks of git (tests/test_rewrite_history.py): its checks of a clone, and
+# the stream itself, which only real git runs
+
+
+def test_rev_parse_names_a_bare_repository_and_a_checkout(door, tmp_path: Path) -> None:
+    origin = fake_git.init(tmp_path / "origin.git", "--bare")
+    root = project(tmp_path)
+    assert git(origin, "rev-parse", "--is-bare-repository") == "true"
+    assert git(root, "rev-parse", "--is-bare-repository") == "false"
+
+
+
+CLAUDE = ("Claude", "noreply" + "@anthropic.com")
+WEB_FLOW = ("GitHub", "noreply" + "@github.com")
+OWNER = ("mb", "mb")
+
+
+def written_by(author: tuple[str, str], committer: tuple[str, str]) -> dict[str, str]:
+    """The environment of a commit by `author`, committed by `committer`."""
+    return {**git_door.identity_environment(author), "GIT_COMMITTER_NAME": committer[0],
+            "GIT_COMMITTER_EMAIL": committer[1]}
+
+
+def history_commit(root: Path, name: str, message: str, author=OWNER, committer=OWNER) -> str:
+    """Commit the file `name`, written with its name where it is missing."""
+    if not (root / name).exists():
+        (root / name).write_text(f"{name}\n", encoding="utf-8")
+    git(root, "add", name)
+    assert git_door.run("commit", "-q", "-m", message, root=root, env=written_by(author, committer)).returncode == 0
+    return git(root, "rev-parse", "HEAD")
+
+
+def se_like_history(origin: Path) -> None:
+    """An se-like history: a clean root, a release by Claude with its session trailers, a commit with
+    tracker references and a co-author line, a merge GitHub committed, lightweight and annotated
+    tags, and a published commit's allow entry."""
+    fake_git.init(origin, "-b", "main")
+    (origin / "se.toml").write_text('[project]\nidentity = "mb <mb>"\n', encoding="utf-8")
+    history_commit(origin, "se.toml", "Start")
+    git(origin, "tag", "v0.1.0")
+    released = history_commit(origin, "release.txt", "Release v1.0.1\n\nCo-Authored-By: Claude <"
+                              + CLAUDE[1] + ">\nClaude-Session: https://claude.ai/code/session_x\n",
+                              author=CLAUDE, committer=CLAUDE)
+    git(origin, "tag", "v1.0.1")
+    git(origin, "switch", "-q", "-c", "feature")
+    history_commit(origin, "feature.txt", "Add the feature (#593, requirement 3)\n\nIt follows #12, as "
+                   "asked (#7).\n\nco-authored-by: Copilot <copilot@example.com>\n")
+    git(origin, "switch", "-q", "main")
+    assert git_door.run("merge", "-q", "--no-ff", "-m", "Merge feature", "feature", root=origin,
+                        env=written_by(OWNER, WEB_FLOW)).returncode == 0
+    (origin / ".public-check-allow").write_text(
+        f"commit:{released} author  # published before the identity rule\n", encoding="utf-8")
+    history_commit(origin, ".public-check-allow", "Allow the published release")
+    assert git_door.run("tag", "-a", "-m", "Release v1.0.2", "v1.0.2", root=origin,
+                        env=written_by(OWNER, OWNER)).returncode == 0
+    git(origin, "tag", "v1")
+
+
+def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp_path: Path, capsys,
+                                                                            monkeypatch) -> None:
+    """scripts/rewrite_history.py's rewrite of a fresh clone, end to end: `fast-export` through its
+    filter into `fast-import` streams only in real git (the fake streams nothing), so its parts
+    are tests/test_rewrite_history.py's and this case holds the whole against real git."""
+    import rewrite_history  # scripts/ is on the path (tests/conftest.py)
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))  # no machine's ~/.se identity for the check
+    with git_door.use(isolated_git(home)):
+        se_like_history(tmp_path / "origin")
+        clone = fake_git.clone(tmp_path / "origin", tmp_path / "clone", "--no-local")
+        git(clone, "branch", "-q", "feature", "origin/feature")
+        gate = ["--repo", str(clone), "--range", "main feature"]
+        assert rewrite_history.public_check.main(gate) == 1  # the history as published fails the gates
+        old_head, old_tree = git(clone, "rev-parse", "main"), git(clone, "rev-parse", "main^{tree}")
+        old_tags = {name: git(clone, "rev-parse", f"{name}^{{commit}}") for name in git(clone, "tag").split()}
+        capsys.readouterr()
+
+        assert rewrite_history.main(["--repo", str(clone)]) == 0
+        out = capsys.readouterr().out
+
+        assert rewrite_history.public_check.main(gate) == 0, capsys.readouterr()
+        messages = [m.lstrip("\n") for m in git(clone, "log", "--format=%B%x00", "main").split("\x00")]
+        assert not any("co-authored-by" in m.lower() or "claude-session" in m.lower() for m in messages)
+        assert "Add the feature (requirement 3)\n\nIt follows as asked.\n" in messages
+        assert set(git(clone, "log", "--format=%an <%ae>|%cn <%ce>", "main").splitlines()) == {
+            "mb <mb>|mb <mb>", f"mb <mb>|{WEB_FLOW[0]} <{WEB_FLOW[1]}>"}
+        assert git(clone, "rev-parse", "main^{tree}") == old_tree  # same content, new history
+        assert git(clone, "status", "--porcelain") == ""
+        mapping = dict(line.split() for line in
+                       (clone / ".git" / rewrite_history.MAP_FILE).read_text().splitlines())
+        new_tags = {name: git(clone, "rev-parse", f"{name}^{{commit}}") for name in git(clone, "tag").split()}
+        assert new_tags == {name: mapping[old] for name, old in old_tags.items()}
+        assert new_tags["v0.1.0"] == old_tags["v0.1.0"]  # the clean root keeps its id
+        assert new_tags["v1.0.1"] != old_tags["v1.0.1"]
+        assert git(clone, "cat-file", "-t", "v1.0.2") == "tag"  # an annotated tag stays annotated
+        assert git(clone, "rev-parse", "main") == mapping[old_head]
+
+    assert "5 commits rewritten, 4 with a new id; 3 trailer lines dropped from 2 commits, " \
+           "3 tracker references from 1, the identity 'mb <mb>' set on 1" in out
+    assert f"main {old_head[:12]} -> {mapping[old_head][:12]} (same tree)" in out
+    assert "3 of 4 tags moved to their rewritten commits" in out
+    assert "main: .public-check-allow line 1: commit:" in out and "delete it" in out
+
 # What the public check and se's hooks ask of git (tests/test_public_check.py, tests/test_push_guard.py)
 
 

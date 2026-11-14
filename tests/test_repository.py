@@ -181,14 +181,9 @@ GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py", "kern/git/git.go")  # th
 GIT_SCANNED = ("scripts", "tests", "components", "kern")
 GO_GIT = re.compile(r'exec\.Command(?:Context)?\((?:\w+, )?"git"')
 SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
-TO_THE_FAKE = "real git in temporary repositories; the migration moves it to the fake"
-# Today's git subprocesses outside the door, each with how many its file holds and why it may. The list
-# may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
-GIT_ALLOWED: dict[str, tuple[int, str]] = {
-    "tests/test_releases.py": (7, TO_THE_FAKE),
-    "tests/test_rewrite_history.py": (1, TO_THE_FAKE),
-    "tests/test_start_refresh.py": (1, TO_THE_FAKE),
-}
+# Git subprocesses outside the door, each with how many its file holds and why it may: none is left.
+# The list may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
+GIT_ALLOWED: dict[str, tuple[int, str]] = {}
 
 
 def git_subprocess_lines(path: Path) -> list[int]:
