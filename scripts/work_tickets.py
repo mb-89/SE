@@ -1621,6 +1621,33 @@ def is_discovery_issue(issue: dict[str, object]) -> bool:
     return DISCOVERY_LABEL in issue_labels(issue)
 
 
+#: The work issue's optional section of steps only the owner takes, which the field report carries
+#: under the same heading (.github/ISSUE_TEMPLATE/work.md).
+OWNER_STEP_SECTION = "Owner step"
+OWNER_STEP_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$")
+
+
+def owner_steps(body: str) -> list[str]:
+    """The steps of a work issue's or field report's "## Owner step" section, one per list item
+    (or per line, outside a list); none without the section."""
+    text = HTML_COMMENT_PATTERN.sub("", section(markdown_sections(body),
+                                                OWNER_STEP_SECTION.casefold()))
+    lines = [line for line in text.splitlines() if line.strip()]
+    items = [match[1] for line in lines if (match := OWNER_STEP_ITEM.match(line))]
+    return items if items else [line.strip() for line in lines]
+
+
+def owner_step_problems(report: str, issue_body: str) -> list[str]:
+    """Each owner step of the work issue its field report's "## Owner step" section does not
+    carry, compared without case and spacing."""
+    def plain(text: str) -> str:
+        return " ".join(text.split()).casefold()
+    carried = plain(HTML_COMMENT_PATTERN.sub("", section(markdown_sections(report),
+                                                         OWNER_STEP_SECTION.casefold())))
+    return [f'section "## {OWNER_STEP_SECTION}" does not carry the work issue\'s owner step: '
+            f"{step}" for step in owner_steps(issue_body) if plain(step) not in carried]
+
+
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
     sections = issue_sections(issue["body"])
@@ -1671,6 +1698,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
             "- [ ] Discovery evidence is complete and linked from the field report.\n"
             if discovery else f"{acceptance}\n"
         )
+        + "".join(f"- [ ] The field report's \"## {OWNER_STEP_SECTION}\" carries the owner step: "
+                  f"{step}\n" for step in owner_steps(str(issue["body"])))
         + "- [ ] Branch pushed, pull request to the integration branch opened with the field "
           "report as its description.\n\n"
         "## Evidence\n"
@@ -3739,6 +3768,10 @@ def draft_field_report(root: Path, file: Path, issue_file: Path | None = None) -
             lambda match: match.group(1) + quoted(requirement),
             body, count=1, flags=re.MULTILINE | re.DOTALL,
         )
+    steps = owner_steps(str(issue["body"]))
+    if steps:
+        body = body.replace(REPORT_END, f"## {OWNER_STEP_SECTION}\n\n"
+                            + "".join(f"- {step}\n" for step in steps) + f"\n{REPORT_END}", 1)
     index = discovery_index(root)
     if index is not None:
         relative_index = index.relative_to(root).as_posix()
@@ -3838,6 +3871,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
         )
     if issue_body is not None:
         problems.extend(field_report_evidence_errors(issue_body, body))
+        problems.extend(owner_step_problems(body, issue_body))
     return problems
 
 
@@ -4960,12 +4994,17 @@ def changed_since_integration_branch(root: Path) -> tuple[set[str] | None, str]:
     diff = run_git(root, "diff", "--name-status", "-z", f"{commit}...HEAD")
     if diff.returncode != 0:
         return None, f"git diff against origin/{branch} failed: {(diff.stderr or diff.stdout).strip()}"
-    fields, paths, index = diff.stdout.split("\0"), set(), 0
+    return name_status_paths(diff.stdout) | changed_paths(root), f"origin/{branch} ({commit[:7]})"
+
+
+def name_status_paths(output: str) -> set[str]:
+    """The paths `git diff --name-status -z` names; a rename or copy names both."""
+    fields, paths, index = output.split("\0"), set(), 0
     while index < len(fields) and fields[index]:
-        count = 2 if fields[index][0] in "RC" else 1  # a rename or copy names both paths
+        count = 2 if fields[index][0] in "RC" else 1
         paths.update(fields[index + 1:index + 1 + count])
         index += 1 + count
-    return paths | changed_paths(root), f"origin/{branch} ({commit[:7]})"
+    return paths
 
 
 def beside_to_skip(root: Path, suites: tuple[BesideSuite, ...], full: bool) -> dict[str, str]:
@@ -6421,6 +6460,7 @@ def integrate(
     pr_description: Path | None = None,
     issue_body: Path | None = None,
     head_branch: str | None = None,
+    pr_comments: Path | None = None,
 ) -> str | None:
     """Land a delivered pull request's branch on the integration branch through a squash pull
     request: merge it into the newest integration branch on `land/<branch>`, run the checks,
@@ -6493,6 +6533,12 @@ def integrate(
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
+    try:
+        review_gate(root, branch, base, head, kind, str(work_issue.get("body") or ""), pull_number,
+                    remote, relay, handing_off, pr_comments)
+    except Exception:
+        abandon_landing(root, target, landing)
+        raise
     title = integration_merge_message(
         branch, work_number, pull_number,
         public_check_enabled(root) or any(mirror.public for mirror in mirrors),
@@ -6596,6 +6642,51 @@ def integrate(
         raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
+
+
+def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, issue_body: str,
+                pull_number: int, remote: str, relay, handing_off: bool,
+                comments_file: Path | None) -> None:
+    """se.toml `[integrate] review_gate` (review_gate.py, README "Review gate"): refuse a risky
+    change without a reviewer's pass of its head. Off, the built-in, it reads nothing; on, it reads
+    the pull request's comments only for a risky change: through gh, kern's relay, or without
+    either from `comments_file`, the GitHub tools' answer."""
+    gate = sibling("review_gate")
+    try:
+        settings = gate.settings(se_table(root, "integrate"))
+    except gate.SettingError as error:
+        raise QueueError(f"{error}; fix it in {root / 'se.toml'}; nothing was merged") from None
+    if not settings.on:
+        return
+    paths = name_status_paths(checked_git(root, "diff", "--name-status", "-z",
+                                          f"{base}...{branch_head(root, branch)}"))
+    package_kind = section(issue_sections(issue_body), "package kind")
+    facts = gate.facts(trailer.split(":", 1)[-1].strip(), sorted(paths), package_kind)
+    if not gate.risks(facts, settings.risky):
+        return
+    if relay is not None:
+        owner, name = api_repo(remote).split("/")
+        answer = json.loads(relay.answer_file("comments", owner, name, pull_number,
+                                              "pull request comments").read_text(encoding="utf-8"))
+    elif comments_file is not None:
+        try:
+            answer = json.loads(read_file(comments_file, "the pull request's comments"))
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{comments_file} is not the JSON answer of the pull request's "
+                             f"comments: {error}") from None
+    elif handing_off:
+        raise QueueError(
+            f"se.toml {gate.SETTING} is on and {branch} is risky "
+            f"({', '.join(gate.risks(facts, settings.risky))}): save pull request #{pull_number}'s "
+            "comments with your GitHub tools (issue_read get_comments) and pass --pr-comments "
+            "<file>; nothing was merged")
+    else:
+        answer = Workflows(root, remote).comments(pull_number)
+    decision = gate.decide(facts, gate.reviews(tool_items(answer, "comments")), head, settings)
+    if not decision.land:
+        raise QueueError(f"Review gate: {branch} does not land: {decision.reason}; nothing was "
+                         "merged")
+    print(f"Review gate: {decision.reason}")
 
 
 def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
@@ -7349,6 +7440,8 @@ def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, 
 
 FLEET_KINDS = ("no branch", "quiet branch", "failed check", "conflict", "stray branch",
                "impossible block", "block cycle", "waiting on the person")
+# Listed only from the session tools' answers (fleet-check --sessions): limit_restart.py's KIND.
+LIMIT_KIND = "stopped on a limit"
 # Listed, but neither stuck nor stray: in-progress work within its lease and still without a branch.
 STARTING = "starting"
 STARTED_PREFIX = "Started:"
@@ -7376,6 +7469,16 @@ class Finding:
     def stuck(self) -> bool:
         """Whether it is stuck or stray; a "starting" issue is listed, but healthy."""
         return self.kind != STARTING
+
+
+def fleet_restart(root: Path) -> bool:
+    """se.toml `[fleet] restart_after_limit`: whether the fleet check's remedy for a worker stopped
+    on a usage limit is to restart it (limit_restart.py); built in false."""
+    limits = sibling("limit_restart")
+    try:
+        return limits.restart(se_table(root, "fleet"))
+    except limits.SettingError as error:
+        raise QueueError(f"{error}; fix it in {root / 'se.toml'}") from None
 
 
 def fleet_lease(root: Path) -> timedelta:
@@ -7584,14 +7687,18 @@ def fleet_plan(repo: str, base: str) -> Plan:
                   "on its head; save each pull request with \"check\": the conclusion of its "
                   f"{CHECK_NAME} run, as one JSON list", gives=("pulls file",)),
     ), then="work_tickets.py fleet-check --open-issues <open issues file> --closed-issues "
-            "<closed issues file> --pulls <pulls file>")
+            "<closed issues file> --pulls <pulls file> [--sessions <the session tools' answers "
+            "file, README \"Fleet check\">]")
 
 
-def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str
+def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str,
+                   sessions: list[object] | None = None, restart: bool = False
                    ) -> list[Finding]:
     """What is stuck or stray in the fleet `door` reads, in FLEET_KINDS order, lowest issue first
     within a kind; `repository` is the checkout's name, whose `repo:` label (or none) marks the
-    issues whose branches live on this origin."""
+    issues whose branches live on this origin. Given the session tools' answers `sessions`, the
+    worker sessions stopped on a usage limit too (limit_restart.py), their remedy by `restart`,
+    se.toml `[fleet] restart_after_limit`."""
     open_issues = {issue["number"]: issue for issue in map(fleet_issue, door.issues("open"))}
     closed = {issue["number"]: issue for issue in map(fleet_issue, door.issues("closed"))}
     pulls = [fleet_pull(pull) for pull in door.pulls()]
@@ -7715,7 +7822,16 @@ def fleet_findings(door: object, now: datetime, lease: timedelta, repository: st
             f"waits for the person ({PERSON_LABEL})" + (f", holding up {held}" if held else ""),
             "SE presents it to the person with the decision skill", holds=tuple(sorted(holds))))
 
-    rank = {kind: index for index, kind in enumerate((*FLEET_KINDS, STARTING))}
+    if sessions is not None:
+        limits = sibling("limit_restart")
+        in_progress = {number: str(issue["title"]) for number, issue in open_issues.items()
+                       if IN_PROGRESS_LABEL in issue["labels"] and here(issue)}
+        delivered = {pull["head"] for pull in pulls if REPORT_BEGIN in pull["body"]}
+        found += [Finding(limits.KIND, item.issue, item.what, item.remedy, branch=item.branch)
+                  for item in limits.findings(sessions, in_progress, delivered, door.comments,
+                                              now, restart)]
+
+    rank = {kind: index for index, kind in enumerate((*FLEET_KINDS, LIMIT_KIND, STARTING))}
     return sorted(found, key=lambda finding: (rank[finding.kind], finding.issue))
 
 
@@ -8492,6 +8608,10 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
          arg("--issue-body", type=Path, metavar="FILE",
              help="where gh is not signed in: its work issue's body, saved to a file"),
          arg("--branch", help="where gh is not signed in: the pull request's head branch"),
+         arg("--pr-comments", type=Path, metavar="FILE",
+             help="where gh is not signed in and se.toml [integrate] review_gate is on: the pull "
+                  "request's comments (issue_read get_comments), saved to a file; read only for a "
+                  "risky change (README \"Review gate\")"),
          arg("--read-back", metavar="BRANCH",
              help="after the plan's steps: check that origin's integration branch is the squash "
                   "commit of land/BRANCH on the tested base with the tested tree, and finish"),
@@ -8524,7 +8644,7 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     commit = integrate(
         root, args.pull_request, args.repo, args.build_command,
         args.check_command, args.check_command_temporary_directory, args.include_late,
-        args.pr_description, args.issue_body, args.branch,
+        args.pr_description, args.issue_body, args.branch, args.pr_comments,
     )
     if commit is None:
         print(f"Run the plan's steps, then its last line for pull request #{args.pull_request}")
@@ -8750,18 +8870,34 @@ def run_paused(root: Path, args: argparse.Namespace) -> int:
                         "since its Started comment (listed as starting before) or without a push "
                         "within the lease, a delivered pull request whose check failed or that conflicts, a branch "
                         "of a closed issue, a block by an issue closed as not planned or by itself, "
-                        "an se-person issue and what it holds up; 'healthy' and exit code 0 when "
+                        "an se-person issue and what it holds up, and with --sessions a worker "
+                        "session stopped on a usage limit without delivering; 'healthy' and exit "
+                        "code 0 when "
                         "there is none, exit code 1 otherwise. It only reads. Without gh it prints "
                         "its GitHub plan and takes the answers from files",
          OPTIONAL_WORKTREE, REPO, JSON_OUTPUT,
          arg("--open-issues", type=Path, help="without gh: the open issues the plan read"),
          arg("--closed-issues", type=Path, help="without gh: the closed issues the plan read"),
-         arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"))
+         arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"),
+         arg("--sessions", type=Path, metavar="FILE",
+             help="the session tools' answers: the sessions list_sessions lists, each with its "
+                  "list_events result and rate_limit_event events as \"events\"; adds the worker "
+                  "sessions stopped on a usage limit without delivering (README \"Fleet check\")"))
 def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
+    sessions = None
+    if args.sessions is not None:
+        try:
+            sessions = json.loads(read_file(args.sessions, "the session tools' answers"))
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{args.sessions} is not the JSON list of sessions: {error}") from None
+        sessions = tool_items(sessions, "data")
+    restart = fleet_restart(root) if sessions is not None else False
     # Live first: the fleet component of the core in the checkout (scripts/kern_names.py).
     # Only a complete read of the open issues and pull requests is a verdict; a partial one says
-    # how much it saw, and since when, and the check reads the fleet itself.
-    live = (sibling("kern_names").read(root, ["fleet/findings"]) or {}).get("fleet/findings")
+    # how much it saw, and since when, and the check reads the fleet itself. The core holds no
+    # sessions, so with --sessions the check reads the fleet itself.
+    live = None if sessions is not None else (
+        sibling("kern_names").read(root, ["fleet/findings"]) or {}).get("fleet/findings")
     if isinstance(live, dict) and live.get("issues") and live.get("complete"):
         found = [Finding(**{**f, "holds": tuple(f.get("holds") or ())}) for f in live["findings"]]
         if not args.json:
@@ -8787,7 +8923,7 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     else:
         door = Fleet(root, repo, base)
     found = fleet_findings(door, datetime.now(timezone.utc), fleet_lease(root),
-                           repository_name(root))
+                           repository_name(root), sessions, restart)
     print(fleet_report(found, args.json))
     return 1 if any(finding.stuck for finding in found) else 0
 

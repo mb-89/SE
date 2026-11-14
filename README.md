@@ -717,6 +717,7 @@ so a breaking change reaches them only with the major they choose.
 ```toml
 [fleet]
 lease_hours = 3
+restart_after_limit = false
 ```
 
 `work_tickets.py fleet-check` lists what is stuck or stray, each with its remedy (its `--help`
@@ -745,6 +746,15 @@ says how many it has seen and since when, and reads the fleet itself.
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
+
+With `--sessions <file>` it also reports each worker session stopped on a usage limit before it
+delivered: the session tools' answers, the sessions `list_sessions` lists, each with the
+`list_events` answer of its `result` and `rate_limit_event` events as `"events"`. The core holds no
+sessions, so the check then reads the fleet itself.
+
+`restart_after_limit` is off, built in: the report is all that happens. On, the remedy is to
+resume the session once the limit lifts and comment `Restarted after a usage limit:` on its issue,
+at most once per issue. [scripts/limit_restart.py](scripts/limit_restart.py) owns what counts.
 
 ### Settings check
 
@@ -856,6 +866,26 @@ integrator refuses it at the landing. The pre-push hook names it at the push ins
 - `late_push` is `"warn"`, built in: the push goes through. `"refuse"` refuses it; then the
   redelivery pushes through `deliver`, which records its tip first, or without gh through
   `work_tickets.py push --redeliver`.
+
+### Review gate
+
+```toml
+[integrate]
+review_gate = false
+review_gate_risky = ["major", "rule-book", "role-file", "history"]
+```
+
+`review_gate` is off, built in: `integrate` reads no review. On, `integrate` refuses a risky change
+whose work pull request has no reviewer's `pass` or `pass with open points` of the head that lands
+(`review.py file`'s comment), before anything is pushed, naming the risks and this setting.
+
+`review_gate_risky` lists the kinds that count as risky, all four built in: a major release, a
+change to the rule book (AGENTS.md, the work model's rules.md), to an agent's role file
+(`src/agents/`), or one that rewrites history. [scripts/review_gate.py](scripts/review_gate.py)
+owns each kind and the decision.
+
+Without gh the comments are read only for a risky change: the session saves them with its GitHub
+tools (`issue_read get_comments`) and passes them as `--pr-comments <file>`.
 
 ### Test budget
 
@@ -1537,14 +1567,14 @@ work_tickets.py docs [--check]
 
 work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
                             [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]
-                            [--pulls PULLS]
+                            [--pulls PULLS] [--sessions FILE]
     list every stuck or stray piece of work, each with its issue, pull request and remedy: in-
     progress work without a branch once the lease has passed since its Started comment (listed as
     starting before) or without a push within the lease, a delivered pull request whose check failed
     or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by
-    itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is none,
-    exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers
-    from files
+    itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on
+    a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1
+    otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files
 
 work_tickets.py format [--root ROOT]
     apply the fix of every check the check job runs that a fix can satisfy: write the generated
@@ -1552,11 +1582,11 @@ work_tickets.py format [--root ROOT]
     run writes nothing
 
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
-                          [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]
-                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
-                          [--landing-description FILE] [--build-command BUILD_COMMAND]
-                          [--include-late REASON] [--check-command JSON]
-                          [--check-command-temporary-directory]
+                          [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]
+                          [--read-back BRANCH] [--landing-pull LANDING_PULL]
+                          [--check-run CHECK_RUN] [--landing-description FILE]
+                          [--build-command BUILD_COMMAND] [--include-late REASON]
+                          [--check-command JSON] [--check-command-temporary-directory]
                           [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
     land it through a squash pull request once check passes, and close the work issue. Where gh is

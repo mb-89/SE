@@ -4,7 +4,7 @@ contract = 1
 help = "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the generated docs."
 
 [commands."work_tickets.py integrate"]
-usage = "work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]\n                          [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]\n                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]\n                          [--landing-description FILE] [--build-command BUILD_COMMAND]\n                          [--include-late REASON] [--check-command JSON]\n                          [--check-command-temporary-directory]\n                          [pull_request]"
+usage = "work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]\n                          [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]\n                          [--read-back BRANCH] [--landing-pull LANDING_PULL]\n                          [--check-run CHECK_RUN] [--landing-description FILE]\n                          [--build-command BUILD_COMMAND] [--include-late REASON]\n                          [--check-command JSON] [--check-command-temporary-directory]\n                          [pull_request]"
 summary = "validate the field report a pull request's description carries, ..."
 group = "Integration"
 help = "validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out"
@@ -110,10 +110,10 @@ help = "list delivered pull requests (open, to the integration branch, with a co
 class = "interactive"
 
 [commands."work_tickets.py fleet-check"]
-usage = "work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]\n                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]\n                            [--pulls PULLS]"
+usage = "work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]\n                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]\n                            [--pulls PULLS] [--sessions FILE]"
 summary = "list every stuck or stray piece of work, each with its issue, pull ..."
 group = "Integration"
-help = "list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files"
+help = "list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files"
 class = "interactive"
 read-only = true
 mcp = "Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet."
