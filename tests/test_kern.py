@@ -218,6 +218,19 @@ def test_the_template_is_a_bare_application_in_ses_shape() -> None:
     assert 'cli.Run("app", os.Args[1:], os.Stdout, os.Stderr)' in main
 
 
+def test_the_template_keeps_trust_off_so_its_ci_runs_the_full_battery() -> None:
+    """The template application leaves se.toml [tests] trust_integrator at its default, off: the
+    battery's trust job answers false, and its check grants only contents: read and no schedule."""
+    tests = tomllib.loads((TEMPLATE / "se.toml").read_text(encoding="utf-8"))["tests"]
+    assert "trust_integrator" not in tests and "full_every" not in tests
+    assert ci_trust.trust_settings(TEMPLATE).on is False
+    check = workflow(TEMPLATE / ".github" / "workflows" / "check.yml")
+    version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
+    assert check["jobs"] == {"check": {"uses": f"mb-89/SE/.github/workflows/kern-battery.yml@kern-v{version}"}}
+    assert check["permissions"] == {"contents": "read"}
+    assert set(check["on"]) == {"pull_request", "push"}, "no nightly safety net: nothing is trusted"
+
+
 def test_kerns_workflows_use_only_node_24_actions() -> None:
     for path in (RELEASE, BATTERY):
         text = path.read_text(encoding="utf-8")
