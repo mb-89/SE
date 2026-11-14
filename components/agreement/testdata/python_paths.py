@@ -1,7 +1,8 @@
-"""The Python side of the agreement test (agreement_test.go): SE's Python fleet check and retro
-count, scripts/work_tickets.py fleet_findings and scripts/retro.py landed_since_retro, run on the
-GitHub snapshot names a fixture holds, through doors that read them as the Python reads GitHub.
-Prints {"fleet": <fleet-check --json>, "retro": <landed>}.
+"""The Python side of the agreement test (agreement_test.go): SE's Python fleet check, retro
+count and overhaul count, scripts/work_tickets.py fleet_findings, scripts/retro.py
+landed_since_retro and scripts/overhaul.py retros_since_overhaul, run on the GitHub snapshot names
+a fixture holds, through doors that read them as the Python reads GitHub.
+Prints {"fleet": <fleet-check --json>, "retro": <landed>, "overhaul": <retros>}.
 
 Usage: python python_paths.py <se root> <fixture.json>
 """
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
+import overhaul  # noqa: E402
 import retro  # noqa: E402
 import work_tickets  # noqa: E402
 
@@ -63,7 +65,7 @@ class SnapshotFleet:
 
 
 class SnapshotRetro:
-    """landed_since_retro's door on the names."""
+    """landed_since_retro's and retros_since_overhaul's door on the names."""
 
     missing: list = []
 
@@ -86,4 +88,5 @@ found = work_tickets.fleet_findings(SnapshotFleet(), now, timedelta(hours=fixtur
 print(json.dumps({
     "fleet": json.loads(work_tickets.fleet_report(found, True)),
     "retro": retro.landed_since_retro(SnapshotRetro(), fixture["tracker"], fixture["base"]),
+    "overhaul": overhaul.retros_since_overhaul(SnapshotRetro()),
 }))

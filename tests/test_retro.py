@@ -710,9 +710,11 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch,
 
 
 def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
-    """Retro #5's posted report held three findings in its linked doc; in the window #11 took
+    """Retro #5's posted report held four findings in its linked doc; in the window #11 took
     finding 1 and closed, #12 took finding 2 and closed, and the check finding 2 names broke
-    again."""
+    again; open #16 takes finding 4. With the overhaul countdown off (the built-in), finding 4 is
+    scored as before it: none, and recurred. With it on, finding 4 had no time to land: too early
+    to score, not a failure, even though the check it names broke again."""
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
@@ -723,7 +725,9 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
                  finding(**{"class": "C", "title": "Name the fake door in every test"}),
                  finding(**{"class": "C", "check": "check",
                             "title": "Run the check job on every landing"}),
-                 finding(**{"class": "C", "title": "A finding nobody took up yet"})]}
+                 finding(**{"class": "C", "title": "A finding nobody took up yet"}),
+                 finding(**{"class": "C", "check": "check",
+                            "title": "Gate the landing on its check run"})]}
     draft = commit_doc(checkout, "# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
                        + json.dumps(block) + "\n```\n", "docs/retro-5.md")
     assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
@@ -734,6 +738,18 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
             item["body"] = "Takes retro #5 finding 1."
         if item["number"] == 12:
             item["body"] = "Takes Retro #5 finding 2 and retro #4 finding 3."
+    given["open-issues.json"] = [{"number": 16, "title": "feat/gate", "state": "open",
+                                  "labels": [{"name": "work"}], "body": "Takes retro #5 finding 4."}]
+
+    off = FakeDoor(given)
+    unchanged = retro.collect(checkout, 30, off, REPO, "main", "origin/main", NOW)
+    assert "open-issues.json" not in off.reads
+    assert unchanged.previous["findings"][3] == {
+        "finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
+        "check": "check", "issues": [], "state": "none", "recurred": True}
+    assert ("| 4. Gate the landing on its check run | C | work | none | none | yes (check) |"
+            in retro.draft(unchanged))
+    (checkout / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
 
     found = collected(checkout, given)
     assert found.previous["sizes"] == {"closed": 7}
@@ -743,11 +759,15 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
         {"finding": 2, "title": "Run the check job on every landing", "class": "C",
          "kind": "work", "check": "check", "issues": [12], "state": "closed", "recurred": True},
         {"finding": 3, "title": "A finding nobody took up yet", "class": "C", "kind": "work",
-         "check": "", "issues": [], "state": "none", "recurred": False}]
+         "check": "", "issues": [], "state": "none", "recurred": False},
+        {"finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
+         "check": "check", "issues": [16], "state": "too early to score", "recurred": False}]
     text = retro.draft(found)
     assert "## The findings of retro #5" in text
     assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
     assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
+    assert ("| 4. Gate the landing on its check run | C | work | #16 | too early to score | "
+            "not scored (check) |") in text
     assert retro.read_block(text)["findings"] == []
 
     given["comments-5.json"] = [{"body": retro.DOC_MARKER.format(sha="f" * 40,
