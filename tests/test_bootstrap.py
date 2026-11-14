@@ -186,6 +186,22 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
+def test_the_hook_sets_the_projects_commit_identity_at_start(machine):
+    """A fresh clone carries the host's default identity until something sets the project's: the
+    session's start does, as setup.sh does, through work_tickets.py identity."""
+    home, project, base = machine
+    path = fake_bin(base)
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    identity = [line for line in calls(home) if "work_tickets.py" in line]
+    assert identity == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/work_tickets.py "
+                        f"identity --worktree {sh(project)}"]
+    assert calls(home).index(identity[0]) < next(
+        index for index, line in enumerate(calls(home)) if "se_start.py" in line and " status " in line)
+    (home / "calls").unlink()
+    assert run(home, path, project).returncode == 0  # outside a session's start: setup.sh's
+    assert not any("work_tickets.py" in line for line in calls(home))
+
+
 def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
     home, project, base = machine
     (home / "refresh-moves").touch()

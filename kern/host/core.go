@@ -524,9 +524,18 @@ type Health struct {
 	Sessions   []string         `json:"sessions"`
 	Instances  []string         `json:"instances"`
 	Placements []PlacementState `json:"placements"`
-	// Attached are the declared instances whose process has attached.
+	// Attached are the instances that serve: a declared one once its process
+	// has attached, and a switched-on one compiled into the core and not
+	// placed, which the core started with itself.
 	Attached []string `json:"attached"`
+	// Backends names, by instance, the backend an instance chose at start:
+	// the value of its output backend, where its component declares one and
+	// it is provided.
+	Backends map[string]string `json:"backends"`
 }
+
+// BackendPort is the output port an instance names its chosen backend by.
+const BackendPort = "backend"
 
 // PlacementState is one placed instance as the health shows it.
 type PlacementState struct {
@@ -540,11 +549,23 @@ type PlacementState struct {
 // Health answers the core as it stands.
 func (c *Core) Health() Health {
 	h := Health{Contract: Contract, Pid: c.pid, Bus: c.bus.URL(), Started: c.start.UTC(), Revision: c.ix.Snapshot().Revision(), Sessions: []string{}, Instances: []string{}, Placements: []PlacementState{}}
-	h.Attached = []string{}
+	h.Attached, h.Backends = []string{}, map[string]string{}
+	snap := c.ix.Snapshot()
 	for _, in := range c.ix.Catalog().Instances {
 		h.Instances = append(h.Instances, in.Name)
-		if c.isAttached(in.Name) {
+		_, declared := c.declared[in.Name]
+		if c.isAttached(in.Name) || (in.Enabled && !declared && !c.placed[in.Name]) {
 			h.Attached = append(h.Attached, in.Name)
+		}
+		for _, out := range in.Outputs {
+			if out.Port.Port != BackendPort {
+				continue
+			}
+			if v, err := snap.Read(out.Name); err == nil && v.Provided {
+				if name, ok := v.V.(string); ok && name != "" {
+					h.Backends[in.Name] = name
+				}
+			}
 		}
 	}
 	c.mu.Lock()
