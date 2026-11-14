@@ -4,7 +4,8 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File se_mcp.ps1 --root <project>
 #
 # Standard output carries MCP alone; everything else goes to <project>\.se\.runtime\mcp.log (the
-# binary's own stderr to mcp-door.log beside it), else the system's temporary folder. A plugin
+# binary's own stderr to mcp-door.log beside it), else the system's temporary folder; in a plugin
+# install whose session folder has no .git in it or above it, to ~\.se\.runtime instead. A plugin
 # install chooses its root as se_mcp.sh does, from SE_SESSION_CWD, else COPILOT_SESSION_CWD, with
 # no parent-cwd backstop.
 $ErrorActionPreference = 'Stop'
@@ -17,8 +18,15 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 if (-not $root) { $root = (Get-Location).Path }
 try { $root = (Resolve-Path -LiteralPath $root).Path } catch { $root = (Get-Location).Path }
 
-function Runtime([string]$folder) { # the folder the launcher logs to for that root
-    $runtime = Join-Path (Join-Path $folder '.se') '.runtime'
+function LogFolder([string]$folder, [bool]$session, [string]$homeFolder) { # the folder the launcher logs in
+    $base = if ($session) { $homeFolder } else { $folder }
+    return Join-Path (Join-Path $base '.se') '.runtime'
+}
+function SessionFolder([string]$folder, [string]$plugin) { # whether the plugin case's root is a session folder, no checkout
+    return (-not (Same $folder $plugin)) -and -not (Test-Path -LiteralPath (Join-Path $folder '.git'))
+}
+function Runtime([string]$folder, [bool]$session = $false) { # the folder the launcher logs to for that root
+    $runtime = LogFolder $folder $session $HOME
     try { New-Item -ItemType Directory -Force -Path $runtime | Out-Null } catch { $runtime = [IO.Path]::GetTempPath() }
     return $runtime
 }
@@ -65,11 +73,12 @@ function PluginProject([string]$plugin) { # the root a plugin install serves; $s
     } else {
         $source = 'no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD)'
     }
-    $script:log = Join-Path (Runtime $chosen) 'mcp.log'
+    $script:log = Join-Path (Runtime $chosen (SessionFolder $chosen $plugin)) 'mcp.log'
     Note "plugin ${plugin}: root $chosen from $source"
     return $chosen
 }
 
+$session = $false
 if ($env:PLUGIN_ROOT -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
     $plugin = Folder $env:PLUGIN_ROOT
     if ($plugin -and (Same $plugin (Folder $seRoot)) -and (Same $plugin (Folder $root))) {
@@ -78,6 +87,7 @@ if ($env:PLUGIN_ROOT -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
         if ($script:pluginFound) {
             if (-not (Same $chosen $plugin)) {
                 $root = $chosen
+                $session = SessionFolder $chosen $plugin
                 $next = "$chosen/scripts/se_mcp.ps1"
                 if ((Test-Path -LiteralPath $next -PathType Leaf) -and (Test-Path -LiteralPath "$chosen/components/release.toml" -PathType Leaf)) {
                     $shell = (Get-Process -Id $PID).Path
@@ -92,7 +102,7 @@ if ($env:PLUGIN_ROOT -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
     }
 }
 
-$runtime = Runtime $root
+$runtime = Runtime $root $session
 $log = Join-Path $runtime 'mcp.log'
 
 $version = ''

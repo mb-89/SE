@@ -5,7 +5,8 @@
 #   se_mcp.sh --root <project>
 #
 # Standard output carries MCP alone; everything else goes to <project>/.se/.runtime/mcp.log (else
-# the system's temporary folder). The binary is the one SE's start puts in place,
+# the system's temporary folder), and in a plugin install whose session folder has no .git in it or
+# above it, to ~/.se/.runtime/mcp.log instead, so that folder gets no .se. The binary is the one SE's start puts in place,
 # ~/.se/bin/se-<pinned version>, run as `se mcp --root <project> --home <this SE>`: a project with
 # no wiring of its own is served SE's (kern's cli.Source). SE_MCP_BIN names a local binary instead.
 #
@@ -19,7 +20,8 @@
 # repository instead. It reads SE_SESSION_CWD, else COPILOT_SESSION_CWD (an absolute existing
 # folder), else, on Linux and macOS, its parent's working directory; walks up to the nearest .git;
 # hands over to that repository's own launcher where it is an SE checkout; and writes one line,
-# "plugin <folder>: root <root> from <source>", to the chosen root's mcp.log. Where no source
+# "plugin <folder>: root <root> from <source>", to the chosen root's mcp.log (the home log where
+# that root is a session folder with no .git). Where no source
 # counts and the plugin folder is no checkout, SE_MCP_PLUGIN_FOLDER names it to the binary.
 # SE_MCP_PLUGIN_PROJECT=off keeps the plugin folder as the root.
 set -u
@@ -37,8 +39,15 @@ done
 [ -n "$root" ] || root="$PWD"
 root="$(cd "$root" 2>/dev/null && pwd)" || root="$PWD"
 
-logfile() { # <root>: the log the launcher writes for that root
-  local log="$1/.se/.runtime/mcp.log"
+log_folder() { # <root> <session folder: 1 or 0> <home>: the folder the launcher logs in
+  if [ "$2" = 1 ]; then printf '%s' "$3/.se/.runtime"; else printf '%s' "$1/.se/.runtime"; fi
+}
+session_folder() { # <root> <plugin folder>: 1 where the plugin case's root is a session folder, no checkout
+  if [ "$1" != "$2" ] && [ ! -e "$1/.git" ]; then printf 1; else printf 0; fi
+}
+logfile() { # <root> [<session folder: 1 or 0>]: the log the launcher writes for that root
+  local log
+  log="$(log_folder "$1" "${2:-0}" "$HOME")/mcp.log"
   mkdir -p "${log%/*}" 2>/dev/null && : >>"$log" 2>/dev/null || log="${TMPDIR:-/tmp}/se-mcp.log"
   printf '%s' "$log"
 }
@@ -78,12 +87,13 @@ plugin_project() { # <plugin folder>: the root a plugin install serves; fails wh
   else
     source="no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD) and no parent cwd outside the plugin"
   fi
-  log="$(logfile "$chosen")"
+  log="$(logfile "$chosen" "$(session_folder "$chosen" "$plugin")")"
   note "plugin $plugin: root $chosen from $source"
   printf '%s' "$chosen"
   [ "$found" = 1 ]
 }
 
+session=0
 if [ -n "${PLUGIN_ROOT:-}" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
   plugin="$(cd "$PLUGIN_ROOT" 2>/dev/null && pwd -P)" || plugin=""
   if [ -n "$plugin" ] && [ "$plugin" = "$(cd "$se_root" && pwd -P)" ] && [ "$plugin" = "$(cd "$root" && pwd -P)" ]; then
@@ -91,6 +101,7 @@ if [ -n "${PLUGIN_ROOT:-}" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
     if chosen="$(plugin_project "$plugin")"; then
       if [ "$chosen" != "$plugin" ]; then
         root="$chosen"
+        session="$(session_folder "$chosen" "$plugin")"
         if [ -f "$chosen/scripts/se_mcp.sh" ] && [ -f "$chosen/components/release.toml" ]; then
           exec "${BASH:-bash}" "$chosen/scripts/se_mcp.sh" --root "$chosen"
         fi
@@ -101,7 +112,7 @@ if [ -n "${PLUGIN_ROOT:-}" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
   fi
 fi
 
-log="$(logfile "$root")"
+log="$(logfile "$root" "$session")"
 
 version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$se_root/components/release.toml" 2>/dev/null | head -n 1)"
 suffix=""
