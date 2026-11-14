@@ -3,11 +3,13 @@
 Its choice is one pure function, Select-SeBash, of git's location and the paths that exist; the
 cases below list it. The real runs start the hand-off from PowerShell, as a PowerShell hook line
 would, so they run only where PowerShell is: the Windows leg of kern-platforms runs this file from
-a PowerShell step. That nothing names the file yet runs everywhere.
+a PowerShell step. That nothing but the build's setting se.toml [plugin] powershell_hooks names
+the file runs everywhere.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -187,20 +189,28 @@ def test_from_a_powershell_whose_path_has_no_git_the_script_finds_bootstraps_too
     assert lines[6:] == ["from stdin"], lines
 
 
+_spec = importlib.util.spec_from_file_location("se_plugin", PROJECT / "scripts" / "se_plugin.py")
+se_plugin = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(se_plugin)
+
 # What names a script: the plugin build, the layouts it generates (Copilot's and Claude Code's),
-# the hooks, the start and setup scripts, the agents and the README.
-NAMERS = ["scripts/se_plugin.py", ".github/hooks", ".github/agents", ".github/skills", "agents", "skills",
+# the hooks, the start and setup scripts, the agents and the README. The build names the hand-off
+# only behind powershell_hooks, unset in SE's se.toml, so the layouts it writes name it nowhere.
+NAMERS = [".github/hooks", ".github/plugin", ".github/agents", ".github/skills", "agents", "skills",
           ".claude-plugin", ".githooks", "scripts", "src/agents", "src/skills", "README.md", "AGENTS.md"]
+SETTING_OWNER = PROJECT / "scripts" / "se_plugin.py"
 
 
-def test_nothing_names_the_handoff_yet() -> None:
+def test_nothing_but_the_unset_build_setting_names_the_handoff() -> None:
+    assert "powershell_hooks" not in (PROJECT / "se.toml").read_text(encoding="utf-8")
+    assert se_plugin.HANDOFF in SETTING_OWNER.read_text(encoding="utf-8")
     named = []
     for namer in NAMERS:
         root = PROJECT / namer
         files = [root] if root.is_file() else sorted(path for path in root.rglob("*") if path.is_file())
         assert files, namer
         for path in files:
-            if path == HANDOFF or "__pycache__" in path.parts:
+            if path in (HANDOFF, SETTING_OWNER) or "__pycache__" in path.parts:
                 continue
             if "bash.ps1" in path.read_text(encoding="utf-8", errors="replace"):
                 named.append(path.relative_to(PROJECT).as_posix())
