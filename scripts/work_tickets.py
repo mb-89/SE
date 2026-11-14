@@ -6209,11 +6209,12 @@ def tree_of(root: Path, commit: str) -> str:
     return checked_git(root, "rev-parse", f"{commit}^{{tree}}").strip()
 
 
-def onto_integration_branch(root: Path, target: str) -> None:
+def onto_integration_branch(root: Path, target: str, command: str = "integrate") -> None:
     """Put the checkout on the integration branch `target` before a landing reads anything: a
     checkout detached at origin's `target` (a cloud session's source checkout comes up so, with
     the local branch behind it) switches to `target` and fast-forwards it there; any other
-    branch, or a `target` that cannot fast-forward, is refused with the one instruction."""
+    branch, or a `target` that cannot fast-forward, is refused with the one instruction, named
+    after `command`."""
     here = current_branch(root)
     if here == target:
         return
@@ -6221,15 +6222,23 @@ def onto_integration_branch(root: Path, target: str) -> None:
                    f"origin/{target}, or set project.integration_branch in se.toml")
     if here:
         raise QueueError(
-            f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
+            f"work_tickets.py {command}: {root} is not on the integration branch {target}; "
             + instruction)
     detached = checked_git(root, "rev-parse", "HEAD").strip()
     if (run_git(root, "switch", "-q", target).returncode != 0
             or run_git(root, "merge", "-q", "--ff-only", detached).returncode != 0):
         raise QueueError(
-            f"work_tickets.py integrate: {root} is detached at {detached[:12]} and {target} "
+            f"work_tickets.py {command}: {root} is detached at {detached[:12]} and {target} "
             f"cannot fast-forward to it; " + instruction)
     print(f"Detached checkout: {target} fast-forwarded to {detached[:12]}")
+
+
+def relay_landing_waits(root: Path) -> str:
+    """The one line a landing through kern's relay starts with: a step kern's hook tells reaches
+    the agent only at a tool call's end, so a long foreground command stalls the relay."""
+    return (f"Relay landing: run each long wait (a suite, a build, a sleep) in the background and "
+            f"call `{sibling('se_relay').NEXT_COMMAND} --root {root}` after each, as a step kern's "
+            "hook tells reaches you only when a tool call ends")
 
 
 def abandon_landing(root: Path, target: str, landing: str) -> None:
@@ -6545,6 +6554,8 @@ def integrate(
         )
     target = integration_branch(root)
     onto_integration_branch(root, target)
+    if handing_off and relay_door(root, remote) is not None:
+        print(relay_landing_waits(root), file=sys.stderr)
     feedback.phase(f"read pull request #{pull_number} and its field report")
     relay = relay_for(root) if handing_off and pr_description is None else None
     if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
@@ -8734,7 +8745,9 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     `rehearse/<base>`, then the landing plan (the pause search, the landing pull request into
     `base`, its `check`, the squash merge) and the read-back. It releases and tags nothing,
     touches no issue, and nothing calls it on its own (README "Hand-offs through the relay").
-    Where origin has no `base` yet, it starts there at the integration branch's tip."""
+    Each rehearsal starts `base` at the integration branch's tip, resetting what an earlier one
+    left there; a checkout detached at origin's integration branch fast-forwards it first
+    (onto_integration_branch)."""
     tracker = resolve_repo(root, repo)
     remote = remote_repo(root)
     if remote is None:
@@ -8753,6 +8766,9 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     if checked_git(root, "status", "--porcelain", "--untracked-files=no").strip():
         raise QueueError(f"work_tickets.py rehearse: {root} has uncommitted changes; commit or "
                          "stash them first, as the rehearsal switches branches there")
+    print(relay_landing_waits(root), file=sys.stderr)
+    if not current_branch(root):  # detached, as a cloud session's checkout comes up
+        onto_integration_branch(root, target, "rehearse")
     back = checked_git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     back_to = ["switch", "-q", "--discard-changes", back] if back != "HEAD" else [
         "switch", "-q", "--discard-changes", "--detach", checked_git(root, "rev-parse", "HEAD").strip()]
@@ -8761,11 +8777,11 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     earlier = door.open_pull(branch, base)
     if earlier:
         print(f"Rehearsal pull request already open: {earlier.get('html_url')}")
-    tip = remote_head(root, base)
-    if not tip:
-        start = remote_head(root, target)
-        feedback.phase(f"start the scratch branch {base} at {target}'s {start[:12]}")
-        git_push(root, ["origin", f"{start}:refs/heads/{base}"])
+    tip, start = remote_head(root, base), remote_head(root, target)
+    if tip != start:  # each rehearsal starts clean, never on an earlier one
+        feedback.phase(f"{'reset' if tip else 'start'} the scratch branch {base} at {target}'s "
+                       f"{start[:12]}")
+        git_push(root, ["--force", "origin", f"{start}:refs/heads/{base}"])
         tip = start
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     title = f"Rehearse a landing through kern's relay on {base}"
@@ -8815,8 +8831,8 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
                      "nothing and touches no issue; it runs only as one call through kern's relay",
          WORKTREE, REPO,
          arg("--base", required=True,
-             help="the scratch branch it lands on; started at the integration branch's tip where "
-                  "origin has none"),
+             help="the scratch branch it lands on; reset to the integration branch's tip at the "
+                  "start of each rehearsal"),
          arg("--gap", type=float, default=0.0, metavar="SECONDS",
              help="make the local phase this many seconds slow, to force a gap between two relay "
                   "steps (default 0)"))
