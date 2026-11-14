@@ -9,11 +9,16 @@ saw, and gets report rows back.
 - `commands` names the commands a place's file registers SE with, as the host would run them on a
   platform (Copilot's hooks carry a `bash` and a `powershell` form), so the caller knows what to
   probe.
+- A place another base hides (`hidden_by`, such as a user-level server below an installed
+  plugin's) gives its `register_hidden` line while a root of that base is found.
 - `rows` judges each place: missing, registering nothing, or naming a command whose interpreter
   or script does not resolve, or an MCP command that did not answer `initialize`, ends with the
   place's fix line for the platform, this checkout's launcher filled in (`fill`).
 
-A probe result, per command (keyed by `key(words)`): `resolves` (the interpreter is found),
+- `copilot_plugin_roots` picks, from the plugin folders found under Copilot's home and their
+  manifest texts, the ones that are SE's: the roots of the base `copilot-plugin`.
+
+A probe result, per command and the folder it starts in (keyed by `probe_key(words, cwd)`): `resolves` (the interpreter is found),
 `missing` (scripts named that do not exist), `unresolved` (words naming a variable nobody fills),
 and for an MCP command `answer`: "answered", "timeout" or "exited", with `detail`.
 """
@@ -24,7 +29,7 @@ import json
 import shlex
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Collection, Mapping, Sequence
 
 PLATFORMS = ("linux", "darwin", "windows")
 SEEN, SILENT, NOT_MEASURED = "seen", "silent", "not measured"
@@ -39,7 +44,7 @@ class Place:
     surface: str
     place: str
     kind: str  # hooks | mcp
-    base: str  # project | home | checkout | plugin
+    base: str  # project | home | checkout | plugin | copilot-plugin
     files: Mapping[str, str]  # platform (or "") -> file
     finds: str
     outside: bool
@@ -48,12 +53,19 @@ class Place:
     mark: str
     register: Mapping[str, str]  # platform (or "") -> line
     note: str = ""
+    hidden_by: str = ""  # a base whose found roots hide this place's registration
+    register_hidden: Mapping[str, str] = field(default_factory=dict)  # the fix line while hidden
 
     def file(self, platform: str) -> str:
         return self.files.get(platform) or self.files[""]
 
-    def fix(self, platform: str, fill: Mapping[str, str]) -> str:
-        line = self.register.get(platform) or self.register[""]
+    def hidden(self, present: Collection[str]) -> bool:
+        """Whether a root of the base that hides this place was found."""
+        return bool(self.hidden_by) and self.hidden_by in present and bool(self.register_hidden)
+
+    def fix(self, platform: str, fill: Mapping[str, str], present: Collection[str] = ()) -> str:
+        lines = self.register_hidden if self.hidden(present) else self.register
+        line = lines.get(platform) or lines[""]
         for token in TOKENS:
             line = line.replace("{" + token + "}", fill.get(token, "{" + token + "}"))
         return line
@@ -62,11 +74,13 @@ class Place:
 @dataclass(frozen=True)
 class Seen:
     """One place as the caller found it: its file shown as the report may print it, its text (None:
-    no such file), the variables its commands may name, and whether it is read here at all."""
+    no such file), the variables its commands may name, whether it is read here at all, and the
+    folder the host starts its commands in ("": the project)."""
     shown: str
     text: str | None
     variables: Mapping[str, str] = field(default_factory=dict)
     here: bool = True
+    cwd: str = ""
 
 
 @dataclass(frozen=True)
@@ -95,12 +109,39 @@ def parse(section: Mapping) -> tuple[Place, ...]:
                                 files=_by_platform(row, "file"), finds=row["finds"], outside=bool(row["outside"]),
                                 source=row.get("source", ""), read=str(row.get("read", "")),
                                 mark=row.get("mark", ""), register=_by_platform(row, "register"),
-                                note=row.get("note", "")))
+                                note=row.get("note", ""), hidden_by=row.get("hidden_by", ""),
+                                register_hidden=_by_platform(row, "register_hidden")))
     return tuple(places)
 
 
 def key(words: Sequence[str]) -> str:
     return shlex.join(words)
+
+
+def probe_key(words: Sequence[str], cwd: str = "") -> str:
+    """A probe result's key: the command, and the folder it starts in where that is not the project,
+    so the same words started in two folders are judged apart."""
+    return key(words) if not cwd else f"{key(words)} @ {cwd}"
+
+
+# Copilot CLI's plugin installs (its plugin reference, "File locations"): each plugin folder under
+# its home is installed-plugins/<marketplace>/<plugin> or installed-plugins/_direct/<source>.
+COPILOT_HOME_VARIABLE, COPILOT_HOME_DEFAULT = "COPILOT_HOME", ".copilot"
+COPILOT_PLUGIN_FOLDERS = ("installed-plugins", "*", "*")  # the glob below Copilot's home
+COPILOT_MANIFESTS = (".github/plugin/plugin.json", ".claude-plugin/plugin.json")
+
+
+def copilot_home(env: Mapping[str, str], home: str) -> str:
+    """Copilot's home: `$COPILOT_HOME`, or `~/.copilot` where that is unset or empty."""
+    return env.get(COPILOT_HOME_VARIABLE) or str(PurePosixPath(home.replace("\\", "/")) / COPILOT_HOME_DEFAULT)
+
+
+def copilot_plugin_roots(found: Mapping, name: str = "se") -> list:
+    """The plugin folders that are SE's, sorted: `found` maps each folder to its manifest texts
+    (None: no such file), and a folder counts where one of them is a JSON object named `name`. A
+    manifest that does not parse is skipped. Reads nothing."""
+    return sorted((folder for folder, texts in found.items()
+                   if any((load(text) or {}).get("name") == name for text in texts)), key=str)
 
 
 def _fill(word: str, variables: Mapping[str, str]) -> str:
@@ -218,12 +259,13 @@ def _judge_command(words: Sequence[str], probe: Mapping | None, show: Callable[[
 
 
 def rows(entries: Sequence[tuple[Place, Seen]], probes: Mapping[str, Mapping], platform: str,
-         fill: Mapping[str, str], show: Callable[[str], str] = str) -> list[Row]:
+         fill: Mapping[str, str], show: Callable[[str], str] = str, present: Collection[str] = ()) -> list[Row]:
     """One row per place found or missing, one per command it registers SE with; a missing or
-    broken one carries its fix line for the platform."""
+    broken one carries its fix line for the platform: its `register_hidden` line where `present`, the
+    bases with a root found, holds the base that hides it."""
     out: list[Row] = []
     for place, seen in entries:
-        fix = place.fix(platform, fill)
+        fix = place.fix(platform, fill, present)
         label = f"{place.surface} {place.place} {seen.shown}"
         if not seen.here:
             out.append(_row(place, seen, NOT_MEASURED, NOTE,
@@ -241,6 +283,6 @@ def rows(entries: Sequence[tuple[Place, Seen]], probes: Mapping[str, Mapping], p
             out.append(_row(place, seen, SEEN, NOTE, f"{label}: not registered ({what})", fix))
             continue
         for words in found:
-            state, level, text = _judge_command(words, probes.get(key(words)), show)
+            state, level, text = _judge_command(words, probes.get(probe_key(words, seen.cwd)), show)
             out.append(_row(place, seen, state, level, f"{label}: {text}", fix if level == PROBLEM else None))
     return out
