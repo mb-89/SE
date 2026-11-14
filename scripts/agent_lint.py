@@ -33,7 +33,9 @@ SKILL_DESCRIPTION_MAX = 1024
 
 
 def fields(text: str) -> dict[str, str]:
-    """The front matter of a Markdown file, one `key: value` per line, each value as written."""
+    """The front matter of a Markdown file, one `key: value` per line, each value as written; a
+    checkout with CRLF line endings (git on Windows) reads as one with LF."""
+    text = text.replace("\r\n", "\n")
     if not text.startswith("---\n"):
         return {}
     end = text.find("\n---\n", 4)

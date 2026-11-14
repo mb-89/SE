@@ -52,3 +52,10 @@ def test_a_long_name_and_a_quoted_description_are_measured_as_the_host_reads_the
     assert agent_lint.skill(path, f"---\nname: {'a' * 65}\ndescription: 'it''s'\n---\n") == [
         f"{path}: skill name {'a' * 65!r} is not 1 to 64 lowercase letters, digits and single hyphens"]
     assert agent_lint.scalar("'it''s'") == "it's" and agent_lint.flow_list("[]") == []
+
+
+def test_a_file_with_crlf_line_endings_reads_as_one_with_lf():
+    """git on Windows checks the sources out with CRLF; the kern-platforms leg builds from them."""
+    text = "---\r\nname: decision\r\ndescription: 'Decides.'\r\n---\r\n# Decision\r\n"
+    assert agent_lint.fields(text) == {"name": "decision", "description": "'Decides.'"}
+    assert agent_lint.skill(Path("decision") / "SKILL.md", text) == []

@@ -244,7 +244,8 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
     data = (root / source).read_bytes()
     if source.suffix != ".md":
         return generated, data
-    text = data.decode("utf-8")
+    # A checkout with CRLF line endings (git on Windows) builds the same LF layout as any other.
+    text = data.decode("utf-8").replace("\r\n", "\n")
     for number, line in enumerate(text.splitlines(), 1):
         if UNROOTED_SCRIPT.search(line):
             raise SourceError(f"{source}:{number}: names a script without SE's root; write "

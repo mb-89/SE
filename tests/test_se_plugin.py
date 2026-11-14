@@ -362,3 +362,13 @@ def write_source(root: Path, path: str, text: str) -> None:
         (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
     (root / path).parent.mkdir(parents=True, exist_ok=True)
     (root / path).write_text(text, encoding="utf-8")
+
+
+def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp_path):
+    """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layouts from it."""
+    crlf = tmp_path / "crlf"
+    shutil.copytree(checkout / "src", crlf / "src")
+    shutil.copy(checkout / "se.toml", crlf)
+    for path in (crlf / "src").rglob("*.md"):
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    assert se_plugin.expected(crlf) == se_plugin.expected(checkout)
