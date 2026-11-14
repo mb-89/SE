@@ -109,7 +109,7 @@ def test_front_matter_keys_go_only_to_their_layout(checkout):
     copilot = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
     claude = (checkout / "agents" / "worker.md").read_text(encoding="utf-8")
     copilot_front, claude_front = copilot.split("---")[1], claude.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in copilot_front
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in copilot_front
     assert "disallowedTools" not in copilot_front
     assert "disallowedTools: AskUserQuestion" in claude_front
     assert "tools:" not in claude_front and "copilot." not in claude_front
@@ -466,3 +466,30 @@ def test_a_copilot_part_the_build_cannot_place_is_refused_naming_its_line(tmp_pa
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert refusal in capsys.readouterr().err
 
+
+
+def claude_layout(files: dict) -> dict:
+    """The Claude layout of a build: agents/, skills/ and .claude-plugin/, without the version line."""
+    return {path: re.sub(rb'\n  "version": "[^"]*",', b"", data) for path, data in files.items()
+            if path.parts[0] in ("agents", "skills", ".claude-plugin")}
+
+
+def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_content(checkout, tmp_path):
+    """Everything Copilot gains is additive: the Claude layout built from the sources is the one
+    built without any Copilot content, the Copilot parts of the bodies removed from the sources and
+    the Copilot layout and its files not built at all."""
+    files = se_plugin.expected(checkout)
+    assert se_plugin.COPILOT_MANIFEST in files and se_plugin.COPILOT_MCP_FILE in files
+    stripped = tmp_path / "stripped"
+    shutil.copytree(checkout / "src", stripped / "src")
+    (stripped / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
+        'version = "', 'version = "0.0.', 1), encoding="utf-8")
+    parts = 0
+    for path in (stripped / "src").rglob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        parts += text.count(se_plugin.COPILOT_OPEN + "\n")
+        path.write_text(re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", text), encoding="utf-8")
+    assert parts >= 3, "the se, worker and work-model sources carry Copilot parts"
+    without = se_plugin.expected(stripped, copilot=False)
+    assert not any(path.parts[0] == ".github" for path in without)
+    assert claude_layout(without) == claude_layout(files)
