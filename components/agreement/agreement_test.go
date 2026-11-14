@@ -1,7 +1,8 @@
 // Package agreement holds SE's two fleet paths to one answer: the Go
 // components (fleet, retro-due) and the Python fallback (scripts/work_tickets.py
-// fleet_findings, scripts/retro.py landed_since_retro) read the same
-// GitHub snapshot names, testdata/snapshot.json, and must find the same.
+// fleet_findings, scripts/retro.py landed_since_retro, scripts/overhaul.py
+// retros_since_overhaul) read the same GitHub snapshot names,
+// testdata/snapshot.json, and must find the same.
 package agreement
 
 import (
@@ -31,6 +32,7 @@ type fixture struct {
 	Base       string                     `json:"base"`
 	Tracker    string                     `json:"tracker"`
 	DueAfter   int                        `json:"due_after"`
+	Overhaul   int                        `json:"overhaul_after"`
 	Issues     map[string]github.Snapshot `json:"issues"`
 	Pulls      map[string]github.Snapshot `json:"pulls"`
 	Checks     map[string]github.Snapshot `json:"checks"`
@@ -70,7 +72,8 @@ type pythonPaths struct {
 		Healthy  bool            `json:"healthy"`
 		Findings []fleet.Finding `json:"findings"`
 	} `json:"fleet"`
-	Retro int `json:"retro"`
+	Retro    int `json:"retro"`
+	Overhaul int `json:"overhaul"`
 }
 
 func runPython(t *testing.T) pythonPaths {
@@ -127,5 +130,21 @@ func TestTheRetroPathsAgree(t *testing.T) {
 	}
 	if got.Landed == 0 || !got.Due || got.Retro != 20 {
 		t.Fatalf("on the fixture the count is %+v, want landed above 0, due, since retro #20", got)
+	}
+}
+
+// The retro-due component and overhaul.py count the same retros closed since
+// the last overhaul on one snapshot; the fixture holds a retro closed as a
+// duplicate, which neither counts.
+func TestTheOverhaulPathsAgree(t *testing.T) {
+	f := load(t)
+	got := retrodue.Count(retrodue.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, OverhaulAfter: f.Overhaul,
+		Tracker: f.Tracker, Base: f.Base})
+	want := runPython(t)
+	if got.Retros != want.Overhaul {
+		t.Fatalf("the retro-due component counts %d retros since the last overhaul, overhaul.py %d", got.Retros, want.Overhaul)
+	}
+	if got.Retros != 2 || !got.OverhaulDue || got.Overhaul != 31 {
+		t.Fatalf("on the fixture the overhaul count is %+v, want 2 retros since overhaul #31, due after 2", got)
 	}
 }

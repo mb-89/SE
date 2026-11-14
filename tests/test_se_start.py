@@ -394,10 +394,10 @@ def test_the_greeting_names_the_applications_own_binary_where_it_builds_one(setu
     assert lines[1] == "se 0.1.0: running, pid 7"
 
 
-# What is due in the work: a retro and the fleet's findings, from the cache (work issue
-# "start names what's due").
+# What is due in the work: a retro, an overhaul and the fleet's findings, from the cache (work
+# issue "start names what's due"; the overhaul countdown).
 
-DUE = {"retro": {"landed": 12, "due_after": 10},
+DUE = {"retro": {"landed": 12, "due_after": 10}, "overhaul": {"retros": 3, "due_after": 3},
        "fleet": {"findings": [{"kind": "failed check", "issue": 7}, {"kind": "stray branch", "issue": 3},
                               {"kind": "stray branch", "issue": 5}]}}
 
@@ -411,16 +411,35 @@ def seed(s, work):
 
 
 def work_lines(lines):
-    return [line for line in lines if line.startswith(("Retro", "Fleet"))]
+    return [line for line in lines if line.startswith(("Retro", "Overhaul", "Fleet"))]
 
 
-def test_a_due_retro_and_the_fleets_findings_appear_from_a_seeded_cache(setup):
+OVERHAUL_LINE = ("Overhaul due: 3 retros closed since the last overhaul (due after 3); file one "
+                 "with: uv run python {se}/scripts/overhaul.py new, then run: uv run python "
+                 "{se}/scripts/overhaul.py read <overhaul issue> --out <draft>")
+
+
+def test_with_the_overhaul_countdown_off_the_greeting_is_unchanged(setup):
+    """A cache from a work check with the countdown off holds no overhaul part, and the greeting
+    is the one it was before the countdown: the retro and the fleet lines alone."""
+    seed(setup, {key: value for key, value in DUE.items() if key != "overhaul"})
+    se = setup["se"].as_posix()
+    assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
+        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
+        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
+        "<retro issue> --out <draft>",
+        "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
+        f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}"]
+
+
+def test_a_due_retro_overhaul_and_the_fleets_findings_appear_from_a_seeded_cache(setup):
     seed(setup, DUE)
     se = setup["se"].as_posix()
     expected = [
         "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
         f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
         "<retro issue> --out <draft>",
+        OVERHAUL_LINE.format(se=se),
         "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
         f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}",
     ]
@@ -440,6 +459,7 @@ def test_the_parts_kern_holds_live_replace_the_cached_ones_and_say_so(setup):
         "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
         f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
         "<retro issue> --out <draft>",
+        OVERHAUL_LINE.format(se=se),
         "Fleet: 1 finding (conflict #9), live from kern over 14 issues read; see each with its "
         f"remedy: uv run python {se}/scripts/work_tickets.py fleet-check --worktree "
         f"{setup['project'].as_posix()}"]
@@ -447,6 +467,12 @@ def test_the_parts_kern_holds_live_replace_the_cached_ones_and_say_so(setup):
     live["retro"] = {"landed": 3, "due_after": 3, "issues": 14, "from": "kern"}
     assert work_lines(se_start.greeting(report(setup), setup["se"]))[0].startswith(
         "Retro due: 3 work issues landed since the last retro (due after 3, live from kern); ")
+    live["overhaul"] = {"retros": 4, "due_after": 3, "issues": 14, "from": "kern"}
+    assert work_lines(se_start.greeting(report(setup), setup["se"]))[1].startswith(
+        "Overhaul due: 4 retros closed since the last overhaul (due after 3, live from kern); ")
+    live["overhaul"] = {"retros": 2, "due_after": 3, "issues": 14, "from": "kern"}
+    assert not any(line.startswith("Overhaul") for line in work_lines(
+        se_start.greeting(report(setup), setup["se"])))
 
 
 def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, tmp_path):
@@ -454,7 +480,7 @@ def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, t
     write(tmp_path / ".se" / ".runtime" / "standing.json", '{"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}')
     assert se_start.kern_names.live_work(tmp_path) is None  # a standing file whose bus is gone
     seed(setup, DUE)
-    assert len(work_lines(se_start.greeting(report(setup), setup["se"]))) == 2
+    assert len(work_lines(se_start.greeting(report(setup), setup["se"]))) == 3
 
 
 def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch):
@@ -463,6 +489,13 @@ def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch)
     monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
     assert se_start.kern_names.live_work(Path(".")) == {
         "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
+    # The overhaul part comes from the same name, retro-due/due, where it counts the retros, and
+    # only where its countdown is on: with overhaul_after 0 the core names no overhaul part.
+    names["retro-due/due"].update(retros=2, overhaul_after=0)
+    assert "overhaul" not in se_start.kern_names.live_work(Path("."))
+    names["retro-due/due"].update(retros=2, overhaul_after=3)
+    assert se_start.kern_names.live_work(Path("."))["overhaul"] == {
+        "retros": 2, "due_after": 3, "issues": 4, "from": "kern"}
     # A partial view of the fleet is no verdict: the cached check stands; a complete one replaces it.
     names["fleet/findings"] = {"issues": 1, "complete": False, "findings": []}
     assert "fleet" not in se_start.kern_names.live_work(Path("."))
@@ -494,7 +527,7 @@ def test_status_reads_the_seeded_cache_within_its_budget(setup):
     started = time.perf_counter()
     lines = se_start.greeting(report(setup), setup["se"])
     assert time.perf_counter() - started < se_start.feedback.budget("se_start.py status")
-    assert len(work_lines(lines)) == 2 and setup["world"].work == []
+    assert len(work_lines(lines)) == 3 and setup["world"].work == []
 
 
 def test_check_caches_the_work_and_refreshs_checks_keep_it(setup):
@@ -535,11 +568,17 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
         raise work_tickets.QueueError("gh api issues failed: HTTP 502")
 
     monkeypatch.setattr(retro, "GhDoor", no_door)
+    # The overhaul countdown is off (no se.toml): the work check reads it not and names it not.
     assert se_start.work_check(project) == {"retro": {"error": "gh api issues failed: HTTP 502"},
                                             "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]}}
+    (project / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
+    assert se_start.work_check(project)["overhaul"] == {"error": "gh api issues failed: HTTP 502"}
     monkeypatch.setattr(retro, "GhDoor", lambda *args: "door")
     monkeypatch.setattr(retro, "landed_since_retro", lambda door, repo, branch: 11)
-    assert se_start.work_check(project)["retro"] == {"landed": 11, "due_after": 10}
+    monkeypatch.setattr(se_start._load("overhaul"), "retros_since_overhaul", lambda door: 2)
+    work = se_start.work_check(project)
+    assert work["retro"] == {"landed": 11, "due_after": 10}
+    assert work["overhaul"] == {"retros": 2, "due_after": 3}
 
 
 # Requirement 3: refresh moves only what is due, on the fake git's repositories.

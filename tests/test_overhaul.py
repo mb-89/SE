@@ -292,10 +292,11 @@ class FakeDoor:
         return self.read(f"comments-{number}.json")
 
 
-def gathered(checkout: Path, given: dict[str, object] | None = None) -> overhaul.Gathered:
+def gathered(checkout: Path, given: dict[str, object] | None = None,
+             too_early: bool = False) -> overhaul.Gathered:
     door = FakeDoor(given or answers())
     found = overhaul.gather(THIS, door, overhaul.book_rules(ROOT),
-                            overhaul.find(overhaul.read(checkout)), NOW, show)
+                            overhaul.find(overhaul.read(checkout)), NOW, show, too_early)
     assert found is not None
     return found
 
@@ -337,6 +338,62 @@ def test_the_draft_holds_the_retros_since_the_last_overhaul_and_its_findings(che
     assert "| 2. Split the long command | des-007 | work | #45 | open |" in text
     assert "Against overhaul #40: unreached 9 then, 3 now" in text
     assert "### Reached by nothing but tests" in text
+
+
+def test_with_the_countdown_on_a_finding_still_open_is_too_early_to_score(checkout):
+    """Overhaul #40's finding 2, which open #45 takes, had no time to land: too early to score,
+    not open; each retro row counts the previous findings it found too early apart from those it
+    scored, here a third one retro #42 listed so."""
+    given = answers()
+    block = retro_block(42, ["Lost reports", "Slow suite"], True)
+    sha, path = f"{42:040x}", "docs/retro-42.md"
+    data = retro.read_block(DOCS[(sha, path)])
+    data["previous"]["findings"].append({"state": retro.TOO_EARLY, "recurred": False})
+    DOCS[(sha, path)] = f"# Retro draft\n\n{retro.BLOCK_MARKER}\n```yaml\n{json.dumps(data)}\n```\n"
+    given["comments-42.json"] = [{"body": block}]
+    found = gathered(checkout, given, too_early=True)
+    assert found.retros[0]["previous"] == {"scored": 2, "closed": 1, "recurred": 1, "too_early": 1}
+    assert [(item["finding"], item["issues"], item["state"])
+            for item in found.previous["findings"]] == [(1, [44], "closed"),
+                                                        (2, [45], "too early to score"),
+                                                        (3, [], "none")]
+    text = overhaul.draft(found)
+    assert "| previous findings closed, recurred, too early |" in text
+    assert "| #42 | 6 | 5 | 1 | field-report | 2, 1 | 1 of 2, 1, 1 |" in text
+    assert "| 2. Split the long command | des-007 | work | #45 | too early to score |" in text
+    off = gathered(checkout, given)  # off, the built-in: scored as before the countdown
+    assert off.retros[0]["previous"] == {"scored": 3, "closed": 1, "recurred": 1}
+    assert "| 2. Split the long command | des-007 | work | #45 | open |" in overhaul.draft(off)
+    DOCS.pop((sha, path))
+
+
+def test_an_overhaul_is_due_after_the_third_retro_and_resets_with_an_overhaul(tmp_path):
+    """The countdown retro-due counts too (components/retro-due), a pure function of the runs it
+    is given: the retros closed since the last overhaul closed, a duplicate retro not among them;
+    the next overhaul resets it, and an open overhaul with none closed starts it at its creation.
+    Its setting is off where absent or 0."""
+    given = answers()
+    given["issues.json"].append(issue(48, "docs/retro-20261106", "2026-11-06T00:00:00Z",
+                                      reason="duplicate"))
+    assert overhaul.retros_since_overhaul(FakeDoor(given)) == 3  # #42, #43 and #46
+    closed = [retro.issue_of(item) for item in given["issues.json"]]
+    opened = [retro.issue_of(item) for item in given["open-issues.json"]]
+    assert overhaul.retros_since(closed, opened) == 3
+    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "docs/overhaul-20261107",
+                                                              "2026-11-07T00:00:00Z"))], []) == 0
+    without = [item for item in closed if not overhaul.is_overhaul(item)]
+    open_overhaul = retro.issue_of({**issue(THIS, "docs/overhaul-20261112", None),
+                                    "created_at": "2026-10-25T00:00:00Z"})
+    assert overhaul.retros_since(without, [open_overhaul]) == 2  # #43 and #46
+    assert overhaul.retros_since(without, []) == 4  # the whole history: #41 too
+    assert overhaul.DUE_AFTER == 0 and overhaul.due_after(tmp_path) == 0  # off
+    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
+    assert overhaul.due_after(tmp_path) == 3
+    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 0\n", encoding="utf-8")
+    assert overhaul.due_after(tmp_path) == 0
+    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = -1\n", encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match="must be a whole number, 0 for off"):
+        overhaul.due_after(tmp_path)
 
 
 def test_without_a_closed_overhaul_the_window_is_the_whole_history(checkout):

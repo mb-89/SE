@@ -1,8 +1,10 @@
 // Package retrodue is SE's retro-due component: how many work issues landed
 // since the last retro (scripts/retro.py landed_since_retro) and whether
-// that makes a retro due, as a derivation over kern's GitHub snapshot names,
-// so the greeting reads it live. It is SE's, not kern's: the window and what
-// counts as landed are SE's work model.
+// that makes a retro due, and how many retros closed since the last overhaul
+// (scripts/overhaul.py retros_since_overhaul) and whether that makes an
+// overhaul due, as a derivation over kern's GitHub snapshot names, so the
+// greeting reads both live. It is SE's, not kern's: the windows and what
+// counts are SE's work model.
 package retrodue
 
 import (
@@ -25,6 +27,8 @@ const (
 	Label     = "retro"
 	TitleStem = "docs/retro-"
 	Work      = "work"
+	// OverhaulTitleStem is overhaul.py OVERHAUL_TITLE.
+	OverhaulTitleStem = "docs/overhaul-"
 )
 
 var reference = regexp.MustCompile(`(?i)\b(?:fixes|refs|closes)\s+(?:#(\d+)|https://[^/\s]+/([^/\s]+/[^/\s]+)/issues/(\d+))\b`)
@@ -32,32 +36,40 @@ var reference = regexp.MustCompile(`(?i)\b(?:fixes|refs|closes)\s+(?:#(\d+)|http
 // Due is the component's output: the work issues landed since the last retro,
 // the count that makes a retro due and whether it is, where the window starts
 // (the last retro's close, or the oldest open retro's creation, or none: the
-// whole history), and how much the names held.
+// whole history); the same countdown for the overhaul, counting the retros
+// closed since the last overhaul; and how much the names held.
 type Due struct {
-	Landed   int    `json:"landed"`
-	DueAfter int    `json:"due_after"`
-	Due      bool   `json:"due"`
-	Since    string `json:"since"`
-	Retro    int    `json:"retro"`
-	Issues   int    `json:"issues"`
-	Pulls    int    `json:"pulls"`
+	Landed        int    `json:"landed"`
+	DueAfter      int    `json:"due_after"`
+	Due           bool   `json:"due"`
+	Since         string `json:"since"`
+	Retro         int    `json:"retro"`
+	Retros        int    `json:"retros"`
+	OverhaulAfter int    `json:"overhaul_after"`
+	OverhaulDue   bool   `json:"overhaul_due"`
+	OverhaulSince string `json:"overhaul_since"`
+	Overhaul      int    `json:"overhaul"`
+	Issues        int    `json:"issues"`
+	Pulls         int    `json:"pulls"`
 }
 
 // In is what the derivation reads.
 type In struct {
-	Issues   map[string]github.Snapshot `index:"issues"`
-	Pulls    map[string]github.Snapshot `index:"pulls"`
-	DueAfter int                        `index:"config/due-after"`
-	Tracker  string                     `index:"config/tracker"`
-	Base     string                     `index:"config/base"`
+	Issues        map[string]github.Snapshot `index:"issues"`
+	Pulls         map[string]github.Snapshot `index:"pulls"`
+	DueAfter      int                        `index:"config/due-after"`
+	OverhaulAfter int                        `index:"config/overhaul-after"`
+	Tracker       string                     `index:"config/tracker"`
+	Base          string                     `index:"config/base"`
 }
 
 // Component is the component a binary carries.
-var Component = index.Declare(Name, "Whether a retro is due: the work issues landed since the last one, from the GitHub names.",
+var Component = index.Declare(Name, "Whether a retro or an overhaul is due: the work issues landed since the last retro and the retros closed since the last overhaul, from the GitHub names.",
 	index.Config("due-after", 10, "How many landed work issues make a retro due: se.toml [retro] due_after."),
+	index.Config("overhaul-after", 0, "How many closed retros make an overhaul due: se.toml [overhaul] due_after; 0 is off."),
 	index.Config("tracker", "", "The tracker, <owner>/<repo>: a pull request's Fixes or Refs URL names an issue only there."),
 	index.Config("base", "main", "The integration branch: a work issue landed where a pull request naming it merged into it."),
-	index.Derived("due", Due{DueAfter: 10}, "The work issues landed since the last retro and whether a retro is due.",
+	index.Derived("due", Due{DueAfter: 10}, "The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.",
 		func(in In) (Due, error) { return Count(in), nil }),
 )
 
@@ -65,37 +77,47 @@ func init() { index.Register(Component) }
 
 func isRetro(i snap.Issue) bool { return strings.HasPrefix(i.Title, TitleStem) || i.Has(Label) }
 
-// Count is retro.py landed_since_retro over what the names hold.
+func isOverhaul(i snap.Issue) bool { return strings.HasPrefix(i.Title, OverhaulTitleStem) }
+
+func isDuplicate(i snap.Issue) bool { return i.Reason == "duplicate" || i.Has("duplicate") }
+
+// windowStart is where a countdown of the runs `of` picks out starts: the
+// close of the last closed one, else the creation of the oldest open one,
+// else nowhere (ok false: the whole history); with the moment as the names
+// give it and that run's number.
+func windowStart(all []snap.Issue, of func(snap.Issue) bool) (since time.Time, ok bool, at string, number int) {
+	var last *snap.Issue
+	for i := range all {
+		c, closed := snap.When(all[i].ClosedAt)
+		if all[i].State == "closed" && of(all[i]) && closed && (last == nil || c.After(since)) {
+			last, since = &all[i], c
+		}
+	}
+	if last != nil {
+		return since, true, last.ClosedAt, last.Number
+	}
+	var oldest *snap.Issue
+	for i := range all {
+		c, created := snap.When(all[i].CreatedAt)
+		if all[i].State == "open" && of(all[i]) && created && (oldest == nil || c.Before(since)) {
+			oldest, since = &all[i], c
+		}
+	}
+	if oldest != nil {
+		return since, true, oldest.CreatedAt, oldest.Number
+	}
+	return time.Time{}, false, "", 0
+}
+
+// Count is retro.py landed_since_retro and overhaul.py retros_since_overhaul
+// over what the names hold.
 func Count(in In) Due {
 	all := snap.Issues(in.Issues)
 	pulls := snap.Pulls(in.Pulls)
-	d := Due{DueAfter: in.DueAfter, Issues: len(all), Pulls: len(pulls)}
-	var last *snap.Issue
-	var lastAt time.Time
-	for i := range all {
-		c, ok := snap.When(all[i].ClosedAt)
-		if all[i].State == "closed" && isRetro(all[i]) && ok && (last == nil || c.After(lastAt)) {
-			last, lastAt = &all[i], c
-		}
-	}
-	var since time.Time
-	hasSince := false
-	switch {
-	case last != nil:
-		since, hasSince, d.Since, d.Retro = lastAt, true, last.ClosedAt, last.Number
-	default:
-		var oldest *snap.Issue
-		var oldestAt time.Time
-		for i := range all {
-			c, ok := snap.When(all[i].CreatedAt)
-			if all[i].State == "open" && isRetro(all[i]) && ok && (oldest == nil || c.Before(oldestAt)) {
-				oldest, oldestAt = &all[i], c
-			}
-		}
-		if oldest != nil {
-			since, hasSince, d.Since, d.Retro = oldestAt, true, oldest.CreatedAt, oldest.Number
-		}
-	}
+	d := Due{DueAfter: in.DueAfter, OverhaulAfter: in.OverhaulAfter, Issues: len(all), Pulls: len(pulls)}
+	since, hasSince, at, number := windowStart(all, isRetro)
+	d.Since, d.Retro = at, number
+	d.Retros, d.OverhaulSince, d.Overhaul = RetrosSince(all)
 	naming := map[int][]snap.Pull{}
 	for _, p := range pulls {
 		if n, ok := Reference(p.Body, in.Tracker); ok {
@@ -116,13 +138,31 @@ func Count(in In) Due {
 				break
 			}
 		}
-		duplicate := i.Reason == "duplicate" || i.Has("duplicate")
-		if landed && !duplicate && i.Reason != "not_planned" {
+		if landed && !isDuplicate(i) && i.Reason != "not_planned" {
 			d.Landed++
 		}
 	}
 	d.Due = d.DueAfter > 0 && d.Landed >= d.DueAfter
+	d.OverhaulDue = d.OverhaulAfter > 0 && d.Retros >= d.OverhaulAfter
 	return d
+}
+
+// RetrosSince is the overhaul countdown, a pure function of the runs it is
+// given (overhaul.py retros_since): how many retros closed since the last
+// overhaul, counted as Count counts landings since the last retro, with where
+// that window starts and the overhaul it starts at. A retro closed as a
+// duplicate or not planned does not count. Whether that makes an overhaul due
+// is Count's, by overhaul-after, where 0 is off.
+func RetrosSince(all []snap.Issue) (retros int, since string, overhaul int) {
+	at, ok, since, overhaul := windowStart(all, isOverhaul)
+	for _, i := range all {
+		closedAt, closed := snap.When(i.ClosedAt)
+		if i.State == "closed" && isRetro(i) && closed && (!ok || closedAt.After(at)) &&
+			!isDuplicate(i) && i.Reason != "not_planned" {
+			retros++
+		}
+	}
+	return retros, since, overhaul
 }
 
 // Reference is the issue of tracker a pull request's body first names with

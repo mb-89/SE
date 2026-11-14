@@ -138,10 +138,12 @@ uv run python <se>/scripts/se_start.py refresh
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
 - What is due in the work: where gh is signed in, `check` also counts the work issues landed since
-  the last retro (the window of [`retro.py collect`](#work-commands)) and runs the
-  [fleet check](#fleet-check), and caches both.
-  - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
-    issue, one line each with the command to run, and a part whose read failed with its cause.
+  the last retro (the window of [`retro.py collect`](#work-commands)), the retros closed since
+  the last overhaul where that countdown is on, runs the [fleet check](#fleet-check), and caches
+  them.
+  - The greeting then names a retro that is [due](#retro-due), an overhaul that is
+    [due](#overhaul-due) and the fleet's findings by kind and issue, one line each with the command
+    to run, and a part whose read failed with its cause.
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
@@ -583,6 +585,26 @@ A retro is due once `due_after` work issues landed since the last closed retro i
 the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
 setting; SE's retro-due component counts the same from kern's GitHub names, for the greeting to read
 live ([components/README.md](components/README.md)).
+
+### Overhaul due
+
+```toml
+[overhaul]
+due_after = 3  # absent or 0: off
+```
+
+An overhaul is due once `due_after` retros closed since the last closed overhaul issue; a retro
+closed as a duplicate or as not planned does not count, as for the landings a retro counts. The
+[start greeting](#start-and-refresh) names it beside the retro.
+
+- **Off unless set.** Absent or 0 switches the countdown off, SE's own `se.toml` among them: the
+  greeting names no overhaul, and the retro and the overhaul score earlier findings as they did
+  before it.
+- **Too early to score.** With it on, an earlier finding that an issue still open takes is listed
+  as `too early to score`, by `retro.py collect` and `overhaul.py read`, not scored as a failure.
+- **One store.** `scripts/overhaul.py` owns the count (`retros_since`, a pure function of the runs
+  it is given) and the setting; the retro-due component counts the same into its name,
+  `retro-due/due`, by its config `overhaul-after` (0, off, unless the wiring sets it).
 
 ### Stop hook
 
@@ -1529,6 +1551,9 @@ Each issue comes with the field report of the work pull request its landing pull
 - the previous retro's findings, from the block of the retro doc its report links, each with the work issues of the window
   that name it (`retro #<n> finding <k>`), its state (`closed` where one closed as completed) and
   whether the rule check it names broke again (recurred).
+  - Where the [overhaul countdown](#overhaul-due) is on, a finding an issue still open takes is
+    `too early to score`: filed after the previous retro's cut-off, it had no time to land, so it
+    is listed and scored neither as failed nor as recurred.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
@@ -1580,10 +1605,13 @@ filing path (`file --label discovery`): once, so an open overhaul answers a seco
   neither);
 - the retros closed since the last closed overhaul (titled `docs/overhaul-...`), or in the whole
   history where none has, each from the block of the retro doc its report links: its sizes, its
-  broken rule checks, its findings by kind and how many of the previous retro's findings closed or
-  recurred, and the finding classes more than one of them named;
+  broken rule checks, its findings by kind and the previous retro's findings it scored, and the
+  finding classes more than one of them named;
+  - of those findings, how many closed or recurred, and, where the
+    [overhaul countdown](#overhaul-due) is on, how many were too early to score apart;
 - the previous overhaul's findings, each with the issues that name it
-  (`overhaul #<n> finding <k>`) and their state (`closed`, `open` or `none`);
+  (`overhaul #<n> finding <k>`) and their state (`closed`, `open` where one is still open, or
+  `none`; `too early to score` instead of `open` where the [countdown](#overhaul-due) is on);
 - the pruning facts (`facts`, below), beside the previous overhaul's counts.
 
 It ends in a JSON block under `<!-- se:overhaul-yaml -->`, which the next overhaul reads. Without
