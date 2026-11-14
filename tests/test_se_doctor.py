@@ -228,7 +228,7 @@ def test_the_host_comes_from_variable_names(env, host):
     assert d.gather_host(env) == host
 
 
-# --probe (off by default)
+# --probe and --write (both off by default)
 
 
 BASE_TEXT = (
@@ -340,3 +340,15 @@ def test_gather_probe_reads_each_place_and_probes_without_running_a_hook(tmp_pat
     elsewhere = d.gather_probe(project, home, tmp_path / "se", [], "linux", data, which=lambda _w: None, start=no_probe)
     assert {r["place"]: r["state"] for r in elsewhere["rows"]}["hooks"] == d.NOT_MEASURED
 
+
+def test_write_puts_the_report_into_one_file_under_dot_se(tmp_path: Path, monkeypatch, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(d, "gather", lambda *_a, **_k: clean_facts())
+    assert d.main(["--root", str(project), "--write"]) == 0
+    out = capsys.readouterr()
+    assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == \
+        ["project", "project/.se", "project/.se/doctor.txt"]
+    assert (project / ".se" / "doctor.txt").read_text(encoding="utf-8") == out.out == BASE_TEXT
+    assert "written to <project>/.se/doctor.txt" in out.err
+    assert ".se/" in (Path(d.SE_ROOT) / ".gitignore").read_text(encoding="utf-8").splitlines()

@@ -1,6 +1,6 @@
 """SE's doctor: one read-only report of the box SE runs in, to paste whole when something half-works.
 
-    uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline] [--probe]
+    uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline] [--probe] [--write]
 
 It measures the host, the SE checkout against its upstream, the installed plugin and the `se`
 binary against the pins, the core (standing file, pid, boot id, the last lines of its log), each
@@ -15,7 +15,7 @@ Three layers, so the form can change without the checks:
 - `diagnose` is pure: facts in, findings out; the tests hand it fake facts.
 - `render_text` and `render_json` format the findings.
 
-One option, off by default; without it the report is the same as before it existed:
+Two options, both off by default; without them the report is the same as before they existed:
 
 - `--probe` adds a row for each place a host reads SE from (scripts/host-limits.toml
   `[registrations]`, judged by scripts/host_registrations.py): whether the registration is there,
@@ -23,6 +23,8 @@ One option, off by default; without it the report is the same as before it exist
   for an MCP command one `initialize` with a time limit, which may start the core as a host's own
   spawn would. A missing or broken one ends with its fix line, which names this checkout's
   launcher exactly, to paste: under home as `$HOME/...`, else by its full path.
+- `--write` also puts the report into one file, `.se/doctor.txt` (`.se/doctor.json` with `--json`)
+  in the project, to paste whole.
 
 Otherwise it writes nothing, starts nothing that stays, and prints no secret: never a token, a bus user, an
 environment value, an e-mail address or a private path (home is `~`, the checkout `<checkout>`, any
@@ -762,8 +764,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offline", action="store_true", help="skip gh and the network reach")
     parser.add_argument("--probe", action="store_true",
                         help="also probe each place a host reads SE from; starts each MCP command once")
+    parser.add_argument("--write", action="store_true",
+                        help="also write the report to .se/doctor.txt (.se/doctor.json with --json)")
     return parser
 
+
+def write_report(project: Path, text: str, as_json: bool) -> Path:
+    """The report as one file under the project's ignored `.se/` folder."""
+    path = project / ".se" / ("doctor.json" if as_json else "doctor.txt")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -773,6 +784,9 @@ def main(argv: list[str] | None = None) -> int:
     findings = diagnose(facts)
     report = render_json(findings, facts) if args.json else render_text(findings, PROBED if args.probe else READ_ONLY)
     sys.stdout.write(report)
+    if args.write:
+        path = write_report(project, report, args.json)
+        print(f"SE doctor: written to <project>/.se/{path.name}", file=sys.stderr)
     return 1 if args.strict and any(f.level == PROBLEM for f in findings) else 0
 
 
