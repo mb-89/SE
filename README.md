@@ -538,7 +538,7 @@ landing assigns the number, so branches open in parallel never claim the same on
   `[tests.beside.release-guard]`) passes a changed component whose kind is stated, read from
   `$SE_COMPONENT_KINDS`.
   - `work_tickets.py suite` sets it from `.se/work/field-report.md`, CI from the pull request's
-    description (`work_tickets.py component-kinds`).
+    description (`field-report --check --component-kinds-to`).
   - A landing and `main` set none, so there the guard refuses as before.
 - **The landing assigns the number:** `integrate` writes the next version of that kind after
   `main`'s into the landing's merge, before the suite runs, for each component whose folder the
@@ -1280,7 +1280,7 @@ work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SES
 
 work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)
                              [--issue-body FILE] [--comment-count N] [--newest-comment ID]
-                             [--check-runs FILE]
+                             [--check-runs FILE] [--component-kinds-to FILE]
     draft or check the field report a pull request description carries, in the form of
     .github/pull_request_template.md
 
@@ -1331,10 +1331,6 @@ settings checks and the generated docs.
 ```text
 work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]
     show local worker capacity or cloud unlimited capacity
-
-work_tickets.py component-kinds FILE
-    print the release guard's $SE_COMPONENT_KINDS line from the field report in FILE, for CI's
-    environment (README "Component versions")
 
 work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                        [--integrator-session INTEGRATOR_SESSION]

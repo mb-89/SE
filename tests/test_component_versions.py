@@ -194,11 +194,17 @@ def test_the_suite_gives_the_release_guard_the_work_branch_s_stated_kinds(
     assert versions.ENVIRONMENT not in work_tickets.os.environ
 
 
-def test_component_kinds_prints_the_guard_s_environment_line(tmp_path, capsys):
+def test_field_report_check_appends_the_guard_s_environment_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "check_field_report", lambda *arguments: None)  # passes
     body = tmp_path / "body.md"
-    body.write_text("Fixes x\n\n**Component kinds:** se minor\n", encoding="utf-8")
-    assert work_tickets.main(["component-kinds", str(body)]) == 0
-    assert capsys.readouterr().out == "SE_COMPONENT_KINDS=se=minor\n"
+    body.write_text(reported_at("abc1234").replace(
+        "**Release kind:**", "**Component kinds:** se minor\n**Release kind:**", 1), encoding="utf-8")
+    environment = tmp_path / "github-env"
+    environment.write_text("EARLIER=1\n", encoding="utf-8")
+    assert work_tickets.main(["field-report", "--check", str(body),
+                              "--component-kinds-to", str(environment)]) == 0
+    assert environment.read_text(encoding="utf-8") == "EARLIER=1\nSE_COMPONENT_KINDS=se=minor\n"
+    assert "Component kinds for the release guard: SE_COMPONENT_KINDS=se=minor" in capsys.readouterr().out
 
 
 # A build that writes the project version into a generated file, as se_plugin.py build writes the

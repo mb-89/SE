@@ -7854,7 +7854,11 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
          arg("--check-runs", type=Path, metavar="FILE",
              help="with --check in a worktree: the work pull request's check runs as "
                   "pull_request_read get_check_runs answered them, which the warning on platform "
-                  "code reads; default: read with gh, else from kern's relay"))
+                  "code reads; default: read with gh, else from kern's relay"),
+         arg("--component-kinds-to", type=Path, metavar="FILE",
+             help="with --check: append the release guard's $SE_COMPONENT_KINDS line, the "
+                  "report's Component kinds, to FILE, as CI does to a work pull request's "
+                  "$GITHUB_ENV (README \"Component versions\")"))
 def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     if args.check is not None:
         if (args.comment_count is None) != (args.newest_comment is None):
@@ -7864,6 +7868,12 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
             "count": args.comment_count, "newest": args.newest_comment}
         check_field_report(root, args.check, args.issue_body, comments, args.check_runs)
         print(f"Field report {args.check.name} follows the template")
+        if args.component_kinds_to is not None:
+            kinds = component_versions.stated_kinds(args.check.read_text(encoding="utf-8"))
+            line = f"{component_versions.ENVIRONMENT}={component_versions.environment_value(kinds)}"
+            with args.component_kinds_to.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(line + "\n")
+            print(f"Component kinds for the release guard: {line}")
     elif root is None:
         raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")
     else:
@@ -8062,18 +8072,6 @@ def stated_component_kinds(root: Path) -> None:
     os.environ[variable] = component_versions.environment_value(kinds)
     print(f"Suite: the release guard reads {branch}'s Component kinds: "
           f"{os.environ[variable] or 'none stated'} ({report})")
-
-
-@command("component-kinds", "print the release guard's $SE_COMPONENT_KINDS line from the field "
-                            "report in FILE, for CI's environment (README \"Component versions\")",
-         arg("file", type=Path, metavar="FILE", help="a pull request description or field report"))
-def run_component_kinds(root: Path, args: argparse.Namespace) -> int:
-    try:
-        kinds = component_versions.stated_kinds(args.file.read_text(encoding="utf-8"))
-    except component_versions.VersionError as error:
-        raise QueueError(f"{args.file}: {error}") from None
-    print(f"{component_versions.ENVIRONMENT}={component_versions.environment_value(kinds)}")
-    return 0
 
 
 @command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
@@ -8587,7 +8585,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
-     ("integrate", "release-trailer", "component-kinds", "refs request", "refs apply", "suite", "suite-shard",
+     ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))

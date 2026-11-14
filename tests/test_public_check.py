@@ -1186,12 +1186,10 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
     made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
     if checked:
         assert made[0] == "gh api repos/alice/example/issues/7 --jq .body"
-        assert made[1].startswith("uv run python scripts/work_tickets.py field-report --check ")
         # A work pull request's Component kinds reach the suite's release guard through the
         # job's environment (README "Component versions").
-        body_file = (tmp_path / "pr-body.md").as_posix()
-        assert made[2] == f"uv run python scripts/work_tickets.py component-kinds {body_file}"
-        assert (tmp_path / "github-env").is_file()  # the fake uv prints nothing to append
+        assert made[1].startswith("uv run python scripts/work_tickets.py field-report --check ")
+        assert made[1].endswith(f" --component-kinds-to {tmp_path / 'github-env'}")
         assert (tmp_path / "issue-body.md").read_text(encoding="utf-8") == "issue body\n"
     else:
         assert made == [] and "no field report in the description" in result.stdout
@@ -1220,8 +1218,8 @@ def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request
         "gh api repos/alice/example/pulls/7 --jq .body",
         "gh api repos/alice/example/issues/5 --jq .body"]
     # A landing's release commit carries the component versions: it gives the guard no kinds.
-    assert not any("component-kinds" in call for call in made)
-    assert not (tmp_path / "github-env").exists()
+    assert made[2].startswith("uv run python scripts/work_tickets.py field-report --check ")
+    assert "--component-kinds-to" not in made[2]
     assert "the landing's report is the description of pull request 7" in result.stdout
     assert (tmp_path / "pr-body.md").read_text(encoding="utf-8").endswith("report\n")
 
