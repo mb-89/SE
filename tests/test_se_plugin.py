@@ -158,24 +158,13 @@ def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(ch
         assert (checkout / command.split()[0]).is_file()
 
 
-def test_copilot_clis_manifest_names_the_copilot_layout(checkout):
-    copilot = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
-    claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    assert "hooks" in claude, "Claude Code's hooks stay inline, as on main"
-    del claude["hooks"], claude["version"]
-    assert copilot == {**claude, "agents": ".github/agents/", "skills": ".github/skills/"}, \
-        "no version, so a release of main never makes it stale"
-    assert sorted(path.name for path in (checkout / ".github" / "agents").iterdir()) == [
-        "integrator.agent.md", "reviewer.agent.md", "se.agent.md", "worker.agent.md"]
-
-
 def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
     assert se_plugin.COPILOT_HOOKS_FILE in se_plugin.expected(tmp_path)
     off = (se_plugin.dataclasses.replace(se_plugin.LAYOUTS[0], hooks=False), se_plugin.LAYOUTS[1])
     monkeypatch.setattr(se_plugin, "LAYOUTS", off)
     files = se_plugin.expected(tmp_path)
-    assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.COPILOT_MANIFEST in files
+    assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.MANIFESTS[0] in files
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):

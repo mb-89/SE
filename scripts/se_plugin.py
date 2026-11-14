@@ -1,8 +1,8 @@
 """Generate the Copilot and Claude Code layouts of the se plugin from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
-`build` writes both layouts, the Claude Code plugin manifests, Copilot's hooks
-(`.github/hooks/se.json`, a layout setting: `Layout.hooks`) and Copilot CLI's plugin manifest; `check`
+`build` writes both layouts, the Claude Code plugin manifests and Copilot's hooks
+(`.github/hooks/se.json`, a layout setting: `Layout.hooks`); `check`
 refuses when any generated file differs from what `build` would write, so a hand edit to a generated
 file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
 validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
@@ -110,11 +110,8 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
-# Copilot CLI reads this manifest before .claude-plugin/plugin.json; it names the Copilot layout,
-# whose agents are `<name>.agent.md` as the CLI reads them.
-COPILOT_MANIFEST = PurePosixPath(".github/plugin/plugin.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
-             COPILOT_HOOKS_FILE, COPILOT_MANIFEST)
+             COPILOT_HOOKS_FILE)
 
 
 class SourceError(Exception):
@@ -292,10 +289,6 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "repository": REPOSITORY,
         "license": "MIT",
     }
-    # No version: it would go stale with every release of main before a branch lands, and the CLI's
-    # manifest needs none.
-    copilot = {**{key: value for key, value in plugin.items() if key != "version"},
-               "agents": f"{LAYOUTS[0].agents}/", "skills": f"{LAYOUTS[0].skills}/"}
     plugin["hooks"] = {
         "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
         **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
@@ -307,7 +300,7 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "description": "SE, installed from this repository.",
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
-    files = {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace), COPILOT_MANIFEST: _json(copilot)}
+    files = {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
     if LAYOUTS[0].hooks:
         files[COPILOT_HOOKS_FILE] = _json({
             "version": 1,
