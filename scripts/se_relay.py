@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
@@ -165,3 +166,64 @@ def relay(root: Path, now: Callable[[], datetime] | None = None) -> Relay | None
     except (NatsError, OSError, RelayError, KeyError, TypeError, ValueError):
         return None
     return Relay(root, get, now)
+
+
+#: The words that open the relay's block in what kern tells the agent (kern's github Outbox).
+TOLD = "kern's GitHub relay waits for these GitHub tool calls"
+#: How long `next` waits for the core's answer.
+NEXT_WAIT = 5.0
+
+
+def told(root: Path, wait: float = NEXT_WAIT) -> str | None:
+    """The GitHub tool calls kern's relay waits for, as its hook tells them on a prompt: the
+    relay's block of that context, "" where none waits, None where no core answers. The event
+    carries no session, so it takes no lease."""
+    served = se_components.kern_root(root.resolve())
+    found = se_components.standing(served) if served else None
+    if found is None:
+        return None
+    se_components.sdk()
+    from kern.nats import NatsError, Peer
+
+    try:
+        peer = Peer(found["bus"], "client", found["users"]["client"], name="se-relay-next",
+                    timeout=wait)
+    except (OSError, KeyError, TypeError, ValueError, NatsError):
+        return None
+    try:
+        answer = peer.request("hook.UserPromptSubmit", {}, wait).json() or {}
+    except (OSError, NatsError, ValueError):
+        return None
+    finally:
+        peer.close()
+    context = str(answer.get("context") or "")
+    start = context.find(TOLD)
+    return context[start:].split("\n\n")[0].strip() if start >= 0 else ""
+
+
+NEXT_COMMAND = f"uv run python {Path(__file__).resolve().as_posix()} next"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`se_relay.py next [--root DIR]`: print the GitHub steps kern's relay waits for, the same
+    the hook tells on a prompt, whichever tool's PostToolUse ran last; exit 1 where no core
+    serves the checkout."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="se_relay.py", description=(
+        "SE's reads and steps through kern's GitHub relay."))
+    commands = parser.add_subparsers(dest="command", required=True)
+    nxt = commands.add_parser("next", help="print the GitHub tool calls kern's relay waits for")
+    nxt.add_argument("--root", type=Path, default=Path.cwd(),
+                     help="the checkout kern serves (default: the working directory)")
+    args = parser.parse_args(argv)
+    found = told(args.root)
+    if found is None:
+        print(f"se_relay.py next: no core serves {args.root.resolve()}", file=sys.stderr)
+        return 1
+    print(found or "kern's GitHub relay waits for no GitHub tool call")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

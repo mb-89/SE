@@ -11,8 +11,9 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
 3. it answers each step of a command on ``cmd.<i>.<command>``, each in a thread
    of its own, so calls run side by side, and, an I/O component, each request on
    ``io.<i>.<verb>``; each line a step says goes out at once on
-   ``say.<i>.<call>``, its own call's, and while a step runs it beats there, so
-   the core waits for a long step as long as the process lives; a message on
+   ``say.<i>.<call>``, its own call's, and while a step runs it beats there, until
+   its answer is out, so the core waits for a long step as long as the process
+   lives, and an answer that is no JSON goes out as the step's error; a message on
    ``cmd.<i>.<command>`` without a reply, ``{"call", "stop"}``, is the core's
    stop word: it gave that call up, so the runner drops the call's waiting
    continuation and sets its :class:`Abandon`, which the call's code reads
@@ -28,6 +29,7 @@ It ends when the bus closes: the core ended it, or ended.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import queue
 import sys
@@ -252,17 +254,19 @@ class Runner:
                 with self._steps_lock:
                     self._asks.pop(call, None)
             return
-        self.peer.respond(msg, self._step(what, body))
+        self._step(what, body, lambda answer: self.peer.respond(msg, answer))
 
     def _say(self, call: str, line: str | None = None) -> None:
         """One word on say.<i>.<call> for the step of `call`: a progress line, or a beat without one."""
         self.peer.publish("say." + self.me + "." + token(call), {} if line is None else {"line": line})
 
-    def _step(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _step(self, name: str, body: dict[str, Any], send=None) -> dict[str, Any]:
         """Run one step of a command: each line it says goes to the core at once on say.<i>.<call>,
         and, while it runs, the runner beats there and on lease.<i> every BEAT, so the core
         waits for a long step as long as this process lives (docs/go-core.md "Progress and
-        long calls")."""
+        long calls"). With `send`, the step's answer goes out through it before the beat ends,
+        so the core never waits in silence between the step's end and its answer; an answer
+        that is no JSON goes out as the step's error instead of nothing."""
         call, step = str(body.get("call", "")), int(body.get("step", 1))
         done = threading.Event()
 
@@ -276,7 +280,18 @@ class Runner:
 
         threading.Thread(target=beat, name="kern-step-beat", daemon=True).start()
         try:
-            return self._run_step(name, body, call, step)
+            answer = self._run_step(name, body, call, step)
+            if send is not None:
+                try:
+                    data = json.dumps(answer)
+                except (TypeError, ValueError) as e:
+                    with self._steps_lock:  # no continuation runs after an answer the core never read
+                        self._steps.pop(call, None)
+                        self._abandons.pop(call, None)
+                    answer = {"error": f"command {name!r}: its answer is no JSON: {e}"}
+                    data = json.dumps(answer)
+                send(data)
+            return answer
         finally:
             done.set()
 
