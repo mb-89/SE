@@ -6073,7 +6073,9 @@ class GitHub:
         output = self.text(path, method, data)
         return json.loads(output) if output.strip() else {}
 
-    def pull(self, number: int) -> dict[str, object]:
+    def pull(self, number: int, purpose: str = "") -> dict[str, object]:
+        """Pull request `number`; `purpose` names why it is read where a told step says so
+        (RelayDoor), as two reads in a row look alike."""
         return self.api(f"pulls/{number}")
 
     def open_pull(self, head: str, base: str) -> dict[str, object] | None:
@@ -6253,6 +6255,15 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
     ), then)
 
 
+#: What each read of a landing pull request is for, as the told step names it: the reads of the
+#: merge confirmation and of the read-back are the same tool call in a row.
+MERGE_CONFIRMATION = ("purpose: the merge confirmation of #{number}, merged at the commit the "
+                      "squash returned")
+LANDING_READ_BACK = ("purpose: the read-back of #{number}'s description, for its metrics line, "
+                     "after the merge confirmation")
+REHEARSAL_READ_BACK = "purpose: the read-back of the rehearsal pull request #{number}, merged"
+
+
 def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str,
                     tracker: str) -> dict[str, Action]:
     """The local runner of a landing plan, through the door."""
@@ -6291,7 +6302,7 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
             )
         merged = door.squash(number, str(arguments["expectedHeadSha"]),
                              str(arguments["commit_title"]), str(arguments["commit_message"]))
-        read = door.pull(number)
+        read = door.pull(number, MERGE_CONFIRMATION.format(number=number))
         if not read.get("merged") or str(read.get("merge_commit_sha") or "") != merged or not merged:
             raise QueueError(
                 f"{url} reads back as merged={read.get('merged')} at "
@@ -6606,7 +6617,8 @@ def integrate(
             landing_pull = int(given["pull number"])
             feedback.phase("read back the landing pull request and the landed commit")
             landed_metrics({**state, "plan": plan.data()}, landing_pull,
-                           str(door.pull(landing_pull).get("body") or ""))
+                           str(door.pull(landing_pull, LANDING_READ_BACK.format(
+                               number=landing_pull)).get("body") or ""))
             commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
         elif handing_off:
             path = handoff_path(root, branch)
@@ -7002,8 +7014,8 @@ class RelayDoor(Workflows):
                  "url": issue.get("url") or issue.get("html_url")}
                 for issue in tool_items(found, "issues")]
 
-    def pull(self, number: int) -> dict[str, object]:
-        read = self.ask("pull_request_read", {"method": "get", "pullNumber": number})
+    def pull(self, number: int, purpose: str = "") -> dict[str, object]:
+        read = self.ask("pull_request_read", {"method": "get", "pullNumber": number}, purpose)
         read = dict(read) if isinstance(read, dict) else {}
         if read.get("merged") and not read.get("merge_commit_sha") and number in self.merged:
             # The tools name no merge commit (work model, Without gh); the read-back checks it
@@ -8728,7 +8740,8 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
                        "squash merge")
         given = run_plan(plan, landing_actions(root, door, branch, base, tip, tracker))
         feedback.phase("read back the rehearsal pull request and the landed commit")
-        read = door.pull(int(given["pull number"]))
+        read = door.pull(int(given["pull number"]), REHEARSAL_READ_BACK.format(
+            number=given["pull number"]))
         if not read.get("merged"):
             raise QueueError(f"{given['pull url']} reads back as not merged")
         commit = landing_read_back(root, base, tip, landed, str(given["merge commit sha"]))

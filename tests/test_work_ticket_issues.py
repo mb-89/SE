@@ -1854,7 +1854,7 @@ class FakeGitHub:
     def git(self, *arguments: str, env: dict | None = None) -> str:
         return git_run(self.origin, *arguments, check=True, env=env).stdout.strip()
 
-    def pull(self, number: int) -> dict:
+    def pull(self, number: int, purpose: str = "") -> dict:
         self.calls.append(("pull", number))
         return next(pull for pull in self.pulls if pull["number"] == number)
 
@@ -3206,9 +3206,11 @@ class SessionSteps:
     def __init__(self, github: FakeGitHub, root: Path, checks: list[dict]) -> None:
         self.github, self.root, self.checks = github(root, "git.example/owner/repo"), root, checks
         self.asked: list[tuple[str, dict]] = []
+        self.notes: list[str] = []  # each step's note, as the told text shows it under the call
 
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
+        self.notes.append(note)
         return self.answer(tool, input_)
 
     def answer(self, tool: str, input_: dict) -> object:
@@ -3304,6 +3306,31 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     assert "Check check: in_progress" in out and "Check check: success" in out
     assert "Issue #5: CLOSED on GitHub after the merge" in out
     assert f"Integrated pull request #7 in {commit[:7]}" in out
+
+
+def test_a_relay_landings_two_reads_of_the_landing_pull_request_name_their_purpose(
+        main_checkout, monkeypatch, github):
+    """The merge confirmation and the read-back are the same pull_request_read get in a row: the
+    told text of each names its purpose, and every told step carries its sequence number."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    session = SessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+
+    merge = next(index for index, (tool, _) in enumerate(session.asked)
+                 if tool == "merge_pull_request")
+    reads = session.asked[merge + 1:merge + 3]
+    assert [(tool, input_["method"], input_["pullNumber"]) for tool, input_ in reads] == [
+        ("pull_request_read", "get", 20)] * 2
+    confirmation, read_back = session.notes[merge + 1:merge + 3]
+    assert confirmation == f"step {merge + 2}: purpose: the merge confirmation of #20, merged at the commit the squash returned"
+    assert read_back.startswith(f"step {merge + 3}: purpose: the read-back of #20's description")
+    assert [note.split(":")[0] for note in session.notes] == [
+        f"step {number}" for number in range(1, len(session.notes) + 1)]
 
 
 def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lands_again(
@@ -5639,9 +5666,11 @@ class RehearsalSteps:
     def __init__(self, github: FakeGitHub, root: Path) -> None:
         self.github = github(root, "git.example/owner/repo")
         self.asked: list[tuple[str, dict]] = []
+        self.notes: list[str] = []
 
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
+        self.notes.append(note)
         if tool == "list_issues":
             return {"issues": [], "totalCount": 0}
         if tool == "list_pull_requests":
