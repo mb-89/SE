@@ -64,8 +64,13 @@ type Options struct {
 	Core     Core
 	// Session is the lease's session id; empty for one of the door's own.
 	Session string
+	// NoStart is why the door starts no core though it runs in a checkout,
+	// such as no path to its own binary; every call answers it as failed.
+	NoStart string
 	// StartWait and Renew replace the built-in spans where set.
 	StartWait, Renew time.Duration
+	// PageLimit replaces the built-in PageLimit where set.
+	PageLimit int
 	// Log takes what the door says beside the protocol: stderr.
 	Log io.Writer
 }
@@ -77,6 +82,8 @@ type door struct {
 	failed string // why the core does not start, once it said so
 	// leased is set while the session's lease stands.
 	leased atomic.Bool
+	// pages are the answers that need more than one page, by tool and arguments.
+	pages map[string][]string
 }
 
 // Serve serves the door on in and out, newline-delimited JSON-RPC as stdio
@@ -90,13 +97,16 @@ func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser)
 	if o.Renew == 0 {
 		o.Renew = Renew
 	}
+	if o.PageLimit == 0 {
+		o.PageLimit = PageLimit
+	}
 	if o.Log == nil {
 		o.Log = io.Discard
 	}
 	if o.Session == "" {
 		o.Session = fmt.Sprintf("mcp-%d-%d", os.Getpid(), time.Now().UnixNano())
 	}
-	d := &door{o: o}
+	d := &door{o: o, pages: map[string][]string{}}
 	server, err := d.server()
 	if err != nil {
 		fmt.Fprintf(o.Log, "%s mcp: %v\n", o.App, err)
@@ -104,7 +114,7 @@ func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	supervised := make(chan struct{})
-	if o.Checkout {
+	if o.Checkout && o.NoStart == "" {
 		go func() { defer close(supervised); d.supervise(ctx) }()
 	} else {
 		close(supervised)
@@ -164,11 +174,18 @@ func (d *door) server() (*sdk.Server, error) {
 	return s, err
 }
 
-// schema is a tool's input: none for the door's own, the command and its
-// arguments for a command tool.
+// page is the argument that asks a later page of a long answer.
+var page = map[string]any{"type": "integer", "minimum": 1, "description": fmt.Sprintf("the page of an answer longer than %d bytes, which says how many it has; 1 by default", PageLimit)}
+
+// schema is a tool's input, generated from the catalog: none for status, the
+// page for the greeting, and for a command tool the command, one its
+// declarations name, its arguments and the page.
 func schema(t Tool) map[string]any {
-	if len(t.Commands) == 0 {
+	if t.Name == StatusTool {
 		return map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}
+	}
+	if len(t.Commands) == 0 {
+		return map[string]any{"type": "object", "properties": map[string]any{"page": page}, "additionalProperties": false}
 	}
 	names := make([]any, 0, len(t.Commands))
 	for _, c := range t.Commands {
@@ -179,6 +196,7 @@ func schema(t Tool) map[string]any {
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "enum": names, "description": "the command to run, as the tool's description names it"},
 			"args":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "its arguments after its name, as its usage shows; none by default"},
+			"page":    page,
 		},
 		"required":             []any{"command"},
 		"additionalProperties": false,
@@ -256,6 +274,10 @@ func (d *door) failure() string {
 // that runs and has not taken the lease by then is called all the same.
 func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 	o := d.o
+	if o.NoStart != "" {
+		return host.Status{}, failure(Failed, fmt.Sprintf("%s mcp starts no core in %s: %s", o.App, o.Root, o.NoStart),
+			fmt.Sprintf("fix what it names and restart the server; run %s start --root %s to see it start", o.App, o.Root))
+	}
 	if !o.Checkout {
 		return host.Status{}, failure(NoCheckout, fmt.Sprintf("%s mcp runs in %s, which is no checkout (no .git): it starts no core there", o.App, o.Root),
 			"configure the server to run in the repository's folder (its cwd), or pass --root <checkout>")
@@ -300,17 +322,19 @@ func (d *door) call(ctx context.Context, t Tool, raw json.RawMessage) *sdk.CallT
 	switch {
 	case t.Name == StatusTool:
 		return d.status(ctx)
-	case t.Greeting != nil:
-		return d.greeting(ctx, t)
 	}
 	var in struct {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
+		Page    int      `json:"page"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &in); err != nil {
-			return failure(CommandFailed, fmt.Sprintf("the arguments are no {\"command\", \"args\"}: %v", err), "pass the command's name and its arguments as strings")
+			return failure(CommandFailed, fmt.Sprintf("the arguments are no {\"command\", \"args\", \"page\"}: %v", err), "pass the command's name, its arguments as strings and the page as a number")
 		}
+	}
+	if t.Greeting != nil {
+		return d.paged(t.Name, in.Page, func() (string, *sdk.CallToolResult) { return d.greeting(ctx, t) })
 	}
 	known := false
 	for _, c := range t.Commands {
@@ -319,17 +343,20 @@ func (d *door) call(ctx context.Context, t Tool, raw json.RawMessage) *sdk.CallT
 	if !known {
 		return failure(CommandFailed, fmt.Sprintf("%s offers no command %q", t.Name, in.Command), "name one its description lists")
 	}
-	if _, failed := d.await(ctx); failed != nil {
-		return failed
-	}
-	a, err := d.run(ctx, in.Command, in.Args)
-	if err != nil {
-		return failure(CommandFailed, fmt.Sprintf("%s: %v", in.Command, err), "the status tool says whether the core still runs; call again")
-	}
-	if a.Error != "" {
-		return failure(CommandFailed, fmt.Sprintf("%s: %s", in.Command, a.Error), "read the command's usage in the tool's description and its answer above")
-	}
-	return text(answerText(a), map[string]any{"text": a.Text, "lines": a.Lines})
+	key := strings.Join(append([]string{t.Name, in.Command}, in.Args...), "\x00")
+	return d.paged(key, in.Page, func() (string, *sdk.CallToolResult) {
+		if _, failed := d.await(ctx); failed != nil {
+			return "", failed
+		}
+		a, err := d.run(ctx, in.Command, in.Args)
+		if err != nil {
+			return "", failure(CommandFailed, fmt.Sprintf("%s: %v", in.Command, err), "the status tool says whether the core still runs; call again")
+		}
+		if a.Error != "" {
+			return "", failure(CommandFailed, fmt.Sprintf("%s: %s", in.Command, a.Error), "read the command's usage in the tool's description and its answer above")
+		}
+		return answerText(a), nil
+	})
 }
 
 func (d *door) run(ctx context.Context, command string, args []string) (host.CallAnswer, error) {
@@ -345,10 +372,10 @@ func answerText(a host.CallAnswer) string {
 
 // status answers the core's state at once where it runs, else once it runs
 // within StartWait, else the state it is in: never an error but outside a
-// checkout.
+// checkout or where the door starts no core (Options.NoStart).
 func (d *door) status(ctx context.Context) *sdk.CallToolResult {
 	st, failed := d.await(ctx)
-	if failed != nil && !d.o.Checkout {
+	if failed != nil && (!d.o.Checkout || d.o.NoStart != "") {
 		return failed
 	}
 	answer := map[string]any{"state": string(st.State), "root": d.o.Root}
@@ -372,12 +399,11 @@ func (d *door) status(ctx context.Context) *sdk.CallToolResult {
 
 // greeting reads each entry: a name's value, a command's answer; a part that
 // fails says why in its place.
-func (d *door) greeting(ctx context.Context, t Tool) *sdk.CallToolResult {
+func (d *door) greeting(ctx context.Context, t Tool) (string, *sdk.CallToolResult) {
 	if _, failed := d.await(ctx); failed != nil {
-		return failed
+		return "", failed
 	}
 	var b strings.Builder
-	parts := map[string]any{}
 	for _, e := range t.Greeting {
 		fmt.Fprintf(&b, "## %s\n\n", e.Name)
 		if e.Command {
@@ -385,13 +411,10 @@ func (d *door) greeting(ctx context.Context, t Tool) *sdk.CallToolResult {
 			switch {
 			case err != nil:
 				fmt.Fprintf(&b, "failed: %v\n\n", err)
-				parts[e.Name] = map[string]string{"error": err.Error()}
 			case a.Error != "":
 				fmt.Fprintf(&b, "failed: %s\n\n", a.Error)
-				parts[e.Name] = map[string]string{"error": a.Error}
 			default:
 				fmt.Fprintf(&b, "%s\n\n", answerText(a))
-				parts[e.Name] = map[string]any{"text": a.Text, "lines": a.Lines}
 			}
 			continue
 		}
@@ -401,7 +424,6 @@ func (d *door) greeting(ctx context.Context, t Tool) *sdk.CallToolResult {
 		}
 		if err != nil {
 			fmt.Fprintf(&b, "failed: %v\n\n", err)
-			parts[e.Name] = map[string]string{"error": err.Error()}
 			continue
 		}
 		data, _ := json.MarshalIndent(v.Value, "", "  ")
@@ -411,7 +433,6 @@ func (d *door) greeting(ctx context.Context, t Tool) *sdk.CallToolResult {
 			b.WriteString("Stale: its writer stopped beating.\n\n")
 		}
 		fmt.Fprintf(&b, "```json\n%s\n```\n\n", data)
-		parts[e.Name] = v
 	}
-	return text(strings.TrimSpace(b.String()), parts)
+	return strings.TrimSpace(b.String()), nil
 }

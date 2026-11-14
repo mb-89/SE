@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
@@ -458,5 +459,79 @@ mcp = "Lists the desk."
 	cl.hangUp()
 	if _, err := Tools("app", catalog(t), []string{"desk clear"}); err == nil || !strings.Contains(err.Error(), "is a batch command") {
 		t.Fatalf("Tools answers %v for a batch greeting entry, and wants it refused", err)
+	}
+}
+
+// An answer longer than the page limit comes in pages below it, each asked
+// by "page"; a later page is read from the kept answer, not run again.
+func TestALongAnswerComesInPages(t *testing.T) {
+	long := strings.Repeat("a line of the desk, about forty bytes\n", 100) // 3,800 bytes
+	core := &fakeCore{running: true, answers: map[string]host.CallAnswer{"desk list": {Text: long}}}
+	o := options(core, catalog(t))
+	o.PageLimit = 1000
+	c := open(t, o)
+	c.initialize()
+	var got strings.Builder
+	pages := 0
+	for page := 1; ; page++ {
+		r := c.call("desk", map[string]any{"command": "desk list", "page": page})
+		if r.IsError || r.Structured["page"] != float64(page) {
+			t.Fatalf("page %d answers %+v, and wants that page", page, r)
+		}
+		body, _, _ := strings.Cut(r.Content[0].Text, "\n\n[page ")
+		if len(body) > 1000 {
+			t.Fatalf("page %d carries %d bytes, and wants at most the limit, 1000", page, len(body))
+		}
+		got.WriteString(body)
+		pages = int(r.Structured["pages"].(float64))
+		if page == pages {
+			break
+		}
+		if !strings.Contains(r.Content[0].Text, fmt.Sprintf("\"page\": %d for the rest", page+1)) {
+			t.Fatalf("page %d says %q, and wants the next page named", page, r.Content[0].Text)
+		}
+	}
+	if pages < 4 || got.String() != strings.TrimSpace(long) {
+		t.Fatalf("the %d pages join to %d bytes, and want the whole answer, %d bytes", pages, got.Len(), len(strings.TrimSpace(long)))
+	}
+	if _, calls := core.record(); len(calls) != 1 {
+		t.Fatalf("the core ran %v for the pages, and wants the command run once", calls)
+	}
+	if r := c.call("desk", map[string]any{"command": "desk list", "page": 99}); !r.IsError {
+		t.Fatalf("a page past the last answers %+v, and wants it refused", r)
+	}
+	c.hangUp()
+}
+
+// pages cuts at line ends where a line fits, and inside a line only at a
+// rune's boundary.
+func TestPagesCutAtLinesAndRunes(t *testing.T) {
+	if got := pages("ab\ncd\n", 3); strings.Join(got, "|") != "ab\n|cd\n" {
+		t.Fatalf("pages answers %q, and wants a page per line", got)
+	}
+	for _, p := range pages(strings.Repeat("ä", 10), 5) {
+		if !utf8.ValidString(p) || len(p) > 5 {
+			t.Fatalf("pages cut %q, and wants whole runes within the limit", p)
+		}
+	}
+}
+
+// Where the door starts no core, such as without a path to its binary, it
+// serves all the same, and every call answers why.
+func TestADoorThatStartsNoCoreServesAndSaysWhy(t *testing.T) {
+	core := &fakeCore{}
+	o := options(core, catalog(t))
+	o.NoStart = "no path to this binary"
+	c := open(t, o)
+	c.initialize()
+	for _, tool := range []string{"status", "desk"} {
+		r := c.call(tool, map[string]any{"command": "desk list"})
+		if !r.IsError || r.Structured["error"] != Failed || !strings.Contains(fmt.Sprint(r.Structured["message"]), "no path to this binary") {
+			t.Fatalf("%s answers %+v, and wants the error failed naming why", tool, r)
+		}
+	}
+	c.hangUp()
+	if core.starts != 0 {
+		t.Fatalf("the door started a core it should not start")
 	}
 }

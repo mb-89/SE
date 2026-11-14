@@ -94,13 +94,16 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	dir, err := rootOf(*root)
+	if verb == "mcp" {
+		// The door a host spawns never exits early: what keeps it from a core
+		// is every call's answer instead.
+		return door(name, dir, err, *grace, *idle, stderr)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s %s: %v\n", name, verb, err)
 		return 2
 	}
 	switch verb {
-	case "mcp":
-		return door(name, dir, *grace, *idle, stderr)
 	case "start":
 		bin, err := os.Executable()
 		if err != nil {
@@ -334,14 +337,18 @@ func Wiring(root string) (index.Wiring, error) {
 
 // door serves the MCP door over stdio until the client hangs up: the catalog
 // the core would serve, read without it, and the core started detached, with
-// grace and idle, or attached to, beside the protocol.
-func door(name, root string, grace, idle time.Duration, stderr io.Writer) int {
+// grace and idle, or attached to, beside the protocol. A root it could not
+// find (rooted) or no path to this binary leaves it serving, each call
+// answering why it starts no core.
+func door(name, root string, rooted error, grace, idle time.Duration, stderr io.Writer) int {
 	version := Version
 	if info, ok := debug.ReadBuildInfo(); ok && version == "" {
 		version = info.Main.Version
 	}
 	o := mcp.Options{App: name, Version: version, Root: root, Greeting: Greeting, Log: stderr}
-	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+	if rooted != nil {
+		o.NoStart = rooted.Error()
+	} else if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
 		o.Checkout = true
 	}
 	w, err := Wiring(root)
@@ -351,8 +358,7 @@ func door(name, root string, grace, idle time.Duration, stderr io.Writer) int {
 	o.CatalogErr = err
 	bin, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(stderr, "%s mcp: no path to this binary: %v\n", name, err)
-		return 2
+		o.NoStart = fmt.Sprintf("no path to this binary: %v", err)
 	}
 	o.Core = mcp.Host{Root: root, Bin: bin, Args: []string{"--grace", grace.String(), "--idle", idle.String()}}
 	if err := mcp.Serve(context.Background(), o, os.Stdin, os.Stdout); err != nil {

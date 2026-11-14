@@ -104,6 +104,11 @@ the core to answer `initialize` and `tools/list`.
 - **A call before the core stands** waits up to 5 s, then answers the typed error `starting`, its
   structured content `{"error": "starting", "message", "remedy"}`. The other kinds are `failed`
   (the core ended at its start, with what it said), `no-checkout` and `command-failed`.
+- **It never exits early.** Without a root folder or a path to its own binary it serves all the
+  same, and every call answers `failed` with why; only EOF ends it.
+- **Long answers come in pages** of at most 45,000 bytes (`mcp.PageLimit`), below a host's cut at
+  about 50,000. Each page says how many there are; the tool's `page` argument asks the next, read
+  from the kept answer, not run again.
 
 | tool | what |
 |---|---|
