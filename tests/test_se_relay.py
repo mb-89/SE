@@ -161,3 +161,11 @@ def test_the_work_issues_comments_are_read_where_the_tools_count_any(tmp_path: P
     names.clear()
     names["github/issues/alice.demo.7"] = snapshot(7, {**issue, "comments": 0})
     assert work_tickets.relay_issue_read(relay, "alice", "demo", 7)["comments"] == []
+
+
+def test_next_names_the_missing_core(tmp_path: Path, capsys) -> None:
+    """`se_relay.py next` prints the steps kern's relay waits for; where no core serves the
+    checkout it says so and exits 1."""
+    (tmp_path / ".git").mkdir()
+    assert se_relay.main(["next", "--root", str(tmp_path)]) == 1
+    assert "no core serves" in capsys.readouterr().err

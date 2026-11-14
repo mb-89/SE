@@ -76,7 +76,7 @@ CWD = "--se-cwd="
 #: kern's standing file under the checkout it serves (kern/host/standing.go).
 STANDING = Path(".se") / ".runtime" / "standing.json"
 #: How long routed waits for kern to answer a call, then gives it up and runs the command directly:
-#: kern waits for a step this long (host.StepWait).
+#: an interactive command only reads, so a minute is long (kern's own verb wait, host.VerbWait).
 CALL_WAIT = 60.0
 #: How long a streamed call waits for any word from kern: kern beats every 5 s (host.CallBeat).
 CALL_IDLE = 60.0
