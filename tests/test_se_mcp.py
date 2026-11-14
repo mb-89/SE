@@ -351,3 +351,49 @@ def test_an_unset_home_is_taken_from_the_account(tmp_path):
     result = launch("bash", None, project, "", SE_MCP_BIN=sh(stub(tmp_path)))
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[:3] == ["mcp", "--root", sh(project)]
+
+
+def declared_server(path: Path) -> dict:
+    """The se server as a generated MCP config declares it."""
+    return json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["se"]
+
+
+def expand(text: str, values: dict[str, str]) -> str:
+    for name, value in values.items():
+        text = text.replace("${" + name + "}", value)
+    return text
+
+
+@needs_bash
+@pytest.mark.parametrize("expanded", [True, False], ids=["expanded", "unexpanded"])
+def test_the_plugin_config_serves_the_session_checkout(tmp_path, expanded):
+    """The launcher as the generated Copilot plugin runs it: its args, its env, cwd the plugin folder.
+    A host that leaves ${COPILOT_SESSION_CWD} unexpanded still sets the variable itself."""
+    server = declared_server(ROOT / ".github" / "plugin" / "plugin.json")
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    host = {"PLUGIN_ROOT": sh(plugin), "COPILOT_SESSION_CWD": sh(repo / "sub")}
+    env = {name: expand(value, host) if expanded else value for name, value in server["env"].items()}
+    assert server["command"] == "bash" and server["args"][1:] == ["--root", "."]
+    assert expand(server["args"][0], host) == sh(plugin / "scripts" / "se_mcp.sh")
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = {key: value for key, value in os.environ.items() if key not in {"SE_MCP_BIN", *PLUGIN_VARIABLES}}
+    environment.update(HOME=str(home), USERPROFILE=str(home), SE_MCP_BIN=sh(stub(tmp_path)),
+                       PLUGIN_ROOT=str(plugin), COPILOT_SESSION_CWD=sh(repo / "sub"), **env)
+    result = subprocess.run([BASH, "-c", '"$BASH" "$@"; :', "host", expand(server["args"][0], host), "--root", "."],
+                            capture_output=True, text=True, encoding="utf-8", env=environment, cwd=plugin,
+                            timeout=60, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["mcp", "--root", sh(repo), "--home", sh(plugin), "folder=unset"]
+
+
+@needs_bash
+def test_the_checkouts_own_config_keeps_its_root_whatever_the_session_folder(tmp_path):
+    """.github/mcp.json runs the launcher of the checkout itself, no PLUGIN_ROOT: the gate stays shut,
+    so its SE_SESSION_CWD changes nothing."""
+    server = declared_server(ROOT / ".github" / "mcp.json")
+    checkout, repo = se_copy(tmp_path / "checkout", checkout=True), repository(tmp_path / "repo")
+    env = {name: expand(value, {"COPILOT_SESSION_CWD": sh(repo)}) for name, value in server["env"].items()}
+    assert "SE_SESSION_CWD" in env
+    assert stub_run(tmp_path, checkout, PLUGIN_ROOT=None, COPILOT_SESSION_CWD=sh(repo), **env) == today(
+        tmp_path, checkout)
