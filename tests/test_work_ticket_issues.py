@@ -5038,3 +5038,44 @@ def test_field_report_check_reads_the_platform_legs_from_the_relay_without_gh(
     assert asked == [("checks", "owner", "repo", 7)], out
     assert "for windows-2025, macos-15. " in out and f"kern-platforms (macos-15) success {JOBS}/job/3" in out
     assert gh.calls == []
+
+
+class CommentedSessionSteps(SessionSteps):
+    """The session of SessionSteps, where the work issue carries comments: `issue_read get`
+    names them only as their count, as the GitHub tools do, and `get_comments` lists them."""
+
+    def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
+        if tool == "issue_read" and input_.get("method") == "get_comments":
+            self.asked.append((tool, input_))
+            return [{"id": 6874481244, "body": "Started: a worker session.",
+                     "user": {"login": "alice"}, "created_at": "2026-11-14T08:23:11Z",
+                     "html_url": "https://git.example/owner/tracker/issues/5#issuecomment-1"}]
+        answer = super().__call__(tool, input_, note, wait)
+        if tool == "issue_read" and input_.get("method") == "get" and "title" in answer:
+            answer = {**answer, "comments": 1}
+        return answer
+
+
+def test_integrate_through_kerns_relay_reads_the_work_issues_comments_as_a_step(
+        main_checkout, monkeypatch, github, capsys):
+    """A work issue with comments lands through kern's relay with no --comments-file: where
+    `issue_read get` counts comments, integrate's read phase asks `issue_read get_comments` as
+    one more step, and each read step names itself on stderr as every other relayed step does."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    session = CommentedSessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+
+    tools = [(tool, input_.get("method")) for tool, input_ in session.asked]
+    assert tools[:3] == [("pull_request_read", "get"), ("issue_read", "get"),
+                         ("issue_read", "get_comments")]
+    assert session.asked[2][1]["issue_number"] == 5
+    captured = capsys.readouterr()
+    assert "--comments-file" not in captured.err
+    for line in ("pull_request_read get #7", "issue_read get #5", "issue_read get_comments #5"):
+        assert f"GitHub step through kern's relay: {line}" in captured.err
+    assert "Integrated pull request #7" in captured.out

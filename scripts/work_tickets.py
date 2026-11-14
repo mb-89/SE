@@ -1148,8 +1148,19 @@ def relay_issue(relay, root: Path, repo: str, number: int) -> dict[str, object]:
     answers the session's hooks landed; raises naming the tool calls where a snapshot is missing
     or stale (se_relay.RelayError)."""
     owner, name = api_repo(repo).split("/")
+    return relay_issue_read(relay, owner, name, number)
+
+
+def relay_issue_read(relay, owner: str, name: str, number: int) -> dict[str, object]:
+    """The work issue `owner/name#number` through kern's relay (a snapshot, or a step where the
+    command runs as one call), with its comments: the GitHub tools' `issue_read get` names them
+    only as their count, so where it counts any they are read as `issue_read get_comments`, and
+    where it names none (no count, or 0) there are none, as `issue_record` reads it."""
     issue = json.loads(relay.answer_file("issues", owner, name, number, "work issue")
                        .read_text(encoding="utf-8"))
+    counted = issue.get("comments") if isinstance(issue, dict) else None
+    if isinstance(counted, list) or not counted:
+        return issue_record(issue)
     comments = json.loads(relay.answer_file("comments", owner, name, number, "work issue comments")
                           .read_text(encoding="utf-8"))
     return issue_record(issue, comments if isinstance(comments, list) else [])
@@ -6159,10 +6170,7 @@ def relay_pull_request(relay, root: Path, pull_number: int, remote: str
     branch = str(head.get("ref") or "")
     if not branch:
         raise QueueError(f"The pull request snapshot of #{pull_number} names no head branch")
-    issue = issue_record(json.loads(
-        relay.answer_file("issues", owner, name, work_number, "work issue")
-        .read_text(encoding="utf-8")))
-    body = str(issue["body"])
+    body = str(relay_issue_read(relay, owner, name, work_number)["body"])
     problems = field_report_problems(report, body)
     if problems:
         raise field_report_error(f"in {where}", problems)
@@ -6753,7 +6761,8 @@ class RelayDoor(Workflows):
 class StepReads:
     """kern relay's reads (se_relay.Relay.answer_file) asked as github.step through the relay
     door, where a command runs as one call: the tool's answer is written to the file a command
-    reads, no snapshot needed beforehand."""
+    reads, no snapshot needed beforehand. Each read is the door's `ask`, so it prints its
+    `GitHub step through kern's relay: <tool>` line on stderr as every other step does."""
 
     def __init__(self, root: Path, door: RelayDoor) -> None:
         self.root, self.door = root, door
@@ -6761,8 +6770,8 @@ class StepReads:
     def answer_file(self, family: str, owner: str, repo: str, number: int, what: str) -> Path:
         relay = sibling("se_relay")
         tool, method, number_arg = relay.FAMILIES[family]
-        data = self.door.step(tool, {"method": method, "owner": owner, "repo": repo,
-                                     number_arg: number}, f"read the {what}", "")
+        data = self.door.ask(tool, {"method": method, "owner": owner, "repo": repo,
+                                    number_arg: number}, f"read the {what}")
         path = self.root / relay.ANSWERS / f"{family}-{relay.key(owner, repo, number)}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -7929,7 +7938,8 @@ def run_sync(root: Path, args: argparse.Namespace) -> int:
 
 @command("identity", "set the checkout's commit identity (machine-local public_identity, else "
                      "se.toml project.identity) as sync does, without fetching or merging; "
-                     "scripts/setup.sh and setup.ps1 run it", WORKTREE)
+                     "scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run "
+                     "it", WORKTREE)
 def run_identity(root: Path, args: argparse.Namespace) -> int:
     identity = set_commit_identity(root, "identity")
     if identity is None:

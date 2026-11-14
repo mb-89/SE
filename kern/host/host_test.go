@@ -761,3 +761,31 @@ func TestAnAdHocCallIsCounted(t *testing.T) {
 		t.Fatalf("a second ad hoc call makes %d records, and wants two (the log appends)", len(records))
 	}
 }
+
+// The health lists an instance compiled into the core as attached, as the
+// core started it with itself, and names the backend it chose at start; a
+// switched-off instance is neither.
+func TestTheHealthNamesCompiledInInstancesAndTheirBackends(t *testing.T) {
+	t.Parallel()
+	backend := index.Output("backend", "", "The backend chosen at start.")
+	router := index.Declare("router", "Chooses a backend.", index.IO(), backend,
+		index.Inlet(func(_ string, _ index.Reader, commit index.Commit) error {
+			return commit(backend.Set("relay"))
+		}))
+	w := index.Wiring{Instances: []index.Instance{
+		{Name: "github", Component: "router", Enabled: true, Config: map[string]index.ConfigValue{}, Line: 1},
+		{Name: "spare", Component: "router", Enabled: false, Config: map[string]index.ConfigValue{}, Line: 4},
+	}}
+	c := served(t, host.Options{Clock: newClock(), Wiring: w, Components: []*index.Component{router}})
+	h := c.Health()
+	if len(h.Attached) != 1 || h.Attached[0] != "github" {
+		t.Fatalf("the health lists %q as attached, and wants [github]", h.Attached)
+	}
+	if len(h.Backends) != 1 || h.Backends["github"] != "relay" {
+		t.Fatalf("the health names the backends %v, and wants github: relay", h.Backends)
+	}
+	data, _ := json.Marshal(h)
+	if !strings.Contains(string(data), `"backends":{"github":"relay"}`) {
+		t.Fatalf("the health's JSON %s names no backends", data)
+	}
+}

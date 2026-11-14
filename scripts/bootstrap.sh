@@ -7,6 +7,7 @@
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml modules, synced by se_modules.py
+#   identity in --hook mode: the project's commit identity, set as setup.sh sets it
 #   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
 #            its major is moved to it first (se_start.py start-refresh), and the start then runs again
 #            from the moved tree, so the core starts from its pins; a refresh that fails starts with
@@ -251,6 +252,14 @@ if [ -f "$project/se.toml" ] && grep -q '^\[modules\.' "$project/se.toml"; then
     say "$out"
     need "syncing the modules of $project/se.toml failed; run this again when the cause above is fixed"
   fi
+fi
+# The commit identity (README "Install"): at a session's start the project's checkout gets its
+# commit identity as setup.sh sets it, so a fresh clone's first commit already carries it, never the
+# host's default; work_tickets.py identity owns which one, and leaves git's own where none is set.
+if $hook && [ -f "$project/se.toml" ]; then
+  uv run --no-project --python ">=$python_version" python "$se_root/scripts/work_tickets.py" \
+    identity --worktree "$project" >/dev/null 2>&1 ||
+    say "setting the commit identity of $project failed; run: uv run python $se_root/scripts/work_tickets.py identity --worktree $project"
 fi
 $hook && kern_step
 finish 0
