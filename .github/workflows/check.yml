@@ -1,9 +1,9 @@
 # SE's CI, the one check main's ruleset requires by its name `check` (AGENTS.md "Public safety"):
 # on every pull request and every push to the integration branch, every check the integration runs:
-# the public check's commit gate, the generated layouts, the README's command reference, a pull
-# request's field report and the complete suite within its budget, kern's tests on Linux and,
-# through the job kern-platforms, on Windows and macOS with SE's start and hook scripts; on a pull
-# request also the work model's issue rule.
+# the public check's commit gate, the generated layouts, the README's command reference, the
+# hygiene of SE's own checkout, a pull request's field report and the complete suite within its
+# budget, kern's tests on Linux and, through the job kern-platforms, on Windows and macOS with SE's
+# start and hook scripts; on a pull request also the work model's issue rule.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, kern's checks and kern-platforms do not run;
@@ -80,6 +80,11 @@ jobs:
         run: uv run python scripts/se_plugin.py check
       - name: The README's command reference is up to date
         run: uv run python scripts/work_tickets.py docs --check
+      # The checks of SE's own checkout, not of its code, through git's real door (scripts/hygiene.py,
+      # AGENTS.md "Tests"): tracked files, the git door, dangling references and the public check
+      # with SE's line of history; a trusted landing runs them too, as they take seconds.
+      - name: SE's checkout passes its hygiene checks
+        run: uv run python scripts/hygiene.py
       - name: The pull request's field report follows the template
         if: github.event_name == 'pull_request'
         env:

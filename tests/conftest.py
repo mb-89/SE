@@ -51,15 +51,12 @@ def local_machine() -> Iterator[None]:
 # Real git behind the door (scripts/git_door.py) only for the test files named here, with their
 # reason; every other test's git is refused unless it installs the fake (`fake_git_door`), so "only
 # the door's contract suite touches real git" is enforced, not counted. A git subprocess that does
-# not pass the door is tests/test_repository.py's guard's to find. The list may only shrink.
-STILL_ON_REAL_GIT = "runs real git until its piece of the move to the fake lands"
+# not pass the door is scripts/hygiene.py's git-door check's to find. The list may only shrink.
 REAL_GIT: dict[str, str] = {
     "tests/test_git_door.py": "the door's contract, held against real git",
     # Found by the refusal of child processes: `se new app` reads SE's own checkout, kern's template
-    # at its real pin tag, as test_references.py and test_repository.py read it (piece 6's kind).
+    # at its real pin tag (piece 6's kind).
     "tests/beside_new_app.py": "reads SE's own checkout: kern's template at its real pin",
-    "tests/test_references.py": STILL_ON_REAL_GIT,
-    "tests/test_repository.py": STILL_ON_REAL_GIT,
 }
 
 

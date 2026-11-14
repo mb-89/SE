@@ -4,7 +4,7 @@ at runtime from fragments, so this file itself passes the check.
 git is the door's fake behind a state file (`shared_fake_git`, tests/conftest.py), which the check,
 the hooks and the setup scripts reach as child processes; the fake holds an se checkout at this
 one's root at SE_HEAD, so a verdict names that commit. SE's own checkout is checked by
-tests/test_repository.py."""
+scripts/hygiene.py, a step of CI's `check` job."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 import fake_git
 import git_door
+import hygiene
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = SE_ROOT / "scripts" / "public_check.py"
@@ -887,27 +888,8 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     assert f"(2 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
 
 
-SE_LINE_MARKER = "scripts/public_check.py"
-
-
-def se_line(root: Path) -> str:
-    """The history revisions of SE's own line in `root`: every commit reachable from HEAD whose
-    tree carries the public check itself (SE_LINE_MARKER), stopping at the parents that do not.
-
-    main keeps the old Go line below SE's switch commit, by the owner's decision. That line never
-    carried the public check, was published before it existed, and publishes an address this
-    check refuses; blessing it with an allow entry would bless a real address (pub-002). So SE's
-    self-test checks SE's line only, and the CI gate on main checks every new commit. The rule is
-    structural, so it holds on the rewritten se branch (no Go line), on GitHub's merge ref of a
-    pull request into main (a merge of the Go line's tip and the switch commits on top of it) and
-    on main after the squash merge (the Go line, then squash commits)."""
-    parents = {line.split()[0]: line.split()[1:]
-               for line in git(root, "rev-list", "--parents", "HEAD").stdout.splitlines()}
-    query = "".join(f"{sha}:{SE_LINE_MARKER}\n" for sha in parents)
-    found = git_door.run("cat-file", "--batch-check", root=root, stdin=query.encode()).stdout.splitlines()
-    own = {sha for sha, line in zip(parents, found) if not line.endswith(" missing")}
-    tips = sorted({parent for sha in own for parent in parents[sha] if parent not in own})
-    return " ".join(["HEAD", "--not", *tips]) if tips else "HEAD"
+# SE's own line of history, which scripts/hygiene.py's public check covers.
+SE_LINE_MARKER, se_line = hygiene.SE_LINE_MARKER, hygiene.se_line
 
 
 def foreign_line(repo: Path) -> None:
@@ -1159,7 +1141,8 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     assert "types: [opened, synchronize, reopened, edited, labeled, unlabeled]" in workflow
     # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
     steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
-             "scripts/work_tickets.py field-report --check", "scripts/work_tickets.py suite --worktree ."]
+             "scripts/hygiene.py", "scripts/work_tickets.py field-report --check",
+             "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
     assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"

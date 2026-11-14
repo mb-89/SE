@@ -1,110 +1,35 @@
-"""Repository hygiene: what any repository should not track, checked on se's own tree.
+"""Repository hygiene's logic, on the git door's fake: the checks themselves are
+`scripts/hygiene.py`, a step of CI's `check` job that reads SE's own checkout through the real door
+(AGENTS.md "Tests"); here each fails on a fixture.
 
-Three rules hold for every tracked file: no binary file, no file over `MAX_BYTES`, and no
-marker of unfinished work in `scripts/` or `tests/` that names no issue. A file that must break
-the first two goes in its allow list below with the reason it may; an entry that no longer names
-such a file is refused, so the lists stay true.
+Three rules hold for every tracked file: no binary file, no file over `MAX_BYTES`, and no marker
+of unfinished work in `scripts/` or `tests/` that names no issue. One holds for scripts, tests, kern
+and the components: git runs only through its door (scripts/git_door.py). And the checkout passes
+its public check (pub-001), with its history.
 
 One rule holds for the suite itself, so it behaves on GitHub's runner as it does locally: no test
-starts with a runner's variable set (tests/conftest.py).
-
-One rule holds for scripts, tests, kern and the components: git runs only through its door
-(scripts/git_door.py); today's other git subprocesses sit on an allow list that may only shrink.
-
-And se's own checkout passes its public check (pub-001), with its history.
+starts with a runner's variable set (tests/conftest.py); and its door refuses real git outside the
+contract suite.
 """
 
 from __future__ import annotations
 
-import ast
 import os
-import re
 from pathlib import Path
 
 import git_door
 import fake_git
+import hygiene
 import pytest
 from conftest import REAL_GIT, RefusedGit, door_backend, door_variable, runner_variables
+from hygiene import binary_findings, git_door_findings, large_findings, marker_findings
+from test_public_check import commit, repo, se_checkout  # noqa: F401  (repo: the public check's fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The most bytes a tracked file holds outside LARGE_ALLOWED: source stays well under it, a build
-# output, a data dump or a vendored bundle does not.
-MAX_BYTES = 200_000
-
-# Tracked binary files (a NUL byte in the first BINARY_PEEK bytes, git's own test), each with the
-# reason it is tracked.
-BINARY_ALLOWED: dict[str, str] = {}
-
-# Tracked files over MAX_BYTES, each with the reason it is tracked.
-LARGE_ALLOWED: dict[str, str] = {
-    "scripts/work_tickets.py": "the work model's one command; its split is a package of its own",
-    "tests/test_work_ticket_issues.py": "the issue tests of work_tickets.py, which follow its size",
-}
-
-BINARY_PEEK = 8000
-
-# The markers are spelled in two halves, so this file does not break its own rule.
-MARKER = re.compile(r"\b(?:" + "TO" + "DO" + "|" + "FIX" + "ME" + r")\b")
-# An issue a marker names: `#<n>`, `<repo>#<n>` or an issue URL.
-ISSUE = re.compile(r"#\d+|/issues/\d+")
-MARKED_DIRS = ("scripts/", "tests/")
-
-
-def tracked(repo: Path) -> list[str]:
-    """The files git tracks in `repo` that exist in its working tree."""
-    listed = git_door.run("ls-files", "-z", root=repo)
-    assert listed.returncode == 0, listed.stderr
-    return [p for p in listed.stdout.split("\0") if p and (repo / p).is_file()]
-
-
-def binary_findings(repo: Path, allowed: dict[str, str]) -> list[str]:
-    """Tracked binary files outside `allowed`, and entries of `allowed` that name none."""
-    binaries = set()
-    for p in tracked(repo):
-        with open(repo / p, "rb") as f:
-            if b"\0" in f.read(BINARY_PEEK):
-                binaries.add(p)
-    return [
-        f"{p}: a tracked binary file; git rm --cached it and ignore it, or allow it with a reason"
-        for p in sorted(binaries - set(allowed))
-    ] + [
-        f"{p}: allowed as binary but no tracked binary file; remove the entry"
-        for p in sorted(set(allowed) - binaries)
-    ]
-
-
-def large_findings(repo: Path, allowed: dict[str, str], limit: int = MAX_BYTES) -> list[str]:
-    """Tracked files over `limit` bytes outside `allowed`, and entries of `allowed` naming none."""
-    sizes = {p: (repo / p).stat().st_size for p in tracked(repo)}
-    large = {p for p, size in sizes.items() if size > limit}
-    return [
-        f"{p}: {sizes[p]} bytes, over {limit}; git rm --cached it and ignore it, split it, "
-        "or allow it with a reason"
-        for p in sorted(large - set(allowed))
-    ] + [
-        f"{p}: allowed as large but no tracked file over {limit} bytes; remove the entry"
-        for p in sorted(set(allowed) - large)
-    ]
-
-
-def marker_findings(repo: Path) -> list[str]:
-    """Lines in `scripts/` and `tests/` whose marker of unfinished work names no issue."""
-    found = []
-    for p in tracked(repo):
-        if not p.startswith(MARKED_DIRS):
-            continue
-        data = (repo / p).read_bytes()
-        if b"\0" in data[:BINARY_PEEK]:
-            continue
-        for number, line in enumerate(data.decode(errors="replace").splitlines(), 1):
-            if MARKER.search(line) and not ISSUE.search(line):
-                found.append(f"{p}:{number}: names no issue; write the issue that owns it, #<n>")
-    return found
-
 
 def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
-    """A git repository in `tmp_path` tracking `files`."""
+    """A git repository in `tmp_path`, in the door's fake, tracking `files`."""
     repo = tmp_path / "repo"
     for name, data in files.items():
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
@@ -114,12 +39,7 @@ def fixture_repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
     return repo
 
 
-def test_se_tracks_no_binary_file_outside_its_allow_list() -> None:
-    assert binary_findings(ROOT, BINARY_ALLOWED) == []
-    assert all(reason.strip() for reason in BINARY_ALLOWED.values())
-
-
-def test_a_tracked_binary_file_fails_and_a_stale_entry_too(tmp_path: Path) -> None:
+def test_a_tracked_binary_file_fails_and_a_stale_entry_too(tmp_path: Path, fake_git_door) -> None:
     repo = fixture_repo(
         tmp_path, {"tool": b"\x7fELF\0\0\0", "logo.png": b"\x89PNG\0", "a.txt": b"text\n"}
     )
@@ -130,12 +50,7 @@ def test_a_tracked_binary_file_fails_and_a_stale_entry_too(tmp_path: Path) -> No
     ]
 
 
-def test_se_tracks_no_file_over_the_bound_outside_its_allow_list() -> None:
-    assert large_findings(ROOT, LARGE_ALLOWED) == []
-    assert all(reason.strip() for reason in LARGE_ALLOWED.values())
-
-
-def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Path) -> None:
+def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Path, fake_git_door) -> None:
     repo = fixture_repo(
         tmp_path, {"dump.json": b"x" * 201, "kept.json": b"x" * 201, "small.py": b"x" * 200}
     )
@@ -147,11 +62,7 @@ def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Pat
     ]
 
 
-def test_se_has_no_marker_without_an_issue_in_scripts_or_tests() -> None:
-    assert marker_findings(ROOT) == []
-
-
-def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
+def test_a_marker_without_an_issue_fails(tmp_path: Path, fake_git_door) -> None:
     todo, fixme = "TO" + "DO", "FIX" + "ME"
     repo = fixture_repo(
         tmp_path,
@@ -168,69 +79,46 @@ def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
     ]
 
 
-def called_name(call: ast.Call) -> str:
-    function = call.func
-    return function.id if isinstance(function, ast.Name) else getattr(function, "attr", "")
+def test_the_allow_lists_say_why() -> None:
+    assert all(reason.strip() for reason in [*hygiene.BINARY_ALLOWED.values(), *hygiene.LARGE_ALLOWED.values(),
+                                             *(reason for _, reason in hygiene.GIT_ALLOWED.values())])
 
 
-# git is an outside thing with one door (rule book des-004): scripts/git_door.py runs every git command,
-# tests/fake_git.py is its fake, and tests/test_git_door.py holds both to one contract. A git subprocess
-# anywhere else fails: a command list that starts with "git" (not one announced with `.reading`), a
-# command string that does, or Go's exec.Command of "git".
-GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py", "kern/git/git.go")  # the last, kern's Go door
-GIT_SCANNED = ("scripts", "tests", "components", "kern")
-GO_GIT = re.compile(r'exec\.Command(?:Context)?\((?:\w+, )?"git"')
-SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
-# Git subprocesses outside the door, each with how many its file holds and why it may: none is left.
-# The list may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
-GIT_ALLOWED: dict[str, tuple[int, str]] = {}
+# The command CI's `check` job runs (scripts/hygiene.py): it refuses what each check finds, naming
+# the check, and passes a clean checkout; the public check runs as its child, on the shared fake.
+
+@pytest.fixture
+def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fixture checkout has none of SE's allowed files, so SE's lists would be stale there."""
+    for name in ("BINARY_ALLOWED", "LARGE_ALLOWED", "GIT_ALLOWED"):
+        monkeypatch.setattr(hygiene, name, {})
 
 
-def git_subprocess_lines(path: Path) -> list[int]:
-    """The lines of `path` (Python or Go) that start a git subprocess."""
-    text = path.read_text(encoding="utf-8")
-    if path.suffix == ".go":
-        return [number for number, line in enumerate(text.splitlines(), 1) if GO_GIT.search(line)]
-    tree = ast.parse(text, str(path))
-    announced = {id(argument) for node in ast.walk(tree)
-                 if isinstance(node, ast.Call) and called_name(node) == "reading" for argument in node.args}
-    lines = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) \
-                and node.elts[0].value == "git" and id(node) not in announced:
-            lines.append(node.lineno)
-        elif isinstance(node, ast.Call) and called_name(node) in SUBPROCESS_CALLS and node.args \
-                and isinstance(node.args[0], ast.Constant) and str(node.args[0].value).startswith("git "):
-            lines.append(node.lineno)
-    return sorted(lines)
+def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsys) -> None:
+    commit(repo, {"README.md": "# Clean\n\nSee [agents](AGENTS.md).\n", "AGENTS.md": "# Agents\n",
+                  "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
+    assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines()[-1].startswith("hygiene: passed (6 checks) in ")
 
 
-def git_door_findings(root: Path, allowed: dict[str, tuple[int, str]]) -> list[str]:
-    """Each file under `root` that starts more git subprocesses outside the door than `allowed` lets it,
-    and each entry of `allowed` whose file now starts fewer."""
-    found, counts = [], {}
-    for folder in GIT_SCANNED:
-        for path in sorted((root / folder).rglob("*")):
-            name = path.relative_to(root).as_posix()
-            if path.suffix in (".py", ".go") and path.is_file() and name not in GIT_DOOR \
-                    and not {".venv", "testdata", "__pycache__"} & set(path.parts):
-                if lines := git_subprocess_lines(path):
-                    counts[name] = lines
-    for name, lines in counts.items():
-        limit = allowed.get(name, (0, ""))[0]
-        if len(lines) > limit:
-            found.append(f"{name}:{lines[0]}: {len(lines)} git subprocess(es) outside the door, {limit} allowed; "
-                         f"run git through scripts/git_door.py (tests: the fake_git_door fixture)")
-    for name, (limit, _) in allowed.items():
-        if len(counts.get(name, [])) < limit:
-            found.append(f"{name}: {len(counts.get(name, []))} git subprocess(es) outside the door, the allow "
-                         f"list says {limit}; lower its entry (it may only shrink)")
-    return found
-
-
-def test_se_runs_git_only_through_its_door() -> None:
-    assert git_door_findings(ROOT, GIT_ALLOWED) == []
-    assert all(reason.strip() for _, reason in GIT_ALLOWED.values())
+def test_hygiene_refuses_what_each_check_finds_naming_the_check(
+        repo: Path, no_allow_lists: None, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr(hygiene, "MAX_BYTES", 100)
+    marker = "TO" + "DO"
+    commit(repo, {"tool.bin": b"\x7fELF\0\0", "dump.json": "x" * 101,
+                  "scripts/tool.py": f"import subprocess\n# {marker}: retry\nsubprocess.run(['git', 'status'])\n",
+                  "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n"})
+    assert hygiene.main(["--repo", str(repo)]) == 1
+    out = capsys.readouterr().out
+    assert "hygiene: binary: tool.bin: a tracked binary file" in out
+    assert "hygiene: large: dump.json: 101 bytes, over 100" in out
+    assert "hygiene: marker: scripts/tool.py:2: names no issue" in out
+    assert "hygiene: git-door: scripts/tool.py:3: 1 git subprocess(es) outside the door" in out
+    assert "hygiene: references: README.md line 3: `gone.md`" in out
+    assert "hygiene: public: " in out and "README.md:3:" in out and "user-profile-path" in out
+    assert "alice" not in out, "the public check names locations and labels, never the matched text"
+    assert out.splitlines()[-1].startswith(
+        "hygiene: refused by binary, large, marker, git-door, references, public (")
 
 
 class Item:
@@ -296,11 +184,3 @@ def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() 
 def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
-
-
-def test_se_itself_passes() -> None:
-    """se must stay publishable; uses se's local list when the checkout has one. History is SE's
-    own line (tests/test_public_check.py `se_line`). It reads SE's own checkout through real git."""
-    from test_public_check import run_check, se_line
-    result = run_check("--repo", str(ROOT), "--history", se_line(ROOT))
-    assert result.returncode == 0, result.stdout
