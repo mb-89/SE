@@ -56,10 +56,14 @@ func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 }
 
 // The door's contract, the one test with a real MCP client (the Go SDK's)
-// against the built `se mcp` and the real core it starts: initialize and
-// tools/list answer while the core's start is held, status answers once it
-// runs with the door's session holding a lease, and the core ends its grace
-// after the client hangs up.
+// against the built `se mcp` and the real core it starts, once per handshake:
+// server/discover of the MCP spec of 2026-07-28, which the client sends first,
+// and the legacy initialize of a client that knows only 2025-11-25. Each
+// handshake and tools/list answer while the core's start is held, from a cold
+// start (a fresh `se mcp`, no core running), and the test logs how long the
+// first answer took; status answers once the core runs with the door's
+// session holding a lease, and the core ends its grace after the client hangs
+// up.
 func TestTheMCPDoorStartsTheCoreAndEndsItWithTheSession(t *testing.T) {
 	dir := t.TempDir()
 	se := filepath.Join(dir, "se")
@@ -70,6 +74,19 @@ func TestTheMCPDoorStartsTheCoreAndEndsItWithTheSession(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build of cmd/se: %v\n%s", err, out)
 	}
+	for _, c := range []struct{ name, asks, wants string }{
+		{"server-discover", "", "2026-07-28"},
+		{"initialize", "2025-11-25", "2025-11-25"},
+	} {
+		t.Run(c.name, func(t *testing.T) { doorContract(t, se, c.asks, c.wants) })
+	}
+}
+
+// doorContract runs the contract with a client that asks the protocol asks
+// (empty: the SDK's newest, by server/discover) and wants the door to answer
+// wants.
+func doorContract(t *testing.T, se, asks, wants string) {
+	dir := t.TempDir()
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -119,18 +136,21 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	began := time.Now()
-	session, err := client.Connect(ctx, &sdk.CommandTransport{Command: cmd}, nil)
+	session, err := client.Connect(ctx, &sdk.CommandTransport{Command: cmd}, &sdk.ClientSessionOptions{ProtocolVersion: asks})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("initialize answered %v after the spawn of se mcp, the core's start held", time.Since(began))
-	if info := session.InitializeResult().ServerInfo; info.Name != "se" {
-		t.Fatalf("initialize names the server %+v, and wants se", info)
+	answered := time.Since(began)
+	result := session.InitializeResult()
+	if result.ProtocolVersion != wants || result.ServerInfo == nil || result.ServerInfo.Name != "se" {
+		t.Fatalf("the handshake answers the protocol %q and the server %+v, and wants %s and se", result.ProtocolVersion, result.ServerInfo, wants)
 	}
 	listed, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("protocol %s: the handshake answered %v after the spawn of se mcp, tools/list %v after it, the core's start held",
+		wants, answered, time.Since(began)-answered)
 	var names []string
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)

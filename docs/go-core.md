@@ -11,9 +11,8 @@ gets a repository of its own and becomes the template every new application star
 
 This decision overturns the 12 Nov port plan's verdict that the index, the daemon and the bus
 were obsolete; [The Go line](#the-go-line) says what of it comes back and what does not. Every
-number below was measured on
-13 Nov in a Claude Code cloud container (4 cores, 15 GB, Go 1.24.7 preinstalled), in
-[Measurements](#measurements).
+number below was measured on 13 Nov, those of Go 1.25 on 14 Nov, in a Claude Code cloud container
+(4 cores, 15 GB, Go 1.24.7 preinstalled), in [Measurements](#measurements).
 
 ## Naming
 
@@ -754,6 +753,11 @@ loopback with a token, dials it and answers one request; nothing of it is in SE.
 | release download | `curl -L -o n.tgz https://github.com/nats-io/nats-server/releases/download/v2.11.9/nats-server-v2.11.9-linux-amd64.tar.gz` (6.35 MB, 3 runs) | 0.71 s, 0.64 s, 0.43 s |
 | unpack | `tar xzf n.tgz` | 0.12 s |
 | a Go toolchain download | `curl -L https://go.dev/dl/go1.25.4.linux-amd64.tar.gz` (59.8 MB) | 2.49 s |
+| Go 1.25's download, 14 Nov | `curl -L https://go.dev/dl/go1.25.14.linux-amd64.tar.gz` (59.9 MB, 3 runs) | 2.58 to 2.93 s |
+| Go 1.25's fetch by `go`, 14 Nov | `GOTOOLCHAIN=go1.25.14 go version` with an empty module cache (3 runs) | 5.8 to 7.6 s |
+| SE's `se` on Go 1.24.7, 14 Nov | `go build ./cmd/se` in `components/` at SDK v1.4.0: cold, cold compile (twice), warm (3 runs) | 23.5 s (user 54.5 s), 19.6 s and 19.9 s, 0.09 to 0.12 s |
+| SE's `se` on Go 1.25.14, 14 Nov | the same at SDK v1.8.0, the cold build fetching the toolchain itself | 29.8 s (user 58.9 s), 19.5 s and 19.2 s, 0.08 to 0.10 s |
+| SE's `se`, binary size | Go 1.24.7; Go 1.25.14; gzipped each | 26.6 MB, 26.8 MB; 13.9 MB, 13.6 MB |
 | embedded NATS start | `./probe`: server ready, client dialled, first request answered (5 runs) | ready 27.0 to 28.2 ms, answered 28.4 to 32.8 ms, process 33 to 38 ms |
 | standalone NATS start | `nats-server -a 127.0.0.1 -p 14222 --auth <token>` until its `INFO` line (3 runs) | 7.6 to 8.9 ms |
 | a Python peer on the bus | standard-library socket: `CONNECT`, `SUB`, `PUB`, the `MSG` back (3 runs) | 2.3 to 2.8 ms; 36 to 40 ms with `python3 -I` |
@@ -763,8 +767,9 @@ loopback with a token, dials it and answers one request; nothing of it is in SE.
 | kern's catalog check | `cd kern && go test -run XXX -bench . -benchtime 200x -count 5 ./index/`: 20 and 200 instances | 0.16 to 0.20 ms; 1.54 to 1.74 ms |
 
 The NATS server adds about 6 s to a cold compile against the Go line's `se`, and 10 MB to the
-binary. quackitect v5 asks for Go 1.25, which this image lacks; the core's `go.mod` names the
-version the images carry, or the fallback build fetches the toolchain (2.5 s).
+binary. The `go.mod` files name Go 1.25.14, which the MCP Go SDK's protocol of 2026-07-28 needs and
+this image lacks: a cold build fetches the toolchain first (6 to 8 s); a compile with it is as fast
+as on Go 1.24.7.
 
 ## Risks and open points
 

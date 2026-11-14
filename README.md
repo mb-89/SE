@@ -281,9 +281,10 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 - **What the host runs.** `se` must already be on the PATH (`~/.se/bin`, [Kern](#kern)), or be
   reached through a launcher that fetches it. Pass the checkout as `--root`: a host's working
   directory need not be the repository. Which file names the door for which host is not here yet.
-- **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
-  without the core: its Go components, the checkout's `wiring.toml` and its components'
-  declarations. Beside them it starts the core detached, or attaches to the one that runs.
+- **It answers at once.** Either handshake, `server/discover` of the MCP spec of 2026-07-28 or the
+  legacy `initialize`, and `tools/list` come from the catalog the `se` binary reads without the
+  core: its Go components, the checkout's `wiring.toml` and its components' declarations. Beside
+  them it starts the core detached, or attaches to the one that runs.
 - **It holds the session.** It takes a session lease once the core runs and renews it on every
   call. It returns the lease on EOF and on SIGTERM, so the core ends its grace after the last
   session; where the core ended idle or crashed, the door starts it again and takes the lease anew.
@@ -312,7 +313,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 - **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
   so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
   catalog to the check, and the door to its contract with the Go SDK's client against the built
-  `se mcp` and the real core.
+  `se mcp` and the real core, once per handshake.
 
 ### Doctor
 
