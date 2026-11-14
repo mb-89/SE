@@ -5777,6 +5777,29 @@ def tree_of(root: Path, commit: str) -> str:
     return checked_git(root, "rev-parse", f"{commit}^{{tree}}").strip()
 
 
+def onto_integration_branch(root: Path, target: str) -> None:
+    """Put the checkout on the integration branch `target` before a landing reads anything: a
+    checkout detached at origin's `target` (a cloud session's source checkout comes up so, with
+    the local branch behind it) switches to `target` and fast-forwards it there; any other
+    branch, or a `target` that cannot fast-forward, is refused with the one instruction."""
+    here = current_branch(root)
+    if here == target:
+        return
+    instruction = (f"run git -C {root} switch {target} && git -C {root} merge --ff-only "
+                   f"origin/{target}, or set project.integration_branch in se.toml")
+    if here:
+        raise QueueError(
+            f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
+            + instruction)
+    detached = checked_git(root, "rev-parse", "HEAD").strip()
+    if (run_git(root, "switch", "-q", target).returncode != 0
+            or run_git(root, "merge", "-q", "--ff-only", detached).returncode != 0):
+        raise QueueError(
+            f"work_tickets.py integrate: {root} is detached at {detached[:12]} and {target} "
+            f"cannot fast-forward to it; " + instruction)
+    print(f"Detached checkout: {target} fast-forwarded to {detached[:12]}")
+
+
 def abandon_landing(root: Path, target: str, landing: str) -> None:
     """Leave the landing branch: back on the integration branch, the local landing branch gone."""
     run_git(root, "merge", "--abort")
@@ -6006,6 +6029,15 @@ def relay_pull_request(relay, root: Path, pull_number: int, remote: str
     """What `pull_request_report` reads, from kern's relay instead of retyped files: the pull
     request (its snapshot), its field report, its work issue (that snapshot) and its number. No
     file is saved."""
+    pull, report, work_number = relay_pull(relay, root, pull_number, remote)
+    return pull, report, relay_work_issue(relay, pull_number, remote, report, work_number), work_number
+
+
+def relay_pull(relay, root: Path, pull_number: int, remote: str
+               ) -> tuple[dict[str, object], str, int]:
+    """The pull request through kern's relay, its field report and its work issue's number, with
+    its head branch fetched: what the local guards need, so they run before the work issue's
+    reads."""
     owner, name = api_repo(remote).split("/")
     data = json.loads(relay.answer_file("pulls", owner, name, pull_number, "pull request")
                       .read_text(encoding="utf-8"))
@@ -6022,14 +6054,22 @@ def relay_pull_request(relay, root: Path, pull_number: int, remote: str
     branch = str(head.get("ref") or "")
     if not branch:
         raise QueueError(f"The pull request snapshot of #{pull_number} names no head branch")
-    body = str(relay_issue_read(relay, owner, name, work_number)["body"])
-    problems = field_report_problems(report, body)
-    if problems:
-        raise field_report_error(f"in {where}", problems)
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     pull = {"number": pull_number, "url": pull_url(remote, pull_number), "body": text,
             "headRefName": branch, "headRefOid": str(head.get("sha") or remote_head(root, branch))}
-    return pull, report, {"body": body}, work_number
+    return pull, report, work_number
+
+
+def relay_work_issue(relay, pull_number: int, remote: str, report: str, work_number: int
+                     ) -> dict[str, object]:
+    """The work issue through kern's relay, with its comments, its body checked against the field
+    report."""
+    owner, name = api_repo(remote).split("/")
+    body = str(relay_issue_read(relay, owner, name, work_number)["body"])
+    problems = field_report_problems(report, body)
+    if problems:
+        raise field_report_error(f"in pull request #{pull_number}", problems)
+    return {"body": body}
 
 
 def integrate(
@@ -6061,12 +6101,15 @@ def integrate(
             f"work_tickets.py integrate: {root} has no origin remote to land on; add it with "
             "git remote add origin <url>"
         )
+    target = integration_branch(root)
+    onto_integration_branch(root, target)
     feedback.phase(f"read pull request #{pull_number} and its field report")
     relay = relay_for(root) if handing_off and pr_description is None else None
     if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
         relay = StepReads(root, stepped)  # one call through kern: the reads are steps too
-    if handing_off and relay is not None:
-        pull, report, work_issue, work_number = relay_pull_request(relay, root, pull_number, remote)
+    work_issue: dict[str, object] | None = None
+    if handing_off and relay is not None:  # the work issue's reads wait for the local guards
+        pull, report, work_number = relay_pull(relay, root, pull_number, remote)
     elif handing_off:
         pull, report, work_issue, work_number = handed_pull_request(
             root, pull_number, remote, pr_description, issue_body, head_branch)
@@ -6079,12 +6122,6 @@ def integrate(
     feedback.phase(f"guard {branch} against its field report")
     guard(root, branch, report)
 
-    target = integration_branch(root)
-    if current_branch(root) != target:
-        raise QueueError(
-            f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
-            f"run git -C {root} switch {target}, or set project.integration_branch in se.toml"
-        )
     feedback.phase(f"sync {target}")
     sync(root)
     base = checked_git(root, "rev-parse", "HEAD").strip()
@@ -6096,6 +6133,21 @@ def integrate(
         )
     head = str(pull.get("headRefOid", ""))
     late = check_branch_tip(root, report, branch, head or branch, included)
+    landing = f"{LANDING_PREFIX}{branch}"
+    feedback.phase(f"merge {branch} on {landing}")
+    checked_git(root, "switch", "-q", "-C", landing, base)
+    merged = run_git(root, "merge", "--no-ff", "-m", f"Integrate {branch}", branch_head(root, branch))
+    if merged.returncode != 0:
+        conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
+        abandon_landing(root, target, landing)
+        files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
+        raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
+    if work_issue is None:  # through the relay: read once the branch has passed the local guards
+        try:
+            work_issue = relay_work_issue(relay, pull_number, remote, report, work_number)
+        except Exception:
+            abandon_landing(root, target, landing)
+            raise
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
@@ -6105,15 +6157,7 @@ def integrate(
         str(work_issue.get("body") or ""),
     )
     message = "\n\n".join((kind, *((trailer,) if trailer else ())))
-    landing = f"{LANDING_PREFIX}{branch}"
-    feedback.phase(f"merge {branch} on {landing}")
-    checked_git(root, "switch", "-q", "-C", landing, base)
-    merged = run_git(root, "merge", "--no-ff", "-m", title, "-m", message, branch_head(root, branch))
-    if merged.returncode != 0:
-        conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
-        abandon_landing(root, target, landing)
-        files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
-        raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
+    checked_git(root, "commit", "-q", "--amend", "-m", title, "-m", message)
     contained = run_git(root, "merge-base", "--is-ancestor", head, landing)
     if not head or contained.returncode != 0:
         abandon_landing(root, target, landing)

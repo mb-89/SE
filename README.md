@@ -496,6 +496,10 @@ no token), the hand-off needs neither a retyped file nor a second run
   - The step's line names `uv run python <se>/scripts/se_relay.py next --root <checkout>`, which
     prints the tool calls the relay waits for, as the hook tells them on a prompt: the agent asks
     for the pending step whichever tool's PostToolUse ran last.
+  - `integrate` reads the pull request first, then runs its local guards, the field-report guard
+    against the branch's merge base and the merge, and only then reads the work issue: a branch
+    that cannot land fails after that one read. A checkout detached at origin's integration branch
+    (a cloud session's source checkout) is moved onto the branch first, fast-forwarded there.
   - The core fails a step of the command only after ten minutes without its answer, a line or a
     beat (`StepWait`, the work model's stall rule), not after one: the wait was raised, the hook's
     beat does not count, and the command's process beats every 5 s until its answer is out.

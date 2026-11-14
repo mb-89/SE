@@ -2987,6 +2987,52 @@ def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lan
     assert squashed_onto_origin(main_checkout, origin_main(main_checkout))
 
 
+def test_a_relay_landing_runs_its_local_guards_before_it_reads_the_work_issue(
+        main_checkout, monkeypatch, github, capsys):
+    """Through kern's relay the branch meets the local guards (the field-report guard, the merge)
+    right after the one read that names it, the pull request: a branch that cannot merge fails
+    there, with no read of the work issue or its comments and no step of the landing plan."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    other = main_checkout.parent / "other"
+    git_ok("-C", str(other), "pull", "-q", "origin", "main")
+    (other / "worker.txt").write_text("main's own worker file\n", encoding="utf-8")
+    git_ok("-C", str(other), "add", "worker.txt")
+    git_ok("-C", str(other), "-c", "user.name=Other", "-c", "user.email=other@example.invalid",
+           "commit", "-q", "-m", "A conflicting worker file")
+    git_ok("-C", str(other), "push", "-q", "origin", "HEAD:main")
+    session = SessionSteps(github, main_checkout, [{"id": 1, "status": "completed"}])
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 1
+
+    assert "Cannot merge feature/worker; conflicts: worker.txt" in capsys.readouterr().err
+    assert [tool for tool, _ in session.asked] == ["pull_request_read"]
+    assert work_tickets.current_branch(main_checkout) == "main"
+
+
+def test_integrate_moves_a_detached_checkout_onto_the_integration_branch(
+        main_checkout, monkeypatch, github, capsys):
+    """A cloud session's source checkout comes up detached at origin's main, with local main a
+    commit behind: integrate fast-forwards main there itself and lands; a checkout on another
+    branch is refused with the one instruction."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    git_ok("-C", str(main_checkout), "checkout", "--detach", "origin/main")
+    assert work_tickets.current_branch(main_checkout) == ""
+    session = SessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+    assert "Detached checkout: main fast-forwarded to" in capsys.readouterr().out
+
+    git_ok("-C", str(main_checkout), "switch", "-q", "-c", "elsewhere")
+    with pytest.raises(work_tickets.QueueError, match="merge --ff-only origin/main"):
+        work_tickets.onto_integration_branch(main_checkout, "main")
+
+
 def test_integrate_without_kern_keeps_the_file_based_hand_off(main_checkout, monkeypatch, github,
                                                               capsys):
     """The fallback: no call through kern (se_relay.steps unset, as when kern is not running),
