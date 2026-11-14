@@ -345,6 +345,7 @@ outside = true
 source = "https://docs.github.com/en/copilot/reference/cli-plugin-reference"
 read = 2026-11-14
 mark = "documented"
+note = "An installed plugin's se outranks this user-level se: user config ranks below plugins. Add the door per session instead (docs/copilot.md, \"The door by hand\")."
 register = 'copilot mcp add se -- bash "{launcher}" --root .'
 register_windows = 'copilot mcp add se -- powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher_ps1}" --root .'
 

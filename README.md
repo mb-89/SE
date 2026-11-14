@@ -298,9 +298,15 @@ through it as tools. The host spawns it as the session starts; nobody starts any
     install, the plugin's root `${PLUGIN_ROOT}` in an argument only;
   - a root `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on; it is off, as Claude Code
     reads that file too.
+- **A plugin install** runs the launcher in the plugin's folder with `--root .`; the launcher then
+  serves the session's repository. It reads `SE_SESSION_CWD`, else `COPILOT_SESSION_CWD`, else, on
+  Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>: root
+  <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
 - **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
   or in VS Code `code --add-mcp
   '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.
+  - An installed plugin's `se` outranks `copilot mcp add`; then the door goes by hand, per
+    session ([docs/copilot.md "The door by hand"](docs/copilot.md#the-door-by-hand)).
 - **In another repository**, one without a `wiring.toml` of its own, the door serves SE's tools
   from the SE the launcher lies in (the plugin's root, or the pinned module under
   `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
