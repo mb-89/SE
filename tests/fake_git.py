@@ -12,6 +12,7 @@ repository's config.
 from __future__ import annotations
 
 import base64
+import copy
 import difflib
 import fnmatch
 import hashlib
@@ -1582,6 +1583,32 @@ def from_state(state: dict, folder: Path) -> FakeGit:
     return fake
 
 
+def _as_parsed(fake: FakeGit, folder: Path) -> FakeGit:
+    """`fake`, which only the caller holds, rearranged as from_state reads what to_state wrote:
+    paths as a parse resolves them, and every dict to_state sorts in its sorted order, so the
+    fake prints `git remote` or `git worktree list` as a fresh parse of the file would."""
+    folder = folder.resolve()
+    repositories = {}
+    for path, repository in sorted(fake.repositories.items()):
+        repository.path = _path(_place(path, folder), folder)
+        repository.index = dict(sorted(repository.index.items()))
+        if repository.main is None:
+            repository.refs, repository.config = dict(sorted(repository.refs.items())), dict(sorted(repository.config.items()))
+        repositories[repository.path] = repository
+    for repository in repositories.values():
+        if repository.main is not None:
+            repository.refs, repository.config = repository.main.refs, repository.main.config
+    fake.repositories = repositories
+    fake.trees = {tree: dict(sorted(files.items())) for tree, files in sorted(fake.trees.items())}
+    fake.declining = {_path(_place(path, folder), folder): message for path, message in sorted(fake.declining.items())}
+    return fake
+
+
+# Per process and per state file: the text this process last loaded or saved, and a fake that
+# only StateFile holds, answering as a parse of that text would (StateFile.load hands out copies).
+_KEPT: dict[Path, tuple[str, FakeGit]] = {}
+
+
 class StateFile:
     """The fake behind a state file, for this process and every child that the door's variable
     (`SE_GIT_DOOR=fake:<file>`) points at it: each command loads the state, runs and writes it
@@ -1594,12 +1621,23 @@ class StateFile:
             self.save(FakeGit())
 
     def load(self) -> FakeGit:
-        return from_state(json.loads(self.path.read_text(encoding="utf-8")), self.path.parent)
+        """The fake the file holds, always a fresh copy: where the file's text is the one this
+        process last loaded or saved, a copy of the fake kept with it, else a parse of the text,
+        kept in turn. The whole text is compared, so another process's write is always read."""
+        text = self.path.read_text(encoding="utf-8")
+        kept = _KEPT.get(self.path)
+        if kept is not None and kept[0] == text:
+            return copy.deepcopy(kept[1])
+        fake = from_state(json.loads(text), self.path.parent)
+        _KEPT[self.path] = (text, copy.deepcopy(fake))
+        return fake
 
     def save(self, fake: FakeGit) -> None:
+        text = json.dumps(to_state(fake, self.path.parent), indent=1)
         temporary = self.path.with_name(self.path.name + f".{os.getpid()}.tmp")
-        temporary.write_text(json.dumps(to_state(fake, self.path.parent), indent=1), encoding="utf-8")
+        temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, self.path)
+        _KEPT[self.path] = (text, _as_parsed(copy.deepcopy(fake), self.path.parent))
 
     @contextmanager
     def locked(self) -> Iterator[None]:
