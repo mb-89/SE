@@ -60,6 +60,19 @@ se_payload "$payload"
 payload="$se_payload_text"
 se_project "$payload"
 project="$se_project"
+# Once per session under Copilot, which runs every hook source it finds together (a project's and a
+# plugin's): a second start of the same session within a minute ends here, quietly. Claude Code
+# starts a session once and is not guarded.
+if $hook && [ "$se_payload_host" = copilot ] &&
+  [[ $payload =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"/\\]+)\" ]]; then
+  claim="$project/.se/.runtime/start-${BASH_REMATCH[1]}.claim"
+  mkdir -p "$project/.se/.runtime" 2>/dev/null
+  if [ -e "$claim" ] && [ -n "$(find "$claim" -mmin -1 2>/dev/null)" ]; then
+    exit 0
+  fi
+  rm -f "$claim"
+  (set -C && : >"$claim") 2>/dev/null || exit 0
+fi
 uv_url="https://astral.sh/uv/install.sh"
 uv_ps_url="https://astral.sh/uv/install.ps1"
 python_version="3.11"

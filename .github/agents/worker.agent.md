@@ -1,7 +1,8 @@
 ---
 name: worker
 description: 'Works one work issue in its own worktree and always ends with a pushed branch and a pull request whose description is its field report. Never talks to other agents, never waits for a human.'
-tools: ['execute', 'read', 'edit', 'search']
+tools: ['execute', 'read', 'edit', 'search', 'send_message']
+strict-tools-list: true
 ---
 <!-- Generated from src/agents/worker.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

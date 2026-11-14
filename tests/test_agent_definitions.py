@@ -36,8 +36,8 @@ def test_agent_definition_names_its_role_and_points_to_the_work_model(role):
 def test_worker_agent_tools_exclude_input_and_workspace_prompts():
     text = (GITHUB / "agents" / "worker.agent.md").read_text(encoding="utf-8")  # what Copilot reads
     front_matter = text.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search']\n" in front_matter  # Copilot's tool names only
-    assert "send_message" not in front_matter and "strict-tools-list" not in front_matter
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in front_matter
+    assert "strict-tools-list: true" in front_matter
     assert "ask_user" not in front_matter
     assert "set_workspace" not in front_matter
 
@@ -97,8 +97,8 @@ def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
     front_matter = (AGENTS / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
     assert "claude.model: inherit" in front_matter
     copilot = (GITHUB / "agents" / "reviewer.agent.md").read_text(encoding="utf-8").split("---")[1]
-    assert "tools: ['execute', 'read', 'search']\n" in copilot  # no edit tool
-    assert "send_message" not in copilot and "strict-tools-list" not in copilot
+    assert "tools: ['execute', 'read', 'search', 'send_message']" in copilot  # no edit tool
+    assert "strict-tools-list: true" in copilot
 
 
 def test_se_starts_a_reviewer_on_request_and_the_integrator_does_not_wait_for_it():

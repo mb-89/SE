@@ -1,6 +1,6 @@
 """Standalone validators for agent and skill files: a file in, its findings out, for any repository.
 
-`copilot_agent` holds a Copilot custom agent (`<name>.agent.md`) to Copilot's fields and tool names;
+`copilot_agent` holds a Copilot custom agent (`<name>.agent.md`) to Copilot's fields;
 `skill` holds a skill (`<name>/SKILL.md`) to the agentskills.io rules. Each takes the file's path
 and text and returns one line per finding, naming the path; none means the host loads it. The SE
 build (scripts/se_plugin.py) runs them on its generated layouts.
@@ -16,14 +16,14 @@ import re
 import sys
 from pathlib import Path, PurePath
 
-# Copilot's custom agent fields (VS Code's custom agent file reference); `handoffs` and `agents` work
-# only in VS Code's local harness and are not offered.
-COPILOT_AGENT_FIELDS = frozenset({"name", "description", "tools", "model", "model-policy", "hooks", "target",
-                                  "user-invocable", "disable-model-invocation", "argument-hint"})
+# Copilot's custom agent fields: VS Code's custom agent file reference and the Copilot CLI's and cloud
+# agent's own (the dispatcher's fact-check of 14 Nov). `handoffs` and `agents` work only in VS Code's
+# local harness and are not offered. An unknown tool name is no finding: Copilot ignores it.
+COPILOT_AGENT_FIELDS = frozenset({
+    "name", "description", "tools", "model", "model-policy", "hooks", "target", "user-invocable",
+    "disable-model-invocation", "argument-hint", "skills", "mcp-servers", "metadata", "reasoning-effort",
+    "deferred-tool-loading", "include-custom-instructions", "github", "strict-tools-list"})
 COPILOT_TARGETS = frozenset({"vscode", "github-copilot"})
-# Copilot's tool aliases; an MCP server's tools are `<server>/<tool>` or `<server>/*`.
-COPILOT_TOOLS = frozenset({"execute", "read", "edit", "search", "agent", "web", "todo"})
-MCP_TOOL = re.compile(r"^[\w.-]+/(?:\*|[\w.-]+)$")
 # The agentskills.io rules: a name of lowercase letters, digits and single hyphens, at most 64
 # characters, equal to its folder (VS Code skips a skill whose name breaks them); a description of
 # at most 1024 characters.
@@ -56,21 +56,12 @@ def scalar(value: str) -> str:
     return value
 
 
-def flow_list(value: str) -> list[str]:
-    """A YAML flow list of scalars, `['a', 'b']`, or one scalar."""
-    if value.startswith("[") and value.endswith("]"):
-        return [scalar(item.strip()) for item in value[1:-1].split(",") if item.strip()]
-    return [scalar(value)] if value else []
-
-
 def copilot_agent(path: PurePath, text: str) -> list[str]:
     """The findings of one Copilot custom agent file."""
     found = fields(text)
     findings = [f"{path}: {key} is no Copilot agent field" for key in found if key not in COPILOT_AGENT_FIELDS]
     if not scalar(found.get("description", "")):
         findings.append(f"{path}: a Copilot agent needs a description")
-    findings += [f"{path}: tool {tool!r} is no Copilot tool" for tool in flow_list(found.get("tools", ""))
-                 if tool not in COPILOT_TOOLS and not MCP_TOOL.match(tool)]
     if "target" in found and scalar(found["target"]) not in COPILOT_TARGETS:
         findings.append(f"{path}: target is one of {', '.join(sorted(COPILOT_TARGETS))}")
     return findings

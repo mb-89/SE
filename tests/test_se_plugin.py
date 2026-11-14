@@ -109,7 +109,7 @@ def test_front_matter_keys_go_only_to_their_layout(checkout):
     copilot = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
     claude = (checkout / "agents" / "worker.md").read_text(encoding="utf-8")
     copilot_front, claude_front = copilot.split("---")[1], claude.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search']\n" in copilot_front
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in copilot_front
     assert "disallowedTools" not in copilot_front
     assert "disallowedTools: AskUserQuestion" in claude_front
     assert "tools:" not in claude_front and "copilot." not in claude_front
@@ -143,16 +143,18 @@ def copilot_hooks(checkout: Path) -> dict:
 
 
 def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
-    """sessionStart greets and starts kern, agentStop holds a worker to its delivery (README "Stop
-    hook"); each fails open within its timeout, in bash and in PowerShell."""
+    """SessionStart greets and starts kern, Stop holds a worker to its delivery (README "Stop
+    hook"); PascalCase events, so Copilot sends Claude-shaped payloads with their `session_id`, and
+    each hook names its host; each fails open within its timeout, in bash and in PowerShell."""
     hooks = copilot_hooks(checkout)
-    assert sorted(hooks) == ["agentStop", "sessionStart"]
-    for event, command in (("sessionStart", "scripts/bootstrap.sh --hook"), ("agentStop", "scripts/se_hook.sh Stop")):
+    assert sorted(hooks) == ["SessionStart", "Stop"]
+    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
         [hook] = hooks[event]
         assert hook["type"] == "command" and hook["cwd"] == "."
+        assert hook["env"] == {"SE_HOOK_HOST": "copilot"}
         assert hook["bash"] == f"bash {command} || true"
         assert hook["powershell"] == f"bash {command}; exit 0"
-        assert 0 < hook["timeoutSec"] <= 120
+        assert 30 < hook["timeoutSec"] <= 120, "an explicit timeout above Copilot's default of 30 s"
         assert (checkout / command.split()[0]).is_file()
 
 
@@ -301,16 +303,15 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
     assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
 
 
-def test_every_generated_copilot_agent_holds_to_copilots_fields_and_tools(checkout):
+def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
     files = se_plugin.expected(checkout)
     agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
     assert len(agents) == 4 and se_plugin.validate(files) == []
     for path in agents:
         fields = agent_lint.fields(files[path].decode())
         assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path
-        assert "send_message" not in fields.get("tools", "") and "strict-tools-list" not in fields
-    se = agent_lint.fields(files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode())
-    assert agent_lint.scalar(se["argument-hint"])
+    worker = agent_lint.fields(files[se_plugin.PurePosixPath(".github/agents/worker.agent.md")].decode())
+    assert worker["strict-tools-list"] == "true", "a Copilot field, kept as on main"
 
 
 def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
@@ -325,8 +326,8 @@ def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
 
 
 @pytest.mark.parametrize("front, refusal", (
-    ("copilot.strict-tools-list: true", "strict-tools-list is no Copilot agent field"),
-    ("copilot.tools: ['execute', 'send_message']", "tool 'send_message' is no Copilot tool"),
+    ("copilot.agents: []", "agents is no Copilot agent field"),
+    ("copilot.description: ''", "a Copilot agent needs a description"),
     ("copilot.target: cli", "target is one of github-copilot, vscode"),
     ("handoffs: []", "handoffs is no Copilot agent field"),
 ))
@@ -336,9 +337,12 @@ def test_a_copilot_agent_its_host_would_reject_is_refused_naming_it(tmp_path, ca
     assert f".github/agents/se.agent.md: {refusal}" in capsys.readouterr().err
 
 
-def test_mcp_tools_and_a_claude_only_key_pass(tmp_path):
+def test_copilots_other_fields_an_unknown_tool_and_a_claude_only_key_pass(tmp_path):
+    """Copilot ignores a tool it does not know (`send_message`); its other fields are its own."""
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
-                 "copilot.tools: ['read', 'github/*', 'se/status']\nclaude.disallowedTools: AskUserQuestion\n---\n")
+                 "copilot.tools: ['read', 'github/*', 'send_message']\ncopilot.strict-tools-list: true\n"
+                 "copilot.reasoning-effort: high\ncopilot.mcp-servers: {}\ncopilot.model: ['a', 'b']\n"
+                 "claude.disallowedTools: AskUserQuestion\n---\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
 
 

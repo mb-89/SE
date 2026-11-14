@@ -56,15 +56,19 @@ def kern_hook(event: str) -> str:
     return f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
 
 
-# Copilot's hooks (.github/hooks/se.json, version 1): a project's hooks run in the repository's root,
-# and its CLI may name no project variable (scripts/hosts.sh reads the payload's cwd then). Each
-# fails open: `|| true` (bash) and `exit 0` (PowerShell) keep a refused step from failing the hook,
-# and a hook past its `timeoutSec` fails open by itself. Event: (script and argument, seconds).
+# Copilot's hooks (.github/hooks/se.json, version 1): a project's hooks run in the repository's root.
+# Events in PascalCase, so Copilot sends Claude-shaped payloads, `session_id` among them, which kern's
+# lease needs; each hook's environment names its host (SE_HOOK_HOST, scripts/hosts.sh), so the start
+# answers in Copilot's shape, a top-level `additionalContext`. Each fails open: `|| true` (bash) and
+# `exit 0` (PowerShell) keep a refused step from failing the hook, and a hook past its `timeoutSec`
+# fails open by itself. Event: (script and argument, seconds).
 COPILOT_HOOKS = {
-    # The greeting and kern's start; a first start installing uv and Python may take longer.
-    "sessionStart": ("scripts/bootstrap.sh --hook", 120),
+    # The greeting and kern's start, once per session; a first start installing uv and Python may
+    # take longer, and the core starts detached.
+    "SessionStart": ("scripts/bootstrap.sh --hook", 120),
     # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
-    "agentStop": ("scripts/se_hook.sh Stop", 60),
+    # It also fires for the se agent; stop-check lets any checkout without a work issue end.
+    "Stop": ("scripts/se_hook.sh Stop", 60),
 }
 
 
@@ -276,7 +280,7 @@ def _json(value: dict) -> bytes:
 
 def _copilot_hook(command: str, seconds: int) -> dict:
     return {"type": "command", "bash": f"bash {command} || true", "powershell": f"bash {command}; exit 0",
-            "cwd": ".", "timeoutSec": seconds}
+            "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
 
 
 def _manifests(root: Path) -> dict[PurePosixPath, bytes]:

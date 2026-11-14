@@ -1,7 +1,8 @@
 ---
 name: reviewer
 description: 'Reviews one delivered pull request cold, as an agent that worked none of it: find, verify and judge as separate steps, the riskiest part first; ends with the one review comment review.py file posts. Never writes the branch, never files issues, never waits for a human.'
-tools: ['execute', 'read', 'search']
+tools: ['execute', 'read', 'search', 'send_message']
+strict-tools-list: true
 ---
 <!-- Generated from src/agents/reviewer.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

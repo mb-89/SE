@@ -135,21 +135,24 @@ def test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_sna
     assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{handed}\n"
 
 
-def test_copilots_project_variable_names_the_project_where_claudes_is_unset(machine):
+def test_without_a_project_variable_or_a_cwd_the_project_is_the_working_directory(machine, tmp_path):
     home, project = machine
     install(home, project)
-    result = copilot_hook(home, "PostToolUse", COPILOT_TOOL % "/elsewhere", COPILOT_PROJECT_DIR=sh(project))
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "SE_HOOK_HOST": "copilot"}
+    result = subprocess.run([BASH, sh(SCRIPT), "PostToolUse"], env=env, input='{"session_id":"s1"}',
+                            capture_output=True, text=True, timeout=30, cwd=project)
     assert result.returncode == 0, result.stderr
-    assert (home / "calls").read_text(encoding="utf-8").startswith(f"hook PostToolUse --root {sh(project)} <<")
+    assert (home / "calls").read_text(encoding="utf-8").startswith("hook PostToolUse --root ")
 
 
-def test_claudes_project_variable_wins_over_copilots(machine):
+def test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does(machine):
+    """.github/hooks/se.json registers `Stop`: Copilot then sends a Claude-shaped payload."""
     home, project = machine
-    install(home, project)
-    other = project.parent / "other"
-    result = copilot_hook(home, "PostToolUse", EVENT, CLAUDE_PROJECT_DIR=sh(project), COPILOT_PROJECT_DIR=sh(other))
-    assert result.returncode == 0, result.stderr
-    assert (home / "calls").read_text(encoding="utf-8") == f"hook PostToolUse --root {sh(project)} <<{EVENT}\n"
+    stop = '{"hook_event_name":"Stop","session_id":"s1","cwd":"%s","stop_hook_active":false}' % sh(project)
+    result = copilot_hook(home, "Stop", stop, SE_HOOK_HOST="copilot")
+    assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
+    [line] = (home / "fallback").read_text(encoding="utf-8").splitlines()
+    assert line.endswith(f"work_tickets.py stop-check <<{stop}")
 
 
 def test_a_copilot_agent_stop_falls_back_to_stop_check_with_the_payload_in_snake_case(machine):

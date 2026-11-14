@@ -1,21 +1,27 @@
 {
   "version": 1,
   "hooks": {
-    "sessionStart": [
+    "SessionStart": [
       {
         "type": "command",
         "bash": "bash scripts/bootstrap.sh --hook || true",
         "powershell": "bash scripts/bootstrap.sh --hook; exit 0",
         "cwd": ".",
+        "env": {
+          "SE_HOOK_HOST": "copilot"
+        },
         "timeoutSec": 120
       }
     ],
-    "agentStop": [
+    "Stop": [
       {
         "type": "command",
         "bash": "bash scripts/se_hook.sh Stop || true",
         "powershell": "bash scripts/se_hook.sh Stop; exit 0",
         "cwd": ".",
+        "env": {
+          "SE_HOOK_HOST": "copilot"
+        },
         "timeoutSec": 60
       }
     ]

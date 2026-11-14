@@ -639,10 +639,12 @@ refusals = 5
 ```
 
 The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
-ends only with its work issue delivered; Copilot hands its `agentStop` the same way
-(`.github/hooks/se.json`). The hook scripts read both hosts' payloads alike:
-[scripts/hosts.sh](scripts/hosts.sh), the host table, names the project variables, the host and cloud
-marks and Copilot's camelCase fields.
+ends only with its work issue delivered; Copilot hands its `Stop` the same way
+(`.github/hooks/se.json`), a check that fails open.
+
+The hook scripts read both hosts' payloads alike: [scripts/hosts.sh](scripts/hosts.sh), the host
+table, names the project variable, the host and cloud marks, the hook file's host selector and
+Copilot's camelCase fields.
 
 - kern answers it within the hook: `wiring.toml` binds both events to the delivery component's
   `stop-check`, which judges in its own warm process ([Kern](#kern)).

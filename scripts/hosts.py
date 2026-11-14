@@ -49,13 +49,23 @@ def variables() -> list[str]:
 
 
 def host(environment: Mapping[str, str]) -> str | None:
-    """The host `environment` marks (claude, copilot), the table's first; None where none does."""
+    """The host `environment` marks (claude), the table's first; None where none does."""
     found = _marked("SE_HOST_MARKS", environment)
     return found[0] if found else None
 
 
+def hook_host(environment: Mapping[str, str], event: Mapping[str, object] | None = None) -> str:
+    """The host a hook answers: the one its hook file names (SE_HOOK_HOST), else `copilot` for a
+    camelCase payload, else `claude`, the default."""
+    variable, *names = table()["SE_HOOK_HOSTS"]
+    named = environment.get(variable, "")
+    if named in names:
+        return named
+    return payload_host(event or {})
+
+
 def clouds(environment: Mapping[str, str]) -> list[str]:
-    """The clouds whose mark `environment` carries (claude, copilot, ci, se), in the table's order."""
+    """The clouds whose mark `environment` carries (claude, ci), in the table's order."""
     return _marked("SE_CLOUD_MARKS", environment)
 
 
