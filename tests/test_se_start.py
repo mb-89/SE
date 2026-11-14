@@ -974,3 +974,67 @@ def test_the_round_trip_list_then_build_then_the_greeting_names_the_missing_item
                           se_start.World(clock=Clock(), spawn=Spawns(), work=Work()), offline=True)
     assert ("Missing for SE's agents: plugin-dev:plugin-structure (worker). Install: claude plugin "
             "install plugin-dev@claude-plugins-official") in se_start.greeting(rep, se)
+
+
+# The hooks at start (bootstrap.sh --hook): a checkout whose core.hooksPath is unset gets se's hooks.
+
+def hooks_path(repo: Path) -> str | None:
+    found = se_start.git_door.run("config", "--get", "core.hooksPath", root=repo)
+    return found.stdout.strip() if found.returncode == 0 else None
+
+
+def fresh_clone(base: Path, name: str = "clone") -> Path:
+    """A fresh clone of a project with an se.toml, as a cloud session's container clones it: no
+    core.hooksPath, which git never copies."""
+    origin = base / "origin"
+    if not origin.exists():
+        fake_git.init(origin, "-b", "main")
+        write(origin / "se.toml", '[project]\nversion = "0.1.0"\n')
+        git(origin, "add", "-A")
+        git(origin, "-c", "user.name=alice", "-c", "user.email=alice@example.com", "commit", "-q", "-m", "one")
+    clone = fake_git.clone(origin.as_uri(), base / name)
+    assert hooks_path(clone) is None
+    return clone
+
+
+@pytest.fixture
+def fresh(tmp_path):
+    return fresh_clone(tmp_path), tmp_path
+
+
+def test_start_hooks_points_a_fresh_clone_of_se_at_its_own_hooks_once(fresh):
+    clone, base = fresh
+    write(clone / ".githooks" / "se-script", "#!/bin/sh\n")  # se's own checkout carries its hooks
+    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
+    assert hooks_path(clone) == ".githooks"  # as setup.sh sets it in se's own checkout
+    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""  # again: no change
+    assert hooks_path(clone) == ".githooks"
+
+
+def test_start_hooks_leaves_a_set_hooks_path_alone(fresh):
+    clone, base = fresh
+    git(clone, "config", "core.hooksPath", "custom/hooks")
+    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
+    assert hooks_path(clone) == "custom/hooks"
+
+
+def test_start_hooks_takes_the_hooks_of_the_se_module_a_project_pins_else_this_ses(fresh):
+    clone, base = fresh
+    plugin = base / "plugin"
+    assert se_start.start_hooks(plugin, clone, base / "local.toml") == ""
+    assert hooks_path(clone) == (plugin / ".githooks").as_posix()  # no se module: this SE's hooks
+    clone = fresh_clone(base, "pinning")
+    module = base / "se-module"
+    write(module / ".githooks" / "se-script", "#!/bin/sh\n")
+    write(clone / "se.toml", '[modules.se]\nurl = "https://example.com/se.git"\nref = "%s"\n' % ("0" * 40))
+    config = write(base / "local.toml", f'[paths]\nse = "{module.as_posix()}"\n')
+    assert se_start.start_hooks(plugin, clone, config) == ""
+    assert hooks_path(clone) == (module / ".githooks").as_posix()  # the pinned se's, as its setup.sh sets
+
+
+def test_start_hooks_changes_nothing_outside_a_project_checkout(tmp_path):
+    plain = tmp_path / "plain"
+    write(plain / "se.toml", '[project]\nversion = "0.1.0"\n')  # an se.toml, but no git
+    assert se_start.start_hooks(tmp_path / "plugin", plain, None) == ""
+    assert se_start.start_hooks(tmp_path / "plugin", None, None) == ""
+    assert se_start.main(["--root", str(plain), "start-hooks"]) == 0

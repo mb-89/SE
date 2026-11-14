@@ -129,3 +129,17 @@ def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(
     assert greeting[0].startswith("SE: no refresh at start, this session starts with SE 5.0.0: cannot reach ")
     assert greeting[1].startswith("SE 5.0.0 started: ")
     assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart"]
+
+
+def test_the_start_points_a_fresh_checkouts_hooks_at_se_and_keeps_a_set_one(behind):
+    """A fresh clone has no core.hooksPath (git never copies it): the plugin's start sets it to its
+    SE's hooks, as setup.sh would, so the first commit runs the public check; a later start, or a
+    checkout that points elsewhere, keeps what is set."""
+    home, plugin, project, base = behind
+    fake_git.init(project, "-b", "main")
+    assert git_door.run("config", "--get", "core.hooksPath", root=project).returncode == 1
+    start(home, plugin, project, base)
+    assert git(project, "config", "--get", "core.hooksPath") == (plugin.resolve() / ".githooks").as_posix()
+    git(project, "config", "core.hooksPath", "custom/hooks")
+    start(home, plugin, project, base)
+    assert git(project, "config", "--get", "core.hooksPath") == "custom/hooks"

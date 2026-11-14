@@ -29,7 +29,8 @@ pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash"
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
-# `refresh-moves` exists, else has nothing to move, and is logged apart; every other call is logged.
+# `refresh-moves` exists, else has nothing to move, and is logged apart; its hooks at start say
+# nothing, as where they are in place; every other call is logged.
 FAKE_UV = """#!/bin/sh
 case "$*" in *"se_start.py "*" start-refresh"*)
   echo refresh >> "$HOME/refreshes"
@@ -37,6 +38,7 @@ case "$*" in *"se_start.py "*" start-refresh"*)
   echo "SE: 1.0.0 -> 1.0.1, refreshed at this start"; exit 0 ;;
 esac
 echo "uv $*" >> "$HOME/calls"
+case "$*" in *"se_start.py "*" start-hooks"*) exit 0 ;; esac
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
 case "$1 $2" in
@@ -181,7 +183,7 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     result = run(home, fake_bin(base), project, "--hook")
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == '{"greeting": 1}\n'  # the JSON alone: Claude Code parses the hook's stdout
-    start = [line for line in calls(home) if "se_start.py" in line]
+    start = [line for line in calls(home) if "se_start.py" in line and " status " in line]
     assert len(start) == 1
     assert start[0].startswith(f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
                                f"--root {sh(project)} status --hook --note se bootstrap: installing uv into ")
@@ -202,6 +204,32 @@ def test_the_hook_sets_the_projects_commit_identity_at_start(machine):
     (home / "calls").unlink()
     assert run(home, path, project).returncode == 0  # outside a session's start: setup.sh's
     assert not any("work_tickets.py" in line for line in calls(home))
+
+
+@pytest.mark.parametrize("host", ["claude", "copilot camelCase", "copilot PascalCase"])
+def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload(machine, host):
+    """A fresh clone has no core.hooksPath until setup.sh runs: the session's start sets it, under
+    Claude's payload (its project variable) and Copilot's two shapes (the payload's cwd), through
+    se_start.py start-hooks, which leaves a set one alone (tests/test_se_start.py)."""
+    home, project, base = machine
+    path = fake_bin(base)
+    if host == "claude":
+        result = run(home, path, project, "--hook", stdin=START)
+    elif host == "copilot camelCase":
+        result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env={"HOME": sh(home), "PATH": sh(path)},
+                                capture_output=True, text=True, timeout=60, input=COPILOT_START % sh(project),
+                                cwd=base)
+    else:
+        result = copilot_start(home, path, base, PASCAL_START % sh(project))
+    assert result.returncode == 0, result.stdout + result.stderr
+    hooks = [line for line in calls(home) if " start-hooks" in line]
+    assert hooks == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
+                     f"--root {sh(project)} start-hooks"]
+    assert calls(home).index(hooks[0]) < next(
+        index for index, line in enumerate(calls(home)) if "se_start.py" in line and " status " in line)
+    (home / "calls").unlink()
+    assert run(home, path, project).returncode == 0  # outside a session's start: setup.sh's
+    assert not any("start-hooks" in line for line in calls(home))
 
 
 def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
@@ -250,7 +278,7 @@ def kern_bin(home: Path) -> Path:
 
 
 def greeting_call(home: Path) -> str:
-    [start] = [line for line in calls(home) if "se_start.py" in line]
+    [start] = [line for line in calls(home) if "se_start.py" in line and " status " in line]
     return start
 
 
