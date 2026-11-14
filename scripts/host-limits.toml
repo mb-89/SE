@@ -5,7 +5,7 @@
 # whether the host documents it or someone measured it (`mark`: documented | measured).
 #
 # One home for host facts. Each kind of fact is one section of this file: `surfaces` (what a host
-# reads) and `limits` (what it caps) today. Later kinds, such as capability rows, a probed tool
+# reads), `limits` (what it caps) and `registrations` (where it reads SE from) today. Later kinds, such as capability rows, a probed tool
 # list or hook probe results, become sections here, never a second host file.
 #
 # A limit row:
