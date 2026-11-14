@@ -287,7 +287,8 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   twin `se_mcp.ps1`: standalone, it reads only the release pin (`components/release.toml`).
   - It runs `~/.se/bin/se-<version>` ([Kern](#kern)), or the binary `SE_MCP_BIN` names, as
     `se mcp --root <project> --home <this SE>`.
-  - Standard output carries MCP alone; the rest goes to `<project>/.se/.runtime/mcp.log`.
+  - Standard output carries MCP alone; the rest goes to `<project>/.se/.runtime/mcp.log`, or,
+    for a plugin install's session folder with no `.git` in it or above it, `~/.se/.runtime/mcp.log`.
 - **Where the binary is missing** the launcher answers at once as a door of one tool, `status`,
   whose calls say `not-installed` and name the setup to run, SE's start (`scripts/bootstrap.sh`).
   That fetches the binary and checks it against the release's `SHA256SUMS` in `~/.se/bin`; then
@@ -302,6 +303,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   serves the session's repository. It reads `SE_SESSION_CWD`, else `COPILOT_SESSION_CWD`, else, on
   Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>: root
   <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
+  - A session folder that is no checkout gets no `.se`: that line goes to `~/.se/.runtime/mcp.log`.
 - **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
   or in VS Code `code --add-mcp
   '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.

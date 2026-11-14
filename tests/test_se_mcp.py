@@ -397,3 +397,68 @@ def test_the_checkouts_own_config_keeps_its_root_whatever_the_session_folder(tmp
     assert "SE_SESSION_CWD" in env
     assert stub_run(tmp_path, checkout, PLUGIN_ROOT=None, COPILOT_SESSION_CWD=sh(repo), **env) == today(
         tmp_path, checkout)
+
+
+# A session folder that is no checkout (README "MCP door"): the plugin case keeps it as the root, and
+# the launcher logs at home, so that folder gets no .se.
+
+
+def session_folder(tmp_path: Path) -> Path:
+    """A folder with no .git in it or above it; skipped where the temporary folder lies in a checkout."""
+    folder = tmp_path / "session"
+    folder.mkdir()
+    if any((parent / ".git").exists() for parent in (folder, *folder.parents)):
+        pytest.skip("the temporary folder lies in a checkout")
+    return folder
+
+
+def home_log(tmp_path: Path) -> Path:
+    return tmp_path / "home" / ".se" / ".runtime" / "mcp.log"
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_a_session_folder_that_is_no_checkout_gets_no_se_and_the_log_is_at_home(tmp_path, kind):
+    plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
+    result = plugin_run(kind, tmp_path, plugin, SE_SESSION_CWD=named(kind, session))
+    assert door_root(kind, result) == named(kind, session)
+    assert not (session / ".se").exists()
+    log = home_log(tmp_path).read_text(encoding="utf-8")
+    decision = next(line for line in log.splitlines() if ": root " in line)
+    assert f"from SE_SESSION_CWD={named(kind, session)}" in decision
+    assert "not installed: " in log
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_a_session_folder_that_is_a_repositorys_root_logs_there(tmp_path, kind):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, SE_SESSION_CWD=named(kind, repo))
+    assert door_root(kind, result) == named(kind, repo)
+    assert ": root " in (repo / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    assert not (tmp_path / "home" / ".se" / ".runtime").exists()
+
+
+@needs_bash
+def test_the_binary_gets_the_session_folder_and_its_stderr_lands_in_the_home_log(tmp_path):
+    plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    fake = tmp_path / "se"
+    fake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGS_FILE"\necho "said beside the protocol" >&2\n',
+                    encoding="utf-8", newline="\n")
+    fake.chmod(0o755)
+    result = launch("bash", home, plugin, "", se=plugin, parent=plugin, PLUGIN_ROOT=str(plugin),
+                    SE_SESSION_CWD=sh(session), SE_MCP_BIN=sh(fake), ARGS_FILE=sh(tmp_path / "args"))
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "args").read_text(encoding="utf-8").splitlines() == [
+        "mcp", "--root", sh(session), "--home", sh(plugin)]
+    assert "said beside the protocol" in home_log(tmp_path).read_text(encoding="utf-8")
+    assert not (session / ".se").exists()
+
+
+@needs_parent_cwd
+def test_a_parent_folder_that_is_no_checkout_gets_no_se(tmp_path):
+    plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
+    got = stub_run(tmp_path, plugin, parent=session)
+    assert got == ["mcp", "--root", sh(session), "--home", sh(plugin), "folder=unset"]
+    assert not (session / ".se").exists()
+    assert "from parent cwd" in home_log(tmp_path).read_text(encoding="utf-8")
