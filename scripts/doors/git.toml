@@ -1,0 +1,13 @@
+# The git door (rule book des-004): every git command runs through scripts/git_door.py, its fake is
+# tests/fake_git.py and kern's Go door kern/git/git.go, as scripts/hygiene.py's GIT_DOOR names them.
+# Read by scripts/door_report.py, whose docstring owns the keys.
+door = "git"
+files = ["scripts/git_door.py", "tests/fake_git.py", "kern/git/git.go"]
+contract_tests = ["tests/test_git_door.py", "kern/git/contract_test.go"]
+commands = ["git"]
+imports = []
+calls = []
+literals = []
+
+# Empty, like hygiene.py's GIT_ALLOWED: no git subprocess is left outside the door.
+[baseline]

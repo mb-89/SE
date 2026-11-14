@@ -1,0 +1,23 @@
+# GitHub: gh, its binary's one resolver and the REST API's host. Read by scripts/door_report.py, whose
+# docstring owns the keys.
+#
+# GitHub decides nothing yet: which of today's reaches is the one GitHub door is the owner's question,
+# so `files` is empty and every reach found on main is the baseline. Calls into a candidate door, such
+# as work_tickets.py's run_gh and run_gh_with_body, are not reaches until the owner names the door;
+# gh_executable, where run_gh resolves the binary, is.
+door = "github"
+files = []
+contract_tests = []
+commands = ["gh"]
+imports = []
+calls = ["gh_executable"]
+literals = ["api.github.com"]
+
+[baseline]
+"kern/components/github/github.go" = { count = 2, reason = "kern's GitHub component: the token backend's API default and its gh auth token read" }
+"scripts/ci_queue.py" = { count = 1, reason = "the CI queue's REST API default where GITHUB_API_URL is unset" }
+"scripts/ci_trust.py" = { count = 1, reason = "the CI trust check's REST API default where GITHUB_API_URL is unset" }
+"scripts/pr_issues.py" = { count = 1, reason = "the pull request issue rule's REST API default where GITHUB_API_URL is unset" }
+"scripts/se_doctor.py" = { count = 2, reason = "the doctor's host list names the API, and it asks gh auth status whether gh is signed in" }
+"scripts/timeline.py" = { count = 1, reason = "the timeline's REST API host" }
+"scripts/work_tickets.py" = { count = 3, reason = "run_gh and run_gh_with_body resolve gh through gh_executable; suite reads public check runs from the API without an account" }
