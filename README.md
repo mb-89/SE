@@ -1225,6 +1225,17 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
+## Host validators
+
+`uv run python scripts/host_validate.py` runs each host's own validator over the built layouts
+(`claude plugin validate --strict` on both manifests, `skills-ref validate` on each skill folder) and
+reports; SE's own lint in the build stays the first line. Exit codes: 0 passed, 1 a host refused a
+layout, 2 a validator could not run; `--skips-pass` answers 0 where only a tool is absent.
+
+It is off by default, and nothing runs it. Adding `[tests.beside.host-validators]` to `se.toml`,
+running `tests/beside_host_validators.py`, puts the hosts' validators into every integration: that
+step is the owner's.
+
 ## Ad hoc components
 
 `se.py component add` ([its usage](#scaffold)) scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
