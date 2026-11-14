@@ -1,0 +1,18 @@
+# The long local phase's fixture (contract/longstep_test.go): a command in Python that asks one
+# GitHub step through kern's relay, works for a while without asking anything, as a landing's
+# suite, release and push do, and then asks the next.
+name = "gap"
+contract = 1
+help = "Asks a GitHub step, works a while, asks another."
+
+[commands."gap run"]
+usage = "gap run SECONDS"
+summary = "Ask a step, work SECONDS, ask another."
+group = "Fixtures"
+help = "Asks issue_read through the relay, sleeps SECONDS in its continuation, then asks list_issues."
+class = "batch"
+
+[requests.step]
+type = "github.step"
+answer = "github.step-answer"
+help = "One GitHub step through kern's relay."

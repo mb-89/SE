@@ -278,9 +278,28 @@ door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.js
 Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
 through it as tools. The host spawns it as the session starts; nobody starts anything else.
 
-- **What the host runs.** `se` must already be on the PATH (`~/.se/bin`, [Kern](#kern)), or be
-  reached through a launcher that fetches it. Pass the checkout as `--root`: a host's working
-  directory need not be the repository. Which file names the door for which host is not here yet.
+- **What the host runs.** The launcher `scripts/se_mcp.sh --root <project>`, or its PowerShell
+  twin `se_mcp.ps1`: standalone, it reads only the release pin (`components/release.toml`).
+  - It runs `~/.se/bin/se-<version>` ([Kern](#kern)), or the binary `SE_MCP_BIN` names, as
+    `se mcp --root <project> --home <this SE>`.
+  - Standard output carries MCP alone; the rest goes to `<project>/.se/.runtime/mcp.log`.
+- **Where the binary is missing** the launcher answers at once as a door of one tool, `status`,
+  whose calls say `not-installed` and name the setup to run, SE's start (`scripts/bootstrap.sh`).
+  That fetches the binary and checks it against the release's `SHA256SUMS` in `~/.se/bin`; then
+  restart the server. The launcher fetches nothing itself, so no host waits on a download.
+- **Declared per host, generated** by `scripts/se_plugin.py build`:
+  - `.github/mcp.json` for Copilot in a checkout of SE;
+  - the `mcpServers` entry of Copilot's plugin manifest `.github/plugin/plugin.json` for a plugin
+    install, the plugin's root `${PLUGIN_ROOT}` in an argument only;
+  - a root `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on; it is off, as Claude Code
+    reads that file too.
+- **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
+  or in VS Code `code --add-mcp
+  '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.
+- **In another repository**, one without a `wiring.toml` of its own, the door serves SE's tools
+  from the SE the launcher lies in (the plugin's root, or the pinned module under
+  `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
+  `cli.Source`), its processes placed in that SE with `KERN_ROOT` naming the project.
 - **It answers at once.** Either handshake, `server/discover` of the MCP spec of 2026-07-28 or the
   legacy `initialize`, and `tools/list` come from the catalog the `se` binary reads without the
   core: its Go components, the checkout's `wiring.toml` and its components' declarations. Beside
@@ -335,6 +354,20 @@ exits 1 on a problem; otherwise it exits 0.
 - **Private**: it prints no token, bus user, environment value, e-mail address or path outside the
   checkout; home is `~`, the checkout `<checkout>`.
 - Its checks are pure functions of the facts it gathers, which its docstring owns.
+
+### Host sizes
+
+`uv run python <se>/scripts/host_size.py report [--root DIR] [--tools FILE] [--json]` measures
+the generated layouts (`AGENTS.md`, `.github/agents`, `.github/skills`, `agents/`, `skills/`) and,
+with `--tools`, the JSON of a `tools/list` answer, against what each agent host caps.
+
+It prints one row per host, file or tool and subject, "over", "under" or "not measured", the
+largest overrun first, then the bytes a session is always handed apart from those it loads on
+demand.
+
+- **The host facts** are one dated data file, `scripts/host-limits.toml`, whose header owns its
+  layout; a limit it lacks is "not measured", never "under".
+- **A report only**: it writes nothing, always exits 0, and no hook, check, build or suite runs it.
 
 ## Documentation
 
@@ -578,15 +611,28 @@ no token), the hand-off needs neither a retyped file nor a second run
   - The core fails a step of the command only after ten minutes without its answer, a line or a
     beat (`StepWait`, the work model's stall rule), not after one: the wait was raised, the hook's
     beat does not count, and the command's process beats every 5 s until its answer is out.
+  - A step's answer reaches the core however long the step ran: kern's bus gives a placed
+    process's answer no time limit, where NATS's default of two minutes refused the answer of any
+    longer step, such as a landing's suite, release and push. An answer the bus refuses all the
+    same fails the step at once, naming why, instead of waiting out `StepWait`.
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
   - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
     file-based hand-off: <why>`.
+- **Rehearsing a relay landing.** `work_tickets.py rehearse` runs a whole landing through the
+  relay on the scratch branch `--base` names, without holding the integration branch: a relay
+  read, a local phase `--gap` makes slow on purpose, the push of `rehearse/` and the base's name,
+  the landing plan into the base (pause search, pull request, `check`, squash merge), the read-back.
+  - It refuses the integration branch, `land/…` and `rehearse/…` as its base, starts a base origin
+    lacks at the integration branch's tip, releases and tags nothing and touches no issue.
+  - It runs only as one call through kern's relay, and only when someone runs it.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
   `fleet-check` as one call whose reads a simulated session answers on the hook, from the
   checkout's script and from a plugin's copy, then the fallback once kern stops.
+  - kern's `contract/longstep_test.go` asks a relay step after a local phase longer than two
+    minutes (`se.toml` `[tests.beside.kern-long-step]`).
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
@@ -1226,6 +1272,27 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
+## Host validators
+
+`uv run python scripts/host_validate.py` runs each host's own validator over the built layouts
+(`claude plugin validate --strict` on both manifests, `skills-ref validate` on each skill folder) and
+reports; SE's own lint in the build stays the first line. Exit codes: 0 passed, 1 a host refused a
+layout, 2 a validator could not run; `--skips-pass` answers 0 where only a tool is absent.
+
+It is off by default, and nothing runs it. Adding `[tests.beside.host-validators]` to `se.toml`,
+running `tests/beside_host_validators.py`, puts the hosts' validators into every integration: that
+step is the owner's.
+
+## Decision rows
+
+`uv run python scripts/decision_rows.py list --since DATE [--until DATE] [--json]` lists every row
+of the Decisions table in the field reports of the pull requests merged into the integration branch
+in the window, grouped by pull request, newest first, each with its work issue and the report's
+Result. A landing without a Decisions section or without a field report is named as such.
+
+It reads GitHub as `retro.py collect` does (without gh, from the answers saved into `--answers DIR`),
+writes and files nothing, and nothing runs it.
+
 ## Ad hoc components
 
 `se.py component add` ([its usage](#scaffold)) scaffolds an ad hoc component in the checkout: a Python component over NATS under the ignored
@@ -1473,6 +1540,13 @@ work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--
     prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
     refs and finishes
 
+work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]
+    rehearse a whole landing through kern's relay against a scratch branch, never the integration
+    branch: a relay read, a local phase (--gap makes it slow on purpose), the push of
+    rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-
+    back. It releases and tags nothing and touches no issue; it runs only as one call through kern's
+    relay
+
 work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 [--pr-description FILE] [--include-late REASON]
                                 branch
@@ -1712,6 +1786,14 @@ Then what went well and what follows. The facts and the block stay in the retro 
 report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the
 next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
 numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
+
+`scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
+their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts
+written twice, denials by tool and long waits, per session and in total (`--json`).
+
+It prints counts, locations and masked command shapes, never message text; it judges nothing,
+files nothing, and nothing runs it. Its docstring owns the signals and the adapter a new format
+adds.
 
 `scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
 right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.

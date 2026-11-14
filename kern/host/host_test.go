@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 		os.Exit(placed())
 	case callerArg:
 		os.Exit(caller())
+	case whereArg:
+		os.Exit(where())
 	}
 	// Every test reaches git through kern's git door, on its fake.
 	gitdoor.Use(gitfake.New())
@@ -323,15 +325,18 @@ func TestASecondCoreInOneCheckoutIsRefused(t *testing.T) {
 	}
 }
 
-// closedBus answers a bus URL on the loopback that nothing listens on.
+// closedBus answers a bus URL on the loopback that nothing listens on: port
+// 1, outside every system's range for a listener on port 0, so no core a
+// parallel test starts can take it, as it could take a port freed here
+// (macOS hands a freed port out again at once). It refuses the test where
+// something does listen there.
 func closedBus(t *testing.T) (string, int) {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	const port = 1
+	if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second); err == nil {
+		_ = conn.Close()
+		t.Skipf("something listens on 127.0.0.1:%d, the port a gone bus is named by", port)
 	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
 	return fmt.Sprintf("nats://127.0.0.1:%d", port), port
 }
 

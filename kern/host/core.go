@@ -63,6 +63,11 @@ const PostToolUse = "PostToolUse"
 type Options struct {
 	// Root is the checkout the core serves; its standing file lies under it.
 	Root string
+	// Home is the folder the wiring came from where it is not Root (an
+	// application's own, serving a project that keeps no wiring, cli.Source):
+	// the declared components' component.toml are read under it, and each
+	// placed process runs in it. Empty for Root.
+	Home string
 	// Wiring and Components make the index; an instance with a Command is placed in a process of its own.
 	Wiring     index.Wiring
 	Components []*index.Component
@@ -72,8 +77,25 @@ type Options struct {
 	Grace, Idle, LeaseLapse time.Duration
 	// StepWait and CallBeat override the built-in waits of a call where set.
 	StepWait, CallBeat time.Duration
+	// ReplyWait, where set, bounds how long a declared instance's process may
+	// take to answer one step or request (bus.Start); unset, the core's own
+	// waits bound it alone.
+	ReplyWait time.Duration
 	// Log takes what the core and its placed processes say; none where nil.
 	Log io.Writer
+}
+
+// RootEnv names, in each placed process's environment, the checkout the core
+// serves: the folder a command runs against where the call names none, also
+// where the process runs in Home.
+const RootEnv = "KERN_ROOT"
+
+// wired is the folder the wiring came from: Home where set, else Root.
+func (o Options) wired() string {
+	if o.Home != "" {
+		return o.Home
+	}
+	return o.Root
 }
 
 // Core is a running core.
@@ -153,7 +175,7 @@ func Serve(o Options) (*Core, error) {
 	if s, err := ReadStanding(o.Root); err == nil {
 		return nil, fmt.Errorf("kern serve: a core already runs in %s, pid %d (%s)", o.Root, s.Pid, StandingPath(o.Root))
 	}
-	decls, err := declarations(o.Root, o.Wiring, o.Components)
+	decls, err := declarations(o.wired(), o.Wiring, o.Components)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +216,7 @@ func Serve(o Options) (*Core, error) {
 			c.types[in.Name][out.Port.Port] = out.Type
 		}
 	}
-	if c.bus, err = bus.Start(instances); err != nil {
+	if c.bus, err = bus.Start(instances, o.ReplyWait); err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	if c.nc, err = bus.Dial(c.bus.URL(), bus.Core, c.bus.Users()[bus.Core]); err != nil {
@@ -640,8 +662,11 @@ func (c *Core) spawnPlaced(s Standing) error {
 			continue
 		}
 		cmd := exec.Command(in.Command[0], in.Command[1:]...)
-		cmd.Dir = c.o.Root
-		cmd.Env = append(os.Environ(), bus.EnvBus+"="+s.Bus, bus.EnvUser+"="+in.Name, bus.EnvToken+"="+s.Users[in.Name])
+		// The process runs where its wiring came from, so its command's
+		// relative paths resolve; RootEnv names the checkout it serves.
+		cmd.Dir = c.o.wired()
+		cmd.Env = append(os.Environ(), bus.EnvBus+"="+s.Bus, bus.EnvUser+"="+in.Name, bus.EnvToken+"="+s.Users[in.Name],
+			RootEnv+"="+c.o.Root)
 		cmd.Stdout, cmd.Stderr = c.o.Log, c.o.Log
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("wiring line %d: instance %s: its command does not start: %w", in.CommandLine, in.Name, err)

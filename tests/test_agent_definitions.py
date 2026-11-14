@@ -36,7 +36,7 @@ def test_agent_definition_names_its_role_and_points_to_the_work_model(role):
 def test_worker_agent_tools_exclude_input_and_workspace_prompts():
     text = (GITHUB / "agents" / "worker.agent.md").read_text(encoding="utf-8")  # what Copilot reads
     front_matter = text.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in front_matter
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in front_matter
     assert "strict-tools-list: true" in front_matter
     assert "ask_user" not in front_matter
     assert "set_workspace" not in front_matter
@@ -97,7 +97,7 @@ def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
     front_matter = (AGENTS / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
     assert "claude.model: inherit" in front_matter
     copilot = (GITHUB / "agents" / "reviewer.agent.md").read_text(encoding="utf-8").split("---")[1]
-    assert "tools: ['execute', 'read', 'search', 'send_message']" in copilot  # no edit tool
+    assert "tools: ['execute', 'read', 'search', 'send_message', 'se/*']" in copilot  # no edit tool
     assert "strict-tools-list: true" in copilot
 
 
@@ -489,13 +489,73 @@ def test_without_gh_names_what_the_session_prompt_still_carries_and_nothing_else
                     "Work issue", "Branch", "Integrator session to notify at delivery"]
 
 
+def claude_text(path: Path) -> str:
+    """A source as the Claude layout carries it: its Copilot-only parts dropped (se_plugin.py
+    `hosts`), whitespace normalized."""
+    text = re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", path.read_text(encoding="utf-8"))
+    return " ".join(text.split())
+
+
 @pytest.mark.parametrize("role", ("worker", "integrator"))
 def test_roles_point_to_without_gh_and_do_not_restate_it(role):
-    text = normalized(AGENTS / f"{role}.md")
+    """The Claude layout's role text; under Copilot the role names SE's MCP tools, which the work
+    model's Host procedure under Copilot owns (the next test)."""
+    text = claude_text(AGENTS / f"{role}.md")
     assert "(../skills/work-model/SKILL.md#without-gh)" in text
     for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
                   "carries only", "`review-note`, `probe`"):
         assert owned not in text, owned
+
+
+@pytest.mark.parametrize("role", ("worker", "integrator", "reviewer", "se"))
+def test_under_copilot_each_role_names_ses_mcp_tools_and_points_to_the_host_procedure(role):
+    text = normalized(ROOT / ".github" / "agents" / f"{role}.agent.md")
+    assert "MCP tools" in text
+    assert "/.github/skills/work-model/SKILL.md#host-procedure-under-copilot)" in text
+    assert "Host procedure under Copilot" not in claude_text(AGENTS / f"{role}.md")
+    assert "MCP" not in normalized(ROOT / "agents" / f"{role}.md").replace("GitHub MCP", "")
+
+
+@pytest.mark.parametrize("role", ("worker", "reviewer"))
+def test_the_strict_tool_lists_gain_the_se_server_under_copilot_only(role):
+    copilot = (ROOT / ".github" / "agents" / f"{role}.agent.md").read_text(encoding="utf-8").split("\n---\n")[0]
+    assert "'se/*']" in copilot and "strict-tools-list: true" in copilot
+    assert "se/*" not in (ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8")
+
+
+def host_procedure() -> str:
+    text = normalized(ROOT / ".github" / "skills" / "work-model" / "SKILL.md")
+    return text.split("## Host procedure under Copilot", 1)[1]
+
+
+def test_the_host_procedure_is_in_the_copilot_layout_only():
+    """The Claude text stays as it is: tests/test_se_plugin.py holds its layout byte for byte."""
+    assert "## Host procedure under Copilot" in normalized(ROOT / ".github" / "skills" / "work-model" / "SKILL.md")
+    assert "Host procedure under Copilot" not in normalized(ROOT / "skills" / "work-model" / "SKILL.md")
+
+
+def test_the_host_procedure_branches_on_the_tools_the_session_has():
+    section = host_procedure()
+    assert "It branches on the tools the session has, never on the host's name or its layout." in section
+    assert ("**Starting a session, where the host has a session tool** (`create_session`): use it" in section
+            and "`send_message` for the one message a role sends" in section)
+    assert ("nohup copilot -C <worktree> --agent worker --trust-folder --no-ask-user --allow-tool=<list> "
+            "\\ -n <branch> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &") in section
+    assert "Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker'," in section
+    assert "-RedirectStandardOutput <worktree>\\.se\\worker.log -WindowStyle Hidden`" in section
+    assert "give the person that one line to run" in section
+    assert "**No message tool**: read the queue at each turn (`work_tickets.py queue`)" in section
+    assert "**No ask tool** (`ask_user`): SE asks the person in the chat" in section
+    assert "Out of scope: the Copilot cloud agent, and VS Code's Claude and Local harnesses." in section
+
+
+def test_the_host_procedure_uses_the_se_tools_where_present_and_the_scripts_otherwise():
+    section = host_procedure()
+    for tool in ("se/status", "se/greeting", "se/tickets", "se/integration", "se/overhaul"):
+        assert f"`{tool}`" in section, tool
+    assert "or the session has no `se` tools, run the same command as its script" in section
+    assert "A command no tool offers, every one that writes among them, always runs as its script." in section
+    assert "the greeting then says `SE runs without kern`, and so does SE in its first message" in section
 
 
 def test_agents_md_names_the_focused_and_complete_test_commands():

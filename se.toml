@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.54.0"
+version = "5.59.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -51,6 +51,17 @@ command = ["go", "test", "./..."]
 directory = "components"
 target_seconds = 30
 limit_seconds = 60
+
+# A relay step asked after a local phase longer than NATS's two minutes still reaches the hook
+# (kern/contract/longstep_test.go, README "Hand-offs through the relay"): the real core, a Python
+# command and the test as the session's host. Its real wait of 130 s keeps it out of kern's own
+# tests, behind the build tag longstep.
+[tests.beside.kern-long-step]
+setup = ["go", "test", "-tags", "longstep", "-run", "^$", "./contract/"]
+command = ["go", "test", "-tags", "longstep", "-count=1", "-run", "^TestAStepAnswersAfterALongLocalPhase$", "./contract/"]
+directory = "kern"
+target_seconds = 150
+limit_seconds = 240
 
 # The released binaries hold what the checkout builds (docs/go-core.md "How the binary arrives"):
 # kern's release tool refuses where kern's or SE's release.toml names a tag already cut and a file
@@ -107,6 +118,12 @@ repositories = ["mb-89/SE", "mb-89/obs"]
 [outside]
 "github.com/mb-89/SE" = 690
 "github.com/mb-89/obs" = 459
+
+# The plugin's build (scripts/se_plugin.py): `root_mcp` writes a root .mcp.json declaring SE's MCP
+# door. Off, as Claude Code reads that file too; Copilot reads .github/mcp.json, always written
+# (README "MCP door").
+[plugin]
+root_mcp = false
 
 # The outside skills each role relies on, `<plugin>@<marketplace>:<skill>`: se_plugin.py build
 # preloads them into that agent and the start greeting names one the session lacks (AGENTS.md
