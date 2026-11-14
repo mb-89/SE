@@ -341,6 +341,137 @@ def test_gather_probe_reads_each_place_and_probes_without_running_a_hook(tmp_pat
     assert {r["place"]: r["state"] for r in elsewhere["rows"]}["hooks"] == d.NOT_MEASURED
 
 
+# Copilot CLI's plugin installs (--probe only)
+
+
+SE_MCP = json.dumps({"mcpServers": {"se": {"command": "bash", "args": ["scripts/se_mcp.sh", "--root", "."]}}})
+
+
+def copilot_install(copilot_home: Path, *parts: str, name: str = "se", script: bool = False,
+                    manifest: str = ".github/plugin/plugin.json") -> Path:
+    """A plugin folder Copilot installed: its manifest named `name`, its .github/mcp.json naming the
+    relative launcher, which exists only with `script`."""
+    root = copilot_home.joinpath("installed-plugins", *parts)
+    (root / Path(manifest)).parent.mkdir(parents=True, exist_ok=True)
+    (root / ".github").mkdir(exist_ok=True)
+    (root / Path(manifest)).write_text(json.dumps({"name": name}), encoding="utf-8")
+    (root / ".github" / "mcp.json").write_text(SE_MCP, encoding="utf-8")
+    if script:
+        (root / "scripts").mkdir()
+        (root / "scripts" / "se_mcp.sh").write_text("", encoding="utf-8")
+    return root
+
+
+def copilot_only() -> dict:
+    data = __import__("tomllib").loads(d.HOST_FACTS.read_text(encoding="utf-8"))["registrations"]
+    return {"registrations": {"copilot-cli": data["copilot-cli"]}}
+
+
+class Fakes:
+    """The probe's which and start, recording what they were asked."""
+
+    def __init__(self):
+        self.which, self.started = [], []
+
+    def find(self, word):
+        self.which.append(word)
+        return f"/bin/{word}"
+
+    def start(self, words, cwd):
+        self.started.append((words, Path(cwd)))
+        return {"answer": "answered", "detail": "se 0.5.0"}
+
+    def asked_for_copilot(self) -> bool:
+        return any("copilot" in w for w in self.which) or any(
+            "copilot" in Path(word).name for words, _ in self.started for word in words)
+
+
+def probe_rows(project: Path, home: Path, fakes: Fakes, env: dict | None = None) -> list[dict]:
+    copilot = d.copilot_plugins(env or {}, home)
+    probe = d.gather_probe(project, home, tmp_checkout(project), [], "linux", copilot_only(), which=fakes.find,
+                           start=fakes.start, copilot=copilot)
+    assert not fakes.asked_for_copilot()  # the probe never runs the Copilot CLI
+    return [r for r in probe["rows"] if r["place"] == "installed plugin MCP"]
+
+
+def tmp_checkout(project: Path) -> Path:
+    return project.parent / "se"
+
+
+def test_an_install_naming_a_missing_script_shows_it_with_the_fix_line(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    copilot_install(home / ".copilot", "se", "se")
+    fakes = Fakes()
+    [row] = probe_rows(project, home, fakes)
+    assert row["level"] == d.PROBLEM and row["file"] == "~/.copilot/installed-plugins/se/se/.github/mcp.json"
+    assert "scripts/se_mcp.sh, which does not exist" in row["text"]
+    assert row["fix"] == "copilot plugin marketplace add mb-89/SE && copilot plugin install se@se"
+    assert fakes.started == []
+
+
+def test_an_installs_relative_script_resolves_and_starts_in_the_install_not_the_project(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    (project / ".github").mkdir(parents=True)
+    (project / ".github" / "mcp.json").write_text(SE_MCP, encoding="utf-8")  # same words, no script here
+    root = copilot_install(home / ".copilot", "se", "se", script=True)
+    fakes = Fakes()
+    copilot = d.copilot_plugins({}, home)
+    probe = d.gather_probe(project, home, project, [], "linux", copilot_only(), which=fakes.find, start=fakes.start,
+                           copilot=copilot)
+    rows = {r["place"]: r for r in probe["rows"]}
+    assert rows["installed plugin MCP"]["level"] == d.OK and "answered initialize" in rows["installed plugin MCP"]["text"]
+    assert fakes.started == [(["/bin/bash", "scripts/se_mcp.sh", "--root", "."], root)]
+    assert rows["MCP door"]["level"] == d.PROBLEM and "which does not exist" in rows["MCP door"]["text"]
+    assert not fakes.asked_for_copilot()
+
+
+def test_a_direct_install_is_found_and_a_plugin_of_another_name_is_not(tmp_path: Path):
+    home = tmp_path / "home"
+    direct = copilot_install(home / ".copilot", "_direct", "mb-89-SE", manifest=".claude-plugin/plugin.json")
+    copilot_install(home / ".copilot", "se", "other", name="other")
+    assert d.copilot_plugins({}, home) == [direct]
+
+
+def test_without_an_install_one_row_says_so(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    [row] = probe_rows(project, home, Fakes())
+    assert "no installed Copilot SE plugin" in row["text"] and row["fix"]
+
+
+def test_copilot_home_is_read_in_place_of_dot_copilot(tmp_path: Path, monkeypatch):
+    home, project, elsewhere = tmp_path / "home", tmp_path / "project", tmp_path / "copilot-home"
+    project.mkdir()
+    copilot_install(home / ".copilot", "se", "se")
+    moved = copilot_install(elsewhere, "se", "se", script=True)
+    env = {"COPILOT_HOME": str(elsewhere)}
+    assert d.copilot_plugins(env, home) == [moved]
+    fakes = Fakes()
+    [row] = probe_rows(project, home, fakes, env)
+    assert row["level"] == d.OK and [cwd for _words, cwd in fakes.started] == [moved]
+    seen = {}
+    monkeypatch.setenv("SE_START_CACHE", str(home / "start-check.json"))
+    monkeypatch.setattr(d, "SE_ROOT", project)  # no git checkout: the door's real git stays unasked
+    monkeypatch.setattr(d, "gather_probe", lambda *_a, **k: seen.update(k) or {"platform": "linux", "rows": []})
+    d.gather(project, project, offline=True, env=env, home=home, probe=True)
+    assert seen["copilot"] == [moved]
+
+
+def test_the_user_level_fix_line_names_the_guides_door_only_while_a_copilot_plugin_is_installed(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+
+    def user_fix() -> str:
+        probe = d.gather_probe(project, home, tmp_checkout(project), [], "linux", copilot_only(), which=Fakes().find,
+                               start=Fakes().start, copilot=d.copilot_plugins({}, home))
+        return {r["place"]: r for r in probe["rows"]}["user MCP config"]["fix"]
+
+    assert user_fix().startswith("copilot mcp add se -- bash ")
+    copilot_install(home / ".copilot", "se", "se")
+    assert user_fix().startswith("copilot --agent se --additional-mcp-config ")
+
+
 def test_write_puts_the_report_into_one_file_under_dot_se(tmp_path: Path, monkeypatch, capsys):
     project = tmp_path / "project"
     project.mkdir()
