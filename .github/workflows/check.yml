@@ -148,10 +148,17 @@ jobs:
         if: needs.trust.outputs.trusted != 'true'
         working-directory: components
         run: time go vet ./...
-      # The budget's reference run (README "Test budget"): over a limit here, check fails.
+      # The budget's reference run (README "Test budget"): over a limit here, check fails. The
+      # nightly run is full: it runs every suite beside, also one whose paths the change does not
+      # touch, such as kern-long-step.
       - name: The complete suite and kern's tests, within their budgets
         if: needs.trust.outputs.trusted != 'true'
-        run: uv run python scripts/work_tickets.py suite --worktree .
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          full=()
+          if [ "$EVENT" = schedule ]; then full=(--full); fi
+          uv run python scripts/work_tickets.py suite --worktree . "${full[@]}"
       - name: kern and SE's start and hook passed on Windows and macOS
         env:
           PLATFORMS: ${{ needs.kern-platforms.result }}

@@ -193,7 +193,11 @@ One case waits for real: `contract/longstep_test.go`, behind the build tag `long
 step after a local phase of 130 s, longer than NATS's two minutes, the one limit on the path that
 no fake clock reaches. `go test ./...` leaves it out; SE runs it beside the suite as `se.toml`
 `[tests.beside.kern-long-step]` (`go test -tags longstep -run TestAStepAnswersAfterALongLocalPhase
-./contract/`).
+./contract/`), nightly and where a change touches the `paths` it guards.
+
+Its fast guards run in `go test ./...`, in milliseconds: `bus/expiry_test.go` holds that an
+instance's reply permission never expires where the core sets no reply wait, and
+`host/refused_test.go` that a step whose answer the bus refused fails at once.
 
 ## Release
 

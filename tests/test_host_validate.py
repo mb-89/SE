@@ -17,9 +17,6 @@ from host_validate import Answer  # noqa: E402
 
 PLUGIN, MARKETPLACE = ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"
 SKILLS = ("skills/decision", "skills/work-model", ".github/skills/decision")
-# The beside suites se.toml declares on main when this command arrived; the command adds none.
-BESIDE_ON_MAIN = ["kern", "go-components", "kern-long-step", "release-guard", "new-app",
-                  "se-components", "se-relay", "script-runs", "copilot-self-test"]
 
 
 @pytest.fixture
@@ -154,11 +151,24 @@ def test_help_gives_the_switch(capsys):
     assert "tests/beside_host_validators.py" in help_text
 
 
+def host_validator_suites(config: str) -> list[str]:
+    """The beside suites of an se.toml that run the hosts' validators: by the name the command's
+    help gives such an entry, or by a command naming the validators or their suite."""
+    beside = tomllib.loads(config).get("tests", {}).get("beside", {})
+    return [name for name, suite in beside.items() if "host-valid" in name
+            or any("host_valid" in part for part in suite.get("command", []))]
+
+
 def test_se_toml_declares_no_beside_suite_for_it():
-    beside = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["tests"]["beside"]
-    assert list(beside) == BESIDE_ON_MAIN
-    for suite in beside.values():
-        assert not any("host_valid" in part for part in suite["command"])
+    assert host_validator_suites((ROOT / "se.toml").read_text(encoding="utf-8")) == []
+
+
+def test_a_new_beside_suite_passes_and_one_that_runs_the_validators_is_named():
+    config = ('[tests]\ncommand = ["pytest"]\n[tests.beside.made-up]\ncommand = ["go", "test"]\n'
+              '[tests.beside.ui]\ncommand = ["uv", "run", "pytest", "-q", "-n", "0", '
+              '"tests/beside_host_validators.py"]\n[tests.beside.host-validators]\ncommand = ["x"]\n')
+    assert host_validator_suites(config) == ["ui", "host-validators"]
+    assert host_validator_suites(config.split("[tests.beside.ui]")[0]) == []
 
 
 def test_no_workflow_hook_role_or_skill_names_it():
