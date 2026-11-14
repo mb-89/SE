@@ -3,7 +3,8 @@
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
 `build` writes both layouts, the Claude Code plugin manifests, Copilot's hooks
 (`.github/hooks/se.json`, a layout setting: `Layout.hooks`), Copilot's one plugin manifest
-(`.github/plugin/plugin.json`) and the MCP door's declarations (`.github/mcp.json`, and a root
+(`.github/plugin/plugin.json`, or the root `plugin.json` where `se.toml` `[plugin] copilot_manifest`
+is `"root"`) and the MCP door's declarations (`.github/mcp.json`, and a root
 `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on); `check` refuses when any generated file
 differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
 validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
@@ -119,14 +120,25 @@ NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
 # Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
-# layout's .claude-plugin/plugin.json.
-COPILOT_MANIFEST = PurePosixPath(".github/plugin/plugin.json")
+# layout's .claude-plugin/plugin.json. Where it lies is the build setting se.toml [plugin]
+# copilot_manifest (`copilot_manifest`): unset, "github"; "root" puts it at the repository root, the
+# one place VS Code reads a Copilot-format manifest (MANIFEST_LOOKUPS). Every build writes exactly one.
+COPILOT_MANIFEST_PLACES = {"github": PurePosixPath(".github/plugin/plugin.json"),
+                           "root": PurePosixPath("plugin.json")}
+COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
 # The MCP door (README "MCP door"), declared per host: Copilot's project file, and the root file
 # Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`).
 COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
 ROOT_MCP_FILE = PurePosixPath(".mcp.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
-             COPILOT_HOOKS_FILE, COPILOT_MANIFEST, COPILOT_MCP_FILE, ROOT_MCP_FILE)
+             COPILOT_HOOKS_FILE, *COPILOT_MANIFEST_PLACES.values(), COPILOT_MCP_FILE, ROOT_MCP_FILE)
+# Which manifest each host's plugin install picks, in the order its documentation names, each place
+# with the format it reads there; documented, not measured (`manifest_pick`).
+MANIFEST_LOOKUPS = {
+    "copilot-cli": ((".plugin/plugin.json", "copilot"), ("plugin.json", "copilot"),
+                    (".github/plugin/plugin.json", "copilot"), (".claude-plugin/plugin.json", "claude")),
+    "vscode": (("plugin.json", "copilot"), (".claude-plugin/plugin.json", "claude")),
+}
 # The door's server: its key, and the launcher a host runs, standalone (scripts/se_mcp.sh). A project
 # file names it from the project's root, the folder its host starts it in; a plugin's manifest from
 # the plugin's root, whose variable a host sets in arguments only, never in the command.
@@ -330,15 +342,48 @@ def _version(root: Path) -> str:
     return version
 
 
+def _plugin_settings(root: Path) -> dict:
+    """`se.toml` `[plugin]`, refused where it holds what the build cannot read."""
+    with (root / "se.toml").open("rb") as handle:
+        table = tomllib.load(handle).get("plugin", {})
+    if (not isinstance(table, dict) or set(table) - {"root_mcp", "copilot_manifest"}
+            or not isinstance(table.get("root_mcp", False), bool)
+            or table.get("copilot_manifest", "github") not in COPILOT_MANIFEST_PLACES):
+        raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false` and "
+                          f"`copilot_manifest = {'|'.join(map(json.dumps, COPILOT_MANIFEST_PLACES))}`")
+    return table
+
+
 def root_mcp(root: Path) -> bool:
     """`se.toml` `[plugin] root_mcp`: whether the build writes a root `.mcp.json`, which Claude Code
     reads too; off by default."""
-    with (root / "se.toml").open("rb") as handle:
-        table = tomllib.load(handle).get("plugin", {})
-    value = table.get("root_mcp", False) if isinstance(table, dict) else None
-    if not isinstance(value, bool) or (isinstance(table, dict) and set(table) - {"root_mcp"}):
-        raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false`")
-    return value
+    return _plugin_settings(root).get("root_mcp", False)
+
+
+def copilot_manifest(root: Path) -> PurePosixPath:
+    """`se.toml` `[plugin] copilot_manifest`: where Copilot's one manifest lies; unset,
+    `.github/plugin/plugin.json`."""
+    return COPILOT_MANIFEST_PLACES[_plugin_settings(root).get("copilot_manifest", "github")]
+
+
+@dataclass(frozen=True)
+class Pick:
+    """The manifest one host's plugin install picks, with the format it reads it as."""
+
+    host: str
+    path: PurePosixPath
+    format: str  # "copilot" or "claude"
+    evidence: str = "documented"  # from the host's documentation, not measured
+
+
+def manifest_pick(names, host: str) -> Pick | None:
+    """Which manifest `host` (a key of MANIFEST_LOOKUPS) picks from a tree holding the files
+    `names` (POSIX paths relative to the plugin root); None where it finds none. Pure."""
+    present = {PurePosixPath(name) for name in names}
+    for place, form in MANIFEST_LOOKUPS[host]:
+        if PurePosixPath(place) in present:
+            return Pick(host, PurePosixPath(place), form)
+    return None
 
 
 def mcp_server(launcher: str) -> dict:
@@ -388,7 +433,7 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
                       for event, (command, seconds) in COPILOT_HOOKS.items()},
         })
     files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {**mcp_server(LAUNCHER), "tools": ["*"]}}})
-    files[COPILOT_MANIFEST] = _json({
+    files[copilot_manifest(root)] = _json({
         "name": PLUGIN,
         "version": plugin["version"],
         "description": DESCRIPTION,
