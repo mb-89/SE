@@ -1,0 +1,92 @@
+# The cold run's record: one entry per step of the Monday checklist in docs/copilot.md, filled
+# during the first Copilot run and pasted whole as the one comment on the person-step issue.
+# Name no person, machine, account or private repository in it: it is pasted where anyone reads.
+# Read it with: uv run python scripts/cold_run.py report docs/copilot-cold-run.toml
+
+[run]
+host = ""      # the Copilot host and its version, e.g. "Copilot CLI 1.0.112" or "VS Code 1.106"
+platform = ""  # e.g. "Linux", "macOS 15", "Windows 11 with Git for Windows"
+date = ""      # YYYY-MM-DD
+
+# Each step: result is "as expected", "differs" or "not run"; minutes is a whole number; beyond is
+# what was needed beyond the written step, or "nothing".
+
+[[step]]
+number = 1
+name = "Copilot CLI, SE's checkout"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 2
+name = "VS Code, SE's checkout"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 3
+name = "A real request, on a safe target"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 4
+name = "Plugin install, resume and the worker launch line, CLI"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 5
+name = "Windows"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 6
+name = "VS Code, another repository"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 7
+name = "Copilot CLI, another repository"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 8
+name = "On anything else"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[[step]]
+number = 9
+name = "Record the smoke test"
+result = "not run"
+minutes = 0
+beyond = "nothing"
+
+[asked]
+# After a request for a one-word README change: did the se agent file or queue the work, or print
+# the worker's launch line, while `git status --porcelain` in the checkout stayed empty?
+# "yes", "no" or "not run".
+dispatch = ""
+# The session's own list of its tools, agents and skills, pasted as it gave it.
+tools = """
+"""
+# Which manifest the install picked: .github/plugin/plugin.json or .claude-plugin/plugin.json.
+manifest = ""
+
+[proof]
+# The last step: `uv run python <se>/scripts/se_doctor.py --probe --write` writes the doctor's
+# report to .se/doctor.txt; keep that report beside this record and name it here. The step
+# changes nothing on the machine: the doctor only reads, and --write writes no file but its report.
+doctor = ""
