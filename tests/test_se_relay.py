@@ -141,6 +141,44 @@ def test_integrate_reads_the_pull_request_and_issue_from_the_relay(served, monke
     assert captured["issue_body"] == "## Requirements\n\n1. One.\n"
 
 
+def test_refresh_reads_the_issue_and_comments_from_the_relay(served, monkeypatch) -> None:
+    """Worker step 3 without gh: `refresh` reads the work issue through kern's relay, as `intake`
+    does, and reports what changed since intake."""
+    worktree, names = served
+
+    def no_gh(*a, **k):
+        raise work_tickets.MissingGhError("needs the GitHub CLI (gh)")
+
+    monkeypatch.setattr(work_tickets, "fetch_issue", no_gh)
+    body = ("<!-- se:fleet -->\n## Goal\n\nG.\n\n## Base branch\n\nmain\n\n## Requirements\n\n"
+            "1. One requirement.\n\n## Acceptance\n\n- [ ] It.\n")
+    issue = {"number": 42, "title": "feat/x", "body": body, "comments": 0,
+             "updated_at": "2026-11-13T09:00:00Z", "html_url": "https://github.com/alice/demo/issues/42"}
+    names["github/issues/alice.demo.42"] = snapshot(42, issue)
+    work_tickets.intake(worktree, 42, "alice/demo")
+    assert work_tickets.refresh(worktree, None, None)["changed"] is False
+    names["github/issues/alice.demo.42"] = snapshot(42, {**issue, "comments": 1})
+    names["github/comments/alice.demo.42"] = snapshot(42, [
+        {"id": 5, "body": "Also two.", "user": {"login": "mb-89"},
+         "created_at": "2026-11-13T09:05:00Z", "html_url": "https://github.com/alice/demo/issues/42#c5"}])
+    changes = work_tickets.refresh(worktree, None, None)
+    assert changes["changed"] is True
+    assert [c["body"] for c in changes["new_comments"]] == ["Also two."]
+
+
+def test_refresh_without_a_relay_falls_back_to_the_no_gh_message(tmp_path: Path, monkeypatch) -> None:
+    worktree = tmp_path / "wt"
+    (worktree / ".git").mkdir(parents=True)
+
+    def no_gh(*a, **k):
+        raise work_tickets.MissingGhError("needs the GitHub CLI (gh)")
+
+    monkeypatch.setattr(work_tickets, "fetch_issue", no_gh)
+    monkeypatch.setattr(work_tickets, "relay_for", lambda root: None)
+    with pytest.raises(work_tickets.MissingGhError, match="GitHub CLI"):
+        work_tickets.refresh(worktree, 42, "alice/demo")
+
+
 def test_the_work_issues_comments_are_read_where_the_tools_count_any(tmp_path: Path) -> None:
     """`issue_read get` names the comments only as their count: a count above 0 reads them as
     `issue_read get_comments`, and a missing read names that relay call, never a file; a count of

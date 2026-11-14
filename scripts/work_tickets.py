@@ -1920,7 +1920,13 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
             raise QueueError(
                 "No repository: pass --repo [HOST/]OWNER/REPO or add a git remote origin")
     feedback.phase(f"read work issue #{number}")
-    issue = fetch_issue(root, number, repo)
+    try:  # gh first; where the host gives it no account, kern's relay, else the no-gh message
+        issue = fetch_issue(root, number, repo)
+    except MissingGhError:
+        relay = relay_for(root)
+        if relay is None:
+            raise
+        issue = relay_issue(relay, root, repo, number)
     if previous is not None and previous["number"] != number:
         previous = None
     feedback.phase("compare it with the last read")
