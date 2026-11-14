@@ -55,15 +55,15 @@ func TestThePlatformNamesAProcesssStart(t *testing.T) {
 	if err := child.Run(); err != nil {
 		t.Fatal(err)
 	}
-	// Windows keeps an ended process's object while a handle to it stays open, as
-	// this case's exec.Cmd holds one; a dead core's pid has none. Neither names a start.
+	// Windows keeps an ended process's object while a handle to it stays open; a
+	// dead core's pid has none. Neither names a start.
 	if got := procMark(child.Process.Pid); got != "" {
 		t.Fatalf("the ended child's pid, its handle held, still names a start: %q", got)
 	}
+	// Release answers an error where Wait closed the handle already, as on
+	// Windows; either way no handle is held after it.
 	pid := child.Process.Pid
-	if err := child.Process.Release(); err != nil {
-		t.Fatal(err)
-	}
+	_ = child.Process.Release()
 	if got := procMark(pid); got != "" {
 		t.Fatalf("the ended child's pid, no handle held, still names a start: %q", got)
 	}
