@@ -1,5 +1,6 @@
-"""The fleet's settings as the repository records them, compared with the live settings
-(rule book wrk-008; AGENTS.md "Fleet settings" owns the file and the check).
+"""The fleet's settings as the repository records them, compared with the live settings: an
+advisory check, standalone, that nothing runs on its own and that never blocks a landing, a push
+or a session start. This docstring owns the file's format and the check.
 
 `fleet/settings.toml` records main's ruleset, the scheduled tasks and the cloud environment. Each
 part is read live through its own door, and only `work_tickets.py settings-check` opens the doors:
@@ -9,8 +10,11 @@ holds no door: it reads the recorded file and compares it with the answers it is
 tests need none.
 
 A recorded value `"unchecked: <reason>"` is never compared: it is a setting no door reads, or one
-that may not be written down here (pub-001). A part whose door is missing is reported unchecked,
-never as a difference, so a missing door never fails anything.
+that may not be written down here (pub-001): names of environment variables only, never values.
+A part whose door is missing is reported unchecked, never as a difference. The check exits 0
+whatever it finds; only `--strict` makes a difference exit 1.
+
+The comparison is pure: the recorded settings and the doors' answers in, the report's lines out.
 """
 from __future__ import annotations
 
@@ -56,7 +60,7 @@ def load(root: Path) -> dict[str, object]:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise SettingsError(f"No fleet settings: {path} is missing (AGENTS.md \"Fleet settings\")")
+        raise SettingsError(f"No fleet settings: {path} is missing")
     except tomllib.TOMLDecodeError as error:
         raise SettingsError(f"{path} is not valid TOML: {error}") from error
     for part in ("ruleset", "environment"):

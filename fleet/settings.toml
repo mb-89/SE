@@ -1,6 +1,6 @@
-# The fleet's settings as they stand live, recorded here (rule book wrk-008); AGENTS.md
-# "Fleet settings" owns this file's format and `work_tickets.py settings-check`, which compares it
-# with what the live doors read. Change a setting live and here in the same change.
+# The fleet's settings as they stand live, recorded here; `work_tickets.py settings-check` compares
+# it with what the live doors read, advisory only. scripts/fleet_settings.py owns this format.
+# Change a setting live and here in the same change.
 #
 # A value "unchecked: <reason>" is never compared: no door reads it, or it may not be written down
 # in this public repository (pub-001). Names of environment variables only, never their values.

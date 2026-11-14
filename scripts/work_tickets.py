@@ -8330,8 +8330,8 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
                            "tasks and the cloud environment from the answers of the session's "
                            "list_triggers and get_environment tools; a part whose door is missing "
                            "and a value recorded as unchecked are reported unchecked, never as a "
-                           "difference. Exit code 1 where a setting differs, 0 otherwise. It only "
-                           "reads",
+                           "difference. Advisory: exit code 0 whatever it finds, 1 for a "
+                           "difference only with --strict. It only reads",
          OPTIONAL_WORKTREE, REPO,
          arg("--ruleset", type=Path, metavar="FILE",
              help="the REST answer of GET repos/<owner>/<repo>/rules/branches/<branch>; default: "
@@ -8340,7 +8340,9 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
              help="the answer of the session's list_triggers tool (claude-code-remote)"),
          arg("--environment", type=Path, metavar="FILE",
              help="the answer of the session's get_environment tool (claude-code-remote), run in "
-                  "a session on the recorded environment"))
+                  "a session on the recorded environment"),
+         arg("--strict", action="store_true",
+             help="exit code 1 where a setting differs; default: advisory, exit code 0"))
 def run_settings_check(root: Path, args: argparse.Namespace) -> int:
     settings = sibling("fleet_settings")
 
@@ -8380,7 +8382,7 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
     except settings.SettingsError as error:
         raise QueueError(str(error)) from error
     print(settings.report(lines))
-    return 1 if any(line.kind == "difference" for line in lines) else 0
+    return 1 if args.strict and any(line.kind == "difference" for line in lines) else 0
 
 
 @command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "

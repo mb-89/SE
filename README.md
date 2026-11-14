@@ -1335,13 +1335,13 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
     Release kind (a re-integration's from its Re-integration kind); push requires it
 
 work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]
-                               [--scheduled-tasks FILE] [--environment FILE]
+                               [--scheduled-tasks FILE] [--environment FILE] [--strict]
     compare the fleet's settings the repository records (fleet/settings.toml) with the live ones,
     each difference in one line: main's ruleset through gh where it is signed in or from --ruleset,
     the scheduled tasks and the cloud environment from the answers of the session's list_triggers
     and get_environment tools; a part whose door is missing and a value recorded as unchecked are
-    reported unchecked, never as a difference. Exit code 1 where a setting differs, 0 otherwise. It
-    only reads
+    reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a
+    difference only with --strict. It only reads
 
 work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                       [--no-create] [--cloud-agent CLOUD_AGENT]
