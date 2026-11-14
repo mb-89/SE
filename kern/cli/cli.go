@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -46,8 +47,9 @@ import (
 var Greeting []string
 
 // Version is the application's version the MCP door names at initialize: an
-// application's main sets it before Run.
-var Version = "dev"
+// application's main may set it before Run; by default the build's own
+// module version, "(devel)" for a binary built from a checkout.
+var Version string
 
 // HoldEnv names a file a served core waits for before it stands its bus: a
 // test's way to show that `kern start` returns before the core answers.
@@ -334,7 +336,11 @@ func Wiring(root string) (index.Wiring, error) {
 // the core would serve, read without it, and the core started detached, with
 // grace and idle, or attached to, beside the protocol.
 func door(name, root string, grace, idle time.Duration, stderr io.Writer) int {
-	o := mcp.Options{App: name, Version: Version, Root: root, Greeting: Greeting, Log: stderr}
+	version := Version
+	if info, ok := debug.ReadBuildInfo(); ok && version == "" {
+		version = info.Main.Version
+	}
+	o := mcp.Options{App: name, Version: version, Root: root, Greeting: Greeting, Log: stderr}
 	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
 		o.Checkout = true
 	}
