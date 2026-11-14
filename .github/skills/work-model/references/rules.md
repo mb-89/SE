@@ -567,6 +567,22 @@ a report.
     ([Issues](../SKILL.md#issues)).
 - **Related:** wrk-002, dec-011
 
+### wrk-008 The fleet's settings live in the repository
+
+The settings the fleet runs on outside the repository are recorded in it, and a check compares
+the record with the live settings.
+
+- **Why:** settings kept only in GitHub's and claude.ai's pages change without a trace, and a
+  record nobody compares goes stale unnoticed.
+- **Without it:** a ruleset, a scheduled task or a cloud environment drifts and nobody sees it
+  until the fleet breaks on it.
+- **Prevents:** a live setting changed without a record; a record that no longer matches what
+  runs; a setting only its page knows.
+- **Implementations:**
+  - se: `fleet/settings.toml` and `work_tickets.py settings-check`
+    ([Fleet settings](../../../../AGENTS.md#fleet-settings)).
+- **Related:** wrk-001, gen-002
+
 ## dec: decisions
 
 Rules `dec-001` to `dec-009` are the decision skill's [checklist](../../decision/SKILL.md#the-checklist),
