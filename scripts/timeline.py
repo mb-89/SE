@@ -21,6 +21,13 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure.
   "late" when the day has passed.
   An open issue labelled `se-person` and not `backlogged` is marked "needs you" wherever it shows.
   A release is a tag `v<major>.<minor>.<patch>`, a marker on the day (UTC) it was tagged.
+- Ages, a setting off when absent: `[timeline] ages = true` in the `--config` file (se.toml by
+  default) also reads each issue's last label events in the same request and keeps `person_since`,
+  when it was last labelled `se-person`; each "needs you" mark then says how long it has waited,
+  in whole UTC calendar days to the read (`needs you, 3 days`, `needs you, 1 day`, `needs you,
+  today`). An issue with no such event, or a snapshot saved without it, keeps the bare mark. Absent
+  or false, the query, the snapshot and the page are those without the setting; any other value is
+  refused.
 - Show: top to bottom, one lane per repository: each past day with an event is one stop per lane
   (a filled dot, a count and a short label, the release if there was one), then the Today line,
   each planned day with an issue as one hollow stop per lane, Needs you and Next; tapping a stop lists its issues, tapping an issue shows the first paragraph of its Goal and
@@ -73,6 +80,21 @@ def repositories(config: Path = CONFIG) -> list[str]:
     return list(names)
 
 
+def ages_setting(config: Path = CONFIG) -> bool:
+    """se.toml's `[timeline] ages`: whether the "needs you" marks say how long they have waited; off when absent."""
+    try:
+        data = tomllib.loads(config.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"timeline: {config} does not parse ({error})") from error
+    section = data.get("timeline", {})
+    value = section.get("ages", False) if isinstance(section, dict) else False
+    if not isinstance(value, bool):
+        raise SystemExit(f"timeline: [timeline] ages in {config} must be true or false")
+    return value
+
+
 # --- Read -------------------------------------------------------------------------------------
 
 # One query per page and repository: a page of its issues and a page of its tags, each with what the
@@ -99,6 +121,18 @@ query($owner: String!, $name: String!, $issues: String, $tags: String,
   }
 }
 """
+# With `[timeline] ages` on, each issue also brings its last label events, in the same request.
+LABEL_EVENTS = (" timelineItems(itemTypes: [LABELED_EVENT], last: 10)"
+                " { nodes { ... on LabeledEvent { createdAt label { name } } } }")
+AGES_QUERY = QUERY.replace("labels(first: 30) { nodes { name } } }",
+                           "labels(first: 30) { nodes { name } }" + LABEL_EVENTS + " }")
+
+
+def query(ages: bool = False) -> str:
+    """The query one page and repository sends: today's, or with each issue's label events when ``ages``."""
+    return AGES_QUERY if ages else QUERY
+
+
 # A release is a tag v<major>.<minor>.<patch> (README "Release tags"); the moving v<major> is none.
 RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 
@@ -135,10 +169,19 @@ def tag_date(target: dict | None) -> str | None:
             or (target.get("target") or {}).get("committedDate"))
 
 
-def read(names: list[str], post: Poster, now: datetime) -> dict:
+def person_since(issue: dict) -> str | None:
+    """When an issue node was last labelled `se-person`: its newest such label event's `createdAt`, or None."""
+    events = ((issue.get("timelineItems") or {}).get("nodes")) or []
+    times = [event["createdAt"] for event in events
+             if event and (event.get("label") or {}).get("name") == PERSON and event.get("createdAt")]
+    return max(times, key=lambda stamp: datetime.fromisoformat(stamp.replace("Z", "+00:00"))) if times else None
+
+
+def read(names: list[str], post: Poster, now: datetime, ages: bool = False) -> dict:
     """The snapshot: per repository, its issues and its releases, as read at ``now``.
 
-    GraphQL's issues are issues only; pull requests are never read.
+    GraphQL's issues are issues only; pull requests are never read. With ``ages`` each issue also
+    keeps `person_since` ([timeline] ages); without it the snapshot is the same as before the setting.
     """
     snapshot: dict = {"read_at": now.astimezone(timezone.utc).isoformat(timespec="seconds"), "repositories": {}}
     for name in names:
@@ -148,7 +191,7 @@ def read(names: list[str], post: Poster, now: datetime) -> dict:
         cursors: dict[str, str | None] = {"issues": None, "tags": None}
         more = {"issues": True, "tags": True}
         while more["issues"] or more["tags"]:
-            data = post(QUERY, {"owner": owner, "name": repo, **cursors,
+            data = post(query(ages), {"owner": owner, "name": repo, **cursors,
                                 "withIssues": more["issues"], "withTags": more["tags"]})
             repository = data.get("repository")
             if repository is None:
@@ -169,6 +212,7 @@ def read(names: list[str], post: Poster, now: datetime) -> dict:
                 "closed_at": issue.get("closedAt"),
                 "labels": sorted(label["name"] for label in issue["labels"]["nodes"]),
                 "body": issue.get("body") or "",
+                **({"person_since": person_since(issue)} if ages else {}),
             } for issue in issues],
             "releases": [{
                 "tag": tag["name"],
@@ -237,8 +281,18 @@ def day(timestamp: str) -> str:
     return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(timezone.utc).date().isoformat()
 
 
-def model(snapshot: dict) -> dict:
-    """The page's content from the snapshot alone: lanes, past days, the open places and the backlog."""
+def waiting_days(since: str | None, read_at: str) -> int | None:
+    """Whole UTC calendar days from ``since`` to ``read_at``, never below 0; None without ``since``."""
+    if not since:
+        return None
+    return max(0, (date.fromisoformat(day(read_at)) - date.fromisoformat(day(since))).days)
+
+
+def model(snapshot: dict, ages: bool = False) -> dict:
+    """The page's content from the snapshot alone: lanes, past days, the open places and the backlog.
+
+    With ``ages`` ([timeline] ages) each entry that needs you also gets `waiting_days`.
+    """
     lanes = list(snapshot["repositories"])
     today = day(snapshot["read_at"])
     days: dict[str, dict[str, dict]] = {}
@@ -255,6 +309,8 @@ def model(snapshot: dict) -> dict:
             if where is None:
                 continue
             entry = {**issue, "needs_you": needs_you(issue), "goal": goal(issue["body"]), "late": False}
+            if ages and entry["needs_you"]:
+                entry["waiting_days"] = waiting_days(issue.get("person_since"), snapshot["read_at"])
             plan = planned(issue["body"]) if where in ("today", "next", "needs-you") else None
             if where == "done":
                 stop(day(issue["closed_at"]), lane)["issues"].append(entry)
@@ -358,8 +414,17 @@ def lane_name(name: str) -> str:
     return name.split("/", 1)[1]
 
 
+def needs_you_mark(waiting: int | None) -> str:
+    """The "needs you" mark's text: bare without an age, else how long it has waited."""
+    if waiting is None:
+        return "needs you"
+    if waiting == 0:
+        return "needs you, today"
+    return f"needs you, {waiting} day" + ("" if waiting == 1 else "s")
+
+
 def marks(issue: dict) -> str:
-    return (('<span class="mark">needs you</span>' if issue["needs_you"] else "")
+    return ((f'<span class="mark">{needs_you_mark(issue.get("waiting_days"))}</span>' if issue["needs_you"] else "")
             + ('<span class="mark">late</span>' if issue.get("late") else ""))
 
 
@@ -505,16 +570,17 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--destination", type=Path, required=True, help="the HTML file to write")
     parser.add_argument("--snapshot", type=Path, help="build from this snapshot file instead of reading GitHub")
     parser.add_argument("--save-snapshot", type=Path, help="also write the snapshot read to this file")
-    parser.add_argument("--config", type=Path, default=CONFIG, help="the se.toml naming the repositories")
+    parser.add_argument("--config", type=Path, default=CONFIG, help="the se.toml naming the repositories and [timeline] ages")
     return parser
 
 
-def main(argv: list[str] | None = None, post: Poster | None = None) -> int:
+def main(argv: list[str] | None = None, post: Poster | None = None, now: datetime | None = None) -> int:
     args = make_parser().parse_args(argv)
     routed = sibling("se_components").routed(
         Path(__file__), [], list(sys.argv[1:] if argv is None else argv), False)
     if routed is not None:
         return routed
+    ages = ages_setting(args.config)
     if args.snapshot:
         try:
             snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))
@@ -529,14 +595,14 @@ def main(argv: list[str] | None = None, post: Poster | None = None) -> int:
                   file=sys.stderr)
             return 2
         try:
-            snapshot = read(names, post or http_poster(token), datetime.now(timezone.utc))
+            snapshot = read(names, post or http_poster(token), now or datetime.now(timezone.utc), ages=ages)
         except ReadError as error:
             print(f"timeline: {error}", file=sys.stderr)
             return 1
     if args.save_snapshot:
         args.save_snapshot.write_text(json.dumps(snapshot, indent=1), encoding="utf-8")
     args.destination.parent.mkdir(parents=True, exist_ok=True)
-    page = model(snapshot)
+    page = model(snapshot, ages=ages)
     args.destination.write_text(render(page), encoding="utf-8")
     done = sum(len(stop["issues"]) for stops in page["days"].values() for stop in stops.values())
     print(f"timeline: wrote {args.destination} ({len(page['days'])} days, {done} done issues)")

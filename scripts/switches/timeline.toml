@@ -1,0 +1,12 @@
+# SE's switches, timeline group: the Timeline's settings (scripts/timeline.py), one [[switch]]
+# each; core.toml's header owns the keys of a row, scripts/se_switches.py's docstring the format.
+
+[[switch]]
+name = "[timeline] ages"
+kind = "se.toml"
+reader = "scripts/timeline.py"
+default = "off"
+layers = ["se.toml"]
+key = "timeline.ages"
+help = "scripts/timeline.py"
+note = "on: each needs-you mark says how long it has waited"
