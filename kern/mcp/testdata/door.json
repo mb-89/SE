@@ -1,0 +1,92 @@
+{
+  "tools/call desk": {
+    "content": [
+      {
+        "text": "reading\ntwo items",
+        "type": "text"
+      }
+    ]
+  },
+  "tools/list tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "app desk"
+      },
+      "description": "The desk: what waits on it. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `desk list`: Lists what waits on the desk; use it to see what to do next. Usage: `desk list [--all]`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "desk list"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "desk",
+      "title": "app desk"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "app greeting"
+      },
+      "description": "app's start greeting, live from its core: what is due and what is queued. Use it at the start of a session, and whenever you ask what to do next. It reads:\n- `desk/due`: How many items are due.\n- `desk list`: Lists what waits on the desk; use it to see what to do next.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "greeting",
+      "title": "app greeting"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "app status"
+      },
+      "description": "Whether app's core runs in this checkout, and its health: pid, bus, the sessions holding a lease, the instances and the placed processes. Use it when another tool of this server answers \"starting\" or fails, or to see what the core carries; it never starts anything the door has not.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "status",
+      "title": "app status"
+    }
+  ]
+}

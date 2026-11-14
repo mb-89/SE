@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -568,5 +571,55 @@ func TestAToolIsNamedInSnakeCase(t *testing.T) {
 	}
 	if got := tools[len(tools)-1]; got.Name != "front_desk" || got.Instance != "front-desk" {
 		t.Fatalf("the instance front-desk's tool is %+v, and wants the name front_desk", got)
+	}
+}
+
+// golden rewrites testdata/door.json from what the door answers now.
+var golden = flag.Bool("golden", false, "rewrite testdata/door.json from the door's answers")
+
+// The door's tools and one answer are its public face: the tools tools/list
+// names and a call of desk answer, byte for byte as JSON, what
+// testdata/door.json holds, so a bump of the SDK or of Go that changes either
+// fails here. Rewrite it with
+// go test ./mcp -run TestTheToolsAndAnAnswerStayTheSame -golden, only where
+// the change is meant.
+func TestTheToolsAndAnAnswerStayTheSame(t *testing.T) {
+	core := &fakeCore{running: true, answers: map[string]host.CallAnswer{"desk list": {Text: "two items", Lines: []string{"reading"}}}}
+	c := open(t, options(core, catalog(t)))
+	c.initialize()
+	var list struct {
+		Tools any `json:"tools"`
+	}
+	var answer any
+	if err := json.Unmarshal(c.ask("tools/list", map[string]any{}), &list); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(c.ask("tools/call", map[string]any{"name": "desk", "arguments": map[string]any{"command": "desk list"}}), &answer); err != nil {
+		t.Fatal(err)
+	}
+	// The tools of tools/list, not its envelope: the protocol's own fields
+	// beside them are the SDK's.
+	answers := map[string]any{"tools/list tools": list.Tools, "tools/call desk": answer}
+	c.hangUp()
+	got, err := json.MarshalIndent(answers, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	path := filepath.Join("testdata", "door.json")
+	if *golden {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != strings.ReplaceAll(string(want), "\r\n", "\n") {
+		t.Fatalf("the door answers\n%s\nand wants what %s holds:\n%s", got, filepath.ToSlash(path), want)
 	}
 }
