@@ -90,7 +90,8 @@ def test_intake_reads_the_issue_and_comments_from_the_relay(served) -> None:
     body = ("<!-- se:fleet -->\n## Goal\n\nG.\n\n## Base branch\n\nmain\n\n## Requirements\n\n"
             "1. One requirement.\n\n## Acceptance\n\n- [ ] It.\n")
     names["github/issues/alice.demo.42"] = snapshot(42, {
-        "number": 42, "title": "feat/x", "body": body, "html_url": "https://github.com/alice/demo/issues/42"})
+        "number": 42, "title": "feat/x", "body": body, "comments": 1,
+        "html_url": "https://github.com/alice/demo/issues/42"})
     names["github/comments/alice.demo.42"] = snapshot(42, [
         {"id": 5, "body": "Started", "user": {"login": "mb-89"},
          "created_at": "2026-11-13T09:00:00Z", "html_url": "https://github.com/alice/demo/issues/42#c5"}])
@@ -138,3 +139,25 @@ def test_integrate_reads_the_pull_request_and_issue_from_the_relay(served, monke
         relay, worktree, 9, "alice/demo")
     assert number == 42 and pull["headRefName"] == "feat/x" and pull["headRefOid"] == "deadbeef"
     assert captured["issue_body"] == "## Requirements\n\n1. One.\n"
+
+
+def test_the_work_issues_comments_are_read_where_the_tools_count_any(tmp_path: Path) -> None:
+    """`issue_read get` names the comments only as their count: a count above 0 reads them as
+    `issue_read get_comments`, and a missing read names that relay call, never a file; a count of
+    0 reads none."""
+    issue = {"number": 7, "title": "feat/x", "body": "B.", "comments": 2,
+             "html_url": "https://github.com/alice/demo/issues/7"}
+    names: dict[str, object] = {"github/issues/alice.demo.7": snapshot(7, issue)}
+    relay = FakeRelay(tmp_path, names)
+    with pytest.raises(se_relay.RelayError) as raised:
+        work_tickets.relay_issue_read(relay, "alice", "demo", 7)
+    assert 'issue_read {"issue_number": 7, "method": "get_comments"' in str(raised.value)
+    assert "--comments-file" not in str(raised.value)
+    names["github/comments/alice.demo.7"] = snapshot(7, [
+        {"id": 1, "body": "One.", "user": {"login": "alice"}, "created_at": "2026-11-13T09:00:00Z"},
+        {"id": 2, "body": "Two.", "user": {"login": "bob"}, "created_at": "2026-11-13T09:01:00Z"}])
+    assert [c["body"] for c in work_tickets.relay_issue_read(relay, "alice", "demo", 7)["comments"]] == [
+        "One.", "Two."]
+    names.clear()
+    names["github/issues/alice.demo.7"] = snapshot(7, {**issue, "comments": 0})
+    assert work_tickets.relay_issue_read(relay, "alice", "demo", 7)["comments"] == []
