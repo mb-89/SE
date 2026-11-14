@@ -209,6 +209,67 @@ func TestASessionsLeaseHoldsTheCore(t *testing.T) {
 	ended(t, c, "no session has held a lease")
 }
 
+// call.core.lease takes a session's lease without a hook event, as the MCP
+// door holds one, and returns it; the last one out leaves the core its grace.
+// A body without a session is refused.
+func TestTheLeaseSubjectHoldsAndReturnsASession(t *testing.T) {
+	t.Parallel()
+	clk := newClock()
+	c := served(t, host.Options{Clock: clk})
+	client := as(t, c, bus.Client)
+	var got struct {
+		Sessions []string `json:"sessions"`
+		Error    string   `json:"error"`
+	}
+	ask(t, client, host.LeaseSubject, host.Lease{Session: "door"}, &got)
+	if len(got.Sessions) != 1 || got.Sessions[0] != "door" {
+		t.Fatalf("call.core.lease answers %+v, and wants the session door holding a lease", got)
+	}
+	clk.move(5 * time.Minute)
+	c.Check()
+	running(t, c)
+	ask(t, client, host.LeaseSubject, map[string]string{}, &got)
+	if !strings.Contains(got.Error, "no {\"session_id\": <id>}") {
+		t.Fatalf("call.core.lease without a session answers %+v, and wants it refused", got)
+	}
+	ask(t, client, host.LeaseSubject, host.Lease{Session: "door", End: true}, &got)
+	if len(got.Sessions) != 0 {
+		t.Fatalf("call.core.lease's end answers %+v, and wants no session left", got)
+	}
+	clk.move(host.Grace)
+	c.Check()
+	ended(t, c, "no session has held a lease")
+}
+
+// Catalog answers the catalog a core would serve, its declared components
+// read from the checkout, without serving it.
+func TestTheCatalogIsReadWithoutTheCore(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "components", "desk")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	decl := "name = \"desk\"\ncontract = 1\nhelp = \"The desk.\"\n\n[commands.\"desk list\"]\nusage = \"desk list\"\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"interactive\"\nmcp = \"Lists the desk.\"\n"
+	if err := os.WriteFile(filepath.Join(dir, index.DeclarationFile), []byte(decl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := index.ParseWiring([]byte("[instances.desk]\ncomponent = \"desk\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := host.Catalog(root, w, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci, ok := c.Command("desk list"); !ok || ci.Instance != "desk" || ci.MCP != "Lists the desk." {
+		t.Fatalf("the catalog's desk list is %+v (%v), and wants desk's with its mcp description", ci, ok)
+	}
+	if _, err := host.ReadStanding(root); !errors.Is(err, host.ErrNotRunning) {
+		t.Fatalf("reading the catalog stood a core: %v", err)
+	}
+}
+
 // A session that holds its lease and posts nothing for the idle span ends the core all the same.
 func TestTheCoreEndsWhenIdle(t *testing.T) {
 	t.Parallel()

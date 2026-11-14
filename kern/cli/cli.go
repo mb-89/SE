@@ -7,6 +7,7 @@
 //	<name> stop   [--root DIR]                          stop the core and wait until it has exited
 //	<name> serve  [--root DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
 //	<name> hook <event> [--root DIR] [--wait D] [--unanswered N]  post the host's hook JSON on stdin to the core
+//	<name> mcp    [--root DIR] [--grace D] [--idle D]   the MCP door over stdio, starting the core or attaching to it (package mcp)
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
@@ -19,6 +20,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -35,7 +37,17 @@ import (
 	_ "github.com/mb-89/kern/git/gitfake"
 	"github.com/mb-89/kern/host"
 	"github.com/mb-89/kern/index"
+	"github.com/mb-89/kern/mcp"
 )
+
+// Greeting are the names and read-only commands the MCP door's greeting tool
+// reads, in order: an application's main sets them before Run; none offers no
+// greeting tool.
+var Greeting []string
+
+// Version is the application's version the MCP door names at initialize: an
+// application's main sets it before Run.
+var Version = "dev"
 
 // HoldEnv names a file a served core waits for before it stands its bus: a
 // test's way to show that `kern start` returns before the core answers.
@@ -46,7 +58,7 @@ const HoldEnv = "KERN_HOLD_START"
 // show that a step that beats outlives it.
 const StepWaitEnv = "KERN_STEP_WAIT"
 
-const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
+const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
 
 // Run is the command named name: it serves the components registered with
 // index.Register before it is called, and answers the exit code.
@@ -65,7 +77,7 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 	var grace, idle, wait *time.Duration
 	var asJSON *bool
 	switch verb {
-	case "start", "serve":
+	case "start", "serve", "mcp":
 		grace = fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
 		idle = fs.Duration("idle", host.Idle, "how long the core runs without any event")
 	case "status":
@@ -85,6 +97,8 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch verb {
+	case "mcp":
+		return door(name, dir, *grace, *idle, stderr)
 	case "start":
 		bin, err := os.Executable()
 		if err != nil {
@@ -261,12 +275,9 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		_ = os.Remove(host.ClaimPath(root))
 		return 2
 	}
-	var w index.Wiring
-	path := filepath.Join(root, index.WiringFile)
-	if _, err := os.Stat(path); err == nil {
-		if w, err = index.ReadWiring(path); err != nil {
-			return die(fmt.Sprintf("%s serve: %v", name, err))
-		}
+	w, err := Wiring(root)
+	if err != nil {
+		return die(fmt.Sprintf("%s serve: %v", name, err))
 	}
 	var stepWait time.Duration
 	if v := os.Getenv(StepWaitEnv); v != "" {
@@ -275,17 +286,6 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 			return die(fmt.Sprintf("%s serve: %s=%q is no duration, such as 60s", name, StepWaitEnv, v))
 		}
 		stepWait = d
-	}
-	// The ad hoc wiring overlay, .se/wiring.toml, holds the instances `se
-	// component add` placed under the ignored .se/ (index.ReadWiring comment on
-	// Merge); it is read after the tracked wiring and merged into it.
-	overlay := filepath.Join(root, ".se", index.WiringFile)
-	if _, err := os.Stat(overlay); err == nil {
-		o, err := index.ReadWiring(overlay)
-		if err != nil {
-			return die(fmt.Sprintf("%s serve: %v", name, err))
-		}
-		w.Merge(o)
 	}
 	core, err := host.Serve(host.Options{
 		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
@@ -304,6 +304,55 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		<-core.Ended()
 	}
 	fmt.Fprintf(stdout, "%s: ended, %s\n", name, core.Reason())
+	return 0
+}
+
+// Wiring is the wiring a core serves in the checkout at root: wiring.toml
+// where it has one, with the ad hoc overlay, .se/wiring.toml, which holds the
+// instances `se component add` placed under the ignored .se/ (index.ReadWiring
+// comment on Merge), read after it and merged into it.
+func Wiring(root string) (index.Wiring, error) {
+	var w index.Wiring
+	path := filepath.Join(root, index.WiringFile)
+	if _, err := os.Stat(path); err == nil {
+		if w, err = index.ReadWiring(path); err != nil {
+			return w, err
+		}
+	}
+	overlay := filepath.Join(root, ".se", index.WiringFile)
+	if _, err := os.Stat(overlay); err == nil {
+		o, err := index.ReadWiring(overlay)
+		if err != nil {
+			return w, err
+		}
+		w.Merge(o)
+	}
+	return w, nil
+}
+
+// door serves the MCP door over stdio until the client hangs up: the catalog
+// the core would serve, read without it, and the core started detached, with
+// grace and idle, or attached to, beside the protocol.
+func door(name, root string, grace, idle time.Duration, stderr io.Writer) int {
+	o := mcp.Options{App: name, Version: Version, Root: root, Greeting: Greeting, Log: stderr}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		o.Checkout = true
+	}
+	w, err := Wiring(root)
+	if err == nil {
+		o.Catalog, err = host.Catalog(root, w, index.Registered())
+	}
+	o.CatalogErr = err
+	bin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s mcp: no path to this binary: %v\n", name, err)
+		return 2
+	}
+	o.Core = mcp.Host{Root: root, Bin: bin, Args: []string{"--grace", grace.String(), "--idle", idle.String()}}
+	if err := mcp.Serve(context.Background(), o, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(stderr, "%s mcp: %v\n", name, err)
+		return 2
+	}
 	return 0
 }
 
