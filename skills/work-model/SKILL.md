@@ -702,6 +702,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
       the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
     - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
       branch.
+    - Its warning on platform code ([worker](../../agents/worker.md#procedure), "Platform code")
+      reads the work pull request's check runs from kern's relay, for the pull request `stop-check
+      --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
+      `get_check_runs`.
     - A commit after delivery changes the tip: run the check again and update the pull request's
       description in place.
     - A refused report is fixed and checked again, never delivered.

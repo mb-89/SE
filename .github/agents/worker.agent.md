@@ -147,16 +147,15 @@ every package, so work issues and session prompts never repeat it.
      (`*_windows.go`, `*_darwin.go`, `//go:build` tags, `runtime.GOOS`, `sys.platform` or
      `os.name` branches, `.ps1` files, the start and hook scripts `kern-platforms` runs), only
      the CI job `kern-platforms` tests it, and a worker cannot run it.
-     - Push the branch and open its work pull request first (`deliver`, or without gh `push` and
-       the GitHub tools), but do not notify the integrator yet.
+     - Push the branch and open its work pull request first (`deliver`, or
+       [without gh](../skills/work-model/SKILL.md#without-gh) its steps), but do not notify the
+       integrator yet.
      - Wait until that pull request's own `kern-platforms` legs are green. Fix a red leg on the
        branch and push again, so a landing never debugs it.
      - Link each green leg's job page in the evidence table. Then check and deliver again, and
        notify.
      - The check and `deliver` warn, without refusing, where such a branch's report links no
-       green job of each leg, and they name the legs and job links they read. Without gh they
-       read the pull request's check runs from kern's relay, or from `--check-runs <file>`, the
-       answer of `pull_request_read` `get_check_runs`.
+       green job of each leg, and they name the legs and job links they read.
    - Then run `work_tickets.py deliver`; it merges current main first, checks the report and runs
      the guard again against the merge, pushes, creates or updates the pull request with the field
      report as its description (as `work_tickets.py pr-body` prints it), files no issue, and prints

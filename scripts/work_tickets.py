@@ -2812,7 +2812,7 @@ PLATFORM_BRANCH = re.compile(
 #: The code files PLATFORM_BRANCH is looked for in; prose that names a branch branches on nothing.
 PLATFORM_CODE = (".go", ".py", ".sh", ".ps1")
 #: A GitHub Actions job's page, as a field report links it: its run's and its job's id.
-JOB_LINK = re.compile(r"https://[^\s)<>\]`'\"]+/actions/runs/(\d+)/job/(\d+)")
+JOB_LINK = re.compile(r"/actions/runs/(\d+)/job/(\d+)\b")
 
 
 def platform_legs(root: Path) -> list[str]:
