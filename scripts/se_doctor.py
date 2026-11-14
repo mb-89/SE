@@ -23,6 +23,8 @@ Two options, both off by default; without them the report is the same as before 
   for an MCP command one `initialize` with a time limit, which may start the core as a host's own
   spawn would. A missing or broken one ends with its fix line, which names this checkout's
   launcher exactly, to paste: under home as `$HOME/...`, else by its full path.
+  Copilot CLI's plugin installs under `$COPILOT_HOME` (or `~/.copilot`) are listed only here, their
+  servers started in the install's folder as Copilot starts them; `copilot` itself never runs.
 - `--write` also puts the report into one file, `.se/doctor.txt` (`.se/doctor.json` with `--json`)
   in the project, to paste whole.
 
@@ -479,38 +481,60 @@ def probe_command(words: list[str], kind: str, cwd: Path, which=shutil.which, st
     return probe
 
 
+def _text(file: Path) -> str | None:
+    try:
+        return file.read_text(encoding="utf-8") if file.is_file() else None
+    except OSError:
+        return None
+
+
+def copilot_plugins(env: dict[str, str], home: Path) -> list[Path]:
+    """SE's plugin folders under Copilot's home: the folders listed here, their manifests read here,
+    host_registrations' resolver picking SE's. Runs no `copilot`."""
+    base = Path(host_registrations.copilot_home(env, str(home)))
+    try:
+        folders = [f for f in base.glob("/".join(host_registrations.COPILOT_PLUGIN_FOLDERS)) if f.is_dir()]
+    except OSError:
+        folders = []
+    found = {f: [_text(f / m) for m in host_registrations.COPILOT_MANIFESTS] for f in folders}
+    return host_registrations.copilot_plugin_roots(found)
+
+
+NO_ROOT = {"plugin": "no installed SE plugin", "copilot-plugin": "no installed Copilot SE plugin"}
+
+
 def gather_probe(project: Path, home: Path, checkout: Path, plugins: list[Path], platform: str,
-                 data: dict, which=shutil.which, start=initialize) -> dict:
+                 data: dict, which=shutil.which, start=initialize, copilot: list[Path] = ()) -> dict:
     """The registration rows: each place's file read, its SE commands probed, the rows judged by
-    host_registrations."""
+    host_registrations. A plugin's commands start in its root where the host starts them there
+    (Copilot's installs), so their scripts resolve against it, not against the project."""
     places = host_registrations.parse(data.get("registrations", {}))
     common = {"HOME": str(home), "CLAUDE_PROJECT_DIR": str(project), "workspaceFolder": str(project)}
     entries = []
     for place in places:
-        if place.base == "plugin":
-            roots = [(root, {"CLAUDE_PLUGIN_ROOT": str(root), "PLUGIN_ROOT": str(root)}) for root in plugins]
+        if place.base in NO_ROOT:
+            found = plugins if place.base == "plugin" else copilot
+            roots = [(root, {"CLAUDE_PLUGIN_ROOT": str(root), "PLUGIN_ROOT": str(root)}) for root in found]
         else:
             base = {"project": project, "home": home, "checkout": checkout}[place.base]
             extra = {"PLUGIN_ROOT": str(checkout)} if place.base == "checkout" else {}
             roots = [(base, extra)]
         if not roots:
-            entries.append((place, host_registrations.Seen("no installed SE plugin", None)))
+            entries.append((place, host_registrations.Seen(NO_ROOT[place.base], None)))
         for root, extra in roots:
             file = root / place.file(platform)
-            try:
-                text = file.read_text(encoding="utf-8") if file.is_file() else None
-            except OSError:
-                text = None
             here = place.outside or project == checkout
-            entries.append((place, host_registrations.Seen(shown(file, checkout, home), text, common | extra, here)))
+            cwd = str(root) if place.base == "copilot-plugin" else ""
+            entries.append((place, host_registrations.Seen(shown(file, checkout, home), _text(file), common | extra,
+                                                           here, cwd)))
     probes: dict[str, dict] = {}
     for place, seen in entries:
         if not seen.here:
             continue
         for words in host_registrations.commands(place, seen.text, platform, seen.variables):
-            name = host_registrations.key(words)
+            name = host_registrations.probe_key(words, seen.cwd)
             if name not in probes:
-                probes[name] = probe_command(words, place.kind, project, which, start)
+                probes[name] = probe_command(words, place.kind, Path(seen.cwd) if seen.cwd else project, which, start)
     fill = {"launcher": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.sh"), str(home)),
             "launcher_ps1": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.ps1"), str(home)),
             "checkout": host_registrations.launcher_text(str(checkout), str(home))}
@@ -549,7 +573,8 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "network": None if offline else gather_network(),
     }
     if probe:
-        facts["probe"] = gather_probe(project, home, checkout, roots, platform_name(), _toml(HOST_FACTS))
+        facts["probe"] = gather_probe(project, home, checkout, roots, platform_name(), _toml(HOST_FACTS),
+                                      copilot=copilot_plugins(env, home))
     return facts
 
 
