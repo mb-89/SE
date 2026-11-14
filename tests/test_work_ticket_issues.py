@@ -4901,7 +4901,7 @@ BRANCHING_DIFF = """diff --git a/scripts/tool.py b/scripts/tool.py
 PLAIN_DIFF = """diff --git a/docs/note.md b/docs/note.md
 +++ b/docs/note.md
 @@ -1 +1 @@
-+A note.
++A note on `sys.platform` and `//go:build` branches.
 """
 
 

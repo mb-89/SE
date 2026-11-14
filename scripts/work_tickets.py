@@ -2809,6 +2809,8 @@ PLATFORM_SCRIPTS = ("scripts/bootstrap.sh", "scripts/se_hook.sh", "tests/test_bo
 #: Code that branches on the platform, in a changed hunk: build tags, Go's and Python's tests of it.
 PLATFORM_BRANCH = re.compile(
     r"//go:build|// \+build|runtime\.GOOS|sys\.platform|\bos\.name\b|platform\.system\(")
+#: The code files PLATFORM_BRANCH is looked for in; prose that names a branch branches on nothing.
+PLATFORM_CODE = (".go", ".py", ".sh", ".ps1")
 #: A GitHub Actions job's page, as a field report links it: its run's and its job's id.
 JOB_LINK = re.compile(r"https://[^\s)<>\]`'\"]+/actions/runs/(\d+)/job/(\d+)")
 
@@ -2827,8 +2829,9 @@ def platform_legs(root: Path) -> list[str]:
 
 def platform_changes(root: Path) -> list[str]:
     """The files the branch changes since the integration branch that are platform-specific: by
-    name (PLATFORM_FILE, PLATFORM_SCRIPTS) or where a changed hunk, its context lines included,
-    branches on the platform (PLATFORM_BRANCH); [] where git cannot tell."""
+    name (PLATFORM_FILE, PLATFORM_SCRIPTS) or where a changed hunk of a code file (PLATFORM_CODE),
+    its context lines included, branches on the platform (PLATFORM_BRANCH); [] where git cannot
+    tell."""
     result = run_git(root, "diff", "--unified=3", f"{integration_ref(root)}...HEAD")
     if result.returncode != 0:
         return []
@@ -2839,8 +2842,8 @@ def platform_changes(root: Path) -> list[str]:
             path = line.rsplit(" b/", 1)[-1]
             if PLATFORM_FILE.search(path) or path in PLATFORM_SCRIPTS:
                 found[path] = None
-        elif path and line[:1] in "+- " and not line.startswith(("+++", "---")) and (
-                PLATFORM_BRANCH.search(line)):
+        elif path.endswith(PLATFORM_CODE) and line[:1] in "+- " and not line.startswith(
+                ("+++", "---")) and PLATFORM_BRANCH.search(line):
             found[path] = None
     return list(found)
 
