@@ -1,0 +1,19 @@
+{"type": "queue-operation", "operation": "enqueue"}
+{"type": "user", "timestamp": "2026-01-01T10:00:00Z", "message": {"role": "user", "content": "Please count the lines of the synthetic input."}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:01Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Counting them."}]}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:02Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a1", "name": "Bash", "input": {"command": "uv run python scripts/transcript_signals.py --json first.jsonl"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:03Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a1", "content": "ok", "is_error": false}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:04Z", "message": {"role": "user", "content": "No, use the other branch instead."}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a2", "name": "Bash", "input": {"command": "make widget"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:06Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a2", "content": "error: no rule", "is_error": true}]}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:07Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a3", "name": "Bash", "input": {"command": "make widget"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:08Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a3", "content": "ok", "is_error": false}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:09Z", "message": {"role": "user", "content": "That looks fine, now please go on with the next part of the task and write the counting script for the synthetic data."}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:10Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a4", "name": "Write", "input": {"file_path": "tools/count.py", "content": "import sys\n\ndef main():\n    total = 0\n    for line in sys.stdin:\n        total += len(line)\n    print(total)\n\nmain()"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:11Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a4", "content": "written", "is_error": false}]}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:12Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a5", "name": "Bash", "input": {"command": "uv run python scripts/transcript_signals.py --json second.jsonl"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:13Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a5", "content": "The user doesn't want to proceed with this tool use. The tool use was rejected.", "is_error": true}]}}
+{"type": "assistant", "timestamp": "2026-01-01T10:00:14Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a6", "name": "Bash", "input": {"command": "uv run python scripts/transcript_signals.py --json second.jsonl"}}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:15Z", "permissionDecision": {"decision": "accept"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a6", "content": "ok", "is_error": false}]}}
+{"type": "user", "timestamp": "2026-01-01T10:00:16Z", "promptSource": "system", "message": {"role": "user", "content": "No, a system notice instead."}}
+not json at all
