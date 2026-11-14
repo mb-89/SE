@@ -3825,7 +3825,7 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     # kern's tests first: they warm Go's build cache for the acceptances after them.
-    kern, go_components, long_step, release_guard, new_app, components, relay, scripts = budget.beside
+    kern, go_components, long_step, release_guard, new_app, components, relay, scripts, copilot = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
@@ -3850,6 +3850,9 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert relay.target_seconds < relay.limit_seconds < budget.limit_seconds
     assert (scripts.name, scripts.command[-1]) == ("script-runs", "tests/beside_script_runs.py")
     assert scripts.target_seconds < scripts.limit_seconds < budget.limit_seconds
+    # SE installed beside an empty project, checked without Copilot (docs/copilot.md "Self-test").
+    assert (copilot.name, copilot.command[-3:]) == ("copilot-self-test", ["scripts/copilot.py", "self-test", "--build"])
+    assert copilot.target_seconds < copilot.limit_seconds < budget.limit_seconds
 
 
 @pytest.fixture
