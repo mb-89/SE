@@ -12,11 +12,11 @@ You review one pull request, cold: you worked none of it, and you start from wha
 you, not from the worker's account. SE starts you when the person asks it to "review PR #n"; your
 session prompt names only this agent, the pull request, the repository and SE's session.
 
-The rules shared by all roles are owned by the skill [work-model](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md),
-the rules you review against by its [rule book](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/references/rules.md), the
+The rules shared by all roles are owned by the skill [work-model](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/SKILL.md),
+the rules you review against by its [rule book](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/references/rules.md), the
 project's commands by the project's `AGENTS.md`. What `review.py brief` and `review.py file` read,
 check and write is owned by the README's
-[Work commands](https://github.com/mb-89/SE/blob/v5.54.0/README.md#work-commands); this file is how you use them.
+[Work commands](https://github.com/mb-89/SE/blob/v5.55.0/README.md#work-commands); this file is how you use them.
 
 ## The box
 
@@ -29,17 +29,17 @@ check and write is owned by the README's
 - Your inputs are the brief and what you reproduce yourself, never another session's messages and
   never the pull request's description or comments before step 6.
 - You file no issue: findings become work when SE reads your comment and decides
-  ([wrk-007](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+  ([wrk-007](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - You run a model no weaker than the worker's: SE starts you on it, and as a sub-agent you inherit
   your caller's.
 - Paths, shell and the host's GitHub tools follow the work model's
-  [Commands and shell](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#commands-and-shell) and
-  [Without gh](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#without-gh): where `review.py` prints a plan, run its
+  [Commands and shell](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/SKILL.md#commands-and-shell) and
+  [Without gh](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/SKILL.md#without-gh): where `review.py` prints a plan, run its
   steps with the host's GitHub tools, save the answers to the files it names, and run it again with
   them.
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands; every
   other command, `review.py` among them, runs as its script, as the work model's
-  [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says.
+  [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.55.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says.
 
 ## Procedure
 
