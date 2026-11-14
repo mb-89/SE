@@ -1,0 +1,27 @@
+{
+ "environment_id": "env_example",
+ "name": "general",
+ "description": "",
+ "scope": "personal",
+ "applies_to": "my personal environment: all of my future sessions that use it, not only this one",
+ "network": {
+  "type": "unrestricted"
+ },
+ "environment_variable_names": [
+  "EXAMPLE_NAME"
+ ],
+ "has_setup_script": true,
+ "setup_script": "#!/bin/bash\nrm -rf ~/.claude/skills/se\ngit clone --depth 1 -b main https://github.com/mb-89/SE ~/.claude/skills/se || echo \"SE: clone failed, this session starts without SE\" >&2\nexit 0\n#nov14",
+ "repositories": [],
+ "network_secrets": [],
+ "is_current": true,
+ "editable_by_you": true,
+ "session_has_repository": true,
+ "note": "(the tool's note, shortened)",
+ "other_cloud_environments": [
+  {
+   "environment_id": "env_other",
+   "name": "Default"
+  }
+ ]
+}
