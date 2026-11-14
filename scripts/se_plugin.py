@@ -6,7 +6,9 @@ Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) i
 layout setting: `Layout.hooks`), Copilot's one plugin manifest
 (`.github/plugin/plugin.json`, or the root `plugin.json` where `se.toml` `[plugin] copilot_manifest`
 is `"root"`) and the MCP door's declarations (`.github/mcp.json`, and a root
-`.mcp.json` only where `se.toml` `[plugin] root_mcp` is on); `check` refuses when any generated file
+`.mcp.json` only where `se.toml` `[plugin] root_mcp` is on). Whether the PowerShell lines of both
+hooks files call a bare `bash` or the Git-bash hand-off `scripts/bash.ps1` is the build setting
+`se.toml` `[plugin] powershell_hooks` (`powershell_hooks`); unset, a bare `bash`. `check` refuses when any generated file
 differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
 validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
 section "Install".
@@ -86,6 +88,13 @@ COPILOT_HOOKS = {
 # runs a `scripts/` file of the repository it runs in; in a folder holding the repository hooks
 # (COPILOT_HOOKS_FILE), SE's own checkout, it runs nothing either, as those already run its own copy.
 # Each exits 0 (`plugin_hook_commands`).
+# How a PowerShell hook line starts its bash script: the build setting se.toml [plugin]
+# powershell_hooks (`powershell_hooks`). Unset, "bash": a bare `bash` on PATH, which Git for Windows
+# does not put there. "handoff": scripts/bash.ps1, which finds the bash Git for Windows ships, started
+# by Windows PowerShell with -File so no execution policy refuses it; the bash lines never change.
+POWERSHELL_HOOKS = ("bash", "handoff")
+HANDOFF = "scripts/bash.ps1"
+HANDOFF_START = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File"
 
 
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
@@ -357,11 +366,13 @@ def _plugin_settings(root: Path) -> dict:
     """`se.toml` `[plugin]`, refused where it holds what the build cannot read."""
     with (root / "se.toml").open("rb") as handle:
         table = tomllib.load(handle).get("plugin", {})
-    if (not isinstance(table, dict) or set(table) - {"root_mcp", "copilot_manifest"}
+    if (not isinstance(table, dict) or set(table) - {"root_mcp", "copilot_manifest", "powershell_hooks"}
             or not isinstance(table.get("root_mcp", False), bool)
-            or table.get("copilot_manifest", "github") not in COPILOT_MANIFEST_PLACES):
-        raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false` and "
-                          f"`copilot_manifest = {'|'.join(map(json.dumps, COPILOT_MANIFEST_PLACES))}`")
+            or table.get("copilot_manifest", "github") not in COPILOT_MANIFEST_PLACES
+            or table.get("powershell_hooks", "bash") not in POWERSHELL_HOOKS):
+        raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false`, "
+                          f"`copilot_manifest = {'|'.join(map(json.dumps, COPILOT_MANIFEST_PLACES))}` and "
+                          f"`powershell_hooks = {'|'.join(map(json.dumps, POWERSHELL_HOOKS))}`")
     return table
 
 
@@ -375,6 +386,12 @@ def copilot_manifest(root: Path) -> PurePosixPath:
     """`se.toml` `[plugin] copilot_manifest`: where Copilot's one manifest lies; unset,
     `.github/plugin/plugin.json`."""
     return COPILOT_MANIFEST_PLACES[_plugin_settings(root).get("copilot_manifest", "github")]
+
+
+def powershell_hooks(root: Path) -> str:
+    """`se.toml` `[plugin] powershell_hooks`: how a PowerShell hook line starts its bash script
+    (POWERSHELL_HOOKS); unset, `"bash"`."""
+    return _plugin_settings(root).get("powershell_hooks", "bash")
 
 
 @dataclass(frozen=True)
@@ -406,28 +423,47 @@ def _json(value: dict) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
 
-def plugin_hook_commands(command: str) -> tuple[str, str]:
+def powershell_bash(script: str, setting: str = "bash", root: str = "") -> str:
+    """The PowerShell words that run the bash `script` (followed by its arguments) under `setting`
+    (POWERSHELL_HOOKS): a bare `bash`, or the hand-off. `root` is the PowerShell expression of the
+    folder both lie in (a plugin's), empty for the working directory. Pure."""
+    if setting == "bash":
+        return f"bash {script}" if not root else f'bash "{root}/{script}"'
+    if not root:
+        return f"{HANDOFF_START} {HANDOFF} {script}"
+    return f'{HANDOFF_START} "$env:PLUGIN_ROOT/{HANDOFF}" "{root}/{script}"'
+
+
+def plugin_hook_commands(command: str, setting: str = "bash") -> tuple[str, str]:
     """The bash and PowerShell commands of a plugin install's hook running `command` (a script under
-    `scripts/` and its arguments) from `$PLUGIN_ROOT`, guarded as PLUGIN_HOOKS_FILE says. Pure."""
+    `scripts/` and its arguments) from `$PLUGIN_ROOT`, guarded as PLUGIN_HOOKS_FILE says; `setting`
+    is powershell_hooks'. Pure."""
     script, _, arguments = command.partition(" ")
     tail = f" {arguments}" if arguments else ""
     guard = COPILOT_HOOKS_FILE
     bash = (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f {guard} ]; then '
             f'bash "$PLUGIN_ROOT/{script}"{tail} || true; fi')
-    powershell = (f"if ($env:PLUGIN_ROOT -and -not (Test-Path {guard})) "
-                  f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}"{tail} }}; exit 0')
+    start = powershell_bash(script, setting, root="$($env:PLUGIN_ROOT.Replace([char]92,[char]47))")
+    powershell = f"if ($env:PLUGIN_ROOT -and -not (Test-Path {guard})) {{ {start}{tail} }}; exit 0"
     return bash, powershell
 
 
-def _copilot_hook(command: str, seconds: int, plugin: bool = False) -> dict:
-    bash, powershell = (plugin_hook_commands(command) if plugin
-                        else (f"bash {command} || true", f"bash {command}; exit 0"))
+def hook_commands(command: str, setting: str = "bash") -> tuple[str, str]:
+    """The bash and PowerShell commands of a repository hook running `command` (a script under
+    `scripts/` and its arguments) from the repository's root; `setting` is powershell_hooks'. Pure."""
+    script, _, arguments = command.partition(" ")
+    tail = f" {arguments}" if arguments else ""
+    return f"bash {command} || true", f"{powershell_bash(script, setting)}{tail}; exit 0"
+
+
+def _copilot_hook(command: str, seconds: int, plugin: bool = False, setting: str = "bash") -> dict:
+    bash, powershell = (plugin_hook_commands if plugin else hook_commands)(command, setting)
     return {"type": "command", "bash": bash, "powershell": powershell,
             "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
 
 
-def _copilot_hooks(plugin: bool) -> bytes:
-    return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin)]
+def _copilot_hooks(plugin: bool, setting: str = "bash") -> bytes:
+    return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin, setting)]
                                          for event, (command, seconds) in COPILOT_HOOKS.items()}})
 
 
@@ -458,8 +494,9 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         return files
     layout = LAYOUTS[0]
     if layout.hooks:
-        files[COPILOT_HOOKS_FILE] = _copilot_hooks(plugin=False)
-        files[PLUGIN_HOOKS_FILE] = _copilot_hooks(plugin=True)
+        setting = powershell_hooks(root)
+        files[COPILOT_HOOKS_FILE] = _copilot_hooks(plugin=False, setting=setting)
+        files[PLUGIN_HOOKS_FILE] = _copilot_hooks(plugin=True, setting=setting)
     files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {
         **mcp_server(LAUNCHER), "tools": ["*"], "env": SESSION_CWD_ENV}}})
     files[copilot_manifest(root)] = _json({
