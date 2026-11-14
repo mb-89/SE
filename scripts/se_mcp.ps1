@@ -4,7 +4,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File se_mcp.ps1 --root <project>
 #
 # Standard output carries MCP alone; everything else goes to <project>\.se\.runtime\mcp.log (the
-# binary's own stderr to mcp-door.log beside it), else the system's temporary folder.
+# binary's own stderr to mcp-door.log beside it), else the system's temporary folder. A plugin
+# install chooses its root as se_mcp.sh does, from SE_SESSION_CWD, else COPILOT_SESSION_CWD, with
+# no parent-cwd backstop.
 $ErrorActionPreference = 'Stop'
 $seRoot = Split-Path -Parent $PSScriptRoot
 $root = ''
@@ -15,12 +17,83 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 if (-not $root) { $root = (Get-Location).Path }
 try { $root = (Resolve-Path -LiteralPath $root).Path } catch { $root = (Get-Location).Path }
 
-$runtime = Join-Path (Join-Path $root '.se') '.runtime'
-try { New-Item -ItemType Directory -Force -Path $runtime | Out-Null } catch { $runtime = [IO.Path]::GetTempPath() }
-$log = Join-Path $runtime 'mcp.log'
+function Runtime([string]$folder) { # the folder the launcher logs to for that root
+    $runtime = Join-Path (Join-Path $folder '.se') '.runtime'
+    try { New-Item -ItemType Directory -Force -Path $runtime | Out-Null } catch { $runtime = [IO.Path]::GetTempPath() }
+    return $runtime
+}
 function Note([string]$text) {
     try { [IO.File]::AppendAllText($log, "$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')) se_mcp.ps1: $text`n") } catch {}
 }
+$windows = [IO.Path]::DirectorySeparatorChar -eq '\'
+function Folder([string]$path) { # the folder's full path, or '' where it is none
+    try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop } catch { return '' }
+    if (-not $item.PSIsContainer) { return '' }
+    $full = $item.FullName.TrimEnd('\', '/')
+    if (-not $full) { return '/' }
+    if ($full.EndsWith(':')) { return $full + '\' }
+    return $full
+}
+function Same([string]$a, [string]$b) {
+    $how = if ($windows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    return [string]::Equals($a, $b, $how)
+}
+function Inside([string]$path, [string]$folder) { # whether path is folder or lies inside it
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $how = if ($windows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    return ($path.TrimEnd($sep) + $sep).StartsWith($folder.TrimEnd($sep) + $sep, $how)
+}
+function PluginProject([string]$plugin) { # the root a plugin install serves; $script:pluginFound where a source counts
+    $script:pluginFound = $false
+    $dir = ''
+    $source = ''
+    foreach ($name in @('SE_SESSION_CWD', 'COPILOT_SESSION_CWD')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value -and [IO.Path]::IsPathRooted($value)) {
+            $dir = Folder $value
+            if ($dir) { $source = "$name=$value"; break }
+        }
+    }
+    $chosen = $plugin
+    if ($source) {
+        $script:pluginFound = $true
+        if (-not (Inside $dir $plugin)) {
+            $chosen = $dir
+            while ($chosen -and -not (Test-Path -LiteralPath (Join-Path $chosen '.git'))) { $chosen = Split-Path -Parent $chosen }
+            if (-not $chosen) { $chosen = $dir }
+        }
+    } else {
+        $source = 'no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD)'
+    }
+    $script:log = Join-Path (Runtime $chosen) 'mcp.log'
+    Note "plugin ${plugin}: root $chosen from $source"
+    return $chosen
+}
+
+if ($env:PLUGIN_ROOT -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
+    $plugin = Folder $env:PLUGIN_ROOT
+    if ($plugin -and (Same $plugin (Folder $seRoot)) -and (Same $plugin (Folder $root))) {
+        Remove-Item Env:SE_MCP_PLUGIN_FOLDER -ErrorAction SilentlyContinue
+        $chosen = PluginProject $plugin
+        if ($script:pluginFound) {
+            if (-not (Same $chosen $plugin)) {
+                $root = $chosen
+                $next = "$chosen/scripts/se_mcp.ps1"
+                if ((Test-Path -LiteralPath $next -PathType Leaf) -and (Test-Path -LiteralPath "$chosen/components/release.toml" -PathType Leaf)) {
+                    $shell = (Get-Process -Id $PID).Path
+                    $handover = Start-Process -FilePath $shell -NoNewWindow -Wait -PassThru -ArgumentList @(
+                        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$next`"", '--root', "`"$chosen`"")
+                    exit $handover.ExitCode
+                }
+            }
+        } elseif (-not (Test-Path -LiteralPath (Join-Path $plugin '.git'))) {
+            $env:SE_MCP_PLUGIN_FOLDER = $plugin
+        }
+    }
+}
+
+$runtime = Runtime $root
+$log = Join-Path $runtime 'mcp.log'
 
 $version = ''
 $pin = Join-Path (Join-Path $seRoot 'components') 'release.toml'
@@ -29,7 +102,6 @@ if (Test-Path -LiteralPath $pin) {
         if ($line -match '^version\s*=\s*"([^"]*)"') { $version = $Matches[1]; break }
     }
 }
-$windows = [IO.Path]::DirectorySeparatorChar -eq '\'
 $suffix = if ($windows) { '.exe' } else { '' }
 $binDir = Join-Path (Join-Path $HOME '.se') 'bin'
 $bin = $env:SE_MCP_BIN
