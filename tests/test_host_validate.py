@@ -19,7 +19,7 @@ PLUGIN, MARKETPLACE = ".claude-plugin/plugin.json", ".claude-plugin/marketplace.
 SKILLS = ("skills/decision", "skills/work-model", ".github/skills/decision")
 # The beside suites se.toml declares on main when this command arrived; the command adds none.
 BESIDE_ON_MAIN = ["kern", "go-components", "kern-long-step", "release-guard", "new-app",
-                  "se-components", "se-relay", "script-runs"]
+                  "se-components", "se-relay", "script-runs", "copilot-self-test"]
 
 
 @pytest.fixture

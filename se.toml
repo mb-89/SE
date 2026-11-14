@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.63.0"
+version = "5.64.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -101,6 +101,14 @@ limit_seconds = 90
 # three times for an untracked script and reads the count through `retro.py collect`.
 [tests.beside.script-runs]
 command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_script_runs.py"]
+target_seconds = 30
+limit_seconds = 90
+
+# SE installed beside an empty project, checked without Copilot (docs/copilot.md "Self-test"): the
+# layout, the hooks, the MCP door's launcher, handshake and one call. It builds the door's binary
+# from this tree with Go's cache warm, so it runs beside the suite, not in its budget.
+[tests.beside.copilot-self-test]
+command = ["uv", "run", "python", "scripts/copilot.py", "self-test", "--build"]
 target_seconds = 30
 limit_seconds = 90
 
