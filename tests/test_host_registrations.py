@@ -182,3 +182,20 @@ def test_the_same_command_is_judged_per_folder_it_starts_in():
     first, second = h.rows(entries, probes, "linux", FILL)
     assert first.level == h.OK and first.fix is None
     assert second.level == h.PROBLEM and second.fix == p.fix("linux", FILL)
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_an_installed_copilot_plugin_turns_the_user_level_fix_into_the_guides_door_line(platform):
+    p = place("copilot-cli", "user MCP config")
+    entries = [(p, h.Seen("~/.copilot/mcp-config.json", None))]
+    [today] = h.rows(entries, {}, platform, FILL)
+    [hidden] = h.rows(entries, {}, platform, FILL, present={"copilot-plugin"})
+    assert today.fix == p.fix(platform, FILL) and today.fix.startswith("copilot mcp add se -- ")
+    assert "--additional-mcp-config" in hidden.fix and "copilot mcp add" not in hidden.fix and "\n" not in hidden.fix
+    if platform == "windows":
+        assert hidden.fix.startswith('see docs/copilot.md, "The door by hand"') and "$HOME/se/scripts/se_mcp.ps1" in hidden.fix
+    else:
+        assert hidden.fix == ('copilot --agent se --additional-mcp-config "{\\"mcpServers\\":{\\"se\\":{\\"type\\":'
+                              '\\"local\\",\\"command\\":\\"bash\\",\\"args\\":[\\"$HOME/se/scripts/se_mcp.sh\\",\\"--root\\",'
+                              '\\"$(git rev-parse --show-toplevel)\\"],\\"tools\\":[\\"*\\"]}}}"')
+    assert h.rows(entries, {}, platform, FILL, present={"plugin"})[0].fix == today.fix  # Claude's plugin hides nothing

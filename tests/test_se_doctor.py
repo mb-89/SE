@@ -458,6 +458,20 @@ def test_copilot_home_is_read_in_place_of_dot_copilot(tmp_path: Path, monkeypatc
     assert seen["copilot"] == [moved]
 
 
+def test_the_user_level_fix_line_names_the_guides_door_only_while_a_copilot_plugin_is_installed(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+
+    def user_fix() -> str:
+        probe = d.gather_probe(project, home, tmp_checkout(project), [], "linux", copilot_only(), which=Fakes().find,
+                               start=Fakes().start, copilot=d.copilot_plugins({}, home))
+        return {r["place"]: r for r in probe["rows"]}["user MCP config"]["fix"]
+
+    assert user_fix().startswith("copilot mcp add se -- bash ")
+    copilot_install(home / ".copilot", "se", "se")
+    assert user_fix().startswith("copilot --agent se --additional-mcp-config ")
+
+
 def test_write_puts_the_report_into_one_file_under_dot_se(tmp_path: Path, monkeypatch, capsys):
     project = tmp_path / "project"
     project.mkdir()

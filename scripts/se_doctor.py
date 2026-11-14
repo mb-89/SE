@@ -538,7 +538,9 @@ def gather_probe(project: Path, home: Path, checkout: Path, plugins: list[Path],
     fill = {"launcher": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.sh"), str(home)),
             "launcher_ps1": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.ps1"), str(home)),
             "checkout": host_registrations.launcher_text(str(checkout), str(home))}
-    rows = host_registrations.rows(entries, probes, platform, fill, show=lambda t: redact(t, checkout, home))
+    present = {base for base, found in (("plugin", plugins), ("copilot-plugin", copilot)) if found}
+    rows = host_registrations.rows(entries, probes, platform, fill, show=lambda t: redact(t, checkout, home),
+                                   present=present)
     return {"platform": platform, "rows": [asdict(row) for row in rows]}
 
 

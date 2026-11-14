@@ -287,6 +287,9 @@ note = "The default of MCP_TIMEOUT."
 #   register  the line that registers SE there, run in the project; register_windows, a
 #             PowerShell line, where it differs. {launcher} and {launcher_ps1} are this checkout's
 #             scripts/se_mcp.sh and scripts/se_mcp.ps1, {checkout} the checkout.
+#   hidden_by optional: a base whose found roots hide this place's server (a plugin's outranks it)
+#   register_hidden  with hidden_by: the fix line while such a root is found, in place of register;
+#             register_hidden_windows where it differs
 
 [[registrations.claude-code.places]]
 place = "plugin hooks"
@@ -353,6 +356,9 @@ mark = "documented"
 note = "An installed plugin's se outranks this user-level se: user config ranks below plugins. Add the door per session instead (docs/copilot.md, \"The door by hand\")."
 register = 'copilot mcp add se -- bash "{launcher}" --root .'
 register_windows = 'copilot mcp add se -- powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher_ps1}" --root .'
+hidden_by = "copilot-plugin"
+register_hidden = 'copilot --agent se --additional-mcp-config "{\"mcpServers\":{\"se\":{\"type\":\"local\",\"command\":\"bash\",\"args\":[\"{launcher}\",\"--root\",\"$(git rev-parse --show-toplevel)\"],\"tools\":[\"*\"]}}}"'
+register_hidden_windows = 'see docs/copilot.md, "The door by hand", Windows: write the entry naming "{launcher_ps1}" to a file, then copilot --agent se --additional-mcp-config "@$env:TEMP\se-mcp.json"'
 
 [[registrations.copilot-cli.places]]
 place = "plugin manifest"

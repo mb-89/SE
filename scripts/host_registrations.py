@@ -9,6 +9,8 @@ saw, and gets report rows back.
 - `commands` names the commands a place's file registers SE with, as the host would run them on a
   platform (Copilot's hooks carry a `bash` and a `powershell` form), so the caller knows what to
   probe.
+- A place another base hides (`hidden_by`, such as a user-level server below an installed
+  plugin's) gives its `register_hidden` line while a root of that base is found.
 - `rows` judges each place: missing, registering nothing, or naming a command whose interpreter
   or script does not resolve, or an MCP command that did not answer `initialize`, ends with the
   place's fix line for the platform, this checkout's launcher filled in (`fill`).
@@ -27,7 +29,7 @@ import json
 import shlex
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Collection, Mapping, Sequence
 
 PLATFORMS = ("linux", "darwin", "windows")
 SEEN, SILENT, NOT_MEASURED = "seen", "silent", "not measured"
@@ -51,12 +53,19 @@ class Place:
     mark: str
     register: Mapping[str, str]  # platform (or "") -> line
     note: str = ""
+    hidden_by: str = ""  # a base whose found roots hide this place's registration
+    register_hidden: Mapping[str, str] = field(default_factory=dict)  # the fix line while hidden
 
     def file(self, platform: str) -> str:
         return self.files.get(platform) or self.files[""]
 
-    def fix(self, platform: str, fill: Mapping[str, str]) -> str:
-        line = self.register.get(platform) or self.register[""]
+    def hidden(self, present: Collection[str]) -> bool:
+        """Whether a root of the base that hides this place was found."""
+        return bool(self.hidden_by) and self.hidden_by in present and bool(self.register_hidden)
+
+    def fix(self, platform: str, fill: Mapping[str, str], present: Collection[str] = ()) -> str:
+        lines = self.register_hidden if self.hidden(present) else self.register
+        line = lines.get(platform) or lines[""]
         for token in TOKENS:
             line = line.replace("{" + token + "}", fill.get(token, "{" + token + "}"))
         return line
@@ -100,7 +109,8 @@ def parse(section: Mapping) -> tuple[Place, ...]:
                                 files=_by_platform(row, "file"), finds=row["finds"], outside=bool(row["outside"]),
                                 source=row.get("source", ""), read=str(row.get("read", "")),
                                 mark=row.get("mark", ""), register=_by_platform(row, "register"),
-                                note=row.get("note", "")))
+                                note=row.get("note", ""), hidden_by=row.get("hidden_by", ""),
+                                register_hidden=_by_platform(row, "register_hidden")))
     return tuple(places)
 
 
@@ -249,12 +259,13 @@ def _judge_command(words: Sequence[str], probe: Mapping | None, show: Callable[[
 
 
 def rows(entries: Sequence[tuple[Place, Seen]], probes: Mapping[str, Mapping], platform: str,
-         fill: Mapping[str, str], show: Callable[[str], str] = str) -> list[Row]:
+         fill: Mapping[str, str], show: Callable[[str], str] = str, present: Collection[str] = ()) -> list[Row]:
     """One row per place found or missing, one per command it registers SE with; a missing or
-    broken one carries its fix line for the platform."""
+    broken one carries its fix line for the platform: its `register_hidden` line where `present`, the
+    bases with a root found, holds the base that hides it."""
     out: list[Row] = []
     for place, seen in entries:
-        fix = place.fix(platform, fill)
+        fix = place.fix(platform, fill, present)
         label = f"{place.surface} {place.place} {seen.shown}"
         if not seen.here:
             out.append(_row(place, seen, NOT_MEASURED, NOTE,
