@@ -2,7 +2,10 @@ module github.com/mb-89/se/components
 
 go 1.24.7
 
-require github.com/mb-89/kern v0.0.0
+require (
+	github.com/mb-89/kern v0.0.0
+	github.com/modelcontextprotocol/go-sdk v1.4.0
+)
 
 require (
 	github.com/antithesishq/antithesis-sdk-go v0.4.3-default-no-op // indirect
@@ -10,7 +13,6 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/minio/highwayhash v1.0.3 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.4.0 // indirect
 	github.com/nats-io/jwt/v2 v2.7.4 // indirect
 	github.com/nats-io/nats-server/v2 v2.11.9 // indirect
 	github.com/nats-io/nats.go v1.45.0 // indirect
