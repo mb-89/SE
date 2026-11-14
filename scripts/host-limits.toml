@@ -267,3 +267,124 @@ source = "https://code.claude.com/docs/en/env-vars"
 read = 2026-11-14
 mark = "documented"
 note = "The default of MCP_TIMEOUT."
+
+# Registrations: each place a host reads SE from, by surface, as scripts/host_registrations.py
+# reads it (se_doctor.py --probe reports them). A place:
+#   place     what the report calls it
+#   kind      hooks (a hooks file: SE's commands are those naming `finds`) | mcp (an MCP config:
+#             SE's server is the one named `finds`)
+#   base      where `file` lies: project (the repository the host opened), home, checkout (SE's own
+#             checkout, the one measured), plugin (each installed SE plugin's root)
+#   file      relative to base; file_<platform> (windows, darwin) where it differs
+#   outside   whether the place works in a repository other than SE's own checkout
+#   source, read, mark  as for a limit; mark `unverified` where the source does not name the fact
+#   note      optional
+#   register  the line that registers SE there, run in the project; register_windows, a
+#             PowerShell line, where it differs. {launcher} and {launcher_ps1} are this checkout's
+#             scripts/se_mcp.sh and scripts/se_mcp.ps1, {checkout} the checkout.
+
+[[registrations.claude-code.places]]
+place = "plugin hooks"
+kind = "hooks"
+base = "plugin"
+file = ".claude-plugin/plugin.json"
+finds = "bootstrap.sh"
+outside = true
+source = "https://code.claude.com/docs/en/plugins-reference"
+read = 2026-11-14
+mark = "documented"
+register = "claude plugin install se --marketplace mb-89/SE"
+
+[[registrations.claude-code.places]]
+place = "MCP door"
+kind = "mcp"
+base = "project"
+file = ".mcp.json"
+finds = "se"
+outside = true
+source = "https://code.claude.com/docs/en/mcp"
+read = 2026-11-14
+mark = "documented"
+register = 'claude mcp add --scope project se -- bash "{launcher}" --root .'
+register_windows = 'claude mcp add --scope project se -- powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher_ps1}" --root .'
+
+[[registrations.copilot-cli.places]]
+place = "hooks"
+kind = "hooks"
+base = "project"
+file = ".github/hooks/se.json"
+finds = "bootstrap.sh"
+outside = false
+source = "README.md#install"
+read = 2026-11-14
+mark = "documented"
+register = 'cd "{checkout}" && uv run python scripts/se_plugin.py build'
+register_windows = 'cd "{checkout}"; uv run python scripts/se_plugin.py build'
+
+[[registrations.copilot-cli.places]]
+place = "MCP door"
+kind = "mcp"
+base = "project"
+file = ".github/mcp.json"
+finds = "se"
+outside = false
+source = "README.md#the-mcp-door"
+read = 2026-11-14
+mark = "documented"
+note = "The CLI plugin reference lists .github/mcp.json only inside a plugin's folder."
+register = 'cd "{checkout}" && uv run python scripts/se_plugin.py build'
+register_windows = 'cd "{checkout}"; uv run python scripts/se_plugin.py build'
+
+[[registrations.copilot-cli.places]]
+place = "user MCP config"
+kind = "mcp"
+base = "home"
+file = ".copilot/mcp-config.json"
+finds = "se"
+outside = true
+source = "https://docs.github.com/en/copilot/reference/cli-plugin-reference"
+read = 2026-11-14
+mark = "documented"
+register = 'copilot mcp add se -- bash "{launcher}" --root .'
+register_windows = 'copilot mcp add se -- powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher_ps1}" --root .'
+
+[[registrations.copilot-cli.places]]
+place = "plugin manifest"
+kind = "mcp"
+base = "checkout"
+file = ".github/plugin/plugin.json"
+finds = "se"
+outside = true
+source = "https://docs.github.com/en/copilot/reference/cli-plugin-reference"
+read = 2026-11-14
+mark = "documented"
+register = "copilot plugin install mb-89/SE"
+
+[[registrations.copilot-vscode.places]]
+place = "workspace MCP config"
+kind = "mcp"
+base = "project"
+file = ".mcp.json"
+finds = "se"
+outside = true
+source = "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
+read = 2026-11-14
+mark = "documented"
+register = '''code --add-mcp '{"name":"se","command":"bash","args":["'"{launcher}"'","--root","${workspaceFolder}"]}' '''
+register_windows = '''code --add-mcp (@{name='se';command='powershell';args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',"{launcher_ps1}",'--root','${workspaceFolder}')} | ConvertTo-Json -Compress).Replace('"','\"')'''
+
+[[registrations.copilot-vscode.places]]
+place = "user MCP config"
+kind = "mcp"
+base = "home"
+file = ".config/Code/User/mcp.json"
+file_darwin = "Library/Application Support/Code/User/mcp.json"
+file_windows = "AppData/Roaming/Code/User/mcp.json"
+finds = "se"
+outside = true
+source = "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
+read = 2026-11-14
+mark = "unverified"
+note = "The page names the user profile's configuration, not its path: VS Code's user folder per platform."
+register = '''code --add-mcp '{"name":"se","command":"bash","args":["'"{launcher}"'","--root","${workspaceFolder}"]}' '''
+register_windows = '''code --add-mcp (@{name='se';command='powershell';args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',"{launcher_ps1}",'--root','${workspaceFolder}')} | ConvertTo-Json -Compress).Replace('"','\"')'''
