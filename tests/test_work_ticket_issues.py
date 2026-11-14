@@ -2954,6 +2954,39 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     assert f"Integrated pull request #7 in {commit[:7]}" in out
 
 
+def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lands_again(
+        main_checkout, monkeypatch, github, capsys):
+    """A step after the push that kern gives up (the call through kern stopped) leaves the
+    checkout on main at its base, with no local landing branch or release commit, and names the
+    pushed land/ branch; the next integrate replaces that branch and lands without help."""
+    head, _ = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    se_relay = work_tickets.sibling("se_relay")
+    session = SessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+
+    def given_up(tool, input_, note, wait):
+        if tool == "list_issues":
+            raise RuntimeError("the call through kern stopped: kern gave it up: no answer")
+        return session(tool, input_, note, wait)
+
+    with se_relay.stepping(given_up):
+        assert run(main_checkout, "integrate", "7") == 1
+    err = capsys.readouterr().err
+    assert "kern gave it up" in err and "land/feature/worker stays on origin" in err, err
+    assert work_tickets.current_branch(main_checkout) == "main"
+    assert git_run(main_checkout, "rev-parse", "HEAD", check=True).stdout.strip() == base
+    assert git_run(main_checkout, "rev-parse", "--verify", "--quiet",
+                   "refs/heads/land/feature/worker").returncode != 0
+
+    session.asked = []
+    with se_relay.stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+    assert squashed_onto_origin(main_checkout, origin_main(main_checkout))
+
+
 def test_integrate_without_kern_keeps_the_file_based_hand_off(main_checkout, monkeypatch, github,
                                                               capsys):
     """The fallback: no call through kern (se_relay.steps unset, as when kern is not running),

@@ -6196,11 +6196,18 @@ def integrate(
             given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
             feedback.phase("read back the landed commit")
             commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
-    except QueueError as error:
+    except Exception as error:  # a relay step kern gave up raises too: nothing stays behind
         abandon_landing(root, target, landing)
+        listed = run_git(root, "ls-remote", "origin", f"refs/heads/{landing}")
+        left = (f" {landing} stays on origin: the next integrate {pull_number} pushes it again and "
+                "reuses its landing pull request" if listed.stdout.strip() else "")
+        if not isinstance(error, QueueError):
+            error = QueueError(f"{error}; {target} is back at {base[:12]}.{left}")
+        elif left:
+            error.args = (f"{error}.{left}",)
         if not isinstance(error, PausedError):  # a pause is the owner's, no escalation
             integration_escalation(root, work_number, tracker, str(error))
-        raise
+        raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
 
