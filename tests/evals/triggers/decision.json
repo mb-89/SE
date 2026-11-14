@@ -1,0 +1,102 @@
+[
+  {
+    "query": "Should the local cache use SQLite or Postgres? Decide and write it up.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Write a decision note with a Pugh matrix for choosing the test runner.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "I need to bring the owner a choice between two release schedules; frame it for them.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "This merge conflicts with a design rule and I can't pick a side; escalate it.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Compare three ways to store secrets and recommend one, with the trade-offs.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "We keep choosing log formats case by case. Settle the rule for all of them.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Put the open points from this review in front of me so I can decide.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "make the call on whether to drop Windows PowerShell 5.1 support",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Draft the deck chapter: current situation, the problem, and the options scored against each other.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Which of these two API designs should we take? Weigh them properly before choosing.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Convert this Markdown table to HTML.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Make a packing checklist for a weekend camping trip.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Install the Obsidian app on Linux and open my vault.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Multiply this 3x3 matrix by its transpose in NumPy.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Explain how a decision tree classifier splits its nodes.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Write a note to my landlord about the broken heater.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "How many posts does a 12 metre garden fence need?",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "What is the general mechanism by which vaccines train the immune system?",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "My mechanical keyboard repeats the E key; how do I fix it?",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Present these quarterly sales numbers as a bar chart.",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]

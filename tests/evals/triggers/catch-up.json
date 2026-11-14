@@ -1,0 +1,102 @@
+[
+  {
+    "query": "Catch me up on this repository.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "where are we?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "I'm back after two weeks off: what is still open, and what should happen next?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Continue the work from the last handover and get it to a finished state.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Pick up where the previous session left off; read the handover and the open issues first.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "finish this, drive the open work through to a release",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "What's the status of the project? Start workers for whatever is ready.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Resume from the handover note and tell me if anything needs my input.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Get the repo to a committed, finished state, merging whatever has been delivered.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "status check please: open issues, open pull requests, anything waiting on me?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Catch the exception thrown when the config file is missing and log it.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Merge these two CSV files on the customer id column.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Write a release note for version 2.3 of the parser library.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "What is the current state of the art in speech recognition?",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Rebuild the Docker image without using the layer cache.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Explain how to rewrite commit history with an interactive rebase.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Write a timer script that reminds me to take a break every hour.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Translate this handover email for the night shift into Spanish.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Finish this sentence for me: the quick brown fox ...",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Which open source license should a new repository use?",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]
