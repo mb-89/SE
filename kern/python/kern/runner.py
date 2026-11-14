@@ -13,7 +13,9 @@ environment (``CORE_BUS``, ``CORE_USER``, ``CORE_TOKEN``), as docs/go-core.md,
    ``io.<i>.<verb>``; each line a step says goes out at once on
    ``say.<i>.<call>``, its own call's, and while a step runs it beats there, until
    its answer is out, so the core waits for a long step as long as the process
-   lives, and an answer that is no JSON goes out as the step's error; a message on
+   lives, and an answer that is no JSON goes out as the step's error; an answer the
+   bus refuses (its reply permission ran out) the runner says there as
+   ``{"refused"}``, so the core fails the step at once; a message on
    ``cmd.<i>.<command>`` without a reply, ``{"call", "stop"}``, is the core's
    stop word: it gave that call up, so the runner drops the call's waiting
    continuation and sets its :class:`Abandon`, which the call's code reads
@@ -254,7 +256,19 @@ class Runner:
                 with self._steps_lock:
                     self._asks.pop(call, None)
             return
-        self._step(what, body, lambda answer: self.peer.respond(msg, answer))
+        self._step(what, body, lambda answer: self._answer(msg, str(body.get("call", "")), answer))
+
+    def _answer(self, msg: Msg, call: str, data: str) -> None:
+        """Send a step's answer, and make sure the bus took it: where it refused it (a reply
+        permission that ran out), say so on say.<i>.<call>, {"refused"}, so the core fails the
+        step at once instead of waiting out its step wait in silence."""
+        self.peer.respond(msg, data)
+        self.peer.flush()
+        why = self.peer.refused(msg.reply)
+        if why:
+            print(f"kern: {self.instance}: the bus refused the answer to a step of call {call}: {why}",
+                  file=sys.stderr, flush=True)
+            self.peer.publish("say." + self.me + "." + token(call), {"refused": why})
 
     def _say(self, call: str, line: str | None = None) -> None:
         """One word on say.<i>.<call> for the step of `call`: a progress line, or a beat without one."""

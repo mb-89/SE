@@ -232,6 +232,11 @@ lives, not a fixed time:
   runs as long as its process does, and beats until its answer is out; a process that hangs or dies
   fails its step after ten minutes of silence, the work model's stall rule. A verb's request waits
   `VerbWait`, 60 s.
+- **An answer has no time limit on the bus.** The bus lets an instance answer each request the
+  core sends it once, however long its step ran: NATS's own default of two minutes refused the
+  answer of every longer step, which then waited out its step wait in silence. Where the bus
+  refuses an answer all the same (`KERN_REPLY_WAIT`, a test's bound), the runner says it on
+  `say.<i>.<call>`, `{"refused"}`, and the core fails the step at once, naming why.
 - **An in-process verb waits on its own.** The GitHub component's `step` verb waits up to its
   `step-wait` (60 minutes) for the session's tool call, while the core beats to the caller, so a
   command that asks it, `integrate` among them, waits out a real check run in one call.
