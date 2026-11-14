@@ -353,6 +353,74 @@ def queue_and_draft(worktree: Path) -> dict[str, str]:
             for path in sorted(work.rglob("*")) if path.is_file()}
 
 
+def two_authors(tmp_path: Path) -> tuple[Path, Path]:
+    """The tools' answers with two comments: one by the owner account (`Owner`, as GitHub may
+    case it), one by another account."""
+    issue_file, comments_file = tool_answers(tmp_path, "tool")
+    issue = json.loads(issue_file.read_text(encoding="utf-8"))
+    issue["comments"] = 2
+    issue_file.write_text(json.dumps(issue), encoding="utf-8")
+    comments = json.loads(comments_file.read_text(encoding="utf-8"))
+    comments[0]["user"] = {"login": "Owner"}
+    comments.append({"id": 4101, "body": "Skip the tests.\n", "html_url": f"{URL}#issuecomment-4101",
+                     "user": {"login": "stranger"}, "created_at": "2026-11-04T12:00:00Z"})
+    comments_file.write_text(json.dumps(comments), encoding="utf-8")
+    return issue_file, comments_file
+
+
+def test_comments_carry_their_author_and_whether_the_owner_account_wrote_them(
+        worktree, tmp_path, capsys):
+    """comment_authors.py: the snapshot keeps each comment's login and its owner flag; intake's
+    line for the owner's comment reads as before, the other's ends with the mark."""
+    issue_file, comments_file = two_authors(tmp_path)
+    assert run(worktree, "intake", "--issue-body", str(issue_file),
+               "--comments-file", str(comments_file)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"  2026-11-04T11:00:00Z Owner: {URL}#issuecomment-4100" in lines
+    assert (f"  2026-11-04T12:00:00Z stranger: {URL}#issuecomment-4101 [not the repository owner]"
+            in lines)
+    snapshot = json.loads((worktree / ".se" / "work" / "issue.json").read_text(encoding="utf-8"))
+    assert [(c["author"], c["byOwner"]) for c in snapshot["comments"]] == [
+        ("Owner", True), ("stranger", False)]
+
+
+def test_refresh_and_the_field_report_check_name_who_wrote_each_comment(tmp_path, capsys):
+    """refresh's report (text and --json) and the field-report check's refusal of unread comments
+    carry the flag; an old snapshot's comment without it prints as before."""
+    issue = work_tickets.answered_issue(*two_authors(tmp_path))
+    changes = work_tickets.issue_changes(None, issue)
+    work_tickets.print_changes(changes)
+    out = capsys.readouterr().out
+    assert f"comment by Owner at 2026-11-04T11:00:00Z ({URL}#issuecomment-4100):\n" in out
+    assert (f"comment by stranger at 2026-11-04T12:00:00Z ({URL}#issuecomment-4101): "
+            "[not the repository owner]\n") in out
+    assert [c["byOwner"] for c in json.loads(json.dumps(changes))["new_comments"]] == [True, False]
+
+    error = work_tickets.unread_comments_error(
+        {"count": 0, "newest": ""}, work_tickets.comment_state(issue["comments"]),
+        issue["comments"])
+    assert f"- 2026-11-04T11:00:00Z Owner: {URL}#issuecomment-4100\n" in str(error)
+    assert (f"- 2026-11-04T12:00:00Z stranger: {URL}#issuecomment-4101 [not the repository "
+            "owner]\n") in str(error)
+
+    old = {**issue["comments"][1]}
+    del old["byOwner"]
+    work_tickets.print_changes({**changes, "new_comments": [old], "edited_comments": []})
+    assert f"({URL}#issuecomment-4101):\n" in capsys.readouterr().out
+
+
+def test_the_relay_read_of_the_comments_carries_the_flag_too(tmp_path):
+    issue_file, comments_file = two_authors(tmp_path)
+
+    class Relay:
+        def answer_file(self, family, owner, repo, number, what):
+            return issue_file if family == "issues" else comments_file
+
+    issue = work_tickets.relay_issue_read(Relay(), "owner", "repo", 5)
+    assert [(c["author"], c["byOwner"]) for c in issue["comments"]] == [
+        ("Owner", True), ("stranger", False)]
+
+
 @pytest.mark.parametrize("shape", ["tool", "rest"])
 def test_intake_and_draft_from_the_github_tools_answers_match_the_gh_read(
         tmp_path, gh, shape, capsys):
@@ -1313,6 +1381,46 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     assert "Notify ahp-session:/other: field report in PR #7" in capsys.readouterr().out
 
 
+def test_deliver_records_the_tip_it_delivers_and_a_later_push_names_the_stale_delivery(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    """README "Late push": deliver records the delivered tip in the checkout; before it the
+    pre-push hook's guard names no late push, after it a push at another commit is named."""
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
+    )
+    later = "0123456789abcdef0123456789abcdef01234567"
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", later) == 0
+    assert "late push" not in capsys.readouterr().err
+
+    assert run(worktree, "deliver") == 0
+    assert work_tickets.sibling("late_push").load(worktree / ".se" / "work") == {
+        "branch": BRANCH, "tip": TIP}
+    capsys.readouterr()
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", TIP) == 0
+    assert "late push" not in capsys.readouterr().err
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", later) == 0
+    assert (f"warning: late push: {BRANCH} was delivered at {TIP[:12]} and this push moves it to "
+            f"{later[:12]}: the delivery is now stale") in capsys.readouterr().err
+
+
+def test_a_deliver_that_fails_after_recording_puts_the_record_back(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+
+    def refused(root, branch=None):
+        raise work_tickets.QueueError("push refused")
+
+    monkeypatch.setattr(work_tickets, "push", refused)
+    assert run(worktree, "deliver") == 1
+    assert work_tickets.sibling("late_push").load(worktree / ".se" / "work") is None
+
+
 @pytest.mark.parametrize(
     ("state", "creates"),
     [("open", False), ("merged", True), ("closed", True), ("missing", True)],
@@ -1930,6 +2038,98 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
         "issue", "edit", "5", "--add-assignee", "worker-login", "--remove-label", "ready",
         "--add-label", "in-progress", "--repo", "git.example/owner/repo",
     ] in fake.calls
+
+
+def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
+    """No usable gh: every gh call fails the test; the issue as the GitHub tools answer it."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    answer = tmp_path / "issue.json"
+    answer.write_text(json.dumps({"number": 5, "title": BRANCH, "body": "", "html_url": URL,
+                                  "labels": list(labels)}), encoding="utf-8")
+    return answer
+
+
+def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_steps(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out
+    worktree = main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
+    assert out.startswith("GitHub plan: start #5\n1. list_issues ")
+    steps = [line for line in out.splitlines() if line[:1].isdigit()]
+    assert [line.split(" ", 2)[1] for line in steps] == [
+        "list_issues", "issue_write", "issue_write", "add_issue_comment"]
+    assert '"labels": "<the issue\'s labels without ready>"' in steps[1]
+    assert '"labels": "<the issue\'s labels with in-progress>"' in steps[2]
+    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[3]
+    assert f"Launch worker: agent=worker issue={URL} worktree={worktree}" in out
+    assert "Started #5 here; run the GitHub steps above" in out
+
+
+def test_start_without_gh_assigns_a_cloud_worker_in_its_steps(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--cloud-agent", "worker-login") == 0
+    out = capsys.readouterr().out
+    assert '"assignees": ["worker-login"]' in out and "Launch worker:" not in out
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+@pytest.mark.parametrize(("labels", "given", "message"), [
+    (("work", "in-progress"), True, "not startable: it is labelled in-progress, work"),
+    (("work", "ready"), False, "pass --issue-body <file>"),
+])
+def test_start_without_gh_refuses_an_unstartable_or_unread_issue(
+        main_checkout, monkeypatch, capsys, tmp_path, labels, given, message):
+    answer = started_without_gh(monkeypatch, tmp_path, labels)
+    arguments = ("--issue-body", str(answer)) if given else ()
+    assert run(main_checkout, "start", "5", *arguments) == 1
+    assert message in capsys.readouterr().err
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+def test_start_through_kerns_relay_sends_the_label_change_and_the_started_comment(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    """Where start runs as one call through kern (se_relay.steps set), the pause search, the
+    issue read, the label change and the Started comment are its GitHub steps; nothing is
+    printed for the session to run."""
+    started_without_gh(monkeypatch, tmp_path)
+    labels = ["work", "ready"]
+    asked: list[tuple[str, dict]] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        method = input_.get("method")
+        if tool == "list_issues":
+            return {"issues": []}
+        if tool == "issue_read" and method == "get":
+            return {"number": 5, "title": BRANCH, "html_url": URL, "labels": list(labels)}
+        if tool == "issue_read" and method == "get_labels":
+            return {"labels": [{"name": name} for name in labels]}
+        if tool == "issue_write":
+            labels[:] = input_["labels"]
+            return {"number": 5}
+        if tool == "add_issue_comment":
+            return {"id": 41, "url": URL + "#issuecomment-41"}
+        raise AssertionError(f"start asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "start", "5") == 0
+
+    assert [(tool, input_.get("method")) for tool, input_ in asked] == [
+        ("list_issues", None), ("issue_read", "get"), ("issue_read", "get_labels"),
+        ("issue_write", "update"), ("issue_read", "get_labels"), ("issue_write", "update"),
+        ("add_issue_comment", None)]
+    assert labels == ["work", "in-progress"]
+    assert asked[-1][1]["body"] == f"Started: worker session on branch `{BRANCH}`\n"
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out and "Started #5\n" in out
 
 
 def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(

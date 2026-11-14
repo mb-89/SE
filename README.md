@@ -599,8 +599,8 @@ no token), the hand-off needs neither a retyped file nor a second run
 - **Reads.** `intake`, `field-report --check`, `deliver` and `integrate` read the issue, its
   comments and the pull request from kern's snapshots, which every GitHub tool answer the session
   receives fills through the PostToolUse hook ([scripts/se_relay.py](scripts/se_relay.py)).
-- **One call.** `integrate`, `refs request`, `refs apply`, `file`, `route` and `fleet-check`
-  (`work_tickets.py` `STREAMED_COMMANDS`) run as one call through kern's `call.`, from the same
+- **One call.** `integrate`, `refs request`, `refs apply`, `file`, `route`, `fleet-check` and
+  `start` (`work_tickets.py` `STREAMED_COMMANDS`) run as one call through kern's `call.`, from the same
   command line.
   - Their component runs the command in a thread of its own; each GitHub step of its plan is one
     `github.step` request on the component's `step` port, which `wiring.toml` binds to the GitHub
@@ -836,6 +836,26 @@ What it judges:
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
   `stop-check --pull <number> --pr-description <file>` writes from the pull request the session's
   GitHub tools opened; without either, it cannot judge.
+
+### Late push
+
+```toml
+[deliver]
+late_push = "warn"
+```
+
+A push of the work branch after its delivery makes the field report's Branch tip stale, and the
+integrator refuses it at the landing. The pre-push hook names it at the push instead
+([scripts/late_push.py](scripts/late_push.py)).
+
+- `deliver` records the tip it delivers in the checkout, `.se/work/delivered-tip.json`; without
+  gh, `stop-check --pull` records the Branch tip of the description it is given.
+- The hook's guard, `work_tickets.py verified`, prints one line for a push of that branch at
+  another commit: the delivery is now stale, the integrator will refuse it, and `deliver` must run
+  again after the push. Before any delivery it says nothing.
+- `late_push` is `"warn"`, built in: the push goes through. `"refuse"` refuses it; then the
+  redelivery pushes through `deliver`, which records its tip first, or without gh through
+  `work_tickets.py push --redeliver`.
 
 ### Test budget
 
@@ -1417,7 +1437,9 @@ work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --issue-body FILE | 
                        [--comments-file FILE] [--repo REPO] [--discovery]
                        [--probe-root PROBE_ROOT]
     read the work issue with gh, or from the files your GitHub tools' answers were saved to, and
-    write its tickets into todo
+    write its tickets into todo; it lists the comments, each with its author, a line ending [not the
+    repository owner] where the repository's owner account did not write it
+    (scripts/comment_authors.py)
 
 work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
     whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in
@@ -1426,7 +1448,8 @@ work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
     the session's GitHub tools, exit code 2
 
 work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]
-    re-read the work issue and its comments and report changes
+    re-read the work issue and its comments and report changes; each new or edited comment with its
+    author, marked as intake marks it (--json: byOwner)
 
 work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
                       --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]
@@ -1467,7 +1490,7 @@ work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-ur
     print the pull request description deliver writes: Fixes <issue> where all its acceptance shows
     before the merge, else Refs <issue>, then the field report between its markers
 
-work_tickets.py push [--worktree WORKTREE] [branch]
+work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]
     public check's push gate, then git push -u origin <branch>; retries a transient refusal once a
     minute, ten attempts; the integration branch needs a passing suite and public check recorded on
     the tree pushed
@@ -1488,7 +1511,9 @@ work_tickets.py sync --worktree WORKTREE
 work_tickets.py verified [--worktree WORKTREE] remote_ref commit
     the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the
     integration branch and no passing suite and public check are recorded on its tree; push runs the
-    same check
+    same check. A push of the delivered work branch at another commit than its delivered tip prints
+    the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late
+    push")
 ```
 
 #### Integration
@@ -1591,9 +1616,11 @@ work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FI
     difference only with --strict. It only reads
 
 work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
-                      [--no-create] [--cloud-agent CLOUD_AGENT]
+                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]
                       issue
-    start a ready work issue: worktree from the newest main, label in-progress
+    start a ready work issue: worktree from the newest main, label in-progress; without gh, the
+    label change and the Started comment as GitHub steps, or through kern's relay where it serves
+    the checkout
 
 work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1

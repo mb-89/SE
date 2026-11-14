@@ -7,14 +7,14 @@ help = "Work issues and their comments as a role reads and files them: intake, r
 usage = "work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --issue-body FILE | --outside)\n                       [--comments-file FILE] [--repo REPO] [--discovery]\n                       [--probe-root PROBE_ROOT]"
 summary = "read the work issue with gh, or from the files your GitHub tools' ..."
 group = "Issues"
-help = "read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo"
+help = "read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo; it lists the comments, each with its author, a line ending [not the repository owner] where the repository's owner account did not write it (scripts/comment_authors.py)"
 class = "batch"
 
 [commands."work_tickets.py refresh"]
 usage = "work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]"
 summary = "re-read the work issue and its comments and report changes"
 group = "Issues"
-help = "re-read the work issue and its comments and report changes"
+help = "re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner)"
 class = "batch"
 
 [commands."work_tickets.py comments-read"]

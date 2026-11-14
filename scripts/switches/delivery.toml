@@ -1,0 +1,14 @@
+# SE's switches, delivery group: what a worker's delivery reads (scripts/se_switches.py's docstring
+# owns this format, core.toml's header its keys).
+
+[[switch]]
+name = "[deliver] late_push"
+kind = "se.toml"
+reader = "scripts/late_push.py"
+default = "off"
+layers = ["se.toml"]
+key = "deliver.late_push"
+on = ["refuse"]
+off = ["warn"]
+help = "README.md#late-push"
+note = "off: a push of the work branch after its delivery warns and goes through; on: it is refused"

@@ -645,8 +645,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `integrate`'s read-back then needs no `--landing-description`: it reads the landing pull
     request from the relay. `SE_KERN=off`, no kern or a token backend keeps the file-based path
     above, the fallback; `<se>/scripts/se_relay.py` owns which path a command takes.
-- **One call through kern**: there `integrate`, `refs request`, `refs apply`, `file`, `route` and
-  `fleet-check` run as one call, each GitHub step of their plan asked through kern (README
+- **One call through kern**: there `integrate`, `refs request`, `refs apply`, `file`, `route`,
+  `fleet-check` and `start` run as one call, each GitHub step of their plan asked through kern (README
   [Hand-offs through the relay](https://github.com/mb-89/SE/blob/v5.71.1/README.md#hand-offs-through-the-relay)).
   - Run the command in the background (in Claude Code, Bash's `run_in_background`), so the
     session can run its steps while it waits; each one prints `GitHub step through kern's relay:
@@ -666,6 +666,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     (README [Fleet check](https://github.com/mb-89/SE/blob/v5.71.1/README.md#fleet-check)).
   - `paused` prints its search as a plan, and `route` prints it before its own
     ([Pause](#pause)).
+  - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
+    the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
+    and the `Started:` comment as its plan; through kern's relay it runs them as one call.
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
     conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
     <title> --issue-body <file>`; `file --blocked-by` needs gh.

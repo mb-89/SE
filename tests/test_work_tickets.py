@@ -1826,6 +1826,10 @@ def test_stop_check_without_gh_judges_by_the_recorded_pull_request_and_else_fail
     assert "the Stop hook passes" in capsys.readouterr().out
     assert stop_hook(root, monkeypatch, capsys) == {}
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()  # a pass resets the count
+    # README "Late push": the delivery without gh records its Branch tip as deliver does
+    recorded = work_tickets.sibling("late_push").load(root / ".se" / "work")
+    assert recorded is not None and recorded["branch"] == work_tickets.current_branch(root)
+    assert recorded["tip"] == work_tickets.BRANCH_TIP_PATTERN.search(delivered_description(root))[1]
 
 
 def test_stop_check_never_refuses_without_a_work_issue_queue_or_for_other_agents(
