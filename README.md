@@ -269,33 +269,42 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 ### The MCP door
 
-`se mcp` is SE's MCP server over stdio, kern's door ([kern/README.md "The MCP
+`se mcp --root <checkout>` is SE's MCP server over stdio, kern's door ([kern/README.md "The MCP
 door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.json` (Claude Code,
-Copilot in VS Code and its CLI): a host whose `mcp.json` names `se mcp` calls SE's read-only
-commands through it as tools. The host spawns it as the session starts; nobody starts anything else.
+Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
+through it as tools. The host spawns it as the session starts; nobody starts anything else.
 
+- **What the host runs.** `se` must already be on the PATH (`~/.se/bin`, [Kern](#kern)), or be
+  reached through a launcher that fetches it. Pass the checkout as `--root`: a host's working
+  directory need not be the repository. Which file names the door for which host is not here yet.
 - **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
   without the core: its Go components, the checkout's `wiring.toml` and its components'
   declarations. Beside them it starts the core detached, or attaches to the one that runs.
-- **It holds the session.** It takes a session lease once the core runs and returns it on EOF, so
-  the core ends its grace after the last session, as after a hook's SessionEnd.
+- **It holds the session.** It takes a session lease once the core runs and renews it on every
+  call. It returns the lease on EOF and on SIGTERM, so the core ends its grace after the last
+  session; where the core ended idle or crashed, the door starts it again and takes the lease anew.
 - **A call waits** up to 5 s for a core that is starting, then answers the error `starting` with
-  its remedy: call again in a few seconds.
+  its remedy (a tool result with `isError`): call again in a few seconds.
 
 | tool | what | from |
 |---|---|---|
 | `status` | whether the core runs, and its health | kern |
-| `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due`, `fleet/findings` and `work_tickets.py queue` | `components/cmd/se` `Greeting` |
-| `integration` | `config`, `ready`, `capacity`, `queue`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
+| `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due` and `fleet/findings` | `components/cmd/se` `Greeting` |
+| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
 
-- **Generated, never written per tool.** A command group with read-only commands is one tool, its
-  `command` one of them and `args` its arguments. Each command's description is its `mcp` line,
-  which `INTERACTIVE_COMMANDS` of its script holds beside the command.
-- **Read-only.** Every tool says `readOnlyHint` and not `destructiveHint`, so a host may allow it
-  once: in VS Code per tool, in Copilot's CLI `--allow-tool='se(<tool>)'`. A command that writes is
-  in no tool.
+- **Read-only, command by command.** A script names the commands that change nothing in its
+  `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
+  docs` writes `read-only = true` and that `mcp` line into its declaration. `work_tickets.py queue`
+  syncs the checkout (git fetch and merge), so no tool offers it, and no command that writes.
+- **Generated, never written per tool.** A command group with read-only commands is one tool,
+  named in snake_case: `command` is one of them, `args` its arguments, `page` the page of a long
+  answer.
+- **Approvals stay the host's.** Every tool says `readOnlyHint` and not `destructiveHint`, which
+  neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
+  `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
+  through "Chat: Manage Tool Approval".
 - **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
   so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
   catalog to the check, and the door to its contract with the Go SDK's client against the built

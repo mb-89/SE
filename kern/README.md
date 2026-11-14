@@ -92,15 +92,18 @@ One core runs per checkout, the nearest folder up from the working directory tha
 `<name> mcp` (package `mcp/`) is an MCP server over stdio, built on the official Go SDK,
 `github.com/modelcontextprotocol/go-sdk` (`go.mod` owns its version). A host spawns its configured
 stdio servers as a session starts and drops one that is slow to answer, so the door never waits on
-the core to answer `initialize` and `tools/list`.
+the core to answer `initialize` and `tools/list`. A host runs it as `<name> mcp --root <checkout>`,
+the binary on its PATH or reached through a launcher, since its working directory need not be the
+checkout.
 
 - **The catalog without the core.** `host.Catalog` reads what the core would serve: the binary's
   components, the checkout's wiring (`cli.Wiring`, its ad hoc overlay included) and the declared
   components' `component.toml`, and runs the catalog check. The tools come from it.
 - **Start or attach.** Inside a checkout (a folder with `.git`) the door starts the core detached
   where none runs (`host.Start`, with its `--grace` and `--idle`), or attaches to the one that runs.
-  Once the core runs it takes a session lease on `call.core.lease` and renews it every 30 s, which
-  counts as an event; on EOF it returns the lease. A core that ended is started anew.
+  Once the core runs it takes a session lease on `call.core.lease` and renews it every 30 s and on
+  every call, each renewal an event; on EOF and on SIGTERM it returns the lease. A core that ended,
+  idle or crashed, is started anew and the lease taken again.
 - **A call before the core stands** waits up to 5 s, then answers the typed error `starting`, its
   structured content `{"error": "starting", "message", "remedy"}`. The other kinds are `failed`
   (the core ended at its start, with what it said), `no-checkout` and `command-failed`.
@@ -114,14 +117,17 @@ the core to answer `initialize` and `tools/list`.
 |---|---|
 | `status` | the core's state and health, as `kern status --json` |
 | `greeting` | the names and read-only commands the application names in `cli.Greeting`, read in order; a part the catalog lacks is left out, and with no part there is no greeting tool |
-| `<instance>` | one per switched-on instance with interactive commands: `command`, one of them, and `args`; its description lists each with its `mcp` line and usage |
+| `<instance>` | one per switched-on instance with read-only commands, named in snake_case (`mcp.ToolName`: `retro-due` reads `retro_due`): `command`, one of them, `args` and `page`; its description lists each with its `mcp` line and usage |
 
-- **Read-only.** A command of class `interactive` only reads, and only those are tools. Every tool
-  carries `readOnlyHint`, `destructiveHint: false` and `idempotentHint`; `openWorldHint` is set on
-  those that run a component's command, which may read an outside service.
-- **The catalog check.** `mcp.Tools` refuses an interactive command without its `mcp` line, when
-  an agent uses it (`index.CommandDecl.MCP`, which both declaration readers read), an instance
-  named like the door's own tools, and a batch command in the greeting. The door then serves the
+- **Read-only, command by command.** A command's declaration says `read-only = true` where it
+  changes nothing (`index.CommandDecl.ReadOnly`), whatever its class: an interactive command may
+  still write, as one that syncs the checkout does. Only those are tools. Every tool carries
+  `readOnlyHint`, `destructiveHint: false` and `idempotentHint`; `openWorldHint` is set on those
+  that run a component's command, which may read an outside service. The hints neither grant nor
+  force a host's approval.
+- **The catalog check.** `mcp.Tools` refuses a read-only command without its `mcp` line, when an
+  agent uses it (`index.CommandDecl.MCP`; both declaration readers read both keys), an instance
+  whose tool name takes one of the door's own, and a greeting entry not declared read-only. The door then serves the
   tools it made, and its status tool names the refusal; an application's test holds its own
   catalog to the check, as SE's `components/cmd/se/mcp_test.go` does.
 - **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,
