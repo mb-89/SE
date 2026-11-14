@@ -88,8 +88,9 @@ type door struct {
 
 // Serve serves the door on in and out, newline-delimited JSON-RPC as stdio
 // carries it, until the client hangs up (EOF on in) or ctx ends, then returns
-// the session's lease. initialize and tools/list never wait on the core: the
-// supervisor starts or attaches to it beside the protocol.
+// the session's lease. Either handshake, server/discover (2026-07-28) or the
+// legacy initialize, and tools/list never wait on the core: the supervisor
+// starts or attaches to it beside the protocol.
 func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser) error {
 	if o.StartWait == 0 {
 		o.StartWait = StartWait

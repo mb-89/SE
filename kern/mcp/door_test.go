@@ -126,6 +126,9 @@ type client struct {
 	out  *bufio.Reader
 	id   int
 	done chan error
+	// meta is the _meta every request carries once discover named the
+	// protocol of 2026-07-28, which holds no session.
+	meta map[string]any
 }
 
 func open(t *testing.T, o Options) *client {
@@ -146,6 +149,13 @@ func open(t *testing.T, o Options) *client {
 func (c *client) ask(method string, params any) json.RawMessage {
 	c.t.Helper()
 	c.id++
+	if p, ok := params.(map[string]any); ok && c.meta != nil {
+		with := map[string]any{"_meta": c.meta}
+		for k, v := range p {
+			with[k] = v
+		}
+		params = with
+	}
 	c.send(map[string]any{"jsonrpc": "2.0", "id": c.id, "method": method, "params": params})
 	for {
 		line, err := c.out.ReadBytes('\n')
@@ -184,6 +194,19 @@ func (c *client) initialize() json.RawMessage {
 		"clientInfo": map[string]any{"name": "fake", "version": "0"}})
 	c.send(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
 	return r
+}
+
+// discover is the handshake of the MCP spec of 2026-07-28: server/discover,
+// no notification after it, and every later request carries the protocol,
+// the client and its capabilities in its _meta.
+func (c *client) discover() json.RawMessage {
+	c.t.Helper()
+	c.meta = map[string]any{
+		"io.modelcontextprotocol/protocolVersion":    "2026-07-28",
+		"io.modelcontextprotocol/clientInfo":         map[string]any{"name": "fake", "version": "0"},
+		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
+	}
+	return c.ask("server/discover", map[string]any{})
 }
 
 type listed struct {
@@ -327,6 +350,59 @@ func TestInitializeAndListAnswerWhileTheCoreStarts(t *testing.T) {
 		t.Fatalf("the greeting's description is %q, and wants the name and the command it reads, without the one the catalog lacks", greeting)
 	}
 	c.hangUp()
+}
+
+// The door speaks both handshakes, server/discover of 2026-07-28 and the
+// legacy initialize, each answered from the catalog while the core never
+// stands, and tools/list at once after either, with the same tools.
+func TestBothHandshakesAnswerWhileTheCoreStarts(t *testing.T) {
+	tools := map[string]string{}
+	for _, handshake := range []string{"server/discover", "initialize"} {
+		c := open(t, options(&fakeCore{standAfter: -1}, catalog(t)))
+		var answer struct {
+			ProtocolVersion   string                                    `json:"protocolVersion"`
+			SupportedVersions []string                                  `json:"supportedVersions"`
+			ServerInfo        struct{ Name, Version string }            `json:"serverInfo"`
+			Meta              map[string]struct{ Name, Version string } `json:"_meta"`
+			Capabilities      struct {
+				Tools *struct{} `json:"tools"`
+			} `json:"capabilities"`
+		}
+		var raw json.RawMessage
+		if handshake == "initialize" {
+			raw = c.initialize()
+		} else {
+			raw = c.discover()
+		}
+		if err := json.Unmarshal(raw, &answer); err != nil {
+			t.Fatal(err)
+		}
+		server := answer.ServerInfo
+		if handshake == "server/discover" {
+			server = answer.Meta["io.modelcontextprotocol/serverInfo"]
+			if !strings.Contains(strings.Join(answer.SupportedVersions, " "), "2026-07-28") {
+				t.Fatalf("server/discover answers the versions %v, and wants 2026-07-28 among them", answer.SupportedVersions)
+			}
+		} else if answer.ProtocolVersion != "2025-06-18" {
+			t.Fatalf("initialize answers the protocol %q, and wants the client's 2025-06-18", answer.ProtocolVersion)
+		}
+		if server.Name != "app" || server.Version != "1.2.3" || answer.Capabilities.Tools == nil {
+			t.Fatalf("%s answers %s, and wants the application app 1.2.3 with tools", handshake, raw)
+		}
+		var l listed
+		if err := json.Unmarshal(c.ask("tools/list", map[string]any{}), &l); err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, tool := range l.Tools {
+			names = append(names, tool.Name)
+		}
+		tools[handshake] = strings.Join(names, " ")
+		c.hangUp()
+	}
+	if tools["initialize"] != "desk greeting status" || tools["server/discover"] != tools["initialize"] {
+		t.Fatalf("tools/list answers %v by handshake, and wants desk, greeting and status after either", tools)
+	}
 }
 
 // A call made before the core stands waits StartWait, then answers the typed
@@ -579,18 +655,34 @@ var golden = flag.Bool("golden", false, "rewrite testdata/door.json from the doo
 
 // The door's tools and one answer are its public face: the tools tools/list
 // names and a call of desk answer, byte for byte as JSON, what
-// testdata/door.json holds, so a bump of the SDK or of Go that changes either
-// fails here. Rewrite it with
+// testdata/door.json holds, after either handshake, so a bump of the SDK or
+// of Go that changes either fails here. Rewrite it with
 // go test ./mcp -run TestTheToolsAndAnAnswerStayTheSame -golden, only where
 // the change is meant.
 func TestTheToolsAndAnAnswerStayTheSame(t *testing.T) {
+	for _, handshake := range []string{"initialize", "server/discover"} {
+		t.Run(strings.ReplaceAll(handshake, "/", "-"), func(t *testing.T) { theToolsAndAnAnswer(t, handshake) })
+	}
+}
+
+func theToolsAndAnAnswer(t *testing.T, handshake string) {
 	core := &fakeCore{running: true, answers: map[string]host.CallAnswer{"desk list": {Text: "two items", Lines: []string{"reading"}}}}
 	c := open(t, options(core, catalog(t)))
-	c.initialize()
+	if handshake == "initialize" {
+		c.initialize()
+	} else {
+		c.discover()
+	}
 	var list struct {
 		Tools any `json:"tools"`
 	}
-	var answer any
+	// The door's parts of the answer, not the protocol's around them (the
+	// _meta and resultType of 2026-07-28).
+	var answer struct {
+		Content    any `json:"content"`
+		IsError    any `json:"isError,omitempty"`
+		Structured any `json:"structuredContent,omitempty"`
+	}
 	if err := json.Unmarshal(c.ask("tools/list", map[string]any{}), &list); err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +690,7 @@ func TestTheToolsAndAnAnswerStayTheSame(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The tools of tools/list, not its envelope: the protocol's own fields
-	// beside them are the SDK's.
+	// beside them (cacheScope and ttlMs) are the SDK's.
 	answers := map[string]any{"tools/list tools": list.Tools, "tools/call desk": answer}
 	c.hangUp()
 	got, err := json.MarshalIndent(answers, "", "  ")
@@ -607,7 +699,7 @@ func TestTheToolsAndAnAnswerStayTheSame(t *testing.T) {
 	}
 	got = append(got, '\n')
 	path := filepath.Join("testdata", "door.json")
-	if *golden {
+	if *golden && handshake == "initialize" {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
