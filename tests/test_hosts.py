@@ -1,15 +1,24 @@
-"""The host table (scripts/hosts.sh): one place names how SE tells host, cloud, project and payload."""
+"""The host table (scripts/hosts.sh): one place names how SE tells host, cloud, project and payload;
+scripts/hosts.py reads it as a pure module."""
+import sys
 from pathlib import Path
-import re
-
-import hosts
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import hosts  # noqa: E402
 
 
 def test_the_table_names_each_cloud_and_project_variable_in_order():
     assert hosts.table()["SE_PROJECT_VARIABLES"] == ("CLAUDE_PROJECT_DIR", "COPILOT_PROJECT_DIR")
-    assert hosts.variables() == ["CLAUDE_CODE_REMOTE", "COPILOT_AGENT_PROMPT", "GITHUB_ACTIONS", "SE_CLOUD"]
+    assert hosts.variables() == ["CLAUDECODE", "CLAUDE_CODE_REMOTE", "COPILOT_PROJECT_DIR", "COPILOT_AGENT_PROMPT",
+                                 "GITHUB_ACTIONS", "SE_CLOUD"]
+
+
+def test_the_host_is_the_first_the_environment_marks():
+    assert hosts.host({}) is None
+    assert hosts.host({"CLAUDECODE": "1"}) == "claude"
+    assert hosts.host({"COPILOT_AGENT_PROMPT": "fix it"}) == "copilot"
+    assert hosts.host({"CLAUDE_CODE_REMOTE": "true", "COPILOT_PROJECT_DIR": "/p"}) == "claude"
 
 
 def test_a_cloud_is_marked_by_its_value_in_any_case_or_by_being_set():
@@ -17,8 +26,7 @@ def test_a_cloud_is_marked_by_its_value_in_any_case_or_by_being_set():
     assert hosts.clouds({"CLAUDE_CODE_REMOTE": "TRUE"}) == ["claude"]
     assert hosts.clouds({"CLAUDE_CODE_REMOTE": "false"}) == []
     assert hosts.clouds({"COPILOT_AGENT_PROMPT": "fix it", "GITHUB_ACTIONS": "true"}) == ["copilot", "ci"]
-    assert hosts.in_cloud(environment={"SE_CLOUD": "true"})
-    assert not hosts.in_cloud("ci", {"CLAUDE_CODE_REMOTE": "true"})
+    assert hosts.clouds({"SE_CLOUD": "true"}) == ["se"]
 
 
 def test_the_project_is_the_first_project_variable_set():
@@ -38,16 +46,3 @@ def test_a_copilot_payload_reads_as_claudes_and_a_claude_payload_is_kept():
     assert (hosts.payload_host(copilot), hosts.payload_host(claude)) == ("copilot", "claude")
     assert hosts.payload({"session_id": "snake", "sessionId": "camel"}) == {"session_id": "snake"}
 
-
-def test_no_script_checks_a_host_variable_on_its_own():
-    """Every script reads the host table; only a variable a script sets for a child may appear."""
-    names = [*hosts.variables(), *hosts.table()["SE_PROJECT_VARIABLES"]]
-    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, names)) + r")\b")
-    found = []
-    for path in sorted((ROOT / "scripts").iterdir()):
-        if path.suffix not in (".py", ".sh", ".ps1") or path.stem == "hosts":
-            continue
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if pattern.search(line) and not re.search(r'CLAUDE_PROJECT_DIR="\$\w+"\s', line):
-                found.append(f"{path.name}:{number}: {line.strip()}")
-    assert found == []

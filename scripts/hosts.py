@@ -1,13 +1,12 @@
-"""The host table, `scripts/hosts.sh`, as the Python scripts read it: which cloud runs SE, where the
-project is, and a hook payload in snake_case whatever host wrote it.
+"""The host table, `scripts/hosts.sh`, as a pure module: an environment (and a hook payload) in;
+the host, the clouds, the project and the payload in snake_case out.
 
-`hosts.sh` owns the table (one line `SE_<NAME>=(<entry> ...)` per table, so bash sources it and this
-reads it); every script asks here instead of checking a host's variable on its own.
+`hosts.sh` owns the table (one line `SE_<NAME>=(<entry> ...)` per table, so the hook scripts source
+it and this reads it). Nothing here reads the process's own environment: every caller passes it.
 """
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
 from collections.abc import Mapping
@@ -24,41 +23,44 @@ def table(path: Path = TABLE) -> dict[str, tuple[str, ...]]:
     return {name: tuple(shlex.split(entries)) for name, entries in LINE.findall(path.read_text(encoding="utf-8"))}
 
 
-def _marks() -> list[tuple[str, str, str | None]]:
-    """The cloud marks: (cloud, variable, value or None for set and not empty)."""
+def _marks(name: str) -> list[tuple[str, str, str | None]]:
+    """A mark table: (host or cloud, variable, value or None for set and not empty)."""
     found = []
-    for entry in table()["SE_CLOUD_MARKS"]:
-        cloud, _, mark = entry.partition(":")
+    for entry in table()[name]:
+        owner, _, mark = entry.partition(":")
         variable, equals, value = mark.partition("=")
-        found.append((cloud, variable, value if equals else None))
+        found.append((owner, variable, value if equals else None))
     return found
 
 
-def variables() -> list[str]:
-    """Every variable the cloud marks read."""
-    return list(dict.fromkeys(variable for _, variable, _ in _marks()))
-
-
-def clouds(environment: Mapping[str, str] | None = None) -> list[str]:
-    """The clouds whose mark `environment` (default: this process's) carries, in the table's order."""
-    environment = os.environ if environment is None else environment
+def _marked(name: str, environment: Mapping[str, str]) -> list[str]:
     found = []
-    for cloud, variable, value in _marks():
+    for owner, variable, value in _marks(name):
         given = environment.get(variable, "")
         if (given.lower() == value.lower()) if value is not None else bool(given):
-            found.append(cloud)
+            found.append(owner)
     return list(dict.fromkeys(found))
 
 
-def in_cloud(name: str | None = None, environment: Mapping[str, str] | None = None) -> bool:
-    """Whether a cloud runs this (any, or the one named: claude, copilot, ci, se)."""
-    found = clouds(environment)
-    return bool(found) if name is None else name in found
+def variables() -> list[str]:
+    """Every variable the host and cloud marks read."""
+    return list(dict.fromkeys(variable for name in ("SE_HOST_MARKS", "SE_CLOUD_MARKS")
+                              for _, variable, _ in _marks(name)))
 
 
-def project_dir(environment: Mapping[str, str] | None = None) -> str | None:
+def host(environment: Mapping[str, str]) -> str | None:
+    """The host `environment` marks (claude, copilot), the table's first; None where none does."""
+    found = _marked("SE_HOST_MARKS", environment)
+    return found[0] if found else None
+
+
+def clouds(environment: Mapping[str, str]) -> list[str]:
+    """The clouds whose mark `environment` carries (claude, copilot, ci, se), in the table's order."""
+    return _marked("SE_CLOUD_MARKS", environment)
+
+
+def project_dir(environment: Mapping[str, str]) -> str | None:
     """The project a host names, from the first project variable that is set; None without one."""
-    environment = os.environ if environment is None else environment
     return next((environment[name] for name in table()["SE_PROJECT_VARIABLES"] if environment.get(name)), None)
 
 
@@ -67,7 +69,7 @@ def payload_keys() -> dict[str, str]:
     return dict(entry.split(":", 1) for entry in table()["SE_PAYLOAD_KEYS"])
 
 
-def payload(event: dict[str, object]) -> dict[str, object]:
+def payload(event: Mapping[str, object]) -> dict[str, object]:
     """A hook payload in snake_case: each camelCase field of the table renamed, a field already in
     snake_case kept."""
     keys = payload_keys()

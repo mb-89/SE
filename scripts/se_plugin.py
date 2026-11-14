@@ -1,11 +1,12 @@
 """Generate the Copilot and Claude Code layouts of the se plugin from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
-`build` writes both layouts, the Claude Code plugin manifests with its hooks (`hooks/hooks.json`),
-Copilot's hooks (`.github/hooks/se.json`) and Copilot CLI's plugin manifest; `check` refuses when any
-generated file differs from what `build` would write, so a hand edit to a generated file fails. Both
-refuse a Copilot agent or a skill its host would reject or skip (`validate`). Where each layout is
-installed from is the README section "Install".
+`build` writes both layouts, the Claude Code plugin manifests, Copilot's hooks
+(`.github/hooks/se.json`, a layout setting: `Layout.hooks`) and Copilot CLI's plugin manifest; `check`
+refuses when any generated file differs from what `build` would write, so a hand edit to a generated
+file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
+validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
+section "Install".
 
 Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
 into that layout, without its prefix; every other key goes into both.
@@ -18,6 +19,8 @@ whose host preloads skills (`roles` parses it; AGENTS.md "Agents and skills" own
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import importlib.util
 import json
 import os
 import re
@@ -27,6 +30,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
+_lint_spec = importlib.util.spec_from_file_location("agent_lint", Path(__file__).with_name("agent_lint.py"))
+agent_lint = sys.modules.get("agent_lint") or importlib.util.module_from_spec(_lint_spec)
+if "agent_lint" not in sys.modules:
+    sys.modules["agent_lint"] = agent_lint
+    _lint_spec.loader.exec_module(agent_lint)
 SOURCE = PurePosixPath("src")
 PLUGIN = "se"
 OWNER = "mb-89"
@@ -58,20 +66,6 @@ COPILOT_HOOKS = {
     # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
     "agentStop": ("scripts/se_hook.sh Stop", 60),
 }
-# Copilot's custom agent fields (VS Code's custom agent file reference); `handoffs` and `agents` work
-# only in VS Code's local harness and are not offered.
-COPILOT_AGENT_FIELDS = frozenset({"name", "description", "tools", "model", "model-policy", "hooks", "target",
-                                  "user-invocable", "disable-model-invocation", "argument-hint"})
-COPILOT_TARGETS = frozenset({"vscode", "github-copilot"})
-# Copilot's tool aliases; an MCP server's tools are `<server>/<tool>` or `<server>/*`.
-COPILOT_TOOLS = frozenset({"execute", "read", "edit", "search", "agent", "web", "todo"})
-MCP_TOOL = re.compile(r"^[\w.-]+/(?:\*|[\w.-]+)$")
-# The agentskills.io rules: a name of lowercase letters, digits and single hyphens, at most 64
-# characters, equal to its folder (VS Code skips a skill whose name breaks them); a description of
-# at most 1024 characters.
-SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SKILL_NAME_MAX = 64
-SKILL_DESCRIPTION_MAX = 1024
 
 
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
@@ -91,10 +85,14 @@ class Layout:
     agent_suffix: str
     skills: PurePosixPath
     preloads_skills: bool  # the host reads an agent's `skills` field (Copilot's agents have none)
+    # The build setting for the host's own hooks file (Copilot's .github/hooks/se.json, COPILOT_HOOKS);
+    # Claude Code's hooks stay in its plugin manifest whatever this says.
+    hooks: bool = False
 
 
 LAYOUTS = (
-    Layout("copilot", PurePosixPath(".github/agents"), ".agent.md", PurePosixPath(".github/skills"), False),
+    Layout("copilot", PurePosixPath(".github/agents"), ".agent.md", PurePosixPath(".github/skills"), False,
+           hooks=True),
     Layout("claude", PurePosixPath("agents"), ".md", PurePosixPath("skills"), True),
 )
 # One outside skill a role relies on: `<plugin>@<marketplace>:<skill>`, a skill of a plugin and the
@@ -107,13 +105,12 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
           "`python scripts/se_plugin.py build`. -->\n")
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
-CLAUDE_HOOKS = PurePosixPath("hooks/hooks.json")  # the Claude plugin's hooks, never inline in plugin.json
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
 # Copilot CLI reads this manifest before .claude-plugin/plugin.json; it names the Copilot layout,
 # whose agents are `<name>.agent.md` as the CLI reads them.
 COPILOT_MANIFEST = PurePosixPath(".github/plugin/plugin.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
-             CLAUDE_HOOKS, COPILOT_HOOKS_FILE, COPILOT_MANIFEST)
+             COPILOT_HOOKS_FILE, COPILOT_MANIFEST)
 
 
 class SourceError(Exception):
@@ -290,89 +287,39 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "repository": REPOSITORY,
         "license": "MIT",
     }
-    # Claude Code merges inline hooks with hooks/hooks.json, so hooks in both would fire twice.
-    claude_hooks = {
-        "hooks": {
-            "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
-            **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
-               for event in KERN_EVENTS},
-        },
-    }
-    copilot_hooks = {
-        "version": 1,
-        "hooks": {event: [_copilot_hook(command, seconds)] for event, (command, seconds) in COPILOT_HOOKS.items()},
-    }
     copilot = {**plugin, "agents": f"{LAYOUTS[0].agents}/", "skills": f"{LAYOUTS[0].skills}/"}
+    plugin["hooks"] = {
+        "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
+        **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
+           for event in KERN_EVENTS},
+    }
     marketplace = {
         "name": PLUGIN,
         "owner": {"name": OWNER},
         "description": "SE, installed from this repository.",
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
-    return {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace), CLAUDE_HOOKS: _json(claude_hooks),
-            COPILOT_HOOKS_FILE: _json(copilot_hooks), COPILOT_MANIFEST: _json(copilot)}
-
-
-def _fields(data: bytes) -> dict[str, str]:
-    """The front matter of a generated Markdown file, each value as written."""
-    text = data.decode("utf-8")
-    if not text.startswith("---\n"):
-        return {}
-    head = text[4:text.find("\n---\n", 4)]
-    return {key.strip(): value.strip() for key, _, value in (line.partition(":") for line in head.splitlines())}
-
-
-def _scalar(value: str) -> str:
-    """A YAML scalar as front matter writes one: plain, 'single-quoted' or "double-quoted"."""
-    if len(value) >= 2 and value[0] == value[-1] == "'":
-        return value[1:-1].replace("''", "'")
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        return json.loads(value)
-    return value
-
-
-def _list(value: str) -> list[str]:
-    """A YAML flow list of scalars, `['a', 'b']`, or one scalar."""
-    if value.startswith("[") and value.endswith("]"):
-        return [_scalar(item.strip()) for item in value[1:-1].split(",") if item.strip()]
-    return [_scalar(value)]
-
-
-def _agent_problems(path: PurePosixPath, fields: dict[str, str]) -> list[str]:
-    problems = [f"{path}: {key} is no Copilot agent field" for key in fields if key not in COPILOT_AGENT_FIELDS]
-    if not _scalar(fields.get("description", "")):
-        problems.append(f"{path}: a Copilot agent needs a description")
-    problems += [f"{path}: tool {tool!r} is no Copilot tool" for tool in _list(fields.get("tools", "[]"))
-                 if tool not in COPILOT_TOOLS and not MCP_TOOL.match(tool)]
-    if "target" in fields and _scalar(fields["target"]) not in COPILOT_TARGETS:
-        problems.append(f"{path}: target is one of {', '.join(sorted(COPILOT_TARGETS))}")
-    return problems
-
-
-def _skill_problems(path: PurePosixPath, fields: dict[str, str]) -> list[str]:
-    name, description = _scalar(fields.get("name", "")), _scalar(fields.get("description", ""))
-    problems = []
-    if not SKILL_NAME.match(name) or len(name) > SKILL_NAME_MAX:
-        problems.append(f"{path}: skill name {name!r} is not 1 to {SKILL_NAME_MAX} lowercase letters, digits "
-                        "and single hyphens")
-    if name != path.parent.name:
-        problems.append(f"{path}: skill name {name!r} differs from its folder {path.parent.name!r}")
-    if not description or len(description) > SKILL_DESCRIPTION_MAX:
-        problems.append(f"{path}: skill description has {len(description)} characters, not 1 to "
-                        f"{SKILL_DESCRIPTION_MAX}")
-    return problems
+    files = {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace), COPILOT_MANIFEST: _json(copilot)}
+    if LAYOUTS[0].hooks:
+        files[COPILOT_HOOKS_FILE] = _json({
+            "version": 1,
+            "hooks": {event: [_copilot_hook(command, seconds)]
+                      for event, (command, seconds) in COPILOT_HOOKS.items()},
+        })
+    return files
 
 
 def validate(files: dict[PurePosixPath, bytes]) -> list[str]:
-    """One line per generated agent or skill its host would reject or skip: every Copilot agent
-    against Copilot's fields and tools, every skill of both layouts against the agentskills.io rules."""
-    problems = []
+    """One finding per generated agent or skill its host would reject or skip: every Copilot agent
+    and every skill of both layouts, through the standalone validators (scripts/agent_lint.py)."""
+    findings = []
     for path, data in sorted(files.items()):
+        text = data.decode("utf-8", errors="replace")
         if path.parent == LAYOUTS[0].agents and path.name.endswith(LAYOUTS[0].agent_suffix):
-            problems += _agent_problems(path, _fields(data))
+            findings += agent_lint.copilot_agent(path, text)
         elif path.name == "SKILL.md" and any(path.parent.parent == layout.skills for layout in LAYOUTS):
-            problems += _skill_problems(path, _fields(data))
-    return problems
+            findings += agent_lint.skill(path, text)
+    return findings
 
 
 def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:

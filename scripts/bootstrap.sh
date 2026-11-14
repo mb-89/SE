@@ -70,11 +70,11 @@ say() { notes+=("se bootstrap: $*"); }
 finish() {
   if $hook && command -v uv >/dev/null 2>&1; then
     args=()
+    [ "$se_payload_host" = copilot ] && args+=(--host copilot)
     for note in ${notes[@]+"${notes[@]}"}; do args+=(--note "$note"); done
     args+=(${kern_args[@]+"${kern_args[@]}"})
     uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
-      --root "$project" status --hook --host "$se_payload_host" ${args[@]+"${args[@]}"} 2>/dev/null &&
-      exit "$1"
+      --root "$project" status --hook ${args[@]+"${args[@]}"} 2>/dev/null && exit "$1"
   fi
   for note in ${notes[@]+"${notes[@]}"}; do printf '%s\n' "$note"; done
   exit "$1"

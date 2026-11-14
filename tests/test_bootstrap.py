@@ -182,8 +182,7 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     start = [line for line in calls(home) if "se_start.py" in line]
     assert len(start) == 1
     assert start[0].startswith(f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py "
-                               f"--root {sh(project)} status --hook --host claude --note se bootstrap: "
-                               "installing uv into ")
+                               f"--root {sh(project)} status --hook --note se bootstrap: installing uv into ")
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
@@ -209,7 +208,7 @@ def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
     result = run(home, fake_bin(base), project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert (home / "refreshes").read_text(encoding="utf-8").splitlines() == ["refresh"]  # once: no loop
-    notes = greeting_call(home).split(" status --hook --host claude ")[1]
+    notes = greeting_call(home).split(" status --hook ")[1]
     assert notes.startswith("--note se bootstrap: installing uv into ")
     assert "--note se bootstrap: installing Python 3.11" in notes
     assert notes.index("installing Python") < notes.index("--note SE: 1.0.0 -> 1.0.1, refreshed at this start")

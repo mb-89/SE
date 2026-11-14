@@ -585,8 +585,7 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "hosts.py", "hosts.sh",
-                             "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")
@@ -847,7 +846,7 @@ def claude_home(tmp_path, monkeypatch):
     """An empty Claude Code configuration folder on a local machine."""
     home = tmp_path / "claude-home"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
-    monkeypatch.delenv("CLAUDE_CODE_REMOTE", raising=False)
+    monkeypatch.delenv(se_start.CLOUD_ENV, raising=False)
     return home
 
 
@@ -886,7 +885,7 @@ def test_a_plugin_from_another_marketplace_does_not_count(setup, claude_home):
 
 
 def test_in_the_cloud_the_line_says_the_environment_provides_plugins(setup, claude_home, monkeypatch):
-    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    monkeypatch.setenv(se_start.CLOUD_ENV, "true")
     with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
     assert skill_line(setup) == [
         "Missing for SE's agents: plugin-dev:plugin-structure (worker). This cloud session lacks them; "

@@ -15,6 +15,7 @@ _spec = importlib.util.spec_from_file_location("se_plugin", ROOT / "scripts" / "
 se_plugin = importlib.util.module_from_spec(_spec)
 sys.modules["se_plugin"] = se_plugin
 _spec.loader.exec_module(se_plugin)
+agent_lint = sys.modules["agent_lint"]  # the standalone validators se_plugin.py loads
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -130,15 +131,9 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     assert plugin["name"] == "se" and plugin["version"] == version  # se.toml [project] version
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
-    assert "hooks" not in plugin, "Claude Code merges inline hooks with hooks/hooks.json: each would fire twice"
-    hook = claude_hooks(checkout)["SessionStart"][0]["hooks"][0]
+    hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
     assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
-
-
-def claude_hooks(checkout: Path) -> dict:
-    """The Claude plugin's hooks, in its hooks/hooks.json."""
-    return json.loads((checkout / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
 
 
 def copilot_hooks(checkout: Path) -> dict:
@@ -164,15 +159,26 @@ def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(ch
 def test_copilot_clis_manifest_names_the_copilot_layout(checkout):
     copilot = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
     claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert "hooks" in claude, "Claude Code's hooks stay inline, as on main"
+    del claude["hooks"]
     assert copilot == {**claude, "agents": ".github/agents/", "skills": ".github/skills/"}
     assert sorted(path.name for path in (checkout / ".github" / "agents").iterdir()) == [
         "integrator.agent.md", "reviewer.agent.md", "se.agent.md", "worker.agent.md"]
 
 
+def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    assert se_plugin.COPILOT_HOOKS_FILE in se_plugin.expected(tmp_path)
+    off = (se_plugin.dataclasses.replace(se_plugin.LAYOUTS[0], hooks=False), se_plugin.LAYOUTS[1])
+    monkeypatch.setattr(se_plugin, "LAYOUTS", off)
+    files = se_plugin.expected(tmp_path)
+    assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.COPILOT_MANIFEST in files
+
+
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
     """README "Stop hook": one hook per stop, se_hook.sh, which kern's delivery component answers
     and else stop-check as its own process."""
-    plugin = {"hooks": claude_hooks(checkout)}
+    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     for event in ("Stop", "SubagentStop"):
         [entry] = plugin["hooks"][event]
         [hook] = entry["hooks"]
@@ -184,7 +190,7 @@ def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
 
 def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout):
     """README "Kern": SessionStart starts kern through bootstrap.sh; every other event posts to it."""
-    plugin = {"hooks": claude_hooks(checkout)}
+    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     events = ["SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]
     assert sorted(plugin["hooks"]) == sorted(["SessionStart", *events])
     for event in events:
@@ -300,11 +306,11 @@ def test_every_generated_copilot_agent_holds_to_copilots_fields_and_tools(checko
     agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
     assert len(agents) == 4 and se_plugin.validate(files) == []
     for path in agents:
-        fields = se_plugin._fields(files[path])
-        assert set(fields) <= se_plugin.COPILOT_AGENT_FIELDS, path
+        fields = agent_lint.fields(files[path].decode())
+        assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path
         assert "send_message" not in fields.get("tools", "") and "strict-tools-list" not in fields
-    se = se_plugin._fields(files[se_plugin.PurePosixPath(".github/agents/se.agent.md")])
-    assert se_plugin._scalar(se["argument-hint"])
+    se = agent_lint.fields(files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode())
+    assert agent_lint.scalar(se["argument-hint"])
 
 
 def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
@@ -312,10 +318,10 @@ def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
     skills = [path for path in files if path.name == "SKILL.md"]
     assert len(skills) == 2 * len(list((checkout / "src" / "skills").iterdir()))
     for path in skills:
-        fields = se_plugin._fields(files[path])
-        name = se_plugin._scalar(fields["name"])
+        fields = agent_lint.fields(files[path].decode())
+        name = agent_lint.scalar(fields["name"])
         assert name == path.parent.name and len(name) <= 64 and re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name)
-        assert 0 < len(se_plugin._scalar(fields["description"])) <= 1024
+        assert 0 < len(agent_lint.scalar(fields["description"])) <= 1024
 
 
 @pytest.mark.parametrize("front, refusal", (

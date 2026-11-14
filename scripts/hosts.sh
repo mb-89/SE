@@ -1,12 +1,15 @@
 # shellcheck shell=bash
 # The host table: the one place that names how SE tells which host and which cloud runs it, and how
-# each host's hook payload names its fields. Every script reads it instead of checking on its own:
-# the shell scripts source it (se_hook.sh, bootstrap.sh), the Python ones read the same lines through
-# scripts/hosts.py. Each table is one line `SE_<NAME>=(<entry> ...)`, so both can read it.
+# each host's hook payload names its fields. The hook scripts source it (se_hook.sh, bootstrap.sh);
+# scripts/hosts.py reads the same lines as a pure module, environment in, host and cloud out. Each
+# table is one line `SE_<NAME>=(<entry> ...)`, so both can read it.
 #
 # Where the project is, in this order: the first of these variables that is set, then the hook
 # payload's cwd, then the working directory. Copilot's CLI hooks may lack CLAUDE_PROJECT_DIR.
 SE_PROJECT_VARIABLES=(CLAUDE_PROJECT_DIR COPILOT_PROJECT_DIR)
+# The hosts, each `<host>:<variable>` (set and not empty) or `<host>:<variable>=<value>`: Claude Code
+# sets CLAUDECODE in the processes it starts; Copilot's cloud agent sets COPILOT_AGENT_PROMPT.
+SE_HOST_MARKS=(claude:CLAUDECODE=1 claude:CLAUDE_CODE_REMOTE=true copilot:COPILOT_PROJECT_DIR copilot:COPILOT_AGENT_PROMPT)
 # The clouds, each `<cloud>:<variable>` (set and not empty) or `<cloud>:<variable>=<value>` (that
 # value, in any case). `ci` is a GitHub Actions runner, which also runs Copilot's cloud agent; `se`
 # marks any other cloud an environment declares to SE.

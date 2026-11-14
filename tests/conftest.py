@@ -17,7 +17,6 @@ import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
-import hosts  # noqa: E402
 
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
@@ -27,10 +26,9 @@ os.environ["SE_METRICS"] = os.devnull
 # as components"): a test's fakes live in its own process. A test of the routing sets its own.
 os.environ["SE_KERN"] = "off"
 
-# What a CI runner or a cloud sets and a local machine does not: GitHub Actions' variables, SE's
-# cloud agent and every cloud mark of the host table (scripts/hosts.sh), which switch commands to
-# their runner behaviour (`start` a cloud start, `capacity` none, the greeting's cloud line).
-RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT", *hosts.variables())
+# What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
+# which switch commands to their runner behaviour (`start` a cloud start, `capacity` none).
+RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT")
 RUNNER_PREFIX = "GITHUB_"
 
 
