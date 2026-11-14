@@ -6,6 +6,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.11.9
 	github.com/nats-io/nats.go v1.45.0
 	github.com/pelletier/go-toml/v2 v2.4.3
+	golang.org/x/sys v0.36.0
 )
 
 require (
@@ -17,6 +18,5 @@ require (
 	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/time v0.13.0 // indirect
 )

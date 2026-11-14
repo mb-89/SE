@@ -89,7 +89,7 @@ From v5's `src/index/bus.go` and `spec/design_output/model.md` ("The inner proto
 |---|---|---|
 | embedded NATS server | `server.NewServer` on `127.0.0.1`, `RANDOM_PORT`, a 24-byte token, `NoLog`, `NoSigs`, no JetStream, no disk | yes, as it is |
 | subjects | `get.`, `val.`, `run.`, `in.`, `commit.`, `act.`, `io.`, `lease.` | yes, renamed and reduced in [Subjects](#subjects) |
-| the standing file | `.se/.runtime/standing.json`: bus port, token, pid, stamp | yes; a `pid` that runs nowhere, or whose bus accepts no connection, reads as absent |
+| the standing file | `.se/.runtime/standing.json`: bus port, token, pid, stamp | yes, with the boot it runs in; a file of an earlier boot, a `pid` that runs nowhere, or a bus that accepts no connection reads as absent |
 | detached start | `Setsid` on Unix, a detached process on Windows (`src/index/detach_*.go`); a claim file while one caller starts it | yes, for the hooks' start |
 | leases | a heartbeat on `lease.<part>` from the work loop itself; a lapsed lease marks names stale | yes, for components and for sessions: a component beats every 5 s and its lease lapses 15 s (three beats) after its last beat; a session's lease is the hooks' ([Lifetime](#lifetime-bound-to-the-session)) |
 | placements | instances grouped into processes by config | yes: Go components run inside the core by default, other languages in their own process; a placed process that exits is not restarted, and the health shows it with its exit |
@@ -416,13 +416,21 @@ first `UserPromptSubmit` or `PostToolUse` hook after it tells the session the sa
 context; SessionStart does not, since the start posts it and shows nothing of its output. A core
 that stands removes the file. A core that stood and ended without its end, killed or crashed,
 leaves a standing file naming a pid that runs nowhere: the first such hook tells the session the
-last lines of the core's log, once, and removes that file.
+last lines of that core's run in its log, once, and removes that file.
+
+Every `serve` starts its lines in the core's log, which runs and boots append to, with one start
+line, `kern: start <time>, boot <id>, pid <n>`. A report quotes the lines of its own core's run
+alone, from that line on, and none of an earlier boot's.
 
 A pid alone does not prove a core. A machine restarted with the checkout's files kept, as a cloud
 environment restored from its snapshot is, gives its processes the last boot's pids, the start's
-own among them. So a standing file whose pid runs and whose bus accepts no connection within 1 s
-names no core either, and a hook tells it as a core that ended without its end. The start spawns
-a core, and the core that serves writes the file anew.
+own among them. So the standing file and `core.died` name their boot (Linux's `boot_id`, macOS's
+`kern.boottime`, Windows's boot counter): a file of an earlier boot names no core and no cause,
+and no hook tells it, since that core ended with its boot.
+
+Within a boot, or where the platform names none, a standing file whose pid runs and whose bus
+accepts no connection within 1 s names no core either, and a hook tells it as a core that ended
+without its end. Either way the start spawns a core, and the core that serves writes the file anew.
 
 | hook | posts | what it gains |
 |---|---|---|
