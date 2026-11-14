@@ -83,55 +83,68 @@ itself with `--build` (`se.toml` `[tests.beside.copilot-self-test]`).
 
 ## Monday checklist
 
-Each step names the points of the Copilot work it settles (#1121, #1122, #1123). "Expect" is what
-you should see.
+Each step names the points of the Copilot work it settles (#1121, #1122, #1123); "Expect" is what
+you should see, and a known difference links its [remedy](#remedies). Steps 1 to 5 are in SE's
+own checkout. Steps 6 and 7, a plugin install in VS Code and another repository, are **expected
+to differ (documented)**: a difference there is a finding, not a failure.
 
-1. **Self-test.** In a checkout of SE, with the Copilot CLI installed
-   (`npm install -g @github/copilot@1.0.112`): `uv run python scripts/copilot.py self-test`.
-   Expect `copilot self-test: 9 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
-   [open point](#what-a-token-less-copilot-cli-showed).
-2. **VS Code, SE's checkout.** Open the checkout, trust it, pick the session target Copilot and
-   the agent `se`, and say `status`.
-   - Expect the agent list to hold `se`, `integrator`, `reviewer`, `worker`; the first answer to
-     open with `SE <version> started: ...`, once per session (#1121: the agents and skills load,
-     `SessionStart` fires with `SE_HOOK_HOST`; #1123: the greeting reaches the session, and where
+After each step, note: as expected, differs, or not run; the minutes it took; and what you needed
+beyond the written step. Paste the notes as one comment on the person-step issue "Monday: the
+owner's first Copilot run".
+
+1. **Copilot CLI, SE's checkout.** In a checkout of SE, with the CLI installed
+   (`npm install -g @github/copilot@1.0.112`), run `uv run python scripts/copilot.py self-test`;
+   then `copilot --agent se`, trusting the folder ([trust](#remedies)), and say `status`.
+   - Expect `copilot self-test: 9 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
+     [open point](#what-a-token-less-copilot-cli-showed).
+   - Expect the greeting `SE <version> started: ...` once (#1121: the agents, skills and
+     `SessionStart` load with `SE_HOOK_HOST`; #1123: the greeting reaches the session, and where
      kern fails, the line `SE runs without kern: ...` too).
-   - Expect a call of `se/status` answering `se: running in <checkout>, ...` with no approval asked,
-     as it says `readOnlyHint` (#1123: VS Code reads `.github/mcp.json` with its `mcpServers` key,
-     `se/*` admits the tools; #1122: the door spawns and lists `greeting`, `integration`,
-     `overhaul`, `status`, `tickets`).
-   - Ask for `tickets` and for `integration` `fleet-check`. Expect each to answer; a long one in
-     pages, read page by page; a first call right after the start may answer `starting`, and the
-     next one, a few seconds on, the result (#1122: paging, `starting`, the tool timeout).
-   - End the session. Expect `se status --root <checkout>` to show one session fewer once the core's
-     grace ends (#1122: the lease returns on EOF).
-3. **VS Code, another repository.** **Chat: Install Plugin from Source** with
-   `https://github.com/mb-89/SE`; no trust prompt (it shows only for marketplace and deep-link
-   installs). Pick Copilot and `se`, say `status`.
-   - Expect the greeting and `se/status` naming that repository (#1123: the install picks
-     `.github/plugin/plugin.json` and its four fields, `${PLUGIN_ROOT}` expands, the server's
-     working directory). An answer naming the plugin's folder is the open point.
-4. **Copilot CLI, SE's checkout.** `copilot plugin marketplace add mb-89/SE`, `copilot plugin
-   install se@se`, then in the checkout `copilot --agent se`, trusting the folder; say `status`.
-   - Expect `copilot mcp get se` to list the server (#1123), the greeting once, though hooks fire
-     from the checkout and the plugin (#1121: the guard keeps the second start quiet; the plugin's
-     Claude hooks fail open), and `se-status` answering.
-   - Allow one tool with `--allow-tool='se(status)'` in a new run: expect no prompt for it (#1122).
-   - End the turn. Expect the `Stop` hook to run the delivery check, silent outside a worker
-     (#1121).
-5. **Copilot CLI, another repository.** `bash <se>/scripts/setup.sh <repo> --copilot`, then
-   `copilot --agent se` in `<repo>`. Expect `copilot install: ...` lines and `se: local` or
-   `se: pinned` from the sync; then the greeting, and `se-status` naming `<repo>` (the open point
-   otherwise).
-6. **Resume and the worker launch line.** `copilot --continue` in SE's checkout: expect `se-status`
-   to answer, the core kept or started again (#1121). Run the worker launch line of the work model's
-   "Host procedure under Copilot" once on a scratch issue: expect `copilot` to take `-C`,
-   `--trust-folder`, `--no-ask-user`, `--allow-tool`, `-n` and `-p`, and to go on detached (#1123).
-7. **Windows**, with Git for Windows. Repeat step 4 there. Expect the greeting and `se-status`
+   - Expect `se-status` to answer `se: running in <checkout>, ...` and `copilot mcp get se` to list
+     the server (#1122: the door spawns and lists `greeting`, `integration`, `overhaul`, `status`,
+     `tickets`; #1123: `se/*` admits them). Tools [not shown](#remedies), or
+     [`not-installed`](#remedies), have a remedy.
+   - Ask for `tickets` and `integration` `fleet-check`. Expect answers, a long one in pages; a first
+     call right after the start may answer `starting`, the next one the result (#1122: paging,
+     `starting`, the tool timeout).
+   - End the turn. Expect the `Stop` hook to run the delivery check, silent here (#1121); a
+     [refused stop](#remedies) is safe.
+2. **VS Code, SE's checkout.** Open the checkout with no install, trust it ([trust](#remedies)),
+   add the door with the user-level line of README [The MCP door](../README.md#the-mcp-door)
+   (`code --add-mcp ...`), pick the session target Copilot and the agent `se`, say `status`.
+   - Expect the agent list to hold `se`, `integrator`, `reviewer`, `worker`, the greeting once, and
+     `se/status` answering without an approval asked, as it says `readOnlyHint` (#1122). Then
+     remove the user-level line and reload: expect the same from `.github/mcp.json`, read with its
+     `mcpServers` key (#1123).
+3. **A real request, on a safe target.** In the session of step 1, ask `se` to file one small work
+   issue as a person step (label `se-person`), so no worker takes it into the live fleet; or close
+   it as not planned right after. Expect `se` to say what it files, file it, and name it.
+4. **Plugin install, resume and the worker launch line, CLI.** `copilot plugin marketplace add
+   mb-89/SE`, `copilot plugin install se@se`, then `copilot --agent se` in the checkout.
+   - Expect the greeting once, though hooks fire from the checkout and the plugin (#1121: the guard
+     keeps the second start quiet; the plugin's Claude hooks fail open).
+   - In a new run, `--allow-tool='se(status)'`: expect no prompt for `se-status` (#1122). Then
+     `copilot --continue`: expect `se-status` to answer, the core kept or started again (#1121).
+   - Run the worker launch line of the work model's "Host procedure under Copilot" once on step 3's
+     issue: expect `copilot` to take `-C`, `--trust-folder`, `--no-ask-user`, `--allow-tool`, `-n`
+     and `-p`, and to go on detached (#1123). Close the issue as not planned.
+   - Quit every session. Expect `se status --root <checkout>` to show no session once the core's
+     grace ends (#1122: the lease returns on EOF and SIGTERM).
+5. **Windows**, with Git for Windows. Repeat step 1 there. Expect the greeting and `se-status`
    (#1121: the PowerShell hook commands run with `bash` on the `PATH`; #1123: `bash` reaches the MCP
-   command, and `se_mcp.ps1` passes standard input and output through). Then rename
+   command, `se_mcp.ps1` passes standard input and output through, see [no bash](#remedies)). Rename
    `~/.se/bin/se-<version>.exe` for one session: expect `se-status` to answer `not-installed`
    naming SE's start, Copilot accepting the stand-in door (#1123); rename it back.
+6. **VS Code, another repository** (expected to differ, documented). **Chat: Install Plugin from
+   Source** with `https://github.com/mb-89/SE`; no trust prompt, which shows only for marketplace
+   and deep-link installs. Pick Copilot and `se`, say `status`. Expect the greeting and `se/status`
+   naming that repository (#1123: the install reads `.github/plugin/plugin.json` and its four
+   fields, `${PLUGIN_ROOT}` expands, the server's working directory). An answer about the plugin's
+   folder is the open point.
+7. **Copilot CLI, another repository** (expected to differ, documented). `bash
+   <se>/scripts/setup.sh <repo> --copilot`, then `copilot --agent se` in `<repo>`. Expect
+   `copilot install: ...` lines and `se: pinned` from the sync, the greeting, and `se-status`
+   naming `<repo>`; the open point otherwise.
 8. **On anything else**, at any step: `uv run python <se>/scripts/se_doctor.py`, and paste its whole
    report with the step's number into SE's session.
 9. **Record the smoke test.** In SE's checkout, `COPILOT_GITHUB_TOKEN=<token> bash
@@ -140,8 +153,29 @@ you should see.
    scripts/public_check.py --repo .` passes over it.
 
 Claude Code's spawn of the door through a root `.mcp.json` (#1122) is no Copilot point and not on
-this list: no such file is committed. The cloud agent's point (#1121) is in the next section, with
-its own "Expect", as trying it is optional.
+this list: no such file is committed. The cloud agent's point (#1121) is in its own section below,
+with its own "Expect", as trying it is optional.
+
+### Remedies
+
+Each is an expected result with its one-line remedy.
+
+- **Folder trust.** Project MCP servers and hooks load only in a trusted folder. CLI: answer the
+  trust prompt with "Yes, and remember this folder", or `--trust-folder` for one run (it lands in
+  `trustedFolders` of `~/.copilot/config.json`). VS Code: **Workspaces: Manage Workspace Trust**,
+  then **Trust**.
+- **The `se` tools do not show.** Tool search may defer them: `/mcp get se` shows the server and
+  its tools. CLI: set `"toolSearch": false` in `~/.copilot/settings.json` for a new session, so
+  every tool loads at turn start. VS Code: turn the `se` tools on in the chat's tool picker.
+- **`not-installed`.** The host spawned the door before SE's start fetched the binary: restart the
+  `se` server once (CLI `/mcp reload`; VS Code **MCP: List Servers**, `se`, **Restart**).
+- **No `bash` on Windows.** Name the PowerShell launcher at user level instead, CLI: `copilot mcp
+  add se -- powershell -NoProfile -ExecutionPolicy Bypass -File <se>\scripts\se_mcp.ps1 --root
+  <checkout>`; VS Code: `code --add-mcp` with the same `command` and `args`.
+- **A refused stop.** Copilot's stop event carries no agent name, so the delivery check can judge
+  SE's own session as a worker's in a checkout whose ticket queue is for a work issue, off the
+  integration branch. You see `se Stop hook (1 of 5 in a row): ...`, naming what is undelivered.
+  Ending the session is safe: the check only advises, and lets the turn end after five refusals.
 
 ## Cloud agent, optional and untested
 
