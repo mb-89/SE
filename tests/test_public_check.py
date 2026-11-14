@@ -1146,6 +1146,12 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
     assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"
+    # The nightly run alone is full: it runs every suite beside, also one its paths skip.
+    suite = check[check.index("- name: The complete suite and kern's tests"):]
+    suite = suite[:suite.index("\n      - ")]
+    assert "EVENT: ${{ github.event_name }}" in suite
+    assert 'if [ "$EVENT" = schedule ]; then full=(--full); fi' in suite
+    assert 'scripts/work_tickets.py suite --worktree . "${full[@]}"' in suite
 
 
 def field_report_script() -> str:

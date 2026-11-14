@@ -3821,6 +3821,94 @@ def test_a_key_these_scripts_do_not_know_beside_warns_off_ci_and_the_suite_runs(
     assert "kern passed in 2.0 s" in captured.out
 
 
+def guarded_beside(checkout: Path, monkeypatch) -> None:
+    """beside_suite in a clone of origin, its kern suite guarding `kern/bus/` alone."""
+    beside_suite(checkout, monkeypatch, [5.0, 2.0])
+    with (checkout / "se.toml").open("a", encoding="utf-8") as config:
+        config.write('paths = ["kern/bus/", "kern/go.mod"]\n')
+
+
+def test_a_suite_beside_whose_paths_the_change_does_not_touch_is_skipped_in_one_line(
+        main_checkout, monkeypatch, capsys):
+    guarded_beside(main_checkout, monkeypatch)
+    (main_checkout / "kern" / "README.md").write_text("kern\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "kern/README.md")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "docs")
+
+    assert run(main_checkout, "suite") == 0
+    lines = capsys.readouterr().out.splitlines()
+    skip = re.compile(r"kern skipped: the change since origin/main \([0-9a-f]{7}\) touches none of "
+                      r"its paths \(kern/bus/, kern/go\.mod, \[tests\.beside\.kern\] in se\.toml\); "
+                      r"it runs nightly and with suite --full")
+    assert [line for line in lines if skip.fullmatch(line)], lines
+    assert lines[-1].startswith("Suite: 3 passed; 5.0 s") and skip.search(lines[-1]), lines[-1]
+    assert not [line for line in lines if line.startswith("kern time:") or "ok in kern" in line]
+
+
+@pytest.mark.parametrize("touched", ["kern/bus/bus.go", "kern/go.mod"])
+def test_a_suite_beside_runs_where_the_change_touches_one_of_its_paths(
+        main_checkout, monkeypatch, capsys, touched):
+    guarded_beside(main_checkout, monkeypatch)
+    (main_checkout / touched).parent.mkdir(parents=True, exist_ok=True)
+    (main_checkout / touched).write_text("package bus\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", touched)
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "bus")
+
+    assert run(main_checkout, "suite") == 0
+    out = capsys.readouterr().out
+    assert "kern passed in 2.0 s (target 30 s, limit 60 s)" in out and "skipped" not in out
+
+
+def test_a_suite_beside_runs_where_an_uncommitted_change_touches_its_paths(
+        main_checkout, monkeypatch, capsys):
+    guarded_beside(main_checkout, monkeypatch)
+    (main_checkout / "kern" / "bus").mkdir()
+    (main_checkout / "kern" / "bus" / "bus.go").write_text("package bus\n", encoding="utf-8")
+
+    assert run(main_checkout, "suite") == 0
+    assert "kern passed in 2.0 s" in capsys.readouterr().out
+
+
+def test_suite_full_runs_a_suite_beside_whose_paths_the_change_does_not_touch(
+        main_checkout, monkeypatch, capsys):
+    guarded_beside(main_checkout, monkeypatch)
+
+    assert run(main_checkout, "suite", "--full") == 0
+    out = capsys.readouterr().out
+    assert "kern passed in 2.0 s" in out and "skipped" not in out
+
+
+def test_a_suite_beside_with_paths_runs_where_the_integration_branch_is_not_fetched(
+        worktree, monkeypatch, capsys):
+    guarded_beside(worktree, monkeypatch)
+
+    assert run(worktree, "suite") == 0
+    out = capsys.readouterr().out
+    assert ("kern runs: origin/main is not fetched here, so the change it guards cannot be read "
+            "(paths of [tests.beside.kern] in se.toml)") in out
+    assert "kern passed in 2.0 s" in out
+
+
+def test_a_failing_suite_beside_on_ci_is_an_annotation_naming_its_failed_test(
+        worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0], fails=True)
+    monkeypatch.setattr(work_tickets, "suite_is_reference", lambda: True)
+
+    assert run(worktree, "suite") == 1
+    captured = capsys.readouterr()
+    assert ("::error title=kern failed::kern failed: TestTally ([tests.beside.kern] in se.toml)"
+            in captured.out.splitlines())
+    assert "kern failed (2.0 s) running " in captured.err
+
+
+@pytest.mark.parametrize("paths", ['"kern/bus/"', "[]", '["/kern/bus/"]', '["../kern/"]', "[3]"])
+def test_suite_budget_refuses_paths_that_are_no_paths_in_the_project(worktree, paths):
+    (worktree / "se.toml").write_text(f'[tests]\ncommand = ["pytest"]\n[tests.beside.kern]\n'
+                                      f'command = ["go"]\npaths = {paths}\n', encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match=r"paths must be a non-empty array of paths"):
+        work_tickets.suite_budget(worktree)
+
+
 def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
@@ -3836,6 +3924,11 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert (long_step.name, long_step.directory) == ("kern-long-step", "kern")
     assert long_step.command[:4] == ["go", "test", "-tags", "longstep"], "out of kern's own tests"
     assert 130 < long_step.target_seconds < long_step.limit_seconds
+    # Off the landing path: it runs nightly and where the change touches what it guards.
+    assert long_step.guards({"kern/bus/bus.go"}) and long_step.guards({"kern/go.mod"})
+    assert long_step.guards({"kern/host/declared.go"}) and long_step.guards({"kern/python/kern/runner.py"})
+    assert not long_step.guards({"scripts/work_tickets.py", "kern/host/core.go", "README.md"})
+    assert all(suite.paths is None for suite in budget.beside if suite is not long_step)
     # The released binaries hold what the checkout builds (kern/README.md "Release").
     assert (release_guard.name, release_guard.directory) == ("release-guard", "kern")
     assert release_guard.command == ["go", "run", "./tools/release", "guard", "--dir", ".",
