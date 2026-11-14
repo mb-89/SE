@@ -1854,7 +1854,7 @@ class FakeGitHub:
     def git(self, *arguments: str, env: dict | None = None) -> str:
         return git_run(self.origin, *arguments, check=True, env=env).stdout.strip()
 
-    def pull(self, number: int) -> dict:
+    def pull(self, number: int, purpose: str = "") -> dict:
         self.calls.append(("pull", number))
         return next(pull for pull in self.pulls if pull["number"] == number)
 
@@ -3206,9 +3206,11 @@ class SessionSteps:
     def __init__(self, github: FakeGitHub, root: Path, checks: list[dict]) -> None:
         self.github, self.root, self.checks = github(root, "git.example/owner/repo"), root, checks
         self.asked: list[tuple[str, dict]] = []
+        self.notes: list[str] = []  # each step's note, as the told text shows it under the call
 
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
+        self.notes.append(note)
         return self.answer(tool, input_)
 
     def answer(self, tool: str, input_: dict) -> object:
@@ -3304,6 +3306,77 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     assert "Check check: in_progress" in out and "Check check: success" in out
     assert "Issue #5: CLOSED on GitHub after the merge" in out
     assert f"Integrated pull request #7 in {commit[:7]}" in out
+
+
+def test_a_relay_landings_two_reads_of_the_landing_pull_request_name_their_purpose(
+        main_checkout, monkeypatch, github, capsys):
+    """The merge confirmation and the read-back are the same pull_request_read get in a row: the
+    told text of each names its purpose, and every told step carries its sequence number."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    suites: list[dict] = []
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **options: suites.append(
+        options) or suite_passed(root, "1 passed"))
+    session = SessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+
+    assert [options.get("ci_skipped") for options in suites] == [work_tickets.CI_SKIPPED_ON_RELAY]
+    waits = [line for line in capsys.readouterr().err.splitlines()
+             if line.startswith("Relay landing: run each long wait")]
+    assert waits == [work_tickets.relay_landing_waits(main_checkout)]  # one line, at the start
+    assert "se_relay.py next --root" in waits[0]
+
+    merge = next(index for index, (tool, _) in enumerate(session.asked)
+                 if tool == "merge_pull_request")
+    reads = session.asked[merge + 1:merge + 3]
+    assert [(tool, input_["method"], input_["pullNumber"]) for tool, input_ in reads] == [
+        ("pull_request_read", "get", 20)] * 2
+    confirmation, read_back = session.notes[merge + 1:merge + 3]
+    assert confirmation == f"step {merge + 2}: purpose: the merge confirmation of #20, merged at the commit the squash returned"
+    assert read_back.startswith(f"step {merge + 3}: purpose: the read-back of #20's description")
+    assert [note.split(":")[0] for note in session.notes] == [
+        f"step {number}" for number in range(1, len(session.notes) + 1)]
+
+
+def test_a_landing_says_the_branch_deletions_origin_refuses_in_one_summary_line(
+        main_checkout, monkeypatch, github, capsys, fake_git_door):
+    """Where origin refuses deleting the merged branches (an HTTP 403), the landing prints one
+    summary line naming both, the landing branch and the work branch, and no warning per branch."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    origin = (main_checkout.parent / "origin.git").resolve()
+
+    class Refusing(SessionSteps):
+        def answer(self, tool: str, input_: dict) -> object:
+            answer = super().answer(tool, input_)
+            if tool == "merge_pull_request":  # landed: origin refuses every push from here
+                fake_git_door.declining[origin] = "error: GH006: HTTP 403, deletion refused"
+            return answer
+
+    session = Refusing(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+
+    captured = capsys.readouterr()
+    assert "retained on origin" not in captured.err and "left on origin" not in captured.out
+    lines = [line for line in captured.out.splitlines() if "refused deleting" in line]
+    assert lines == ["Cleanup: origin refused deleting 2 merged branches (land/feature/worker, "
+                     "feature/worker: HTTP 403); the repository's automatic head-branch deletion "
+                     "removes them, not retried"]
+
+
+def test_the_cleanup_summary_names_each_refused_branch_once():
+    assert work_tickets.cleanup_refusals([]) is None
+    one = work_tickets.cleanup_refusals([("feature/x", "remote: denied\nerror: failed to push")])
+    assert one.startswith("Cleanup: origin refused deleting 1 merged branch (feature/x: remote: denied)")
+    assert work_tickets.refused_reason("fatal: unable to access: The requested URL returned "
+                                       "error: 403") == "HTTP 403"
 
 
 def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lands_again(
@@ -5639,9 +5712,11 @@ class RehearsalSteps:
     def __init__(self, github: FakeGitHub, root: Path) -> None:
         self.github = github(root, "git.example/owner/repo")
         self.asked: list[tuple[str, dict]] = []
+        self.notes: list[str] = []
 
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
+        self.notes.append(note)
         if tool == "list_issues":
             return {"issues": [], "totalCount": 0}
         if tool == "list_pull_requests":
@@ -5714,6 +5789,54 @@ def test_a_rehearsal_lands_on_its_scratch_branch_through_the_relay_after_a_slow_
     assert f"landed on rehearsal as {landed[:12]}" in captured.out
 
 
+def test_a_rehearsal_resets_its_scratch_branch_to_main_at_each_start(
+        main_checkout, monkeypatch, github, capsys):
+    """A second rehearsal starts its scratch branch at main's tip again, never on the first one's
+    landing; each says, at its start, to run long waits in the background, and its read-back
+    names its purpose."""
+    rehearsal_fakes(main_checkout, monkeypatch)
+    origin = main_checkout.parent / "origin.git"
+    base = origin_main(main_checkout)
+    se_relay = work_tickets.sibling("se_relay")
+    landed = []
+    for _ in range(2):
+        session = RehearsalSteps(github, main_checkout)
+        with se_relay.stepping(session):
+            assert run(main_checkout, "rehearse", "--base", "rehearsal") == 0
+        landed.append(git_run(origin, "rev-parse", "refs/heads/rehearsal", check=True).stdout.strip())
+    first, second = landed
+    assert first != second
+    assert git_run(origin, "rev-parse", f"{second}^", check=True).stdout.strip() == base
+    captured = capsys.readouterr()
+    assert captured.err.count("Relay landing: run each long wait") == 2
+    assert "reset the scratch branch rehearsal at main's" in captured.err
+    assert session.notes[-1].endswith("purpose: the read-back of the rehearsal pull request #21, merged")
+
+
+def test_a_rehearsal_moves_a_detached_checkout_onto_main(main_checkout, monkeypatch, github, capsys):
+    """A cloud session's checkout detached at origin's main, with local main a commit behind:
+    rehearse fast-forwards main first, as integrate does, and ends on it."""
+    rehearsal_fakes(main_checkout, monkeypatch)
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    (main_checkout / "ahead.txt").write_text("ahead\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "ahead.txt")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-m", "Ahead on origin")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "main")
+    git_ok("-C", str(main_checkout), "reset", "-q", "--hard", "HEAD~1")
+    git_ok("-C", str(main_checkout), "checkout", "-q", "--detach", "origin/main")
+    assert work_tickets.current_branch(main_checkout) == ""
+    behind = git_run(main_checkout, "rev-parse", "main", check=True).stdout.strip()
+    assert behind != origin_main(main_checkout)
+
+    with work_tickets.sibling("se_relay").stepping(RehearsalSteps(github, main_checkout)):
+        assert run(main_checkout, "rehearse", "--base", "rehearsal") == 0
+
+    assert "Detached checkout: main fast-forwarded to" in capsys.readouterr().out
+    assert work_tickets.current_branch(main_checkout) == "main"
+    assert (git_run(main_checkout, "rev-parse", "main", check=True).stdout.strip()
+            == origin_main(main_checkout))
+
+
 @pytest.mark.parametrize("base", ["main", "land/feature/worker", "rehearse/x"])
 def test_a_rehearsal_refuses_the_integration_branch_and_landing_branches(
         main_checkout, monkeypatch, github, capsys, base):
@@ -5729,3 +5852,32 @@ def test_a_rehearsal_runs_only_through_kerns_relay(main_checkout, monkeypatch, c
     rehearsal_fakes(main_checkout, monkeypatch)
     assert run(main_checkout, "rehearse", "--base", "rehearsal") == 1  # no stepping: no call through kern
     assert "runs only as one call through kern's GitHub relay" in capsys.readouterr().err
+
+
+#: The landing description a plan tells, ending in its metrics line.
+TOLD_LANDING = work_tickets.landing_description(
+    "https://git.example/owner/repo/pull/7", 7, "https://git.example/owner/tracker/issues/5",
+    {"command": "integrate", "start": "2026-11-14T10:00:00Z", "seconds": 12.5})
+#: The footers a host's GitHub tool appends to the body it was told to write.
+TOOL_FOOTERS = [
+    "\n---\n_Generated by [A Tool](https://tool.example/code)_",
+    "\n\U0001F916 Generated with [A Tool](https://tool.example/a-tool)\n\n"
+    "https://tool.example/code/session_x\n",
+]
+
+
+@pytest.mark.parametrize("footer", [*TOOL_FOOTERS, "".join(TOOL_FOOTERS)])
+def test_a_trailing_tool_footer_is_no_part_of_the_told_body(footer):
+    assert work_tickets.without_tool_footer(TOLD_LANDING + footer) == TOLD_LANDING
+    assert work_tickets.without_tool_footer(TOLD_LANDING) == TOLD_LANDING
+    text = "Generated by [A Tool](https://tool.example/code) is named here, mid-text.\n"
+    assert work_tickets.without_tool_footer(text) == text  # only the footer's own form, at the end
+
+
+@pytest.mark.parametrize("footer", TOOL_FOOTERS)
+def test_the_landing_description_compares_with_the_told_body_without_the_tools_footer(footer):
+    state = {"plan": {"steps": [{"tool": "create_pull_request", "arguments": {"body": TOLD_LANDING}}]}}
+    work_tickets.landed_metrics(state, 20, TOLD_LANDING + footer)  # passes
+    other = TOLD_LANDING.replace("12.5", "13.5")
+    with pytest.raises(work_tickets.QueueError, match="names another metrics line"):
+        work_tickets.landed_metrics(state, 20, other + footer)

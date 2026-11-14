@@ -19,8 +19,10 @@ Python SDK and `se_components` are imported where they are needed.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -62,11 +64,49 @@ def steps() -> Callable[[str, dict[str, Any], str, str], Any] | None:
     return getattr(_calls, "step", None)
 
 
+#: How a told step's note opens: its sequence number in the call that asks it (`numbered`).
+STEP_LABEL = "step {number}"
+#: A told step's sequence number, at the start of its note's line in the relay's block.
+STEP_NUMBER = re.compile(r"^\s*step (\d+)\b", re.M)
+
+
+def numbered(step: Callable[[str, dict[str, Any], str, str], Any]
+             ) -> Callable[[str, dict[str, Any], str, str], Any]:
+    """`step` with each GitHub step it asks numbered, 1 first: the note opens with `step <n>`, so
+    the hook and `next` show the number with the call (kern's Outbox prints the note under it)."""
+    count = itertools.count(1)
+    lock = threading.Lock()
+
+    def ask(tool: str, input_: dict[str, Any], note: str, wait: str) -> Any:
+        with lock:
+            label = STEP_LABEL.format(number=next(count))
+        return step(tool, input_, f"{label}: {note}" if note else label, wait)
+
+    return ask
+
+
+def waiting_numbers(block: str) -> list[int]:
+    """The sequence numbers of the steps a relay's told block waits for, in its order."""
+    return [int(found) for found in STEP_NUMBER.findall(block)]
+
+
+def stale_step(block: str, number: int) -> str | None:
+    """The one refusal line of an answer to step `number` where the told `block` no longer waits
+    for it, naming the current step; None where it still waits."""
+    waiting = waiting_numbers(block)
+    if number in waiting:
+        return None
+    if not waiting:
+        return f"step {number} is answered: kern's GitHub relay waits for no numbered step now"
+    return (f"step {number} is answered: the current step is {waiting[0]}; run that one, as "
+            "`se_relay.py next` prints it")
+
+
 @contextlib.contextmanager
 def stepping(step: Callable[[str, dict[str, Any], str, str], Any]) -> Iterator[None]:
     """Run a command in this thread with `step` as its GitHub step (se_components' Stepped sets
-    it); a call beside it in another thread keeps its own."""
-    before, _calls.step = steps(), step
+    it), each step numbered (`numbered`); a call beside it in another thread keeps its own."""
+    before, _calls.step = steps(), numbered(step)
     try:
         yield
     finally:
@@ -205,9 +245,9 @@ NEXT_COMMAND = f"uv run python {Path(__file__).resolve().as_posix()} next"
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`se_relay.py next [--root DIR]`: print the GitHub steps kern's relay waits for, the same
-    the hook tells on a prompt, whichever tool's PostToolUse ran last; exit 1 where no core
-    serves the checkout."""
+    """`se_relay.py next [--root DIR] [--step N]`: print the GitHub steps kern's relay waits for,
+    the same the hook tells on a prompt, whichever tool's PostToolUse ran last; exit 1 where no
+    core serves the checkout, or where `--step` names a step it no longer waits for (stale_step)."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="se_relay.py", description=(
@@ -216,10 +256,17 @@ def main(argv: list[str] | None = None) -> int:
     nxt = commands.add_parser("next", help="print the GitHub tool calls kern's relay waits for")
     nxt.add_argument("--root", type=Path, default=Path.cwd(),
                      help="the checkout kern serves (default: the working directory)")
+    nxt.add_argument("--step", type=int, metavar="N",
+                     help="the step number about to be answered: refused, naming the current "
+                          "step, where the relay no longer waits for it")
     args = parser.parse_args(argv)
     found = told(args.root)
     if found is None:
         print(f"se_relay.py next: no core serves {args.root.resolve()}", file=sys.stderr)
+        return 1
+    refused = stale_step(found, args.step) if args.step is not None else None
+    if refused:
+        print(f"se_relay.py next: {refused}", file=sys.stderr)
         return 1
     print(found or "kern's GitHub relay waits for no GitHub tool call")
     return 0
