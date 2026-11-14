@@ -562,3 +562,26 @@ def test_a_copilot_manifest_place_the_build_cannot_read_is_refused(tmp_path, cap
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert '`copilot_manifest = "github"|"root"`' in capsys.readouterr().err
 
+
+def test_every_manifest_lookup_row_is_documented_not_measured():
+    assert set(se_plugin.MANIFEST_LOOKUPS) == {"copilot-cli", "vscode"}
+    assert [place for place, _ in se_plugin.MANIFEST_LOOKUPS["copilot-cli"]] == [
+        ".plugin/plugin.json", "plugin.json", ".github/plugin/plugin.json", ".claude-plugin/plugin.json"]
+    assert dict(se_plugin.MANIFEST_LOOKUPS["vscode"]) == {"plugin.json": "copilot",
+                                                          ".claude-plugin/plugin.json": "claude"}
+    assert se_plugin.manifest_pick([".claude-plugin/plugin.json"], "copilot-cli").evidence == "documented"
+    assert se_plugin.manifest_pick(["README.md"], "vscode") is None
+
+
+@pytest.mark.parametrize("setting, host, picked, form", (
+    # Unset: the Copilot CLI reads SE's Copilot manifest, VS Code only finds the Claude layout's.
+    (None, "copilot-cli", ".github/plugin/plugin.json", "copilot"),
+    (None, "vscode", ".claude-plugin/plugin.json", "claude"),
+    # Set to "root": both hosts read the Copilot manifest at the root.
+    ('copilot_manifest = "root"', "copilot-cli", "plugin.json", "copilot"),
+    ('copilot_manifest = "root"', "vscode", "plugin.json", "copilot"),
+))
+def test_what_each_value_of_the_setting_means_per_host(checkout, tmp_path, setting, host, picked, form):
+    tree = built_with_manifest_setting(checkout, tmp_path / "tree", setting)
+    pick = se_plugin.manifest_pick([path.as_posix() for path in tree], host)
+    assert (pick.path.as_posix(), pick.format, pick.evidence) == (picked, form, "documented")

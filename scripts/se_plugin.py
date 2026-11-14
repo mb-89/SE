@@ -122,7 +122,7 @@ COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
 # Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
 # layout's .claude-plugin/plugin.json. Where it lies is the build setting se.toml [plugin]
 # copilot_manifest (`copilot_manifest`): unset, "github"; "root" puts it at the repository root, the
-# one place VS Code reads a Copilot-format manifest. Every build writes exactly one.
+# one place VS Code reads a Copilot-format manifest (MANIFEST_LOOKUPS). Every build writes exactly one.
 COPILOT_MANIFEST_PLACES = {"github": PurePosixPath(".github/plugin/plugin.json"),
                            "root": PurePosixPath("plugin.json")}
 COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
@@ -132,6 +132,13 @@ COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
 ROOT_MCP_FILE = PurePosixPath(".mcp.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
              COPILOT_HOOKS_FILE, *COPILOT_MANIFEST_PLACES.values(), COPILOT_MCP_FILE, ROOT_MCP_FILE)
+# Which manifest each host's plugin install picks, in the order its documentation names, each place
+# with the format it reads there; documented, not measured (`manifest_pick`).
+MANIFEST_LOOKUPS = {
+    "copilot-cli": ((".plugin/plugin.json", "copilot"), ("plugin.json", "copilot"),
+                    (".github/plugin/plugin.json", "copilot"), (".claude-plugin/plugin.json", "claude")),
+    "vscode": (("plugin.json", "copilot"), (".claude-plugin/plugin.json", "claude")),
+}
 # The door's server: its key, and the launcher a host runs, standalone (scripts/se_mcp.sh). A project
 # file names it from the project's root, the folder its host starts it in; a plugin's manifest from
 # the plugin's root, whose variable a host sets in arguments only, never in the command.
@@ -357,6 +364,26 @@ def copilot_manifest(root: Path) -> PurePosixPath:
     """`se.toml` `[plugin] copilot_manifest`: where Copilot's one manifest lies; unset,
     `.github/plugin/plugin.json`."""
     return COPILOT_MANIFEST_PLACES[_plugin_settings(root).get("copilot_manifest", "github")]
+
+
+@dataclass(frozen=True)
+class Pick:
+    """The manifest one host's plugin install picks, with the format it reads it as."""
+
+    host: str
+    path: PurePosixPath
+    format: str  # "copilot" or "claude"
+    evidence: str = "documented"  # from the host's documentation, not measured
+
+
+def manifest_pick(names, host: str) -> Pick | None:
+    """Which manifest `host` (a key of MANIFEST_LOOKUPS) picks from a tree holding the files
+    `names` (POSIX paths relative to the plugin root); None where it finds none. Pure."""
+    present = {PurePosixPath(name) for name in names}
+    for place, form in MANIFEST_LOOKUPS[host]:
+        if PurePosixPath(place) in present:
+            return Pick(host, PurePosixPath(place), form)
+    return None
 
 
 def mcp_server(launcher: str) -> dict:
