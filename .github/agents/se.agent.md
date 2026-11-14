@@ -44,6 +44,18 @@ its tools.
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](https://github.com/mb-89/SE/blob/v5.54.0/README.md#fleet-check)).
 
+- **Under Copilot** the work model's
+  [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says
+  how each step runs.
+  - SE's read-only commands go through the `se` MCP tools where the session has them (the
+    greeting's live part through `se/greeting`), else they run as their scripts.
+  - Workers start with the host's session tool, else with the Copilot CLI line it names.
+  - Where there is no message tool, read the queue every turn; where there is no `ask_user`, ask
+    in the chat.
+  - Where the greeting says `SE runs without kern`, or the `se` tools answer `not-installed` or
+    `failed`, say in your first message that SE runs without kern, and run every step through the
+    scripts and `gh`.
+
 - **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main
   checkout>` to surface field reports and startable ready work; local sessions have no scheduled

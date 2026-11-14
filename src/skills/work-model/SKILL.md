@@ -753,3 +753,45 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
   ```
+<!-- copilot -->
+
+## Host procedure under Copilot
+
+Under GitHub Copilot (VS Code's Copilot harness, the Copilot CLI), every role follows its procedure
+as above; this section owns what changes. It branches on the tools the session has, never on the
+host's name or its layout. Out of scope: the Copilot cloud agent, and VS Code's Claude and Local
+harnesses.
+
+- **SE's commands through the `se` tools, where present**: the MCP door
+  ([README "The MCP door"](../../../README.md#the-mcp-door)) offers SE's read-only commands as the
+  tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
+  `command`, `args` and `page`.
+  - Where a tool answers `starting`, call it again in a few seconds; where it answers
+    `not-installed` or `failed`, or the session has no `se` tools, run the same command as its
+    script, `uv run python <se>/scripts/<name>.py`.
+  - A command no tool offers, every one that writes among them, always runs as its script.
+- **Without kern**: where `gh` is signed in and no core runs, every step still works, through the
+  scripts and `gh`, as SE's own commands do without kern; the greeting then says
+  `SE runs without kern`, and so does SE in its first message.
+- **Starting a session, where the host has a session tool** (`create_session`): use it, as the
+  catch-up skill says, and `send_message` for the one message a role sends.
+- **Where it has none**, start the worker with the Copilot CLI, detached and logged, in its
+  worktree, its prompt the one [Without gh](#without-gh) names:
+
+  ```sh
+  nohup copilot -C <worktree> --agent worker --trust-folder --no-ask-user --allow-tool=<list> \
+    -n <branch> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &
+  ```
+
+  - Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker',
+    '--trust-folder','--no-ask-user','--allow-tool=<list>','-n','<branch>','-p','<prompt>'
+    -RedirectStandardOutput <worktree>\.se\worker.log -WindowStyle Hidden`.
+  - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
+  - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.
+  - Where the session cannot run it, give the person that one line to run, and end the turn.
+- **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
+  delivered pull requests a message would have announced; a role that would send one sends none.
+- **No ask tool** (`ask_user`): SE asks the person in the chat, its question the turn's last
+  lines, as the catch-up skill ends every turn; workers and integrators still never ask.
+
+<!-- /copilot -->

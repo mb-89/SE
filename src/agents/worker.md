@@ -1,7 +1,7 @@
 ---
 name: worker
 description: 'Works one work issue in its own worktree and always ends with a pushed branch and a pull request whose description is its field report. Never talks to other agents, never waits for a human.'
-copilot.tools: ['execute', 'read', 'edit', 'search', 'send_message']
+copilot.tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']
 copilot.strict-tools-list: true
 claude.disallowedTools: AskUserQuestion
 ---
@@ -52,6 +52,12 @@ every package, so work issues and session prompts never repeat it.
 - A missing tool is installed with the setup command the project's `AGENTS.md` names.
 - Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`,
   `status`), it is optional: work without it and say so in the field report.
+<!-- copilot -->
+- SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
+  `se/tickets` with `work_tickets.py status`; every other command, and each one whose tool answers
+  `not-installed` or `failed`, runs as its script. The work model's
+  [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) owns each step.
+<!-- /copilot -->
 
 ## Procedure
 

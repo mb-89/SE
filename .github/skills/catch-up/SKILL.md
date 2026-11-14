@@ -25,6 +25,10 @@ project's commands and hot files by the project's `AGENTS.md`.
   - Never use in-chat subagents (`task`) for work packages: they keep you busy and are cancelled
     when the user interrupts.
   - Never call blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
+  - Under Copilot, where the host has no session tool, start each worker detached with the
+    Copilot CLI line of the work model's
+    [Host procedure under Copilot](../work-model/SKILL.md#host-procedure-under-copilot), or give
+    the person that line; read the queue at each turn where no message tool announces a delivery.
 - **One worktree per worker.** Never two workers in one checkout, never a worker in a main checkout.
   Separate worktrees prevent edit collisions; shared files still conflict at merge time, so check
   overlap before dispatch (step 5).

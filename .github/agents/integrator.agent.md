@@ -48,6 +48,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - Paths and shell follow the work model's
   [Commands and shell](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#commands-and-shell); where the host offers no
   `gh`, its [Without gh](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
+  `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
+  them, runs as its script, as the work model's [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.54.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says.
 
 ## Procedure
 
