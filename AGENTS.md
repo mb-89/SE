@@ -86,30 +86,6 @@
   `SE_CLOUD_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
-## Fleet settings
-
-The rule is the rule book's [wrk-008](src/skills/work-model/references/rules.md#wrk-008-the-fleets-settings-live-in-the-repository);
-this section owns its file and its check.
-
-- The file, `fleet/settings.toml`: main's ruleset (required checks, strictness, merge methods,
-  linear history, force-push and deletion blocks), the scheduled tasks (name, schedule, model,
-  target, whether enabled) and the cloud environment (name, network level, setup script).
-  - A change to one of them, live or here, changes the other in the same piece of work.
-  - It stays publishable ([pub-001](src/skills/work-model/references/rules.md#pub-001-publishable-at-any-time)):
-    names of environment variables only, never values, and a value that may not be written down
-    is recorded as `"unchecked: not publishable"`.
-  - A value no door reads is recorded too, as `"unchecked: <reason>"`; the check never compares it.
-- The check, `uv run python scripts/work_tickets.py settings-check`, reads each part through its
-  door and prints each difference and each unchecked setting in one line, then its verdict; exit
-  code 1 where a setting differs. Its doors:
-  - the ruleset: gh where it is signed in, or `--ruleset <file>`, the REST answer of
-    `GET repos/<owner>/<repo>/rules/branches/<branch>`, which a public repository answers unsigned;
-  - the scheduled tasks and the environment: the answers of the session's claude-code-remote
-    tools `list_triggers` and `get_environment` as files (`--scheduled-tasks`, `--environment`).
-- A part whose door is missing is reported unchecked, never as a difference, so a session without
-  a door never fails it. `scripts/fleet_settings.py` holds the comparison; its tests and each
-  door's recorded real answer are `tests/test_fleet_settings.py`.
-
 ## Public safety
 
 The rules are the rule book's [`pub` section](src/skills/work-model/references/rules.md#pub-publishing-and-security); this
