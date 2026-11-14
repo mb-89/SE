@@ -73,6 +73,8 @@ COMPONENTS = "components"
 SWITCH = "SE_KERN"
 #: A call's optional first argument: the directory the command runs in.
 CWD = "--se-cwd="
+# The checkout kern serves, in each placed process's environment (kern's host.RootEnv).
+ROOT_ENV = "KERN_ROOT"
 #: kern's standing file under the checkout it serves (kern/host/standing.go).
 STANDING = Path(".se") / ".runtime" / "standing.json"
 #: How long routed waits for kern to answer a call, then gives it up and runs the command directly:
@@ -471,7 +473,10 @@ class Directory:
         with self.changed:
             if not self._count:
                 self._home = os.path.realpath(os.getcwd())
-            want = os.path.realpath(want) if want else self._home
+            # Without a directory of its own, a call runs in the checkout kern serves (ROOT_ENV),
+            # which differs from where the process stands where kern serves SE's wiring to a
+            # project that keeps none (kern's cli.Source).
+            want = os.path.realpath(want or os.environ.get(ROOT_ENV) or self._home)
             place = [want]
             self._line.append(place)
             self.waiting += 1

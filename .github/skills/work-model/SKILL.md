@@ -7,11 +7,11 @@ description: 'The shared rules of how we work, for every role (SE, worker, integ
 # Work model
 
 This skill owns the rules that are the same for every role. Each role's own rules live in its
-agent definition: [SE](../../agents/se.agent.md),
-[worker](../../agents/worker.agent.md), [integrator](../../agents/integrator.agent.md). The
+agent definition: [SE](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/se.agent.md),
+[worker](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/worker.agent.md), [integrator](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/integrator.agent.md). The
 SE's procedure is the [catch-up](../catch-up/SKILL.md) skill.
 
-Issue formats are the templates in [`.github/ISSUE_TEMPLATE/`](../../ISSUE_TEMPLATE/).
+Issue formats are the templates in [`.github/ISSUE_TEMPLATE/`](https://github.com/mb-89/SE/tree/v5.57.0/.github/ISSUE_TEMPLATE).
 Everything specific to one project (its commands, design notes, quality rules, hot files) is owned
 by the project's `AGENTS.md`; see [What the project provides](#what-the-project-provides).
 
@@ -32,7 +32,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   field report, and one notification to the integrator. No field-report issue is filed: one piece
   of work is one issue, the work issue, which the integrator closes once the work is integrated.
   - The report's one form is the pull request template,
-    [`.github/pull_request_template.md`](../../pull_request_template.md). The report
+    [`.github/pull_request_template.md`](https://github.com/mb-89/SE/blob/v5.57.0/.github/pull_request_template.md). The report
     sits between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines.
   - `field-report --draft` writes it there, and every reader (`field-report --check`, `guard`,
     `release-trailer`, `integrate`, `queue`) finds it there. A description without them holds no
@@ -135,7 +135,7 @@ then person. Every level decides, and writes what it sends up, as the
 
 - **One rank at a time**: what does not work goes up one rank, never two. A worker that cannot
   proceed goes to its integrator; an integrator that cannot resolve it, or a review that declines
-  a pull request (README [Work commands](../../../README.md#work-commands), `review.py file`),
+  a pull request (README [Work commands](https://github.com/mb-89/SE/blob/v5.57.0/README.md#work-commands), `review.py file`),
   goes to SE; SE goes to the person. A rank is skipped only where the rank below cannot act at
   all, as for [steps only the person approves](#steps-only-the-person-approves).
 
@@ -196,7 +196,7 @@ GitHub app as well; no role sets, closes or works it.
   lists) the turn starts, lands, routes and dispatches nothing and ends, so a session a scheduled
   task fires does no work either.
 - On a pause SE lists the live sessions and interrupts the working ones, as its agent's
-  [Pause](../../agents/se.agent.md#pause) says.
+  [Pause](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/se.agent.md#pause) says.
 - Resuming is closing the pause issue; nothing else is reset.
 
 ## Outside issues
@@ -217,12 +217,12 @@ own issues apart instead, and SE labels it once it routes it ([Issues](#issues))
   derived from its title, and it gets the work labels.
   - Its body, unchanged above, gets the handled marker and one section headed Routing: a
     `Routed from:` line with the original title, then the
-    [work.md](../../ISSUE_TEMPLATE/work.md) sections it lacks, one heading level down.
+    [work.md](https://github.com/mb-89/SE/blob/v5.57.0/.github/ISSUE_TEMPLATE/work.md) sections it lacks, one heading level down.
   - Every reader of the issue's sections reads these as its own; `field-report --check` enforces
     the numbered requirements there, named "Routing".
 - `work_tickets.py intake --outside` lists the open, unmarked, unhandled issues above each
   cut-off, read in one query. What SE does with each is its
-  [outside-issue routine](../../agents/se.agent.md#outside-issues).
+  [outside-issue routine](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/se.agent.md#outside-issues).
 
 ## Integration branch
 
@@ -239,7 +239,7 @@ integration_branch = "next"
 `integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
 Nothing is pushed to it directly: `integrate` lands each integration as a squash pull request that
 waits for the required check `check`, as the README's
-[Landing on main](../../../README.md#landing-on-main) says.
+[Landing on main](https://github.com/mb-89/SE/blob/v5.57.0/README.md#landing-on-main) says.
 
 Every pull request into the integration branch names the work it does, so no work is done outside
 the issues dispatch reads:
@@ -269,7 +269,7 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
   it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
   its verdict on that commit's tree. A failure, or a suite its
-  [budget](../../../README.md#test-budget) refuses, records a failure.
+  [budget](https://github.com/mb-89/SE/blob/v5.57.0/README.md#test-budget) refuses, records a failure.
 - `integrate` refuses to push a landing branch without both passing verdicts on its tree, and
   reads the squash commit back only with that tree; `work_tickets.py push` and se's pre-push hook
   (`work_tickets.py verified`) refuse a push of the integration branch itself the same way, naming
@@ -284,7 +284,7 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 
 A release's kind follows what changed, never the branch name: the worker declares it in the field
 report's "Release kind" (patch, minor or major, with a one-line reason), and
-[releases](../../../README.md#project-settings) bump by it. The branch prefix only proposes a
+[releases](https://github.com/mb-89/SE/blob/v5.57.0/README.md#project-settings) bump by it. The branch prefix only proposes a
 default (`field-report --draft`).
 
 - **Breaking means major**, as Semantic Versioning 2.0.0 (item 8) defines it: removing or
@@ -384,7 +384,7 @@ Pull requests built on an old `main` cause most integration trouble.
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
-  pieces left ([integrator](../../agents/integrator.agent.md)), the issue stays open and the comment names
+  pieces left ([integrator](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/integrator.agent.md)), the issue stays open and the comment names
   what it waits for.
 - Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
   workers have none. File clashes and the serial merge queue apply everywhere.
@@ -468,7 +468,7 @@ A worker splits its work issue into local tickets in its worktree:
 This section is the one statement of how tests are written
 ([tst-002](references/rules.md#tst-002-fast-tests), fast tests); work
 issues point here and never restate it. The project's suite and its time budget are `[tests]` in
-`se.toml` ([Test budget](../../../README.md#test-budget)), which the integration gate enforces.
+`se.toml` ([Test budget](https://github.com/mb-89/SE/blob/v5.57.0/README.md#test-budget)), which the integration gate enforces.
 
 - Test a behaviour once, at the outermost interface (the command a person or role runs), on fakes;
   real outside services appear only in their own contract tests.
@@ -501,7 +501,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the focused and the complete test commands, including gated test tiers if there are any, and
   the focused tests a kind of change adds (in se, the docs build for published Markdown);
 - its public check with the hooks that run it; `public_check` in its `se.toml`
-  ([Project settings](../../../README.md#project-settings)) gates every push to the integration
+  ([Project settings](https://github.com/mb-89/SE/blob/v5.57.0/README.md#project-settings)) gates every push to the integration
   branch on it, on unless the project sets it to `false`;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
@@ -515,7 +515,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 
 The repository and its host come from the checkout's git remote `origin` (or `--repo`). Machine-local
 facts never go into a repository; they live in `~/.se/local.toml`. The
-[Modules guide](../../../README.md#modules) owns the module-specific settings; command-line arguments
+[Modules guide](https://github.com/mb-89/SE/blob/v5.57.0/README.md#modules) owns the module-specific settings; command-line arguments
 override the settings below, and `work_tickets.py config` shows what is in effect:
 
 ```toml
@@ -535,8 +535,8 @@ integrator_session = "<session>"
 
 **Commit identity and public check**
 ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)): every role commits as `public_identity` where the machine
-sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
-as the project's `identity` in its `se.toml` ([Project settings](../../../README.md#project-settings)).
+sets it (the [Modules guide](https://github.com/mb-89/SE/blob/v5.57.0/README.md#machine-local-selocaltoml) owns what it pins), else
+as the project's `identity` in its `se.toml` ([Project settings](https://github.com/mb-89/SE/blob/v5.57.0/README.md#project-settings)).
 Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies. No session prompt
 repeats any of this section's rules:
 
@@ -546,7 +546,7 @@ repeats any of this section's rules:
   commit, so the project's hooks run its public check on every commit and push.
 - Commit messages carry no tracker numbers
   ([pub-004](references/rules.md#pub-004-no-tracker-references-in-commit-messages)). se's public check refuses them in its commit gates
-  ([Public safety](../../../AGENTS.md#public-safety)), and `integrate` writes its merge messages
+  ([Public safety](https://github.com/mb-89/SE/blob/v5.57.0/AGENTS.md#public-safety)), and `integrate` writes its merge messages
   without them where the project's public check is on.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
@@ -554,7 +554,7 @@ sets it on its machine, every role adds it as the last line of
 each commit it makes, and `integrate` adds it to its merge and squash commits. Unset, commits carry no trailer,
 as a project's public rule may require; se's public check refuses attribution trailers
 ([pub-003](references/rules.md#pub-003-no-attribution-trailers),
-[Public safety](../../../AGENTS.md#public-safety)).
+[Public safety](https://github.com/mb-89/SE/blob/v5.57.0/AGENTS.md#public-safety)).
 
 The `--repo` resolution order is argument, `[trackers]`, then `origin`. A tracker is selected by
 the repository name and is where that repository's work issues live; its pull requests, and the
@@ -585,7 +585,7 @@ the project check command and refuses that push if the check fails.
 ## Adapter sync contract
 
 An adapter is a command that writes to an external system (a tracker, a wiki, a service's API).
-Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](../../../scripts/adapter_sync.py)
+Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](https://github.com/mb-89/SE/blob/v5.57.0/scripts/adapter_sync.py)
 is its reusable part, imported from the project's se module.
 
 - **One command, dry run by default**: it reads the external state, computes the plan and the
@@ -646,7 +646,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     above, the fallback; `<se>/scripts/se_relay.py` owns which path a command takes.
 - **One call through kern**: there `integrate`, `refs request`, `refs apply`, `file`, `route` and
   `fleet-check` run as one call, each GitHub step of their plan asked through kern (README
-  [Hand-offs through the relay](../../../README.md#hand-offs-through-the-relay)).
+  [Hand-offs through the relay](https://github.com/mb-89/SE/blob/v5.57.0/README.md#hand-offs-through-the-relay)).
   - Run the command in the background (in Claude Code, Bash's `run_in_background`), so the
     session can run its steps while it waits; each one prints `GitHub step through kern's relay:
     <tool>`.
@@ -660,9 +660,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
-  [Landing on main](../../../README.md#landing-on-main)).
+  [Landing on main](https://github.com/mb-89/SE/blob/v5.57.0/README.md#landing-on-main)).
   - `fleet-check` prints its reading plan and takes the lists the GitHub tools read as files
-    (README [Fleet check](../../../README.md#fleet-check)).
+    (README [Fleet check](https://github.com/mb-89/SE/blob/v5.57.0/README.md#fleet-check)).
   - `paused` prints its search as a plan, and `route` prints it before its own
     ([Pause](#pause)).
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
@@ -692,7 +692,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     its markers); send the notification. No issue is filed.
     - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
       <file>` (its description as the GitHub tools read it) records it for the Stop hook
-      ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
+      ([README "Stop hook"](https://github.com/mb-89/SE/blob/v5.57.0/README.md#stop-hook)), which judges without gh by that record.
     - The field report comes from `field-report.md`, which `field-report --draft
       .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
       the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
@@ -702,7 +702,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
       the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
     - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
       branch.
-    - Its warning on platform code ([worker](../../agents/worker.agent.md#procedure), "Platform code")
+    - Its warning on platform code ([worker](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/worker.agent.md#procedure), "Platform code")
       reads the work pull request's check runs from kern's relay, for the pull request `stop-check
       --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
       `get_check_runs`.
@@ -711,7 +711,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - A refused report is fixed and checked again, never delivered.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
-  - `integrate`: the hand-off, the cloud path of [Landing on main](../../../README.md#landing-on-main).
+  - `integrate`: the hand-off, the cloud path of [Landing on main](https://github.com/mb-89/SE/blob/v5.57.0/README.md#landing-on-main).
     - Save the pull request's description and its work issue's body to files, then run
       `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
       branch>`. Where kern's relay serves the checkout, run `integrate <pull request>` alone: it
@@ -754,3 +754,43 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
   ```
+
+## Host procedure under Copilot
+
+Under GitHub Copilot (VS Code's Copilot harness, the Copilot CLI), every role follows its procedure
+as above; this section owns what changes. It branches on the tools the session has, never on the
+host's name or its layout. Out of scope: the Copilot cloud agent, and VS Code's Claude and Local
+harnesses.
+
+- **SE's commands through the `se` tools, where present**: the MCP door
+  ([README "The MCP door"](https://github.com/mb-89/SE/blob/v5.57.0/README.md#the-mcp-door)) offers SE's read-only commands as the
+  tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
+  `command`, `args` and `page`.
+  - Where a tool answers `starting`, call it again in a few seconds; where it answers
+    `not-installed` or `failed`, or the session has no `se` tools, run the same command as its
+    script, `uv run python <se>/scripts/<name>.py`.
+  - A command no tool offers, every one that writes among them, always runs as its script.
+- **Without kern**: where `gh` is signed in and no core runs, every step still works, through the
+  scripts and `gh`, as SE's own commands do without kern; the greeting then says
+  `SE runs without kern`, and so does SE in its first message.
+- **Starting a session, where the host has a session tool** (`create_session`): use it, as the
+  catch-up skill says, and `send_message` for the one message a role sends.
+- **Where it has none**, start the worker with the Copilot CLI, detached and logged, in its
+  worktree, its prompt the one [Without gh](#without-gh) names:
+
+  ```sh
+  nohup copilot -C <worktree> --agent worker --trust-folder --no-ask-user --allow-tool=<list> \
+    -n <branch> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &
+  ```
+
+  - Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker',
+    '--trust-folder','--no-ask-user','--allow-tool=<list>','-n','<branch>','-p','<prompt>'
+    -RedirectStandardOutput <worktree>\.se\worker.log -WindowStyle Hidden`.
+  - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
+  - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.
+  - Where the session cannot run it, give the person that one line to run, and end the turn.
+- **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
+  delivered pull requests a message would have announced; a role that would send one sends none.
+- **No ask tool** (`ask_user`): SE asks the person in the chat, its question the turn's last
+  lines, as the catch-up skill ends every turn; workers and integrators still never ask.
+

@@ -386,6 +386,28 @@ def test_the_greeting_names_a_core_that_ended_at_its_start_with_the_first_lines_
                           f"  (all of it in {log})"]
 
 
+@pytest.mark.parametrize(("host", "args", "said"), [
+    ("copilot", ["--kern-failed", "no se 0.3.0 release, and no go to build it"], True),
+    ("copilot", ["--kern-starting", "fetching"], False),
+    ("claude", ["--kern-failed", "no se 0.3.0 release, and no go to build it"], False),
+])
+def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monkeypatch, host, args, said):
+    """Copilot's sessions work with no core, through SE's scripts and gh, and the greeting says so;
+    Claude Code's greeting stays as it is."""
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    write(setup["se"] / "kern" / "release.toml",
+          'version = "0.2.0"\ndownload = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n')
+    assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]), "--cache",
+                          str(setup["cache"]), "status", "--hook", "--offline", "--host", host, *args],
+                         world=setup["world"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    text = out["additionalContext"] if host == "copilot" else out["systemMessage"]
+    assert (se_start.WITHOUT_KERN in text.splitlines()) is said
+    if said:
+        lines = text.splitlines()
+        assert lines[lines.index(se_start.WITHOUT_KERN) - 1].startswith("kern 0.2.0: failed: ")
+
+
 def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):
     lines, asked = kern_greeting(setup, capsys, monkeypatch)
     assert not any(line.startswith("kern") for line in lines) and asked == []

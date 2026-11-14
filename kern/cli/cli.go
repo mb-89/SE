@@ -2,15 +2,17 @@
 // every application built on it: an application's main registers its
 // components (index.Register) and calls Run with its own name.
 //
-//	<name> start  [--root DIR] [--grace D] [--idle D]   start the core in the background, return at once
+//	<name> start  [--root DIR] [--home DIR] [--grace D] [--idle D]   start the core in the background, return at once
 //	<name> status [--root DIR] [--wait D] [--json]      say whether a core runs, and its health
 //	<name> stop   [--root DIR]                          stop the core and wait until it has exited
-//	<name> serve  [--root DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
+//	<name> serve  [--root DIR] [--home DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
 //	<name> hook <event> [--root DIR] [--wait D] [--unanswered N]  post the host's hook JSON on stdin to the core
-//	<name> mcp    [--root DIR] [--grace D] [--idle D]   the MCP door over stdio, starting the core or attaching to it (package mcp)
+//	<name> mcp    [--root DIR] [--home DIR] [--grace D] [--idle D]   the MCP door over stdio, starting the core or attaching to it (package mcp)
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
+// The home is the application's own folder, where it is installed: a root
+// with no wiring of its own is served the home's (Source).
 // Exit codes: 0 done, 1 no core runs (status), 2 a usage or start error.
 // hook exits 0 and prints nothing where the core does not answer: a hook
 // fails open, and a host reads a hook's exit code 2 as a block. With
@@ -61,7 +63,7 @@ const HoldEnv = "KERN_HOLD_START"
 // show that a step that beats outlives it.
 const StepWaitEnv = "KERN_STEP_WAIT"
 
-const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
+const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--home DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
 
 // Run is the command named name: it serves the components registered with
 // index.Register before it is called, and answers the exit code.
@@ -79,8 +81,10 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 	root := fs.String("root", "", "the checkout the core serves")
 	var grace, idle, wait *time.Duration
 	var asJSON *bool
+	home := new(string)
 	switch verb {
 	case "start", "serve", "mcp":
+		home = fs.String("home", "", "the application's own folder, whose wiring a root without one is served")
 		grace = fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
 		idle = fs.Duration("idle", host.Idle, "how long the core runs without any event")
 	case "status":
@@ -98,7 +102,7 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 	if verb == "mcp" {
 		// The door a host spawns never exits early: what keeps it from a core
 		// is every call's answer instead.
-		return door(name, dir, err, *grace, *idle, stderr)
+		return door(name, dir, *home, err, *grace, *idle, stderr)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s %s: %v\n", name, verb, err)
@@ -111,7 +115,7 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "%s start: no path to this binary: %v\n", name, err)
 			return 2
 		}
-		got, err := host.Start(host.Wall{}, dir, bin, "--grace", grace.String(), "--idle", idle.String())
+		got, err := host.Start(host.Wall{}, dir, bin, serveArgs(*home, *grace, *idle)...)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
@@ -157,7 +161,17 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	return serve(name, dir, *grace, *idle, stdout, stderr)
+	return serve(name, dir, *home, *grace, *idle, stdout, stderr)
+}
+
+// serveArgs are the arguments after `serve --root <root>` that start and the
+// door hand the core they start.
+func serveArgs(home string, grace, idle time.Duration) []string {
+	args := []string{"--grace", grace.String(), "--idle", idle.String()}
+	if home != "" {
+		args = append(args, "--home", home)
+	}
+	return args
 }
 
 // hook posts the host's hook JSON, read from stdin, on hook.<event> and
@@ -260,7 +274,7 @@ func HookOutput(event string, a host.HookAnswer) []byte {
 
 // serve runs the core until it ends: no session holds a lease, it is idle,
 // it is asked to stop, or the process is interrupted.
-func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Writer) int {
+func serve(name, root, home string, grace, idle time.Duration, stdout, stderr io.Writer) int {
 	// Every run starts its lines in the core's log with its start, its boot
 	// and its pid, so a report quotes the lines of its own run alone.
 	fmt.Fprintln(stdout, host.StartLine(name, time.Now(), host.Boot(), os.Getpid()))
@@ -281,7 +295,8 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		_ = os.Remove(host.ClaimPath(root))
 		return 2
 	}
-	w, err := Wiring(root)
+	source := Source(root, home)
+	w, err := Wiring(source)
 	if err != nil {
 		return die(fmt.Sprintf("%s serve: %v", name, err))
 	}
@@ -294,7 +309,7 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		stepWait = d
 	}
 	core, err := host.Serve(host.Options{
-		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
+		Root: root, Home: homeOf(root, source), Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
 		StepWait: stepWait,
 	})
 	if err != nil {
@@ -336,12 +351,42 @@ func Wiring(root string) (index.Wiring, error) {
 	return w, nil
 }
 
+// Source answers the folder whose wiring the core serves for the checkout at
+// root: root itself where it has a wiring of its own (wiring.toml or the ad
+// hoc overlay, Wiring), else home where it is given and has a wiring.toml, so
+// an application installed in home serves its commands to a project that
+// keeps none, else root.
+func Source(root, home string) string {
+	for _, own := range []string{filepath.Join(root, index.WiringFile), filepath.Join(root, ".se", index.WiringFile)} {
+		if _, err := os.Stat(own); err == nil {
+			return root
+		}
+	}
+	if home == "" {
+		return root
+	}
+	if abs, err := filepath.Abs(home); err == nil {
+		if _, err := os.Stat(filepath.Join(abs, index.WiringFile)); err == nil {
+			return abs
+		}
+	}
+	return root
+}
+
+// homeOf is the core's Home: source where it is not root, else none.
+func homeOf(root, source string) string {
+	if source == root {
+		return ""
+	}
+	return source
+}
+
 // door serves the MCP door over stdio until the client hangs up: the catalog
 // the core would serve, read without it, and the core started detached, with
 // grace and idle, or attached to, beside the protocol. A root it could not
 // find (rooted) or no path to this binary leaves it serving, each call
 // answering why it starts no core.
-func door(name, root string, rooted error, grace, idle time.Duration, stderr io.Writer) int {
+func door(name, root, home string, rooted error, grace, idle time.Duration, stderr io.Writer) int {
 	version := Version
 	if info, ok := debug.ReadBuildInfo(); ok && version == "" {
 		version = info.Main.Version
@@ -352,16 +397,17 @@ func door(name, root string, rooted error, grace, idle time.Duration, stderr io.
 	} else if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
 		o.Checkout = true
 	}
-	w, err := Wiring(root)
+	source := Source(root, home)
+	w, err := Wiring(source)
 	if err == nil {
-		o.Catalog, err = host.Catalog(root, w, index.Registered())
+		o.Catalog, err = host.Catalog(source, w, index.Registered())
 	}
 	o.CatalogErr = err
 	bin, err := os.Executable()
 	if err != nil {
 		o.NoStart = fmt.Sprintf("no path to this binary: %v", err)
 	}
-	o.Core = mcp.Host{Root: root, Bin: bin, Args: []string{"--grace", grace.String(), "--idle", idle.String()}}
+	o.Core = mcp.Host{Root: root, Bin: bin, Args: serveArgs(home, grace, idle)}
 	// SIGTERM, as a host ends its server, ends the door as EOF does: it returns the lease.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

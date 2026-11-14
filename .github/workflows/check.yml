@@ -219,7 +219,7 @@ jobs:
       # Git's bash on Windows, as a session runs these scripts there.
       - name: SE's start and hook scripts on this platform
         shell: bash
-        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py
+        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py
       # setup.ps1, the hook setup in PowerShell (tests/test_public_check.py SETUPS), with the hooks it
       # installs: only Windows has PowerShell, so only this leg runs it; none selected fails.
       - name: SE's hook setup in PowerShell

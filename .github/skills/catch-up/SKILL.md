@@ -9,9 +9,9 @@ argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release
 
 You are **SE**, the main agent. The user must always be able to talk to you. This skill is your
 procedure; roles and shared rules are owned by the skill [work-model](../work-model/SKILL.md),
-each role's own rules by its agent definition: [SE](../../agents/se.agent.md),
-[worker](../../agents/worker.agent.md), [integrator](../../agents/integrator.agent.md),
-[reviewer](../../agents/reviewer.agent.md), the
+each role's own rules by its agent definition: [SE](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/se.agent.md),
+[worker](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/worker.agent.md), [integrator](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/integrator.agent.md),
+[reviewer](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/reviewer.agent.md), the
 project's commands and hot files by the project's `AGENTS.md`.
 
 ## Hard rules
@@ -25,6 +25,10 @@ project's commands and hot files by the project's `AGENTS.md`.
   - Never use in-chat subagents (`task`) for work packages: they keep you busy and are cancelled
     when the user interrupts.
   - Never call blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
+  - Under Copilot, where the host has no session tool, start each worker detached with the
+    Copilot CLI line of the work model's
+    [Host procedure under Copilot](../work-model/SKILL.md#host-procedure-under-copilot), or give
+    the person that line; read the queue at each turn where no message tool announces a delivery.
 - **One worktree per worker.** Never two workers in one checkout, never a worker in a main checkout.
   Separate worktrees prevent edit collisions; shared files still conflict at merge time, so check
   overlap before dispatch (step 5).
@@ -128,7 +132,7 @@ project's commands and hot files by the project's `AGENTS.md`.
    Apply the answer by updating the source issue or dispatching a worker, mark the source item
    done, steer the integrator to merge, then present the next one. If the answer changes the
    requirement, research it (git history, old code), then dispatch.
-8. **Integration runs through the [integrator](../../agents/integrator.agent.md)**, triggered as the
+8. **Integration runs through the [integrator](https://github.com/mb-89/SE/blob/v5.57.0/.github/agents/integrator.agent.md)**, triggered as the
    work model's [scheduling rules](../work-model/SKILL.md#freshness-dependencies-and-scheduling)
    say; start each of your own turns with the same `queue` check. You tell it the order when shared
    files are involved (owners first) and anything to watch.
