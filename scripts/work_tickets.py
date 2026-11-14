@@ -3441,8 +3441,14 @@ def start(
         )
         return None
 
-    branch = str(issue["title"])
-    path = None
+    path = start_worktree(root, str(issue["title"]), worktree_root, create)
+    mark_in_progress(root, number, repo)
+    return path
+
+
+def start_worktree(root: Path, branch: str, worktree_root: str | None, create: bool) -> Path:
+    """The worker's worktree of `branch`: created from the newest integration branch, or with
+    `create` off the one the project's own script created, synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -3482,8 +3488,72 @@ def start(
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
         sync(path)
-    mark_in_progress(root, number, repo)
     return path
+
+
+STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
+
+
+def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
+    """The GitHub steps of a start where gh cannot take them: the pause search where `paused`
+    (the relay asks it before anything else), `ready` off and `in-progress` on, the cloud worker
+    assigned where `agent` names one, and the Started comment fleet-check's lease counts from."""
+    return Plan(f"start #{number}", (
+        *((pause_step(repo),) if paused else ()),
+        label_step(repo, number, "ready", add=False),
+        label_step(repo, number, "in-progress", add=True),
+        *((Step("assign", "issue_write", {
+            **owner_repo(repo), "method": "update", "issue_number": number,
+            "assignees": [agent]}),) if agent else ()),
+        Step("comment_issue", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": number,
+            "body": STARTED_COMMENT.format(branch=branch)},
+            note="followed by the host's footer where it requires one on every comment"),
+    ), f"#{number} is started: in-progress, with its Started comment")
+
+
+def start_handed_off(
+    root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
+    cloud_agent: str | None, issue_file: Path | None,
+) -> tuple[Path | None, str]:
+    """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
+    GitHub tools answered it (`issue_file`); the worktree as with gh; then the label change and the
+    Started comment sent through kern's relay where it serves the checkout, else printed as steps
+    for the session's GitHub tools. The worktree (None for a cloud worker) and the issue's URL."""
+    door = relay_door(root, repo)
+    if door is not None:
+        refuse_while_paused("start", door.paused(repo))
+        issue = door.ask("issue_read", {"method": "get", "issue_number": number})
+        issue = issue if isinstance(issue, dict) else {}
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"start: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if int(issue.get("number") or 0) != number or not issue.get("title"):
+        raise QueueError(f"start: the issue read is not #{number}: give issue_read's answer of it")
+    labels = issue_labels(issue)
+    if not {"work", "ready"} <= labels:
+        raise QueueError(f"Issue #{number} is not startable: it is labelled "
+                         f"{', '.join(sorted(labels)) or 'nothing'}, not work and ready")
+    cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
+    agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
+    if cloud and not agent:
+        raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
+    branch = str(issue["title"])
+    path = None if cloud else start_worktree(root, branch, worktree_root, create)
+    plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
+    if door is None:
+        print(plan.text())
+    else:
+        def assign(arguments: dict[str, object], _: str) -> None:
+            door.ask("issue_write", {key: value for key, value in arguments.items()
+                                     if key not in ("owner", "repo")})
+
+        run_plan(plan, {**workflow_actions(door), "assign": assign})
+    return path, web_url(issue) or issue_url(repo, number)
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
@@ -8488,19 +8558,35 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("start", "start a ready work issue: worktree from the newest main, label in-progress",
+@command("start", "start a ready work issue: worktree from the newest main, label in-progress; "
+                  "without gh, the label change and the Started comment as GitHub steps, or "
+                  "through kern's relay where it serves the checkout",
          WORKTREE,
          arg("issue", type=int),
          REPO, WORKTREE_ROOT,
          arg("--no-create", dest="create", action="store_false",
              help="only change the labels; the project's own script created the worktree"),
-         arg("--cloud-agent", help="GitHub login for a cloud worker"))
+         arg("--cloud-agent", help="GitHub login for a cloud worker"),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
+                  "it; start then prints the label change and the Started comment as steps for "
+                  "them, or sends them through kern's relay where it serves the checkout"))
 def run_start(root: Path, args: argparse.Namespace) -> int:
-    path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
+    if hand_off():
+        path, url = start_handed_off(root, args.issue, resolve_repo(root, args.repo),
+                                     args.worktree_root, args.create, args.cloud_agent,
+                                     args.issue_body)
+        sent = relay_door(root, resolve_repo(root, args.repo)) is not None
+    else:
+        path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
+        url = None if path is None else str(
+            fetch_issue(root, args.issue, resolve_repo(root, args.repo))["url"])
+        sent = True
     if path is not None:
-        issue = fetch_issue(root, args.issue, resolve_repo(root, args.repo))
-        print(f"Launch worker: agent=worker issue={issue['url']} worktree={path}")
-    print(f"Started #{args.issue}")
+        print(f"Launch worker: agent=worker issue={url} worktree={path}")
+    print(f"Started #{args.issue}" if sent else
+          f"Started #{args.issue} here; run the GitHub steps above to label it and post its "
+          "Started comment")
     return 0
 
 
@@ -8784,7 +8870,8 @@ READ_ONLY_COMMANDS = {
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
 STREAMED_COMMANDS = frozenset(
-    {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check"})
+    {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check",
+     "start"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:

@@ -593,8 +593,8 @@ no token), the hand-off needs neither a retyped file nor a second run
 - **Reads.** `intake`, `field-report --check`, `deliver` and `integrate` read the issue, its
   comments and the pull request from kern's snapshots, which every GitHub tool answer the session
   receives fills through the PostToolUse hook ([scripts/se_relay.py](scripts/se_relay.py)).
-- **One call.** `integrate`, `refs request`, `refs apply`, `file`, `route` and `fleet-check`
-  (`work_tickets.py` `STREAMED_COMMANDS`) run as one call through kern's `call.`, from the same
+- **One call.** `integrate`, `refs request`, `refs apply`, `file`, `route`, `fleet-check` and
+  `start` (`work_tickets.py` `STREAMED_COMMANDS`) run as one call through kern's `call.`, from the same
   command line.
   - Their component runs the command in a thread of its own; each GitHub step of its plan is one
     `github.step` request on the component's `step` port, which `wiring.toml` binds to the GitHub
@@ -1596,9 +1596,11 @@ work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FI
     difference only with --strict. It only reads
 
 work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
-                      [--no-create] [--cloud-agent CLOUD_AGENT]
+                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]
                       issue
-    start a ready work issue: worktree from the newest main, label in-progress
+    start a ready work issue: worktree from the newest main, label in-progress; without gh, the
+    label change and the Started comment as GitHub steps, or through kern's relay where it serves
+    the checkout
 
 work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1

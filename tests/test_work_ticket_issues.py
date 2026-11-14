@@ -1972,6 +1972,98 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
     ] in fake.calls
 
 
+def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
+    """No usable gh: every gh call fails the test; the issue as the GitHub tools answer it."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    answer = tmp_path / "issue.json"
+    answer.write_text(json.dumps({"number": 5, "title": BRANCH, "body": "", "html_url": URL,
+                                  "labels": list(labels)}), encoding="utf-8")
+    return answer
+
+
+def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_steps(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out
+    worktree = main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
+    assert out.startswith("GitHub plan: start #5\n1. list_issues ")
+    steps = [line for line in out.splitlines() if line[:1].isdigit()]
+    assert [line.split(" ", 2)[1] for line in steps] == [
+        "list_issues", "issue_write", "issue_write", "add_issue_comment"]
+    assert '"labels": "<the issue\'s labels without ready>"' in steps[1]
+    assert '"labels": "<the issue\'s labels with in-progress>"' in steps[2]
+    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[3]
+    assert f"Launch worker: agent=worker issue={URL} worktree={worktree}" in out
+    assert "Started #5 here; run the GitHub steps above" in out
+
+
+def test_start_without_gh_assigns_a_cloud_worker_in_its_steps(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--cloud-agent", "worker-login") == 0
+    out = capsys.readouterr().out
+    assert '"assignees": ["worker-login"]' in out and "Launch worker:" not in out
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+@pytest.mark.parametrize(("labels", "given", "message"), [
+    (("work", "in-progress"), True, "not startable: it is labelled in-progress, work"),
+    (("work", "ready"), False, "pass --issue-body <file>"),
+])
+def test_start_without_gh_refuses_an_unstartable_or_unread_issue(
+        main_checkout, monkeypatch, capsys, tmp_path, labels, given, message):
+    answer = started_without_gh(monkeypatch, tmp_path, labels)
+    arguments = ("--issue-body", str(answer)) if given else ()
+    assert run(main_checkout, "start", "5", *arguments) == 1
+    assert message in capsys.readouterr().err
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+def test_start_through_kerns_relay_sends_the_label_change_and_the_started_comment(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    """Where start runs as one call through kern (se_relay.steps set), the pause search, the
+    issue read, the label change and the Started comment are its GitHub steps; nothing is
+    printed for the session to run."""
+    started_without_gh(monkeypatch, tmp_path)
+    labels = ["work", "ready"]
+    asked: list[tuple[str, dict]] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        method = input_.get("method")
+        if tool == "list_issues":
+            return {"issues": []}
+        if tool == "issue_read" and method == "get":
+            return {"number": 5, "title": BRANCH, "html_url": URL, "labels": list(labels)}
+        if tool == "issue_read" and method == "get_labels":
+            return {"labels": [{"name": name} for name in labels]}
+        if tool == "issue_write":
+            labels[:] = input_["labels"]
+            return {"number": 5}
+        if tool == "add_issue_comment":
+            return {"id": 41, "url": URL + "#issuecomment-41"}
+        raise AssertionError(f"start asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "start", "5") == 0
+
+    assert [(tool, input_.get("method")) for tool, input_ in asked] == [
+        ("list_issues", None), ("issue_read", "get"), ("issue_read", "get_labels"),
+        ("issue_write", "update"), ("issue_read", "get_labels"), ("issue_write", "update"),
+        ("add_issue_comment", None)]
+    assert labels == ["work", "in-progress"]
+    assert asked[-1][1]["body"] == f"Started: worker session on branch `{BRANCH}`\n"
+    out = capsys.readouterr().out
+    assert "GitHub plan:" not in out and "Started #5\n" in out
+
+
 def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(
         main_checkout, local_config, monkeypatch, capsys):
     local_config.parent.mkdir(parents=True)
