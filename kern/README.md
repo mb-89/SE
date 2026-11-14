@@ -139,7 +139,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.5"
+version = "0.4.6"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 
@@ -200,6 +200,10 @@ application's `se.toml` `[tests]` command, its Go tests and its Python tests, he
 one budget: over `target_seconds` it warns, over `limit_seconds` or on a failed test it fails, as
 SE's own suite (SE's [README "Test budget"](../README.md#test-budget)). Its input `directory`
 names the application's folder, `.` by default.
+
+Where the application's `se.toml` sets `trust_integrator`, the battery's job `trust` passes it on
+the integrator's record of exactly its tree, and the vet and tests do not run; the template
+keeps it off ([SE's README "Trusted landings"](../README.md#trusted-landings)).
 
 ## The template
 

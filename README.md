@@ -848,6 +848,14 @@ Its permissions are `checks: write` (the marks) and `actions: read` (the record'
 `trust_integrator` off: its `check` runs the full suite and kern-platforms on every pull request
 and push.
 
+A kern application gets the same shortcut from its battery: `kern-battery.yml`'s job `trust`
+runs the action from the kern commit the battery runs at (`job.workflow_sha`), the tag the
+application pins, and the vet and tests run only where it answers false.
+
+To turn it on, the application also grants those two permissions, adds the `schedule` and copies
+`se-pass-record.yml` with the action at `@kern-v<version>`. kern's template keeps it off
+([kern's battery](kern/README.md#the-battery)).
+
 Free minutes for a private repository, which the owner sets up:
 
 - Linux runners only (`ubuntu-*`): a Windows minute counts double, a macOS minute ten times.
