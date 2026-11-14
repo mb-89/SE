@@ -1,0 +1,269 @@
+# Host facts: what each agent host documents, or was measured to have, read from its own pages.
+#
+# A limit this file lacks is not measured: scripts/host_size.py reports "not measured" for it,
+# never "under". A row says what it is from (`source`), when that page was read (`read`) and
+# whether the host documents it or someone measured it (`mark`: documented | measured).
+#
+# One home for host facts. Each kind of fact is one section of this file: `surfaces` (what a host
+# reads) and `limits` (what it caps) today. Later kinds, such as capability rows, a probed tool
+# list or hook probe results, become sections here, never a second host file.
+#
+# A limit row:
+#   surface  a key of [surfaces]
+#   subject  what is limited: agent-body, instructions-file, skill-name, skill-description,
+#            skill-length, skill-listing, mcp-tool-description, tool-name, tool-output-offload,
+#            hook-timeout, mcp-start-timeout
+#   value    the number, in `unit` (bytes, characters, lines, tokens, seconds, milliseconds)
+#   measures optional: for tool-name, the name the host builds, from {server} and {tool}
+#   note     optional: how the host applies it, in its own words where it helps
+
+# What each host reads, by role: `instructions` and `agent` files are handed to every session
+# whole, a skill's name and description too; its body and `reference` files load on demand.
+
+[surfaces.copilot-cli]
+name = "Copilot CLI"
+source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
+read = 2026-11-14
+instructions = ["AGENTS.md"]
+agent = [".github/agents/*.agent.md"]
+skill = [".github/skills/*/SKILL.md"]
+reference = [".github/skills/*/references/*"]
+
+[surfaces.copilot-vscode]
+name = "Copilot in VS Code"
+source = "https://code.visualstudio.com/docs/copilot/customization/agent-skills"
+read = 2026-11-14
+instructions = ["AGENTS.md"]
+agent = [".github/agents/*.agent.md"]
+skill = [".github/skills/*/SKILL.md"]
+reference = [".github/skills/*/references/*"]
+
+[surfaces.copilot-github]
+name = "Copilot cloud agent on github.com"
+source = "https://docs.github.com/en/copilot/concepts/agents/about-agent-skills"
+read = 2026-11-14
+instructions = ["AGENTS.md"]
+agent = [".github/agents/*.agent.md"]
+skill = [".github/skills/*/SKILL.md"]
+reference = [".github/skills/*/references/*"]
+
+[surfaces.claude-code]
+name = "Claude Code"
+source = "https://code.claude.com/docs/en/memory"
+read = 2026-11-14
+instructions = ["AGENTS.md"]
+agent = ["agents/*.md"]
+skill = ["skills/*/SKILL.md"]
+reference = ["skills/*/references/*"]
+
+# Copilot: the custom agent reference covers github.com, the CLI and the IDEs alike.
+
+[[limits]]
+surface = "copilot-cli"
+subject = "agent-body"
+value = 30000
+unit = "characters"
+source = "https://docs.github.com/en/copilot/reference/custom-agents-configuration"
+read = 2026-11-14
+mark = "documented"
+note = "The prompt can be a maximum of 30,000 characters."
+
+[[limits]]
+surface = "copilot-vscode"
+subject = "agent-body"
+value = 30000
+unit = "characters"
+source = "https://docs.github.com/en/copilot/reference/custom-agents-configuration"
+read = 2026-11-14
+mark = "documented"
+note = "The prompt can be a maximum of 30,000 characters."
+
+[[limits]]
+surface = "copilot-github"
+subject = "agent-body"
+value = 30000
+unit = "characters"
+source = "https://docs.github.com/en/copilot/reference/custom-agents-configuration"
+read = 2026-11-14
+mark = "documented"
+note = "The prompt can be a maximum of 30,000 characters."
+
+[[limits]]
+surface = "copilot-cli"
+subject = "skill-name"
+value = 64
+unit = "characters"
+source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
+read = 2026-11-14
+mark = "documented"
+
+[[limits]]
+surface = "copilot-cli"
+subject = "skill-description"
+value = 1024
+unit = "characters"
+source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
+read = 2026-11-14
+mark = "documented"
+
+[[limits]]
+surface = "copilot-vscode"
+subject = "skill-name"
+value = 64
+unit = "characters"
+source = "https://code.visualstudio.com/docs/copilot/customization/agent-skills"
+read = 2026-11-14
+mark = "documented"
+
+[[limits]]
+surface = "copilot-vscode"
+subject = "skill-description"
+value = 1024
+unit = "characters"
+source = "https://code.visualstudio.com/docs/copilot/customization/agent-skills"
+read = 2026-11-14
+mark = "documented"
+
+[[limits]]
+surface = "copilot-cli"
+subject = "tool-name"
+value = 64
+unit = "characters"
+measures = "{server}-{tool}"
+source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
+read = 2026-11-14
+mark = "documented"
+note = "The combined name (serverName-toolName) is capped at 64 characters; a longer one is truncated."
+
+[[limits]]
+surface = "copilot-cli"
+subject = "mcp-start-timeout"
+value = 60000
+unit = "milliseconds"
+source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
+read = 2026-11-14
+mark = "documented"
+note = "A server's `timeout` (default 30000) sets the connection budget, floored at 60000 ms."
+
+[[limits]]
+surface = "copilot-cli"
+subject = "hook-timeout"
+value = 30
+unit = "seconds"
+source = "https://docs.github.com/en/copilot/reference/hooks-configuration"
+read = 2026-11-14
+mark = "documented"
+note = "The default of `timeoutSec`."
+
+[[limits]]
+surface = "copilot-github"
+subject = "hook-timeout"
+value = 30
+unit = "seconds"
+source = "https://docs.github.com/en/copilot/reference/hooks-configuration"
+read = 2026-11-14
+mark = "documented"
+note = "The default of `timeoutSec`."
+
+# Claude Code.
+
+[[limits]]
+surface = "claude-code"
+subject = "instructions-file"
+value = 4194304
+unit = "bytes"
+source = "https://code.claude.com/docs/en/memory"
+read = 2026-11-14
+mark = "documented"
+note = "Claude Code skips a file over 4 MiB."
+
+[[limits]]
+surface = "claude-code"
+subject = "instructions-file"
+value = 200
+unit = "lines"
+source = "https://code.claude.com/docs/en/memory"
+read = 2026-11-14
+mark = "documented"
+note = "A target, not a refusal: target under 200 lines per CLAUDE.md file."
+
+[[limits]]
+surface = "claude-code"
+subject = "skill-description"
+value = 1536
+unit = "characters"
+source = "https://code.claude.com/docs/en/skills"
+read = 2026-11-14
+mark = "documented"
+note = "description and when_to_use together are truncated at 1,536 characters in the skill listing."
+
+[[limits]]
+surface = "claude-code"
+subject = "skill-length"
+value = 500
+unit = "lines"
+source = "https://code.claude.com/docs/en/skills"
+read = 2026-11-14
+mark = "documented"
+note = "A target, not a refusal: keep SKILL.md under 500 lines."
+
+[[limits]]
+surface = "claude-code"
+subject = "skill-listing"
+value = 8000
+unit = "characters"
+source = "https://code.claude.com/docs/en/env-vars"
+read = 2026-11-14
+mark = "documented"
+note = "The budget is 1% of the context window, with a fallback of 8,000 characters; over it, descriptions are dropped."
+
+[[limits]]
+surface = "claude-code"
+subject = "mcp-tool-description"
+value = 4096
+unit = "characters"
+source = "https://code.claude.com/docs/en/mcp"
+read = 2026-11-14
+mark = "documented"
+note = "For a tool that loads upfront; 16,384 for one loaded through tool search."
+
+[[limits]]
+surface = "claude-code"
+subject = "tool-name"
+value = 128
+unit = "characters"
+measures = "mcp__{server}__{tool}"
+source = "https://code.claude.com/docs/en/mcp"
+read = 2026-11-14
+mark = "documented"
+note = "A tool whose full name is over 128 characters is left out of the tools sent to Claude."
+
+[[limits]]
+surface = "claude-code"
+subject = "tool-output-offload"
+value = 50000
+unit = "characters"
+source = "https://code.claude.com/docs/en/mcp"
+read = 2026-11-14
+mark = "documented"
+note = "A successful MCP text result longer than this is saved to a file; MAX_MCP_OUTPUT_TOKENS (25000) caps tokens."
+
+[[limits]]
+surface = "claude-code"
+subject = "hook-timeout"
+value = 600
+unit = "seconds"
+source = "https://code.claude.com/docs/en/hooks"
+read = 2026-11-14
+mark = "documented"
+note = "The default for command hooks; 30 on UserPromptSubmit."
+
+[[limits]]
+surface = "claude-code"
+subject = "mcp-start-timeout"
+value = 30000
+unit = "milliseconds"
+source = "https://code.claude.com/docs/en/env-vars"
+read = 2026-11-14
+mark = "documented"
+note = "The default of MCP_TIMEOUT."
