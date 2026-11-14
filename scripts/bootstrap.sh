@@ -121,9 +121,11 @@ kern_link() { # <bin>
   ln -sf "$base" "$dir/${base%%-[0-9]*}$ext" 2>/dev/null || cp -f "$1" "$dir/${base%%-[0-9]*}$ext"
 }
 # Start the core for the project and hand it the session's start; the post waits for the core.
+# `--home`: a project that keeps no wiring of its own is served SE's (kern's cli.Source), as the MCP
+# door's launcher (se_mcp.sh) serves it.
 kern_run() { # <bin> <session start file>
   kern_link "$1"
-  "$1" start --root "$project" >/dev/null 2>"$project/.se/.runtime/kern-start.err" || return 1
+  "$1" start --root "$project" --home "$se_root" >/dev/null 2>"$project/.se/.runtime/kern-start.err" || return 1
   "$1" hook SessionStart --root "$project" <"$2" >/dev/null 2>&1
   return 0
 }

@@ -661,3 +661,18 @@ def test_a_routed_call_kern_does_not_answer_within_call_wait_is_given_up_and_run
     assert asked == [("call.work_tickets%2Epy%20status", se_components.CALL_WAIT, True)]
     monkeypatch.setenv(se_components.SWITCH, "on")
     assert se_components.routed(script, ["status"], [], True) == 1
+
+
+def test_a_call_naming_no_directory_runs_in_the_checkout_kern_serves(tmp_path, monkeypatch) -> None:
+    """kern names the checkout it serves in each placed process (KERN_ROOT), which runs where its
+    wiring came from: SE's own folder where kern serves SE's wiring to a project that keeps none
+    (kern's cli.Source). A call without `--se-cwd` runs against that checkout, and the process
+    stands where it stood once it has ended."""
+    project = tmp_path / "project"
+    project.mkdir()
+    seen = []
+    monkeypatch.setenv(se_components.ROOT_ENV, str(project))
+    home = Path.cwd()
+    code, _, _ = se_components.run_main(lambda argv: seen.append(Path.cwd()) or 0, [], None)
+    assert code == 0 and seen == [project.resolve()]
+    assert Path.cwd() == home

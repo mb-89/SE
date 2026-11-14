@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 		os.Exit(placed())
 	case callerArg:
 		os.Exit(caller())
+	case whereArg:
+		os.Exit(where())
 	}
 	// Every test reaches git through kern's git door, on its fake.
 	gitdoor.Use(gitfake.New())
