@@ -899,6 +899,50 @@ def test_field_report_check_takes_the_issue_body_from_a_file_or_refuses_without_
     assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
 
 
+OWNER_STEPS = ("## Owner step\n\n<!-- what the sessions' filters refuse -->\n\n"
+               "- Schedule the follow-up run for Monday.\n"
+               "- Add `example.com` to the allow list.\n\n")
+
+
+def test_intake_draft_and_check_carry_the_work_issues_owner_steps(worktree, gh, capsys):
+    gh.issue["body"] = BODY.replace("## Verification", OWNER_STEPS + "## Verification")
+    assert run(worktree, "intake", "--issue", "5") == 0
+    delivery = (worktree / ".se" / "work" / "todo" / "delivery.md").read_text(encoding="utf-8")
+    assert ('- [ ] The field report\'s "## Owner step" carries the owner step: Schedule the '
+            "follow-up run for Monday.\n" in delivery)
+    assert "carries the owner step: Add `example.com` to the allow list.\n" in delivery
+    report = draft_complete_field_report(worktree)
+    drafted = report.read_text(encoding="utf-8")
+    assert ("## Owner step\n\n- Schedule the follow-up run for Monday.\n- Add `example.com` to "
+            f"the allow list.\n\n{END}") in drafted
+    assert run(worktree, "field-report", "--check", str(report)) == 0
+    report.write_text(drafted.replace("- Add `example.com` to the allow list.\n", ""),
+                      encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+
+    assert ('section "## Owner step" does not carry the work issue\'s owner step: Add '
+            "`example.com` to the allow list.") in capsys.readouterr().err
+
+
+def test_a_work_issue_without_owner_steps_adds_no_ticket_item_and_no_report_section(worktree, gh):
+    gh.issue["body"] = BODY.replace("## Verification", "## Owner step\n\n<!-- none -->\n\n"
+                                                       "## Verification")
+    assert run(worktree, "intake", "--issue", "5") == 0
+    delivery = (worktree / ".se" / "work" / "todo" / "delivery.md").read_text(encoding="utf-8")
+    assert "Owner step" not in delivery
+    assert "## Owner step" not in draft_complete_field_report(worktree).read_text(encoding="utf-8")
+    assert work_tickets.owner_steps(BODY) == []
+
+
+def test_the_work_issue_template_offers_the_optional_owner_step_section():
+    template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / "work.md"
+                ).read_text(encoding="utf-8")
+    assert "\n## Owner step\n" in template
+    assert work_tickets.owner_steps(template) == []  # its guidance is a comment: no step
+
+
 def with_requirement_3(report: str) -> str:
     row = "| Requirement 2 | complete | `abc1234` | `test`: passed |\n"
     return report.replace(row, row + row.replace("Requirement 2", "Requirement 3"))
@@ -2960,6 +3004,103 @@ def test_integrate_hands_off_a_plan_of_github_steps_where_gh_is_not_signed_in(
     assert '"expectedHeadSha": "' + landed + '"' in out
     assert "Run the plan's steps, then its last line for pull request #7" in out
     assert git_run(main_checkout, "branch", "--show-current", check=True).stdout.strip() == "main"
+
+
+def review_comment(verdict: str, head: str) -> dict[str, str]:
+    """review.py file's one comment on a pull request: its marker, then its JSON block."""
+    data = json.dumps({"pull": 7, "verdict": verdict, "head": head})
+    return {"body": f"<!-- se:review -->\n## Review of pull request #7: {verdict}\n\n"
+                    f"```json\n{data}\n```\n"}
+
+
+def rule_book_worker(main_checkout: Path, monkeypatch, github, gate: str | None
+                     ) -> tuple[str, list[str], Path]:
+    """feature/worker, handed off as PR #7, edits AGENTS.md: a risky change by the review gate's
+    built-in list, with se.toml [integrate] on origin's main set to `gate` (none where None);
+    (head, the integrate arguments, the folder of the session's saved answers)."""
+    if gate is not None:
+        (main_checkout / "se.toml").write_text(IDENTITY + f"\n[integrate]\n{gate}\n",
+                                               encoding="utf-8")
+        git_ok("-C", str(main_checkout), "pull", "-q", "origin", "main")
+        git_ok("-C", str(main_checkout), "commit", "-q", "-am", "Set the review gate")
+        git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "AGENTS.md").write_text("# Rules\n\n- A new rule.\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "AGENTS.md")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "Change the rule book")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = git_run(worker, "rev-parse", "HEAD", check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    integration_fakes(monkeypatch, head)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    saved = main_checkout.parent / "saved"
+    saved.mkdir()
+    (saved / "pr.md").write_text(reported_at(head), encoding="utf-8")
+    (saved / "issue.md").write_text(reported_at(head), encoding="utf-8")
+    return head, ["integrate", "7", "--pr-description", str(saved / "pr.md"),
+                  "--issue-body", str(saved / "issue.md"), "--branch", "feature/worker"], saved
+
+
+def test_integrate_lands_a_rule_book_change_unreviewed_where_the_review_gate_is_absent(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments, _ = rule_book_worker(main_checkout, monkeypatch, github, None)
+
+    assert run(main_checkout, *arguments) == 0
+
+    out = capsys.readouterr().out
+    assert "Review gate" not in out  # off, it reads no review and says nothing
+    assert "Run the plan's steps, then its last line for pull request #7" in out
+
+
+def test_integrate_refuses_an_unreviewed_rule_book_change_where_the_review_gate_is_on(
+        main_checkout, monkeypatch, github, capsys):
+    head, arguments, saved = rule_book_worker(main_checkout, monkeypatch, github,
+                                              "review_gate = true")
+    base = origin_main(main_checkout)
+
+    assert run(main_checkout, *arguments) == 1  # without gh and without the comments: named
+    assert "pass --pr-comments <file>" in capsys.readouterr().err
+    (saved / "comments.json").write_text(json.dumps([review_comment("decline", head)]),
+                                         encoding="utf-8")
+
+    assert run(main_checkout, *arguments, "--pr-comments", str(saved / "comments.json")) == 1
+
+    err = capsys.readouterr().err
+    assert ("Review gate: feature/worker does not land: the change is risky (rule-book) and its "
+            f"newest review of {head[:12]} is decline") in err
+    assert "se.toml [integrate] review_gate = true" in err
+    origin = main_checkout.parent / "origin.git"
+    assert git_run(origin, "rev-parse", "--verify", "--quiet", "refs/heads/land/feature/worker"
+                   ).returncode != 0  # nothing pushed
+    assert origin_main(main_checkout) == base
+    assert git_run(main_checkout, "branch", "--show-current", check=True).stdout.strip() == "main"
+
+
+def test_integrate_lands_a_rule_book_change_with_a_pass_where_the_review_gate_is_on(
+        main_checkout, monkeypatch, github, capsys):
+    head, arguments, saved = rule_book_worker(main_checkout, monkeypatch, github,
+                                              "review_gate = true")
+    (saved / "comments.json").write_text(json.dumps(
+        {"comments": [review_comment("pass", "0" * 40), review_comment("pass", head[:12])]}),
+        encoding="utf-8")
+
+    assert run(main_checkout, *arguments, "--pr-comments", str(saved / "comments.json")) == 0
+
+    out = capsys.readouterr().out
+    assert f"Review gate: risky (rule-book), reviewed: pass at {head[:12]}" in out
+    assert "Run the plan's steps, then its last line for pull request #7" in out
+
+
+def test_integrate_lands_a_change_whose_risk_the_review_gate_does_not_list(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments, _ = rule_book_worker(main_checkout, monkeypatch, github,
+                                       'review_gate = true\nreview_gate_risky = ["major"]')
+
+    assert run(main_checkout, *arguments) == 0  # minor, and the rule book is not listed
+
+    assert "Run the plan's steps" in capsys.readouterr().out
 
 
 TRUSTED = IDENTITY + "\n[tests]\ncommand = [\"true\"]\ntrust_integrator = true\n"

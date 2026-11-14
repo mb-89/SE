@@ -79,6 +79,13 @@ None
 
 - [ ]
 
+## Owner step
+
+<!-- Optional: steps only the owner takes, one list item each, that the sessions' safety filters
+     refuse (scheduling a follow-up, an allow-list entry, deleting files outside the repository).
+     intake adds each to the delivery ticket and the field report carries each under the same
+     heading. Delete this section otherwise. -->
+
 ## Verification
 
 <!-- Focused tests and real commands to run; name the complete suite only where the worker must run it, otherwise the integrator does. -->
