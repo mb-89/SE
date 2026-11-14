@@ -637,8 +637,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   instead of from a file the session retypes.
   - Every GitHub tool answer the session receives lands in kern's snapshot (`github/issues/<key>`,
     `github/pulls/<key>`, `github/comments/<key>`), so `intake`, `refresh`, `field-report
-    --check`, `deliver` and `integrate` (its pull request, work issue and landing description)
-    read it from there.
+    --check`, `deliver` and `integrate` (its pull request, its work issue from the tracker, and
+    its landing description) read it from there.
   - Where a snapshot is missing or stale the command names the exact GitHub tool call to run and
     stops; the session runs it (the hook, telling it the waiting calls, points the same way), its
     answer reaches kern through the PostToolUse hook, and the command runs again.

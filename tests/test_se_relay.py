@@ -136,9 +136,30 @@ def test_integrate_reads_the_pull_request_and_issue_from_the_relay(served, monke
     monkeypatch.setattr(work_tickets, "remote_head", lambda root, branch: "deadbeef")
     relay = work_tickets.relay_for(worktree)
     pull, report_text, work_issue, number = work_tickets.relay_pull_request(
-        relay, worktree, 9, "alice/demo")
+        relay, worktree, 9, "alice/demo", "alice/demo")
     assert number == 42 and pull["headRefName"] == "feat/x" and pull["headRefOid"] == "deadbeef"
     assert captured["issue_body"] == "## Requirements\n\n1. One.\n"
+
+
+def test_the_relay_reads_the_work_issue_from_the_tracker_not_origin(served, monkeypatch) -> None:
+    """The pull request lives on origin, its work issue on the tracker, as the gh path reads it:
+    the relay answers only the repository asked, so a read of origin's #42 finds nothing."""
+    worktree, names = served
+    report = ("<!-- se:field-report -->\n**Work issue:** #42  **Branch:** `feat/x`\n"
+              "<!-- se:field-report:end -->")
+    names["github/pulls/alice.demo.9"] = snapshot(9, {
+        "number": 9, "body": report, "head": {"ref": "feat/x", "sha": "deadbeef"}})
+    names["github/issues/alice.tracker.42"] = snapshot(42, {
+        "number": 42, "title": "feat/x", "body": "Tracker's body.",
+        "html_url": "https://github.com/alice/tracker/issues/42"})
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report_body, issue_body: [])
+    monkeypatch.setattr(work_tickets, "checked_git", lambda *a, **k: "")
+    relay = work_tickets.relay_for(worktree)
+    _, _, work_issue, _ = work_tickets.relay_pull_request(
+        relay, worktree, 9, "alice/demo", "git.example/alice/tracker")
+    assert work_issue == {"body": "Tracker's body."}
+    with pytest.raises(se_relay.RelayError, match="no work issue of alice/demo#42"):
+        work_tickets.relay_pull_request(relay, worktree, 9, "alice/demo", "alice/demo")
 
 
 def test_refresh_reads_the_issue_and_comments_from_the_relay(served, monkeypatch) -> None:

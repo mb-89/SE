@@ -2855,7 +2855,9 @@ def test_integrate_hands_off_the_record_as_steps_the_github_tools_make_where_tru
 class SessionSteps:
     """A cloud session answering integrate's GitHub steps through kern's relay: each step is the
     tool and input kern's `github.step` hands it, answered as the GitHub tools answer, on the bare
-    origin as GitHub would (`FakeGitHub` writes the squash commit).
+    origin as GitHub would (`FakeGitHub` writes the squash commit). The pull requests live on
+    origin (owner/repo), the work issue on the tracker (owner/tracker), and each is answered only
+    for the repository asked.
 
     Every step is recorded in `__call__`, before it is answered; a subclass changes the answers
     by overriding `answer`, so no step it adds goes unrecorded."""
@@ -2871,9 +2873,12 @@ class SessionSteps:
     def answer(self, tool: str, input_: dict) -> object:
         method = input_.get("method")
         if tool == "pull_request_read" and method == "get" and input_["pullNumber"] == 7:
+            assert input_["repo"] == "repo", f"pull request #7 lives on origin: {input_}"
             head = self.github.git("rev-parse", "refs/heads/feature/worker")
             return {"number": 7, "body": reported_at(head), "html_url": "https://git.example/owner/repo/pull/7",
                     "head": {"ref": "feature/worker", "sha": head}}
+        if tool == "issue_read" and method in ("get", "get_comments") and input_["repo"] != "tracker":
+            raise AssertionError(f"the work issue lives on the tracker, owner/tracker: {input_}")
         if tool == "issue_read" and method == "get" and input_["issue_number"] == 5 and len(self.asked) < 3:
             return {"number": 5, "title": "feature/worker", "state": "open",
                     "html_url": "https://git.example/owner/tracker/issues/5", "body": reported_at(self.github.git("rev-parse", "refs/heads/feature/worker"))}
@@ -5135,6 +5140,7 @@ class CommentedSessionSteps(SessionSteps):
 
     def answer(self, tool: str, input_: dict) -> object:
         if tool == "issue_read" and input_.get("method") == "get_comments":
+            assert input_["repo"] == "tracker", f"the work issue lives on the tracker: {input_}"
             return [{"id": 6874481244, "body": "Started: a worker session.",
                      "user": {"login": "alice"}, "created_at": "2026-11-14T08:23:11Z",
                      "html_url": "https://git.example/owner/tracker/issues/5#issuecomment-1"}]
@@ -5183,6 +5189,10 @@ def test_a_session_steps_subclass_that_adds_a_step_still_records_it(main_checkou
     assert session("get_me", {}, "who", "") == {"login": "alice"}
     assert session("list_pull_requests", {"owner": "owner", "repo": "repo"}, "list", "") == []
     assert [tool for tool, _ in session.asked] == ["get_me", "list_pull_requests"]
+    with pytest.raises(AssertionError, match="lives on the tracker"):
+        session("issue_read", {"method": "get", "owner": "owner", "repo": "repo",
+                               "issue_number": 5}, "read", "")
+    assert session.asked[-1][0] == "issue_read"  # recorded before it was refused
 
 
 class RehearsalSteps:
