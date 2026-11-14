@@ -55,6 +55,15 @@ class Peer:
         with self.lock:
             self.sent.append((subject, data if isinstance(data, dict) else json.loads(data or b"{}")))
 
+    def flush(self) -> None:
+        """The server read all: the fake has nothing in flight."""
+
+    #: The reply subjects the fake bus refuses an answer to, with the server's reason.
+    refusing: dict[str, str] = {}
+
+    def refused(self, subject: str) -> str:
+        return self.refusing.get(subject, "")
+
 
 def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "component.toml").write_text(DECLARATION, encoding="utf-8")
@@ -317,3 +326,27 @@ def test_a_step_answers_while_it_beats_and_an_answer_that_is_no_json_as_its_erro
 
     assert len(sent) == 1 and "is no JSON" in sent[0]["error"], sent
     assert not run._steps and not run._abandons
+
+
+def test_an_answer_the_bus_refuses_is_said_so_the_core_fails_the_step_at_once(
+        tmp_path: Path, monkeypatch) -> None:
+    """Where the bus refuses a step's answer (its reply permission ran out), the runner says it on
+    say.<i>.<call>, {"refused"}, with the server's reason, so the core fails the step at once
+    instead of waiting out its step wait in silence; an answer the bus took says nothing more."""
+    (tmp_path / "component.toml").write_text(DECLARATION, encoding="utf-8")
+    (tmp_path / "__init__.py").write_text(INIT, encoding="utf-8")
+    comp = runner.load(tmp_path)
+    monkeypatch.setattr(runner, "BEAT", 10.0)
+    from kern.nats import Msg
+    from kern.subjects import token
+
+    peer = Answering()
+    peer.refusing = {"_INBOX.core.2": 'Permissions Violation for Publish to "_INBOX.core.2"'}
+    run = runner.Runner(comp, peer, "drip")  # type: ignore[arg-type]
+    for reply, call in (("_INBOX.core.1", "1"), ("_INBOX.core.2", "2")):
+        run._handle(Msg("cmd.drip." + token("drip talk"), reply,
+                        json.dumps({"call": call, "step": 1, "args": []}).encode()))
+
+    assert [reply for reply, _ in peer.answered] == ["_INBOX.core.1", "_INBOX.core.2"]
+    refused = [(subject, body) for subject, body in peer.sent if "refused" in body]
+    assert refused == [("say.drip.2", {"refused": 'Permissions Violation for Publish to "_INBOX.core.2"'})]
