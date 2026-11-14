@@ -572,6 +572,16 @@ Without gh it prints its GitHub plan; the session runs it with its GitHub tools,
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
 
+### Settings check
+
+`fleet/settings.toml` records settings the fleet runs on outside the repository: main's ruleset,
+the scheduled tasks and the cloud environment. `scripts/fleet_settings.py` owns its format and
+the doors.
+
+`work_tickets.py settings-check` compares it with what the live doors read and prints each
+difference in one line. It is advisory: it exits 0 unless `--strict` is given, and nothing runs it
+on its own.
+
 ### Retro due
 
 ```toml
