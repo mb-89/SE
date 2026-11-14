@@ -1645,6 +1645,40 @@ def test_fleet_check_command_prints_findings_and_exits_one(tmp_path: Path, monke
     assert "no branch #1" in capsys.readouterr().out
 
 
+def test_fleet_check_reports_a_worker_stopped_on_a_usage_limit_and_restarts_it_only_when_on(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    fresh = work_tickets.datetime.now(work_tickets.timezone.utc)  # the command's own clock
+    door = FakeFleet([fleet_issue(1, "feat/limited", "work", "in-progress")],
+                     branches={"feat/limited": fresh})
+    monkeypatch.setattr(work_tickets, "Fleet", door)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    asked = []  # the core holds no sessions: with --sessions it is not read
+    monkeypatch.setattr(work_tickets.sibling("kern_names"), "read",
+                        lambda root, names: asked.append(names))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    sessions = tmp_path / "sessions.json"
+    sessions.write_text(json.dumps({"data": [{
+        "id": "session_w", "title": "Work feat/limited", "status_bucket": "idle",
+        "events": [{"data": {"result": {"is_error": True,
+                                        "result": "Claude usage limit reached"}}}]}]}),
+        encoding="utf-8")
+    arguments = ["fleet-check", "--worktree", str(tmp_path), "--repo", "owner/repo", "--json"]
+    assert work_tickets.main(arguments) == 0  # without --sessions: as before, healthy
+    assert json.loads(capsys.readouterr().out) == {"healthy": True, "findings": []}
+
+    assert work_tickets.main([*arguments, "--sessions", str(sessions)]) == 1
+    finding, = json.loads(capsys.readouterr().out)["findings"]
+    assert (finding["kind"], finding["issue"], finding["branch"]) == (
+        "stopped on a limit", 1, "feat/limited")
+    assert finding["remedy"].startswith("none: reported only")
+
+    (tmp_path / "se.toml").write_text("[fleet]\nrestart_after_limit = true\n", encoding="utf-8")
+    assert work_tickets.main([*arguments, "--sessions", str(sessions)]) == 1
+    finding, = json.loads(capsys.readouterr().out)["findings"]
+    assert finding["remedy"].startswith("once the limit lifts, resume session session_w")
+    assert asked == [["fleet/findings"]]
+
+
 def test_fleet_check_reads_the_cores_fleet_live_and_falls_back_without_it(
         tmp_path: Path, monkeypatch, capsys) -> None:
     kern_names = work_tickets.sibling("kern_names")

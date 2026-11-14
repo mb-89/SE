@@ -7406,6 +7406,8 @@ def refs_apply_read_back(root: Path, number: int, triples: list[tuple[str, str, 
 
 FLEET_KINDS = ("no branch", "quiet branch", "failed check", "conflict", "stray branch",
                "impossible block", "block cycle", "waiting on the person")
+# Listed only from the session tools' answers (fleet-check --sessions): limit_restart.py's KIND.
+LIMIT_KIND = "stopped on a limit"
 # Listed, but neither stuck nor stray: in-progress work within its lease and still without a branch.
 STARTING = "starting"
 STARTED_PREFIX = "Started:"
@@ -7433,6 +7435,16 @@ class Finding:
     def stuck(self) -> bool:
         """Whether it is stuck or stray; a "starting" issue is listed, but healthy."""
         return self.kind != STARTING
+
+
+def fleet_restart(root: Path) -> bool:
+    """se.toml `[fleet] restart_after_limit`: whether the fleet check's remedy for a worker stopped
+    on a usage limit is to restart it (limit_restart.py); built in false."""
+    limits = sibling("limit_restart")
+    try:
+        return limits.restart(se_table(root, "fleet"))
+    except limits.SettingError as error:
+        raise QueueError(f"{error}; fix it in {root / 'se.toml'}") from None
 
 
 def fleet_lease(root: Path) -> timedelta:
@@ -7641,14 +7653,18 @@ def fleet_plan(repo: str, base: str) -> Plan:
                   "on its head; save each pull request with \"check\": the conclusion of its "
                   f"{CHECK_NAME} run, as one JSON list", gives=("pulls file",)),
     ), then="work_tickets.py fleet-check --open-issues <open issues file> --closed-issues "
-            "<closed issues file> --pulls <pulls file>")
+            "<closed issues file> --pulls <pulls file> [--sessions <the session tools' answers "
+            "file, README \"Fleet check\">]")
 
 
-def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str
+def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str,
+                   sessions: list[object] | None = None, restart: bool = False
                    ) -> list[Finding]:
     """What is stuck or stray in the fleet `door` reads, in FLEET_KINDS order, lowest issue first
     within a kind; `repository` is the checkout's name, whose `repo:` label (or none) marks the
-    issues whose branches live on this origin."""
+    issues whose branches live on this origin. Given the session tools' answers `sessions`, the
+    worker sessions stopped on a usage limit too (limit_restart.py), their remedy by `restart`,
+    se.toml `[fleet] restart_after_limit`."""
     open_issues = {issue["number"]: issue for issue in map(fleet_issue, door.issues("open"))}
     closed = {issue["number"]: issue for issue in map(fleet_issue, door.issues("closed"))}
     pulls = [fleet_pull(pull) for pull in door.pulls()]
@@ -7772,7 +7788,16 @@ def fleet_findings(door: object, now: datetime, lease: timedelta, repository: st
             f"waits for the person ({PERSON_LABEL})" + (f", holding up {held}" if held else ""),
             "SE presents it to the person with the decision skill", holds=tuple(sorted(holds))))
 
-    rank = {kind: index for index, kind in enumerate((*FLEET_KINDS, STARTING))}
+    if sessions is not None:
+        limits = sibling("limit_restart")
+        in_progress = {number: str(issue["title"]) for number, issue in open_issues.items()
+                       if IN_PROGRESS_LABEL in issue["labels"] and here(issue)}
+        delivered = {pull["head"] for pull in pulls if REPORT_BEGIN in pull["body"]}
+        found += [Finding(limits.KIND, item.issue, item.what, item.remedy, branch=item.branch)
+                  for item in limits.findings(sessions, in_progress, delivered, door.comments,
+                                              now, restart)]
+
+    rank = {kind: index for index, kind in enumerate((*FLEET_KINDS, LIMIT_KIND, STARTING))}
     return sorted(found, key=lambda finding: (rank[finding.kind], finding.issue))
 
 
@@ -8811,18 +8836,34 @@ def run_paused(root: Path, args: argparse.Namespace) -> int:
                         "since its Started comment (listed as starting before) or without a push "
                         "within the lease, a delivered pull request whose check failed or that conflicts, a branch "
                         "of a closed issue, a block by an issue closed as not planned or by itself, "
-                        "an se-person issue and what it holds up; 'healthy' and exit code 0 when "
+                        "an se-person issue and what it holds up, and with --sessions a worker "
+                        "session stopped on a usage limit without delivering; 'healthy' and exit "
+                        "code 0 when "
                         "there is none, exit code 1 otherwise. It only reads. Without gh it prints "
                         "its GitHub plan and takes the answers from files",
          OPTIONAL_WORKTREE, REPO, JSON_OUTPUT,
          arg("--open-issues", type=Path, help="without gh: the open issues the plan read"),
          arg("--closed-issues", type=Path, help="without gh: the closed issues the plan read"),
-         arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"))
+         arg("--pulls", type=Path, help="without gh: the open pull requests the plan read"),
+         arg("--sessions", type=Path, metavar="FILE",
+             help="the session tools' answers: the sessions list_sessions lists, each with its "
+                  "list_events result and rate_limit_event events as \"events\"; adds the worker "
+                  "sessions stopped on a usage limit without delivering (README \"Fleet check\")"))
 def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
+    sessions = None
+    if args.sessions is not None:
+        try:
+            sessions = json.loads(read_file(args.sessions, "the session tools' answers"))
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{args.sessions} is not the JSON list of sessions: {error}") from None
+        sessions = tool_items(sessions, "data")
+    restart = fleet_restart(root) if sessions is not None else False
     # Live first: the fleet component of the core in the checkout (scripts/kern_names.py).
     # Only a complete read of the open issues and pull requests is a verdict; a partial one says
-    # how much it saw, and since when, and the check reads the fleet itself.
-    live = (sibling("kern_names").read(root, ["fleet/findings"]) or {}).get("fleet/findings")
+    # how much it saw, and since when, and the check reads the fleet itself. The core holds no
+    # sessions, so with --sessions the check reads the fleet itself.
+    live = None if sessions is not None else (
+        sibling("kern_names").read(root, ["fleet/findings"]) or {}).get("fleet/findings")
     if isinstance(live, dict) and live.get("issues") and live.get("complete"):
         found = [Finding(**{**f, "holds": tuple(f.get("holds") or ())}) for f in live["findings"]]
         if not args.json:
@@ -8848,7 +8889,7 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     else:
         door = Fleet(root, repo, base)
     found = fleet_findings(door, datetime.now(timezone.utc), fleet_lease(root),
-                           repository_name(root))
+                           repository_name(root), sessions, restart)
     print(fleet_report(found, args.json))
     return 1 if any(finding.stuck for finding in found) else 0
 

@@ -110,10 +110,10 @@ help = "list delivered pull requests (open, to the integration branch, with a co
 class = "interactive"
 
 [commands."work_tickets.py fleet-check"]
-usage = "work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]\n                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]\n                            [--pulls PULLS]"
+usage = "work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]\n                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]\n                            [--pulls PULLS] [--sessions FILE]"
 summary = "list every stuck or stray piece of work, each with its issue, pull ..."
 group = "Integration"
-help = "list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files"
+help = "list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files"
 class = "interactive"
 read-only = true
 mcp = "Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet."

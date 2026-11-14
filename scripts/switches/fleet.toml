@@ -10,3 +10,13 @@ layers = ["se.toml"]
 key = "integrate.review_gate"
 help = "README.md#review-gate"
 note = "off: integrate reads no review; on: a risky change lands only with a reviewer's pass of its head"
+
+[[switch]]
+name = "[fleet] restart_after_limit"
+kind = "se.toml"
+reader = "scripts/limit_restart.py"
+default = "off"
+layers = ["se.toml"]
+key = "fleet.restart_after_limit"
+help = "README.md#fleet-check"
+note = "off: a worker stopped on a usage limit is reported only; on: the remedy resumes it once the limit lifts, once per issue"
