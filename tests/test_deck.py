@@ -341,6 +341,22 @@ def test_answers_parse_into_the_summary():
         deck.summary({"answers": []})
 
 
+def test_a_veto_a_lift_and_a_datum_the_owner_changed_print_beside_the_old_fields():
+    # The three fields obs v3.2.0's answers.schema.json added to figureChanges.
+    figure = {"weights": {"places": 1}, "vetoes": ["C", "A"], "lifts": {"B": ["given", "gate1"]}, "datum": "B",
+              "winner": "B"}
+    payload = {"verdicts": [{"chapter": "record", "version": "0" * 64, "verdict": "decline",
+                             "comment": "A and C break the budget.", "figures": {"record--figure-1": figure}}]}
+    assert deck.summary(payload) == (
+        "record: decline\n"
+        "  comment: A and C break the budget.\n"
+        "  record--figure-1 weights: places 1\n"
+        "  record--figure-1 vetoes: A, C\n"
+        "  record--figure-1 lifted vetoes of B: given, gate1\n"
+        "  record--figure-1 datum: B\n"
+        "  record--figure-1 winner with these changes: B")
+
+
 @pytest.mark.parametrize("entry", [{"version": "0" * 64, "verdict": "bless"}, {"chapter": "one", "version": "0" * 64},
                                    {"chapter": "one", "version": "0" * 64, "comment": " "}],
                          ids=["no-chapter", "neither-verdict-nor-comment", "blank-comment"])

@@ -24,7 +24,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.
   answers ANSWERS [--record FOLDER --destination HTML]   Prints, per decision, what to act on: the
-      verdict, the picked option, the comment and the weights, marks and rulings the person changed.
+      verdict, the picked option, the comment and the weights, marks, vetoes, lifted vetoes, datum and
+      rulings the person changed.
       An entry with a comment and no verdict reads `<chapter>: comment`: the decision is still open.
       With --record it also builds FOLDER again with the answers (obs-document --answers): that
       artifact is the decision's record.
@@ -226,13 +227,23 @@ def serve(artifact: Path, wait: bool, timeout: str | None) -> int:
 
 
 def _changes(name: str, change: dict) -> list[str]:
-    """One line per kind of change the person made to decision figure ``name``."""
+    """One line per kind of change the person made to decision figure ``name``.
+
+    The fields are obs's ``figureChanges``; ``vetoes``, ``lifts`` and ``datum`` as obs v3.2.0's
+    answers.schema.json defines them (se reads that schema nowhere as data). A field absent is unchanged."""
     lines = []
     if change.get("weights"):
         lines.append(f"{name} weights: " + ", ".join(f"{key} {value:g}" for key, value in change["weights"].items()))
     for letter, marks in sorted(change.get("marks", {}).items()):
         if marks:
             lines.append(f"{name} marks of {letter}: " + ", ".join(f"{key} {value:+d}" for key, value in marks.items()))
+    if change.get("vetoes"):
+        lines.append(f"{name} vetoes: " + ", ".join(sorted(change["vetoes"])))
+    for letter, lifted in sorted(change.get("lifts", {}).items()):
+        if lifted:
+            lines.append(f"{name} lifted vetoes of {letter}: " + ", ".join(lifted))
+    if change.get("datum"):
+        lines.append(f"{name} datum: {change['datum']}")
     for letter, ruling in sorted(change.get("rulings", {}).items()):
         tripwire = f", tripwire: {ruling['tripwire']}" if ruling.get("tripwire") else ""
         lines.append(f"{name} ruling on {letter}: {ruling.get('ruling', 'none')}{tripwire}")
