@@ -1,0 +1,12 @@
+# SE's switches, fleet group: what the integrator's landing and fleet check read
+# (scripts/se_switches.py's docstring owns this format, core.toml's header its keys).
+
+[[switch]]
+name = "[integrate] review_gate"
+kind = "se.toml"
+reader = "scripts/review_gate.py"
+default = "off"
+layers = ["se.toml"]
+key = "integrate.review_gate"
+help = "README.md#review-gate"
+note = "off: integrate reads no review; on: a risky change lands only with a reviewer's pass of its head"

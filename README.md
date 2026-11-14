@@ -857,6 +857,26 @@ integrator refuses it at the landing. The pre-push hook names it at the push ins
   redelivery pushes through `deliver`, which records its tip first, or without gh through
   `work_tickets.py push --redeliver`.
 
+### Review gate
+
+```toml
+[integrate]
+review_gate = false
+review_gate_risky = ["major", "rule-book", "role-file", "history"]
+```
+
+`review_gate` is off, built in: `integrate` reads no review. On, `integrate` refuses a risky change
+whose work pull request has no reviewer's `pass` or `pass with open points` of the head that lands
+(`review.py file`'s comment), before anything is pushed, naming the risks and this setting.
+
+`review_gate_risky` lists the kinds that count as risky, all four built in: a major release, a
+change to the rule book (AGENTS.md, the work model's rules.md), to an agent's role file
+(`src/agents/`), or one that rewrites history. [scripts/review_gate.py](scripts/review_gate.py)
+owns each kind and the decision.
+
+Without gh the comments are read only for a risky change: the session saves them with its GitHub
+tools (`issue_read get_comments`) and passes them as `--pr-comments <file>`.
+
 ### Test budget
 
 ```toml
@@ -1552,11 +1572,11 @@ work_tickets.py format [--root ROOT]
     run writes nothing
 
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
-                          [--issue-body FILE] [--branch BRANCH] [--read-back BRANCH]
-                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
-                          [--landing-description FILE] [--build-command BUILD_COMMAND]
-                          [--include-late REASON] [--check-command JSON]
-                          [--check-command-temporary-directory]
+                          [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]
+                          [--read-back BRANCH] [--landing-pull LANDING_PULL]
+                          [--check-run CHECK_RUN] [--landing-description FILE]
+                          [--build-command BUILD_COMMAND] [--include-late REASON]
+                          [--check-command JSON] [--check-command-temporary-directory]
                           [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
     land it through a squash pull request once check passes, and close the work issue. Where gh is

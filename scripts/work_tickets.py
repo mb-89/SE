@@ -4960,12 +4960,17 @@ def changed_since_integration_branch(root: Path) -> tuple[set[str] | None, str]:
     diff = run_git(root, "diff", "--name-status", "-z", f"{commit}...HEAD")
     if diff.returncode != 0:
         return None, f"git diff against origin/{branch} failed: {(diff.stderr or diff.stdout).strip()}"
-    fields, paths, index = diff.stdout.split("\0"), set(), 0
+    return name_status_paths(diff.stdout) | changed_paths(root), f"origin/{branch} ({commit[:7]})"
+
+
+def name_status_paths(output: str) -> set[str]:
+    """The paths `git diff --name-status -z` names; a rename or copy names both."""
+    fields, paths, index = output.split("\0"), set(), 0
     while index < len(fields) and fields[index]:
-        count = 2 if fields[index][0] in "RC" else 1  # a rename or copy names both paths
+        count = 2 if fields[index][0] in "RC" else 1
         paths.update(fields[index + 1:index + 1 + count])
         index += 1 + count
-    return paths | changed_paths(root), f"origin/{branch} ({commit[:7]})"
+    return paths
 
 
 def beside_to_skip(root: Path, suites: tuple[BesideSuite, ...], full: bool) -> dict[str, str]:
@@ -6421,6 +6426,7 @@ def integrate(
     pr_description: Path | None = None,
     issue_body: Path | None = None,
     head_branch: str | None = None,
+    pr_comments: Path | None = None,
 ) -> str | None:
     """Land a delivered pull request's branch on the integration branch through a squash pull
     request: merge it into the newest integration branch on `land/<branch>`, run the checks,
@@ -6493,6 +6499,12 @@ def integrate(
     mirrors = configured_mirrors(root)
     trailer = config_value("commit_trailer", remote, None)
     kind = release_trailer(root, branch, str(work_issue["body"]), report)
+    try:
+        review_gate(root, branch, base, head, kind, str(work_issue.get("body") or ""), pull_number,
+                    remote, relay, handing_off, pr_comments)
+    except Exception:
+        abandon_landing(root, target, landing)
+        raise
     title = integration_merge_message(
         branch, work_number, pull_number,
         public_check_enabled(root) or any(mirror.public for mirror in mirrors),
@@ -6596,6 +6608,51 @@ def integrate(
         raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
+
+
+def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, issue_body: str,
+                pull_number: int, remote: str, relay, handing_off: bool,
+                comments_file: Path | None) -> None:
+    """se.toml `[integrate] review_gate` (review_gate.py, README "Review gate"): refuse a risky
+    change without a reviewer's pass of its head. Off, the built-in, it reads nothing; on, it reads
+    the pull request's comments only for a risky change: through gh, kern's relay, or without
+    either from `comments_file`, the GitHub tools' answer."""
+    gate = sibling("review_gate")
+    try:
+        settings = gate.settings(se_table(root, "integrate"))
+    except gate.SettingError as error:
+        raise QueueError(f"{error}; fix it in {root / 'se.toml'}; nothing was merged") from None
+    if not settings.on:
+        return
+    paths = name_status_paths(checked_git(root, "diff", "--name-status", "-z",
+                                          f"{base}...{branch_head(root, branch)}"))
+    package_kind = section(issue_sections(issue_body), "package kind")
+    facts = gate.facts(trailer.split(":", 1)[-1].strip(), sorted(paths), package_kind)
+    if not gate.risks(facts, settings.risky):
+        return
+    if relay is not None:
+        owner, name = api_repo(remote).split("/")
+        answer = json.loads(relay.answer_file("comments", owner, name, pull_number,
+                                              "pull request comments").read_text(encoding="utf-8"))
+    elif comments_file is not None:
+        try:
+            answer = json.loads(read_file(comments_file, "the pull request's comments"))
+        except json.JSONDecodeError as error:
+            raise QueueError(f"{comments_file} is not the JSON answer of the pull request's "
+                             f"comments: {error}") from None
+    elif handing_off:
+        raise QueueError(
+            f"se.toml {gate.SETTING} is on and {branch} is risky "
+            f"({', '.join(gate.risks(facts, settings.risky))}): save pull request #{pull_number}'s "
+            "comments with your GitHub tools (issue_read get_comments) and pass --pr-comments "
+            "<file>; nothing was merged")
+    else:
+        answer = Workflows(root, remote).comments(pull_number)
+    decision = gate.decide(facts, gate.reviews(tool_items(answer, "comments")), head, settings)
+    if not decision.land:
+        raise QueueError(f"Review gate: {branch} does not land: {decision.reason}; nothing was "
+                         "merged")
+    print(f"Review gate: {decision.reason}")
 
 
 def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
@@ -8492,6 +8549,10 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
          arg("--issue-body", type=Path, metavar="FILE",
              help="where gh is not signed in: its work issue's body, saved to a file"),
          arg("--branch", help="where gh is not signed in: the pull request's head branch"),
+         arg("--pr-comments", type=Path, metavar="FILE",
+             help="where gh is not signed in and se.toml [integrate] review_gate is on: the pull "
+                  "request's comments (issue_read get_comments), saved to a file; read only for a "
+                  "risky change (README \"Review gate\")"),
          arg("--read-back", metavar="BRANCH",
              help="after the plan's steps: check that origin's integration branch is the squash "
                   "commit of land/BRANCH on the tested base with the tested tree, and finish"),
@@ -8524,7 +8585,7 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     commit = integrate(
         root, args.pull_request, args.repo, args.build_command,
         args.check_command, args.check_command_temporary_directory, args.include_late,
-        args.pr_description, args.issue_body, args.branch,
+        args.pr_description, args.issue_body, args.branch, args.pr_comments,
     )
     if commit is None:
         print(f"Run the plan's steps, then its last line for pull request #{args.pull_request}")
