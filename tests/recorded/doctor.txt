@@ -1,0 +1,13 @@
+SE doctor: 0 problems, 0 notes (read-only; nothing was changed)
+  binary   [seen] se 0.2.8 on PATH, the pin
+  binary   [seen] se 0.2.8 on the core's start, the pin
+  plugin   [seen] SE 5.50.2 at ~/.claude/skills/se, current
+  core     [seen] running, pid 370, boot b-1
+  core     [seen] core.log ends:
+    se: serving <checkout>, pid 370
+  hooks    [seen] ~/.claude/skills/se/.claude-plugin/plugin.json (hooks, 1 entries): 1 scripts named, all exist
+  checkout [seen] SE 5.50.2 at 0daf4dc; 0 ahead, 0 behind origin/main as last fetched
+  gh       [seen] gh signed in
+  network  [seen] reached github.com
+  host     [seen] claude-code, a cloud session
+reused: se_start (plugin registry, cached release check, kern status, cloud marker), se_modules (binary pin)
