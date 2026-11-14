@@ -1420,7 +1420,9 @@ work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --issue-body FILE | 
                        [--comments-file FILE] [--repo REPO] [--discovery]
                        [--probe-root PROBE_ROOT]
     read the work issue with gh, or from the files your GitHub tools' answers were saved to, and
-    write its tickets into todo
+    write its tickets into todo; it lists the comments, each with its author, a line ending [not the
+    repository owner] where the repository's owner account did not write it
+    (scripts/comment_authors.py)
 
 work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
     whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in
@@ -1429,7 +1431,8 @@ work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
     the session's GitHub tools, exit code 2
 
 work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]
-    re-read the work issue and its comments and report changes
+    re-read the work issue and its comments and report changes; each new or edited comment with its
+    author, marked as intake marks it (--json: byOwner)
 
 work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
                       --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]

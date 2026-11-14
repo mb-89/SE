@@ -1179,16 +1179,25 @@ def web_url(item: dict[str, object]) -> str:
     return str(first_of(item, "html_url", "url"))
 
 
-def comment_record(comment: dict[str, object]) -> dict[str, object]:
-    """One comment as the snapshot keeps it, from gh's, the REST API's or the GitHub tools' form."""
+def comment_record(comment: dict[str, object], repo: str) -> dict[str, object]:
+    """One comment of an issue of `repo` as the snapshot keeps it, from gh's, the REST API's or
+    the GitHub tools' form, with whether the repository's owner account wrote it
+    (comment_authors.py)."""
     author = first_of(comment, "author", "user")
+    login = str(author.get("login", "")) if isinstance(author, dict) else str(author)
     return {
         "id": str(comment.get("id", "")),
-        "author": str(author.get("login", "")) if isinstance(author, dict) else str(author),
+        "author": login,
+        "byOwner": sibling("comment_authors").by_owner(login, repo),
         "createdAt": str(first_of(comment, "createdAt", "created_at")),
         "url": web_url(comment),
         "body": str(comment.get("body") or "").replace("\r\n", "\n"),
     }
+
+
+def comment_mark(comment: dict[str, object]) -> str:
+    """What a line naming the comment ends with where the owner did not write it (comment_authors)."""
+    return sibling("comment_authors").mark(comment)
 
 
 def issue_record(
@@ -1212,8 +1221,9 @@ def issue_record(
                 "GitHub tools read them and pass --comments-file <file>")
         else:
             comments = []
+    repo = "/".join(match.groups())
     return {
-        "repo": "/".join(match.groups()),
+        "repo": repo,
         "number": int(data["number"]),
         "url": url,
         "title": str(data["title"]),
@@ -1221,7 +1231,7 @@ def issue_record(
         "updatedAt": str(first_of(data, "updatedAt", "updated_at")),
         "labels": [{"name": label["name"] if isinstance(label, dict) else str(label)}
                    for label in data.get("labels") or []],
-        "comments": [comment_record(comment) for comment in comments],
+        "comments": [comment_record(comment, repo) for comment in comments],
     }
 
 
@@ -1418,6 +1428,7 @@ def unread_comments_error(
         start = ids.index(str(recorded["newest"])) + 1 if recorded["newest"] in ids else 0
         named = [
             f"{comment['createdAt']} {comment['author']}: {comment['url'] or comment['id']}"
+            f"{comment_mark(comment)}"
             for comment in comments[start:]
         ] or [f"comment(s) were deleted: {recorded['count']} recorded, {current['count']} now"]
     else:
@@ -1955,7 +1966,8 @@ def print_changes(changes: dict[str, object]) -> None:
         print("run intake again to add tickets for added requirements")
     for key, label in (("new_comments", "comment"), ("edited_comments", "edited comment")):
         for comment in changes[key]:
-            print(f"{label} by {comment['author']} at {comment['createdAt']} ({comment['url']}):")
+            print(f"{label} by {comment['author']} at {comment['createdAt']} ({comment['url']}):"
+                  f"{comment_mark(comment)}")
             for line in comment["body"].splitlines():
                 print(f"  {line}")
 
@@ -7810,7 +7822,9 @@ def run_close(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("intake", "read the work issue with gh, or from the files your GitHub tools' answers "
-                   "were saved to, and write its tickets into todo",
+                   "were saved to, and write its tickets into todo; it lists the comments, each "
+                   "with its author, a line ending [not the repository owner] where the "
+                   "repository's owner account did not write it (scripts/comment_authors.py)",
          WORKTREE,
          Exclusive((
              arg("--issue", type=int, help="work issue number"),
@@ -7868,7 +7882,8 @@ def run_intake(root: Path, args: argparse.Namespace) -> int:
     if issue["comments"]:
         print(f"{len(issue['comments'])} comment(s) may change the requirements:")
         for comment in issue["comments"]:
-            print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}")
+            print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}"
+                  f"{comment_mark(comment)}")
     return 0
 
 
@@ -7883,7 +7898,8 @@ def run_probe(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("refresh", "re-read the work issue and its comments and report changes",
+@command("refresh", "re-read the work issue and its comments and report changes; each new or "
+                    "edited comment with its author, marked as intake marks it (--json: byOwner)",
          WORKTREE,
          arg("--issue", type=int, help="work issue number; default: recorded"),
          REPO, JSON_OUTPUT)

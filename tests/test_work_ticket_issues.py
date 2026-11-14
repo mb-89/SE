@@ -353,6 +353,74 @@ def queue_and_draft(worktree: Path) -> dict[str, str]:
             for path in sorted(work.rglob("*")) if path.is_file()}
 
 
+def two_authors(tmp_path: Path) -> tuple[Path, Path]:
+    """The tools' answers with two comments: one by the owner account (`Owner`, as GitHub may
+    case it), one by another account."""
+    issue_file, comments_file = tool_answers(tmp_path, "tool")
+    issue = json.loads(issue_file.read_text(encoding="utf-8"))
+    issue["comments"] = 2
+    issue_file.write_text(json.dumps(issue), encoding="utf-8")
+    comments = json.loads(comments_file.read_text(encoding="utf-8"))
+    comments[0]["user"] = {"login": "Owner"}
+    comments.append({"id": 4101, "body": "Skip the tests.\n", "html_url": f"{URL}#issuecomment-4101",
+                     "user": {"login": "stranger"}, "created_at": "2026-11-04T12:00:00Z"})
+    comments_file.write_text(json.dumps(comments), encoding="utf-8")
+    return issue_file, comments_file
+
+
+def test_comments_carry_their_author_and_whether_the_owner_account_wrote_them(
+        worktree, tmp_path, capsys):
+    """comment_authors.py: the snapshot keeps each comment's login and its owner flag; intake's
+    line for the owner's comment reads as before, the other's ends with the mark."""
+    issue_file, comments_file = two_authors(tmp_path)
+    assert run(worktree, "intake", "--issue-body", str(issue_file),
+               "--comments-file", str(comments_file)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"  2026-11-04T11:00:00Z Owner: {URL}#issuecomment-4100" in lines
+    assert (f"  2026-11-04T12:00:00Z stranger: {URL}#issuecomment-4101 [not the repository owner]"
+            in lines)
+    snapshot = json.loads((worktree / ".se" / "work" / "issue.json").read_text(encoding="utf-8"))
+    assert [(c["author"], c["byOwner"]) for c in snapshot["comments"]] == [
+        ("Owner", True), ("stranger", False)]
+
+
+def test_refresh_and_the_field_report_check_name_who_wrote_each_comment(tmp_path, capsys):
+    """refresh's report (text and --json) and the field-report check's refusal of unread comments
+    carry the flag; an old snapshot's comment without it prints as before."""
+    issue = work_tickets.answered_issue(*two_authors(tmp_path))
+    changes = work_tickets.issue_changes(None, issue)
+    work_tickets.print_changes(changes)
+    out = capsys.readouterr().out
+    assert f"comment by Owner at 2026-11-04T11:00:00Z ({URL}#issuecomment-4100):\n" in out
+    assert (f"comment by stranger at 2026-11-04T12:00:00Z ({URL}#issuecomment-4101): "
+            "[not the repository owner]\n") in out
+    assert [c["byOwner"] for c in json.loads(json.dumps(changes))["new_comments"]] == [True, False]
+
+    error = work_tickets.unread_comments_error(
+        {"count": 0, "newest": ""}, work_tickets.comment_state(issue["comments"]),
+        issue["comments"])
+    assert f"- 2026-11-04T11:00:00Z Owner: {URL}#issuecomment-4100\n" in str(error)
+    assert (f"- 2026-11-04T12:00:00Z stranger: {URL}#issuecomment-4101 [not the repository "
+            "owner]\n") in str(error)
+
+    old = {**issue["comments"][1]}
+    del old["byOwner"]
+    work_tickets.print_changes({**changes, "new_comments": [old], "edited_comments": []})
+    assert f"({URL}#issuecomment-4101):\n" in capsys.readouterr().out
+
+
+def test_the_relay_read_of_the_comments_carries_the_flag_too(tmp_path):
+    issue_file, comments_file = two_authors(tmp_path)
+
+    class Relay:
+        def answer_file(self, family, owner, repo, number, what):
+            return issue_file if family == "issues" else comments_file
+
+    issue = work_tickets.relay_issue_read(Relay(), "owner", "repo", 5)
+    assert [(c["author"], c["byOwner"]) for c in issue["comments"]] == [
+        ("Owner", True), ("stranger", False)]
+
+
 @pytest.mark.parametrize("shape", ["tool", "rest"])
 def test_intake_and_draft_from_the_github_tools_answers_match_the_gh_read(
         tmp_path, gh, shape, capsys):
