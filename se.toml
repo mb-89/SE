@@ -52,6 +52,17 @@ directory = "components"
 target_seconds = 30
 limit_seconds = 60
 
+# A relay step asked after a local phase longer than NATS's two minutes still reaches the hook
+# (kern/contract/longstep_test.go, README "Hand-offs through the relay"): the real core, a Python
+# command and the test as the session's host. Its real wait of 130 s keeps it out of kern's own
+# tests, behind the build tag longstep.
+[tests.beside.kern-long-step]
+setup = ["go", "test", "-tags", "longstep", "-run", "^$", "./contract/"]
+command = ["go", "test", "-tags", "longstep", "-count=1", "-run", "^TestAStepAnswersAfterALongLocalPhase$", "./contract/"]
+directory = "kern"
+target_seconds = 150
+limit_seconds = 240
+
 # The released binaries hold what the checkout builds (docs/go-core.md "How the binary arrives"):
 # kern's release tool refuses where kern's or SE's release.toml names a tag already cut and a file
 # its binary is built from changed since that tag; the remedy is a kind stated in the field report,

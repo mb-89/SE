@@ -10,6 +10,7 @@ the bus lets it hear. No reconnect: a new core stands a new bus.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import json
 import secrets
@@ -60,7 +61,8 @@ class Peer:
         #: The errors the server sent, such as a permissions violation; `closed` is set once the connection is gone.
         self.errors: list[str] = []
         self.closed = threading.Event()
-        self._pong: threading.Event | None = None
+        #: One event per PING flush sent, oldest first: the server answers each with one PONG, in order.
+        self._pongs: collections.deque[threading.Event] = collections.deque()
         line = self._file.readline()
         if not line.startswith(b"INFO "):
             raise NatsError(f"bus at {url} answers {line!r}, not INFO")
@@ -180,11 +182,24 @@ class Peer:
             self.publish(msg.reply, data)
 
     def flush(self, timeout: float = 5.0) -> None:
-        """Wait until the server has read everything sent so far."""
-        self._pong = threading.Event()
-        self._send(b"PING\r\n")
-        if not self._pong.wait(timeout):
+        """Wait until the server has read everything sent so far, and has sent every error it
+        found in it: threads may flush side by side, each waiting for its own PONG."""
+        pong = threading.Event()
+        with self._lock:
+            self._pongs.append(pong)
+            try:
+                self._sock.sendall(b"PING\r\n")
+            except OSError as e:
+                self._pongs.remove(pong)
+                raise NatsError(f"the bus is gone: {e}") from None
+        if not pong.wait(timeout) or self.closed.is_set():
             raise NatsError("the bus answers no PING")
+
+    def refused(self, subject: str) -> str:
+        """The server's refusal of a publish to `subject` this peer sent, such as an answer whose
+        reply permission ran out, or "" where it refused none; read it after a :meth:`flush`."""
+        return next((e for e in self.errors
+                     if e.startswith("Permissions Violation for Publish") and f'"{subject}"' in e), "")
 
     def close(self) -> None:
         try:
@@ -225,8 +240,10 @@ class Peer:
                 elif line.startswith(b"PING"):
                     self._send(b"PONG\r\n")
                 elif line.startswith(b"PONG"):
-                    if self._pong:
-                        self._pong.set()
+                    with self._lock:
+                        pong = self._pongs.popleft() if self._pongs else None
+                    if pong:
+                        pong.set()
                 elif line.startswith(b"-ERR"):
                     self.errors.append(line[5:].decode(errors="replace").strip().strip("'"))
         except (OSError, ValueError):
@@ -235,3 +252,5 @@ class Peer:
             self.closed.set()
             for ev, _ in list(self._waiting.values()):
                 ev.set()
+            for pong in list(self._pongs):
+                pong.set()
