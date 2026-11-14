@@ -258,3 +258,62 @@ def test_the_cores_stop_word_on_a_verb_ends_the_request_it_names(tmp_path: Path)
     run._handle(run._work.get_nowait())
     assert peer.answered[1] == ("_INBOX.r2", {"error": "the core gave it up: its caller gave it up"})
     assert not module.started.is_set() and not run._asks
+
+
+ODD = """name = "odd"
+contract = 1
+help = "Answers what JSON cannot carry."
+
+[commands."odd ask"]
+usage = "odd ask"
+summary = "Ask with a value JSON cannot carry."
+group = "Fixtures"
+help = "Asks its ledger with a set."
+class = "batch"
+
+[requests.ask]
+type = "odd.question"
+answer = "string"
+help = "The question."
+"""
+
+ODD_INIT = """from kern import component
+
+odd = component("odd")
+
+
+@odd.command("odd ask")
+def ask(args, inputs, say):
+    return odd.result(requests=[odd.ask("ask", {"labels": {"pause"}})], then=lambda answers: "never")
+"""
+
+
+def test_a_step_answers_while_it_beats_and_an_answer_that_is_no_json_as_its_error(
+        tmp_path: Path, monkeypatch) -> None:
+    """The step's answer goes out before its beat ends, so the core never waits in silence between
+    the step's end and its answer; an answer JSON cannot carry goes out as the step's error, with no
+    continuation left waiting, where before nothing went out and the core waited out its StepWait."""
+    (tmp_path / "component.toml").write_text(ODD, encoding="utf-8")
+    (tmp_path / "__init__.py").write_text(ODD_INIT, encoding="utf-8")
+    comp = runner.load(tmp_path)
+    monkeypatch.setattr(runner, "BEAT", 0.05)
+    peer = Peer()
+    run = runner.Runner(comp, peer, "odd")  # type: ignore[arg-type]
+    sent: list[dict] = []
+
+    def respond(msg, data) -> None:  # a slow answer, encoded as Peer.publish encodes it
+        data = json.dumps(data) if isinstance(data, (dict, list)) else data
+        before = len(peer.sent)
+        time.sleep(0.3)
+        assert len(peer.sent) > before, "the runner beats until the answer is out"
+        sent.append(json.loads(data))
+
+    peer.respond = respond  # type: ignore[attr-defined]
+    from kern.nats import Msg
+    from kern.subjects import token
+
+    run._handle(Msg("cmd.odd." + token("odd ask"), "_INBOX.core.1",
+                    json.dumps({"call": "3", "step": 1, "args": []}).encode()))
+
+    assert len(sent) == 1 and "is no JSON" in sent[0]["error"], sent
+    assert not run._steps and not run._abandons
