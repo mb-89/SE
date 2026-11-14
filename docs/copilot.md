@@ -26,17 +26,101 @@ sign-in before it starts any MCP server.
   manifest's `mcpServers`, with `"cwd": "${PLUGIN_ROOT}"` and `PLUGIN_ROOT` set in its `env`.
   Removing that file gave the manifest's entry, with the same `cwd`.
 - In SE's own checkout, `.github/mcp.json` loads only once the folder is trusted, as a workspace
-  server without a `cwd`; the project's skills load without trust.
+  server without a `cwd`; the project's skills load without trust. With the plugin installed, the
+  plugin's `se` hides it, trusted or not; `copilot plugin disable se` brings it back.
+- `--additional-mcp-config` with a server `se` replaces the plugin's `se` in `copilot mcp list` and
+  `copilot mcp get se`. A user-level `se` from `copilot mcp add` stays in
+  `~/.copilot/mcp-config.json`, but `copilot mcp list` shows only the plugin's.
 - The flags the smoke test and the worker launch line use exist in 1.0.112: `-C`, `--agent`,
   `--plugin-dir`, `-p`, `-n`, `--output-format`, `--allow-tool`, `--no-ask-user`,
   `--trust-folder`. A refused run still writes its JSON result line, `{"type": "result", ...,
   "exitCode": 1}`.
 
 **Open point, for a Copilot run to decide:** a plugin's server starts in the plugin's folder, so
-its `--root .` names that folder, not the project. If `se-status` in another repository answers
-about the plugin's folder (or `no-checkout`), that is this. Until it is fixed, add the door for
-that repository by hand, `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root <repo>`.
-The same may hold for the hooks' `bash scripts/...` commands in another repository.
+its `--root .` names that folder. The launcher then picks the session's repository: from
+`SE_SESSION_CWD` or `COPILOT_SESSION_CWD`, else, on Linux and macOS, its parent's working
+directory (README [The MCP door](../README.md#the-mcp-door)). No signed-in session has shown which
+it gets. If `se-status` answers about the plugin's folder (or `no-checkout`), that is this.
+
+## The door by hand
+
+The remedy for the open point is one line per session, run inside the repository. It names the
+repository itself, `git rev-parse --show-toplevel`, so it serves the repository the session runs
+in, whichever that is. Where to see what the door chose is [Where to look](#where-to-look).
+
+```sh
+copilot --agent se --additional-mcp-config "{\"mcpServers\":{\"se\":{\"type\":\"local\",\"command\":\"bash\",\"args\":[\"<se>/scripts/se_mcp.sh\",\"--root\",\"$(git rev-parse --show-toplevel)\"],\"tools\":[\"*\"]}}}"
+```
+
+- **Why this source.** An `--additional-mcp-config` server outranks a plugin's, as GitHub documents
+  and as Copilot CLI 1.0.112 showed on 14 Nov: its `se` replaced the plugin's in `copilot mcp list`
+  and `copilot mcp get se`. A signed-in session has not shown it yet.
+- **Why the name `se`.** The worker and the reviewer are strict on `se/*`: their tools list admits
+  the server `se` and no other. The se agent itself has no tools list.
+- **No user-level `se`.** A server added with `copilot mcp add` does not help while the plugin is
+  installed: user config ranks below plugins, and it pins every session to one repository. In
+  1.0.112 a user-level `se` stayed in `~/.copilot/mcp-config.json`, but `copilot mcp list` showed
+  only the plugin's.
+
+### Windows
+
+In PowerShell, write the entry to a file and name it with `@`. First check which `bash` the door
+would get: `(Get-Command bash).Source` must be Git Bash (`...\Git\bin\bash.exe` or
+`...\Git\usr\bin\bash.exe`), not the WSL launcher under `C:\Windows\System32`. Write `<se>` with
+`/`.
+
+```powershell
+$repo = git rev-parse --show-toplevel
+$json = '{"mcpServers":{"se":{"type":"local","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","REPO"],"tools":["*"]}}}'
+[IO.File]::WriteAllText("$env:TEMP\se-mcp.json", $json.Replace('REPO', $repo))
+copilot --agent se --additional-mcp-config "@$env:TEMP\se-mcp.json"
+```
+
+Where `bash` is not Git Bash, the same file names PowerShell's launcher instead:
+
+```powershell
+$json = '{"mcpServers":{"se":{"type":"local","command":"powershell","args":["-NoProfile","-ExecutionPolicy","Bypass","-File","<se>/scripts/se_mcp.ps1","--root","REPO"],"tools":["*"]}}}'
+```
+
+### SE's own checkout
+
+An installed plugin's `se` hides the checkout's `.github/mcp.json` server, trusted or not (seen on
+14 Nov in 1.0.112). The plugin's launcher then finds the checkout, an SE checkout, and hands over
+to the checkout's own `scripts/se_mcp.sh`, so the door still serves it. Where it does not:
+
+- `copilot plugin disable se` brings the workspace server back (seen the same day);
+- or the `--additional-mcp-config` line above, run in the checkout, so with the checkout as root.
+
+`copilot --plugin-dir=.` works as today.
+
+### Hooks
+
+The plugin's hooks run the plugin's own scripts, `$PLUGIN_ROOT/scripts/bootstrap.sh` and
+`se_hook.sh`, and skip SE's checkout, where `.github/hooks/se.json` runs the checkout's. Where
+another repository shows no greeting, start SE by hand inside it:
+`env -u CLAUDE_PROJECT_DIR bash <se>/scripts/bootstrap.sh --hook </dev/null`.
+
+First check the repository for a `scripts/bootstrap.sh` or `scripts/se_hook.sh` of its own: a
+relative `bash scripts/...` there runs that one, not SE's, so always name SE's by its full path.
+
+### VS Code
+
+VS Code's own parser takes SE as a Claude-format plugin: it checks `.claude-plugin/plugin.json`
+before `.github/plugin/plugin.json`. So the plugin brings no `se` server there, and its hooks use
+`${CLAUDE_PLUGIN_ROOT}`. Always add the user-level door, README's `code --add-mcp` line with
+`${workspaceFolder}` ([The MCP door](../README.md#the-mcp-door)).
+
+- That expansion in a user profile is unverified. The fallback is `<repo>/.vscode/mcp.json` with
+  the same entry: `{"servers": {"se": {"type": "stdio", "command": "bash", "args":
+  ["<se>/scripts/se_mcp.sh", "--root", "${workspaceFolder}"]}}}`.
+- The check is **MCP: List Servers**: it lists `se` and its state; **Show Output** shows its start.
+
+### Where to look
+
+The first check is the launcher's decision line, `plugin <folder>: root <root> from <source>`, in
+`.se/.runtime/mcp.log`: in the repository it chose, or in the plugin's folder (`PLUGIN_ROOT` in
+`copilot mcp get se --json`) where it kept that. Where neither has a line, the launcher never ran:
+`/mcp` shows the server's start error.
 
 ## Another repository
 
@@ -58,8 +142,14 @@ a plugin install does, beside an empty git project that is not SE, and checks th
 
 - the layout the Copilot manifest names, and `se_plugin.py check` of the copy;
 - the hook registrations of `.github/hooks/se.json`;
-- the launcher the manifest runs, with `${PLUGIN_ROOT}` the copy, in the project;
-- the MCP handshake, `tools/list` and one `status` call, which starts a core in the project;
+- the launcher the manifest runs, with `${PLUGIN_ROOT}` the copy;
+- the door started as Copilot starts a plugin's server: in the copy with `--root .` and
+  `PLUGIN_ROOT` set, its parent process in the project. It runs once with `COPILOT_SESSION_CWD`
+  naming the project and once without, from an environment without `CLAUDE_PROJECT_DIR`,
+  `SE_SESSION_CWD`, `PLUGIN_ROOT` and every `COPILOT_*` variable;
+- in each run the MCP handshake, `tools/list` and one `status` call. It passes only where
+  `status` names the project, and is `noted`, naming the root it got, otherwise (the open point).
+  Without the variable, Windows has no parent's working directory to read, so it is noted there;
 - with a Copilot CLI on `PATH` (or `--cli <path>`), what it reads of the copy without signing in;
   otherwise that line is `skipped`.
 
@@ -95,8 +185,8 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
 1. **Copilot CLI, SE's checkout.** In a checkout of SE, with the CLI installed
    (`npm install -g @github/copilot@1.0.112`), run `uv run python scripts/copilot.py self-test`;
    then `copilot --agent se`, trusting the folder ([trust](#remedies)), and say `status`.
-   - Expect `copilot self-test: 9 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
-     [open point](#what-a-token-less-copilot-cli-showed).
+   - Expect `copilot self-test: 10 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
+     [open point](#what-a-token-less-copilot-cli-showed), `mcp-root`.
    - Expect the greeting `SE <version> started: ...` once (#1121: the agents, skills and
      `SessionStart` load with `SE_HOOK_HOST`; #1123: the greeting reaches the session, and where
      kern fails, the line `SE runs without kern: ...` too).
@@ -109,6 +199,10 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
      `starting`, the tool timeout).
    - End the turn. Expect the `Stop` hook to run the delivery check, silent here (#1121); a
      [refused stop](#remedies) is safe.
+   - A silent `Stop` leaves no trace on main: kern logs no hook event, and the check writes
+     `.se/work/stop-refusals.json` only when it refuses. Step 4's worker run is where it shows, as
+     `se Stop hook (1 of 5 in a row): ...` while that worker is undelivered. If it never shows
+     there, the `Stop` hook never ran: note it in the cold-run record.
 2. **VS Code, SE's checkout.** Open the checkout with no install, trust it ([trust](#remedies)),
    add the door with the user-level line of README [The MCP door](../README.md#the-mcp-door)
    (`code --add-mcp ...`), pick the session target Copilot and the agent `se`, say `status`.
@@ -121,8 +215,10 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    it as not planned right after. Expect `se` to say what it files, file it, and name it.
 4. **Plugin install, resume and the worker launch line, CLI.** `copilot plugin marketplace add
    mb-89/SE`, `copilot plugin install se@se`, then `copilot --agent se` in the checkout.
-   - Expect the greeting once, though hooks fire from the checkout and the plugin (#1121: the guard
-     keeps the second start quiet; the plugin's Claude hooks fail open).
+   - Expect the greeting once, though the checkout and the plugin both register hooks (#1121: the
+     plugin's hooks skip SE's checkout, [Hooks](#hooks); the guard keeps a second start quiet; the
+     plugin's Claude hooks fail open). The plugin's `se` hides the checkout's server here
+     ([SE's own checkout](#ses-own-checkout)).
    - In a new run, `--allow-tool='se(status)'`: expect no prompt for `se-status` (#1122). Then
      `copilot --continue`: expect `se-status` to answer, the core kept or started again (#1121).
    - Run the worker launch line of the work model's "Host procedure under Copilot" once on step 3's
@@ -137,14 +233,15 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    naming SE's start, Copilot accepting the stand-in door (#1123); rename it back.
 6. **VS Code, another repository** (expected to differ, documented). **Chat: Install Plugin from
    Source** with `https://github.com/mb-89/SE`; no trust prompt, which shows only for marketplace
-   and deep-link installs. Pick Copilot and `se`, say `status`. Expect the greeting and `se/status`
-   naming that repository (#1123: the install reads `.github/plugin/plugin.json` and its four
-   fields, `${PLUGIN_ROOT}` expands, the server's working directory). An answer about the plugin's
+   and deep-link installs. Add the user-level door ([VS Code](#vs-code)), pick Copilot and `se`,
+   say `status`. Expect the greeting and the user-level door's `se/status` naming that repository
+   (#1123: VS Code reads the install as a Claude-format plugin, so the door is the user-level
+   one, `${workspaceFolder}` expands, the server's working directory). An answer about another
    folder is the open point.
 7. **Copilot CLI, another repository** (expected to differ, documented). `bash
    <se>/scripts/setup.sh <repo> --copilot`, then `copilot --agent se` in `<repo>`. Expect
    `copilot install: ...` lines and `se: pinned` from the sync, the greeting, and `se-status`
-   naming `<repo>`; the open point otherwise.
+   naming `<repo>`; the open point otherwise, with its remedy [The door by hand](#the-door-by-hand).
 8. **On anything else**, at any step: `uv run python <se>/scripts/se_doctor.py`, and paste its whole
    report with the step's number into SE's session.
 9. **Record the smoke test.** In SE's checkout, `COPILOT_GITHUB_TOKEN=<token> bash
@@ -169,9 +266,8 @@ Each is an expected result with its one-line remedy.
   every tool loads at turn start. VS Code: turn the `se` tools on in the chat's tool picker.
 - **`not-installed`.** The host spawned the door before SE's start fetched the binary: restart the
   `se` server once (CLI `/mcp reload`; VS Code **MCP: List Servers**, `se`, **Restart**).
-- **No `bash` on Windows.** Name the PowerShell launcher at user level instead, CLI: `copilot mcp
-  add se -- powershell -NoProfile -ExecutionPolicy Bypass -File <se>\scripts\se_mcp.ps1 --root
-  <checkout>`; VS Code: `code --add-mcp` with the same `command` and `args`.
+- **No `bash` on Windows.** CLI: the `@file` whose command is `powershell` with `se_mcp.ps1`
+  ([Windows](#windows)); VS Code: `code --add-mcp` with the same `command` and `args`.
 - **A refused stop.** Copilot's stop event carries no agent name, so the delivery check can judge
   SE's own session as a worker's in a checkout whose ticket queue is for a work issue, off the
   integration branch. You see `se Stop hook (1 of 5 in a row): ...`, naming what is undelivered.
