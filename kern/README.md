@@ -114,10 +114,11 @@ the core to answer `initialize` and `tools/list`.
 - **Read-only.** A command of class `interactive` only reads, and only those are tools. Every tool
   carries `readOnlyHint`, `destructiveHint: false` and `idempotentHint`; `openWorldHint` is set on
   those that run a component's command, which may read an outside service.
-- **The catalog check.** A declaration refuses an interactive command without its `mcp` line, when
-  an agent uses it (`index.CommandDecl.MCP`, both readers alike, `contract/declarations.json`).
-  `mcp.Tools` refuses it too, an instance named like the door's own tools, and a batch command in
-  the greeting.
+- **The catalog check.** `mcp.Tools` refuses an interactive command without its `mcp` line, when
+  an agent uses it (`index.CommandDecl.MCP`, which both declaration readers read), an instance
+  named like the door's own tools, and a batch command in the greeting. The door then serves the
+  tools it made, and its status tool names the refusal; an application's test holds its own
+  catalog to the check, as SE's `components/cmd/se/mcp_test.go` does.
 - **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,
   against a fake core. The one contract test with the SDK's own client runs against the built
   binary and the real core: SE's `components/cmd/se/mcp_test.go`.

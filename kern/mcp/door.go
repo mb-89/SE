@@ -100,6 +100,7 @@ func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser)
 	server, err := d.server()
 	if err != nil {
 		fmt.Fprintf(o.Log, "%s mcp: %v\n", o.App, err)
+		d.o.CatalogErr = err // the status tool names it
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	supervised := make(chan struct{})

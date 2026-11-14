@@ -414,10 +414,12 @@ func TestOutsideACheckoutTheDoorStartsNothing(t *testing.T) {
 	}
 }
 
-// The catalog check refuses an interactive command without an MCP
-// description, in the declaration and in the door's tools alike.
+// The door's catalog check refuses an interactive command without an MCP
+// description, which the declaration reads, and a batch command in the
+// greeting; the door serves the tools it made all the same, and its status
+// names the refusal.
 func TestTheCatalogCheckRefusesACommandWithoutAnMCPDescription(t *testing.T) {
-	_, err := index.ParseDeclaration([]byte(`name = "desk"
+	comp, err := index.ParseDeclaration([]byte(`name = "desk"
 contract = 1
 help = "h"
 
@@ -427,17 +429,33 @@ summary = "s"
 group = "g"
 help = "h"
 class = "interactive"
+mcp = "Lists the desk."
 `))
-	if err == nil || !strings.Contains(err.Error(), `command "desk list" is interactive and has no mcp description`) {
-		t.Fatalf("the declaration answers %v, and wants the command without an mcp description refused", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := comp.Commands()[0].MCP; got != "Lists the desk." {
+		t.Fatalf("the declaration reads the mcp description %q, and wants Lists the desk.", got)
 	}
 	c := catalog(t)
 	for i := range c.Commands {
 		c.Commands[i].MCP = "" // as a catalog might hand it, past its declaration
 	}
-	if _, err := Tools("app", c, nil); err == nil || !strings.Contains(err.Error(), "has no mcp description") {
+	tools, err := Tools("app", c, nil)
+	if err == nil || !strings.Contains(err.Error(), `command "desk list" of instance desk is interactive and has no mcp description`) {
 		t.Fatalf("Tools answers %v, and wants the command without an mcp description refused", err)
 	}
+	if len(tools) != 1 || tools[0].Name != StatusTool {
+		t.Fatalf("Tools makes %+v beside its refusal, and wants the status tool alone", tools)
+	}
+	o := options(&fakeCore{running: true}, c)
+	o.Greeting = nil
+	cl := open(t, o)
+	cl.initialize()
+	if r := cl.call("status", map[string]any{}); !strings.Contains(fmt.Sprint(r.Structured["catalog"]), "has no mcp description") {
+		t.Fatalf("status answers %+v, and wants the catalog check's refusal named", r)
+	}
+	cl.hangUp()
 	if _, err := Tools("app", catalog(t), []string{"desk clear"}); err == nil || !strings.Contains(err.Error(), "is a batch command") {
 		t.Fatalf("Tools answers %v for a batch greeting entry, and wants it refused", err)
 	}

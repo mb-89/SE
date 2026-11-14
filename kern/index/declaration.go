@@ -146,7 +146,7 @@ func ReadDeclaration(path string) (*Component, error) {
 //	type = "int"; builtin = 1; help = "..."
 //	[commands."tally note"]
 //	usage = "..."; summary = "..."; group = "..."; help = "..."; class = "batch"; session = true
-//	mcp = "..."   # when to use it, as the MCP door offers it; an interactive command needs one
+//	mcp = "..."   # when to use it, as the MCP door offers an interactive command (mcp.Tools)
 //	[requests.post]
 //	type = "string"; answer = "int"; help = "..."
 //	[verbs.append]                         # an I/O component's

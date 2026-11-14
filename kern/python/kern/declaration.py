@@ -88,7 +88,8 @@ class CommandDecl:
     help: str
     klass: str
     session: bool = False
-    #: When to use it, as kern's MCP door offers it: an interactive command needs one.
+    #: When to use it, as kern's MCP door offers an interactive command (its catalog check
+    #: refuses one without it).
     mcp: str = ""
 
 
@@ -193,9 +194,6 @@ def parse(data: bytes) -> Declaration:
                 errs.append(f'command "{n}" has no {f}')
         if k.klass not in ("interactive", "batch"):
             errs.append(f'command "{n}" has no class: interactive or batch')
-        if k.klass == "interactive" and not k.mcp.strip():
-            errs.append(f'command "{n}" is interactive and has no mcp description: the MCP door '
-                        "offers it, and says when to use it")
         d.commands[n] = k
     for kind_, into, what in (("requests", d.requests, "request port"), ("verbs", d.verbs, "verb")):
         for n, t in sorted(_table(errs, doc, kind_).items()):

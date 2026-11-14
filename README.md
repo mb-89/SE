@@ -294,9 +294,10 @@ commands through it as tools. The host spawns it as the session starts; nobody s
 - **Read-only.** Every tool says `readOnlyHint` and not `destructiveHint`, so a host may allow it
   once: in VS Code per tool, in Copilot's CLI `--allow-tool='se(<tool>)'`. A command that writes is
   in no tool.
-- **Checked.** kern refuses a read-only command without an `mcp` line, so `work_tickets.py docs`
-  refuses one too. `components/cmd/se/mcp_test.go` holds the door to its contract with the Go SDK's
-  client against the built `se mcp` and the real core.
+- **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
+  so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
+  catalog to the check, and the door to its contract with the Go SDK's client against the built
+  `se mcp` and the real core.
 
 ## Documentation
 
