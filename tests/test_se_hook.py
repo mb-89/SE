@@ -1,6 +1,8 @@
 """se_hook.sh posts one session event to the kern SE pins, and fails open (README "Kern")."""
 from pathlib import Path
+import json
 import os
+import shutil
 import subprocess
 import time
 
@@ -253,3 +255,63 @@ def test_a_late_claim_older_than_ten_minutes_is_taken_anew(machine):
     os.utime(claim, (stale, stale))
     late_hook(home, project, late)
     assert len(starts(home, 2)) == 2 and claim.stat().st_mtime > stale + 300
+
+
+# A Copilot plugin install's hooks (.github/plugin/hooks.json, scripts/se_plugin.py
+# PLUGIN_HOOKS_FILE), run as the host runs them, in a folder holding its own `scripts/`: a stub of
+# each script under PLUGIN_ROOT and another in the folder say which one ran.
+PLUGIN_HOOKS = ROOT / ".github" / "plugin" / "hooks.json"
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+PLUGIN_FORMS = ["bash", pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None,
+                                                                           reason="no PowerShell here"))]
+
+
+def plugin_hook(kind: str, event: str, folder: Path, plugin_root: str | None) -> subprocess.CompletedProcess:
+    [entry] = json.loads(PLUGIN_HOOKS.read_text(encoding="utf-8"))["hooks"][event]
+    if kind == "bash":
+        env = {"PATH": "/usr/bin:/bin", "HOME": sh(folder)}
+        command = [BASH, "-c", entry["bash"]]
+    else:  # the bash it runs is the one the scripts run in, first on PATH
+        env = {**os.environ, "PATH": os.path.dirname(BASH) + os.pathsep + os.environ.get("PATH", "")}
+        env.pop("PLUGIN_ROOT", None)
+        command = [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]]
+    if plugin_root is not None:
+        env["PLUGIN_ROOT"] = plugin_root
+    return subprocess.run(command, cwd=folder, env=env, capture_output=True, text=True, timeout=60)
+
+
+@pytest.fixture
+def plugin_and_repository(tmp_path):
+    plugin, repository = tmp_path / "plugin", tmp_path / "repository"
+    for root, said in ((plugin, "plugin-ran"), (repository, "local-ran")):
+        (root / "scripts").mkdir(parents=True)
+        for script in ("bootstrap.sh", "se_hook.sh"):
+            (root / "scripts" / script).write_text(f'echo "{said} {script} $*"\n', encoding="utf-8", newline="\n")
+    return plugin, repository
+
+
+def plugin_root(kind: str, plugin: Path) -> str:
+    """PLUGIN_ROOT as each form's host sets it: bash's own path, PowerShell's with backslashes on Windows."""
+    return sh(plugin) if kind == "bash" else str(plugin)
+
+
+@pytest.mark.parametrize("kind", PLUGIN_FORMS)
+@pytest.mark.parametrize("event, said", (("SessionStart", "bootstrap.sh --hook"), ("Stop", "se_hook.sh Stop")))
+def test_a_plugin_hook_runs_only_the_plugins_own_script(plugin_and_repository, kind, event, said):
+    plugin, repository = plugin_and_repository
+    result = plugin_hook(kind, event, repository, plugin_root(kind, plugin))
+    assert (result.returncode, result.stdout.strip()) == (0, f"plugin-ran {said}"), result.stderr
+
+
+@pytest.mark.parametrize("kind", PLUGIN_FORMS)
+@pytest.mark.parametrize("case", ("unset", "empty", "se checkout"))
+def test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout(plugin_and_repository, kind, case):
+    """No fallback to the folder's own scripts; in SE's checkout its repository hooks run its copy."""
+    plugin, repository = plugin_and_repository
+    root = {"unset": None, "empty": ""}.get(case, plugin_root(kind, plugin))
+    if case == "se checkout":
+        (repository / ".github" / "hooks").mkdir(parents=True)
+        (repository / ".github" / "hooks" / "se.json").write_text("{}\n", encoding="utf-8")
+    for event in ("SessionStart", "Stop"):
+        result = plugin_hook(kind, event, repository, root)
+        assert (result.returncode, result.stdout.strip()) == (0, ""), (event, result.stderr)

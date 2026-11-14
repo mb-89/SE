@@ -165,6 +165,36 @@ def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch)
     monkeypatch.setattr(se_plugin, "LAYOUTS", off)
     files = se_plugin.expected(tmp_path)
     assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.MANIFESTS[0] in files
+    assert se_plugin.PLUGIN_HOOKS_FILE not in files
+
+
+def test_a_plugin_install_runs_the_plugins_own_scripts_guarded_and_fail_open(checkout):
+    """The plugin's hooks (.github/plugin/hooks.json) run `$PLUGIN_ROOT/scripts/<script>`, the
+    variable without braces; without it, or in a folder holding the repository hooks, nothing runs;
+    type, cwd, env and timeouts are the repository hooks'. tests/test_se_hook.py runs them."""
+    data = json.loads((checkout / ".github" / "plugin" / "hooks.json").read_text(encoding="utf-8"))
+    assert data["version"] == 1
+    repository = copilot_hooks(checkout)
+    assert sorted(data["hooks"]) == sorted(repository) == ["SessionStart", "Stop"]
+    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
+        [hook], [local] = data["hooks"][event], repository[event]
+        script, arguments = command.split(" ", 1)
+        assert hook["bash"] == (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f .github/hooks/se.json ]; then '
+                                f'bash "$PLUGIN_ROOT/{script}" {arguments} || true; fi')
+        assert hook["powershell"] == (
+            "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) "
+            f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}" {arguments} }}; exit 0')
+        assert "${" not in hook["bash"] + hook["powershell"]
+        assert {key: hook[key] for key in ("type", "cwd", "env", "timeoutSec")} == \
+            {key: local[key] for key in ("type", "cwd", "env", "timeoutSec")}
+
+
+def test_the_repository_hooks_and_the_claude_plugin_stay_as_they_were(checkout):
+    """Only a plugin install reads the plugin's hooks: the repository's and Claude Code's are what
+    they were before them."""
+    for name in (".github/hooks/se.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
+        assert "PLUGIN_ROOT\"" not in (checkout / name).read_text(encoding="utf-8"), name
+    assert all(hook["bash"].startswith("bash scripts/") for [hook] in copilot_hooks(checkout).values())
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
@@ -374,11 +404,20 @@ def test_copilots_one_manifest_names_its_layout_its_hooks_and_the_door(checkout)
     assert {key: manifest[key] for key in ("name", "version", "description")} == {
         key: claude[key] for key in ("name", "version", "description")}
     assert manifest["agents"] == ".github/agents/" and manifest["skills"] == ".github/skills/"
-    assert manifest["hooks"] == ".github/hooks/se.json"
+    assert manifest["hooks"] == ".github/plugin/hooks.json"
     for key in ("agents", "skills", "hooks"):
         assert (checkout / manifest[key]).exists(), key
     assert manifest["mcpServers"] == {"se": {"type": "stdio", "command": "bash",
-                                            "args": ["${PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."]}}
+                                            "args": ["${PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."],
+                                            "env": {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}}}
+
+
+def test_copilots_door_gets_the_sessions_folder_in_both_its_files(checkout):
+    """Copilot reads a plugin's own .github/mcp.json before the manifest's mcpServers: both name it."""
+    project = json.loads((checkout / ".github" / "mcp.json").read_text(encoding="utf-8"))
+    assert project == {"mcpServers": {"se": {"type": "stdio", "command": "bash",
+                                             "args": ["scripts/se_mcp.sh", "--root", "."], "tools": ["*"],
+                                             "env": {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}}}}
 
 
 @pytest.mark.parametrize("name", (".github/mcp.json", ".github/plugin/plugin.json", ".mcp.json"))
@@ -406,6 +445,17 @@ def test_no_root_mcp_json_with_the_setting_off_and_check_refuses_a_stray_one(che
     assert ".mcp.json: not generated from src/" in capsys.readouterr().err
     assert se_plugin.main(["build", "--root", str(checkout)]) == 0
     assert not (checkout / ".mcp.json").exists()
+
+
+def test_check_refuses_a_hand_edit_to_the_plugin_hooks(checkout, capsys):
+    path = checkout / ".github" / "plugin" / "hooks.json"
+    original = path.read_bytes()
+    path.write_bytes(original.replace(b"$PLUGIN_ROOT/scripts/bootstrap.sh", b"scripts/bootstrap.sh", 1))
+    try:
+        assert se_plugin.main(["check", "--root", str(checkout)]) == 1
+        assert ".github/plugin/hooks.json: differs from its source" in capsys.readouterr().err
+    finally:
+        path.write_bytes(original)
 
 
 @pytest.mark.parametrize("name", (".github/plugin/plugin.json", ".github/mcp.json"))
