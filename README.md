@@ -539,6 +539,13 @@ no token), the hand-off needs neither a retyped file nor a second run
   fails on the way is reported and never run twice, as it writes.
   - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
     file-based hand-off: <why>`.
+- **Rehearsing a relay landing.** `work_tickets.py rehearse` runs a whole landing through the
+  relay on the scratch branch `--base` names, without holding the integration branch: a relay
+  read, a local phase `--gap` makes slow on purpose, the push of `rehearse/` and the base's name,
+  the landing plan into the base (pause search, pull request, `check`, squash merge), the read-back.
+  - It refuses the integration branch, `land/…` and `rehearse/…` as its base, starts a base origin
+    lacks at the integration branch's tip, releases and tags nothing and touches no issue.
+  - It runs only as one call through kern's relay, and only when someone runs it.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
   `fleet-check` as one call whose reads a simulated session answers on the hook, from the
@@ -1426,6 +1433,12 @@ work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--
     prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
     refs and finishes
 
+work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]
+    rehearse a whole landing through kern's relay against a scratch branch, never the integration
+    branch: a relay read, a local phase (--gap makes it slow on purpose), the push of
+    rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-
+    back. It releases and tags nothing and touches no issue; it runs only as one call through kern's
+    relay
 
 work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 [--pr-description FILE] [--include-late REASON]

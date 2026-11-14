@@ -5162,3 +5162,102 @@ def test_integrate_through_kerns_relay_reads_the_work_issues_comments_as_a_step(
     for line in ("pull_request_read get #7", "issue_read get #5", "issue_read get_comments #5"):
         assert f"GitHub step through kern's relay: {line}" in captured.err
     assert "Integrated pull request #7" in captured.out
+
+
+class RehearsalSteps:
+    """A cloud session answering a rehearsal's GitHub steps through kern's relay, on the bare
+    origin as GitHub would (`FakeGitHub` writes the squash commit onto the pull request's base)."""
+
+    def __init__(self, github: FakeGitHub, root: Path) -> None:
+        self.github = github(root, "git.example/owner/repo")
+        self.asked: list[tuple[str, dict]] = []
+
+    def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
+        self.asked.append((tool, input_))
+        if tool == "list_issues":
+            return {"issues": [], "totalCount": 0}
+        if tool == "list_pull_requests":
+            return []
+        if tool == "create_pull_request":
+            pull = self.github.create_pull(input_["head"], input_["base"], input_["title"],
+                                           input_["body"])
+            return {"id": "1", "url": pull["html_url"]}
+        if tool == "pull_request_read" and input_.get("method") == "get_check_runs":
+            head = self.github.git("rev-parse", "refs/heads/rehearse/rehearsal")
+            return {"check_runs": [{"id": 3, "name": "check", "head_sha": head, "status": "completed",
+                                    "conclusion": "success",
+                                    "html_url": "https://git.example/owner/repo/runs/3"}]}
+        if tool == "merge_pull_request":
+            sha = self.github.squash(input_["pullNumber"], input_["expectedHeadSha"],
+                                     input_["commit_title"], input_["commit_message"])
+            return {"sha": sha, "merged": True}
+        if tool == "pull_request_read" and input_.get("method") == "get":
+            pull = dict(self.github.pull(input_["pullNumber"]))
+            pull.pop("merge_commit_sha", None)  # the tools name no merge commit
+            return pull
+        raise AssertionError(f"the rehearsal asked an unexpected step: {tool} {input_}")
+
+
+def rehearsal_fakes(main_checkout: Path, monkeypatch) -> list[float]:
+    """A checkout handed off to kern's relay for a rehearsal; the waits its local phase made."""
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    waits: list[float] = []
+    monkeypatch.setattr(work_tickets, "wait", waits.append)
+    return waits
+
+
+def test_a_rehearsal_lands_on_its_scratch_branch_through_the_relay_after_a_slow_local_phase(
+        main_checkout, monkeypatch, github, capsys):
+    """`rehearse` runs a whole relay landing against a scratch branch it starts at main's tip: a
+    relay read, a local phase --gap makes slow (on the fake clock), the push of rehearse/<base>,
+    the landing plan into the scratch branch and the read-back. main, the tags and every issue stay
+    as they were, and the checkout is back where it was."""
+    waits = rehearsal_fakes(main_checkout, monkeypatch)
+    session = RehearsalSteps(github, main_checkout)
+    origin = main_checkout.parent / "origin.git"
+    base = origin_main(main_checkout)
+    se_relay = work_tickets.sibling("se_relay")
+
+    with se_relay.stepping(session):
+        assert run(main_checkout, "rehearse", "--base", "rehearsal", "--gap", "75") == 0
+
+    assert [tool for tool, _ in session.asked] == [
+        "list_pull_requests",  # the read before the local phase
+        "list_issues",  # the pause search, the first step after the gap
+        "list_pull_requests", "create_pull_request", "pull_request_read", "merge_pull_request",
+        "pull_request_read", "pull_request_read"]  # the squash read back, then the rehearsal's own
+    assert waits == [30, 30, 15]  # the forced gap, said every 30 s
+    assert session.asked[3][1]["base"] == "rehearsal" and session.asked[3][1]["head"] == "rehearse/rehearsal"
+    landed = git_run(origin, "rev-parse", "refs/heads/rehearsal", check=True).stdout.strip()
+    assert git_run(origin, "rev-parse", f"{landed}^", check=True).stdout.strip() == base
+    assert origin_main(main_checkout) == base  # main is untouched
+    assert git_run(origin, "tag", "--list").stdout.strip() == ""  # nothing released or tagged
+    assert work_tickets.current_branch(main_checkout) == "main"
+    assert git_run(main_checkout, "rev-parse", "--verify", "--quiet",
+                   "refs/heads/rehearse/rehearsal").returncode != 0
+    assert not (main_checkout / ".rehearsal").exists()
+    captured = capsys.readouterr()
+    assert "rehearsal: local phase, 75 s of 75 s" in captured.err
+    assert f"Rehearsed: https://git.example/owner/repo/pull/" in captured.out
+    assert f"landed on rehearsal as {landed[:12]}" in captured.out
+
+
+@pytest.mark.parametrize("base", ["main", "land/feature/worker", "rehearse/x"])
+def test_a_rehearsal_refuses_the_integration_branch_and_landing_branches(
+        main_checkout, monkeypatch, github, capsys, base):
+    rehearsal_fakes(main_checkout, monkeypatch)
+    session = RehearsalSteps(github, main_checkout)
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "rehearse", "--base", base) == 1
+    assert "is no scratch branch" in capsys.readouterr().err
+    assert session.asked == []
+
+
+def test_a_rehearsal_runs_only_through_kerns_relay(main_checkout, monkeypatch, capsys):
+    rehearsal_fakes(main_checkout, monkeypatch)
+    assert run(main_checkout, "rehearse", "--base", "rehearsal") == 1  # no stepping: no call through kern
+    assert "runs only as one call through kern's GitHub relay" in capsys.readouterr().err
