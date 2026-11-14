@@ -13,7 +13,17 @@
 # whose every call says "not installed" and names the setup to run, SE's start (bootstrap.sh),
 # which fetches the binary and checks it against the release's SHA256SUMS in ~/.se/bin. It fetches
 # nothing itself, so the host never waits on a download. Its twin is se_mcp.ps1.
+#
+# A plugin install (Copilot's plugin config runs this from the plugin folder with --root .): only
+# where PLUGIN_ROOT, this SE and --root are one physical folder, the launcher serves the session's
+# repository instead. It reads SE_SESSION_CWD, else COPILOT_SESSION_CWD (an absolute existing
+# folder), else, on Linux and macOS, its parent's working directory; walks up to the nearest .git;
+# hands over to that repository's own launcher where it is an SE checkout; and writes one line,
+# "plugin <folder>: root <root> from <source>", to the chosen root's mcp.log. Where no source
+# counts and the plugin folder is no checkout, SE_MCP_PLUGIN_FOLDER names it to the binary.
+# SE_MCP_PLUGIN_PROJECT=off keeps the plugin folder as the root.
 set -u
+[ -n "${HOME+x}" ] || { HOME="$(cd ~ 2>/dev/null && pwd)"; export HOME; }
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 se_root="${here%/*}"
 root=""
@@ -27,9 +37,71 @@ done
 [ -n "$root" ] || root="$PWD"
 root="$(cd "$root" 2>/dev/null && pwd)" || root="$PWD"
 
-log="$root/.se/.runtime/mcp.log"
-mkdir -p "${log%/*}" 2>/dev/null && : >>"$log" 2>/dev/null || log="${TMPDIR:-/tmp}/se-mcp.log"
+logfile() { # <root>: the log the launcher writes for that root
+  local log="$1/.se/.runtime/mcp.log"
+  mkdir -p "${log%/*}" 2>/dev/null && : >>"$log" 2>/dev/null || log="${TMPDIR:-/tmp}/se-mcp.log"
+  printf '%s' "$log"
+}
 note() { printf '%s se_mcp.sh: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log" 2>/dev/null; }
+
+plugin_project() { # <plugin folder>: the root a plugin install serves; fails where no source counts
+  local plugin="$1" name value dir="" source="" found=0
+  usable() { case "$1" in /* | [A-Za-z]:[\\/]*) [ -d "$1" ] ;; *) false ;; esac; }
+  for name in SE_SESSION_CWD COPILOT_SESSION_CWD; do
+    value="${!name:-}"
+    if usable "$value"; then dir="$(cd "$value" && pwd -P)" && { source="$name=$value"; break; }; fi
+  done
+  if [ -z "$source" ]; then
+    value=""
+    case "$(uname -s 2>/dev/null)" in
+      Linux) value="$(cd -P "/proc/$PPID/cwd" 2>/dev/null && pwd -P)" ;;
+      Darwin) value="$(lsof -a -p "$PPID" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" ;;
+    esac
+    if usable "$value" && dir="$(cd "$value" && pwd -P)"; then
+      case "$dir/" in "$plugin/"*) dir="" ;; *) source="parent cwd $value" ;; esac
+    fi
+  fi
+  local chosen="$plugin"
+  if [ -n "$source" ]; then
+    found=1
+    case "$dir/" in
+      "$plugin/"*) ;;
+      *)
+        chosen="$dir"
+        while [ ! -e "$chosen/.git" ]; do
+          case "$chosen" in /) chosen="$dir"; break ;; esac
+          chosen="${chosen%/*}"
+          [ -n "$chosen" ] || chosen=/
+        done
+        ;;
+    esac
+  else
+    source="no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD) and no parent cwd outside the plugin"
+  fi
+  log="$(logfile "$chosen")"
+  note "plugin $plugin: root $chosen from $source"
+  printf '%s' "$chosen"
+  [ "$found" = 1 ]
+}
+
+if [ -n "${PLUGIN_ROOT:-}" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
+  plugin="$(cd "$PLUGIN_ROOT" 2>/dev/null && pwd -P)" || plugin=""
+  if [ -n "$plugin" ] && [ "$plugin" = "$(cd "$se_root" && pwd -P)" ] && [ "$plugin" = "$(cd "$root" && pwd -P)" ]; then
+    unset SE_MCP_PLUGIN_FOLDER
+    if chosen="$(plugin_project "$plugin")"; then
+      if [ "$chosen" != "$plugin" ]; then
+        root="$chosen"
+        if [ -f "$chosen/scripts/se_mcp.sh" ] && [ -f "$chosen/components/release.toml" ]; then
+          exec "${BASH:-bash}" "$chosen/scripts/se_mcp.sh" --root "$chosen"
+        fi
+      fi
+    elif [ ! -e "$plugin/.git" ]; then
+      export SE_MCP_PLUGIN_FOLDER="$plugin"
+    fi
+  fi
+fi
+
+log="$(logfile "$root")"
 
 version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$se_root/components/release.toml" 2>/dev/null | head -n 1)"
 suffix=""
