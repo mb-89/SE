@@ -100,6 +100,14 @@ type CommandDecl struct {
 	Session bool
 	// Class is Interactive or Batch: whether a person waits on its answer.
 	Class Class
+	// ReadOnly declares that it changes nothing: no file, no git state, no
+	// outside service. Only such a command is offered by kern's MCP door
+	// (package mcp), whatever its class.
+	ReadOnly bool
+	// MCP is what an agent host reads of it as a tool of the MCP door: when
+	// to use it. The door's catalog check (mcp.Tools) refuses a read-only
+	// command without it.
+	MCP string
 }
 
 // Class says who waits on a command.

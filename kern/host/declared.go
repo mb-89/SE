@@ -82,6 +82,19 @@ func declarations(root string, w index.Wiring, compiled []*index.Component) ([]*
 	return out, nil
 }
 
+// Catalog answers the catalog the core would serve in the checkout at root
+// with the wiring and the compiled components, without serving it: the
+// declared components' component.toml read as the start reads them, and the
+// catalog check run. A door that offers the core's commands before the core
+// stands reads it (package mcp).
+func Catalog(root string, w index.Wiring, compiled []*index.Component) (index.Catalog, error) {
+	decls, err := declarations(root, w, compiled)
+	if err != nil {
+		return index.Catalog{}, err
+	}
+	return index.Collect(w, append(append([]*index.Component{}, compiled...), decls...)...)
+}
+
 // remote is a declared instance's process, as the index reaches it over the bus.
 type remote struct {
 	c    *Core
@@ -322,6 +335,9 @@ func (c *Core) call(m *nats.Msg) {
 		return
 	case AbandonSubject:
 		c.abandon(m)
+		return
+	case LeaseSubject:
+		c.lease(m)
 		return
 	}
 	c.event()

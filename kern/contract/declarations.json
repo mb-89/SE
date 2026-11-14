@@ -9,6 +9,7 @@
     {"name": "an output without a built-in value", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[outputs.total]\ntype = \"int\"\nhelp = \"t\"\n", "error": ["outputs.total has no built-in value"]},
     {"name": "a type that is none", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[inputs]\nn = \"integer\"\n", "error": ["\"integer\" is no type"]},
     {"name": "a command without a class", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x go\"]\nusage = \"x go\"\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\n", "error": ["command \"x go\" has no class"]},
+    {"name": "a read-only that is no flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x look\"]\nusage = \"x look\"\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"interactive\"\nread-only = \"yes\"\nmcp = \"Looks.\"\n", "error": ["read-only is true or false"]},
     {"name": "a command without a usage", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[commands.\"x go\"]\nsummary = \"s\"\ngroup = \"g\"\nhelp = \"h\"\nclass = \"batch\"\n", "error": ["command \"x go\" has no usage"]},
     {"name": "a verb without the I/O flag", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[verbs.append]\ntype = \"string\"\nanswer = \"int\"\nhelp = \"a\"\n", "error": ["carries no I/O flag"]},
     {"name": "a built-in value of another type", "text": "name = \"x\"\ncontract = 1\nhelp = \"h\"\n[config.n]\ntype = \"int\"\nbuiltin = \"one\"\nhelp = \"n\"\n", "error": ["config.n: builtin takes int"]}
