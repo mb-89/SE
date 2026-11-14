@@ -576,13 +576,13 @@ def landed_since_retro(door, tracker: str, branch: str) -> int | None:
                for issue in found.window)
 
 
-def due_after(root: Path) -> int:
-    """`[retro] due_after` in se.toml: how many landed work issues make a retro due; built in
-    DUE_AFTER."""
-    count = work_tickets.se_table(root, "retro").get("due_after", DUE_AFTER)
+def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER) -> int:
+    """`[<table>] due_after` in se.toml: how many counted items make a run of that kind due (for
+    a retro, landed work issues; for an overhaul, closed retros); built in `default`."""
+    count = work_tickets.se_table(root, table).get("due_after", default)
     if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
-        raise QueueError(f"retro.due_after in {root / 'se.toml'} must be a positive whole number; "
-                         f"fix it or remove it for the built-in {DUE_AFTER}")
+        raise QueueError(f"{table}.due_after in {root / 'se.toml'} must be a positive whole number; "
+                         f"fix it or remove it for the built-in {default}")
     return count
 
 

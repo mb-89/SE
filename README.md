@@ -138,10 +138,11 @@ uv run python <se>/scripts/se_start.py refresh
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
 - What is due in the work: where gh is signed in, `check` also counts the work issues landed since
-  the last retro (the window of [`retro.py collect`](#work-commands)) and runs the
-  [fleet check](#fleet-check), and caches both.
-  - The greeting then names a retro that is [due](#retro-due) and the fleet's findings by kind and
-    issue, one line each with the command to run, and a part whose read failed with its cause.
+  the last retro (the window of [`retro.py collect`](#work-commands)) and the retros closed since
+  the last overhaul, runs the [fleet check](#fleet-check), and caches all three.
+  - The greeting then names a retro that is [due](#retro-due), an overhaul that is
+    [due](#overhaul-due) and the fleet's findings by kind and issue, one line each with the command
+    to run, and a part whose read failed with its cause.
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
@@ -583,6 +584,20 @@ A retro is due once `due_after` work issues landed since the last closed retro i
 the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
 setting; SE's retro-due component counts the same from kern's GitHub names, for the greeting to read
 live ([components/README.md](components/README.md)).
+
+### Overhaul due
+
+```toml
+[overhaul]
+due_after = 3
+```
+
+An overhaul is due once `due_after` retros closed since the last closed overhaul issue, built in 3;
+a retro closed as a duplicate or as not planned does not count, as for the landings a retro counts.
+The [start greeting](#start-and-refresh) names it beside the retro.
+
+`scripts/overhaul.py` owns the count and the setting; the same retro-due component counts it into
+the same name, `retro-due/due`, so the countdowns keep one store.
 
 ### Stop hook
 

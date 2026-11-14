@@ -339,6 +339,25 @@ def test_the_draft_holds_the_retros_since_the_last_overhaul_and_its_findings(che
     assert "### Reached by nothing but tests" in text
 
 
+def test_an_overhaul_is_due_after_the_third_retro_and_resets_with_an_overhaul(tmp_path):
+    """The countdown retro-due counts too (components/retro-due): the retros closed since the
+    last overhaul closed, a duplicate retro not among them; the next overhaul resets it, and an
+    open overhaul with none closed starts it at its creation."""
+    given = answers()
+    given["issues.json"].append(issue(48, "docs/retro-20261106", "2026-11-06T00:00:00Z",
+                                      reason="duplicate"))
+    assert overhaul.retros_since_overhaul(FakeDoor(given)) == 3  # #42, #43 and #46
+    assert overhaul.DUE_AFTER == 3 and overhaul.due_after(tmp_path) == 3
+    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 4\n", encoding="utf-8")
+    assert overhaul.due_after(tmp_path) == 4
+    given["issues.json"].append(issue(49, "docs/overhaul-20261107", "2026-11-07T00:00:00Z"))
+    assert overhaul.retros_since_overhaul(FakeDoor(given)) == 0
+    given["issues.json"] = [item for item in given["issues.json"]
+                            if not item["title"].startswith(overhaul.OVERHAUL_TITLE)]
+    given["open-issues.json"][1]["created_at"] = "2026-10-25T00:00:00Z"
+    assert overhaul.retros_since_overhaul(FakeDoor(given)) == 2  # #43 and #46
+
+
 def test_without_a_closed_overhaul_the_window_is_the_whole_history(checkout):
     given = answers()
     given["issues.json"] = [item for item in given["issues.json"] if item["number"] != 40]

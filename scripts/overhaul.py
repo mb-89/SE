@@ -541,6 +541,8 @@ TEMPLATE = SE_ROOT / ".github" / "ISSUE_TEMPLATE" / "overhaul.md"
 BOOK = Path("src") / "skills" / "work-model" / "references" / "rules.md"
 OVERHAUL_TITLE = "docs/overhaul-"
 OVERHAUL_LABEL = "discovery"
+# An overhaul is due once this many retros closed since the last one (se.toml [overhaul] due_after).
+DUE_AFTER = 3
 BLOCK_MARKER = "<!-- se:overhaul-yaml -->"
 REPORT_MARKER = "<!-- se:overhaul-report -->"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
@@ -612,6 +614,45 @@ def book_rules(root: Path) -> list:
 
 def is_overhaul(issue) -> bool:
     return issue.title.startswith(OVERHAUL_TITLE)
+
+
+def due_after(root: Path) -> int:
+    """`[overhaul] due_after` in se.toml: how many closed retros make an overhaul due; built in
+    DUE_AFTER."""
+    return sibling("retro").due_after(root, "overhaul", DUE_AFTER)
+
+
+def retros_since_overhaul(door) -> int | None:
+    """How many retros closed since the last overhaul, read through `door`, counted as retro.py
+    counts the work landed since the last retro: the window starts at the last closed overhaul's
+    close, else at the oldest open overhaul's creation, else it is the whole history, and a retro
+    closed as a duplicate or as not planned does not count. None where the door is still missing
+    answers."""
+    retro = sibling("retro")
+    closed = [retro.issue_of(item) for item in door.closed_issues()]
+    if door.missing:
+        return None
+    for issue in closed:
+        if (is_overhaul(issue) or retro.is_retro(issue)) and not issue.closed_at:
+            read = retro.issue_of(door.issue(issue.number))
+            issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+    if door.missing:
+        return None
+    last = max((issue for issue in closed if is_overhaul(issue) and retro.when(issue.closed_at)),
+               key=lambda issue: retro.when(issue.closed_at), default=None)
+    if last is not None:
+        since = retro.when(last.closed_at)
+    else:
+        opened = [retro.issue_of(item) for item in door.open_issues()]
+        if door.missing:
+            return None
+        oldest = min((issue for issue in opened if is_overhaul(issue) and retro.when(issue.created_at)),
+                     key=lambda issue: retro.when(issue.created_at), default=None)
+        since = retro.when(oldest.created_at) if oldest else None
+    return sum(1 for issue in closed
+               if retro.is_retro(issue) and retro.when(issue.closed_at)
+               and (since is None or retro.when(issue.closed_at) > since)
+               and not retro.is_duplicate(issue) and issue.state_reason != "not_planned")
 
 
 def door_for(retro, work_tickets, args: argparse.Namespace, root: Path):

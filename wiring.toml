@@ -44,7 +44,7 @@ component = "scaffold"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
 # kern's GitHub component, and SE's fleet, retro-due and origin reading it (components/README.md), all
 # compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
-# repository name and the integration branch; retro-due's due-after count and tracker.
+# repository name and the integration branch; retro-due's due-after and overhaul-after counts and tracker.
 [instances.github]
 component = "github"
 
@@ -57,7 +57,7 @@ config = { lease-hours = 3.0, repository = "SE", base = "main" }
 
 [instances.retro-due]
 component = "retro-due"
-config = { due-after = 10, tracker = "mb-89/SE", base = "main" }
+config = { due-after = 10, overhaul-after = 3, tracker = "mb-89/SE", base = "main" }
 
 [wires]
 "github.issues" = "github/issues/<key>"
