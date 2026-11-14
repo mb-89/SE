@@ -9,7 +9,7 @@
   "license": "MIT",
   "agents": ".github/agents/",
   "skills": ".github/skills/",
-  "hooks": ".github/hooks/se.json",
+  "hooks": ".github/plugin/hooks.json",
   "mcpServers": {
     "se": {
       "type": "stdio",
@@ -18,7 +18,10 @@
         "${PLUGIN_ROOT}/scripts/se_mcp.sh",
         "--root",
         "."
-      ]
+      ],
+      "env": {
+        "SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"
+      }
     }
   }
 }

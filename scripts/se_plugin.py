@@ -2,7 +2,8 @@
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
 `build` writes both layouts, the Claude Code plugin manifests, Copilot's hooks
-(`.github/hooks/se.json`, a layout setting: `Layout.hooks`), Copilot's one plugin manifest
+(`.github/hooks/se.json` for the repository, `.github/plugin/hooks.json` for a plugin install, both a
+layout setting: `Layout.hooks`), Copilot's one plugin manifest
 (`.github/plugin/plugin.json`, or the root `plugin.json` where `se.toml` `[plugin] copilot_manifest`
 is `"root"`) and the MCP door's declarations (`.github/mcp.json`, and a root
 `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on); `check` refuses when any generated file
@@ -79,6 +80,12 @@ COPILOT_HOOKS = {
     # It also fires for the se agent; stop-check lets any checkout without a work issue end.
     "Stop": ("scripts/se_hook.sh Stop", 60),
 }
+# A Copilot plugin install's hooks (.github/plugin/hooks.json, which the manifest names): the same
+# events, scripts and settings, each run from the plugin's own folder, `$PLUGIN_ROOT` without braces
+# so no host's `${...}` expander rewrites it. Without PLUGIN_ROOT a command runs nothing, so it never
+# runs a `scripts/` file of the repository it runs in; in a folder holding the repository hooks
+# (COPILOT_HOOKS_FILE), SE's own checkout, it runs nothing either, as those already run its own copy.
+# Each exits 0 (`plugin_hook_commands`).
 
 
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
@@ -119,6 +126,7 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
+PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 # Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
 # layout's .claude-plugin/plugin.json. Where it lies is the build setting se.toml [plugin]
 # copilot_manifest (`copilot_manifest`): unset, "github"; "root" puts it at the repository root, the
@@ -131,7 +139,7 @@ COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
 COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
 ROOT_MCP_FILE = PurePosixPath(".mcp.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
-             COPILOT_HOOKS_FILE, *COPILOT_MANIFEST_PLACES.values(), COPILOT_MCP_FILE, ROOT_MCP_FILE)
+             COPILOT_HOOKS_FILE, PLUGIN_HOOKS_FILE, *COPILOT_MANIFEST_PLACES.values(), COPILOT_MCP_FILE, ROOT_MCP_FILE)
 # Which manifest each host's plugin install picks, in the order its documentation names, each place
 # with the format it reads there; documented, not measured (`manifest_pick`).
 MANIFEST_LOOKUPS = {
@@ -145,6 +153,9 @@ MANIFEST_LOOKUPS = {
 MCP_SERVER = "se"
 LAUNCHER = "scripts/se_mcp.sh"
 COPILOT_PLUGIN_ROOT = "${PLUGIN_ROOT}"
+# The session's folder, which Copilot expands in a server's env, so a plugin install's door can tell
+# the session's project from the plugin's folder; a launcher reads it only with PLUGIN_ROOT set.
+SESSION_CWD_ENV = {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}
 # The lines that open and close a part of a source's body only the Copilot layout carries (`hosts`).
 COPILOT_OPEN, COPILOT_CLOSE = "<!-- copilot -->", "<!-- /copilot -->"
 
@@ -395,9 +406,29 @@ def _json(value: dict) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
 
-def _copilot_hook(command: str, seconds: int) -> dict:
-    return {"type": "command", "bash": f"bash {command} || true", "powershell": f"bash {command}; exit 0",
+def plugin_hook_commands(command: str) -> tuple[str, str]:
+    """The bash and PowerShell commands of a plugin install's hook running `command` (a script under
+    `scripts/` and its arguments) from `$PLUGIN_ROOT`, guarded as PLUGIN_HOOKS_FILE says. Pure."""
+    script, _, arguments = command.partition(" ")
+    tail = f" {arguments}" if arguments else ""
+    guard = COPILOT_HOOKS_FILE
+    bash = (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f {guard} ]; then '
+            f'bash "$PLUGIN_ROOT/{script}"{tail} || true; fi')
+    powershell = (f"if ($env:PLUGIN_ROOT -and -not (Test-Path {guard})) "
+                  f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}"{tail} }}; exit 0')
+    return bash, powershell
+
+
+def _copilot_hook(command: str, seconds: int, plugin: bool = False) -> dict:
+    bash, powershell = (plugin_hook_commands(command) if plugin
+                        else (f"bash {command} || true", f"bash {command}; exit 0"))
+    return {"type": "command", "bash": bash, "powershell": powershell,
             "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
+
+
+def _copilot_hooks(plugin: bool) -> bytes:
+    return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin)]
+                                         for event, (command, seconds) in COPILOT_HOOKS.items()}})
 
 
 def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
@@ -427,12 +458,10 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         return files
     layout = LAYOUTS[0]
     if layout.hooks:
-        files[COPILOT_HOOKS_FILE] = _json({
-            "version": 1,
-            "hooks": {event: [_copilot_hook(command, seconds)]
-                      for event, (command, seconds) in COPILOT_HOOKS.items()},
-        })
-    files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {**mcp_server(LAUNCHER), "tools": ["*"]}}})
+        files[COPILOT_HOOKS_FILE] = _copilot_hooks(plugin=False)
+        files[PLUGIN_HOOKS_FILE] = _copilot_hooks(plugin=True)
+    files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {
+        **mcp_server(LAUNCHER), "tools": ["*"], "env": SESSION_CWD_ENV}}})
     files[copilot_manifest(root)] = _json({
         "name": PLUGIN,
         "version": plugin["version"],
@@ -442,8 +471,9 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         "license": "MIT",
         "agents": f"{layout.agents}/",
         "skills": f"{layout.skills}/",
-        **({"hooks": str(COPILOT_HOOKS_FILE)} if layout.hooks else {}),
-        "mcpServers": {MCP_SERVER: mcp_server(f"{COPILOT_PLUGIN_ROOT}/{LAUNCHER}")},
+        **({"hooks": str(PLUGIN_HOOKS_FILE)} if layout.hooks else {}),
+        "mcpServers": {MCP_SERVER: {**mcp_server(f"{COPILOT_PLUGIN_ROOT}/{LAUNCHER}"),
+                                    "env": SESSION_CWD_ENV}},
     })
     return files
 
