@@ -6609,7 +6609,8 @@ class RelayDoor(Workflows):
 class StepReads:
     """kern relay's reads (se_relay.Relay.answer_file) asked as github.step through the relay
     door, where a command runs as one call: the tool's answer is written to the file a command
-    reads, no snapshot needed beforehand."""
+    reads, no snapshot needed beforehand. Each read is the door's `ask`, so it prints its
+    `GitHub step through kern's relay: <tool>` line on stderr as every other step does."""
 
     def __init__(self, root: Path, door: RelayDoor) -> None:
         self.root, self.door = root, door
@@ -6617,8 +6618,8 @@ class StepReads:
     def answer_file(self, family: str, owner: str, repo: str, number: int, what: str) -> Path:
         relay = sibling("se_relay")
         tool, method, number_arg = relay.FAMILIES[family]
-        data = self.door.step(tool, {"method": method, "owner": owner, "repo": repo,
-                                     number_arg: number}, f"read the {what}", "")
+        data = self.door.ask(tool, {"method": method, "owner": owner, "repo": repo,
+                                    number_arg: number}, f"read the {what}")
         path = self.root / relay.ANSWERS / f"{family}-{relay.key(owner, repo, number)}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")

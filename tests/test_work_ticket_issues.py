@@ -4913,4 +4913,6 @@ def test_integrate_through_kerns_relay_reads_the_work_issues_comments_as_a_step(
     assert session.asked[2][1]["issue_number"] == 5
     captured = capsys.readouterr()
     assert "--comments-file" not in captured.err
+    for line in ("pull_request_read get #7", "issue_read get #5", "issue_read get_comments #5"):
+        assert f"GitHub step through kern's relay: {line}" in captured.err
     assert "Integrated pull request #7" in captured.out
