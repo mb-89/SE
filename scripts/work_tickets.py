@@ -1920,7 +1920,13 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
             raise QueueError(
                 "No repository: pass --repo [HOST/]OWNER/REPO or add a git remote origin")
     feedback.phase(f"read work issue #{number}")
-    issue = fetch_issue(root, number, repo)
+    try:  # gh first; where the host gives it no account, kern's relay, else the no-gh message
+        issue = fetch_issue(root, number, repo)
+    except MissingGhError:
+        relay = relay_for(root)
+        if relay is None:
+            raise
+        issue = relay_issue(relay, root, repo, number)
     if previous is not None and previous["number"] != number:
         previous = None
     feedback.phase("compare it with the last read")
@@ -6248,13 +6254,13 @@ def handed_pull_request(root: Path, pull_number: int, remote: str, description: 
     return pull, report, {"body": body}, int(work[1])
 
 
-def relay_pull_request(relay, root: Path, pull_number: int, remote: str
+def relay_pull_request(relay, root: Path, pull_number: int, remote: str, tracker: str
                        ) -> tuple[dict[str, object], str, dict[str, object], int]:
     """What `pull_request_report` reads, from kern's relay instead of retyped files: the pull
-    request (its snapshot), its field report, its work issue (that snapshot) and its number. No
-    file is saved."""
+    request (its snapshot, on `remote`), its field report, its work issue (that snapshot, on
+    `tracker`, as the gh path reads it) and its number. No file is saved."""
     pull, report, work_number = relay_pull(relay, root, pull_number, remote)
-    return pull, report, relay_work_issue(relay, pull_number, remote, report, work_number), work_number
+    return pull, report, relay_work_issue(relay, pull_number, tracker, report, work_number), work_number
 
 
 def relay_pull(relay, root: Path, pull_number: int, remote: str
@@ -6284,11 +6290,11 @@ def relay_pull(relay, root: Path, pull_number: int, remote: str
     return pull, report, work_number
 
 
-def relay_work_issue(relay, pull_number: int, remote: str, report: str, work_number: int
+def relay_work_issue(relay, pull_number: int, tracker: str, report: str, work_number: int
                      ) -> dict[str, object]:
-    """The work issue through kern's relay, with its comments, its body checked against the field
-    report."""
-    owner, name = api_repo(remote).split("/")
+    """The work issue through kern's relay, read from `tracker` (where the work issues live, not
+    origin), with its comments, its body checked against the field report."""
+    owner, name = api_repo(tracker).split("/")
     body = str(relay_issue_read(relay, owner, name, work_number)["body"])
     problems = field_report_problems(report, body)
     if problems:
@@ -6372,7 +6378,7 @@ def integrate(
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
-            work_issue = relay_work_issue(relay, pull_number, remote, report, work_number)
+            work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number)
         except Exception:
             abandon_landing(root, target, landing)
             raise

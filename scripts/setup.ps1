@@ -4,8 +4,11 @@ Installs se's git hooks (public-safety check) into a repository: se itself by de
 such as a project that uses se as a module. Also adds the public check's local list
 (.public-check.local, never checked in) to the repository's .gitignore, and sets the repository's
 commit identity as work_tickets.py sync does, so its first commit already carries it.
+
+With -Copilot (opt-in) it then installs SE for GitHub Copilot there: `copilot.py install`
+(docs/copilot.md, "Another repository"). Without it nothing else changes. Twin of setup.sh.
 #>
-param([string]$Repo)
+param([string]$Repo, [switch]$Copilot)
 
 # Runs se's script scripts/<first argument> with the remaining arguments, as .githooks/se-script does.
 function Invoke-SeScript {
@@ -39,3 +42,7 @@ if ($lines -notcontains $localList -and $lines -notcontains "/$localList") {
 }
 Invoke-SeScript work_tickets.py identity --worktree $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($Copilot) {
+    Invoke-SeScript copilot.py install --repo $target
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}

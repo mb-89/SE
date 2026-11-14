@@ -136,9 +136,68 @@ def test_integrate_reads_the_pull_request_and_issue_from_the_relay(served, monke
     monkeypatch.setattr(work_tickets, "remote_head", lambda root, branch: "deadbeef")
     relay = work_tickets.relay_for(worktree)
     pull, report_text, work_issue, number = work_tickets.relay_pull_request(
-        relay, worktree, 9, "alice/demo")
+        relay, worktree, 9, "alice/demo", "alice/demo")
     assert number == 42 and pull["headRefName"] == "feat/x" and pull["headRefOid"] == "deadbeef"
     assert captured["issue_body"] == "## Requirements\n\n1. One.\n"
+
+
+def test_the_relay_reads_the_work_issue_from_the_tracker_not_origin(served, monkeypatch) -> None:
+    """The pull request lives on origin, its work issue on the tracker, as the gh path reads it:
+    the relay answers only the repository asked, so a read of origin's #42 finds nothing."""
+    worktree, names = served
+    report = ("<!-- se:field-report -->\n**Work issue:** #42  **Branch:** `feat/x`\n"
+              "<!-- se:field-report:end -->")
+    names["github/pulls/alice.demo.9"] = snapshot(9, {
+        "number": 9, "body": report, "head": {"ref": "feat/x", "sha": "deadbeef"}})
+    names["github/issues/alice.tracker.42"] = snapshot(42, {
+        "number": 42, "title": "feat/x", "body": "Tracker's body.",
+        "html_url": "https://github.com/alice/tracker/issues/42"})
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report_body, issue_body: [])
+    monkeypatch.setattr(work_tickets, "checked_git", lambda *a, **k: "")
+    relay = work_tickets.relay_for(worktree)
+    _, _, work_issue, _ = work_tickets.relay_pull_request(
+        relay, worktree, 9, "alice/demo", "git.example/alice/tracker")
+    assert work_issue == {"body": "Tracker's body."}
+    with pytest.raises(se_relay.RelayError, match="no work issue of alice/demo#42"):
+        work_tickets.relay_pull_request(relay, worktree, 9, "alice/demo", "alice/demo")
+
+
+def test_refresh_reads_the_issue_and_comments_from_the_relay(served, monkeypatch) -> None:
+    """Worker step 3 without gh: `refresh` reads the work issue through kern's relay, as `intake`
+    does, and reports what changed since intake."""
+    worktree, names = served
+
+    def no_gh(*a, **k):
+        raise work_tickets.MissingGhError("needs the GitHub CLI (gh)")
+
+    monkeypatch.setattr(work_tickets, "fetch_issue", no_gh)
+    body = ("<!-- se:fleet -->\n## Goal\n\nG.\n\n## Base branch\n\nmain\n\n## Requirements\n\n"
+            "1. One requirement.\n\n## Acceptance\n\n- [ ] It.\n")
+    issue = {"number": 42, "title": "feat/x", "body": body, "comments": 0,
+             "updated_at": "2026-11-13T09:00:00Z", "html_url": "https://github.com/alice/demo/issues/42"}
+    names["github/issues/alice.demo.42"] = snapshot(42, issue)
+    work_tickets.intake(worktree, 42, "alice/demo")
+    assert work_tickets.refresh(worktree, None, None)["changed"] is False
+    names["github/issues/alice.demo.42"] = snapshot(42, {**issue, "comments": 1})
+    names["github/comments/alice.demo.42"] = snapshot(42, [
+        {"id": 5, "body": "Also two.", "user": {"login": "mb-89"},
+         "created_at": "2026-11-13T09:05:00Z", "html_url": "https://github.com/alice/demo/issues/42#c5"}])
+    changes = work_tickets.refresh(worktree, None, None)
+    assert changes["changed"] is True
+    assert [c["body"] for c in changes["new_comments"]] == ["Also two."]
+
+
+def test_refresh_without_a_relay_falls_back_to_the_no_gh_message(tmp_path: Path, monkeypatch) -> None:
+    worktree = tmp_path / "wt"
+    (worktree / ".git").mkdir(parents=True)
+
+    def no_gh(*a, **k):
+        raise work_tickets.MissingGhError("needs the GitHub CLI (gh)")
+
+    monkeypatch.setattr(work_tickets, "fetch_issue", no_gh)
+    monkeypatch.setattr(work_tickets, "relay_for", lambda root: None)
+    with pytest.raises(work_tickets.MissingGhError, match="GitHub CLI"):
+        work_tickets.refresh(worktree, 42, "alice/demo")
 
 
 def test_the_work_issues_comments_are_read_where_the_tools_count_any(tmp_path: Path) -> None:

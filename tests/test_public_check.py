@@ -9,6 +9,7 @@ scripts/hygiene.py, a step of CI's `check` job."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -798,15 +799,15 @@ def git_sh() -> str | None:
 SETUPS = ["sh"] + (["powershell"] if os.name == "nt" else [])
 
 
-def setup_hooks(kind: str, target: Path) -> subprocess.CompletedProcess[str]:
+def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.CompletedProcess[str]:
     if kind == "powershell":
         command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                   str(SE_ROOT / "scripts" / "setup.ps1"), "-Repo", str(target)]
+                   str(SE_ROOT / "scripts" / "setup.ps1"), "-Repo", str(target)] + (["-Copilot"] if copilot else [])
     else:
         shell = git_sh()
         if shell is None:
             pytest.skip("no POSIX shell")
-        command = [shell, str(SE_ROOT / "scripts" / "setup.sh"), str(target)]
+        command = [shell, str(SE_ROOT / "scripts" / "setup.sh"), str(target)] + (["--copilot"] if copilot else [])
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
@@ -835,6 +836,45 @@ def test_setup_sets_the_project_commit_identity_as_sync_does(kind: str, repo: Pa
     assert result.returncode == 0, result.stdout + result.stderr
     assert git(repo, "config", "user.name").stdout.strip() == "alice"
     assert git(repo, "config", "user.email").stdout.strip() == "alice"
+
+
+def se_as_a_local_module(repo: Path) -> None:
+    """The machine's local list points the module se at this checkout, so `sync se` clones nothing
+    (README "Modules", ~/.se/local.toml [paths]); the repo fixture's HOME holds it."""
+    local = Path(os.environ["HOME"]) / ".se" / "local.toml"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(f"[paths]\nse = '{SE_ROOT.as_posix()}'\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("kind", SETUPS)
+def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(kind: str, repo: Path) -> None:
+    se_as_a_local_module(repo)
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"model": "x", "enabledPlugins": {"other@else": true}}\n', encoding="utf-8")
+    (repo / "se.toml").write_text('[project]\nidentity = "alice <alice>"\n', encoding="utf-8")
+    for _ in range(2):
+        result = setup_hooks(kind, repo, copilot=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data == {"model": "x",
+                    "enabledPlugins": {"other@else": True, "se@se": True},
+                    "extraKnownMarketplaces": {"se": {"source": {"source": "github", "repo": "mb-89/SE"}}}}
+    pin = tomllib.loads((repo / "se.toml").read_text(encoding="utf-8"))["modules"]["se"]
+    major, minor = tomllib.loads((SE_ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"].split(".")[:2]
+    assert pin == {"url": "https://github.com/mb-89/SE.git", "version": f"^{major}.{minor}"}
+    assert (repo / ".gitignore").read_text(encoding="utf-8").splitlines().count(".se/") == 1
+    assert "se: local" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize("kind", SETUPS)
+def test_setup_without_copilot_writes_no_copilot_settings_pin_or_ignore(kind: str, repo: Path) -> None:
+    result = setup_hooks(kind, repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / ".github").exists()
+    assert not (repo / "se.toml").exists()
+    assert (repo / ".gitignore").read_text(encoding="utf-8") == f"{public_check.LOCAL_FILE}\n"
+    assert "copilot install:" not in result.stdout
 
 
 def test_se_ignores_its_local_list() -> None:

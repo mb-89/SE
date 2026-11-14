@@ -165,6 +165,36 @@ def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch)
     monkeypatch.setattr(se_plugin, "LAYOUTS", off)
     files = se_plugin.expected(tmp_path)
     assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.MANIFESTS[0] in files
+    assert se_plugin.PLUGIN_HOOKS_FILE not in files
+
+
+def test_a_plugin_install_runs_the_plugins_own_scripts_guarded_and_fail_open(checkout):
+    """The plugin's hooks (.github/plugin/hooks.json) run `$PLUGIN_ROOT/scripts/<script>`, the
+    variable without braces; without it, or in a folder holding the repository hooks, nothing runs;
+    type, cwd, env and timeouts are the repository hooks'. tests/test_se_hook.py runs them."""
+    data = json.loads((checkout / ".github" / "plugin" / "hooks.json").read_text(encoding="utf-8"))
+    assert data["version"] == 1
+    repository = copilot_hooks(checkout)
+    assert sorted(data["hooks"]) == sorted(repository) == ["SessionStart", "Stop"]
+    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
+        [hook], [local] = data["hooks"][event], repository[event]
+        script, arguments = command.split(" ", 1)
+        assert hook["bash"] == (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f .github/hooks/se.json ]; then '
+                                f'bash "$PLUGIN_ROOT/{script}" {arguments} || true; fi')
+        assert hook["powershell"] == (
+            "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) "
+            f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}" {arguments} }}; exit 0')
+        assert "${" not in hook["bash"] + hook["powershell"]
+        assert {key: hook[key] for key in ("type", "cwd", "env", "timeoutSec")} == \
+            {key: local[key] for key in ("type", "cwd", "env", "timeoutSec")}
+
+
+def test_the_repository_hooks_and_the_claude_plugin_stay_as_they_were(checkout):
+    """Only a plugin install reads the plugin's hooks: the repository's and Claude Code's are what
+    they were before them."""
+    for name in (".github/hooks/se.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
+        assert "PLUGIN_ROOT\"" not in (checkout / name).read_text(encoding="utf-8"), name
+    assert all(hook["bash"].startswith("bash scripts/") for [hook] in copilot_hooks(checkout).values())
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
@@ -374,11 +404,20 @@ def test_copilots_one_manifest_names_its_layout_its_hooks_and_the_door(checkout)
     assert {key: manifest[key] for key in ("name", "version", "description")} == {
         key: claude[key] for key in ("name", "version", "description")}
     assert manifest["agents"] == ".github/agents/" and manifest["skills"] == ".github/skills/"
-    assert manifest["hooks"] == ".github/hooks/se.json"
+    assert manifest["hooks"] == ".github/plugin/hooks.json"
     for key in ("agents", "skills", "hooks"):
         assert (checkout / manifest[key]).exists(), key
     assert manifest["mcpServers"] == {"se": {"type": "stdio", "command": "bash",
-                                            "args": ["${PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."]}}
+                                            "args": ["${PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."],
+                                            "env": {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}}}
+
+
+def test_copilots_door_gets_the_sessions_folder_in_both_its_files(checkout):
+    """Copilot reads a plugin's own .github/mcp.json before the manifest's mcpServers: both name it."""
+    project = json.loads((checkout / ".github" / "mcp.json").read_text(encoding="utf-8"))
+    assert project == {"mcpServers": {"se": {"type": "stdio", "command": "bash",
+                                             "args": ["scripts/se_mcp.sh", "--root", "."], "tools": ["*"],
+                                             "env": {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}}}}
 
 
 @pytest.mark.parametrize("name", (".github/mcp.json", ".github/plugin/plugin.json", ".mcp.json"))
@@ -406,6 +445,17 @@ def test_no_root_mcp_json_with_the_setting_off_and_check_refuses_a_stray_one(che
     assert ".mcp.json: not generated from src/" in capsys.readouterr().err
     assert se_plugin.main(["build", "--root", str(checkout)]) == 0
     assert not (checkout / ".mcp.json").exists()
+
+
+def test_check_refuses_a_hand_edit_to_the_plugin_hooks(checkout, capsys):
+    path = checkout / ".github" / "plugin" / "hooks.json"
+    original = path.read_bytes()
+    path.write_bytes(original.replace(b"$PLUGIN_ROOT/scripts/bootstrap.sh", b"scripts/bootstrap.sh", 1))
+    try:
+        assert se_plugin.main(["check", "--root", str(checkout)]) == 1
+        assert ".github/plugin/hooks.json: differs from its source" in capsys.readouterr().err
+    finally:
+        path.write_bytes(original)
 
 
 @pytest.mark.parametrize("name", (".github/plugin/plugin.json", ".github/mcp.json"))
@@ -493,3 +543,95 @@ def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_conten
     without = se_plugin.expected(stripped, copilot=False)
     assert not any(path.parts[0] == ".github" for path in without)
     assert claude_layout(without) == claude_layout(files)
+
+
+def built_with_manifest_setting(checkout: Path, root: Path, line: str | None) -> dict:
+    """A build of the checkout's sources whose se.toml [plugin] carries `line` (None: as tracked)."""
+    shutil.copytree(checkout / "src", root / "src")
+    text = (checkout / "se.toml").read_text(encoding="utf-8")
+    if line is not None:
+        text = text.replace("[plugin]\n", f"[plugin]\n{line}\n", 1)
+    (root / "se.toml").write_text(text, encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    return {se_plugin.PurePosixPath(path.relative_to(root).as_posix()): path.read_bytes()
+            for path in root.rglob("*") if path.is_file() and path.parts[len(root.parts)] not in ("src", "se.toml")}
+
+
+def test_the_copilot_manifest_setting_is_unset_and_unset_builds_todays_files_byte_for_byte(tmp_path):
+    """Off stays off: SE's se.toml leaves [plugin] copilot_manifest unset, and unset (or set to its
+    default) the build writes exactly the committed files."""
+    assert "copilot_manifest" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["plugin"]
+    assert se_plugin.copilot_manifest(ROOT) == se_plugin.PurePosixPath(".github/plugin/plugin.json")
+    committed = {path: (ROOT / path).read_bytes() for path in se_plugin._existing(ROOT)}
+    assert se_plugin.PurePosixPath(".github/plugin/plugin.json") in committed
+    assert not (ROOT / "plugin.json").exists()
+    assert se_plugin.expected(ROOT) == committed
+    shutil.copytree(ROOT / "src", tmp_path / "src")
+    (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
+        "[plugin]\n", '[plugin]\ncopilot_manifest = "github"\n', 1), encoding="utf-8")
+    assert se_plugin.expected(tmp_path) == committed
+
+
+def test_a_root_copilot_manifest_moves_only_the_manifest(checkout, tmp_path):
+    """Set to "root", the one Copilot manifest lies at the repository root with the same content,
+    its paths naming the same files under .github/; every other file, the Claude layout among them,
+    is byte-identical."""
+    off = built_with_manifest_setting(checkout, tmp_path / "off", None)
+    on = built_with_manifest_setting(checkout, tmp_path / "on", 'copilot_manifest = "root"')
+    github, root = se_plugin.PurePosixPath(".github/plugin/plugin.json"), se_plugin.PurePosixPath("plugin.json")
+    assert set(off) - set(on) == {github} and set(on) - set(off) == {root}
+    assert on[root] == off[github]
+    manifest = json.loads(on[root])
+    for key in ("agents", "skills", "hooks"):
+        assert manifest[key].startswith(".github/") and (tmp_path / "on" / manifest[key]).exists(), key
+    assert {path: data for path, data in on.items() if path != root} == \
+        {path: data for path, data in off.items() if path != github}
+    assert claude_layout(on) == claude_layout(off) and claude_layout(on)
+
+
+@pytest.mark.parametrize("setting, leftover", ((None, "plugin.json"),
+                                               ('copilot_manifest = "root"', ".github/plugin/plugin.json")))
+def test_check_names_a_copilot_manifest_at_the_other_place_as_not_generated(checkout, tmp_path, capsys,
+                                                                           setting, leftover):
+    root = tmp_path / "tree"
+    built_with_manifest_setting(checkout, root, setting)
+    (root / leftover).parent.mkdir(parents=True, exist_ok=True)
+    (root / leftover).write_text("{}\n", encoding="utf-8")
+    capsys.readouterr()
+    assert se_plugin.main(["check", "--root", str(root)]) == 1
+    assert f"{leftover}: not generated from src/" in capsys.readouterr().err
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    assert not (root / leftover).exists()
+    assert se_plugin.main(["check", "--root", str(root)]) == 0
+
+
+def test_a_copilot_manifest_place_the_build_cannot_read_is_refused(tmp_path, capsys):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\ncopilot_manifest = ".plugin"\n',
+                                      encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert '`copilot_manifest = "github"|"root"`' in capsys.readouterr().err
+
+
+def test_every_manifest_lookup_row_is_documented_not_measured():
+    assert set(se_plugin.MANIFEST_LOOKUPS) == {"copilot-cli", "vscode"}
+    assert [place for place, _ in se_plugin.MANIFEST_LOOKUPS["copilot-cli"]] == [
+        ".plugin/plugin.json", "plugin.json", ".github/plugin/plugin.json", ".claude-plugin/plugin.json"]
+    assert dict(se_plugin.MANIFEST_LOOKUPS["vscode"]) == {"plugin.json": "copilot",
+                                                          ".claude-plugin/plugin.json": "claude"}
+    assert se_plugin.manifest_pick([".claude-plugin/plugin.json"], "copilot-cli").evidence == "documented"
+    assert se_plugin.manifest_pick(["README.md"], "vscode") is None
+
+
+@pytest.mark.parametrize("setting, host, picked, form", (
+    # Unset: the Copilot CLI reads SE's Copilot manifest, VS Code only finds the Claude layout's.
+    (None, "copilot-cli", ".github/plugin/plugin.json", "copilot"),
+    (None, "vscode", ".claude-plugin/plugin.json", "claude"),
+    # Set to "root": both hosts read the Copilot manifest at the root.
+    ('copilot_manifest = "root"', "copilot-cli", "plugin.json", "copilot"),
+    ('copilot_manifest = "root"', "vscode", "plugin.json", "copilot"),
+))
+def test_what_each_value_of_the_setting_means_per_host(checkout, tmp_path, setting, host, picked, form):
+    tree = built_with_manifest_setting(checkout, tmp_path / "tree", setting)
+    pick = se_plugin.manifest_pick([path.as_posix() for path in tree], host)
+    assert (pick.path.as_posix(), pick.format, pick.evidence) == (picked, form, "documented")
