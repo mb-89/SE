@@ -17,6 +17,13 @@ group = "Integration"
 help = "print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it"
 class = "batch"
 
+[commands."work_tickets.py component-kinds"]
+usage = "work_tickets.py component-kinds FILE"
+summary = "print the release guard's $SE_COMPONENT_KINDS line from the field ..."
+group = "Integration"
+help = "print the release guard's $SE_COMPONENT_KINDS line from the field report in FILE, for CI's environment (README \"Component versions\")"
+class = "batch"
+
 [commands."work_tickets.py refs request"]
 usage = "work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO]\n                             [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL]\n                             [--conclusion CONCLUSION] [--log-file LOG_FILE]\n                             issue"
 summary = "for the integrator: post the triples on the issue, run ref- ..."

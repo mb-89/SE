@@ -1178,7 +1178,8 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
         (bin_dir / name).chmod(0o755)
     body = f"{first_line}\n\n<!-- se:field-report -->\nreport\n" if first_line else "Land a branch\n"
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
-           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example",
+           "GITHUB_ENV": str(tmp_path / "github-env")}
     result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1186,6 +1187,11 @@ def test_ci_checks_a_pull_requests_field_report_against_its_work_issue(
     if checked:
         assert made[0] == "gh api repos/alice/example/issues/7 --jq .body"
         assert made[1].startswith("uv run python scripts/work_tickets.py field-report --check ")
+        # A work pull request's Component kinds reach the suite's release guard through the
+        # job's environment (README "Component versions").
+        body_file = (tmp_path / "pr-body.md").as_posix()
+        assert made[2] == f"uv run python scripts/work_tickets.py component-kinds {body_file}"
+        assert (tmp_path / "github-env").is_file()  # the fake uv prints nothing to append
         assert (tmp_path / "issue-body.md").read_text(encoding="utf-8") == "issue body\n"
     else:
         assert made == [] and "no field report in the description" in result.stdout
@@ -1204,13 +1210,18 @@ def test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request
         (bin_dir / name).chmod(0o755)
     body = work_tickets_landing_description()
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PR_BODY": body,
-           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example"}
+           "RUNNER_TEMP": str(tmp_path), "REPOSITORY": "alice/example",
+           "GITHUB_ENV": str(tmp_path / "github-env")}
     result = subprocess.run(["bash", "-e", "-c", field_report_script()], env=env, cwd=SE_ROOT,
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls.read_text(encoding="utf-8").splitlines()[:2] == [
+    made = calls.read_text(encoding="utf-8").splitlines()
+    assert made[:2] == [
         "gh api repos/alice/example/pulls/7 --jq .body",
         "gh api repos/alice/example/issues/5 --jq .body"]
+    # A landing's release commit carries the component versions: it gives the guard no kinds.
+    assert not any("component-kinds" in call for call in made)
+    assert not (tmp_path / "github-env").exists()
     assert "the landing's report is the description of pull request 7" in result.stdout
     assert (tmp_path / "pr-body.md").read_text(encoding="utf-8").endswith("report\n")
 
