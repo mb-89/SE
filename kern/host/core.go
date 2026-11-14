@@ -213,7 +213,7 @@ func Serve(o Options) (*Core, error) {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	standing := Standing{
-		Contract: Contract, Pid: c.pid, Root: o.Root, Bus: c.bus.URL(), Port: c.bus.Port(),
+		Contract: Contract, Pid: c.pid, Boot: Boot(), Root: o.Root, Bus: c.bus.URL(), Port: c.bus.Port(),
 		Started: c.start.UTC(), Users: c.bus.Users(),
 	}
 	if err := writeStanding(o.Root, standing); err != nil {

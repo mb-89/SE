@@ -241,6 +241,9 @@ func HookOutput(event string, a host.HookAnswer) []byte {
 // serve runs the core until it ends: no session holds a lease, it is idle,
 // it is asked to stop, or the process is interrupted.
 func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Writer) int {
+	// Every run starts its lines in the core's log with its start, its boot
+	// and its pid, so a report quotes the lines of its own run alone.
+	fmt.Fprintln(stdout, host.StartLine(name, time.Now(), host.Boot(), os.Getpid()))
 	if hold := os.Getenv(HoldEnv); hold != "" {
 		for {
 			if _, err := os.Stat(hold); err == nil {

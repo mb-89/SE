@@ -12,4 +12,4 @@ permissions:
 
 jobs:
   check:
-    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.4.4
+    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.4.5

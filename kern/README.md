@@ -50,9 +50,12 @@ One core runs per checkout, the nearest folder up from the working directory tha
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
-  address, the pid, the contract version and every bus user with its password. A pid that runs
-  nowhere, or whose bus accepts no connection (the pid is another process's after a restart that
-  kept the files), reads as absent; the core removes the claim once it has written the file.
+  address, the pid, the boot it runs in, the contract version and every bus user with its
+  password. A file of an earlier boot, a pid that runs nowhere, or a bus that accepts no
+  connection (the pid is another process's after a restart that kept the files) reads as absent;
+  the core removes the claim once it has written the file.
+- **The core's log**, `.se/.runtime/core.log`: each `serve` starts its lines with `kern: start
+  <time>, boot <id>, pid <n>`, so a report of a core that ended quotes that core's run alone.
 - **Leases.** Each `hook.<event>` with a `session_id` takes or renews that session's lease and
   `hook.SessionEnd` returns it. A component beats on `lease.<i>` every 5 s; a placed instance's
   names read `stale` once three beats are missed.
@@ -136,7 +139,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.4"
+version = "0.4.5"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

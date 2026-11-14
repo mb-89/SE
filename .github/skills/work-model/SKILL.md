@@ -383,8 +383,9 @@ Pull requests built on an old `main` cause most integration trouble.
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
-  the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, the issue stays open and the
-  comment names what it waits for.
+  the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
+  pieces left ([integrator](../../agents/integrator.agent.md)), the issue stays open and the comment names
+  what it waits for.
 - Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
   workers have none. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
