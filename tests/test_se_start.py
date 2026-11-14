@@ -312,6 +312,15 @@ def test_the_hook_output_shows_the_greeting_and_hands_it_to_the_session():
     assert data["hookSpecificOutput"]["additionalContext"].startswith(data["systemMessage"])
 
 
+def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
+    """Copilot's sessionStart reads only `additionalContext` (scripts/hosts.sh)."""
+    claude = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se")))
+    copilot = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se"), "copilot"))
+    context = claude["hookSpecificOutput"]["additionalContext"]
+    assert copilot == {"additionalContext": context.replace(", already shown to the person", "", 1)}
+    assert "SE's start greeting. As SE, open your first message" in copilot["additionalContext"]
+
+
 def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, monkeypatch):
     """The session finds SE's scripts at the root the hook names, not by searching for the plugin."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
@@ -615,7 +624,8 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
+                             "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")

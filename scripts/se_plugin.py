@@ -1,9 +1,12 @@
 """Generate the Copilot and Claude Code layouts of the se plugin from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
-`build` writes both layouts and the Claude Code plugin manifests; `check` refuses when any generated
-file differs from what `build` would write, so a hand edit to a generated file fails. Where each
-layout is installed from is the README section "Install".
+`build` writes both layouts, the Claude Code plugin manifests and Copilot's hooks
+(`.github/hooks/se.json`, a layout setting: `Layout.hooks`); `check`
+refuses when any generated file differs from what `build` would write, so a hand edit to a generated
+file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
+validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
+section "Install".
 
 Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
 into that layout, without its prefix; every other key goes into both.
@@ -16,6 +19,8 @@ whose host preloads skills (`roles` parses it; AGENTS.md "Agents and skills" own
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import importlib.util
 import json
 import os
 import re
@@ -25,6 +30,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
+_lint_spec = importlib.util.spec_from_file_location("agent_lint", Path(__file__).with_name("agent_lint.py"))
+agent_lint = sys.modules.get("agent_lint") or importlib.util.module_from_spec(_lint_spec)
+if "agent_lint" not in sys.modules:
+    sys.modules["agent_lint"] = agent_lint
+    _lint_spec.loader.exec_module(agent_lint)
 SOURCE = PurePosixPath("src")
 PLUGIN = "se"
 OWNER = "mb-89"
@@ -46,6 +56,22 @@ def kern_hook(event: str) -> str:
     return f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
 
 
+# Copilot's hooks (.github/hooks/se.json, version 1): a project's hooks run in the repository's root.
+# Events in PascalCase, so Copilot sends Claude-shaped payloads, `session_id` among them, which kern's
+# lease needs; each hook's environment names its host (SE_HOOK_HOST, scripts/hosts.sh), so the start
+# answers in Copilot's shape, a top-level `additionalContext`. Each fails open: `|| true` (bash) and
+# `exit 0` (PowerShell) keep a refused step from failing the hook, and a hook past its `timeoutSec`
+# fails open by itself. Event: (script and argument, seconds).
+COPILOT_HOOKS = {
+    # The greeting and kern's start, once per session; a first start installing uv and Python may
+    # take longer, and the core starts detached.
+    "SessionStart": ("scripts/bootstrap.sh --hook", 120),
+    # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
+    # It also fires for the se agent; stop-check lets any checkout without a work issue end.
+    "Stop": ("scripts/se_hook.sh Stop", 60),
+}
+
+
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A script path not under `<se>`, the root the start hook names (scripts/se_start.py `root_line`):
@@ -63,10 +89,14 @@ class Layout:
     agent_suffix: str
     skills: PurePosixPath
     preloads_skills: bool  # the host reads an agent's `skills` field (Copilot's agents have none)
+    # The build setting for the host's own hooks file (Copilot's .github/hooks/se.json, COPILOT_HOOKS);
+    # Claude Code's hooks stay in its plugin manifest whatever this says.
+    hooks: bool = False
 
 
 LAYOUTS = (
-    Layout("copilot", PurePosixPath(".github/agents"), ".agent.md", PurePosixPath(".github/skills"), False),
+    Layout("copilot", PurePosixPath(".github/agents"), ".agent.md", PurePosixPath(".github/skills"), False,
+           hooks=True),
     Layout("claude", PurePosixPath("agents"), ".md", PurePosixPath("skills"), True),
 )
 # One outside skill a role relies on: `<plugin>@<marketplace>:<skill>`, a skill of a plugin and the
@@ -79,7 +109,9 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
           "`python scripts/se_plugin.py build`. -->\n")
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
-MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"))
+COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
+MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
+             COPILOT_HOOKS_FILE)
 
 
 class SourceError(Exception):
@@ -213,7 +245,8 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
     data = (root / source).read_bytes()
     if source.suffix != ".md":
         return generated, data
-    text = data.decode("utf-8")
+    # A checkout with CRLF line endings (git on Windows) builds the same LF layout as any other.
+    text = data.decode("utf-8").replace("\r\n", "\n")
     for number, line in enumerate(text.splitlines(), 1):
         if UNROOTED_SCRIPT.search(line):
             raise SourceError(f"{source}:{number}: names a script without SE's root; write "
@@ -242,6 +275,11 @@ def _json(value: dict) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
 
+def _copilot_hook(command: str, seconds: int) -> dict:
+    return {"type": "command", "bash": f"bash {command} || true", "powershell": f"bash {command}; exit 0",
+            "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
+
+
 def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
     plugin = {
         "name": PLUGIN,
@@ -250,11 +288,11 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "author": {"name": OWNER},
         "repository": REPOSITORY,
         "license": "MIT",
-        "hooks": {
-            "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
-            **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
-               for event in KERN_EVENTS},
-        },
+    }
+    plugin["hooks"] = {
+        "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
+        **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
+           for event in KERN_EVENTS},
     }
     marketplace = {
         "name": PLUGIN,
@@ -262,7 +300,27 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "description": "SE, installed from this repository.",
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
-    return {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
+    files = {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
+    if LAYOUTS[0].hooks:
+        files[COPILOT_HOOKS_FILE] = _json({
+            "version": 1,
+            "hooks": {event: [_copilot_hook(command, seconds)]
+                      for event, (command, seconds) in COPILOT_HOOKS.items()},
+        })
+    return files
+
+
+def validate(files: dict[PurePosixPath, bytes]) -> list[str]:
+    """One finding per generated agent or skill its host would reject or skip: every Copilot agent
+    and every skill of both layouts, through the standalone validators (scripts/agent_lint.py)."""
+    findings = []
+    for path, data in sorted(files.items()):
+        text = data.decode("utf-8", errors="replace")
+        if path.parent == LAYOUTS[0].agents and path.name.endswith(LAYOUTS[0].agent_suffix):
+            findings += agent_lint.copilot_agent(path, text)
+        elif path.name == "SKILL.md" and any(path.parent.parent == layout.skills for layout in LAYOUTS):
+            findings += agent_lint.skill(path, text)
+    return findings
 
 
 def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
@@ -277,6 +335,8 @@ def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
         for layout in LAYOUTS:
             path, data = _generated_file(source, layout, root, role_skills)
             files[path] = data
+    if problems := validate(files):
+        raise SourceError("; ".join(problems))
     return files
 
 

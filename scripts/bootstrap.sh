@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Bring what se's tools need onto this machine; safe to run again after an interruption.
 #
-# Run by the Claude Code plugin at every session start and by SE on its first start elsewhere.
+# Run at every session start by the Claude Code plugin and by Copilot's hooks (.github/hooks/se.json),
+# and by SE on its first start elsewhere.
 # Quiet when nothing is missing. What it does, per dependency, is the README section "Install".
 #   git      required; cannot be installed without admin rights, so it names the one line to run
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
@@ -20,8 +21,9 @@
 # Exit code 0 when everything is in place, 1 when a step needs the person: the line on stdout says
 # what to run and why (the plugin's hook passes it on to the session).
 #
-# --hook (the plugin's SessionStart hook): when everything is in place, end with SE's greeting as
-# the hook's JSON (scripts/se_start.py status --hook), carrying the lines said on the way and kern's
+# --hook (the SessionStart hook of Claude Code's plugin and of Copilot's .github/hooks/se.json): when
+# everything is in place, end with SE's greeting as the hook's JSON for the host that wrote the
+# payload (scripts/se_start.py status --hook --host), carrying the lines said on the way and kern's
 # state. The hook's JSON on stdin is the session's start, which kern is handed.
 set -u
 # uv's deprecated UV_NATIVE_TLS, which cloud environments set, becomes UV_SYSTEM_CERTS for all this
@@ -50,7 +52,27 @@ payload=""
 if $hook && [ ! -t 0 ]; then payload="$(cat)"; fi
 
 se_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-project="${CLAUDE_PROJECT_DIR:-$PWD}"
+# Either host (scripts/hosts.sh, the host table): the start's payload in snake_case, whichever host
+# wrote it, and the project from the host's project variable, else the payload's cwd, else here.
+# shellcheck source=hosts.sh
+. "$se_root/scripts/hosts.sh"
+se_payload "$payload"
+payload="$se_payload_text"
+se_project "$payload"
+project="$se_project"
+# Once per session under Copilot, which runs every hook source it finds together (a project's and a
+# plugin's): a second start of the same session within a minute ends here, quietly. Claude Code
+# starts a session once and is not guarded.
+if $hook && [ "$se_payload_host" = copilot ] &&
+  [[ $payload =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"/\\]+)\" ]]; then
+  claim="$project/.se/.runtime/start-${BASH_REMATCH[1]}.claim"
+  mkdir -p "$project/.se/.runtime" 2>/dev/null
+  if [ -e "$claim" ] && [ -n "$(find "$claim" -mmin -1 2>/dev/null)" ]; then
+    exit 0
+  fi
+  rm -f "$claim"
+  (set -C && : >"$claim") 2>/dev/null || exit 0
+fi
 uv_url="https://astral.sh/uv/install.sh"
 uv_ps_url="https://astral.sh/uv/install.ps1"
 python_version="3.11"
@@ -61,6 +83,7 @@ say() { notes+=("se bootstrap: $*"); }
 finish() {
   if $hook && command -v uv >/dev/null 2>&1; then
     args=()
+    [ "$se_payload_host" = copilot ] && args+=(--host copilot)
     for note in ${notes[@]+"${notes[@]}"}; do args+=(--note "$note"); done
     args+=(${kern_args[@]+"${kern_args[@]}"})
     uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
