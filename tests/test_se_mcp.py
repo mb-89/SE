@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,15 +28,28 @@ SESSION = [
 needs_bash = pytest.mark.skipif(BASH is None, reason="se_mcp.sh runs in bash")
 
 
-def launch(kind: str, home: Path, project: Path, stdin: str, **env: str) -> subprocess.CompletedProcess:
-    environment = {key: value for key, value in os.environ.items() if key != "SE_MCP_BIN"}
-    environment.update(HOME=str(home), USERPROFILE=str(home), **env)
+# The host variables a plugin install reads or must ignore; launch() passes none of the runner's on.
+PLUGIN_VARIABLES = ("CLAUDE_PROJECT_DIR", "COPILOT_PROJECT_DIR", "COPILOT_SESSION_CWD", "SE_SESSION_CWD",
+                    "PLUGIN_ROOT", "SE_MCP_PLUGIN_PROJECT", "SE_MCP_PLUGIN_FOLDER")
+
+
+def launch(kind: str, home: Path | None, project: Path, stdin: str, se: Path = ROOT, parent: Path | None = None,
+           **env: str) -> subprocess.CompletedProcess:
+    """Run the launcher of the SE folder `se`; with `parent`, from a shell whose working directory it is."""
+    dropped = {"SE_MCP_BIN", *PLUGIN_VARIABLES} | ({"HOME", "USERPROFILE"} if home is None else set())
+    environment = {key: value for key, value in os.environ.items() if key not in dropped}
+    if home is not None:
+        environment.update(HOME=str(home), USERPROFILE=str(home))
+    environment.update(env)
     if kind == "bash":
-        command = [BASH, sh(SCRIPT), "--root", sh(project)]
+        command = [BASH, sh(se / "scripts" / "se_mcp.sh"), "--root", sh(project)]
+        if parent is not None:  # `; :` keeps the shell alive, the launcher's parent
+            command = [BASH, "-c", '"$BASH" "$@"; :', "parent", *command[1:]]
     else:
-        command = [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(TWIN), "--root", str(project)]
+        command = [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                   str(se / "scripts" / "se_mcp.ps1"), "--root", str(project)]
     return subprocess.run(command, input=stdin, capture_output=True, text=True, encoding="utf-8", env=environment,
-                          timeout=60, check=False)
+                          cwd=parent, timeout=60, check=False)
 
 
 def answers(result: subprocess.CompletedProcess) -> dict:
@@ -139,5 +153,201 @@ def test_the_launcher_reads_nothing_of_se_but_the_release_pin():
         named = {word for word in text.replace("'", " ").replace('"', " ").split()
                  if word.endswith((".py", ".sh", ".ps1", ".toml")) and "/" in word}
         assert named <= {"$se_root/components/release.toml", "$se_root/scripts/bootstrap.sh",
-                         "$seRoot/scripts/bootstrap.sh"}, (path.name, named)
+                         "$seRoot/scripts/bootstrap.sh",
+                         "$chosen/scripts/se_mcp.sh", "$chosen/components/release.toml",
+                         "$chosen/scripts/se_mcp.ps1"}, (path.name, named)
         assert "release.toml" in text
+
+
+# A plugin install (README "MCP door"): Copilot runs the launcher in the plugin folder with --root .,
+# PLUGIN_ROOT the plugin folder; the launcher serves the session's repository instead.
+
+
+def se_copy(folder: Path, checkout: bool = False) -> Path:
+    """An SE folder of the two launchers and the release pin; with `checkout`, a .git beside them."""
+    (folder / "scripts").mkdir(parents=True)
+    (folder / "components").mkdir()
+    for script in (SCRIPT, TWIN):
+        shutil.copy(script, folder / "scripts" / script.name)
+    shutil.copy(ROOT / "components" / "release.toml", folder / "components" / "release.toml")
+    if checkout:
+        (folder / ".git").mkdir()
+    return folder
+
+
+def repository(folder: Path) -> Path:
+    """A checkout of no SE, with a subfolder."""
+    (folder / ".git").mkdir(parents=True)
+    (folder / "sub").mkdir()
+    return folder
+
+
+def stub(tmp_path: Path) -> Path:
+    """A binary that prints its arguments and SE_MCP_PLUGIN_FOLDER, one per line."""
+    fake = tmp_path / "se"
+    fake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" "folder=${SE_MCP_PLUGIN_FOLDER-unset}"\n',
+                    encoding="utf-8", newline="\n")
+    fake.chmod(0o755)
+    return fake
+
+
+def door_root(kind: str, result: subprocess.CompletedProcess) -> str:
+    """The root the not-installed door names in its remedy's `cd '<root>'`."""
+    remedy = answers(result)["c"]["result"]["structuredContent"]["remedy"]
+    return remedy.split("cd '", 1)[1].split("'", 1)[0]
+
+
+def named(kind: str, path: Path) -> str:
+    return sh(path) if kind == "bash" else str(path)
+
+
+def plugin_run(kind: str, tmp_path: Path, plugin: Path, **env: str) -> subprocess.CompletedProcess:
+    """The plugin case through the not-installed door: PLUGIN_ROOT as the host writes it (a backslash
+    path on Windows), --root the plugin folder, the parent shell in the plugin folder."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env.setdefault("PLUGIN_ROOT", str(plugin))
+    return launch(kind, home, plugin, json.dumps(SESSION[3]) + "\n", se=plugin, parent=plugin, **env)
+
+
+def stub_run(tmp_path: Path, plugin: Path, parent: Path | None = None, project: Path | None = None,
+             **env: str | None) -> list[str]:
+    """The bash launcher of `plugin` with the stub binary: its arguments and SE_MCP_PLUGIN_FOLDER.
+    PLUGIN_ROOT is the plugin folder unless `env` names it, None for none."""
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env.setdefault("PLUGIN_ROOT", str(plugin))
+    result = launch("bash", home, project or plugin, "", se=plugin, parent=parent or plugin,
+                    SE_MCP_BIN=sh(stub(tmp_path)), **{key: value for key, value in env.items() if value is not None})
+    assert result.returncode == 0, result.stderr
+    return result.stdout.splitlines()
+
+
+def today(tmp_path: Path, plugin: Path, project: Path | None = None) -> list[str]:
+    project = project or plugin
+    return ["mcp", "--root", sh(project), "--home", sh(plugin), "folder=unset"]
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_a_plugin_install_serves_the_checkout_of_the_session_folder(tmp_path, kind):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, COPILOT_SESSION_CWD=named(kind, repo / "sub"))
+    assert door_root(kind, result) == named(kind, repo)
+    log = (repo / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    decision = next(line for line in log.splitlines() if ": root " in line)
+    assert f"COPILOT_SESSION_CWD={named(kind, repo / 'sub')}" in decision
+    assert f"plugin {named(kind, plugin)}" in decision
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_the_se_session_folder_wins_over_copilots(tmp_path, kind):
+    plugin = se_copy(tmp_path / "plugin")
+    first, second = repository(tmp_path / "first"), repository(tmp_path / "second")
+    result = plugin_run(kind, tmp_path, plugin, SE_SESSION_CWD=named(kind, first),
+                        COPILOT_SESSION_CWD=named(kind, second))
+    assert door_root(kind, result) == named(kind, first)
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+@pytest.mark.parametrize("value", ["", "${COPILOT_SESSION_CWD}"])
+def test_an_empty_or_unexpanded_se_session_folder_is_ignored(tmp_path, kind, value):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, SE_SESSION_CWD=value, COPILOT_SESSION_CWD=named(kind, repo / "sub"))
+    assert door_root(kind, result) == named(kind, repo)
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_hook_variables_are_no_source(tmp_path, kind):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, CLAUDE_PROJECT_DIR=named(kind, repo),
+                        COPILOT_PROJECT_DIR=named(kind, repo))
+    assert door_root(kind, result) == named(kind, plugin)
+    log = (plugin / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    assert "from no variable set" in log
+
+
+@needs_bash
+def test_with_no_source_the_binary_is_told_the_plugin_folder(tmp_path):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    got = stub_run(tmp_path, plugin, CLAUDE_PROJECT_DIR=sh(repo), COPILOT_PROJECT_DIR=sh(repo))
+    assert got == today(tmp_path, plugin)[:-1] + [f"folder={sh(plugin)}"]
+
+
+def parent_cwd_readable() -> bool:
+    if sys.platform.startswith("linux"):
+        return True
+    return sys.platform == "darwin" and shutil.which("lsof") is not None
+
+
+needs_parent_cwd = pytest.mark.skipif(BASH is None or not parent_cwd_readable(),
+                                      reason="the parent-cwd backstop is Linux's /proc and macOS's lsof")
+
+
+@needs_parent_cwd
+def test_with_no_variable_the_parent_process_folder_decides(tmp_path):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    got = stub_run(tmp_path, plugin, parent=repo / "sub")
+    assert got == ["mcp", "--root", sh(repo), "--home", sh(plugin), "folder=unset"]
+    assert "from parent cwd" in (repo / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    assert stub_run(tmp_path, plugin, parent=repo / "sub", SE_MCP_PLUGIN_PROJECT="off") == today(tmp_path, plugin)
+
+
+@needs_bash
+def test_a_plugin_folder_that_is_the_session_checkout_stays_the_root_with_no_signal(tmp_path):
+    plugin = se_copy(tmp_path / "plugin", checkout=True)
+    assert stub_run(tmp_path, plugin, COPILOT_SESSION_CWD=sh(plugin)) == today(tmp_path, plugin)
+
+
+@needs_parent_cwd
+def test_a_plugin_checkout_run_from_itself_stays_the_root_with_no_signal(tmp_path):
+    plugin = se_copy(tmp_path / "plugin", checkout=True)
+    assert stub_run(tmp_path, plugin, parent=plugin) == today(tmp_path, plugin)
+
+
+@needs_bash
+def test_a_session_folder_inside_a_plain_plugin_folder_gets_no_signal(tmp_path):
+    plugin = se_copy(tmp_path / "plugin")
+    assert stub_run(tmp_path, plugin, COPILOT_SESSION_CWD=sh(plugin)) == today(tmp_path, plugin)
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_another_se_checkout_is_served_by_its_own_launcher(tmp_path, kind):
+    plugin, other = se_copy(tmp_path / "plugin"), se_copy(tmp_path / "other", checkout=True)
+    (other / "sub").mkdir()
+    result = plugin_run(kind, tmp_path, plugin, COPILOT_SESSION_CWD=named(kind, other / "sub"))
+    assert door_root(kind, result) == named(kind, other)
+    remedy = answers(result)["c"]["result"]["structuredContent"]["remedy"]
+    assert f"'{named(kind, other).rstrip(os.sep)}" in remedy.split("&&" if kind == "bash" else ";", 1)[1]
+    assert "starting" not in (other / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    assert "not installed" in (other / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+
+
+@needs_bash
+def test_outside_the_gate_the_binary_gets_todays_arguments(tmp_path):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    session = {"COPILOT_SESSION_CWD": sh(repo / "sub")}
+    assert stub_run(tmp_path, plugin, PLUGIN_ROOT=None, **session) == today(tmp_path, plugin)
+    other = tmp_path / "other"
+    other.mkdir()
+    assert stub_run(tmp_path, plugin, project=other, **session) == today(tmp_path, plugin, other)
+    assert stub_run(tmp_path, plugin, PLUGIN_ROOT=str(other), **session) == today(tmp_path, plugin)
+    assert stub_run(tmp_path, plugin, SE_MCP_PLUGIN_PROJECT="off", **session) == today(tmp_path, plugin)
+    assert stub_run(tmp_path, plugin, PLUGIN_ROOT=None) == today(tmp_path, plugin)
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_the_escape_switch_keeps_the_plugin_folder(tmp_path, kind):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, COPILOT_SESSION_CWD=named(kind, repo / "sub"),
+                        SE_MCP_PLUGIN_PROJECT="off")
+    assert door_root(kind, result) == named(kind, plugin)
+    assert not (repo / ".se").exists()
+
+
+@needs_bash
+def test_an_unset_home_is_taken_from_the_account(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    result = launch("bash", None, project, "", SE_MCP_BIN=sh(stub(tmp_path)))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:3] == ["mcp", "--root", sh(project)]
