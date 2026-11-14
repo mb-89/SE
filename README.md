@@ -267,6 +267,27 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   real core with the components placed (`tests/beside_se_components.py`, `se.toml`
   `[tests.beside.se-components]`).
 
+### Doctor
+
+When something half-works, `uv run python <se>/scripts/se_doctor.py` prints one report to paste
+whole, the most important finding first, each line "seen", "silent" (asked, no answer) or "not
+measured". `--json` prints the same as data, `--offline` skips `gh` and the network, `--strict`
+exits 1 on a problem; otherwise it exits 0.
+
+- **What it measures**: the host and whether it is a cloud session; the SE checkout against its
+  upstream as last fetched; each installed SE plugin against the checkout and the latest release
+  the start's update check cached.
+  - The `se` binary on `PATH`, in `~/.se/bin` and where the core started it, against its pin; the
+    core's standing file, pid, boot id and last log lines.
+  - Each hook and MCP server registration a host reads, and whether the scripts it names exist;
+    `gh` signed in or not; the reach of the hosts SE fetches from.
+- **Read-only**: it writes nothing, starts nothing that stays, fetches nothing and calls no service
+  beyond `gh auth status` and one HEAD request per host, each with a short timeout. Nothing runs it
+  automatically.
+- **Private**: it prints no token, bus user, environment value, e-mail address or path outside the
+  checkout; home is `~`, the checkout `<checkout>`.
+- Its checks are pure functions of the facts it gathers, which its docstring owns.
+
 ## Documentation
 
 se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`
