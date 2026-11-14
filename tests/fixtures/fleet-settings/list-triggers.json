@@ -1,0 +1,43 @@
+{
+ "data": [
+  {
+   "id": "trig_example",
+   "name": "Issue intake check",
+   "cron_expression": "15 * * * *",
+   "enabled": true,
+   "next_run_at": "2026-11-14T10:15:00Z",
+   "created_at": "2026-11-11T08:33:12.060019Z",
+   "updated_at": "2026-11-13T07:53:40.219679Z",
+   "persist_session": true,
+   "persistent_session_id": "session_example",
+   "mcp_connections": [],
+   "creator": {
+    "account_uuid": "00000000-0000-0000-0000-000000000000"
+   },
+   "api_token_hint": "",
+   "enabled_plugins": [],
+   "extra_marketplaces": [],
+   "ended_reason": "",
+   "last_fired_at": "2026-11-14T09:16:06.778432Z",
+   "created_via": "meta_mcp",
+   "suspension_reason": "",
+   "derived_state": {
+    "folders_state": "FOLDERS_STATE_NONE",
+    "folders": [],
+    "prompt": "(the prompt, not publishable)",
+    "model": "",
+    "files": []
+   },
+   "last_run": {
+    "status": "ROUTINE_RUN_STATUS_SUCCEEDED",
+    "fired_at": "2026-11-14T09:16:06.760810Z",
+    "finished_at": "2026-11-14T09:16:06.778074Z",
+    "session_id": "cse_example",
+    "failure_reason": "ROUTINE_RUN_FAILURE_REASON_UNSPECIFIED"
+   },
+   "created_surface": "ROUTINE_CREATED_SURFACE_UNSPECIFIED",
+   "created_kind": "ROUTINE_CREATED_KIND_ROUTINE"
+  }
+ ],
+ "has_more": false
+}
