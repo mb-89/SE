@@ -933,6 +933,40 @@ def _development(se_root: Path) -> bool:
     return own.returncode != 0 or own.stdout.strip() != "0"
 
 
+HOOKS = ".githooks"  # se's git hooks, beside the se-script they run (AGENTS.md "Public safety")
+
+
+def start_hooks(se_root: Path, root: Path | None, local_config: Path | None) -> str:
+    """At the session's start: point a project checkout whose `core.hooksPath` is unset at se's
+    hooks, as scripts/setup.sh does, so a fresh clone's first commit already runs the public check.
+    A checkout that has one keeps it, whatever it names. The hooks are the checkout's own where it
+    carries se's (se's own checkout, `.githooks`), else those of the se module it pins, else this
+    SE's. The line to show, empty where nothing changed; it fails open."""
+    if root is None or not (root / se_modules.MANIFEST).is_file():
+        return ""
+    current = git_door.run("config", "--get", "core.hooksPath", root=root)
+    if current.returncode == 0 and current.stdout.strip():
+        return ""
+    if git_door.run("rev-parse", "--show-toplevel", root=root).returncode != 0:
+        return ""  # no work tree: nothing commits here
+    if (root / HOOKS / "se-script").is_file():
+        hooks = HOOKS
+    else:
+        hooks = (se_root / HOOKS).as_posix()
+        try:
+            local = se_modules.load_local(local_config or se_modules.default_local_config())
+            pinned = [m for m in se_modules.load_manifest(root) if m.name == "se"]
+            if pinned and (found := se_modules.resolve(root, pinned[0], local).dir / HOOKS / "se-script").is_file():
+                hooks = found.parent.as_posix()
+        except ModuleError:
+            pass  # the start goes on with this SE's hooks
+    done = git_door.run("config", "core.hooksPath", hooks, root=root)
+    if done.returncode != 0:
+        return (f"SE: setting core.hooksPath of {root.as_posix()} failed; run: sh "
+                f"{(se_root / 'scripts' / 'setup.sh').as_posix()} {root.as_posix()}")
+    return ""
+
+
 def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
                   remote: Callable[[str], list[Version]] | None = None) -> tuple[str, bool]:
     """At the session's start: move an installed SE that is a git checkout (the cloud's setup-script
@@ -1017,6 +1051,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
     commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
                         "is a git checkout to its latest release; exit code 0 where it moved")
+    commands.add_parser("start-hooks", help="bootstrap.sh at the session's start: point an unset core.hooksPath "
+                        "of the project at se's hooks, as setup.sh does; a set one stays")
     return parser
 
 
@@ -1039,6 +1075,14 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         if line:
             print(line)
         return 0 if moved else 1
+    if args.command == "start-hooks":
+        try:
+            line = start_hooks(SE_ROOT, root, args.local)
+        except Exception as error:  # noqa: BLE001 - the start fails open, whatever went wrong
+            line = f"SE: core.hooksPath not set at start, it failed: {type(error).__name__}: {error}"
+        if line:
+            print(line)
+        return 0
     if args.command == "refresh":
         lines, failed = refresh(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(lines))
