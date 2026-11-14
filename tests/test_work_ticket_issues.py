@@ -4956,6 +4956,169 @@ def test_fleet_check_reads_through_kerns_relay_as_one_call(worktree, monkeypatch
     assert "#5" in out and "no branch" in out
 
 
+# Platform code waits for its own platform legs (src/agents/worker.md "Platform code").
+CHECK_YML = """jobs:
+  kern-platforms:
+    strategy:
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+"""
+JOBS = "https://git.example/owner/repo/actions/runs/40"
+PLATFORM_DIFF = """diff --git a/kern/start_windows.go b/kern/start_windows.go
++++ b/kern/start_windows.go
+@@ -1 +1 @@
++package kern
+"""
+BRANCHING_DIFF = """diff --git a/scripts/tool.py b/scripts/tool.py
++++ b/scripts/tool.py
+@@ -1,3 +1,3 @@
+ if sys.platform == "win32":
+-    return 1
++    return 2
+"""
+PLAIN_DIFF = """diff --git a/docs/note.md b/docs/note.md
++++ b/docs/note.md
+@@ -1 +1 @@
++A note on `sys.platform` and `//go:build` branches.
+"""
+
+
+def leg(name: str, job: int, conclusion: str) -> dict:
+    return {"id": job, "name": f"kern-platforms ({name})", "status": "completed",
+            "conclusion": conclusion, "html_url": f"{JOBS}/job/{job}"}
+
+
+def platform_worktree(worktree: Path, scripted_git, diff: str) -> None:
+    """The worktree's CI runs kern-platforms on two legs, and its branch changes `diff`."""
+    (worktree / ".github" / "workflows").mkdir(parents=True)
+    (worktree / ".github" / "workflows" / "check.yml").write_text(CHECK_YML, encoding="utf-8")
+    scripted_git.answer = lambda argv: (
+        (0, diff) if "diff" in argv else (0, f"{TIP}\n") if "rev-parse" in argv else (0, ""))
+
+
+@pytest.mark.parametrize(
+    ("diff", "links", "runs", "warned"),
+    [(PLATFORM_DIFF, "", [], "windows-2025, macos-15"),
+     (BRANCHING_DIFF, f"{JOBS}/job/1", [leg("windows-2025", 1, "success"),
+                                        leg("macos-15", 2, "failure")], "for macos-15."),
+     (PLATFORM_DIFF, f"{JOBS}/job/1 {JOBS}/job/2", [leg("windows-2025", 1, "success"),
+                                                    leg("macos-15", 2, "success")], None),
+     (PLAIN_DIFF, "", [], None)],
+    ids=["platform-file-no-link", "platform-branch-one-leg-red", "both-legs-green-linked",
+         "no-platform-code"])
+def test_field_report_check_warns_on_platform_code_without_green_platform_legs(
+        worktree, gh, monkeypatch, capsys, scripted_git, diff, links, runs, warned):
+    platform_worktree(worktree, scripted_git, diff)
+    report = worktree / "report.md"
+    report.write_text(with_requirement_3(COMPLETE_REPORT).replace(
+        "## Not delivered", f"Platform legs: {links}\n\n## Not delivered"), encoding="utf-8")
+    issue = worktree / "issue.md"
+    issue.write_text(BODY, encoding="utf-8")
+    answer = worktree / "check-runs.json"
+    answer.write_text(json.dumps({"total_count": len(runs), "check_runs": runs}), encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+
+    assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue),
+               "--check-runs", str(answer)) == 0, capsys.readouterr().err
+    out = capsys.readouterr().out
+    if warned is None:
+        assert "Warning" not in out
+        return
+    assert "Warning: this branch changes platform-specific code (" in out and warned in out
+    assert ("kern/start_windows.go" if diff == PLATFORM_DIFF else "scripts/tool.py") in out
+    for run_ in runs:  # each leg as read, with its job's link
+        assert f"{run_['name']} {run_['conclusion']} {run_['html_url']}" in out
+
+
+def test_deliver_warns_on_platform_code_without_green_legs_and_still_delivers(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    run(worktree, "intake", "--issue", "5")
+    platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets.subprocess, "run",
+                        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
+    answered = gh.__call__
+
+    def checks(root: Path, arguments: list[str]) -> str:
+        if arguments[:1] == ["api"] and arguments[1].endswith("/check-runs?per_page=100"):
+            gh.calls.append(arguments)
+            return json.dumps({"check_runs": [leg("windows-2025", 1, "failure"),
+                                              {"name": "check", "conclusion": None}]})
+        return answered(root, arguments)
+
+    monkeypatch.setattr(work_tickets, "run_gh", checks)
+
+    assert run(worktree, "deliver") == 0
+    out = capsys.readouterr().out
+    assert "links no green kern-platforms job for windows-2025, macos-15" in out
+    assert f"kern-platforms (windows-2025) failure {JOBS}/job/1" in out
+    assert any(call[:2] == ["api", f"repos/owner/repo/commits/{TIP}/check-runs?per_page=100"]
+               for call in gh.calls)  # the pushed head's
+    assert any(call[:2] == ["pr", "edit"] for call in gh.calls)  # delivered all the same
+
+
+def test_deliver_warns_without_blocking_where_github_cannot_be_read(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    run(worktree, "intake", "--issue", "5")
+    platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(work_tickets.subprocess, "run",
+                        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
+    answered = gh.__call__
+
+    def outage(root: Path, arguments: list[str]) -> str:
+        if arguments[:1] == ["api"]:
+            raise work_tickets.QueueError("gh api failed: HTTP 502")
+        return answered(root, arguments)
+
+    monkeypatch.setattr(work_tickets, "run_gh", outage)
+
+    assert run(worktree, "deliver") == 0
+    out = capsys.readouterr().out
+    assert "No leg could be read: gh could not read them (gh api failed: HTTP 502)" in out
+
+
+def test_the_platform_scripts_are_those_kern_platforms_runs():
+    workflow = (PROJECT / work_tickets.CHECK_WORKFLOW).read_text(encoding="utf-8")
+    assert work_tickets.platform_legs(PROJECT) == ["windows-2025", "macos-15"]
+    for path in work_tickets.PLATFORM_SCRIPTS:
+        assert (PROJECT / path).is_file()
+        assert path.startswith("scripts/") or path in workflow
+
+
+def test_field_report_check_reads_the_platform_legs_from_the_relay_without_gh(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
+    report = worktree / "report.md"
+    report.write_text(with_requirement_3(COMPLETE_REPORT), encoding="utf-8")
+    issue = worktree / "issue.md"
+    issue.write_text(BODY, encoding="utf-8")
+    description = worktree / "description.md"
+    description.write_text(report.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
+    work_tickets.record_delivered_pull(worktree, 7, description)  # as stop-check --pull records it
+    asked = []
+
+    class Relay:
+        def answer_file(self, family, owner, repo, number, what):
+            asked.append((family, owner, repo, number))
+            answer = worktree / "relay-checks.json"
+            answer.write_text(json.dumps([leg("macos-15", 3, "success")]), encoding="utf-8")
+            return answer
+
+    monkeypatch.setattr(work_tickets, "relay_for", lambda root: Relay())
+    capsys.readouterr()
+
+    assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
+    out = capsys.readouterr().out
+    assert asked == [("checks", "owner", "repo", 7)], out
+    assert "for windows-2025, macos-15. " in out and f"kern-platforms (macos-15) success {JOBS}/job/3" in out
+    assert gh.calls == []
+
+
 class CommentedSessionSteps(SessionSteps):
     """The session of SessionSteps, where the work issue carries comments: `issue_read get`
     names them only as their count, as the GitHub tools do, and `get_comments` lists them."""

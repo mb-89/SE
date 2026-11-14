@@ -142,6 +142,19 @@ every package, so work issues and session prompts never repeat it.
        against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
        deleted or weakened tests, and authored prose" does not name each test and authored
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
+   - **Platform code**: where the branch changes code that Windows or macOS runs differently
+     (`*_windows.go`, `*_darwin.go`, `//go:build` tags, `runtime.GOOS`, `sys.platform` or
+     `os.name` branches, `.ps1` files, the start and hook scripts `kern-platforms` runs), only
+     the CI job `kern-platforms` tests it, and a worker cannot run it.
+     - Push the branch and open its work pull request first (`deliver`, or
+       [without gh](../skills/work-model/SKILL.md#without-gh) its steps), but do not notify the
+       integrator yet.
+     - Wait until that pull request's own `kern-platforms` legs are green. Fix a red leg on the
+       branch and push again, so a landing never debugs it.
+     - Link each green leg's job page in the evidence table. Then check and deliver again, and
+       notify.
+     - The check and `deliver` warn, without refusing, where such a branch's report links no
+       green job of each leg, and they name the legs and job links they read.
    - Then run `work_tickets.py deliver`; it merges current main first, checks the report and runs
      the guard again against the merge, pushes, creates or updates the pull request with the field
      report as its description (as `work_tickets.py pr-body` prints it), files no issue, and prints
