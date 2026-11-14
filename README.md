@@ -615,6 +615,13 @@ no token), the hand-off needs neither a retyped file nor a second run
   - The step's line names `uv run python <se>/scripts/se_relay.py next --root <checkout>`, which
     prints the tool calls the relay waits for, as the hook tells them on a prompt: the agent asks
     for the pending step whichever tool's PostToolUse ran last.
+  - Each told step's note opens with its sequence number in the call, `step <n>` (`se_relay.py`
+    `numbered`), under the call in the hook and in `next`; `next --step <n>` refuses a step the
+    relay no longer waits for with one line naming the current one. The two reads of a landing
+    pull request in a row, its merge confirmation and its read-back, each name their purpose.
+  - A relay landing (`integrate`, `rehearse`) starts with one line: run each long wait in the
+    background and call `next` after each, as a told step reaches the agent only when a tool call
+    ends. It reads no CI suite time past the relay, and says once that it skipped it.
   - `integrate` reads the pull request first, then runs its local guards, the field-report guard
     against the branch's merge base and the merge, and only then reads the work issue: a branch
     that cannot land fails after that one read. A checkout detached at origin's integration branch
@@ -635,8 +642,9 @@ no token), the hand-off needs neither a retyped file nor a second run
   relay on the scratch branch `--base` names, without holding the integration branch: a relay
   read, a local phase `--gap` makes slow on purpose, the push of `rehearse/` and the base's name,
   the landing plan into the base (pause search, pull request, `check`, squash merge), the read-back.
-  - It refuses the integration branch, `land/…` and `rehearse/…` as its base, starts a base origin
-    lacks at the integration branch's tip, releases and tags nothing and touches no issue.
+  - It refuses the integration branch, `land/…` and `rehearse/…` as its base, resets the base to
+    the integration branch's tip at each start, so no rehearsal builds on an earlier one, releases
+    and tags nothing and touches no issue. A detached checkout is moved as for `integrate`.
   - It runs only as one call through kern's relay, and only when someone runs it.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
