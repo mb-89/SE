@@ -1,7 +1,7 @@
 <!-- Generated from src/skills/catch-up/references/integrator-prompt.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 # Integrator prompt template
 
-Fill every `<...>`; the [integrator definition](https://github.com/mb-89/SE/blob/v5.55.0/.github/agents/integrator.agent.md) holds the
+Fill every `<...>`; the [integrator definition](https://github.com/mb-89/SE/blob/v5.56.0/.github/agents/integrator.agent.md) holds the
 rules. Start it as an independent session with the main checkout as `workspace` and
 `worktree: false`.
 
