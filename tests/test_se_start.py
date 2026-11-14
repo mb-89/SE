@@ -585,7 +585,8 @@ def repos(tmp_path, isolated_git):
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "se_modules.py", "public_check.py",
-                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "public-check-terms.toml")}
+                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
+                             "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")
