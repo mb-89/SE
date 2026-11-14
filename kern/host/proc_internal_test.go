@@ -35,7 +35,7 @@ func TestEachPlatformsProcSourceReadsItsFake(t *testing.T) {
 
 // The platform names this process's start mark, the same at every read, and
 // another for its parent, which started before it; none for a pid that runs
-// nowhere. Linux counts in clock ticks, so two processes forked within one
+// nowhere, whether or not a handle to it stays open. Linux counts in clock ticks, so two processes forked within one
 // tick share a mark: a reused pid is told by the mark together with the bus
 // (judge).
 func TestThePlatformNamesAProcesssStart(t *testing.T) {
@@ -55,7 +55,16 @@ func TestThePlatformNamesAProcesssStart(t *testing.T) {
 	if err := child.Run(); err != nil {
 		t.Fatal(err)
 	}
+	// Windows keeps an ended process's object while a handle to it stays open, as
+	// this case's exec.Cmd holds one; a dead core's pid has none. Neither names a start.
 	if got := procMark(child.Process.Pid); got != "" {
-		t.Fatalf("the ended child's pid still names a start: %q", got)
+		t.Fatalf("the ended child's pid, its handle held, still names a start: %q", got)
+	}
+	pid := child.Process.Pid
+	if err := child.Process.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if got := procMark(pid); got != "" {
+		t.Fatalf("the ended child's pid, no handle held, still names a start: %q", got)
 	}
 }
