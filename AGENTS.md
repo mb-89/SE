@@ -44,31 +44,36 @@
   ([kern/README.md "Tests"](kern/README.md#tests)).
   - The `check` job vets kern in its own step and fails where `gofmt -l` lists one of its files;
     the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook scripts,
-    on Windows and macOS.
+    on Windows and macOS, and on Windows those of `setup.ps1` (`tests/test_public_check.py -k
+    powershell`).
 - SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
   beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
   and retro-due components to the Python paths ([components/README.md](components/README.md#tests)).
 - Complete: `uv run pytest -q` and kern's tests, declared with their time budgets in `se.toml`
   `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>`
   runs them the same way ([README "Test budget"](README.md#test-budget)).
-- Repository hygiene: `tests/test_repository.py` fails on a tracked binary file, a tracked file over
-  200 KB, or a `TODO`/`FIXME` in `scripts/` or `tests/` naming no issue; a file that must break the
-  first two goes in its allow list there, with its reason.
+- Repository hygiene: `uv run python scripts/hygiene.py` checks SE's own checkout through git's real
+  door, a step of the `check` job, not a test; its logic is unit-tested on the fake, each check
+  failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`).
+  - It fails on a tracked binary file, a tracked file over 200 KB, or a `TODO`/`FIXME` in
+    `scripts/` or `tests/` naming no issue; a file that must break the first two goes in its allow
+    list there, with its reason.
   - It also fails on a git subprocess outside `scripts/git_door.py`, git's one door, in scripts,
     tests, kern and the components; a test that needs git uses the door's fake (`fake_git_door`
     fixture, `tests/fake_git.py`), which `tests/test_git_door.py` holds to real git. Its allow
     list of other git subprocesses is empty.
   - A shell script runs git through the door as a command, `git_door.py <git arguments>`: the
-    hooks, `scripts/setup.sh`, `setup.ps1` and the `check` job's gate. The guard reads no shell.
+    hooks, `scripts/setup.sh`, `setup.ps1` and the `check` job's gate. The check reads no shell.
   - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the
     fake behind a state file that `SE_GIT_DOOR=fake:<file>` names to both doors
     (`scripts/git_door.py`, `kern/git`).
   - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
-    list, and to the child processes it starts: the contract suite and the files still to move, a
-    list that may only shrink. A test that reaches real git without the fake fails, naming the
-    command.
-- Dangling references: `tests/test_references.py` fails where the agents, the skills (the rule
-  book among them), README.md or AGENTS.md name what the repository lacks.
+    list, and to the child processes it starts: only the contract suite, `tests/test_git_door.py`.
+    A test that reaches real git without the fake fails, naming the command.
+  - It also fails where SE's checkout fails its public check, with SE's own line of history
+    ([Public safety](#public-safety)).
+- Dangling references: the same command fails where the agents, the skills (the rule book among
+  them), README.md or AGENTS.md name what the repository lacks.
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
     `.github/…`), or a script subcommand its argument parser does not define.
   - `scripts/references.py` owns what counts; the issue-filing commands call it too
@@ -109,9 +114,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   the commits of every pull request and of every push to `main`, so a push the hooks did not see
   fails there; `check` is the check `main`'s ruleset requires.
   - The same job runs every other check an integration runs: `se_plugin.py check`,
-    `work_tickets.py docs --check`, `field-report --check` of a pull request's description
-    against its work issue where it carries a report (a landing pull request's, from the work
-    pull request it links, README [Landing on main](README.md#landing-on-main)), and
+    `work_tickets.py docs --check`, `hygiene.py`, `field-report --check` of a pull request's
+    description against its work issue where it carries a report (a landing pull request's, from
+    the work pull request it links, README [Landing on main](README.md#landing-on-main)), and
     `work_tickets.py suite` in budget.
   - On a pull request it also runs `pr_issues.py`, the work model's rule that the description
     names an open work issue ([Integration branch](src/skills/work-model/SKILL.md#integration-branch)).
