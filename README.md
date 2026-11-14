@@ -72,6 +72,35 @@ first message with it. A session whose permission mode asks before commands, and
 watches, needs SE's scripts and files allowed in the repository's `.claude/settings.json`:
 `"permissions": {"allow": ["Bash(uv run python:*)", "Read(~/.claude/skills/se/**)"]}`.
 
+### Cloud sessions
+
+What a cloud session meets, whatever state its container comes up in.
+
+- **One cached snapshot per set of sources.** The cloud keeps a container snapshot for each set
+  of sources a session starts with, and rebuilds it only when the environment's setup script is
+  edited. A session with SE's repository among its sources can so come up with an older SE plugin,
+  an older `se` binary and the standing file of a core that ended with the snapshot.
+  - The greeting names an SE older than the checkout the session works on, in one line under its
+    first: `SE <plugin> runs, older than this checkout's SE <checkout>: ...`; editing the
+    environment's setup script rebuilds the snapshots.
+  - A plugin from before SE [refreshes at start](#start-and-refresh) (5.47.4 was one) cannot move
+    itself, and one from before that line cannot say so.
+  - A standing file that names no running core stops no start: kern takes it over
+    ([kern/README.md](kern/README.md), "The standing file").
+- **A late checkout gets a core.** In a session without sources that clones a repository with an
+  `se.toml` after its start, SessionStart ran before the clone existed. The first hook whose working
+  directory is inside the clone starts its core in the background, as SessionStart would have, and
+  the hooks there then post to it ([scripts/se_hook.sh](scripts/se_hook.sh)).
+- **`setup.sh` in a spawned session.** Claude Code's auto-mode permission check judges `bash
+  scripts/setup.sh` as one command, before any of its steps runs.
+  - In a session another session started without sources, which then cloned SE by hand, it refused
+    the command twice: with the clone in one command ("Undermining Oversight"), then alone
+    ("Unauthorized Access"). Reading the script, the clone and `git log` passed.
+  - The same command ran in a session started with SE's repository as its source.
+  - So a spawned session that commits to a repository is started with it as its source
+    (`create_session` with `source_url`); one that clones by hand can read and test, and stops at
+    `setup.sh` with its report. Nothing is worded to get around the check.
+
 ## Start and refresh
 
 SE's first message is its greeting, for example `SE 1.2.0 started: 3 skills, 5 rules, 2 sub-agents.

@@ -74,7 +74,8 @@ func TakeDied(root string) string {
 
 // TakeVanished answers the last DiedLines lines of the core's run in its log
 // (runLines) where the standing file names a core of this boot whose process
-// runs nowhere, or whose bus is gone (ErrReused), and removes that file, so
+// runs nowhere, or that another process holds now, or whose bus is gone
+// (ErrReused), and removes that file, so
 // one report names it once; false where it names none. The file of a core of
 // an earlier boot (ErrEarlierBoot) is removed without a report: that core
 // ended with its boot.
@@ -88,7 +89,7 @@ func TakeVanished(root string) (string, bool) {
 		dropStanding(root, s.Pid)
 		return "", false
 	}
-	if alive(s.Pid) && accepts(s.Bus) {
+	if judge(s) == nil {
 		return "", false
 	}
 	dropStanding(root, s.Pid)

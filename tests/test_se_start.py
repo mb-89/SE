@@ -209,6 +209,28 @@ def test_an_up_to_date_greeting_is_one_line(setup):
     assert len(se_start.greeting(report(setup), setup["se"])) == 1
 
 
+def _manifest(root: Path, name: str = "se") -> None:
+    write(root / se_start.PLUGIN_MANIFEST, json.dumps({"name": name}))
+
+
+def test_a_plugin_older_than_the_se_checkout_it_works_on_is_named_in_one_line(setup):
+    """A cloud container restored from a cached snapshot runs an older plugin than the checkout."""
+    setup["remotes"].tags = {SE_URL: ["v1.2.0"], LIB_URL: ["v1.2.0"], TOOL_URL: ["v2.0.3"]}
+    report(setup, "check")
+    _manifest(setup["se"])
+    _manifest(setup["project"])
+    write(setup["project"] / "se.toml", '[project]\nversion = "1.4.0"\n')
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[1:] == ["SE 1.2.0 runs, older than this checkout's SE 1.4.0: in the cloud, a container "
+                         "restored from a cached snapshot, which the environment rebuilds only when its "
+                         "setup script changes (README \"Cloud sessions\")"]
+    # Current, or a checkout of another plugin: no line.
+    for version, name in (("1.2.0", "se"), ("1.4.0", "other")):
+        write(setup["project"] / "se.toml", f'[project]\nversion = "{version}"\n')
+        _manifest(setup["project"], name)
+        assert len(se_start.greeting(report(setup), setup["se"])) == 1
+
+
 # Requirement 4: errors say where they come from and the remedy; the greeting still appears.
 
 
