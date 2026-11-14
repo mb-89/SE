@@ -712,8 +712,9 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch,
 def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     """Retro #5's posted report held four findings in its linked doc; in the window #11 took
     finding 1 and closed, #12 took finding 2 and closed, and the check finding 2 names broke
-    again; open #16 takes finding 4, which had no time to land: too early to score, not a
-    failure, even though the check it names broke again."""
+    again; open #16 takes finding 4. With the overhaul countdown off (the built-in), finding 4 is
+    scored as before it: none, and recurred. With it on, finding 4 had no time to land: too early
+    to score, not a failure, even though the check it names broke again."""
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
@@ -739,6 +740,16 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
             item["body"] = "Takes Retro #5 finding 2 and retro #4 finding 3."
     given["open-issues.json"] = [{"number": 16, "title": "feat/gate", "state": "open",
                                   "labels": [{"name": "work"}], "body": "Takes retro #5 finding 4."}]
+
+    off = FakeDoor(given)
+    unchanged = retro.collect(checkout, 30, off, REPO, "main", "origin/main", NOW)
+    assert "open-issues.json" not in off.reads
+    assert unchanged.previous["findings"][3] == {
+        "finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
+        "check": "check", "issues": [], "state": "none", "recurred": True}
+    assert ("| 4. Gate the landing on its check run | C | work | none | none | yes (check) |"
+            in retro.draft(unchanged))
+    (checkout / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
 
     found = collected(checkout, given)
     assert found.previous["sizes"] == {"closed": 7}

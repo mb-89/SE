@@ -44,12 +44,17 @@ func TestARetroIsDueOnceEnoughWorkLanded(t *testing.T) {
 		if got := v.V.(retrodue.Due); got.Landed != 1 || got.Due != want || got.Retro != 1 {
 			t.Fatalf("due after %d: %+v, and wants 1 landed since retro #1, due %v", due, got, want)
 		}
+		// The overhaul countdown is off by default: it counts, and is never due.
+		if got := v.V.(retrodue.Due); got.OverhaulAfter != 0 || got.OverhaulDue || got.Retros != 1 {
+			t.Fatalf("overhaul by default: %+v, and wants 1 retro counted, off and not due", got)
+		}
 	}
 }
 
 // An overhaul is due once overhaul-after retros closed since the last
 // overhaul closed, and the next overhaul resets the countdown; a retro closed
-// as a duplicate or not planned counts no more than a landing would.
+// as a duplicate or not planned counts no more than a landing would; with
+// overhaul-after 0 the countdown is off and never due.
 func TestAnOverhaulIsDueAfterTheThirdRetroAndResetsWithAnOverhaul(t *testing.T) {
 	issue := func(n int, title, closed, reason string) github.Snapshot {
 		d := map[string]any{"number": float64(n), "title": title, "state": "closed", "closed_at": closed, "state_reason": reason}
@@ -69,6 +74,11 @@ func TestAnOverhaulIsDueAfterTheThirdRetroAndResetsWithAnOverhaul(t *testing.T) 
 	issues["alice.demo.6"] = issue(6, "docs/retro-20261101", "2026-11-01T00:00:00Z", "completed")
 	if got := retrodue.Count(in); got.Retros != 3 || !got.OverhaulDue {
 		t.Fatalf("after the third retro: %+v, and wants 3 retros, an overhaul due", got)
+	}
+	off := in
+	off.OverhaulAfter = 0
+	if got := retrodue.Count(off); got.Retros != 3 || got.OverhaulDue {
+		t.Fatalf("switched off: %+v, and wants 3 retros counted, not due", got)
 	}
 	issues["alice.demo.7"] = issue(7, "docs/overhaul-20261102", "2026-11-02T00:00:00Z", "completed")
 	if got := retrodue.Count(in); got.Retros != 0 || got.OverhaulDue || got.Overhaul != 7 {

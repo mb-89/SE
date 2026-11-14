@@ -419,6 +419,19 @@ OVERHAUL_LINE = ("Overhaul due: 3 retros closed since the last overhaul (due aft
                  "{se}/scripts/overhaul.py read <overhaul issue> --out <draft>")
 
 
+def test_with_the_overhaul_countdown_off_the_greeting_is_unchanged(setup):
+    """A cache from a work check with the countdown off holds no overhaul part, and the greeting
+    is the one it was before the countdown: the retro and the fleet lines alone."""
+    seed(setup, {key: value for key, value in DUE.items() if key != "overhaul"})
+    se = setup["se"].as_posix()
+    assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
+        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
+        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
+        "<retro issue> --out <draft>",
+        "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
+        f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}"]
+
+
 def test_a_due_retro_overhaul_and_the_fleets_findings_appear_from_a_seeded_cache(setup):
     seed(setup, DUE)
     se = setup["se"].as_posix()
@@ -476,7 +489,10 @@ def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch)
     monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
     assert se_start.kern_names.live_work(Path(".")) == {
         "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
-    # The overhaul part comes from the same name, retro-due/due, where it counts the retros.
+    # The overhaul part comes from the same name, retro-due/due, where it counts the retros, and
+    # only where its countdown is on: with overhaul_after 0 the core names no overhaul part.
+    names["retro-due/due"].update(retros=2, overhaul_after=0)
+    assert "overhaul" not in se_start.kern_names.live_work(Path("."))
     names["retro-due/due"].update(retros=2, overhaul_after=3)
     assert se_start.kern_names.live_work(Path("."))["overhaul"] == {
         "retros": 2, "due_after": 3, "issues": 4, "from": "kern"}
@@ -552,9 +568,11 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
         raise work_tickets.QueueError("gh api issues failed: HTTP 502")
 
     monkeypatch.setattr(retro, "GhDoor", no_door)
+    # The overhaul countdown is off (no se.toml): the work check reads it not and names it not.
     assert se_start.work_check(project) == {"retro": {"error": "gh api issues failed: HTTP 502"},
-                                            "overhaul": {"error": "gh api issues failed: HTTP 502"},
                                             "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]}}
+    (project / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
+    assert se_start.work_check(project)["overhaul"] == {"error": "gh api issues failed: HTTP 502"}
     monkeypatch.setattr(retro, "GhDoor", lambda *args: "door")
     monkeypatch.setattr(retro, "landed_since_retro", lambda door, repo, branch: 11)
     monkeypatch.setattr(se_start._load("overhaul"), "retros_since_overhaul", lambda door: 2)

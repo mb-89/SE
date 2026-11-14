@@ -66,10 +66,10 @@ type In struct {
 // Component is the component a binary carries.
 var Component = index.Declare(Name, "Whether a retro or an overhaul is due: the work issues landed since the last retro and the retros closed since the last overhaul, from the GitHub names.",
 	index.Config("due-after", 10, "How many landed work issues make a retro due: se.toml [retro] due_after."),
-	index.Config("overhaul-after", 3, "How many closed retros make an overhaul due: se.toml [overhaul] due_after."),
+	index.Config("overhaul-after", 0, "How many closed retros make an overhaul due: se.toml [overhaul] due_after; 0 is off."),
 	index.Config("tracker", "", "The tracker, <owner>/<repo>: a pull request's Fixes or Refs URL names an issue only there."),
 	index.Config("base", "main", "The integration branch: a work issue landed where a pull request naming it merged into it."),
-	index.Derived("due", Due{DueAfter: 10, OverhaulAfter: 3}, "The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.",
+	index.Derived("due", Due{DueAfter: 10}, "The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.",
 		func(in In) (Due, error) { return Count(in), nil }),
 )
 
@@ -117,15 +117,7 @@ func Count(in In) Due {
 	d := Due{DueAfter: in.DueAfter, OverhaulAfter: in.OverhaulAfter, Issues: len(all), Pulls: len(pulls)}
 	since, hasSince, at, number := windowStart(all, isRetro)
 	d.Since, d.Retro = at, number
-	overhaulSince, hasOverhaulSince, at, number := windowStart(all, isOverhaul)
-	d.OverhaulSince, d.Overhaul = at, number
-	for _, i := range all {
-		closedAt, ok := snap.When(i.ClosedAt)
-		if i.State == "closed" && isRetro(i) && ok && (!hasOverhaulSince || closedAt.After(overhaulSince)) &&
-			!isDuplicate(i) && i.Reason != "not_planned" {
-			d.Retros++
-		}
-	}
+	d.Retros, d.OverhaulSince, d.Overhaul = RetrosSince(all)
 	naming := map[int][]snap.Pull{}
 	for _, p := range pulls {
 		if n, ok := Reference(p.Body, in.Tracker); ok {
@@ -153,6 +145,24 @@ func Count(in In) Due {
 	d.Due = d.DueAfter > 0 && d.Landed >= d.DueAfter
 	d.OverhaulDue = d.OverhaulAfter > 0 && d.Retros >= d.OverhaulAfter
 	return d
+}
+
+// RetrosSince is the overhaul countdown, a pure function of the runs it is
+// given (overhaul.py retros_since): how many retros closed since the last
+// overhaul, counted as Count counts landings since the last retro, with where
+// that window starts and the overhaul it starts at. A retro closed as a
+// duplicate or not planned does not count. Whether that makes an overhaul due
+// is Count's, by overhaul-after, where 0 is off.
+func RetrosSince(all []snap.Issue) (retros int, since string, overhaul int) {
+	at, ok, since, overhaul := windowStart(all, isOverhaul)
+	for _, i := range all {
+		closedAt, closed := snap.When(i.ClosedAt)
+		if i.State == "closed" && isRetro(i) && closed && (!ok || closedAt.After(at)) &&
+			!isDuplicate(i) && i.Reason != "not_planned" {
+			retros++
+		}
+	}
+	return retros, since, overhaul
 }
 
 // Reference is the issue of tracker a pull request's body first names with

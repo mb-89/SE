@@ -9,7 +9,7 @@ once, an open overhaul answering a second `new`.
 from: every rule of the rule book with what checks it (a test, a check, or judgment); the retros
 closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
 and the state of the issues that name them (`overhaul #<n> finding <k>`), too early to score where
-one is still open; and the pruning facts.
+one is still open and the countdown (`[overhaul] due_after`) is on; and the pruning facts.
 It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
 
 `overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, writing nothing; it files
@@ -542,8 +542,9 @@ TEMPLATE = SE_ROOT / ".github" / "ISSUE_TEMPLATE" / "overhaul.md"
 BOOK = Path("src") / "skills" / "work-model" / "references" / "rules.md"
 OVERHAUL_TITLE = "docs/overhaul-"
 OVERHAUL_LABEL = "discovery"
-# An overhaul is due once this many retros closed since the last one (se.toml [overhaul] due_after).
-DUE_AFTER = 3
+# An overhaul is due once this many retros closed since the last one (se.toml [overhaul] due_after);
+# 0, the built-in, switches the countdown off, and with it the too-early scoring.
+DUE_AFTER = 0
 BLOCK_MARKER = "<!-- se:overhaul-yaml -->"
 REPORT_MARKER = "<!-- se:overhaul-report -->"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
@@ -618,17 +619,34 @@ def is_overhaul(issue) -> bool:
 
 
 def due_after(root: Path) -> int:
-    """`[overhaul] due_after` in se.toml: how many closed retros make an overhaul due; built in
-    DUE_AFTER."""
-    return sibling("retro").due_after(root, "overhaul", DUE_AFTER)
+    """`[overhaul] due_after` in se.toml: how many closed retros make an overhaul due; absent or
+    0 (DUE_AFTER) is off: no countdown, and the retro and the overhaul score earlier findings as
+    they did before it, with none too early to score."""
+    return sibling("retro").due_after(root, "overhaul", DUE_AFTER, off=True)
+
+
+def retros_since(closed: list, opened: list) -> int:
+    """The overhaul countdown, a pure function of the runs it is given (retro.py Issues): how many
+    retros of `closed` closed since the last overhaul, counted as retro.py counts the work landed
+    since the last retro. The window starts at the last closed overhaul's close, else at the
+    oldest of `opened` overhauls' creation, else it is the whole history; a retro closed as a
+    duplicate or as not planned does not count. components/retro-due counts the same."""
+    retro = sibling("retro")
+    last = max((issue for issue in closed if is_overhaul(issue) and retro.when(issue.closed_at)),
+               key=lambda issue: retro.when(issue.closed_at), default=None)
+    oldest = min((issue for issue in opened if is_overhaul(issue) and retro.when(issue.created_at)),
+                 key=lambda issue: retro.when(issue.created_at), default=None)
+    since = (retro.when(last.closed_at) if last else retro.when(oldest.created_at) if oldest
+             else None)
+    return sum(1 for issue in closed
+               if retro.is_retro(issue) and retro.when(issue.closed_at)
+               and (since is None or retro.when(issue.closed_at) > since)
+               and not retro.is_duplicate(issue) and issue.state_reason != "not_planned")
 
 
 def retros_since_overhaul(door) -> int | None:
-    """How many retros closed since the last overhaul, read through `door`, counted as retro.py
-    counts the work landed since the last retro: the window starts at the last closed overhaul's
-    close, else at the oldest open overhaul's creation, else it is the whole history, and a retro
-    closed as a duplicate or as not planned does not count. None where the door is still missing
-    answers."""
+    """`retros_since` over the issues read through `door`, the open ones only where no overhaul
+    has closed; None where the door is still missing answers."""
     retro = sibling("retro")
     closed = [retro.issue_of(item) for item in door.closed_issues()]
     if door.missing:
@@ -639,21 +657,12 @@ def retros_since_overhaul(door) -> int | None:
             issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
     if door.missing:
         return None
-    last = max((issue for issue in closed if is_overhaul(issue) and retro.when(issue.closed_at)),
-               key=lambda issue: retro.when(issue.closed_at), default=None)
-    if last is not None:
-        since = retro.when(last.closed_at)
-    else:
+    opened = []
+    if not any(is_overhaul(issue) and retro.when(issue.closed_at) for issue in closed):
         opened = [retro.issue_of(item) for item in door.open_issues()]
         if door.missing:
             return None
-        oldest = min((issue for issue in opened if is_overhaul(issue) and retro.when(issue.created_at)),
-                     key=lambda issue: retro.when(issue.created_at), default=None)
-        since = retro.when(oldest.created_at) if oldest else None
-    return sum(1 for issue in closed
-               if retro.is_retro(issue) and retro.when(issue.closed_at)
-               and (since is None or retro.when(issue.closed_at) > since)
-               and not retro.is_duplicate(issue) and issue.state_reason != "not_planned")
+    return retros_since(closed, opened)
 
 
 def door_for(retro, work_tickets, args: argparse.Namespace, root: Path):
@@ -673,15 +682,17 @@ def last_block(texts: list[str], marker: str, reader) -> dict | None:
     return blocks[-1] if blocks else None
 
 
-def retro_row(issue, block: dict | None) -> dict:
-    """One retro of the window as the block of the retro doc its report links names it."""
+def retro_row(issue, block: dict | None, too_early: bool = False) -> dict:
+    """One retro of the window as the block of the retro doc its report links names it; with
+    `too_early` (the countdown on), the previous findings it found too early to score are counted
+    apart from those it scored."""
     if block is None:
         return {"retro": issue.number, "closed_at": issue.closed_at, "block": False}
     findings = [item for item in block.get("findings") or [] if isinstance(item, dict)]
     earlier = [item for item in ((block.get("previous") or {}).get("findings") or [])
                if isinstance(item, dict)]
-    too_early = sibling("retro").TOO_EARLY
-    scored = [item for item in earlier if item.get("state") != too_early]
+    scored = [item for item in earlier
+              if not too_early or item.get("state") != sibling("retro").TOO_EARLY]
     return {
         "retro": issue.number, "closed_at": issue.closed_at, "block": True,
         "sizes": block.get("sizes") or {},
@@ -694,14 +705,15 @@ def retro_row(issue, block: dict | None) -> dict:
         "previous": {"scored": len(scored),
                      "closed": sum(item.get("state") == "closed" for item in scored),
                      "recurred": sum(bool(item.get("recurred")) for item in scored),
-                     "too_early": len(earlier) - len(scored)}}
+                     **({"too_early": len(earlier) - len(scored)} if too_early else {})}}
 
 
-def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: list) -> list[dict]:
+def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: list,
+                    too_early: bool = False) -> list[dict]:
     """Each finding of the previous overhaul's block with the issues that name it
     (`overhaul #<overhaul> finding <k>`) and their state: closed where one closed as completed,
-    too early to score where one is still open (it had no time to land, so it is no failure), else
-    the reason they closed with, else none."""
+    open where one is still open, too early to score instead with `too_early` (the countdown on:
+    it had no time to land, so it is no failure), else the reason they closed with, else none."""
     found: list[dict] = []
     for index, finding in enumerate((previous or {}).get("findings") or [], 1):
         if not isinstance(finding, dict):
@@ -715,7 +727,8 @@ def scored_findings(previous: dict | None, overhaul: int, closed: list, opened: 
         shut = [issue for issue in closed if names(issue)]
         still = [issue for issue in opened if names(issue)]
         reasons = [issue.state_reason or "completed" for issue in shut]
-        state = ("closed" if "completed" in reasons else sibling("retro").TOO_EARLY if still
+        waiting = sibling("retro").TOO_EARLY if too_early else "open"
+        state = ("closed" if "completed" in reasons else waiting if still
                  else reasons[0] if reasons else "none")
         found.append({"finding": number, "title": str(finding.get("title") or ""),
                       "rule": str(finding.get("rule") or ""), "kind": finding.get("kind"),
@@ -741,6 +754,7 @@ class Gathered:
     retros: list[dict]
     previous: dict | None
     facts: Facts
+    too_early: bool = False  # the countdown is on: earlier findings can be too early to score
 
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "overhaul": self.number, "since": self.since,
@@ -754,9 +768,10 @@ class Gathered:
 
 
 def gather(number: int, door, rules: list, facts: Facts, now: datetime,
-           show) -> Gathered | None:
+           show, too_early: bool = False) -> Gathered | None:
     """Overhaul `number`'s draft data, read through `door`, each retro's block from the retro doc
-    its report links, read with `show(sha, path)` (retro.posted_block); None while the door is
+    its report links, read with `show(sha, path)` (retro.posted_block), earlier findings too early
+    to score set apart with `too_early` (the countdown on, `due_after`); None while the door is
     still missing answers (`door.missing`)."""
     retro = sibling("retro")
     closed = [retro.issue_of(item) for item in door.closed_issues()]
@@ -786,13 +801,14 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
     previous_block = last_block(texts(last), BLOCK_MARKER, read_block) if last else None
     if door.missing:
         return None
-    rows = [retro_row(issue, retro.posted_block(posted[issue.number], issue.number, show))
+    rows = [retro_row(issue, retro.posted_block(posted[issue.number], issue.number, show), too_early)
             for issue in window]
     previous = None
     if last is not None:
         previous = {"overhaul": last.number, "found": previous_block is not None,
                     "facts": (previous_block or {}).get("facts"),
-                    "findings": scored_findings(previous_block, last.number, closed, opened)}
+                    "findings": scored_findings(previous_block, last.number, closed, opened,
+                                                too_early)}
     return Gathered(
         number, last.closed_at if last else None, last.number if last else None,
         now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -801,7 +817,7 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
           "implementations": [item for item in rule.implementations
                               if not sibling("rule_book").FROZEN.match(item)]}
          for rule in rules],
-        rows, previous, facts)
+        rows, previous, facts, too_early)
 
 
 def read_block(text: str) -> dict | None:
@@ -830,8 +846,10 @@ def draft(found: Gathered) -> str:
         lines += [f"  - {item}" for item in rule["implementations"]]
     lines += ["", "## The retros since the last overhaul", ""]
     if found.retros:
+        early = ", too early" if found.too_early else ""
         lines += ["| retro | closed | landed | escalated | broken checks | findings (work, "
-                  "decision) | previous findings closed, recurred, too early |", "|---|---|---|---|---|---|---|"]
+                  f"decision) | previous findings closed, recurred{early} |",
+                  "|---|---|---|---|---|---|---|"]
         for row in found.retros:
             if not row["block"]:
                 lines.append(f"| #{row['retro']} | no report block found | | | | | |")
@@ -841,8 +859,8 @@ def draft(found: Gathered) -> str:
                 f"| #{row['retro']} | {sizes.get('closed', '')} | {sizes.get('landed', '')} | "
                 f"{sizes.get('escalated', '')} | {', '.join(row['broken']) or 'none'} | "
                 f"{row['findings'][WORK]}, {row['findings'][DECISION]} | "
-                f"{previous['closed']} of {previous['scored']}, {previous['recurred']}, "
-                f"{previous['too_early']} |")
+                f"{previous['closed']} of {previous['scored']}, {previous['recurred']}"
+                + (f", {previous['too_early']}" if found.too_early else "") + " |")
         named = Counter(name for row in found.retros if row["block"] for name in row["classes"])
         repeated = sorted(name for name, count in named.items() if count > 1)
         lines += ["", "Finding classes more than one retro named: "
@@ -1053,7 +1071,7 @@ def run_read(args: argparse.Namespace) -> int:
     root = work_tickets.worktree_root(args.worktree)
     door = door_for(retro, work_tickets, args, root)
     found = gather(args.overhaul, door, book_rules(root), find(read(root)),
-                   datetime.now(timezone.utc), retro.git_show(root))
+                   datetime.now(timezone.utc), retro.git_show(root), due_after(root) > 0)
     if found is None:
         directory = args.answers or Path("<dir>")
         then = (f"overhaul.py read {args.overhaul} --answers {directory}"

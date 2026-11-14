@@ -21,7 +21,8 @@ draft with
 
 - the previous retro's findings, each scored: the work issues of the window that name it
   (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
-  (recurred); one that an open issue takes is too early to score (TOO_EARLY), neither;
+  (recurred); where the overhaul countdown is on (overhaul.py due_after), one that an open issue
+  takes is too early to score (TOO_EARLY), neither;
 
 and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
 `retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
@@ -579,12 +580,16 @@ def landed_since_retro(door, tracker: str, branch: str) -> int | None:
                for issue in found.window)
 
 
-def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER) -> int:
+def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER,
+              off: bool = False) -> int:
     """`[<table>] due_after` in se.toml: how many counted items make a run of that kind due (for
-    a retro, landed work issues; for an overhaul, closed retros); built in `default`."""
+    a retro, landed work issues; for an overhaul, closed retros); built in `default`. With `off`,
+    0 is allowed too: the countdown is switched off."""
     count = work_tickets.se_table(root, table).get("due_after", default)
-    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
-        raise QueueError(f"{table}.due_after in {root / 'se.toml'} must be a positive whole number; "
+    least = 0 if off else 1
+    if isinstance(count, bool) or not isinstance(count, int) or count < least:
+        kind = "a whole number, 0 for off" if off else "a positive whole number"
+        raise QueueError(f"{table}.due_after in {root / 'se.toml'} must be {kind}; "
                          f"fix it or remove it for the built-in {default}")
     return count
 
@@ -688,9 +693,10 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             return None
         previous = posted_block(texts, last.number, git_show(root))
     # An issue that takes one of the previous findings and is still open makes it too early to
-    # score: only with findings to score are the open issues read.
+    # score, where the overhaul countdown is on (overhaul.py due_after): only then, and only with
+    # findings to score, are the open issues read.
     opened = ([issue_of(item) for item in door.open_issues()]
-              if (previous or {}).get("findings") else [])
+              if (previous or {}).get("findings") and sibling("overhaul").due_after(root) else [])
     if door.missing:
         return None
     # The window's metrics: the local file's lines that started in it, and the line each landing
@@ -722,7 +728,8 @@ def scored_findings(previous: dict | None, retro: int, window: list[Issue],
     """Each finding of the previous retro's block, scored against this window: the work issues
     closed in it or still open (`opened`) that name the finding (`retro #<retro> finding <k>`),
     its state (closed where one of them closed as completed, else TOO_EARLY where one is still
-    open: filed after the previous retro's cut-off, it had no time to land; else the reason they
+    open: filed after the previous retro's cut-off, it had no time to land; `opened` is empty
+    where the overhaul countdown is off, so nothing is too early there; else the reason they
     closed with, else none) and whether the rule check it names broke again (recurred), which a
     finding too early to score never is."""
     found: list[dict] = []

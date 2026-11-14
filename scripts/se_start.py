@@ -307,7 +307,8 @@ def run_check(urls: set[str], remote: Callable[[str], list[Version]]) -> dict[st
 def work_check(root: Path | None) -> dict | None:
     """What is due in the work of the project at `root`, where gh is signed in: the work issues
     landed since the last retro (retro.py's window) with the count that makes a retro due, the
-    retros closed since the last overhaul with the count that makes an overhaul due, and the
+    retros closed since the last overhaul with the count that makes an overhaul due where that
+    countdown is on (overhaul.py due_after), and the
     fleet check's findings, each part with its error instead where its read failed. None without gh
     or without a project checkout: in the cloud no token reaches SE's code."""
     if root is None or not (root / ".git").exists():
@@ -322,7 +323,7 @@ def work_check(root: Path | None) -> dict | None:
         repo = work_tickets.resolve_repo(root, None)
         branch = work_tickets.integration_branch(root)
     except failures as error:
-        return {part: {"error": str(error)} for part in ("retro", "overhaul", "fleet")}
+        return {"retro": {"error": str(error)}, "fleet": {"error": str(error)}}
     try:
         door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
         work["retro"] = {"landed": retro.landed_since_retro(door, repo, branch),
@@ -331,9 +332,10 @@ def work_check(root: Path | None) -> dict | None:
         work["retro"] = {"error": str(error)}
     overhaul = _load("overhaul")
     try:
-        door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
-        work["overhaul"] = {"retros": overhaul.retros_since_overhaul(door),
-                            "due_after": overhaul.due_after(root)}
+        after = overhaul.due_after(root)
+        if after:  # the countdown is on: 0 (off, the built-in) reads and names nothing
+            door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
+            work["overhaul"] = {"retros": overhaul.retros_since_overhaul(door), "due_after": after}
     except failures as error:
         work["overhaul"] = {"error": str(error)}
     try:
