@@ -2855,7 +2855,10 @@ def test_integrate_hands_off_the_record_as_steps_the_github_tools_make_where_tru
 class SessionSteps:
     """A cloud session answering integrate's GitHub steps through kern's relay: each step is the
     tool and input kern's `github.step` hands it, answered as the GitHub tools answer, on the bare
-    origin as GitHub would (`FakeGitHub` writes the squash commit)."""
+    origin as GitHub would (`FakeGitHub` writes the squash commit).
+
+    Every step is recorded in `__call__`, before it is answered; a subclass changes the answers
+    by overriding `answer`, so no step it adds goes unrecorded."""
 
     def __init__(self, github: FakeGitHub, root: Path, checks: list[dict]) -> None:
         self.github, self.root, self.checks = github(root, "git.example/owner/repo"), root, checks
@@ -2863,6 +2866,9 @@ class SessionSteps:
 
     def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
         self.asked.append((tool, input_))
+        return self.answer(tool, input_)
+
+    def answer(self, tool: str, input_: dict) -> object:
         method = input_.get("method")
         if tool == "pull_request_read" and method == "get" and input_["pullNumber"] == 7:
             head = self.github.git("rev-parse", "refs/heads/feature/worker")
@@ -5127,13 +5133,12 @@ class CommentedSessionSteps(SessionSteps):
     """The session of SessionSteps, where the work issue carries comments: `issue_read get`
     names them only as their count, as the GitHub tools do, and `get_comments` lists them."""
 
-    def __call__(self, tool: str, input_: dict, note: str, wait: str) -> object:
+    def answer(self, tool: str, input_: dict) -> object:
         if tool == "issue_read" and input_.get("method") == "get_comments":
-            self.asked.append((tool, input_))
             return [{"id": 6874481244, "body": "Started: a worker session.",
                      "user": {"login": "alice"}, "created_at": "2026-11-14T08:23:11Z",
                      "html_url": "https://git.example/owner/tracker/issues/5#issuecomment-1"}]
-        answer = super().__call__(tool, input_, note, wait)
+        answer = super().answer(tool, input_)
         if tool == "issue_read" and input_.get("method") == "get" and "title" in answer:
             answer = {**answer, "comments": 1}
         return answer
@@ -5162,6 +5167,22 @@ def test_integrate_through_kerns_relay_reads_the_work_issues_comments_as_a_step(
     for line in ("pull_request_read get #7", "issue_read get #5", "issue_read get_comments #5"):
         assert f"GitHub step through kern's relay: {line}" in captured.err
     assert "Integrated pull request #7" in captured.out
+
+
+def test_a_session_steps_subclass_that_adds_a_step_still_records_it(main_checkout, github):
+    """SessionSteps records each step in `__call__` before any answer: a subclass answers by
+    overriding `answer`, so a step it adds shows in `asked` without the subclass recording it."""
+
+    class Added(SessionSteps):
+        def answer(self, tool: str, input_: dict) -> object:
+            if tool == "get_me":
+                return {"login": "alice"}
+            return super().answer(tool, input_)
+
+    session = Added(github, main_checkout, [{"id": 1, "status": "completed"}])
+    assert session("get_me", {}, "who", "") == {"login": "alice"}
+    assert session("list_pull_requests", {"owner": "owner", "repo": "repo"}, "list", "") == []
+    assert [tool for tool, _ in session.asked] == ["get_me", "list_pull_requests"]
 
 
 class RehearsalSteps:
