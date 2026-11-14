@@ -8404,10 +8404,28 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
 ))
 #: What the header of these components' declarations says they are generated from.
 COMPONENT_SOURCE = "its command registry"
-#: The commands a person waits on that only read: these go through kern where it runs
+#: The commands a person waits on that only read, each with when an agent uses it, which kern's
+#: MCP door offers it with (kern/README.md "The MCP door"): these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
-INTERACTIVE_COMMANDS = frozenset(
-    {"status", "config", "ready", "capacity", "queue", "fleet-check", "metrics"})
+INTERACTIVE_COMMANDS = {
+    "status": "Reports the local ticket queue of a worker's worktree (--worktree): the tickets "
+              "todo, held and done. Use it before and after each ticket to see what remains.",
+    "config": "Shows the repository's and the machine-local settings in effect for a worktree. Use "
+              "it when a command does not behave as expected, to see which settings it read.",
+    "ready": "Lists the ready work issues a session may start now. Use it to choose the next "
+             "package to start.",
+    "capacity": "Shows how many workers may run now: the local slots, or unlimited in the cloud. "
+                "Use it before starting workers.",
+    "queue": "Lists what waits on the integration: delivered pull requests with a complete field "
+             "report, escalations and startable work issues. Use it to see what is queued, and as "
+             "the integrator to pick the next landing.",
+    "fleet-check": "Lists every stuck or stray piece of work, each with its issue, pull request "
+                   "and remedy, or says healthy. Use it to see what needs attention across the "
+                   "fleet; it only reads.",
+    "metrics": "Prints what the commands cost from the line each run records: top spenders by "
+               "wall time and GitHub calls, and each overrun of a budget. Use it to find what is "
+               "slow.",
+}
 #: The batch commands that run as one call through kern where its GitHub relay serves the
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.

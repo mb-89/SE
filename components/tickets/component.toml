@@ -30,6 +30,7 @@ summary = "report queue status"
 group = "Tickets"
 help = "report queue status"
 class = "interactive"
+mcp = "Reports the local ticket queue of a worker's worktree (--worktree): the tickets todo, held and done. Use it before and after each ticket to see what remains."
 
 [commands."work_tickets.py review-note"]
 usage = "work_tickets.py review-note --worktree WORKTREE --note NOTE --disposition DISPOSITION\n                            [--backlog-ref BACKLOG_REF]"
