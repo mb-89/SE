@@ -274,7 +274,12 @@ note = "The default of MCP_TIMEOUT."
 #   kind      hooks (a hooks file: SE's commands are those naming `finds`) | mcp (an MCP config:
 #             SE's server is the one named `finds`)
 #   base      where `file` lies: project (the repository the host opened), home, checkout (SE's own
-#             checkout, the one measured), plugin (each installed SE plugin's root)
+#             checkout, the one measured), plugin (each installed SE plugin's root, Claude Code's
+#             plugin roots), copilot-plugin (each plugin folder Copilot CLI installed under
+#             $COPILOT_HOME, or ~/.copilot where that is unset: installed-plugins/<marketplace>/<plugin>
+#             or installed-plugins/_direct/<source>, counted where its .github/plugin/plugin.json or
+#             .claude-plugin/plugin.json is named se; Copilot starts its commands in that folder;
+#             source https://docs.github.com/en/copilot/reference/cli-plugin-reference, "File locations")
 #   file      relative to base; file_<platform> (windows, darwin) where it differs
 #   outside   whether the place works in a repository other than SE's own checkout
 #   source, read, mark  as for a limit; mark `unverified` where the source does not name the fact
@@ -360,6 +365,19 @@ source = "https://docs.github.com/en/copilot/reference/cli-plugin-reference"
 read = 2026-11-14
 mark = "documented"
 register = "copilot plugin install mb-89/SE"
+
+[[registrations.copilot-cli.places]]
+place = "installed plugin MCP"
+kind = "mcp"
+base = "copilot-plugin"
+file = ".github/mcp.json"
+finds = "se"
+outside = true
+source = "https://docs.github.com/en/copilot/reference/cli-plugin-reference#file-locations"
+read = 2026-11-14
+mark = "documented"
+register = "copilot plugin marketplace add mb-89/SE && copilot plugin install se@se"
+register_windows = "copilot plugin marketplace add mb-89/SE; copilot plugin install se@se"
 
 [[registrations.copilot-vscode.places]]
 place = "workspace MCP config"

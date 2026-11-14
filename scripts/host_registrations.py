@@ -13,7 +13,10 @@ saw, and gets report rows back.
   or script does not resolve, or an MCP command that did not answer `initialize`, ends with the
   place's fix line for the platform, this checkout's launcher filled in (`fill`).
 
-A probe result, per command (keyed by `key(words)`): `resolves` (the interpreter is found),
+- `copilot_plugin_roots` picks, from the plugin folders found under Copilot's home and their
+  manifest texts, the ones that are SE's: the roots of the base `copilot-plugin`.
+
+A probe result, per command and the folder it starts in (keyed by `probe_key(words, cwd)`): `resolves` (the interpreter is found),
 `missing` (scripts named that do not exist), `unresolved` (words naming a variable nobody fills),
 and for an MCP command `answer`: "answered", "timeout" or "exited", with `detail`.
 """
@@ -39,7 +42,7 @@ class Place:
     surface: str
     place: str
     kind: str  # hooks | mcp
-    base: str  # project | home | checkout | plugin
+    base: str  # project | home | checkout | plugin | copilot-plugin
     files: Mapping[str, str]  # platform (or "") -> file
     finds: str
     outside: bool
@@ -62,11 +65,13 @@ class Place:
 @dataclass(frozen=True)
 class Seen:
     """One place as the caller found it: its file shown as the report may print it, its text (None:
-    no such file), the variables its commands may name, and whether it is read here at all."""
+    no such file), the variables its commands may name, whether it is read here at all, and the
+    folder the host starts its commands in ("": the project)."""
     shown: str
     text: str | None
     variables: Mapping[str, str] = field(default_factory=dict)
     here: bool = True
+    cwd: str = ""
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,32 @@ def parse(section: Mapping) -> tuple[Place, ...]:
 
 def key(words: Sequence[str]) -> str:
     return shlex.join(words)
+
+
+def probe_key(words: Sequence[str], cwd: str = "") -> str:
+    """A probe result's key: the command, and the folder it starts in where that is not the project,
+    so the same words started in two folders are judged apart."""
+    return key(words) if not cwd else f"{key(words)} @ {cwd}"
+
+
+# Copilot CLI's plugin installs (its plugin reference, "File locations"): each plugin folder under
+# its home is installed-plugins/<marketplace>/<plugin> or installed-plugins/_direct/<source>.
+COPILOT_HOME_VARIABLE, COPILOT_HOME_DEFAULT = "COPILOT_HOME", ".copilot"
+COPILOT_PLUGIN_FOLDERS = ("installed-plugins", "*", "*")  # the glob below Copilot's home
+COPILOT_MANIFESTS = (".github/plugin/plugin.json", ".claude-plugin/plugin.json")
+
+
+def copilot_home(env: Mapping[str, str], home: str) -> str:
+    """Copilot's home: `$COPILOT_HOME`, or `~/.copilot` where that is unset or empty."""
+    return env.get(COPILOT_HOME_VARIABLE) or str(PurePosixPath(home.replace("\\", "/")) / COPILOT_HOME_DEFAULT)
+
+
+def copilot_plugin_roots(found: Mapping, name: str = "se") -> list:
+    """The plugin folders that are SE's, sorted: `found` maps each folder to its manifest texts
+    (None: no such file), and a folder counts where one of them is a JSON object named `name`. A
+    manifest that does not parse is skipped. Reads nothing."""
+    return sorted((folder for folder, texts in found.items()
+                   if any((load(text) or {}).get("name") == name for text in texts)), key=str)
 
 
 def _fill(word: str, variables: Mapping[str, str]) -> str:
@@ -241,6 +272,6 @@ def rows(entries: Sequence[tuple[Place, Seen]], probes: Mapping[str, Mapping], p
             out.append(_row(place, seen, SEEN, NOTE, f"{label}: not registered ({what})", fix))
             continue
         for words in found:
-            state, level, text = _judge_command(words, probes.get(key(words)), show)
+            state, level, text = _judge_command(words, probes.get(probe_key(words, seen.cwd)), show)
             out.append(_row(place, seen, state, level, f"{label}: {text}", fix if level == PROBLEM else None))
     return out

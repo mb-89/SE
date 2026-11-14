@@ -35,7 +35,7 @@ def test_every_place_is_a_host_fact_of_a_known_surface_with_source_and_register_
     places = h.parse(data["registrations"])
     assert {p.surface for p in places} <= set(data["surfaces"])
     assert {p.kind for p in places} == {"hooks", "mcp"}
-    assert {p.base for p in places} <= {"project", "home", "checkout", "plugin"}
+    assert {p.base for p in places} <= {"project", "home", "checkout", "plugin", "copilot-plugin"}
     for p in places:
         assert p.source and p.read == "2026-11-14" and p.register[""] and p.files[""]
         assert "\n" not in p.fix("windows", FILL) and "{" + "launcher" not in p.fix("linux", FILL)
@@ -139,3 +139,46 @@ def test_the_launcher_is_named_from_home_where_it_lies_there():
     windows_home = "\\".join(("C:", "Users", "alice"))  # joined, so the public check sees no profile path
     assert h.launcher_text(windows_home + "\\se\\scripts\\se_mcp.ps1", windows_home) == "$HOME/se/scripts/se_mcp.ps1"
     assert h.launcher_text("/opt/se/scripts/se_mcp.sh", home.as_posix()) == "/opt/se/scripts/se_mcp.sh"
+
+
+# Copilot CLI's plugin installs: the base copilot-plugin
+
+
+def test_the_installed_plugin_place_is_read_in_copilots_install_and_installs_through_the_marketplace():
+    p = place("copilot-cli", "installed plugin MCP")
+    assert (p.kind, p.base, p.file("linux"), p.finds, p.outside) == ("mcp", "copilot-plugin", ".github/mcp.json", "se",
+                                                                      True)
+    assert p.source.startswith("https://docs.github.com/en/copilot/reference/cli-plugin-reference")
+    assert p.fix("linux", FILL) == "copilot plugin marketplace add mb-89/SE && copilot plugin install se@se"
+    assert p.fix("windows", FILL) == "copilot plugin marketplace add mb-89/SE; copilot plugin install se@se"
+
+
+def test_the_resolver_picks_ses_folders_sorted_reading_nothing_and_skipping_a_broken_manifest(tmp_path: Path):
+    home = tmp_path / "no-such-home"  # nothing exists on disk: the answer comes from the texts alone
+    plugins = home / ".copilot" / "installed-plugins"
+    se, direct = plugins / "se" / "se", plugins / "_direct" / "mb-89-SE"
+    other, broken = plugins / "se" / "other", plugins / "x" / "y"
+    found = {se: [json.dumps({"name": "se"}), None], other: [json.dumps({"name": "other"}), None],
+             broken: ["{not json", "[]"], direct: [None, json.dumps({"name": "se"})]}
+    assert not home.exists()
+    assert h.copilot_plugin_roots(found) == sorted([se, direct], key=str)
+    assert h.copilot_plugin_roots({}) == []
+
+
+def test_copilots_home_is_its_variable_or_dot_copilot_under_home():
+    assert h.copilot_home({"COPILOT_HOME": "/elsewhere"}, "/box/alice") == "/elsewhere"
+    assert PurePosixPath(h.copilot_home({}, "/box/alice")) == PurePosixPath("/box/alice/.copilot")
+    assert PurePosixPath(h.copilot_home({"COPILOT_HOME": ""}, "/box/alice")) == PurePosixPath("/box/alice/.copilot")
+
+
+def test_the_same_command_is_judged_per_folder_it_starts_in():
+    p = place("copilot-cli", "installed plugin MCP")
+    words = ["bash", "scripts/se_mcp.sh", "--root", "."]
+    entries = [(p, h.Seen("~/.copilot/a/.github/mcp.json", MCP, cwd="/a")),
+               (p, h.Seen("~/.copilot/b/.github/mcp.json", MCP, cwd="/b"))]
+    probes = {h.probe_key(words, "/a"): {"resolves": True, "missing": [], "unresolved": []},
+              h.probe_key(words, "/b"): {"resolves": True, "missing": ["scripts/se_mcp.sh"], "unresolved": []}}
+    assert h.probe_key(words) == h.key(words) != h.probe_key(words, "/a")
+    first, second = h.rows(entries, probes, "linux", FILL)
+    assert first.level == h.OK and first.fix is None
+    assert second.level == h.PROBLEM and second.fix == p.fix("linux", FILL)
