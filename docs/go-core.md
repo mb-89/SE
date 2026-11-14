@@ -349,7 +349,7 @@ budget; the real-core runs are the core's CI.
 | path | cost measured | verdict |
 |---|---|---|
 | a prebuilt release per platform, downloaded and checked against its checksum | an equal-sized release (nats-server, 6.35 MB) in 0.43 to 0.71 s; SE's core is about 12.0 MB gzipped, so about 1 s | **chosen** |
-| built by the environment's setup script | 18.7 to 18.9 s cold compile, 23.0 s with module downloads; plus 2.5 s for a toolchain where the image lacks the version | fallback only |
+| built by the environment's setup script | 18.7 to 18.9 s cold compile, 23.0 s with module downloads; plus 2.5 s for a toolchain where the image lacks the version | not used |
 | built at session start | the same 19 to 23 s on every new container | refused: twenty times the budget |
 
 The core's release workflow builds `linux`, `darwin` and `windows` for `amd64` and `arm64`,
@@ -357,8 +357,11 @@ attaches them with a `SHA256SUMS` file to the core's tag, and an application's r
 same for its own binary (core plus its Go components). The binary is fetched into
 `~/.se/bin/<app>-<version>` and kept: a version already there costs nothing.
 
-- **Cloud:** the environment's setup script fetches it beside the SE clone, before Claude starts,
-  outside any budget. A failed fetch prints one line and the session starts without the core.
+- **Cloud:** as local: the environment's setup script only clones SE (README ["Claude Code
+  cloud"](../README.md#claude-code-cloud)), so `bootstrap.sh` fetches the binary at the session
+  start that first meets a version, in the background, and the session works without the core
+  until it lands; a container snapshot the cloud keeps can carry an older one (README ["Cloud
+  sessions"](../README.md#cloud-sessions)).
 - **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background; that
   session works without the core until it lands, and the greeting says so.
 - **Which pins:** the installed SE's `release.toml`, after the refresh at start moved it to its
