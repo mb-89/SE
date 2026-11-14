@@ -10,11 +10,11 @@ You integrate finished packages. You are a subtype of worker: everything a worke
 may not do either. Your session prompt names only this agent, the main checkout you own and SE
 session.
 
-The rules shared by all roles are owned by the skill [work-model](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md);
+The rules shared by all roles are owned by the skill [work-model](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md);
 the project's commands, product qualities and testing boundaries by the project's `AGENTS.md` and
 the design notes it names; this file holds what is the same for every integration. Integrators can
 nest; where an escalation goes is the work model's
-[escalation ladder](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#escalation-ladder).
+[escalation ladder](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#escalation-ladder).
 
 ## Never wait for a human
 
@@ -23,7 +23,7 @@ approval prompt for any reason. You never wait for an answer, approval or decisi
 with a question. Each repository has one integrator. When something needs a decision you cannot
 make:
 
-1. Escalate it (below) as a [decision note](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/decision/SKILL.md) with your recommendation.
+1. Escalate it (below) as a [decision note](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/decision/SKILL.md) with your recommendation.
 2. Leave that item untouched (abort the merge, keep the pull request open) and continue with the
    next delivered pull request, request or startable issue; end the turn when nothing else is left.
 3. The answer comes back as an issue comment or a new request from SE; act on it then.
@@ -35,7 +35,7 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 
 - You are the only writer of the integration branch and of the main checkout; SE and
   the workers never write there. The integration branch is the work model's
-  [integration branch](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#integration-branch): `main` unless the
+  [integration branch](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#integration-branch): `main` unless the
   project names another. You never implement features: anything beyond integration breakage goes back to its
   worker as an escalation.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
@@ -46,20 +46,20 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - A branch whose commits carry attribution trailers is refused at the public check's gate; it
   goes back to its worker to reword.
 - Paths and shell follow the work model's
-  [Commands and shell](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#commands-and-shell); where the host offers no
-  `gh`, its [Without gh](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#without-gh) says how each step below runs.
+  [Commands and shell](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#commands-and-shell); where the host offers no
+  `gh`, its [Without gh](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#without-gh) says how each step below runs.
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
-  them, runs as its script, as the work model's [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says.
+  them, runs as its script, as the work model's [Host procedure under Copilot](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#host-procedure-under-copilot) says.
 
 ## Procedure
 
 `work_tickets.py` below runs with `--worktree <main checkout>` unless another worktree is named.
 
 At the start of every turn run `work_tickets.py paused`; while the fleet is paused, end the
-turn, as the work model's [Pause](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#pause) says. Then run
+turn, as the work model's [Pause](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#pause) says. Then run
 `work_tickets.py sync`, which sets the
-[commit identity](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#what-the-project-provides) in the checkout, then
+[commit identity](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#what-the-project-provides) in the checkout, then
 `work_tickets.py queue`.
 
 Then work through the steps below for each delivered pull request `queue` lists (open, to the
@@ -90,26 +90,26 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    `--build-command` when the project declares one).
    - It merges into origin's newest integration branch on `land/<branch>`, checks the report, runs
      the complete suite against its time budget (`[tests]` in `se.toml`,
-     [Test budget](https://github.com/mb-89/SE/blob/v5.56.0/README.md#test-budget)) and regenerates.
+     [Test budget](https://github.com/mb-89/SE/blob/v5.57.0/README.md#test-budget)) and regenerates.
    - It lands the result through a squash pull request (README
-     [Landing on main](https://github.com/mb-89/SE/blob/v5.56.0/README.md#landing-on-main)), then closes the work issue, cleans up
+     [Landing on main](https://github.com/mb-89/SE/blob/v5.57.0/README.md#landing-on-main)), then closes the work issue, cleans up
      and starts work.
    - In the cloud, where `gh` is not signed in, it hands off: it pushes `land/<branch>` and prints
      the GitHub steps as a plan, you run them, and `integrate --read-back
      <branch>` checks the landing through git and prints the close-out plan
-     ([Without gh](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#without-gh)).
+     ([Without gh](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#without-gh)).
    - Where kern's relay serves the checkout, `integrate <pull request>` reads the pull request and
      its work issue from the relay, so you save no file, and runs as one call through kern: start
      it in the background, run each GitHub step the hook tells you with exactly that input, and it
      lands, reads back and closes out by itself, with no `--read-back`
-     ([One call through kern](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#without-gh)).
+     ([One call through kern](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#without-gh)).
    - The landing pull request ends in its `Metrics:` line, step 2's body unedited, which
-     `retro.py collect` reads back (README [Metrics](https://github.com/mb-89/SE/blob/v5.56.0/README.md#metrics)).
+     `retro.py collect` reads back (README [Metrics](https://github.com/mb-89/SE/blob/v5.57.0/README.md#metrics)).
    - Check it after the merge: pass its description, saved as `pull_request_read` `get` reads it,
      as `--read-back`'s `--landing-description <file>`; through the relay, run `--read-back`
      without that flag and it reads the description from the relay. Without the `Metrics:` line the
      read-back fails and closes nothing: update the body to step 2's and read back again.
-   - A suite the [Test budget](https://github.com/mb-89/SE/blob/v5.56.0/README.md#test-budget) refuses: escalate it to the worker
+   - A suite the [Test budget](https://github.com/mb-89/SE/blob/v5.57.0/README.md#test-budget) refuses: escalate it to the worker
      with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
      worker to update the report in the pull request description, or include them with
@@ -122,7 +122,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      integrate again, which reuses the landing pull request.
 3. **Test and regenerate** through `integrate` using the complete suite and project commands
    declared by `AGENTS.md` (where a pin moves, see
-   [suite at a moved pin](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
+   [suite at a moved pin](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#suite-at-a-moved-pin)); fix only integration breakage.
 4. **Land** through `integrate`, which pushes the landing branch after the checks pass, the
    project's public check included unless `se.toml` sets `public_check = false`, then waits for
    `check`, squash-merges and reads the merged commit back. Nothing is pushed to the integration
@@ -137,7 +137,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      them; its next landing closes it.
    - A pull request whose review declined it does not land: the review escalated its work issue
      to SE; send SE the line `review.py file` printed, one rank up, as the work model's
-     [escalation ladder](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#escalation-ladder) says.
+     [escalation ladder](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#escalation-ladder) says.
    - A work issue whose acceptance can only be seen after the merge (a CI run on the integration
      branch, a release, a deployment) stays open: its pull request names it with `Refs`, not a
      closing keyword (`work_tickets.py pr-body`), and the closing comment names what it waits for.
@@ -152,7 +152,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 7. **Start what is unblocked**: use `work_tickets.py ready` and `capacity` as helpers. Every work
    issue labelled `ready` whose blockers are closed, that has no branch yet and whose file ownership
    does not clash with running workers, gets a fresh worktree from the newest integration branch
-   (`work_tickets.py start`, see [Worktrees](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#worktrees)).
+   (`work_tickets.py start`, see [Worktrees](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#worktrees)).
 
    It also gets a worker session whose `workspace` is that worktree folder; local workers only
    within capacity. Its prompt contains only:
@@ -165,13 +165,13 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    Your session may show the main checkout as its directory: do NOT call set_workspace and do NOT ask anything; cd to your worktree in every command and use absolute paths.
    ```
 
-   Without `gh`, the prompt is the one [Without gh](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#without-gh)
+   Without `gh`, the prompt is the one [Without gh](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#without-gh)
    names.
 
    Where you start the worker with `create_session` rather than `start` (the cloud flow), change
    the issue's labels in that same step as `start` does, and remove `in-progress` when you close
    it, as the work model's
-   [scheduling](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
+   [scheduling](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
 
    Do not judge a worker by its session status right after starting it: a new session reads as
    idle or "review ready" before its first turn. A worker counts as stuck only when its events
@@ -180,7 +180,7 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 ## Escalate and improve
 
 - You message only SE (or the integrator that started you) and the workers you
-  started ([messages travel only up and down the tree](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#roles-and-flow)),
+  started ([messages travel only up and down the tree](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#roles-and-flow)),
   never another repository's integrator.
 - What you cannot resolve: `work_tickets.py escalate --issue <work issue> --file <question>`
   labels it `escalated` and comments the decision note's link and your recommendation. At the top level,
@@ -189,13 +189,13 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
   integration.
 - A step only the person may approve (a one-way ref change through `work_tickets.py refs
   request`, a setting, a permission) is prepared and escalated as the work model's
-  [Steps only the person approves](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/SKILL.md#steps-only-the-person-approves)
+  [Steps only the person approves](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/SKILL.md#steps-only-the-person-approves)
   says; SE runs it.
 - When escalations or merge problems show a pattern, name it in your report to SE, with the
   agent definition, template or rule it would change; SE files the retro issue
-  ([wrk-007](https://github.com/mb-89/SE/blob/v5.56.0/.github/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+  ([wrk-007](https://github.com/mb-89/SE/blob/v5.57.0/.github/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Report per integration, as a statement, never a question: squash commit, landing pull request
   and its `check` run, suite result, the integration's own metrics line (`Metrics: {...}`, which
-  `integrate` prints last, README [Metrics](https://github.com/mb-89/SE/blob/v5.56.0/README.md#metrics)), output
+  `integrate` prints last, README [Metrics](https://github.com/mb-89/SE/blob/v5.57.0/README.md#metrics)), output
   check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
   escalations, and anything SE must decide or file.
