@@ -227,8 +227,8 @@ func (c *client) hangUp() {
 	}
 }
 
-// catalog is a core's catalog: a component with a read-only command and a
-// batch one, and a derived name.
+// catalog is a core's catalog: a component with a read-only command, an
+// interactive one that writes and a batch one, and a derived name.
 func catalog(t *testing.T) index.Catalog {
 	t.Helper()
 	comp, err := index.ParseDeclaration([]byte(`name = "desk"
@@ -246,7 +246,16 @@ summary = "list the desk"
 group = "Desk"
 help = "list the desk"
 class = "interactive"
+read-only = true
 mcp = "Lists what waits on the desk; use it to see what to do next."
+
+[commands."desk sync"]
+usage = "desk sync"
+summary = "fetch the desk and list it"
+group = "Desk"
+help = "fetch the desk and list it"
+class = "interactive"
+mcp = "Fetches the desk; interactive, and it writes, so it is declared not read-only."
 
 [commands."desk clear"]
 usage = "desk clear"
@@ -303,8 +312,8 @@ func TestInitializeAndListAnswerWhileTheCoreStarts(t *testing.T) {
 	}
 	desk := l.Tools[byName["desk"]]
 	if !strings.Contains(desk.Description, "`desk list`: Lists what waits on the desk; use it to see what to do next. Usage: `desk list [--all]`") ||
-		strings.Contains(desk.Description, "desk clear") {
-		t.Fatalf("desk's description is %q, and wants its read-only command with its mcp description and usage, no batch one", desk.Description)
+		strings.Contains(desk.Description, "desk clear") || strings.Contains(desk.Description, "desk sync") {
+		t.Fatalf("desk's description is %q, and wants its read-only command with its mcp description and usage, none that writes", desk.Description)
 	}
 	enum := desk.InputSchema["properties"].(map[string]any)["command"].(map[string]any)["enum"]
 	if fmt.Sprint(enum) != "[desk list]" {
@@ -379,8 +388,13 @@ func TestTheGreetingReadsItsParts(t *testing.T) {
 	if !r.IsError || r.Structured["error"] != CommandFailed {
 		t.Fatalf("desk answers %+v for a batch command, and wants it refused", r)
 	}
-	if _, calls := core.record(); strings.Join(calls, ";") != "desk list" {
+	leases, calls := core.record()
+	if strings.Join(calls, ";") != "desk list" {
 		t.Fatalf("the core saw the calls %v, and wants only the greeting's desk list", calls)
+	}
+	// The supervisor's lease, then one renewal per call that reached the core.
+	if n := strings.Count(strings.Join(leases, ";"), "take s1"); n < 2 {
+		t.Fatalf("the core saw the leases %v, and wants each call to renew the session's", leases)
 	}
 	c.hangUp()
 }
@@ -430,20 +444,21 @@ summary = "s"
 group = "g"
 help = "h"
 class = "interactive"
+read-only = true
 mcp = "Lists the desk."
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := comp.Commands()[0].MCP; got != "Lists the desk." {
-		t.Fatalf("the declaration reads the mcp description %q, and wants Lists the desk.", got)
+	if got := comp.Commands()[0]; got.MCP != "Lists the desk." || !got.ReadOnly {
+		t.Fatalf("the declaration reads %+v, and wants desk list read-only, its mcp description Lists the desk.", got)
 	}
 	c := catalog(t)
 	for i := range c.Commands {
 		c.Commands[i].MCP = "" // as a catalog might hand it, past its declaration
 	}
 	tools, err := Tools("app", c, nil)
-	if err == nil || !strings.Contains(err.Error(), `command "desk list" of instance desk is interactive and has no mcp description`) {
+	if err == nil || !strings.Contains(err.Error(), `command "desk list" of instance desk is read-only and has no mcp description`) {
 		t.Fatalf("Tools answers %v, and wants the command without an mcp description refused", err)
 	}
 	if len(tools) != 1 || tools[0].Name != StatusTool {
@@ -457,8 +472,10 @@ mcp = "Lists the desk."
 		t.Fatalf("status answers %+v, and wants the catalog check's refusal named", r)
 	}
 	cl.hangUp()
-	if _, err := Tools("app", catalog(t), []string{"desk clear"}); err == nil || !strings.Contains(err.Error(), "is a batch command") {
-		t.Fatalf("Tools answers %v for a batch greeting entry, and wants it refused", err)
+	for _, entry := range []string{"desk clear", "desk sync"} {
+		if _, err := Tools("app", catalog(t), []string{entry}); err == nil || !strings.Contains(err.Error(), "not declared read-only") {
+			t.Fatalf("Tools answers %v for the greeting entry %s, and wants a command not declared read-only refused", err, entry)
+		}
 	}
 }
 
@@ -533,5 +550,23 @@ func TestADoorThatStartsNoCoreServesAndSaysWhy(t *testing.T) {
 	c.hangUp()
 	if core.starts != 0 {
 		t.Fatalf("the door started a core it should not start")
+	}
+}
+
+// A tool is named in snake_case: an instance's dashes read as underscores.
+func TestAToolIsNamedInSnakeCase(t *testing.T) {
+	c := catalog(t)
+	for i := range c.Instances {
+		c.Instances[i].Name = "front-desk"
+	}
+	for i := range c.Commands {
+		c.Commands[i].Instance = "front-desk"
+	}
+	tools, err := Tools("app", c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tools[len(tools)-1]; got.Name != "front_desk" || got.Instance != "front-desk" {
+		t.Fatalf("the instance front-desk's tool is %+v, and wants the name front_desk", got)
 	}
 }

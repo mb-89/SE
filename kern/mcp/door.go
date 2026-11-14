@@ -270,8 +270,9 @@ func (d *door) failure() string {
 }
 
 // await waits up to StartWait for a running core that holds the session's
-// lease; it answers the failed call's result where none runs by then. A core
-// that runs and has not taken the lease by then is called all the same.
+// lease, and renews the lease; it answers the failed call's result where none
+// runs by then. A core that runs and has not taken the lease by then is
+// called all the same.
 func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 	o := d.o
 	if o.NoStart != "" {
@@ -288,6 +289,10 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 		st, err := o.Core.Status()
 		running := err == nil && st.State == host.StateRunning
 		if running && (leased || !time.Now().Before(end)) {
+			// Every call renews the session's lease, beside the supervisor's renewal.
+			if err := o.Core.Lease(o.Session, false); err != nil {
+				fmt.Fprintf(o.Log, "%s mcp: renewing the lease: %v\n", o.App, err)
+			}
 			return st, nil
 		}
 		if why := d.failure(); why != "" {

@@ -88,8 +88,10 @@ class CommandDecl:
     help: str
     klass: str
     session: bool = False
-    #: When to use it, as kern's MCP door offers an interactive command (its catalog check
-    #: refuses one without it).
+    #: It changes nothing: kern's MCP door offers it, and only such a command.
+    read_only: bool = False
+    #: When to use it, as kern's MCP door offers it (its catalog check refuses a read-only
+    #: command without it).
     mcp: str = ""
 
 
@@ -182,13 +184,13 @@ def parse(data: bytes) -> Declaration:
         d.outputs[port] = p
     for n, t in sorted(_table(errs, doc, "commands").items()):
         where = f"commands.{_q(n)}"
-        keys = ("usage", "summary", "group", "help", "class", "session", "mcp")
+        keys = ("usage", "summary", "group", "help", "class", "session", "read-only", "mcp")
         if not _sub(errs, t, where, keys):
             continue
         k = CommandDecl(name=n, usage=str(t.get("usage", "")), summary=str(t.get("summary", "")),
                         group=str(t.get("group", "")), help=str(t.get("help", "")),
                         klass=str(t.get("class", "")), session=_flag(errs, t, where, "session"),
-                        mcp=str(t.get("mcp", "")))
+                        read_only=_flag(errs, t, where, "read-only"), mcp=str(t.get("mcp", "")))
         for f in ("name", "usage", "summary", "help", "group"):
             if not str(getattr(k, f)).strip():
                 errs.append(f'command "{n}" has no {f}')

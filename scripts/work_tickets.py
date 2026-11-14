@@ -8521,10 +8521,14 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
 ))
 #: What the header of these components' declarations says they are generated from.
 COMPONENT_SOURCE = "its command registry"
-#: The commands a person waits on that only read, each with when an agent uses it, which kern's
-#: MCP door offers it with (kern/README.md "The MCP door"): these go through kern where it runs
+#: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
-INTERACTIVE_COMMANDS = {
+INTERACTIVE_COMMANDS = frozenset(
+    {"status", "config", "ready", "capacity", "queue", "fleet-check", "settings-check", "metrics"})
+#: The commands that change nothing (no file, no git state, nothing on GitHub), each with when an
+#: agent uses it: kern's MCP door offers these, and only these (kern/README.md "The MCP door").
+#: `queue` syncs the checkout (git fetch and merge), so it is not among them.
+READ_ONLY_COMMANDS = {
     "status": "Reports the local ticket queue of a worker's worktree (--worktree): the tickets "
               "todo, held and done. Use it before and after each ticket to see what remains.",
     "config": "Shows the repository's and the machine-local settings in effect for a worktree. Use "
@@ -8533,12 +8537,9 @@ INTERACTIVE_COMMANDS = {
              "package to start.",
     "capacity": "Shows how many workers may run now: the local slots, or unlimited in the cloud. "
                 "Use it before starting workers.",
-    "queue": "Lists what waits on the integration: delivered pull requests with a complete field "
-             "report, escalations and startable work issues. Use it to see what is queued, and as "
-             "the integrator to pick the next landing.",
     "fleet-check": "Lists every stuck or stray piece of work, each with its issue, pull request "
                    "and remedy, or says healthy. Use it to see what needs attention across the "
-                   "fleet; it only reads.",
+                   "fleet.",
     "settings-check": "Compares the fleet's settings the repository records (fleet/settings.toml) "
                       "with the live ones, one line per difference; advisory. Use it to see "
                       "whether main's ruleset, the scheduled tasks or the cloud environment drifted.",

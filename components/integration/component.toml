@@ -58,6 +58,7 @@ summary = "print what the commands cost, from the line every run of a command ..
 group = "Integration"
 help = "print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml)"
 class = "interactive"
+read-only = true
 mcp = "Prints what the commands cost from the line each run records: top spenders by wall time and GitHub calls, and each overrun of a budget. Use it to find what is slow."
 
 [commands."work_tickets.py config"]
@@ -66,6 +67,7 @@ summary = "show the repository and the machine-local settings in effect"
 group = "Integration"
 help = "show the repository and the machine-local settings in effect"
 class = "interactive"
+read-only = true
 mcp = "Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read."
 
 [commands."work_tickets.py start"]
@@ -81,6 +83,7 @@ summary = "list startable ready work issues"
 group = "Integration"
 help = "list startable ready work issues"
 class = "interactive"
+read-only = true
 mcp = "Lists the ready work issues a session may start now. Use it to choose the next package to start."
 
 [commands."work_tickets.py capacity"]
@@ -89,6 +92,7 @@ summary = "show local worker capacity or cloud unlimited capacity"
 group = "Integration"
 help = "show local worker capacity or cloud unlimited capacity"
 class = "interactive"
+read-only = true
 mcp = "Shows how many workers may run now: the local slots, or unlimited in the cloud. Use it before starting workers."
 
 [commands."work_tickets.py queue"]
@@ -97,7 +101,6 @@ summary = "list delivered pull requests (open, to the integration branch, with .
 group = "Integration"
 help = "list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues"
 class = "interactive"
-mcp = "Lists what waits on the integration: delivered pull requests with a complete field report, escalations and startable work issues. Use it to see what is queued, and as the integrator to pick the next landing."
 
 [commands."work_tickets.py fleet-check"]
 usage = "work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]\n                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]\n                            [--pulls PULLS]"
@@ -105,7 +108,8 @@ summary = "list every stuck or stray piece of work, each with its issue, pull ..
 group = "Integration"
 help = "list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files"
 class = "interactive"
-mcp = "Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet; it only reads."
+read-only = true
+mcp = "Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet."
 
 [commands."work_tickets.py settings-check"]
 usage = "work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]\n                               [--scheduled-tasks FILE] [--environment FILE] [--strict]"
@@ -113,6 +117,7 @@ summary = "compare the fleet's settings the repository records ..."
 group = "Integration"
 help = "compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads"
 class = "interactive"
+read-only = true
 mcp = "Compares the fleet's settings the repository records (fleet/settings.toml) with the live ones, one line per difference; advisory. Use it to see whether main's ruleset, the scheduled tasks or the cloud environment drifted."
 
 [commands."work_tickets.py docs"]

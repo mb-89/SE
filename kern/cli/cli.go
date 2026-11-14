@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	// The reader of SE_GIT_DOOR=fake:<state file>, so a test that starts a
@@ -361,7 +362,10 @@ func door(name, root string, rooted error, grace, idle time.Duration, stderr io.
 		o.NoStart = fmt.Sprintf("no path to this binary: %v", err)
 	}
 	o.Core = mcp.Host{Root: root, Bin: bin, Args: []string{"--grace", grace.String(), "--idle", idle.String()}}
-	if err := mcp.Serve(context.Background(), o, os.Stdin, os.Stdout); err != nil {
+	// SIGTERM, as a host ends its server, ends the door as EOF does: it returns the lease.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := mcp.Serve(ctx, o, os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(stderr, "%s mcp: %v\n", name, err)
 		return 2
 	}

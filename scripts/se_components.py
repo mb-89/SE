@@ -9,8 +9,9 @@ through kern where kern serves this checkout (`routed`), else directly; any copy
 routes there, the plugin's as much as the checkout's own (`serves`).
 
 - **Declared:** a script that runs components names them in its `COMPONENTS` (each a `Group`) and
-  its read-only commands in `INTERACTIVE_COMMANDS`, each with its MCP description, when an agent
-  uses it, which kern's MCP door offers it with; and builds its parser with `make_parser`;
+  its read-only commands in `INTERACTIVE_COMMANDS`, and builds its parser with `make_parser`; it
+  names those that change nothing, each with its MCP description (when an agent uses it), in
+  `READ_ONLY_COMMANDS`, which kern's MCP door offers;
   `SCRIPTS` lists those scripts. `declared` reads each group's commands, their usage and help from
   that argparse parser (a parser without subcommands is one command, the script itself, `""` in its
   group); `components` merges a group two scripts name into one component (render: timeline.py and
@@ -63,7 +64,6 @@ import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import NamedTuple
 
 SE_ROOT = Path(__file__).resolve().parents[1]
@@ -117,7 +117,8 @@ class Declared:
     usage: str
     help: str
     interactive: bool
-    #: When an agent uses it, as kern's MCP door offers it: an interactive command's alone.
+    #: It changes nothing, and this is when an agent uses it: kern's MCP door offers it. Empty
+    #: for a command not declared read-only.
     mcp: str = ""
 
 
@@ -147,8 +148,8 @@ def declaration(name: str, help_text: str, group: str, commands: Iterable[Declar
         lines += ["", f"[commands.{q(c.name)}]", f"usage = {q(c.usage)}",
                   f"summary = {q(summary(c.help))}", f"group = {q(group)}", f"help = {q(c.help)}",
                   f"class = {q('interactive' if c.interactive else 'batch')}"]
-        if c.interactive:
-            lines.append(f"mcp = {q(c.mcp)}")
+        if c.mcp:
+            lines += ["read-only = true", f"mcp = {q(c.mcp)}"]
     if steps:
         lines += ["", f"[requests.{STEP_PORT}]", f"type = {q(STEP_SHAPE)}",
                   f"answer = {q(STEP_ANSWER_SHAPE)}",
@@ -182,13 +183,13 @@ def usage(prog: str, parser: argparse.ArgumentParser, width: int = REFERENCE_WID
 
 
 def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
-             interactive: Mapping[str, str] = MappingProxyType({})
+             interactive: Iterable[str] = (), read_only: Mapping[str, str] | None = None
              ) -> dict[str, tuple[Group, list[Declared]]]:
     """Each group with its commands by the group's name, read from the script's argparse parser:
     every command the parser runs belongs to exactly one group. A parser without subcommands is one
     command, the script itself, which a group names as `""`, its help the parser's description. A
-    command named in `interactive` only reads (class interactive), and maps to its MCP description,
-    which kern refuses it without; every other is batch."""
+    command named in `interactive` only reads (class interactive); every other is batch. A command
+    named in `read_only` changes nothing, and maps to its MCP description, which it needs."""
     script = parser.prog
     found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in
              leaves(parser) or [((), parser.description or "", parser)]}
@@ -198,24 +199,24 @@ def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
         missing, extra = sorted(set(found) - set(grouped)), sorted(set(grouped) - set(found))
         raise ValueError(f"{script}: its components' commands differ from its parser: missing "
                          f"{missing}, unknown {extra}")
-    if not isinstance(interactive, Mapping) and interactive:
-        raise ValueError(f"{script}: INTERACTIVE_COMMANDS maps each read-only command to its MCP "
-                         "description, when an agent uses it")
-    interactive = dict(interactive) if isinstance(interactive, Mapping) else {}
-    undescribed = sorted(n for n, text in interactive.items() if not str(text).strip())
-    if undescribed:
-        raise ValueError(f"{script}: the read-only commands {undescribed} have no MCP description: "
-                         "say when an agent uses each in INTERACTIVE_COMMANDS")
+    interactive, read_only = frozenset(interactive), dict(read_only or {})
+    unknown = sorted(set(read_only) - set(found))
+    undescribed = sorted(n for n, text in read_only.items() if not str(text).strip())
+    if unknown or undescribed:
+        raise ValueError(f"{script}: READ_ONLY_COMMANDS names commands its parser lacks {unknown}, "
+                         f"and commands without an MCP description {undescribed}: say when an "
+                         "agent uses each")
     return {group.name: (group, [Declared(" ".join((script, *found[n][0])),
                                           usage(" ".join((script, *found[n][0])), found[n][2]),
-                                          found[n][1], n in interactive, interactive.get(n, ""))
+                                          found[n][1], n in interactive, read_only.get(n, ""))
                                  for n in group.commands])
             for group in groups}
 
 
 def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
-                 interactive: Mapping[str, str] = MappingProxyType({}), source: str | None = None,
-                 streamed: Iterable[str] = ()) -> dict[str, str]:
+                 interactive: Iterable[str] = (), source: str | None = None,
+                 streamed: Iterable[str] = (), read_only: Mapping[str, str] | None = None
+                 ) -> dict[str, str]:
     """Each group's component.toml text by its name, read from the script's argparse parser
     (`declared`). `source` names what the header says the declaration is generated from, by
     default the script's parser. A group holding a command named in `streamed` declares the
@@ -224,7 +225,8 @@ def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
     return {name: declaration(name, group.help, group.title, commands, GENERATOR,
                               source or f"{parser.prog}'s parser",
                               steps=bool(streamed & set(group.commands)))
-            for name, (group, commands) in declared(parser, groups, interactive).items()}
+            for name, (group, commands) in declared(parser, groups, interactive,
+                                                    read_only).items()}
 
 
 #: Held while a script loads, so a call beside it in another thread never reads it half loaded.
@@ -268,8 +270,9 @@ def components(root: Path) -> dict[Path, str]:
         module = script(name)
         parser = module.make_parser()
         source = getattr(module, "COMPONENT_SOURCE", None) or f"{parser.prog}'s parser"
-        for group_name, (group, commands) in declared(parser, module.COMPONENTS,
-                                                      module.INTERACTIVE_COMMANDS).items():
+        for group_name, (group, commands) in declared(
+                parser, module.COMPONENTS, module.INTERACTIVE_COMMANDS,
+                getattr(module, "READ_ONLY_COMMANDS", None)).items():
             if group_name not in merged:
                 merged[group_name] = (group, [], [])
             first, into, sources = merged[group_name]

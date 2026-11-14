@@ -22,7 +22,8 @@ import (
 // SE's own catalog, its root wiring.toml and its components' declarations as
 // the core reads them, passes the MCP door's catalog check, and makes a few
 // coarse tools: status, the greeting with every part it reads, and one per
-// command group that offers read-only commands.
+// command group that offers commands declared read-only; work_tickets.py
+// queue, which syncs the checkout, is in none.
 func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	w, err := cli.Wiring(root)
@@ -42,6 +43,11 @@ func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 		names = append(names, tool.Name)
 		if tool.Name == mcp.GreetingTool && len(tool.Greeting) != len(Greeting) {
 			t.Errorf("the greeting reads %+v, and wants every part of %v", tool.Greeting, Greeting)
+		}
+		for _, c := range tool.Commands {
+			if c.Name == "work_tickets.py queue" {
+				t.Errorf("tool %s offers work_tickets.py queue, which syncs the checkout", tool.Name)
+			}
 		}
 	}
 	if got := strings.Join(names, " "); got != "status greeting integration overhaul tickets" || len(tools) < 3 || len(tools) > 8 {
@@ -90,6 +96,7 @@ summary = "list the desk"
 group = "Desk"
 help = "list the desk"
 class = "interactive"
+read-only = true
 mcp = "Lists what waits on the desk; use it to see what to do next."
 `)
 	write(filepath.Join(root, index.WiringFile), "[instances.desk]\ncomponent = \"desk\"\n")

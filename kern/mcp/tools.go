@@ -1,6 +1,7 @@
 // Package mcp is kern's MCP door: `<name> mcp`, an MCP server over stdio that
-// offers the core's read-only commands to an agent host as a few coarse
-// tools, generated from the catalog (index.Catalog), never written per tool.
+// offers the core's read-only commands (index.CommandDecl.ReadOnly) to an
+// agent host as a few coarse tools, generated from the catalog
+// (index.Catalog), never written per tool.
 //
 // A host spawns its configured stdio servers as a session starts, so the door
 // answers initialize and tools/list at once, from the catalog it reads without
@@ -30,6 +31,9 @@ const (
 // Tool is one tool the door offers, as the catalog makes it.
 type Tool struct {
 	Name, Title, Description string
+	// Instance is the instance a command tool runs the commands of; empty for
+	// the door's own tools.
+	Instance string
 	// Commands are the read-only commands a command tool runs, by name; empty
 	// for the door's own tools.
 	Commands []index.CommandInfo
@@ -48,17 +52,23 @@ type Entry struct {
 	Help    string
 }
 
-var toolName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+var toolName = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
+
+// ToolName is an instance's tool name, in snake_case as hosts name tools:
+// its dashes read as underscores.
+func ToolName(instance string) string { return strings.ReplaceAll(instance, "-", "_") }
 
 // Tools answers the door's tools for the catalog: status, the greeting where
 // the application names one, and one tool per switched-on instance that
-// offers read-only (interactive) commands, named after the instance.
+// offers read-only commands (index.CommandDecl.ReadOnly), named after the
+// instance in snake_case (ToolName). A command that is not declared
+// read-only is in no tool, whatever its class.
 //
-// It is the door's catalog check: it refuses an interactive command without
-// an MCP description (the declaration refuses one too, index.CommandDecl.MCP),
-// an instance whose name is none of a tool or takes a tool's of the door's
-// own, and a greeting entry that is a batch command. A greeting entry the
-// catalog lacks is left out, so a checkout that wires less greets with less.
+// It is the door's catalog check: it refuses a read-only command without an
+// MCP description (index.CommandDecl.MCP), an instance whose tool name is
+// none or takes one of the door's own, and a greeting entry that is a
+// command not declared read-only. A greeting entry the catalog lacks is left
+// out, so a checkout that wires less greets with less.
 func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 	var errs []string
 	enabled := map[string]index.InstanceInfo{}
@@ -76,11 +86,11 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 	}
 	byInstance := map[string][]index.CommandInfo{}
 	for _, ci := range c.Commands {
-		if ci.Class != index.Interactive {
+		if !ci.ReadOnly {
 			continue
 		}
 		if strings.TrimSpace(ci.MCP) == "" {
-			errs = append(errs, fmt.Sprintf("command %q of instance %s is interactive and has no mcp description", ci.Name, ci.Instance))
+			errs = append(errs, fmt.Sprintf("command %q of instance %s is read-only and has no mcp description", ci.Name, ci.Instance))
 			continue
 		}
 		byInstance[ci.Instance] = append(byInstance[ci.Instance], ci)
@@ -100,8 +110,8 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 			if _, on := enabled[ci.Instance]; !on {
 				continue
 			}
-			if ci.Class != index.Interactive {
-				errs = append(errs, fmt.Sprintf("greeting entry %q is a batch command: the greeting only reads", e))
+			if !ci.ReadOnly {
+				errs = append(errs, fmt.Sprintf("greeting entry %q is a command not declared read-only: the greeting only reads", e))
 				continue
 			}
 			entries = append(entries, Entry{Name: e, Command: true, Help: ci.MCP})
@@ -121,8 +131,9 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if n == StatusTool || n == GreetingTool || !toolName.MatchString(n) {
-			errs = append(errs, fmt.Sprintf("instance %s offers read-only commands, and its name is no tool name of its own: rename it in the wiring", n))
+		name := ToolName(n)
+		if name == StatusTool || name == GreetingTool || !toolName.MatchString(name) {
+			errs = append(errs, fmt.Sprintf("instance %s offers read-only commands, and %q is no tool name of its own: rename it in the wiring", n, name))
 			continue
 		}
 		in := enabled[n]
@@ -131,7 +142,7 @@ func Tools(app string, c index.Catalog, greeting []string) ([]Tool, error) {
 		for _, ci := range byInstance[n] {
 			fmt.Fprintf(&b, "\n- `%s`: %s Usage: `%s`", ci.Name, strings.TrimSpace(ci.MCP), oneLine(ci.Usage))
 		}
-		tools = append(tools, Tool{Name: n, Title: app + " " + n, Description: b.String(), Commands: byInstance[n], OpenWorld: true})
+		tools = append(tools, Tool{Name: name, Title: app + " " + n, Description: b.String(), Instance: n, Commands: byInstance[n], OpenWorld: true})
 	}
 	if len(errs) > 0 {
 		return tools, fmt.Errorf("the MCP door's catalog check: %s", strings.Join(errs, "; "))
