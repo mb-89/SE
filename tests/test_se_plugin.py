@@ -130,15 +130,49 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     assert plugin["name"] == "se" and plugin["version"] == version  # se.toml [project] version
     assert marketplace["name"] == "se"
     assert marketplace["plugins"] == [{"name": "se", "source": "./", "description": plugin["description"]}]
-    hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
+    assert "hooks" not in plugin, "Claude Code merges inline hooks with hooks/hooks.json: each would fire twice"
+    hook = claude_hooks(checkout)["SessionStart"][0]["hooks"][0]
     assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
+
+
+def claude_hooks(checkout: Path) -> dict:
+    """The Claude plugin's hooks, in its hooks/hooks.json."""
+    return json.loads((checkout / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+
+
+def copilot_hooks(checkout: Path) -> dict:
+    data = json.loads((checkout / ".github" / "hooks" / "se.json").read_text(encoding="utf-8"))
+    assert data["version"] == 1
+    return data["hooks"]
+
+
+def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
+    """sessionStart greets and starts kern, agentStop holds a worker to its delivery (README "Stop
+    hook"); each fails open within its timeout, in bash and in PowerShell."""
+    hooks = copilot_hooks(checkout)
+    assert sorted(hooks) == ["agentStop", "sessionStart"]
+    for event, command in (("sessionStart", "scripts/bootstrap.sh --hook"), ("agentStop", "scripts/se_hook.sh Stop")):
+        [hook] = hooks[event]
+        assert hook["type"] == "command" and hook["cwd"] == "."
+        assert hook["bash"] == f"bash {command} || true"
+        assert hook["powershell"] == f"bash {command}; exit 0"
+        assert 0 < hook["timeoutSec"] <= 120
+        assert (checkout / command.split()[0]).is_file()
+
+
+def test_copilot_clis_manifest_names_the_copilot_layout(checkout):
+    copilot = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
+    claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert copilot == {**claude, "agents": ".github/agents/", "skills": ".github/skills/"}
+    assert sorted(path.name for path in (checkout / ".github" / "agents").iterdir()) == [
+        "integrator.agent.md", "reviewer.agent.md", "se.agent.md", "worker.agent.md"]
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
     """README "Stop hook": one hook per stop, se_hook.sh, which kern's delivery component answers
     and else stop-check as its own process."""
-    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    plugin = {"hooks": claude_hooks(checkout)}
     for event in ("Stop", "SubagentStop"):
         [entry] = plugin["hooks"][event]
         [hook] = entry["hooks"]
@@ -150,7 +184,7 @@ def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
 
 def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout):
     """README "Kern": SessionStart starts kern through bootstrap.sh; every other event posts to it."""
-    plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    plugin = {"hooks": claude_hooks(checkout)}
     events = ["SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]
     assert sorted(plugin["hooks"]) == sorted(["SessionStart", *events])
     for event in events:

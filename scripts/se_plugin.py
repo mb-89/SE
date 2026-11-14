@@ -1,10 +1,11 @@
 """Generate the Copilot and Claude Code layouts of the se plugin from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
-`build` writes both layouts and the Claude Code plugin manifests; `check` refuses when any generated
-file differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a
-Copilot agent or a skill its host would reject or skip (`validate`). Where each layout is installed
-from is the README section "Install".
+`build` writes both layouts, the Claude Code plugin manifests with its hooks (`hooks/hooks.json`),
+Copilot's hooks (`.github/hooks/se.json`) and Copilot CLI's plugin manifest; `check` refuses when any
+generated file differs from what `build` would write, so a hand edit to a generated file fails. Both
+refuse a Copilot agent or a skill its host would reject or skip (`validate`). Where each layout is
+installed from is the README section "Install".
 
 Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
 into that layout, without its prefix; every other key goes into both.
@@ -47,6 +48,16 @@ def kern_hook(event: str) -> str:
     return f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
 
 
+# Copilot's hooks (.github/hooks/se.json, version 1): a project's hooks run in the repository's root,
+# and its CLI may name no project variable (scripts/hosts.sh reads the payload's cwd then). Each
+# fails open: `|| true` (bash) and `exit 0` (PowerShell) keep a refused step from failing the hook,
+# and a hook past its `timeoutSec` fails open by itself. Event: (script and argument, seconds).
+COPILOT_HOOKS = {
+    # The greeting and kern's start; a first start installing uv and Python may take longer.
+    "sessionStart": ("scripts/bootstrap.sh --hook", 120),
+    # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
+    "agentStop": ("scripts/se_hook.sh Stop", 60),
+}
 # Copilot's custom agent fields (VS Code's custom agent file reference); `handoffs` and `agents` work
 # only in VS Code's local harness and are not offered.
 COPILOT_AGENT_FIELDS = frozenset({"name", "description", "tools", "model", "model-policy", "hooks", "target",
@@ -96,7 +107,13 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
           "`python scripts/se_plugin.py build`. -->\n")
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
-MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"))
+CLAUDE_HOOKS = PurePosixPath("hooks/hooks.json")  # the Claude plugin's hooks, never inline in plugin.json
+COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
+# Copilot CLI reads this manifest before .claude-plugin/plugin.json; it names the Copilot layout,
+# whose agents are `<name>.agent.md` as the CLI reads them.
+COPILOT_MANIFEST = PurePosixPath(".github/plugin/plugin.json")
+MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
+             CLAUDE_HOOKS, COPILOT_HOOKS_FILE, COPILOT_MANIFEST)
 
 
 class SourceError(Exception):
@@ -259,6 +276,11 @@ def _json(value: dict) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
 
+def _copilot_hook(command: str, seconds: int) -> dict:
+    return {"type": "command", "bash": f"bash {command} || true", "powershell": f"bash {command}; exit 0",
+            "cwd": ".", "timeoutSec": seconds}
+
+
 def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
     plugin = {
         "name": PLUGIN,
@@ -267,19 +289,28 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "author": {"name": OWNER},
         "repository": REPOSITORY,
         "license": "MIT",
+    }
+    # Claude Code merges inline hooks with hooks/hooks.json, so hooks in both would fire twice.
+    claude_hooks = {
         "hooks": {
             "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
             **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
                for event in KERN_EVENTS},
         },
     }
+    copilot_hooks = {
+        "version": 1,
+        "hooks": {event: [_copilot_hook(command, seconds)] for event, (command, seconds) in COPILOT_HOOKS.items()},
+    }
+    copilot = {**plugin, "agents": f"{LAYOUTS[0].agents}/", "skills": f"{LAYOUTS[0].skills}/"}
     marketplace = {
         "name": PLUGIN,
         "owner": {"name": OWNER},
         "description": "SE, installed from this repository.",
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
-    return {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
+    return {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace), CLAUDE_HOOKS: _json(claude_hooks),
+            COPILOT_HOOKS_FILE: _json(copilot_hooks), COPILOT_MANIFEST: _json(copilot)}
 
 
 def _fields(data: bytes) -> dict[str, str]:

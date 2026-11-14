@@ -19,6 +19,8 @@ One step per place. What each agent does is in its own file in [src/agents/](src
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator`, `reviewer` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
+| GitHub Copilot CLI | `copilot plugin install mb-89/SE`: the CLI reads `.github/plugin/plugin.json`, which names `.github/agents/` and `.github/skills/` | `/agent` and pick `se` | `copilot plugin list` shows `se` |
+| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/`, `.github/skills/` and `.github/hooks/se.json` | pick `se` when assigning the agent | the session opens with SE's greeting |
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
 folder is outside your project. Claude Code asks you to allow this the first time. A headless
@@ -30,9 +32,12 @@ Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
 [public check](AGENTS.md#public-safety) refuses a `Co-authored-by` line in every pushed commit.
 
 **Everything else arrives by itself.** At the first start SE runs
-[scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
-when nothing is missing): it installs `uv` into the user's home, Python 3.11 or newer through `uv`,
-and the project's [modules](#modules); in a session it fetches and starts [kern](#kern).
+[scripts/bootstrap.sh](scripts/bootstrap.sh): it installs `uv` into the user's home, Python 3.11 or
+newer through `uv`, and the project's [modules](#modules); in a session it fetches and starts
+[kern](#kern). It is quiet when nothing is missing.
+
+Claude Code runs it at every session start from the plugin's `hooks/hooks.json`, Copilot from
+`.github/hooks/se.json`.
 
 The one tool it cannot install without admin rights is `git`; it then names the one line to run. An
 interrupted first start finishes when run again.
@@ -592,7 +597,9 @@ refusals = 5
 ```
 
 The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
-ends only with its work issue delivered.
+ends only with its work issue delivered; Copilot hands its `agentStop` the same way
+(`.github/hooks/se.json`). Both hosts' payloads read alike: [scripts/hosts.sh](scripts/hosts.sh), the
+host table, names the project variables, the cloud marks and Copilot's camelCase fields.
 
 - kern answers it within the hook: `wiring.toml` binds both events to the delivery component's
   `stop-check`, which judges in its own warm process ([Kern](#kern)).

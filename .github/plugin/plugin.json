@@ -1,0 +1,12 @@
+{
+  "name": "se",
+  "version": "5.49.15",
+  "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills.",
+  "author": {
+    "name": "mb-89"
+  },
+  "repository": "https://github.com/mb-89/SE",
+  "license": "MIT",
+  "agents": ".github/agents/",
+  "skills": ".github/skills/"
+}

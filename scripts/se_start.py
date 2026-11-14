@@ -942,7 +942,8 @@ def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "
     which opens its first message with it, and SE's root for the session. Claude Code also shows it
     to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`."""
     text = "\n".join(notes + lines)
-    context = (f"{text}\n\nSE's start greeting, already shown to the person. As SE, open your first "
+    shown = "" if host == "copilot" else ", already shown to the person"
+    context = (f"{text}\n\nSE's start greeting{shown}. As SE, open your first "
                "message with it as it is; pass on any line that names a command to run.\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")

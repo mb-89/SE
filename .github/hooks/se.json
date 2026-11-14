@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "bash scripts/bootstrap.sh --hook || true",
+        "powershell": "bash scripts/bootstrap.sh --hook; exit 0",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "bash scripts/se_hook.sh Stop || true",
+        "powershell": "bash scripts/se_hook.sh Stop; exit 0",
+        "cwd": ".",
+        "timeoutSec": 60
+      }
+    ]
+  }
+}

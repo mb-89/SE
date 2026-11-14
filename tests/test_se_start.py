@@ -316,7 +316,9 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     """Copilot's sessionStart reads only `additionalContext` (scripts/hosts.sh)."""
     claude = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se")))
     copilot = json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], [], Path("/opt/se"), "copilot"))
-    assert copilot == {"additionalContext": claude["hookSpecificOutput"]["additionalContext"]}
+    context = claude["hookSpecificOutput"]["additionalContext"]
+    assert copilot == {"additionalContext": context.replace(", already shown to the person", "", 1)}
+    assert "SE's start greeting. As SE, open your first message" in copilot["additionalContext"]
 
 
 def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, monkeypatch):
