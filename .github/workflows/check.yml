@@ -114,7 +114,12 @@ jobs:
             exit 1
           fi
           gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
-          uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md"
+          # A work pull request's Component kinds reach the suite's release guard, which passes a
+          # changed component of a stated kind, as the landing assigns its version (README
+          # "Component versions"); a landing's release commit carries the versions, so it sets none.
+          kinds=()
+          if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
+          uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
       # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
       # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
       # declares them, with their own time and budget.

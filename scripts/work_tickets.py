@@ -922,6 +922,7 @@ def sibling(name: str):
 metrics = sibling("metrics")
 trust = sibling("ci_trust")
 feedback = sibling("feedback")
+component_versions = sibling("component_versions")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -2521,11 +2522,7 @@ def merge_release_kind(commit: str, subject: str, message: str) -> str:
     )
 
 
-def bumped(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
-    major, minor, patch = version
-    return {
-        "major": (major + 1, 0, 0), "minor": (major, minor + 1, 0), "patch": (major, minor, patch + 1),
-    }[kind]
+bumped = component_versions.bumped
 
 
 def failure_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -3713,6 +3710,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
             "field-report --check --worktree <worktree> fills it from the branch"
         )
     problems.extend(release_kind_problems(body, issue_body))
+    problems.extend(component_versions.kinds_problems(body))
     kind = REINTEGRATION_KIND_PATTERN.search(header)
     if kind is not None and kind[1] not in RELEASE_ORDER:
         problems.append(
@@ -6291,9 +6289,13 @@ def integrate(
     merged = run_git(root, "merge", "--no-ff", "-m", f"Integrate {branch}", branch_head(root, branch))
     if merged.returncode != 0:
         conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
-        abandon_landing(root, target, landing)
-        files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
-        raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
+        conflicted = [line for line in conflicts.stdout.splitlines() if line.strip()]
+        if not component_versions.merge_past_claims(root, conflicted, base, branch_head(root, branch),
+                                                    landing, f"Integrate {branch}"):
+            abandon_landing(root, target, landing)
+            raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
+    assign_component_versions(root, target, landing, base, branch, report)
+    regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
             work_issue = relay_work_issue(relay, pull_number, remote, report, work_number)
@@ -6406,6 +6408,43 @@ def integrate(
         raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
+
+
+def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
+                              report: str) -> None:
+    """Write the next version of each component the merge on `landing` changes into it, of the
+    kind the field report states or the branch claims, and say so (README "Component versions");
+    refused, the landing abandoned, where a kind names no component."""
+    try:
+        assignments = component_versions.assign(root, base, branch_head(root, branch), report)
+    except component_versions.VersionError as error:
+        abandon_landing(root, target, landing)
+        raise QueueError(f"Cannot assign the component versions of {branch}: {error}; nothing "
+                         "was merged") from None
+    for assignment in assignments:
+        print(assignment.line())
+
+
+def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
+    """Run `project.release_build` on the merge on `landing` and stage what it rewrites, so the
+    merge already holds the generated files the suite's build writes (a plugin manifest carrying
+    the project version): a branch never goes stale by them, and the suite's verdict is recorded
+    on the merge's tree. A failing build abandons the landing with its output."""
+    command = release_build(root)
+    if command is None:
+        return
+    before = changed_paths(root)
+    result = subprocess.run(command, cwd=root, shell=False, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", check=False)
+    if result.returncode != 0:
+        abandon_landing(root, target, landing)
+        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(f"Cannot merge {branch}: project.release_build ({' '.join(command)}) "
+                         f"failed on the merge; nothing was merged:\n{output}")
+    paths = sorted(changed_paths(root) - before)
+    if paths:
+        checked_git(root, "add", "--", *paths)
+        print(f"Merge: release_build regenerated {', '.join(paths)}")
 
 
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
@@ -7815,7 +7854,11 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
          arg("--check-runs", type=Path, metavar="FILE",
              help="with --check in a worktree: the work pull request's check runs as "
                   "pull_request_read get_check_runs answered them, which the warning on platform "
-                  "code reads; default: read with gh, else from kern's relay"))
+                  "code reads; default: read with gh, else from kern's relay"),
+         arg("--component-kinds-to", type=Path, metavar="FILE",
+             help="with --check: append the release guard's $SE_COMPONENT_KINDS line, the "
+                  "report's Component kinds, to FILE, as CI does to a work pull request's "
+                  "$GITHUB_ENV (README \"Component versions\")"))
 def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     if args.check is not None:
         if (args.comment_count is None) != (args.newest_comment is None):
@@ -7825,6 +7868,12 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
             "count": args.comment_count, "newest": args.newest_comment}
         check_field_report(root, args.check, args.issue_body, comments, args.check_runs)
         print(f"Field report {args.check.name} follows the template")
+        if args.component_kinds_to is not None:
+            kinds = component_versions.stated_kinds(args.check.read_text(encoding="utf-8"))
+            line = f"{component_versions.ENVIRONMENT}={component_versions.environment_value(kinds)}"
+            with args.component_kinds_to.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(line + "\n")
+            print(f"Component kinds for the release guard: {line}")
     elif root is None:
         raise QueueError("field-report --draft needs --worktree <worktree>, the worker's checkout")
     else:
@@ -8005,6 +8054,26 @@ def run_identity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def stated_component_kinds(root: Path) -> None:
+    """On a work branch, give the release guard the kinds its field report states (README
+    "Component versions"): $SE_COMPONENT_KINDS from `.se/work/field-report.md`, unless the
+    environment sets it already (CI, from the pull request description). The integration
+    branch and a landing set none: there the release commit carries the versions."""
+    variable = component_versions.ENVIRONMENT
+    branch = current_branch(root)
+    report = root / ".se" / "work" / "field-report.md"
+    if (variable in os.environ or not branch or branch == integration_branch(root)
+            or branch.startswith(LANDING_PREFIX) or not report.is_file()):
+        return
+    try:
+        kinds = component_versions.stated_kinds(report.read_text(encoding="utf-8"))
+    except component_versions.VersionError as error:
+        raise QueueError(f"{report}: {error}") from None
+    os.environ[variable] = component_versions.environment_value(kinds)
+    print(f"Suite: the release guard reads {branch}'s Component kinds: "
+          f"{os.environ[variable] or 'none stated'} ({report})")
+
+
 @command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
                   "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
                   "budget refuses them (README \"Test budget\")",
@@ -8020,6 +8089,7 @@ def run_identity(root: Path, args: argparse.Namespace) -> int:
          arg("--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
              help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
+    stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
