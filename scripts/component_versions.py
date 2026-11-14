@@ -7,8 +7,13 @@ versions at that moment, into the landing's merge. A branch that still claims a 
 `release.toml` is landed too: the claim gives the kind, and the number is replaced by the next free
 one of that kind.
 
-The logic is pure, `claimed_kind` and `assigned_versions`: versions and kinds in, versions out;
-`assign` is the wiring that reads them through git's door and writes the files.
+Every other file that pins a component's release tag, `PINS`, moves with its number in the same
+merge, so the landing never leaves a pin at the old tag (kern's application template calls
+kern's battery at `@kern-v<version>`).
+
+The logic is pure, `claimed_kind`, `assigned_versions` and `moved_pins`: versions, kinds and file
+texts in, versions and file texts out; `assign` is the wiring that reads them through git's door
+and writes the files.
 """
 
 from __future__ import annotations
@@ -30,6 +35,14 @@ KERN_RELEASE = "kern/release.toml"
 VERSION_LINE = re.compile(r"""^(\s*version\s*=\s*)(["'])[^"'\n]*\2""", re.MULTILINE)
 
 Version = tuple[int, int, int]
+
+# The one list of files that pin a component's release tag as `@<tag>`, by component, relative to
+# the checkout root: the landing moves each pin with the number it assigns (`moved_pins`), and
+# tests/test_component_versions.py fails where another file pins a current tag (`unlisted_pins`).
+PINS: dict[str, tuple[str, ...]] = {
+    "kern": ("kern/template/.github/workflows/check.yml",),  # the battery the template calls
+    "se": (),
+}
 
 
 class VersionError(Exception):
@@ -156,15 +169,42 @@ def tag_of(component: Component, version: Version) -> str:
     return component.tag.replace("{version}", text(version))
 
 
+def pin_pattern(component: Component, version: Version | None = None) -> re.Pattern[str]:
+    """The component's release tag as a pin, `@kern-v<version>`: of `version`, or of any version."""
+    number = re.escape(text(version)) if version else r"\d+\.\d+\.\d+"
+    tag = re.escape(component.tag).replace(re.escape("{version}"), number)
+    return re.compile(rf"@{tag}(?![\w-]|\.\d)")
+
+
+def moved_pins(component: Component, texts: dict[str, str], version: Version) -> dict[str, str]:
+    """The listed files of `texts` ({path: text}) that pin the component at another version than
+    `version`, with every such pin moved to it; the rest of each text byte for byte."""
+    pin = f"@{tag_of(component, version)}"
+    moved = {path: pin_pattern(component).sub(pin, content) for path, content in texts.items()
+             if path in PINS.get(component.name, ())}
+    return {path: content for path, content in moved.items() if content != texts[path]}
+
+
+def unlisted_pins(component: Component, version: Version, texts: dict[str, str]) -> list[str]:
+    """The files of `texts` ({path: text}) that pin the component's current `version` but are
+    not in `PINS`, so the landing would leave them at the old tag: sorted."""
+    listed = {component.path, *PINS.get(component.name, ())}
+    pattern = pin_pattern(component, version)
+    return sorted(path for path, content in texts.items()
+                  if path not in listed and pattern.search(content))
+
+
+def release_tag(content: str) -> str:
+    """The tag a release.toml's download names, `{version}` unfilled: its URL's last part."""
+    download = tomllib.loads(content).get("download")
+    return download.rsplit("/", 1)[-1] if isinstance(download, str) else "{version}"
+
+
 def components(root: Path, ref: str) -> list[Component]:
     """The binaries the checkout releases at `ref`: kern where it incubates it
     (`kern/release.toml`) and the binary se.toml `[binary] release` names (SE's `se`)."""
     found: list[Component] = []
-
-    def tag(content: str) -> str:
-        download = tomllib.loads(content).get("download")
-        return download.rsplit("/", 1)[-1] if isinstance(download, str) else "{version}"
-
+    tag = release_tag
     kern = show(root, ref, KERN_RELEASE)
     core = ("kern",) if kern is not None else ()
     if kern is not None:
@@ -189,22 +229,27 @@ def changed(root: Path, base: str, component: Component) -> bool:
 def merge_past_claims(root: Path, conflicted: list[str], base: str, head: str, landing: str,
                       message: str) -> bool:
     """Merge `head` onto `base` on `landing` where the only conflicts are component release.tomls,
-    as where the branch claimed another number than the integration branch moved to: the failed
-    merge is aborted, `head` gets a commit on `landing` that takes the integration branch's
-    version in each such file (`assign` replaces it next), and that commit is merged. False, the
-    failed merge aborted, where a conflict remains or another file conflicts."""
-    paths = {component.path for component in components(root, base)}
-    if not conflicted or not set(conflicted) <= paths:
+    and the files that pin them (`PINS`), as where the branch claimed another number than the
+    integration branch moved to: the failed merge is aborted, `head` gets a commit on `landing`
+    that takes the integration branch's version in each such file (`assign` replaces it next),
+    and that commit is merged. False, the failed merge aborted, where a conflict remains or
+    another file conflicts."""
+    owners = {path: component for component in components(root, base)
+              for path in (component.path, *PINS.get(component.name, ()))}
+    if not conflicted or not set(conflicted) <= set(owners):
         return False
     git_door.run("merge", "--abort", root=root)
     if git_door.run("switch", "-q", "-C", landing, head, root=root).returncode != 0:
         return False
     for path in conflicted:
-        version = read_version(show(root, base, path), f"{path} at {base[:12]}")
+        component = owners[path]
+        version = read_version(show(root, base, component.path), f"{component.path} at {base[:12]}")
         theirs = show(root, head, path)
         if version is None or theirs is None:
             return False
-        (root / path).write_bytes(with_version(theirs, version).encode("utf-8"))
+        taken = (with_version(theirs, version) if path == component.path
+                 else moved_pins(component, {path: theirs}, version).get(path, theirs))
+        (root / path).write_bytes(taken.encode("utf-8"))
         git_door.run("add", "--", path, root=root)
     taken = git_door.run("commit", "-q", "-m", "Take the integration branch's component versions; "
                          "the landing assigns the next", root=root)
@@ -222,8 +267,9 @@ def merge_past_claims(root: Path, conflicted: list[str], base: str, head: str, l
 def assign(root: Path, base: str, head: str, report_body: str | None) -> list[Assignment]:
     """Write the next version of each changed component into the checkout's index, a merge of
     the branch at `head` onto the integration branch at `base`: of the kind the field report
-    states, else of the kind the branch claims by its own raised number. A component the merge
-    leaves unchanged gets none. The assignments, in the order of `components`."""
+    states, else of the kind the branch claims by its own raised number, and move the files that
+    pin it (`PINS`) to the new tag. A component the merge leaves unchanged gets none. The
+    assignments, in the order of `components`."""
     stated = stated_kinds(report_body)
     found = components(root, base)
     main = {component.name: read_version(show(root, base, component.path),
@@ -254,6 +300,11 @@ def assign(root: Path, base: str, head: str, report_body: str | None) -> list[As
         path.write_bytes(with_version(path.read_bytes().decode("utf-8"),
                                       versions[component.name]).encode("utf-8"))
         git_door.run("add", "--", component.path, root=root)
+        pinned = {name: (root / name).read_bytes().decode("utf-8")
+                  for name in PINS.get(component.name, ()) if (root / name).is_file()}
+        for name, content in moved_pins(component, pinned, versions[component.name]).items():
+            (root / name).write_bytes(content.encode("utf-8"))
+            git_door.run("add", "--", name, root=root)
         assignments.append(Assignment(component, kinds[component.name], main[component.name],
                                       versions[component.name], claims.get(component.name)))
     return assignments

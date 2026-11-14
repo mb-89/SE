@@ -300,9 +300,10 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   from the SE the launcher lies in (the plugin's root, or the pinned module under
   `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
   `cli.Source`), its processes placed in that SE with `KERN_ROOT` naming the project.
-- **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
-  without the core: its Go components, the checkout's `wiring.toml` and its components'
-  declarations. Beside them it starts the core detached, or attaches to the one that runs.
+- **It answers at once.** Either handshake, `server/discover` of the MCP spec of 2026-07-28 or the
+  legacy `initialize`, and `tools/list` come from the catalog the `se` binary reads without the
+  core: its Go components, the checkout's `wiring.toml` and its components' declarations. Beside
+  them it starts the core detached, or attaches to the one that runs.
 - **It holds the session.** It takes a session lease once the core runs and renews it on every
   call. It returns the lease on EOF and on SIGTERM, so the core ends its grace after the last
   session; where the core ended idle or crashed, the door starts it again and takes the lease anew.
@@ -331,7 +332,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 - **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
   so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
   catalog to the check, and the door to its contract with the Go SDK's client against the built
-  `se mcp` and the real core.
+  `se mcp` and the real core, once per handshake.
 
 ### Doctor
 
@@ -662,6 +663,12 @@ landing assigns the number, so branches open in parallel never claim the same on
   part it raised), and the number becomes the next free one of that kind, said in the output.
   Where the claim conflicts with `main`'s version, the landing takes `main`'s version on top of
   the branch first and then assigns the number.
+- **The pins move with the number:** every other file that pins a component's tag as `@<tag>`
+  (kern's template calls kern's battery at `@kern-v<version>`) is on one list,
+  `scripts/component_versions.py` `PINS`, and the landing moves each pin to the assigned tag in
+  the same merge, also where the branch moved it by hand.
+  - `tests/test_component_versions.py` fails where a file pins a component's current tag and is
+    not on the list.
 
 #### Release tags
 

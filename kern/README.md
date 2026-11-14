@@ -92,9 +92,10 @@ One core runs per checkout, the nearest folder up from the working directory tha
 `<name> mcp` (package `mcp/`) is an MCP server over stdio, built on the official Go SDK,
 `github.com/modelcontextprotocol/go-sdk` (`go.mod` owns its version). A host spawns its configured
 stdio servers as a session starts and drops one that is slow to answer, so the door never waits on
-the core to answer `initialize` and `tools/list`. A host runs it as `<name> mcp --root <checkout>`,
-the binary on its PATH or reached through a launcher, since its working directory need not be the
-checkout.
+the core to answer its handshake and `tools/list`. It speaks both handshakes: `server/discover` of
+the MCP spec of 2026-07-28, and the legacy `initialize` of a host that knows only an older one.
+A host runs it as `<name> mcp --root <checkout>`, the binary on its PATH or reached through a
+launcher, since its working directory need not be the checkout.
 
 - **The catalog without the core.** `host.Catalog` reads what the core would serve: the binary's
   components, the checkout's wiring (`cli.Wiring`, its ad hoc overlay included) and the declared
