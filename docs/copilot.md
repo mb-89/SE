@@ -89,8 +89,8 @@ own checkout. Steps 6 and 7, a plugin install in VS Code and another repository,
 to differ (documented)**: a difference there is a finding, not a failure.
 
 After each step, note: as expected, differs, or not run; the minutes it took; and what you needed
-beyond the written step. Paste the notes as one comment on the person-step issue "Monday: the
-owner's first Copilot run".
+beyond the written step. The notes go into [`copilot-cold-run.toml`](copilot-cold-run.toml), and
+the filled file is pasted as the comment on #1172, "Monday: the owner's first Copilot run".
 
 1. **Copilot CLI, SE's checkout.** In a checkout of SE, with the CLI installed
    (`npm install -g @github/copilot@1.0.112`), run `uv run python scripts/copilot.py self-test`;
