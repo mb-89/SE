@@ -830,6 +830,26 @@ What it judges:
   `stop-check --pull <number> --pr-description <file>` writes from the pull request the session's
   GitHub tools opened; without either, it cannot judge.
 
+### Late push
+
+```toml
+[deliver]
+late_push = "warn"
+```
+
+A push of the work branch after its delivery makes the field report's Branch tip stale, and the
+integrator refuses it at the landing. The pre-push hook names it at the push instead
+([scripts/late_push.py](scripts/late_push.py)).
+
+- `deliver` records the tip it delivers in the checkout, `.se/work/delivered-tip.json`; without
+  gh, `stop-check --pull` records the Branch tip of the description it is given.
+- The hook's guard, `work_tickets.py verified`, prints one line for a push of that branch at
+  another commit: the delivery is now stale, the integrator will refuse it, and `deliver` must run
+  again after the push. Before any delivery it says nothing.
+- `late_push` is `"warn"`, built in: the push goes through. `"refuse"` refuses it; then the
+  redelivery pushes through `deliver`, which records its tip first, or without gh through
+  `work_tickets.py push --redeliver`.
+
 ### Test budget
 
 ```toml
@@ -1450,7 +1470,7 @@ work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-ur
     print the pull request description deliver writes: Fixes <issue> where all its acceptance shows
     before the merge, else Refs <issue>, then the field report between its markers
 
-work_tickets.py push [--worktree WORKTREE] [branch]
+work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]
     public check's push gate, then git push -u origin <branch>; retries a transient refusal once a
     minute, ten attempts; the integration branch needs a passing suite and public check recorded on
     the tree pushed
@@ -1471,7 +1491,9 @@ work_tickets.py sync --worktree WORKTREE
 work_tickets.py verified [--worktree WORKTREE] remote_ref commit
     the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the
     integration branch and no passing suite and public check are recorded on its tree; push runs the
-    same check
+    same check. A push of the delivered work branch at another commit than its delivered tip prints
+    the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late
+    push")
 ```
 
 #### Integration

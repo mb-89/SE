@@ -1313,6 +1313,46 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     assert "Notify ahp-session:/other: field report in PR #7" in capsys.readouterr().out
 
 
+def test_deliver_records_the_tip_it_delivers_and_a_later_push_names_the_stale_delivery(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    """README "Late push": deliver records the delivered tip in the checkout; before it the
+    pre-push hook's guard names no late push, after it a push at another commit is named."""
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    monkeypatch.setattr(
+        work_tickets.subprocess, "run",
+        lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
+    )
+    later = "0123456789abcdef0123456789abcdef01234567"
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", later) == 0
+    assert "late push" not in capsys.readouterr().err
+
+    assert run(worktree, "deliver") == 0
+    assert work_tickets.sibling("late_push").load(worktree / ".se" / "work") == {
+        "branch": BRANCH, "tip": TIP}
+    capsys.readouterr()
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", TIP) == 0
+    assert "late push" not in capsys.readouterr().err
+    assert run(worktree, "verified", f"refs/heads/{BRANCH}", later) == 0
+    assert (f"warning: late push: {BRANCH} was delivered at {TIP[:12]} and this push moves it to "
+            f"{later[:12]}: the delivery is now stale") in capsys.readouterr().err
+
+
+def test_a_deliver_that_fails_after_recording_puts_the_record_back(
+        worktree, gh, monkeypatch, capsys, scripted_git):
+    run(worktree, "intake", "--issue", "5")
+    draft_complete_field_report(worktree)
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+
+    def refused(root, branch=None):
+        raise work_tickets.QueueError("push refused")
+
+    monkeypatch.setattr(work_tickets, "push", refused)
+    assert run(worktree, "deliver") == 1
+    assert work_tickets.sibling("late_push").load(worktree / ".se" / "work") is None
+
+
 @pytest.mark.parametrize(
     ("state", "creates"),
     [("open", False), ("merged", True), ("closed", True), ("missing", True)],

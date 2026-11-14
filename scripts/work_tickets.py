@@ -2981,9 +2981,18 @@ def deliver(root: Path) -> int:
             f"deliver: {root} has no origin remote to push {branch} to and open its pull request "
             "on; add it with git remote add origin <url>"
         )
+    before = record_delivered_tip(root, branch, branch_tip(root))  # its own push is no late one
+    try:
+        return delivered_pull_request(root, remote, branch, pull_request_body(issue, report))
+    except BaseException:
+        sibling("late_push").restore(root / ".se" / "work", before)
+        raise
+
+
+def delivered_pull_request(root: Path, remote: str, branch: str, body: str) -> int:
+    """Push `branch` and open or update its pull request with `body`; returns its number."""
     push(root, branch)
     pr = open_pull_request_number(root, remote, branch)
-    body = pull_request_body(issue, report)
     if pr is None:
         output = run_gh_with_body(
             root,
@@ -3126,6 +3135,21 @@ def delivered_pull_path(root: Path) -> Path:
     return root / ".se" / "work" / DELIVERED_PULL
 
 
+def late_push_mode(root: Path) -> str:
+    """se.toml `[deliver] late_push`: what a push after the delivery does (README "Late push")."""
+    try:
+        return sibling("late_push").mode(se_table(root, "deliver"))
+    except ValueError as error:
+        raise QueueError(f"{root / 'se.toml'}: {error}") from error
+
+
+def record_delivered_tip(root: Path, branch: str, tip: str | None) -> dict[str, str] | None:
+    """Record `tip` as the delivered commit of `branch` (late_push.py); the record it replaced."""
+    if not tip:
+        return sibling("late_push").load(root / ".se" / "work")
+    return sibling("late_push").record(root / ".se" / "work", branch, tip)
+
+
 def record_delivered_pull(root: Path, number: int, description: Path) -> None:
     """Keep the pull request the session's GitHub tools opened, the Stop hook's answer file
     without gh: its number, its description as they read it, and the branch it is from."""
@@ -3134,6 +3158,8 @@ def record_delivered_pull(root: Path, number: int, description: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"number": number, "branch": current_branch(root), "body": body},
                                indent=2) + "\n", encoding="utf-8", newline="\n")
+    tip = BRANCH_TIP_PATTERN.search(body)
+    record_delivered_tip(root, current_branch(root), tip[1] if tip else branch_tip(root))
 
 
 #: How long a stop-check trusts a gh it found unusable, in a process that judges many stops (kern's
@@ -8201,19 +8227,45 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
-         arg("branch", nargs="?", help="branch to push; default: the current one"))
+         arg("branch", nargs="?", help="branch to push; default: the current one"),
+         arg("--redeliver", action="store_true",
+             help="this push starts a new delivery of the work branch: record its tip as "
+                  "delivered first, so the pre-push hook's late-push line stays quiet (README "
+                  "\"Late push\"); deliver does this itself"))
 def run_push(root: Path, args: argparse.Namespace) -> int:
-    push(root, args.branch)
+    if not args.redeliver:
+        push(root, args.branch)
+        return 0
+    branch = args.branch or current_branch(root)
+    tip = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
+    before = record_delivered_tip(root, branch, tip.stdout.strip() if tip.returncode == 0 else None)
+    try:
+        push(root, branch)
+    except BaseException:
+        sibling("late_push").restore(root / ".se" / "work", before)
+        raise
     return 0
 
 
 @command("verified", "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where "
                      "the ref is the integration branch and no passing suite and public check are "
-                     "recorded on its tree; push runs the same check",
+                     "recorded on its tree; push runs the same check. A push of the delivered "
+                     "work branch at another commit than its delivered tip prints the late-push "
+                     "line, or with se.toml [deliver] late_push = \"refuse\" is refused (README "
+                     "\"Late push\")",
          OPTIONAL_WORKTREE,
          arg("remote_ref", help="the pushed remote ref, for example refs/heads/main"),
          arg("commit", help="the pushed commit"))
 def run_verified(root: Path, args: argparse.Namespace) -> int:
+    late = sibling("late_push")
+    named = run_git(root, "rev-parse", "--verify", "--quiet", f"{args.commit}^{{commit}}")
+    said = late.verdict(late.load(root / ".se" / "work"), args.remote_ref,
+                        named.stdout.strip() if named.returncode == 0 and named.stdout.strip()
+                        else args.commit, late_push_mode(root))
+    if said is not None and said.refuse:
+        raise QueueError(said.line.removeprefix("error: "))
+    if said is not None:
+        print(said.line, file=sys.stderr)
     if args.remote_ref == f"refs/heads/{integration_branch(root)}":
         guard_pushed_tree(root, args.commit)
         print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")

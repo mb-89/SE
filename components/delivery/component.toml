@@ -39,7 +39,7 @@ help = "sync, check the field report, push, and create or update the pull reques
 class = "batch"
 
 [commands."work_tickets.py push"]
-usage = "work_tickets.py push [--worktree WORKTREE] [branch]"
+usage = "work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]"
 summary = "public check's push gate, then git push -u origin <branch>"
 group = "Delivery"
 help = "public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
@@ -49,7 +49,7 @@ class = "batch"
 usage = "work_tickets.py verified [--worktree WORKTREE] remote_ref commit"
 summary = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> ..."
 group = "Delivery"
-help = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check"
+help = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = \"refuse\" is refused (README \"Late push\")"
 class = "batch"
 
 [commands."work_tickets.py pr-body"]
