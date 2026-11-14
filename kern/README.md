@@ -22,7 +22,8 @@ named in the design's plan.
 | `bus/` | the embedded NATS server on loopback, a user and permissions per component instance, so the bus refuses a second writer | quackitect v5 `src/index/bus.go` |
 | `host/` | the core's process: the standing file, the detached start and its claim file, leases, placements, the idle end | v5 `src/index/detach*.go`, `start.go`, `door.go` |
 | `git/` | kern's git door: every git command kern and SE's Go components run, real git outside tests and the fake (`git/gitfake/`) in them, both held to one contract (`git/contract_test.go`); a test that chose no backend is refused real git, and `SE_GIT_DOOR` picks a process's backend, its `fake:<state file>` read from the state SE's Python fake writes (`git/gitfake/state.go`) | SE's `scripts/git_door.py` |
-| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook` | |
+| `cli/` | the core's command line, the same for the bare core and every application: `<name> start`, `status`, `stop`, `serve`, `hook`, `mcp` | |
+| `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
@@ -47,6 +48,7 @@ One core runs per checkout, the nearest folder up from the working directory tha
 | `kern status [--wait D] [--json]` | `running` with the health (`get.core.health`, 200 ms wait), `starting`, or `not running` (exit 1) |
 | `kern stop` | asks `call.core.stop` and waits until the process has exited |
 | `kern serve [--grace D] [--idle D]` | the core in the foreground: reads `wiring.toml` where the checkout has one |
+| `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
@@ -61,7 +63,8 @@ One core runs per checkout, the nearest folder up from the working directory tha
 - **The core's log**, `.se/.runtime/core.log`: each `serve` starts its lines with `kern: start
   <time>, boot <id>, pid <n>`, so a report of a core that ended quotes that core's run alone.
 - **Leases.** Each `hook.<event>` with a `session_id` takes or renews that session's lease and
-  `hook.SessionEnd` returns it. A component beats on `lease.<i>` every 5 s; a placed instance's
+  `hook.SessionEnd` returns it; `call.core.lease`, `{"session_id": <id>, "end"?: true}`, does the
+  same without a host's event, as the MCP door holds its session. A component beats on `lease.<i>` every 5 s; a placed instance's
   names read `stale` once three beats are missed.
 - **Placements.** A wiring instance with `command = [...]` runs in a process of its own, started
   with `CORE_BUS`, `CORE_USER` and `CORE_TOKEN`; it commits on `commit.<i>` and the core checks
@@ -83,6 +86,41 @@ One core runs per checkout, the nearest folder up from the working directory tha
   reason at once, so the caller can answer the event another way (`--unanswered`).
 - **The idle end.** The core ends 60 s after the last session's lease is returned (or after its
   start, where none took one), or after 30 minutes without a hook event or a call.
+
+## The MCP door
+
+`<name> mcp` (package `mcp/`) is an MCP server over stdio, built on the official Go SDK,
+`github.com/modelcontextprotocol/go-sdk` (`go.mod` owns its version). A host spawns its configured
+stdio servers as a session starts and drops one that is slow to answer, so the door never waits on
+the core to answer `initialize` and `tools/list`.
+
+- **The catalog without the core.** `host.Catalog` reads what the core would serve: the binary's
+  components, the checkout's wiring (`cli.Wiring`, its ad hoc overlay included) and the declared
+  components' `component.toml`, and runs the catalog check. The tools come from it.
+- **Start or attach.** Inside a checkout (a folder with `.git`) the door starts the core detached
+  where none runs (`host.Start`, with its `--grace` and `--idle`), or attaches to the one that runs.
+  Once the core runs it takes a session lease on `call.core.lease` and renews it every 30 s, which
+  counts as an event; on EOF it returns the lease. A core that ended is started anew.
+- **A call before the core stands** waits up to 5 s, then answers the typed error `starting`, its
+  structured content `{"error": "starting", "message", "remedy"}`. The other kinds are `failed`
+  (the core ended at its start, with what it said), `no-checkout` and `command-failed`.
+
+| tool | what |
+|---|---|
+| `status` | the core's state and health, as `kern status --json` |
+| `greeting` | the names and read-only commands the application names in `cli.Greeting`, read in order; a part the catalog lacks is left out, and with no part there is no greeting tool |
+| `<instance>` | one per switched-on instance with interactive commands: `command`, one of them, and `args`; its description lists each with its `mcp` line and usage |
+
+- **Read-only.** A command of class `interactive` only reads, and only those are tools. Every tool
+  carries `readOnlyHint`, `destructiveHint: false` and `idempotentHint`; `openWorldHint` is set on
+  those that run a component's command, which may read an outside service.
+- **The catalog check.** A declaration refuses an interactive command without its `mcp` line, when
+  an agent uses it (`index.CommandDecl.MCP`, both readers alike, `contract/declarations.json`).
+  `mcp.Tools` refuses it too, an instance named like the door's own tools, and a batch command in
+  the greeting.
+- **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,
+  against a fake core. The one contract test with the SDK's own client runs against the built
+  binary and the real core: SE's `components/cmd/se/mcp_test.go`.
 
 ## A component in Python
 
@@ -143,7 +181,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.8"
+version = "0.5.0"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

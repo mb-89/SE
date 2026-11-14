@@ -265,6 +265,39 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   real core with the components placed (`tests/beside_se_components.py`, `se.toml`
   `[tests.beside.se-components]`).
 
+### The MCP door
+
+`se mcp` is SE's MCP server over stdio, kern's door ([kern/README.md "The MCP
+door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.json` (Claude Code,
+Copilot in VS Code and its CLI): a host whose `mcp.json` names `se mcp` calls SE's read-only
+commands through it as tools. The host spawns it as the session starts; nobody starts anything else.
+
+- **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
+  without the core: its Go components, the checkout's `wiring.toml` and its components'
+  declarations. Beside them it starts the core detached, or attaches to the one that runs.
+- **It holds the session.** It takes a session lease once the core runs and returns it on EOF, so
+  the core ends its grace after the last session, as after a hook's SessionEnd.
+- **A call waits** up to 5 s for a core that is starting, then answers the error `starting` with
+  its remedy: call again in a few seconds.
+
+| tool | what | from |
+|---|---|---|
+| `status` | whether the core runs, and its health | kern |
+| `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due`, `fleet/findings` and `work_tickets.py queue` | `components/cmd/se` `Greeting` |
+| `integration` | `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` | `components/integration` |
+| `overhaul` | `overhaul.py facts` | `components/overhaul` |
+| `tickets` | `work_tickets.py status` | `components/tickets` |
+
+- **Generated, never written per tool.** A command group with read-only commands is one tool, its
+  `command` one of them and `args` its arguments. Each command's description is its `mcp` line,
+  which `INTERACTIVE_COMMANDS` of its script holds beside the command.
+- **Read-only.** Every tool says `readOnlyHint` and not `destructiveHint`, so a host may allow it
+  once: in VS Code per tool, in Copilot's CLI `--allow-tool='se(<tool>)'`. A command that writes is
+  in no tool.
+- **Checked.** kern refuses a read-only command without an `mcp` line, so `work_tickets.py docs`
+  refuses one too. `components/cmd/se/mcp_test.go` holds the door to its contract with the Go SDK's
+  client against the built `se mcp` and the real core.
+
 ## Documentation
 
 se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`
