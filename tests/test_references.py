@@ -1,5 +1,6 @@
-"""Dangling references: se's own text names no missing file and no undefined subcommand
-(`scripts/references.py`)."""
+"""Dangling references (`scripts/references.py`): the logic of the check that se's own text names
+no missing file and no undefined subcommand, which `scripts/hygiene.py` runs on SE's checkout in
+CI's `check` job."""
 
 from __future__ import annotations
 
@@ -7,6 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+import hygiene
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -25,14 +28,6 @@ def main(argv=None):
 '''
 
 
-def scanned_texts(root: Path) -> list[Path]:
-    """The texts the repository check scans: agents, skills (the rule book among them), README.md
-    and AGENTS.md."""
-    sources = [path for folder in ("src/agents", "src/skills")
-               for path in sorted((root / folder).rglob("*.md"))]
-    return [*sources, root / "README.md", root / "AGENTS.md"]
-
-
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
     (tmp_path / "scripts").mkdir()
@@ -43,14 +38,7 @@ def repository(tmp_path: Path) -> Path:
 
 
 def test_the_scanned_texts_include_the_rule_book() -> None:
-    assert ROOT / "src" / "skills" / "work-model" / "references" / "rules.md" in scanned_texts(ROOT)
-
-
-def test_se_names_no_missing_file_and_no_undefined_subcommand() -> None:
-    found = [f"{path.relative_to(ROOT).as_posix()} {finding}"
-             for path in scanned_texts(ROOT)
-             for finding in references.dangling(path.read_text(encoding="utf-8"), ROOT, path)]
-    assert not found, "\n".join(found)
+    assert ROOT / "src" / "skills" / "work-model" / "references" / "rules.md" in hygiene.scanned_texts(ROOT)
 
 
 def test_a_dead_path_and_an_unknown_subcommand_fail(repository: Path) -> None:
@@ -90,3 +78,14 @@ def test_the_parser_is_the_registry_and_its_main_never_runs(tmp_path: Path) -> N
                                    "    args = parser.parse_args(argv)\n"
                                    "    raise SystemExit('ran')"), encoding="utf-8")
     assert references.command_tree(script) == {"run": {}, "group": {"leaf": {}}}
+
+
+def test_a_script_without_argparse_is_never_run_and_a_parsers_output_is_swallowed(tmp_path: Path, capfd) -> None:
+    plain = tmp_path / "plain.py"
+    plain.write_text("def main(argv=None):\n    open(__file__ + '.ran', 'w').close()\n", encoding="utf-8")
+    assert references.command_tree(plain) == {} and not (tmp_path / "plain.py.ran").exists()
+    noisy = tmp_path / "noisy.py"
+    noisy.write_text("import argparse, sys\n\n\ndef main(argv=None):\n    print('usage: noisy')\n"
+                     "    sys.stderr.write('noise')\n    raise SystemExit(2)\n", encoding="utf-8")
+    assert references.command_tree(noisy) == {}
+    assert capfd.readouterr() == ("", "")

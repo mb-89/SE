@@ -192,11 +192,12 @@ door, and a run reads its inputs once, computes, then writes its outputs.
   times; one call per item where one batched read would do.
 - **Implementations:**
   - se: git only through [`<se>/scripts/git_door.py`](../../../../scripts/git_door.py), which
-    `tests/test_repository.py` checks, today's other git subprocesses on its allow list;
+    [`<se>/scripts/hygiene.py`](../../../../scripts/hygiene.py) checks in CI's `check` job, with no
+    other git subprocess allowed;
     [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
     through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
     ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
-  - kern: git's Go callers sit on that allow list until kern has its own git door.
+  - kern: git only through its Go door, `kern/git`, which the same check holds.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
     through its own HTTP client, never `gh`); a box's take, local work and land.
 - **Related:** tst-001, des-009

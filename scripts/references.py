@@ -2,8 +2,8 @@
 """Dangling references: text that names a file or a command that does not exist.
 
 One function, `dangling`, finds the references in a Markdown text and checks them; both places that
-refuse them call it: the repository test (`tests/test_references.py`, over se's agents, skills,
-README.md, AGENTS.md and the rule book) and the issue-filing commands `work_tickets.py file`,
+refuse them call it: the repository check (`scripts/hygiene.py` references, over se's agents,
+skills, README.md, AGENTS.md and the rule book) and the issue-filing commands `work_tickets.py file`,
 `backlog file` and `route` (over the issue body's commands).
 
 - Paths: a relative Markdown link, resolved from the text's own file, and a repository path in a
@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import re
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -248,14 +249,16 @@ def capturing():
 @cache
 def command_tree(script: Path) -> Tree:
     """The subcommands `script`'s argument parser defines, nested; empty where it defines none or
-    is no script with a `main`. Its `main` runs only until it parses its arguments."""
-    if not script.is_file() or script.suffix != ".py":
+    is no script with a `main`. Its `main` runs only until it parses its arguments, its output
+    swallowed, and never in a script without argparse (git_door.py's main runs git)."""
+    if not script.is_file() or script.suffix != ".py" or "argparse" not in script.read_text(encoding="utf-8"):
         return {}
     module = load(script)
     main = getattr(module, "main", None)
     if main is None:
         return {}
-    with capturing():
+    sink = io.TextIOWrapper(io.BytesIO())
+    with capturing(), redirect_stdout(sink), redirect_stderr(sink):
         try:
             main([])
         except _Captured as captured:

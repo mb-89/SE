@@ -696,7 +696,7 @@ Once the core runs, the skills, agents and specs read from it instead of restati
   dangling references) next to its prose, so a skill links the rule and the core says whether it
   holds now.
 - **Specs and notes:** their links and anchors resolved by a references component as files change,
-  so a dangling link shows during the edit, not first in `tests/test_references.py`.
+  so a dangling link shows during the edit, not first in `scripts/hygiene.py`'s references check.
 - **In the cloud:** every GitHub answer the session read, readable by the next command, so no
   skill tells the agent to save a tool's answer to a file.
 
