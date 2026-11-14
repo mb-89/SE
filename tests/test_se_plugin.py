@@ -15,6 +15,7 @@ _spec = importlib.util.spec_from_file_location("se_plugin", ROOT / "scripts" / "
 se_plugin = importlib.util.module_from_spec(_spec)
 sys.modules["se_plugin"] = se_plugin
 _spec.loader.exec_module(se_plugin)
+agent_lint = sys.modules["agent_lint"]  # the standalone validators se_plugin.py loads
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -133,6 +134,37 @@ def test_the_plugin_manifests_install_the_whole_checkout_and_bootstrap_it(checko
     hook = plugin["hooks"]["SessionStart"][0]["hooks"][0]
     assert hook["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
     assert (ROOT / "scripts" / "bootstrap.sh").is_file()
+
+
+def copilot_hooks(checkout: Path) -> dict:
+    data = json.loads((checkout / ".github" / "hooks" / "se.json").read_text(encoding="utf-8"))
+    assert data["version"] == 1
+    return data["hooks"]
+
+
+def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
+    """SessionStart greets and starts kern, Stop holds a worker to its delivery (README "Stop
+    hook"); PascalCase events, so Copilot sends Claude-shaped payloads with their `session_id`, and
+    each hook names its host; each fails open within its timeout, in bash and in PowerShell."""
+    hooks = copilot_hooks(checkout)
+    assert sorted(hooks) == ["SessionStart", "Stop"]
+    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
+        [hook] = hooks[event]
+        assert hook["type"] == "command" and hook["cwd"] == "."
+        assert hook["env"] == {"SE_HOOK_HOST": "copilot"}
+        assert hook["bash"] == f"bash {command} || true"
+        assert hook["powershell"] == f"bash {command}; exit 0"
+        assert 30 < hook["timeoutSec"] <= 120, "an explicit timeout above Copilot's default of 30 s"
+        assert (checkout / command.split()[0]).is_file()
+
+
+def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    assert se_plugin.COPILOT_HOOKS_FILE in se_plugin.expected(tmp_path)
+    off = (se_plugin.dataclasses.replace(se_plugin.LAYOUTS[0], hooks=False), se_plugin.LAYOUTS[1])
+    monkeypatch.setattr(se_plugin, "LAYOUTS", off)
+    files = se_plugin.expected(tmp_path)
+    assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.MANIFESTS[0] in files
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
@@ -259,3 +291,78 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
                       encoding="utf-8")
     assert se_plugin.main(["build", "--root", str(root)]) == 2
     assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
+
+
+def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
+    files = se_plugin.expected(checkout)
+    agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
+    assert len(agents) == 4 and se_plugin.validate(files) == []
+    for path in agents:
+        fields = agent_lint.fields(files[path].decode())
+        assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path
+    worker = agent_lint.fields(files[se_plugin.PurePosixPath(".github/agents/worker.agent.md")].decode())
+    assert worker["strict-tools-list"] == "true", "a Copilot field, kept as on main"
+
+
+def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
+    files = se_plugin.expected(checkout)
+    skills = [path for path in files if path.name == "SKILL.md"]
+    assert len(skills) == 2 * len(list((checkout / "src" / "skills").iterdir()))
+    for path in skills:
+        fields = agent_lint.fields(files[path].decode())
+        name = agent_lint.scalar(fields["name"])
+        assert name == path.parent.name and len(name) <= 64 and re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name)
+        assert 0 < len(agent_lint.scalar(fields["description"])) <= 1024
+
+
+@pytest.mark.parametrize("front, refusal", (
+    ("copilot.agents: []", "agents is no Copilot agent field"),
+    ("copilot.description: ''", "a Copilot agent needs a description"),
+    ("copilot.target: cli", "target is one of github-copilot, vscode"),
+    ("handoffs: []", "handoffs is no Copilot agent field"),
+))
+def test_a_copilot_agent_its_host_would_reject_is_refused_naming_it(tmp_path, capsys, front, refusal):
+    write_source(tmp_path, "src/agents/se.md", f"---\nname: se\ndescription: 'SE.'\n{front}\n---\n# SE\n")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert f".github/agents/se.agent.md: {refusal}" in capsys.readouterr().err
+
+
+def test_copilots_other_fields_an_unknown_tool_and_a_claude_only_key_pass(tmp_path):
+    """Copilot ignores a tool it does not know (`send_message`); its other fields are its own."""
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
+                 "copilot.tools: ['read', 'github/*', 'send_message']\ncopilot.strict-tools-list: true\n"
+                 "copilot.reasoning-effort: high\ncopilot.mcp-servers: {}\ncopilot.model: ['a', 'b']\n"
+                 "claude.disallowedTools: AskUserQuestion\n---\n")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
+
+
+@pytest.mark.parametrize("name, description, refusal", (
+    ("Decision", "x", "skill name 'Decision' is not 1 to 64 lowercase letters"),
+    ("other", "x", "skill name 'other' differs from its folder 'decision'"),
+    ("de--cision", "x", "skill name 'de--cision' is not 1 to 64 lowercase letters, digits and single hyphens"),
+    ("decision", "x" * 1025, "skill description has 1025 characters, not 1 to 1024"),
+    ("decision", "", "skill description has 0 characters"),
+))
+def test_a_skill_vs_code_would_skip_is_refused_naming_it(tmp_path, capsys, name, description, refusal):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    write_source(tmp_path, "src/skills/decision/SKILL.md", f"---\nname: {name}\ndescription: '{description}'\n---\n")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert f".github/skills/decision/SKILL.md: {refusal}" in err and f"skills/decision/SKILL.md: {refusal}" in err
+
+
+def write_source(root: Path, path: str, text: str) -> None:
+    if not (root / "se.toml").exists():
+        (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_text(text, encoding="utf-8")
+
+
+def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp_path):
+    """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layouts from it."""
+    crlf = tmp_path / "crlf"
+    shutil.copytree(checkout / "src", crlf / "src")
+    shutil.copy(checkout / "se.toml", crlf)
+    for path in (crlf / "src").rglob("*.md"):
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    assert se_plugin.expected(crlf) == se_plugin.expected(checkout)

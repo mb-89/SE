@@ -19,6 +19,7 @@ One step per place. What each agent does is in its own file in [src/agents/](src
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/mb-89/SE` and open it: VS Code reads its `.github/agents/` and `.github/skills/` | pick `se` in the Agent dropdown of the Chat view | the dropdown lists `se`, `integrator`, `reviewer` and `worker`; **Configure Skills** lists `catch-up`, `decision` and `work-model` |
 | GitHub Copilot in VS Code, every repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`); or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/` | as above | as above |
+| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/`, `.github/skills/` and `.github/hooks/se.json` | pick `se` when assigning the agent | its `sessionStart` hook hands the session SE's greeting |
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
 folder is outside your project. Claude Code asks you to allow this the first time. A headless
@@ -30,9 +31,12 @@ Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
 [public check](AGENTS.md#public-safety) refuses a `Co-authored-by` line in every pushed commit.
 
 **Everything else arrives by itself.** At the first start SE runs
-[scripts/bootstrap.sh](scripts/bootstrap.sh) (Claude Code runs it at every session start; it is quiet
-when nothing is missing): it installs `uv` into the user's home, Python 3.11 or newer through `uv`,
-and the project's [modules](#modules); in a session it fetches and starts [kern](#kern).
+[scripts/bootstrap.sh](scripts/bootstrap.sh): it installs `uv` into the user's home, Python 3.11 or
+newer through `uv`, and the project's [modules](#modules); in a session it fetches and starts
+[kern](#kern). It is quiet when nothing is missing.
+
+Claude Code runs it at every session start from the plugin's hooks, Copilot from
+`.github/hooks/se.json`, a fail-open observer: SE works under Copilot with its hooks never firing.
 
 The one tool it cannot install without admin rights is `git`; it then names the one line to run. An
 interrupted first start finishes when run again.
@@ -266,6 +270,49 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 - **Tested** against kern's Python fake core (`tests/test_se_components.py`), and once against the
   real core with the components placed (`tests/beside_se_components.py`, `se.toml`
   `[tests.beside.se-components]`).
+
+### The MCP door
+
+`se mcp --root <checkout>` is SE's MCP server over stdio, kern's door ([kern/README.md "The MCP
+door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.json` (Claude Code,
+Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
+through it as tools. The host spawns it as the session starts; nobody starts anything else.
+
+- **What the host runs.** `se` must already be on the PATH (`~/.se/bin`, [Kern](#kern)), or be
+  reached through a launcher that fetches it. Pass the checkout as `--root`: a host's working
+  directory need not be the repository. Which file names the door for which host is not here yet.
+- **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
+  without the core: its Go components, the checkout's `wiring.toml` and its components'
+  declarations. Beside them it starts the core detached, or attaches to the one that runs.
+- **It holds the session.** It takes a session lease once the core runs and renews it on every
+  call. It returns the lease on EOF and on SIGTERM, so the core ends its grace after the last
+  session; where the core ended idle or crashed, the door starts it again and takes the lease anew.
+- **A call waits** up to 5 s for a core that is starting, then answers the error `starting` with
+  its remedy (a tool result with `isError`): call again in a few seconds.
+
+| tool | what | from |
+|---|---|---|
+| `status` | whether the core runs, and its health | kern |
+| `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due` and `fleet/findings` | `components/cmd/se` `Greeting` |
+| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
+| `overhaul` | `overhaul.py facts` | `components/overhaul` |
+| `tickets` | `work_tickets.py status` | `components/tickets` |
+
+- **Read-only, command by command.** A script names the commands that change nothing in its
+  `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
+  docs` writes `read-only = true` and that `mcp` line into its declaration. `work_tickets.py queue`
+  syncs the checkout (git fetch and merge), so no tool offers it, and no command that writes.
+- **Generated, never written per tool.** A command group with read-only commands is one tool,
+  named in snake_case: `command` is one of them, `args` its arguments, `page` the page of a long
+  answer.
+- **Approvals stay the host's.** Every tool says `readOnlyHint` and not `destructiveHint`, which
+  neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
+  `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
+  through "Chat: Manage Tool Approval".
+- **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
+  so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
+  catalog to the check, and the door to its contract with the Go SDK's client against the built
+  `se mcp` and the real core.
 
 ### Doctor
 
@@ -697,7 +744,12 @@ refusals = 5
 ```
 
 The plugin hands every `Stop` and `SubagentStop` to `work_tickets.py stop-check`, so a worker's turn
-ends only with its work issue delivered.
+ends only with its work issue delivered; Copilot hands its `Stop` the same way
+(`.github/hooks/se.json`), a check that fails open.
+
+The hook scripts read both hosts' payloads alike: [scripts/hosts.sh](scripts/hosts.sh), the host
+table, names the project variable, the host and cloud marks, the hook file's host selector and
+Copilot's camelCase fields.
 
 - kern answers it within the hook: `wiring.toml` binds both events to the delivery component's
   `stop-check`, which judges in its own warm process ([Kern](#kern)).
@@ -1679,6 +1731,14 @@ Then what went well and what follows. The facts and the block stay in the retro 
 report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the
 next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
 numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
+
+`scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
+their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts
+written twice, denials by tool and long waits, per session and in total (`--json`).
+
+It prints counts, locations and masked command shapes, never message text; it judges nothing,
+files nothing, and nothing runs it. Its docstring owns the signals and the adapter a new format
+adds.
 
 `scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
 right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.

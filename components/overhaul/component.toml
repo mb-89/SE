@@ -30,3 +30,5 @@ summary = "list the pruning facts of a checkout"
 group = "Overhaul"
 help = "list the pruning facts of a checkout"
 class = "interactive"
+read-only = true
+mcp = "Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul."

@@ -55,6 +55,11 @@ def test_the_parser_declares_what_the_command_registry_holds() -> None:
         assert declared.usage == se_components.usage(alone.prog, alone)
         assert declared.klass == ("interactive" if " ".join(words) in
                                    work_tickets.INTERACTIVE_COMMANDS else "batch")
+        described = work_tickets.READ_ONLY_COMMANDS.get(" ".join(words), "")
+        assert (declared.read_only, declared.mcp) == (bool(described), described)
+    # queue syncs the checkout: interactive, and not read-only, so the MCP door does not offer it.
+    assert "queue" in work_tickets.INTERACTIVE_COMMANDS
+    assert not catalog["work_tickets.py queue"].read_only
 
 
 def test_any_scripts_parser_declares_its_groups_and_refuses_a_command_in_none() -> None:
@@ -70,6 +75,14 @@ def test_any_scripts_parser_declares_its_groups_and_refuses_a_command_in_none() 
     assert '[commands."tool.py show"]\nusage = "tool.py show [--all]"\nsummary = "show it"' in text
     assert '[commands."tool.py set one"]\nusage = "tool.py set one value"' in text
     assert text.count('class = "interactive"') == 1
+    # A command declared read-only carries its MCP description, kern's MCP door's text; others none.
+    text = se_components.declarations(top, groups, interactive={"show"},
+                                      read_only={"show": "Shows it; use it."})["tool"]
+    assert 'class = "interactive"\nread-only = true\nmcp = "Shows it; use it."\n' in text
+    assert text.count("mcp = ") == 1
+    for wrong in ({"show": " "}, {"gone": "Goes."}):
+        with pytest.raises(ValueError, match=r"tool.py: READ_ONLY_COMMANDS"):
+            se_components.declarations(top, groups, read_only=wrong)
     with pytest.raises(ValueError, match=r"tool.py: .*missing \['set one'\], unknown \['gone'\]"):
         se_components.declarations(top, [groups[0]._replace(commands=("show", "gone"))])
 

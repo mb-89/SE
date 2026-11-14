@@ -22,7 +22,7 @@ NAME, APP_VERSION = APP["binary"], APP["version"]
 APP_BASE = APP["download"].replace("{version}", APP_VERSION)
 BUILD_DIR, PACKAGE = "components", APP["package"]
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
-         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp")
+         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
 # A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
@@ -302,6 +302,77 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary --project {sh(project)}" in calls(home)
     # Every later hook finds the binary where the start named it (scripts/se_hook.sh).
     assert (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
+
+
+# Copilot's camelCase sessionStart payload (an event registered in camelCase): no project variable,
+# so the project is the payload's cwd (scripts/hosts.sh).
+COPILOT_START = '{"sessionId":"s1","timestamp":1,"cwd":"%s","source":"startup"}'
+
+
+def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hands_kern_snake_case(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)  # uv and Python in place
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    (home / "calls").unlink()
+    env = {"HOME": sh(home), "PATH": sh(path)}
+    result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
+                            input=COPILOT_START % sh(project), cwd=base)
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
+    handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","source":"startup"}' % sh(project)
+    log = [line for line in calls(home) if line.startswith("kern ")]
+    assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{handed}"]
+
+
+# Copilot's start as .github/hooks/se.json registers it: PascalCase `SessionStart`, so a Claude-shaped
+# payload, and the hook's environment naming its host.
+PASCAL_START = '{"hook_event_name":"SessionStart","session_id":"s1","cwd":"%s","source":"startup"}'
+
+
+def copilot_start(home: Path, path: Path, cwd: Path, payload: str) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": sh(path), "SE_HOOK_HOST": "copilot"}
+    return subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
+                          input=payload, cwd=cwd)
+
+
+def test_a_copilot_start_with_a_claude_shaped_payload_greets_as_copilot(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    result = copilot_start(home, path, base, PASCAL_START % sh(project))
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
+
+
+def test_copilot_starts_a_session_once_however_many_sources_fire(machine):
+    """Copilot runs every hook source it finds together; the second start of the same session ends
+    quietly, and kern is started once."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    (home / "calls").unlink()
+    first = copilot_start(home, path, base, PASCAL_START % sh(project))
+    second = copilot_start(home, path, base, PASCAL_START % sh(project))
+    assert first.stdout == '{"greeting": 1}\n' and (second.returncode, second.stdout) == (0, "")
+    assert [line for line in calls(home) if line.startswith("kern start")] == [f"kern start --root {sh(project)}"]
+    other = copilot_start(home, path, base, (PASCAL_START % sh(project)).replace('"s1"', '"s2"'))
+    assert other.stdout == '{"greeting": 1}\n', "another session starts"
+
+
+def test_claude_code_starts_are_not_guarded(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    for _ in range(2):
+        assert run(home, path, project, "--hook", stdin=START).stdout == '{"greeting": 1}\n'
+    assert not list((project / ".se" / ".runtime").glob("start-*.claim"))
 
 
 def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):

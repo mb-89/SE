@@ -115,6 +115,56 @@ def test_a_stop_no_command_of_kerns_answers_falls_back_to_stop_check_with_the_ho
     assert (home / "fallback").read_text(encoding="utf-8").splitlines() == [fallback, fallback]
 
 
+# Copilot's payloads (scripts/hosts.sh): camelCase, and its CLI hooks may set no project variable.
+COPILOT_TOOL = '{"sessionId":"s1","timestamp":1,"cwd":"%s","toolName":"bash","toolArgs":"{}"}'
+COPILOT_STOP = '{"sessionId":"s1","timestamp":1,"cwd":"%s","transcriptPath":"/t","stopReason":"end_turn"}'
+
+
+def copilot_hook(home: Path, event: str, payload: str, **variables: str) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", **variables}
+    return subprocess.run([BASH, sh(SCRIPT), event], env=env, input=payload, capture_output=True, text=True,
+                          timeout=30)
+
+
+def test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_snake_case(machine):
+    home, project = machine
+    install(home, project)
+    result = copilot_hook(home, "PreToolUse", COPILOT_TOOL % sh(project))
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","tool_name":"bash","toolArgs":"{}"}' % sh(project)
+    assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{handed}\n"
+
+
+def test_without_a_project_variable_or_a_cwd_the_project_is_the_working_directory(machine, tmp_path):
+    home, project = machine
+    install(home, project)
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "SE_HOOK_HOST": "copilot"}
+    result = subprocess.run([BASH, sh(SCRIPT), "PostToolUse"], env=env, input='{"session_id":"s1"}',
+                            capture_output=True, text=True, timeout=30, cwd=project)
+    assert result.returncode == 0, result.stderr
+    assert (home / "calls").read_text(encoding="utf-8").startswith("hook PostToolUse --root ")
+
+
+def test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does(machine):
+    """.github/hooks/se.json registers `Stop`: Copilot then sends a Claude-shaped payload."""
+    home, project = machine
+    stop = '{"hook_event_name":"Stop","session_id":"s1","cwd":"%s","stop_hook_active":false}' % sh(project)
+    result = copilot_hook(home, "Stop", stop, SE_HOOK_HOST="copilot")
+    assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
+    [line] = (home / "fallback").read_text(encoding="utf-8").splitlines()
+    assert line.endswith(f"work_tickets.py stop-check <<{stop}")
+
+
+def test_a_copilot_agent_stop_falls_back_to_stop_check_with_the_payload_in_snake_case(machine):
+    home, project = machine
+    result = copilot_hook(home, "Stop", COPILOT_STOP % sh(project))
+    assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
+    handed = ('{"session_id":"s1","timestamp":1,"cwd":"%s","transcript_path":"/t","stop_reason":"end_turn"}'
+              % sh(project))
+    [line] = (home / "fallback").read_text(encoding="utf-8").splitlines()
+    assert line.endswith(f"work_tickets.py stop-check <<{handed}")
+
+
 # A late checkout (README "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
 # start it is asked for, with the checkout it was asked for and the hook's JSON.
 FAKE_BOOTSTRAP = """#!/bin/sh
@@ -127,6 +177,7 @@ def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse") 
     if not scripts.is_dir():
         scripts.mkdir(parents=True)
         (scripts / "se_hook.sh").write_bytes(SCRIPT.read_bytes())
+        (scripts / "hosts.sh").write_bytes((SCRIPT.parent / "hosts.sh").read_bytes())
         (scripts / "bootstrap.sh").write_text(FAKE_BOOTSTRAP, encoding="utf-8", newline="\n")
     payload = f'{{"session_id":"s1","hook_event_name":"{event}","cwd":"{sh(cwd)}"}}'
     env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project)}

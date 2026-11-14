@@ -522,7 +522,8 @@ def plugin_checkout(checkout: Path, build: list[str]) -> Path:
     """The checkout made an se plugin: se's sources and generator, its layouts built and pushed."""
     shutil.copytree(PROJECT / "src", checkout / "src")
     (checkout / "scripts").mkdir()
-    shutil.copy2(PROJECT / "scripts" / "se_plugin.py", checkout / "scripts" / "se_plugin.py")
+    for name in ("se_plugin.py", "agent_lint.py"):  # the generator and the validators it loads
+        shutil.copy2(PROJECT / "scripts" / name, checkout / "scripts" / name)
     (checkout / "se.toml").write_text(
         settings("1.2.3") + f"release_build = {json.dumps(build)}\n", encoding="utf-8")
     plugin("build", checkout)

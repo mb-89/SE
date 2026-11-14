@@ -8700,6 +8700,28 @@ COMPONENT_SOURCE = "its command registry"
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
     {"status", "config", "ready", "capacity", "queue", "fleet-check", "settings-check", "metrics"})
+#: The commands that change nothing (no file, no git state, nothing on GitHub), each with when an
+#: agent uses it: kern's MCP door offers these, and only these (kern/README.md "The MCP door").
+#: `queue` syncs the checkout (git fetch and merge), so it is not among them.
+READ_ONLY_COMMANDS = {
+    "status": "Reports the local ticket queue of a worker's worktree (--worktree): the tickets "
+              "todo, held and done. Use it before and after each ticket to see what remains.",
+    "config": "Shows the repository's and the machine-local settings in effect for a worktree. Use "
+              "it when a command does not behave as expected, to see which settings it read.",
+    "ready": "Lists the ready work issues a session may start now. Use it to choose the next "
+             "package to start.",
+    "capacity": "Shows how many workers may run now: the local slots, or unlimited in the cloud. "
+                "Use it before starting workers.",
+    "fleet-check": "Lists every stuck or stray piece of work, each with its issue, pull request "
+                   "and remedy, or says healthy. Use it to see what needs attention across the "
+                   "fleet.",
+    "settings-check": "Compares the fleet's settings the repository records (fleet/settings.toml) "
+                      "with the live ones, one line per difference; advisory. Use it to see "
+                      "whether main's ruleset, the scheduled tasks or the cloud environment drifted.",
+    "metrics": "Prints what the commands cost from the line each run records: top spenders by "
+               "wall time and GitHub calls, and each overrun of a budget. Use it to find what is "
+               "slow.",
+}
 #: The batch commands that run as one call through kern where its GitHub relay serves the
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.

@@ -957,14 +957,18 @@ def root_line(se_root: Path) -> str:
     return f"{ROOT_NAME}: {se_root}"
 
 
-def hook_output(lines: list[str], notes: list[str], se_root: Path) -> str:
-    """Claude Code's SessionStart hook output: the greeting shown to the person (systemMessage) and
-    handed to the session, which opens its first message with it, and SE's root for the session."""
+def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude") -> str:
+    """The SessionStart hook output of `host` (scripts/hosts.sh): the greeting handed to the session,
+    which opens its first message with it, and SE's root for the session. Claude Code also shows it
+    to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`."""
     text = "\n".join(notes + lines)
-    context = (f"{text}\n\nSE's start greeting, already shown to the person. As SE, open your first "
+    shown = "" if host == "copilot" else ", already shown to the person"
+    context = (f"{text}\n\nSE's start greeting{shown}. As SE, open your first "
                "message with it as it is; pass on any line that names a command to run.\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
+    if host == "copilot":
+        return json.dumps({"additionalContext": context})
     return json.dumps({"systemMessage": text,
                        "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
 
@@ -990,6 +994,8 @@ def build_parser() -> argparse.ArgumentParser:
                                         "documentation, from the cached update check")
     status_parser.add_argument("--greeting", action="store_true", help="only the greeting: out-of-date lines only")
     status_parser.add_argument("--hook", action="store_true", help="the greeting as Claude Code SessionStart JSON")
+    status_parser.add_argument("--host", choices=("claude", "copilot"), default="claude",
+                               help="with --hook: the host whose payload started the session (scripts/hosts.sh)")
     status_parser.add_argument("--note", action="append", default=[], help="a line to show above the greeting")
     status_parser.add_argument("--offline", action="store_true", help="never start the update check")
     status_parser.add_argument("--kern-bin", type=Path, help="bootstrap.sh: the kern binary it started for the project")
@@ -1036,7 +1042,7 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
     lines = lines[:1] + kern + lines[1:]
     if args.hook:
-        print(hook_output(lines, args.note, SE_ROOT))
+        print(hook_output(lines, args.note, SE_ROOT, args.host))
     else:
         print("\n".join(args.note + lines))
     return 0
