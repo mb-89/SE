@@ -35,12 +35,14 @@ const (
 // a peer that attaches with another is refused.
 const Contract = index.Contract
 
-// Standing is what the standing file says of the running core: its process,
-// the boot it runs in (Boot) and when it started, its bus and the bus's users
-// with their passwords. Only the checkout's owner reads it.
+// Standing is what the standing file says of the running core: its process
+// with its start mark (procMark), the boot it runs in (Boot) and when it
+// started, its bus and the bus's users with their passwords. Only the
+// checkout's owner reads it.
 type Standing struct {
 	Contract int               `json:"contract"`
 	Pid      int               `json:"pid"`
+	Proc     string            `json:"proc"`
 	Boot     string            `json:"boot"`
 	Root     string            `json:"root"`
 	Bus      string            `json:"bus"`
@@ -56,14 +58,16 @@ var ErrNotRunning = errors.New("no core runs")
 // nowhere: the core ended without its end, killed or crashed (TakeVanished).
 var ErrVanished = fmt.Errorf("%w: its process ended without its end", ErrNotRunning)
 
-// ErrReused is ErrVanished where the standing file names a pid that runs,
-// and its bus accepts no connection: the core is gone, and its pid is not
-// reaped yet or is another process's now. A
-// machine restarted with the checkout's files kept, as a cloud environment
-// restored from its snapshot is, gives its processes the pids of the last
-// boot, the start's own among them, so the file of a core of that boot names
-// a live process that is no core.
-var ErrReused = fmt.Errorf("%w: its pid runs and its bus is gone", ErrVanished)
+// ErrReused is ErrVanished where the standing file names a pid that runs as
+// another process than its core (its start mark differs), or whose bus
+// accepts no connection: the core is gone, and its pid is not reaped yet or
+// is another process's now. A machine restarted with the checkout's files
+// kept, as a cloud environment restored from its snapshot is, gives its
+// processes the pids of the last boot, the start's own among them, so the
+// file of a core of that boot names a live process that is no core; a
+// restored snapshot may keep the boot id too (Boot), so the start mark, not
+// the boot, tells them apart.
+var ErrReused = fmt.Errorf("%w: its pid runs as another process, or its bus is gone", ErrVanished)
 
 // ErrEarlierBoot is ErrNotRunning where the standing file names a core of an
 // earlier boot (Boot): the machine restarted with the checkout's files kept,
@@ -85,9 +89,8 @@ func LogPath(root string) string { return filepath.Join(root, Runtime, logFile) 
 
 // ReadStanding answers the running core's standing. A file that is missing,
 // unreadable, names an earlier boot (ErrEarlierBoot), names a pid that runs
-// nowhere, or names a bus that accepts no connection reads as ErrNotRunning: a
-// pid alone says nothing once the machine restarted (ErrReused), which a
-// platform that names no boot leaves the bus to tell.
+// nowhere, names a pid that another process holds now, or names a bus that
+// accepts no connection reads as ErrNotRunning (judge).
 func ReadStanding(root string) (Standing, error) {
 	var s Standing
 	data, err := readWhole(StandingPath(root))
@@ -100,16 +103,31 @@ func ReadStanding(root string) (Standing, error) {
 	if err := json.Unmarshal(data, &s); err != nil || s.Port == 0 || s.Bus == "" {
 		return Standing{}, fmt.Errorf("%w: %s names no bus", ErrNotRunning, StandingPath(root))
 	}
-	if earlierBoot(s.Boot) {
-		return Standing{}, fmt.Errorf("%w: %s names boot %s, and this is boot %s", ErrEarlierBoot, StandingPath(root), s.Boot, Boot())
-	}
-	if !alive(s.Pid) {
-		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrVanished, StandingPath(root), s.Pid)
-	}
-	if !accepts(s.Bus) {
-		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs, and its bus %s accepts no connection", ErrReused, StandingPath(root), s.Pid, s.Bus)
+	if err := judge(s); err != nil {
+		return Standing{}, fmt.Errorf("%s %w", StandingPath(root), err)
 	}
 	return s, nil
+}
+
+// judge says why the standing s names no running core, nil where it names
+// one: its boot is an earlier one (ErrEarlierBoot), its pid runs nowhere
+// (ErrVanished), its pid runs as another process than its core, by the start
+// mark s keeps, or its bus accepts nothing (ErrReused). A file that keeps no
+// mark, or a platform that names none, leaves the bus to tell a reused pid.
+func judge(s Standing) error {
+	if earlierBoot(s.Boot) {
+		return fmt.Errorf("names boot %s, and this is boot %s: %w", s.Boot, Boot(), ErrEarlierBoot)
+	}
+	if !alive(s.Pid) {
+		return fmt.Errorf("names pid %d, which runs nowhere: %w", s.Pid, ErrVanished)
+	}
+	if now := procMark(s.Pid); s.Proc != "" && now != "" && now != s.Proc {
+		return fmt.Errorf("names pid %d of start %s, and that pid runs a process of start %s: %w", s.Pid, s.Proc, now, ErrReused)
+	}
+	if !accepts(s.Bus) {
+		return fmt.Errorf("names pid %d, which runs, and its bus %s accepts no connection: %w", s.Pid, s.Bus, ErrReused)
+	}
+	return nil
 }
 
 // accepts says whether the bus at url takes a connection within BusWait.
