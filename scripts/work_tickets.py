@@ -5615,9 +5615,33 @@ def remove_worker_worktree(root: Path, branch: str, landed: str | None = None) -
         raise QueueError(f"Cannot remove worker worktree: {detail}")
 
 
-def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None) -> None:
+def refused_reason(detail: str) -> str:
+    """The short reason of a refused push: its HTTP status where git names one, else its first
+    line."""
+    found = re.search(r"\b(?:HTTP |error: )?([45]\d\d)\b", detail)
+    if found:
+        return f"HTTP {found[1]}"
+    return next((line.strip() for line in detail.splitlines() if line.strip()), detail)
+
+
+def cleanup_refusals(refused: list[tuple[str, str]]) -> str | None:
+    """The one summary line of a landing's branch deletions origin refused, `(branch, detail)`
+    each, or None where it refused none."""
+    if not refused:
+        return None
+    reasons = list(dict.fromkeys(refused_reason(detail) for _, detail in refused))
+    names = ", ".join(branch for branch, _ in refused)
+    return (f"Cleanup: origin refused deleting {len(refused)} merged branch"
+            f"{'es' if len(refused) > 1 else ''} ({names}: {'; '.join(reasons)}); the "
+            "repository's automatic head-branch deletion removes them, not retried")
+
+
+def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None,
+                         refused: list[tuple[str, str]] | None = None) -> None:
     """Delete `branch` locally and on origin once `landed` (default: the integration branch), the
-    tip a squash landing merged, contains its `head`."""
+    tip a squash landing merged, contains its `head`. Where origin refuses and `refused` is given,
+    the refusal is added to it for the landing's one summary line (cleanup_refusals) instead of
+    its own warning."""
     target = landed or integration_branch(root)
     contained = run_git(root, "merge-base", "--is-ancestor", head, target)
     if contained.returncode != 0:
@@ -5634,7 +5658,9 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
     else:
         print("Cleanup: local merged branch deleted")
     remote = run_git(root, "push", f"--force-with-lease=refs/heads/{branch}:{head}", "origin", f":refs/heads/{branch}")
-    if remote.returncode != 0:
+    if remote.returncode != 0 and refused is not None:
+        refused.append((branch, failure_detail(remote)))
+    elif remote.returncode != 0:
         detail = failure_detail(remote)
         print(
             f"warning: merged branch was retained on origin, which refused deleting {branch} "
@@ -6839,9 +6865,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         checked_git(root, "tag", "-f", str(tag), commit)
         git_push(root, ["origin", f"refs/tags/{tag}"])
     deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
-    if deleted.returncode != 0:
-        print(f"Cleanup: {landing} left on origin ({failure_detail(deleted)}); the repository's "
-              "automatic head-branch deletion removes it")
+    refused = [(landing, failure_detail(deleted))] if deleted.returncode != 0 else []
     for mirror in configured_mirrors(root):
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, temporary)
@@ -6924,7 +6948,10 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
-    delete_merged_branch(root, branch, str(state["head"]), landed)
+    delete_merged_branch(root, branch, str(state["head"]), landed, refused)
+    summary = cleanup_refusals(refused)
+    if summary:
+        print(summary)
     if door is None or getattr(door, "relayed", False):
         print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
         return short

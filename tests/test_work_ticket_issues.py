@@ -3338,6 +3338,43 @@ def test_a_relay_landings_two_reads_of_the_landing_pull_request_name_their_purpo
         f"step {number}" for number in range(1, len(session.notes) + 1)]
 
 
+def test_a_landing_says_the_branch_deletions_origin_refuses_in_one_summary_line(
+        main_checkout, monkeypatch, github, capsys, fake_git_door):
+    """Where origin refuses deleting the merged branches (an HTTP 403), the landing prints one
+    summary line naming both, the landing branch and the work branch, and no warning per branch."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    origin = (main_checkout.parent / "origin.git").resolve()
+
+    class Refusing(SessionSteps):
+        def answer(self, tool: str, input_: dict) -> object:
+            answer = super().answer(tool, input_)
+            if tool == "merge_pull_request":  # landed: origin refuses every push from here
+                fake_git_door.declining[origin] = "error: GH006: HTTP 403, deletion refused"
+            return answer
+
+    session = Refusing(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "integrate", "7") == 0
+
+    captured = capsys.readouterr()
+    assert "retained on origin" not in captured.err and "left on origin" not in captured.out
+    lines = [line for line in captured.out.splitlines() if "refused deleting" in line]
+    assert lines == ["Cleanup: origin refused deleting 2 merged branches (land/feature/worker, "
+                     "feature/worker: HTTP 403); the repository's automatic head-branch deletion "
+                     "removes them, not retried"]
+
+
+def test_the_cleanup_summary_names_each_refused_branch_once():
+    assert work_tickets.cleanup_refusals([]) is None
+    one = work_tickets.cleanup_refusals([("feature/x", "remote: denied\nerror: failed to push")])
+    assert one.startswith("Cleanup: origin refused deleting 1 merged branch (feature/x: remote: denied)")
+    assert work_tickets.refused_reason("fatal: unable to access: The requested URL returned "
+                                       "error: 403") == "HTTP 403"
+
+
 def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lands_again(
         main_checkout, monkeypatch, github, capsys):
     """A step after the push that kern gives up (the call through kern stopped) leaves the
