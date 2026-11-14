@@ -922,6 +922,7 @@ def sibling(name: str):
 metrics = sibling("metrics")
 trust = sibling("ci_trust")
 feedback = sibling("feedback")
+component_versions = sibling("component_versions")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -2521,11 +2522,7 @@ def merge_release_kind(commit: str, subject: str, message: str) -> str:
     )
 
 
-def bumped(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
-    major, minor, patch = version
-    return {
-        "major": (major + 1, 0, 0), "minor": (major, minor + 1, 0), "patch": (major, minor, patch + 1),
-    }[kind]
+bumped = component_versions.bumped
 
 
 def failure_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -3713,6 +3710,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
             "field-report --check --worktree <worktree> fills it from the branch"
         )
     problems.extend(release_kind_problems(body, issue_body))
+    problems.extend(component_versions.kinds_problems(body))
     kind = REINTEGRATION_KIND_PATTERN.search(header)
     if kind is not None and kind[1] not in RELEASE_ORDER:
         problems.append(
@@ -6291,9 +6289,12 @@ def integrate(
     merged = run_git(root, "merge", "--no-ff", "-m", f"Integrate {branch}", branch_head(root, branch))
     if merged.returncode != 0:
         conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
-        abandon_landing(root, target, landing)
-        files = ", ".join(line for line in conflicts.stdout.splitlines() if line.strip())
-        raise QueueError(f"Cannot merge {branch}; conflicts: {files or 'unknown files'}")
+        conflicted = [line for line in conflicts.stdout.splitlines() if line.strip()]
+        if not component_versions.merge_past_claims(root, conflicted, base, branch_head(root, branch),
+                                                    landing, f"Integrate {branch}"):
+            abandon_landing(root, target, landing)
+            raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
+    assign_component_versions(root, target, landing, base, branch, report)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
             work_issue = relay_work_issue(relay, pull_number, remote, report, work_number)
@@ -6406,6 +6407,21 @@ def integrate(
         raise error from None
     return finish_integration(root, state, commit, str(given["pull url"]),
                               str(given["check run url"]), door)
+
+
+def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
+                              report: str) -> None:
+    """Write the next version of each component the merge on `landing` changes into it, of the
+    kind the field report states or the branch claims, and say so (README "Component versions");
+    refused, the landing abandoned, where a kind names no component."""
+    try:
+        assignments = component_versions.assign(root, base, branch_head(root, branch), report)
+    except component_versions.VersionError as error:
+        abandon_landing(root, target, landing)
+        raise QueueError(f"Cannot assign the component versions of {branch}: {error}; nothing "
+                         "was merged") from None
+    for assignment in assignments:
+        print(assignment.line())
 
 
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
@@ -8005,6 +8021,38 @@ def run_identity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def stated_component_kinds(root: Path) -> None:
+    """On a work branch, give the release guard the kinds its field report states (README
+    "Component versions"): $SE_COMPONENT_KINDS from `.se/work/field-report.md`, unless the
+    environment sets it already (CI, from the pull request description). The integration
+    branch and a landing set none: there the release commit carries the versions."""
+    variable = component_versions.ENVIRONMENT
+    branch = current_branch(root)
+    report = root / ".se" / "work" / "field-report.md"
+    if (variable in os.environ or not branch or branch == integration_branch(root)
+            or branch.startswith(LANDING_PREFIX) or not report.is_file()):
+        return
+    try:
+        kinds = component_versions.stated_kinds(report.read_text(encoding="utf-8"))
+    except component_versions.VersionError as error:
+        raise QueueError(f"{report}: {error}") from None
+    os.environ[variable] = component_versions.environment_value(kinds)
+    print(f"Suite: the release guard reads {branch}'s Component kinds: "
+          f"{os.environ[variable] or 'none stated'} ({report})")
+
+
+@command("component-kinds", "print the release guard's $SE_COMPONENT_KINDS line from the field "
+                            "report in FILE, for CI's environment (README \"Component versions\")",
+         arg("file", type=Path, metavar="FILE", help="a pull request description or field report"))
+def run_component_kinds(root: Path, args: argparse.Namespace) -> int:
+    try:
+        kinds = component_versions.stated_kinds(args.file.read_text(encoding="utf-8"))
+    except component_versions.VersionError as error:
+        raise QueueError(f"{args.file}: {error}") from None
+    print(f"{component_versions.ENVIRONMENT}={component_versions.environment_value(kinds)}")
+    return 0
+
+
 @command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
                   "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
                   "budget refuses them (README \"Test budget\")",
@@ -8020,6 +8068,7 @@ def run_identity(root: Path, args: argparse.Namespace) -> int:
          arg("--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
              help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
+    stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
@@ -8515,7 +8564,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
-     ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
+     ("integrate", "release-trailer", "component-kinds", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))

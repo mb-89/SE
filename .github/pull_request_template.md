@@ -6,6 +6,7 @@
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
 **Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](skills/work-model/SKILL.md#release-kind) says; field-report --draft proposes the branch prefix's -->
+<!-- A branch that changes kern or the se binary adds the line "**Component kinds:** se patch, kern minor" here, one kind per component, and leaves the version in its release.toml alone: the landing assigns it (README "Component versions"). -->
 **Re-integration kind:** patch <!-- what a later integration of this branch releases once its first merge is on the integration branch: patch, minor or major -->
 
 ## User requirement (quoted back)
