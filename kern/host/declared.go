@@ -20,11 +20,16 @@ const (
 	// AttachWait is how long a call to a command of a declared instance waits
 	// for its process to attach, as one the core just placed does in milliseconds.
 	AttachWait = 10 * time.Second
-	// StepWait is how long the core waits for one request on a verb from a
-	// declared component's process, and for word from one step of a command:
-	// a step that says a line or beats on say.<i> waits StepWait again, so a
-	// long step runs as long as its process lives.
-	StepWait = 60 * time.Second
+	// StepWait is how long the core waits for word from one step of a
+	// declared component's command: a step that says a line or beats on
+	// say.<i> waits StepWait again, so a long step runs as long as its process
+	// lives. It is the work model's stall rule, ten minutes, so a process
+	// that pauses (a long subprocess, a machine under load) is not failed
+	// while a session would still wait on it.
+	StepWait = 10 * time.Minute
+	// VerbWait is how long the core waits for one request on a verb from a
+	// declared component's process.
+	VerbWait = 60 * time.Second
 	// CallBeat is how often the core beats on a streaming call's progress
 	// subject while the call runs, and a declared process on say.<i> while
 	// its step runs (the Python SDK's runner).
@@ -167,7 +172,7 @@ type StopWord struct {
 }
 
 // Serve asks the process for one request on a verb, {"call", "request"},
-// and waits StepWait for its answer, or until ctx is done: the call that
+// and waits VerbWait for its answer, or until ctx is done: the call that
 // asked it is given up. Where it stops waiting, it tells the process with the
 // stop word on the verb's io.<i>.<verb>, without a reply, {"call", "stop"},
 // as Stop tells a command's, so the verb's code in the process ends too.
@@ -177,7 +182,7 @@ func (r remote) Serve(ctx context.Context, verb string, req json.RawMessage) (js
 	}
 	call := fmt.Sprintf("%d", r.c.asks.Add(1))
 	data, _ := json.Marshal(map[string]any{"call": call, "request": req})
-	ctx, cancel := context.WithTimeout(ctx, r.c.o.StepWait)
+	ctx, cancel := context.WithTimeout(ctx, VerbWait)
 	defer cancel()
 	subject := bus.IOVerb + bus.Subject(r.inst) + "." + bus.Token(verb)
 	m, err := r.c.nc.RequestWithContext(ctx, subject, data)
