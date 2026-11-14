@@ -59,8 +59,10 @@ def parse_kinds(value: str) -> dict[str, str]:
 
 
 def stated_kinds(report_body: str | None) -> dict[str, str]:
-    """The kinds a field report's header states; none where it has no Component kinds line."""
-    match = KINDS_PATTERN.search(COMMENT.sub("", report_body or ""))
+    """The kinds a field report's header (above its first section) states; none where it has no
+    Component kinds line."""
+    header = re.split(r"^## ", COMMENT.sub("", report_body or ""), maxsplit=1, flags=re.MULTILINE)[0]
+    match = KINDS_PATTERN.search(header)
     return parse_kinds(match[1]) if match else {}
 
 

@@ -47,6 +47,7 @@ def test_the_field_report_states_component_kinds_in_its_header_or_none():
     assert versions.stated_kinds("**Component kinds:** se patch, kern minor — the guard\n") == {
         "se": "patch", "kern": "minor"}
     assert versions.stated_kinds("**Release kind:** patch — x\n") == {}
+    assert versions.stated_kinds("**Release kind:** patch\n\n## Delivered\n\n**Component kinds:** x\n") == {}
     template = work_tickets.field_report_template()
     assert "**Component kinds:**" in template and versions.stated_kinds(template) == {}
     assert versions.environment_value({"se": "patch", "kern": "minor"}) == "kern=minor,se=patch"
