@@ -1041,3 +1041,41 @@ def test_a_child_process_reaches_the_fake_its_test_names_and_is_refused_without_
     assert refused.returncode == 1 and f"git -C {root} status" in refused.stderr and "SE_GIT_DOOR" in refused.stderr
     unknown = run_child("other", "status")
     assert unknown.returncode == 1 and "none of real, refused or fake" in unknown.stderr
+
+
+def test_a_state_file_load_is_a_fresh_copy_and_sees_another_process(tmp_path: Path) -> None:
+    """StateFile keeps the fake of the text it last loaded or saved and hands out copies only: a
+    change made in place to a loaded fake, or to an edited one after `edit` returns, reaches no
+    later load; the kept fake prints `git remote` in the order a fresh parse of the file does; and
+    another process's write is read by the next load."""
+    state = fake_git.StateFile(tmp_path / "git-door.json")
+    root = tmp_path / "project"
+
+    def child(*arguments: str) -> str:
+        script = ("import sys, git_door; done = git_door.run(*sys.argv[1:]); "
+                  "sys.stdout.write(done.stdout); sys.exit(done.returncode)")
+        env = {**os.environ, git_door.VARIABLE: f"fake:{state.path}", "PYTHONPATH": str(ROOT / "scripts")}
+        done = subprocess.run([sys.executable, "-c", script, "-C", str(root), *arguments], env=env,
+                              capture_output=True, text=True, check=False)
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    with git_door.use(state):
+        git_door.run("init", "-q", "-b", "main", str(root))
+        key = next(iter(state.load().repositories))
+        state.load().repositories[key].config["user.name"] = "changed in place"
+        assert "user.name" not in state.load().repositories[key].config
+        with state.edit() as fake:
+            fake.repositories[key].config["user.name"] = "alice"
+        fake.repositories[key].config["user.name"] = "changed after edit"
+        assert state.load().repositories[key].config["user.name"] == "alice"
+
+        git(root, "remote", "add", "zeta", "https://example.com/zeta.git")
+        git(root, "remote", "add", "alpha", "https://example.com/alpha.git")
+        remotes = git(root, "remote")
+        assert sorted(remotes.splitlines()) == ["alpha", "zeta"]
+        assert remotes == child("remote"), "this process's kept fake and a fresh parse print alike"
+
+        child("remote", "add", "beta", "https://example.com/beta.git")
+        assert sorted(git(root, "remote").splitlines()) == ["alpha", "beta", "zeta"]
+        assert state.load().repositories[key].config["remote.beta.url"] == "https://example.com/beta.git"
