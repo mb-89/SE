@@ -402,6 +402,10 @@ naming the file.
 `["uv", "run", "python", "scripts/se_plugin.py", "build"]`), an argument array run without a shell
 from the project root. Where it fails, push restores `se.toml`, commits nothing and shows its output.
 
+`integrate` also runs it on its merge, before the suite, and commits what it rewrites into the
+landing: a generated file that carries the version, added on a branch before `main` released,
+never makes the branch stale, and the suite's verdict is recorded on the merge's tree.
+
 #### Landing on main
 
 Every integration lands on the integration branch through a squash pull request, which se's `main`

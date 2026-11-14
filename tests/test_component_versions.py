@@ -199,3 +199,50 @@ def test_component_kinds_prints_the_guard_s_environment_line(tmp_path, capsys):
     body.write_text("Fixes x\n\n**Component kinds:** se minor\n", encoding="utf-8")
     assert work_tickets.main(["component-kinds", str(body)]) == 0
     assert capsys.readouterr().out == "SE_COMPONENT_KINDS=se=minor\n"
+
+
+# A build that writes the project version into a generated file, as se_plugin.py build writes the
+# plugin manifests: gen.json carries se.toml's [project] version.
+GENERATE = ("import json, pathlib, tomllib; version = tomllib.loads(pathlib.Path('se.toml')"
+            ".read_text())['project']['version']; pathlib.Path('gen.json').write_text("
+            "json.dumps({'version': version}) + '\\n')")
+
+
+def test_a_branch_adding_a_generated_file_with_the_version_lands_after_main_released(
+        main_checkout, monkeypatch, github, capsys):
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    build = [work_tickets.sys.executable, "-c", GENERATE]
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    git_ok("-C", str(main_checkout), "reset", "-q", "--hard", "origin/main")
+    settings = main_checkout / "se.toml"
+    base = settings.read_text(encoding="utf-8") + f"version = \"1.0.0\"\nrelease_build = {json.dumps(build)}\n"
+    settings.write_text(base, encoding="utf-8")
+    git_ok("-C", str(main_checkout), "commit", "-qam", "version")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+    # The branch adds the generated file at 1.0.0; then main releases 1.0.1.
+    head = work_branch(main_checkout, "fix/generated", {"gen.json": '{"version": "1.0.0"}\n'})
+    settings.write_text(base.replace('"1.0.0"', '"1.0.1"'), encoding="utf-8")
+    git_ok("-C", str(main_checkout), "commit", "-qam", "Release v1.0.1")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+
+    def suite(root, **_):  # the real suite's start rebuilds the layouts (tests/conftest.py)
+        work_tickets.subprocess.run(build, cwd=root, check=True)
+        work_tickets.record_suite_verdict(root, work_tickets.clean_commit(root), True, 1.0)
+        return "1 passed"
+
+    report = reported_at(head)
+    integration_fakes(monkeypatch, head)
+    monkeypatch.setattr(work_tickets, "run_suite", suite)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: (
+        json.dumps({"headRefName": "fix/generated", "headRefOid": head, "body": report,
+                    "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["pr", "view"] else ""))
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert squashed_onto_origin(main_checkout, commit)
+    out = capsys.readouterr().out
+    assert "Suite verdict recorded: passed" in out
+    assert "Merge: release_build regenerated gen.json" in out
+    landed = json.loads(git_run(main_checkout, "show", "origin/main:gen.json", check=True).stdout)
+    on_main = git_run(main_checkout, "show", "origin/main:se.toml", check=True).stdout
+    assert landed["version"] == work_tickets.tomllib.loads(on_main)["project"]["version"] == "1.0.1"

@@ -6295,6 +6295,7 @@ def integrate(
             abandon_landing(root, target, landing)
             raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
     assign_component_versions(root, target, landing, base, branch, report)
+    regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
             work_issue = relay_work_issue(relay, pull_number, remote, report, work_number)
@@ -6422,6 +6423,28 @@ def assign_component_versions(root: Path, target: str, landing: str, base: str, 
                          "was merged") from None
     for assignment in assignments:
         print(assignment.line())
+
+
+def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
+    """Run `project.release_build` on the merge on `landing` and stage what it rewrites, so the
+    merge already holds the generated files the suite's build writes (a plugin manifest carrying
+    the project version): a branch never goes stale by them, and the suite's verdict is recorded
+    on the merge's tree. A failing build abandons the landing with its output."""
+    command = release_build(root)
+    if command is None:
+        return
+    before = changed_paths(root)
+    result = subprocess.run(command, cwd=root, shell=False, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", check=False)
+    if result.returncode != 0:
+        abandon_landing(root, target, landing)
+        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise QueueError(f"Cannot merge {branch}: project.release_build ({' '.join(command)}) "
+                         f"failed on the merge; nothing was merged:\n{output}")
+    paths = sorted(changed_paths(root) - before)
+    if paths:
+        checked_git(root, "add", "--", *paths)
+        print(f"Merge: release_build regenerated {', '.join(paths)}")
 
 
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
