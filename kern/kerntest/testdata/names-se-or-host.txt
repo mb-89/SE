@@ -156,5 +156,5 @@ se-workflow	README.md	.github/workflows/kern-battery.yml
 se-workflow	README.md	.github/workflows/kern-release.yml
 se-workflow	README.md	mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
 se-workflow	README.md	mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
-se-workflow	template/.github/workflows/check.yml	mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.6.0
+se-workflow	template/.github/workflows/check.yml	mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
 se-workflow	template/README.md	mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>

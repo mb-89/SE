@@ -119,7 +119,8 @@ before `.github/plugin/plugin.json`. So the plugin brings no `se` server there, 
 
 The first check is the launcher's decision line, `plugin <folder>: root <root> from <source>`, in
 `.se/.runtime/mcp.log`: in the repository it chose, or in the plugin's folder (`PLUGIN_ROOT` in
-`copilot mcp get se --json`) where it kept that. Where neither has a line, the launcher never ran:
+`copilot mcp get se --json`) where it kept that. For a session folder with no `.git` in it or
+above it, the line is in `~/.se/.runtime/mcp.log`. Where none has a line, the launcher never ran:
 `/mcp` shows the server's start error.
 
 ## Another repository
