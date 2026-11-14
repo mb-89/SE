@@ -516,6 +516,16 @@ no token), the hand-off needs neither a retyped file nor a second run
   - Each step's line, `GitHub step through kern's relay: <tool>`, and every phase reach the caller
     as they are said, and the call waits as long as kern beats: a check run of many minutes fits
     ([docs/go-core.md "Progress and long calls"](docs/go-core.md#progress-and-long-calls)).
+  - The step's line names `uv run python <se>/scripts/se_relay.py next --root <checkout>`, which
+    prints the tool calls the relay waits for, as the hook tells them on a prompt: the agent asks
+    for the pending step whichever tool's PostToolUse ran last.
+  - `integrate` reads the pull request first, then runs its local guards, the field-report guard
+    against the branch's merge base and the merge, and only then reads the work issue: a branch
+    that cannot land fails after that one read. A checkout detached at origin's integration branch
+    (a cloud session's source checkout) is moved onto the branch first, fast-forwarded there.
+  - The core fails a step of the command only after ten minutes without its answer, a line or a
+    beat (`StepWait`, the work model's stall rule), not after one: the wait was raised, the hook's
+    beat does not count, and the command's process beats every 5 s until its answer is out.
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
