@@ -31,7 +31,9 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Not delivered
 
-<!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete. -->
+<!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete.
+     A planned split names each piece left as a bullet "- **Piece <n>, <what>:** ...", which keeps
+     the work issue open at this landing. -->
 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 

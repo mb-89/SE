@@ -140,6 +140,10 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
      branch, a release, a deployment) stays open: its pull request names it with `Refs`, not a
      closing keyword (`work_tickets.py pr-body`), and the closing comment names what it waits for.
      Close it yourself once that is seen.
+   - A work issue landed in a planned split stays open until its last piece: where the field
+     report says `**Result:** partial` and its "Not delivered" names the pieces left, each a bullet
+     led by `**Piece <n>, …**`, `integrate` leaves it open and comments those pieces, and
+     `pr-body` names it with `Refs`. The complete piece closes it.
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
    retained worktree explicitly. Where the host refuses deleting a merged branch, leave it: the
    repository's automatic head-branch deletion removes it. Never retry the deletion.

@@ -36,11 +36,12 @@ const (
 const Contract = index.Contract
 
 // Standing is what the standing file says of the running core: its process,
-// its bus and the bus's users with their passwords. Only the checkout's
-// owner reads it.
+// the boot it runs in (Boot) and when it started, its bus and the bus's users
+// with their passwords. Only the checkout's owner reads it.
 type Standing struct {
 	Contract int               `json:"contract"`
 	Pid      int               `json:"pid"`
+	Boot     string            `json:"boot"`
 	Root     string            `json:"root"`
 	Bus      string            `json:"bus"`
 	Port     int               `json:"port"`
@@ -64,6 +65,11 @@ var ErrVanished = fmt.Errorf("%w: its process ended without its end", ErrNotRunn
 // a live process that is no core.
 var ErrReused = fmt.Errorf("%w: its pid runs and its bus is gone", ErrVanished)
 
+// ErrEarlierBoot is ErrNotRunning where the standing file names a core of an
+// earlier boot (Boot): the machine restarted with the checkout's files kept,
+// and that core ended with its boot, which is no news to this boot's session.
+var ErrEarlierBoot = fmt.Errorf("%w: it names a core of an earlier boot", ErrNotRunning)
+
 // BusWait bounds the look at the standing file's bus: a running core's
 // listener accepts on the loopback at once, whatever the core is busy with.
 const BusWait = time.Second
@@ -78,9 +84,10 @@ func ClaimPath(root string) string { return filepath.Join(root, Runtime, claimFi
 func LogPath(root string) string { return filepath.Join(root, Runtime, logFile) }
 
 // ReadStanding answers the running core's standing. A file that is missing,
-// unreadable, names a pid that runs nowhere, or names a bus that accepts no
-// connection reads as ErrNotRunning: a pid alone says nothing once the machine
-// restarted (ErrReused).
+// unreadable, names an earlier boot (ErrEarlierBoot), names a pid that runs
+// nowhere, or names a bus that accepts no connection reads as ErrNotRunning: a
+// pid alone says nothing once the machine restarted (ErrReused), which a
+// platform that names no boot leaves the bus to tell.
 func ReadStanding(root string) (Standing, error) {
 	var s Standing
 	data, err := readWhole(StandingPath(root))
@@ -92,6 +99,9 @@ func ReadStanding(root string) (Standing, error) {
 	}
 	if err := json.Unmarshal(data, &s); err != nil || s.Port == 0 || s.Bus == "" {
 		return Standing{}, fmt.Errorf("%w: %s names no bus", ErrNotRunning, StandingPath(root))
+	}
+	if earlierBoot(s.Boot) {
+		return Standing{}, fmt.Errorf("%w: %s names boot %s, and this is boot %s", ErrEarlierBoot, StandingPath(root), s.Boot, Boot())
 	}
 	if !alive(s.Pid) {
 		return Standing{}, fmt.Errorf("%w: %s names pid %d, which runs nowhere", ErrVanished, StandingPath(root), s.Pid)

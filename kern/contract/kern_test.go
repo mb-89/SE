@@ -490,3 +490,58 @@ func TestACoreKilledOutrightIsToldOnce(t *testing.T) {
 		t.Fatalf("the report is told twice: %q", got.out)
 	}
 }
+
+// A machine restored from its snapshot keeps the checkout's files and starts
+// a new boot: the first hook of the new boot tells nothing of the earlier
+// boot's core, which ended with its boot, and the core's log carries one
+// start line per boot, so a session tells its own lines from the earlier ones.
+func TestARestoredBootTellsNoStaleDeadCore(t *testing.T) {
+	t.Parallel()
+	root := checkout(t)
+	bootA := []string{host.BootEnv + "=boot-a"}
+	bootB := []string{host.BootEnv + "=boot-b"}
+	want(t, run(t, bootA, "start", "--root", root), 0, "kern: started in "+root)
+	want(t, run(t, bootA, "status", "--root", root, "--wait", wait), 0, "kern: running in "+root)
+	var s host.Standing
+	data, err := os.ReadFile(host.StandingPath(root))
+	if err != nil || json.Unmarshal(data, &s) != nil || s.Boot != "boot-a" {
+		t.Fatalf("the standing file reads %q (%v), and wants boot-a", data, err)
+	}
+	// The boot ends under the core: its process is gone, its files stay.
+	p, err := os.FindProcess(s.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(20 * time.Second)
+	for run(t, bootA, "status", "--root", root).code != 1 {
+		if time.Now().After(end) {
+			t.Fatal("the killed core still answers")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := run(t, bootB, "hook", "UserPromptSubmit", "--root", root); strings.Contains(got.out, "additionalContext") {
+		t.Fatalf("the restored boot's first hook tells the earlier boot's core: %q", got.out)
+	}
+	want(t, run(t, bootB, "start", "--root", root), 0, "kern: started in "+root)
+	want(t, run(t, bootB, "status", "--root", root, "--wait", wait), 0, "kern: running in "+root)
+	if got := run(t, bootB, "hook", "UserPromptSubmit", "--root", root); strings.Contains(got.out, "ended without its end") {
+		t.Fatalf("the restored boot's core reports a dead core: %q", got.out)
+	}
+	want(t, run(t, bootB, "stop", "--root", root), 0, "kern: stopped")
+	log, err := os.ReadFile(host.LogPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var starts []string
+	for _, line := range strings.Split(string(log), "\n") {
+		if strings.HasPrefix(line, "kern: start ") {
+			starts = append(starts, line)
+		}
+	}
+	if len(starts) != 2 || !strings.Contains(starts[0], ", boot boot-a, pid ") || !strings.Contains(starts[1], ", boot boot-b, pid ") {
+		t.Fatalf("the core's log has the start lines %q, and wants one of boot-a, then one of boot-b", starts)
+	}
+}
