@@ -577,15 +577,28 @@ no token), the hand-off needs neither a retyped file nor a second run
   - The core fails a step of the command only after ten minutes without its answer, a line or a
     beat (`StepWait`, the work model's stall rule), not after one: the wait was raised, the hook's
     beat does not count, and the command's process beats every 5 s until its answer is out.
+  - A step's answer reaches the core however long the step ran: kern's bus gives a placed
+    process's answer no time limit, where NATS's default of two minutes refused the answer of any
+    longer step, such as a landing's suite, release and push. An answer the bus refuses all the
+    same fails the step at once, naming why, instead of waiting out `StepWait`.
 - **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
   file-based hand-off above. A call kern refuses before it says anything runs directly; one that
   fails on the way is reported and never run twice, as it writes.
   - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
     file-based hand-off: <why>`.
+- **Rehearsing a relay landing.** `work_tickets.py rehearse` runs a whole landing through the
+  relay on the scratch branch `--base` names, without holding the integration branch: a relay
+  read, a local phase `--gap` makes slow on purpose, the push of `rehearse/` and the base's name,
+  the landing plan into the base (pause search, pull request, `check`, squash merge), the read-back.
+  - It refuses the integration branch, `land/…` and `rehearse/…` as its base, starts a base origin
+    lacks at the integration branch's tip, releases and tags nothing and touches no issue.
+  - It runs only as one call through kern's relay, and only when someone runs it.
 - **Tested** against fake sessions in the suite (`tests/test_work_ticket_issues.py`,
   `tests/test_work_tickets.py`) and against the real core: `tests/beside_se_relay.py` runs
   `fleet-check` as one call whose reads a simulated session answers on the hook, from the
   checkout's script and from a plugin's copy, then the fallback once kern stops.
+  - kern's `contract/longstep_test.go` asks a relay step after a local phase longer than two
+    minutes (`se.toml` `[tests.beside.kern-long-step]`).
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
@@ -1482,6 +1495,13 @@ work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--
     output and label the issue escalated; prints the line for SE. Where gh is not signed in it
     prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
     refs and finishes
+
+work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]
+    rehearse a whole landing through kern's relay against a scratch branch, never the integration
+    branch: a relay read, a local phase (--gap makes it slow on purpose), the push of
+    rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-
+    back. It releases and tags nothing and touches no issue; it runs only as one call through kern's
+    relay
 
 work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 [--pr-description FILE] [--include-late REASON]

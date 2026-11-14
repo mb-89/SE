@@ -18,8 +18,8 @@ from host_validate import Answer  # noqa: E402
 PLUGIN, MARKETPLACE = ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"
 SKILLS = ("skills/decision", "skills/work-model", ".github/skills/decision")
 # The beside suites se.toml declares on main when this command arrived; the command adds none.
-BESIDE_ON_MAIN = ["kern", "go-components", "release-guard", "new-app", "se-components", "se-relay",
-                  "script-runs"]
+BESIDE_ON_MAIN = ["kern", "go-components", "kern-long-step", "release-guard", "new-app",
+                  "se-components", "se-relay", "script-runs"]
 
 
 @pytest.fixture

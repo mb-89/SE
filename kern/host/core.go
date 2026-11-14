@@ -72,6 +72,10 @@ type Options struct {
 	Grace, Idle, LeaseLapse time.Duration
 	// StepWait and CallBeat override the built-in waits of a call where set.
 	StepWait, CallBeat time.Duration
+	// ReplyWait, where set, bounds how long a declared instance's process may
+	// take to answer one step or request (bus.Start); unset, the core's own
+	// waits bound it alone.
+	ReplyWait time.Duration
 	// Log takes what the core and its placed processes say; none where nil.
 	Log io.Writer
 }
@@ -194,7 +198,7 @@ func Serve(o Options) (*Core, error) {
 			c.types[in.Name][out.Port.Port] = out.Type
 		}
 	}
-	if c.bus, err = bus.Start(instances); err != nil {
+	if c.bus, err = bus.Start(instances, o.ReplyWait); err != nil {
 		return nil, fmt.Errorf("kern serve: %w", err)
 	}
 	if c.nc, err = bus.Dial(c.bus.URL(), bus.Core, c.bus.Users()[bus.Core]); err != nil {

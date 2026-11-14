@@ -8312,6 +8312,111 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+#: The rehearsal's branch on origin, `rehearse/<scratch base>`, and the file its one commit writes.
+REHEARSAL_PREFIX = "rehearse/"
+REHEARSAL_FILE = ".rehearsal"
+#: How often a rehearsal's slow local phase says how far it is.
+REHEARSAL_TICK_SECONDS = 30
+
+
+def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
+    """A whole landing through kern's relay against the scratch branch `base`, never the
+    integration branch: a relay read, a local phase made `gap` seconds slow, the push of
+    `rehearse/<base>`, then the landing plan (the pause search, the landing pull request into
+    `base`, its `check`, the squash merge) and the read-back. It releases and tags nothing,
+    touches no issue, and nothing calls it on its own (README "Hand-offs through the relay").
+    Where origin has no `base` yet, it starts there at the integration branch's tip."""
+    tracker = resolve_repo(root, repo)
+    remote = remote_repo(root)
+    if remote is None:
+        raise QueueError(f"work_tickets.py rehearse: {root} has no origin remote to rehearse on")
+    target = integration_branch(root)
+    if base in {target, "main"} or base.startswith((LANDING_PREFIX, REHEARSAL_PREFIX)):
+        raise QueueError(
+            f"work_tickets.py rehearse: {base} is no scratch branch; a rehearsal lands on a branch "
+            f"of its own, never on {target}, land/… or rehearse/…, such as --base rehearsal")
+    door = relay_door(root, remote)
+    if door is None:
+        raise QueueError(
+            "work_tickets.py rehearse runs only as one call through kern's GitHub relay, where kern "
+            "serves this checkout with the relay backend and gh is not signed in (README "
+            "\"Hand-offs through the relay\"); it rehearses nothing else")
+    if checked_git(root, "status", "--porcelain", "--untracked-files=no").strip():
+        raise QueueError(f"work_tickets.py rehearse: {root} has uncommitted changes; commit or "
+                         "stash them first, as the rehearsal switches branches there")
+    back = checked_git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    back_to = ["switch", "-q", "--discard-changes", back] if back != "HEAD" else [
+        "switch", "-q", "--discard-changes", "--detach", checked_git(root, "rev-parse", "HEAD").strip()]
+    branch = f"{REHEARSAL_PREFIX}{base}"
+    feedback.phase(f"read {branch}'s open pull request into {base} through kern's relay")
+    earlier = door.open_pull(branch, base)
+    if earlier:
+        print(f"Rehearsal pull request already open: {earlier.get('html_url')}")
+    tip = remote_head(root, base)
+    if not tip:
+        start = remote_head(root, target)
+        feedback.phase(f"start the scratch branch {base} at {target}'s {start[:12]}")
+        git_push(root, ["origin", f"{start}:refs/heads/{base}"])
+        tip = start
+    checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    title = f"Rehearse a landing through kern's relay on {base}"
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    feedback.phase(f"local phase on {branch}" + (f", {gap:g} s slow on purpose" if gap else ""))
+    checked_git(root, "switch", "-q", "-C", branch, tip)
+    try:
+        (root / REHEARSAL_FILE).write_text(
+            f"A rehearsal of a landing through kern's relay on {base}, {stamp}.\n", encoding="utf-8")
+        checked_git(root, "add", REHEARSAL_FILE)
+        checked_git(root, "commit", "-q", "-m", title)
+        slept = 0.0
+        while slept < gap:
+            tick = min(gap - slept, REHEARSAL_TICK_SECONDS)
+            wait(tick)
+            slept += tick
+            feedback.progress(f"rehearsal: local phase, {slept:g} s of {gap:g} s")
+        landed = checked_git(root, "rev-parse", "HEAD").strip()
+        feedback.phase(f"push {branch}")
+        push_gate(root, branch)
+        git_push(root, ["--force", "origin", f"{branch}:refs/heads/{branch}"])
+        description = (f"A rehearsal of a landing through kern's relay (`work_tickets.py rehearse`) "
+                       f"on the scratch branch `{base}`, never `{target}`: it releases and tags "
+                       "nothing and touches no issue.")
+        plan = landing_plan(remote, branch, base, tip, landed, title, title, description, "",
+                            tracker)
+        feedback.phase("landing plan through kern's relay: the pull request, its check, the "
+                       "squash merge")
+        given = run_plan(plan, landing_actions(root, door, branch, base, tip, tracker))
+        feedback.phase("read back the rehearsal pull request and the landed commit")
+        read = door.pull(int(given["pull number"]))
+        if not read.get("merged"):
+            raise QueueError(f"{given['pull url']} reads back as not merged")
+        commit = landing_read_back(root, base, tip, landed, str(given["merge commit sha"]))
+    finally:
+        checked_git(root, *back_to)
+        run_git(root, "branch", "-D", branch)
+    return (f"Rehearsed: {given['pull url']} landed on {base} as {commit[:12]}, its check "
+            f"{given['check run url']}" + (f", after a local phase of {gap:g} s" if gap else ""))
+
+
+@command("rehearse", "rehearse a whole landing through kern's relay against a scratch branch, "
+                     "never the integration branch: a relay read, a local phase (--gap makes it "
+                     "slow on purpose), the push of rehearse/<base>, the landing pull request into "
+                     "<base>, its check, the squash merge and the read-back. It releases and tags "
+                     "nothing and touches no issue; it runs only as one call through kern's relay",
+         WORKTREE, REPO,
+         arg("--base", required=True,
+             help="the scratch branch it lands on; started at the integration branch's tip where "
+                  "origin has none"),
+         arg("--gap", type=float, default=0.0, metavar="SECONDS",
+             help="make the local phase this many seconds slow, to force a gap between two relay "
+                  "steps (default 0)"))
+def run_rehearse(root: Path, args: argparse.Namespace) -> int:
+    if args.gap < 0:
+        raise QueueError("--gap takes seconds, 0 or more")
+    print(rehearse(root, args.base, args.gap, args.repo))
+    return 0
+
+
 @command("config", "show the repository and the machine-local settings in effect",
          WORKTREE, REPO, WORKTREE_ROOT, arg("--integrator-session", help=SESSION_HELP))
 def run_config(root: Path, args: argparse.Namespace) -> int:
@@ -8585,7 +8690,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
-     ("integrate", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
+     ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))
@@ -8621,7 +8726,7 @@ READ_ONLY_COMMANDS = {
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
 STREAMED_COMMANDS = frozenset(
-    {"integrate", "refs request", "refs apply", "file", "route", "fleet-check"})
+    {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:

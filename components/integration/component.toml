@@ -10,6 +10,13 @@ group = "Integration"
 help = "validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out"
 class = "batch"
 
+[commands."work_tickets.py rehearse"]
+usage = "work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]"
+summary = "rehearse a whole landing through kern's relay against a scratch ..."
+group = "Integration"
+help = "rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay"
+class = "batch"
+
 [commands."work_tickets.py release-trailer"]
 usage = "work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY\n                                [--pr-description FILE] [--include-late REASON]\n                                branch"
 summary = "print the Release-kind trailer an integration merge of <branch> ..."

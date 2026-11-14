@@ -15,7 +15,7 @@ const wait = 5 * time.Second
 
 func started(t *testing.T, instances ...bus.Instance) *bus.Bus {
 	t.Helper()
-	b, err := bus.Start(instances)
+	b, err := bus.Start(instances, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestTheBusRefusesStrangers(t *testing.T) {
 	if _, err := bus.Dial(b.URL(), "counter", "wrong"); err == nil {
 		t.Fatal("the bus lets a wrong password in")
 	}
-	if _, err := bus.Start([]bus.Instance{{Name: bus.Client}}); err == nil || !strings.Contains(err.Error(), "two users") {
+	if _, err := bus.Start([]bus.Instance{{Name: bus.Client}}, 0); err == nil || !strings.Contains(err.Error(), "two users") {
 		t.Fatalf("a bus with an instance named client starts with %v, and wants a refusal", err)
 	}
 }
