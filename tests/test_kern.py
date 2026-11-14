@@ -94,6 +94,9 @@ def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and
     # setup.ps1 runs where PowerShell is, Windows only; `-k powershell` selects its SETUPS cases.
     assert ("        if: runner.os == 'Windows'\n        shell: bash\n"
             "        run: uv run pytest -q tests/test_public_check.py -k powershell\n") in platforms
+    # The hand-off to Git's bash (scripts/bash.ps1) runs from PowerShell itself, Windows only.
+    assert ("        if: runner.os == 'Windows'\n        shell: powershell\n"
+            "        run: uv run pytest -q tests/test_windows_entry.py\n") in platforms
     assert "work_tickets.py suite" not in platforms, "the Python suite and its budget stay on Linux"
     assert "    needs: [trust, kern-platforms]\n" in check
     # A required check that is skipped counts as passed: check runs whatever kern-platforms answered.
