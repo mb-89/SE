@@ -1179,16 +1179,25 @@ def web_url(item: dict[str, object]) -> str:
     return str(first_of(item, "html_url", "url"))
 
 
-def comment_record(comment: dict[str, object]) -> dict[str, object]:
-    """One comment as the snapshot keeps it, from gh's, the REST API's or the GitHub tools' form."""
+def comment_record(comment: dict[str, object], repo: str) -> dict[str, object]:
+    """One comment of an issue of `repo` as the snapshot keeps it, from gh's, the REST API's or
+    the GitHub tools' form, with whether the repository's owner account wrote it
+    (comment_authors.py)."""
     author = first_of(comment, "author", "user")
+    login = str(author.get("login", "")) if isinstance(author, dict) else str(author)
     return {
         "id": str(comment.get("id", "")),
-        "author": str(author.get("login", "")) if isinstance(author, dict) else str(author),
+        "author": login,
+        "byOwner": sibling("comment_authors").by_owner(login, repo),
         "createdAt": str(first_of(comment, "createdAt", "created_at")),
         "url": web_url(comment),
         "body": str(comment.get("body") or "").replace("\r\n", "\n"),
     }
+
+
+def comment_mark(comment: dict[str, object]) -> str:
+    """What a line naming the comment ends with where the owner did not write it (comment_authors)."""
+    return sibling("comment_authors").mark(comment)
 
 
 def issue_record(
@@ -1212,8 +1221,9 @@ def issue_record(
                 "GitHub tools read them and pass --comments-file <file>")
         else:
             comments = []
+    repo = "/".join(match.groups())
     return {
-        "repo": "/".join(match.groups()),
+        "repo": repo,
         "number": int(data["number"]),
         "url": url,
         "title": str(data["title"]),
@@ -1221,7 +1231,7 @@ def issue_record(
         "updatedAt": str(first_of(data, "updatedAt", "updated_at")),
         "labels": [{"name": label["name"] if isinstance(label, dict) else str(label)}
                    for label in data.get("labels") or []],
-        "comments": [comment_record(comment) for comment in comments],
+        "comments": [comment_record(comment, repo) for comment in comments],
     }
 
 
@@ -1418,6 +1428,7 @@ def unread_comments_error(
         start = ids.index(str(recorded["newest"])) + 1 if recorded["newest"] in ids else 0
         named = [
             f"{comment['createdAt']} {comment['author']}: {comment['url'] or comment['id']}"
+            f"{comment_mark(comment)}"
             for comment in comments[start:]
         ] or [f"comment(s) were deleted: {recorded['count']} recorded, {current['count']} now"]
     else:
@@ -1955,7 +1966,8 @@ def print_changes(changes: dict[str, object]) -> None:
         print("run intake again to add tickets for added requirements")
     for key, label in (("new_comments", "comment"), ("edited_comments", "edited comment")):
         for comment in changes[key]:
-            print(f"{label} by {comment['author']} at {comment['createdAt']} ({comment['url']}):")
+            print(f"{label} by {comment['author']} at {comment['createdAt']} ({comment['url']}):"
+                  f"{comment_mark(comment)}")
             for line in comment["body"].splitlines():
                 print(f"  {line}")
 
@@ -2981,9 +2993,18 @@ def deliver(root: Path) -> int:
             f"deliver: {root} has no origin remote to push {branch} to and open its pull request "
             "on; add it with git remote add origin <url>"
         )
+    before = record_delivered_tip(root, branch, branch_tip(root))  # its own push is no late one
+    try:
+        return delivered_pull_request(root, remote, branch, pull_request_body(issue, report))
+    except BaseException:
+        sibling("late_push").restore(root / ".se" / "work", before)
+        raise
+
+
+def delivered_pull_request(root: Path, remote: str, branch: str, body: str) -> int:
+    """Push `branch` and open or update its pull request with `body`; returns its number."""
     push(root, branch)
     pr = open_pull_request_number(root, remote, branch)
-    body = pull_request_body(issue, report)
     if pr is None:
         output = run_gh_with_body(
             root,
@@ -3126,6 +3147,21 @@ def delivered_pull_path(root: Path) -> Path:
     return root / ".se" / "work" / DELIVERED_PULL
 
 
+def late_push_mode(root: Path) -> str:
+    """se.toml `[deliver] late_push`: what a push after the delivery does (README "Late push")."""
+    try:
+        return sibling("late_push").mode(se_table(root, "deliver"))
+    except ValueError as error:
+        raise QueueError(f"{root / 'se.toml'}: {error}") from error
+
+
+def record_delivered_tip(root: Path, branch: str, tip: str | None) -> dict[str, str] | None:
+    """Record `tip` as the delivered commit of `branch` (late_push.py); the record it replaced."""
+    if not tip:
+        return sibling("late_push").load(root / ".se" / "work")
+    return sibling("late_push").record(root / ".se" / "work", branch, tip)
+
+
 def record_delivered_pull(root: Path, number: int, description: Path) -> None:
     """Keep the pull request the session's GitHub tools opened, the Stop hook's answer file
     without gh: its number, its description as they read it, and the branch it is from."""
@@ -3134,6 +3170,8 @@ def record_delivered_pull(root: Path, number: int, description: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"number": number, "branch": current_branch(root), "body": body},
                                indent=2) + "\n", encoding="utf-8", newline="\n")
+    tip = BRANCH_TIP_PATTERN.search(body)
+    record_delivered_tip(root, current_branch(root), tip[1] if tip else branch_tip(root))
 
 
 #: How long a stop-check trusts a gh it found unusable, in a process that judges many stops (kern's
@@ -3415,8 +3453,14 @@ def start(
         )
         return None
 
-    branch = str(issue["title"])
-    path = None
+    path = start_worktree(root, str(issue["title"]), worktree_root, create)
+    mark_in_progress(root, number, repo)
+    return path
+
+
+def start_worktree(root: Path, branch: str, worktree_root: str | None, create: bool) -> Path:
+    """The worker's worktree of `branch`: created from the newest integration branch, or with
+    `create` off the one the project's own script created, synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -3456,8 +3500,72 @@ def start(
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
         sync(path)
-    mark_in_progress(root, number, repo)
     return path
+
+
+STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
+
+
+def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
+    """The GitHub steps of a start where gh cannot take them: the pause search where `paused`
+    (the relay asks it before anything else), `ready` off and `in-progress` on, the cloud worker
+    assigned where `agent` names one, and the Started comment fleet-check's lease counts from."""
+    return Plan(f"start #{number}", (
+        *((pause_step(repo),) if paused else ()),
+        label_step(repo, number, "ready", add=False),
+        label_step(repo, number, "in-progress", add=True),
+        *((Step("assign", "issue_write", {
+            **owner_repo(repo), "method": "update", "issue_number": number,
+            "assignees": [agent]}),) if agent else ()),
+        Step("comment_issue", "add_issue_comment", {
+            **owner_repo(repo), "issue_number": number,
+            "body": STARTED_COMMENT.format(branch=branch)},
+            note="followed by the host's footer where it requires one on every comment"),
+    ), f"#{number} is started: in-progress, with its Started comment")
+
+
+def start_handed_off(
+    root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
+    cloud_agent: str | None, issue_file: Path | None,
+) -> tuple[Path | None, str]:
+    """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
+    GitHub tools answered it (`issue_file`); the worktree as with gh; then the label change and the
+    Started comment sent through kern's relay where it serves the checkout, else printed as steps
+    for the session's GitHub tools. The worktree (None for a cloud worker) and the issue's URL."""
+    door = relay_door(root, repo)
+    if door is not None:
+        refuse_while_paused("start", door.paused(repo))
+        issue = door.ask("issue_read", {"method": "get", "issue_number": number})
+        issue = issue if isinstance(issue, dict) else {}
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"start: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if int(issue.get("number") or 0) != number or not issue.get("title"):
+        raise QueueError(f"start: the issue read is not #{number}: give issue_read's answer of it")
+    labels = issue_labels(issue)
+    if not {"work", "ready"} <= labels:
+        raise QueueError(f"Issue #{number} is not startable: it is labelled "
+                         f"{', '.join(sorted(labels)) or 'nothing'}, not work and ready")
+    cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
+    agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
+    if cloud and not agent:
+        raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
+    branch = str(issue["title"])
+    path = None if cloud else start_worktree(root, branch, worktree_root, create)
+    plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
+    if door is None:
+        print(plan.text())
+    else:
+        def assign(arguments: dict[str, object], _: str) -> None:
+            door.ask("issue_write", {key: value for key, value in arguments.items()
+                                     if key not in ("owner", "repo")})
+
+        run_plan(plan, {**workflow_actions(door), "assign": assign})
+    return path, web_url(issue) or issue_url(repo, number)
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
@@ -7788,7 +7896,9 @@ def run_close(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("intake", "read the work issue with gh, or from the files your GitHub tools' answers "
-                   "were saved to, and write its tickets into todo",
+                   "were saved to, and write its tickets into todo; it lists the comments, each "
+                   "with its author, a line ending [not the repository owner] where the "
+                   "repository's owner account did not write it (scripts/comment_authors.py)",
          WORKTREE,
          Exclusive((
              arg("--issue", type=int, help="work issue number"),
@@ -7846,7 +7956,8 @@ def run_intake(root: Path, args: argparse.Namespace) -> int:
     if issue["comments"]:
         print(f"{len(issue['comments'])} comment(s) may change the requirements:")
         for comment in issue["comments"]:
-            print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}")
+            print(f"  {comment['createdAt']} {comment['author']}: {comment['url']}"
+                  f"{comment_mark(comment)}")
     return 0
 
 
@@ -7861,7 +7972,8 @@ def run_probe(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("refresh", "re-read the work issue and its comments and report changes",
+@command("refresh", "re-read the work issue and its comments and report changes; each new or "
+                    "edited comment with its author, marked as intake marks it (--json: byOwner)",
          WORKTREE,
          arg("--issue", type=int, help="work issue number; default: recorded"),
          REPO, JSON_OUTPUT)
@@ -8278,19 +8390,45 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
-         arg("branch", nargs="?", help="branch to push; default: the current one"))
+         arg("branch", nargs="?", help="branch to push; default: the current one"),
+         arg("--redeliver", action="store_true",
+             help="this push starts a new delivery of the work branch: record its tip as "
+                  "delivered first, so the pre-push hook's late-push line stays quiet (README "
+                  "\"Late push\"); deliver does this itself"))
 def run_push(root: Path, args: argparse.Namespace) -> int:
-    push(root, args.branch)
+    if not args.redeliver:
+        push(root, args.branch)
+        return 0
+    branch = args.branch or current_branch(root)
+    tip = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
+    before = record_delivered_tip(root, branch, tip.stdout.strip() if tip.returncode == 0 else None)
+    try:
+        push(root, branch)
+    except BaseException:
+        sibling("late_push").restore(root / ".se" / "work", before)
+        raise
     return 0
 
 
 @command("verified", "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where "
                      "the ref is the integration branch and no passing suite and public check are "
-                     "recorded on its tree; push runs the same check",
+                     "recorded on its tree; push runs the same check. A push of the delivered "
+                     "work branch at another commit than its delivered tip prints the late-push "
+                     "line, or with se.toml [deliver] late_push = \"refuse\" is refused (README "
+                     "\"Late push\")",
          OPTIONAL_WORKTREE,
          arg("remote_ref", help="the pushed remote ref, for example refs/heads/main"),
          arg("commit", help="the pushed commit"))
 def run_verified(root: Path, args: argparse.Namespace) -> int:
+    late = sibling("late_push")
+    named = run_git(root, "rev-parse", "--verify", "--quiet", f"{args.commit}^{{commit}}")
+    said = late.verdict(late.load(root / ".se" / "work"), args.remote_ref,
+                        named.stdout.strip() if named.returncode == 0 and named.stdout.strip()
+                        else args.commit, late_push_mode(root))
+    if said is not None and said.refuse:
+        raise QueueError(said.line.removeprefix("error: "))
+    if said is not None:
+        print(said.line, file=sys.stderr)
     if args.remote_ref == f"refs/heads/{integration_branch(root)}":
         guard_pushed_tree(root, args.commit)
         print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
@@ -8513,19 +8651,35 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("start", "start a ready work issue: worktree from the newest main, label in-progress",
+@command("start", "start a ready work issue: worktree from the newest main, label in-progress; "
+                  "without gh, the label change and the Started comment as GitHub steps, or "
+                  "through kern's relay where it serves the checkout",
          WORKTREE,
          arg("issue", type=int),
          REPO, WORKTREE_ROOT,
          arg("--no-create", dest="create", action="store_false",
              help="only change the labels; the project's own script created the worktree"),
-         arg("--cloud-agent", help="GitHub login for a cloud worker"))
+         arg("--cloud-agent", help="GitHub login for a cloud worker"),
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
+                  "it; start then prints the label change and the Started comment as steps for "
+                  "them, or sends them through kern's relay where it serves the checkout"))
 def run_start(root: Path, args: argparse.Namespace) -> int:
-    path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
+    if hand_off():
+        path, url = start_handed_off(root, args.issue, resolve_repo(root, args.repo),
+                                     args.worktree_root, args.create, args.cloud_agent,
+                                     args.issue_body)
+        sent = relay_door(root, resolve_repo(root, args.repo)) is not None
+    else:
+        path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
+        url = None if path is None else str(
+            fetch_issue(root, args.issue, resolve_repo(root, args.repo))["url"])
+        sent = True
     if path is not None:
-        issue = fetch_issue(root, args.issue, resolve_repo(root, args.repo))
-        print(f"Launch worker: agent=worker issue={issue['url']} worktree={path}")
-    print(f"Started #{args.issue}")
+        print(f"Launch worker: agent=worker issue={url} worktree={path}")
+    print(f"Started #{args.issue}" if sent else
+          f"Started #{args.issue} here; run the GitHub steps above to label it and post its "
+          "Started comment")
     return 0
 
 
@@ -8809,7 +8963,8 @@ READ_ONLY_COMMANDS = {
 #: checkout (se_components' streamed_call): progress streams, and each GitHub step of their plans
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
 STREAMED_COMMANDS = frozenset(
-    {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check"})
+    {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check",
+     "start"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:

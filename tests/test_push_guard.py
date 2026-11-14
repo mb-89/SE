@@ -239,3 +239,100 @@ def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_pa
     line = json.loads(path.read_text(encoding="utf-8"))
     assert line["command"] == "work_tickets.py suite" and line["suite_limit_seconds"] == 120
     assert 0 < line["suite_seconds"] <= line["wall_seconds"]
+
+
+# A push of the work branch after its delivery (README "Late push", scripts/late_push.py).
+late_push = work_tickets.sibling("late_push")
+WORK_BRANCH = "fix/topic-20261114"
+
+
+def hook_push(root: Path, branch: str = WORK_BRANCH) -> tuple[int, str]:
+    """Push `branch` with a plain git push through se's hooks: its exit code and what it said."""
+    git(root, "config", "core.hooksPath", str(PROJECT / ".githooks"))
+    pushed = git_door.run("push", "-q", "origin", branch, root=root)
+    return pushed.returncode, pushed.stdout + pushed.stderr
+
+
+def delivered_work_branch(root: Path) -> str:
+    """The work branch, pushed and delivered at its tip (as deliver records it); its tip."""
+    git(root, "switch", "-q", "-c", WORK_BRANCH)
+    tip = commit(root, name="fix.txt")
+    assert work_tickets.main(["push", "--worktree", str(root)]) == 0
+    work_tickets.record_delivered_tip(root, WORK_BRANCH, tip)
+    return tip
+
+
+def test_a_push_before_any_delivery_names_no_late_push(checkout, capfd):
+    git(checkout, "switch", "-q", "-c", WORK_BRANCH)
+    commit(checkout, name="fix.txt")
+    code, said = hook_push(checkout)
+    output = said + "".join(capfd.readouterr())
+    assert code == 0, output
+    assert "late push" not in output
+
+
+def test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through(checkout, capfd):
+    tip = delivered_work_branch(checkout)
+    later = commit(checkout, name="late.txt")
+    code, said = hook_push(checkout)
+    output = said + "".join(capfd.readouterr())
+    assert code == 0, output
+    assert git(checkout.parent / "origin.git", "rev-parse", WORK_BRANCH) == later
+    lines = [line for line in output.splitlines() if "late push" in line]
+    assert lines == [f"warning: late push: {WORK_BRANCH} was delivered at {tip[:12]} and this "
+                     f"push moves it to {later[:12]}: the delivery is now stale and the "
+                     "integrator will refuse it; run work_tickets.py deliver again after this "
+                     "push"]
+
+
+def test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push(checkout, capsys):
+    delivered_work_branch(checkout)
+    assert verified(checkout, f"refs/heads/{WORK_BRANCH}") == 0
+    commit(checkout, name="late.txt")
+    assert verified(checkout, "refs/heads/other") == 0
+    assert "late push" not in "".join(capsys.readouterr())
+
+
+def test_with_the_setting_on_a_push_after_the_delivery_is_refused(checkout, capfd):
+    (checkout / "se.toml").write_text(
+        f'{IDENTITY}[deliver]\nlate_push = "refuse"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
+    tip = delivered_work_branch(checkout)
+    commit(checkout, name="late.txt")
+    code, said = hook_push(checkout)
+    output = said + "".join(capfd.readouterr())
+    assert code != 0, output
+    assert git(checkout.parent / "origin.git", "rev-parse", WORK_BRANCH) == tip
+    assert f"error: late push: {WORK_BRANCH} was delivered at {tip[:12]}" in output
+    assert "work_tickets.py push --redeliver" in output
+
+
+def test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_it_through(
+        checkout, capfd):
+    (checkout / "se.toml").write_text(
+        f'{IDENTITY}[deliver]\nlate_push = "refuse"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
+    delivered_work_branch(checkout)
+    later = commit(checkout, name="late.txt")
+    git(checkout, "config", "core.hooksPath", str(PROJECT / ".githooks"))
+    assert work_tickets.main(["push", "--redeliver", "--worktree", str(checkout)]) == 0
+    assert "late push" not in "".join(capfd.readouterr())
+    assert late_push.load(checkout / ".se" / "work") == {"branch": WORK_BRANCH, "tip": later}
+
+
+def test_a_failed_redelivery_push_puts_the_record_back(checkout, monkeypatch):
+    tip = delivered_work_branch(checkout)
+    commit(checkout, name="late.txt")
+
+    def refused(root, branch=None):
+        raise work_tickets.QueueError("push refused")
+
+    monkeypatch.setattr(work_tickets, "push", refused)
+    assert work_tickets.main(["push", "--redeliver", "--worktree", str(checkout)]) == 1
+    assert late_push.load(checkout / ".se" / "work") == {"branch": WORK_BRANCH, "tip": tip}
+
+
+@pytest.mark.parametrize("value", ['"loud"', "true"])
+def test_an_unknown_late_push_setting_is_refused_naming_the_values(checkout, capsys, value):
+    (checkout / "se.toml").write_text(
+        f'{IDENTITY}[deliver]\nlate_push = {value}\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
+    assert verified(checkout, f"refs/heads/{WORK_BRANCH}") == 1
+    assert "deliver.late_push must be one of warn, refuse" in capsys.readouterr().err
