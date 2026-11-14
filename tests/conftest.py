@@ -54,9 +54,6 @@ def local_machine() -> Iterator[None]:
 # not pass the door is scripts/hygiene.py's git-door check's to find. The list may only shrink.
 REAL_GIT: dict[str, str] = {
     "tests/test_git_door.py": "the door's contract, held against real git",
-    # Found by the refusal of child processes: `se new app` reads SE's own checkout, kern's template
-    # at its real pin tag (piece 6's kind).
-    "tests/beside_new_app.py": "reads SE's own checkout: kern's template at its real pin",
 }
 
 

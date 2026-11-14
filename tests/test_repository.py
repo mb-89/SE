@@ -143,8 +143,8 @@ def test_a_test_reaching_real_git_through_the_door_fails_outside_the_contract_su
     assert door_variable(Item(ROOT / "tests" / "test_git_door.py")) == "real"
 
 
-def test_the_files_allowed_real_git_exist_and_say_why() -> None:
-    assert [name for name in REAL_GIT if not (ROOT / name).is_file()] == []
+def test_only_the_contract_suite_is_allowed_real_git_and_says_why() -> None:
+    assert list(REAL_GIT) == ["tests/test_git_door.py"] and (ROOT / "tests" / "test_git_door.py").is_file()
     assert all(reason.strip() for reason in REAL_GIT.values())
 
 
