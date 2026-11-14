@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "se": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "scripts/se_mcp.sh",
+        "--root",
+        "."
+      ],
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}

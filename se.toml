@@ -108,6 +108,12 @@ repositories = ["mb-89/SE", "mb-89/obs"]
 "github.com/mb-89/SE" = 690
 "github.com/mb-89/obs" = 459
 
+# The plugin's build (scripts/se_plugin.py): `root_mcp` writes a root .mcp.json declaring SE's MCP
+# door. Off, as Claude Code reads that file too; Copilot reads .github/mcp.json, always written
+# (README "MCP door").
+[plugin]
+root_mcp = false
+
 # The outside skills each role relies on, `<plugin>@<marketplace>:<skill>`: se_plugin.py build
 # preloads them into that agent and the start greeting names one the session lacks (AGENTS.md
 # "Agents and skills"). SE's agents rely on none outside SE today.

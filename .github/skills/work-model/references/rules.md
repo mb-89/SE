@@ -58,10 +58,10 @@ needs it, and agents keep only judgment.
   drift apart; an ad hoc script committed before it was worth keeping.
 - **Implementations:**
   - se: the work model's [Mechanical first](../SKILL.md#rules-for-all-roles), the commands of
-    [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) with their tests.
+    [`<se>/scripts/work_tickets.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/work_tickets.py) with their tests.
   - se, ad hoc: an ad hoc solution stays untracked — a script, or a component
-    [`se component add`](../../../../scripts/se_component.py) scaffolds under `.se/components/`,
-    whose uses kern counts so [`retro.py collect`](../../../../scripts/retro.py) names what to
+    [`se component add`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/se_component.py) scaffolds under `.se/components/`,
+    whose uses kern counts so [`retro.py collect`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/retro.py) names what to
     promote to a tracked `components/` (`docs/go-core.md` weighs Python against a port to Go).
   - Go line (frozen): the retro counted `by-hand` answers and the scripts in the Go line's
     src/scripts/ directory.
@@ -76,8 +76,8 @@ Every fact has one owner, and everything else links to it or is generated from i
   contradict it.
 - **Prevents:** drift between two copies; a change applied in one place and missed in another.
 - **Implementations:**
-  - se: [`AGENTS.md`](../../../../AGENTS.md) ("SPOT everywhere");
-    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) generates both host layouts from
+  - se: [`AGENTS.md`](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md) ("SPOT everywhere");
+    [`<se>/scripts/se_plugin.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/se_plugin.py) generates both host layouts from
     `src/`, every pytest run builds them first (`tests/conftest.py`), and
     `tests/test_se_plugin.py` checks they match; otherwise by judgment in review.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
@@ -93,9 +93,9 @@ Logging and help never block, and a check that guards something refuses when it 
   through.
 - **Prevents:** a gate that passes what it could not check; work blocked by an optional helper.
 - **Implementations:**
-  - se: [`<se>/scripts/public_check.py`](../../../../scripts/public_check.py) exits 2 on a setup
+  - se: [`<se>/scripts/public_check.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/public_check.py) exits 2 on a setup
     error, on a shallow clone that hides commits and on a running se off its pin
-    ([Public safety](../../../../AGENTS.md#public-safety)); `field-report --check` refuses a report
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)); `field-report --check` refuses a report
     it cannot match to the issue.
 - **Related:** pub-001, pub-007, wrk-006
 
@@ -108,7 +108,7 @@ Fix what produced a bad outcome (a rule, a tool, a prompt), never just the outco
 - **Prevents:** a recurring defect whose cause is never fixed; blame in place of a fix.
 - **Implementations:**
   - se: the field report's Retro, whose proposed improvement names a target file and the change
-    ([pull request template](../../../pull_request_template.md)); otherwise by judgment.
+    ([pull request template](https://github.com/mb-89/SE/blob/v5.54.0/.github/pull_request_template.md)); otherwise by judgment.
 - **Related:** gen-001, gen-005
 
 ### gen-005 Consistency
@@ -125,7 +125,7 @@ behaviour other than what the code does.
 - **Implementations:**
   - se: the suite builds the generated layouts before its tests (`tests/conftest.py`), and
     `tests/test_se_plugin.py` checks they match their source; `tests/test_agent_definitions.py`
-    (every link and anchor resolves), [this book's check](../../../../scripts/rule_book.py); the
+    (every link and anchor resolves), [this book's check](https://github.com/mb-89/SE/blob/v5.54.0/scripts/rule_book.py); the
     reviewer, by judgment, for its change.
   - Go line (frozen): the battery's mechanical checks and generated manifests; the retro and the
     overhaul.
@@ -142,7 +142,7 @@ hand-kept lists.
 - **Without it:** every addition needs edits in several lists, and a missed list is a silent bug.
 - **Prevents:** shotgun surgery; a hand-kept list that misses a new entry.
 - **Implementations:**
-  - se: [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) finds every agent and skill
+  - se: [`<se>/scripts/se_plugin.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/se_plugin.py) finds every agent and skill
     under `src/` by itself; otherwise by judgment.
   - Go line (frozen): `se overhaul read` counted files touched per change.
 - **Related:** des-002, des-008
@@ -158,7 +158,7 @@ module and its contract.
 - **Prevents:** a change that breaks a far part of the system; a framework that depends on an
   application.
 - **Implementations:**
-  - se: projects use se and obs as pinned modules ([README "Modules"](../../../../README.md#modules));
+  - se: projects use se and obs as pinned modules ([README "Modules"](https://github.com/mb-89/SE/blob/v5.54.0/README.md#modules));
     framework and application repositories are kept apart
     ([Rules for all roles](../SKILL.md#rules-for-all-roles)).
   - Go line (frozen): v5's index and modules registering with a small core.
@@ -174,7 +174,7 @@ The logic lives in one place, and each host adapter is thin and generated from i
 - **Prevents:** drift between host layouts; behaviour that exists only on one host.
 - **Implementations:**
   - se: one source in `src/`, generated into the Copilot layout and the Claude Code plugin by
-    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py); the
+    [`<se>/scripts/se_plugin.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/se_plugin.py); the
     [adapter sync contract](../SKILL.md#adapter-sync-contract).
   - Go line (frozen): the Go program owned the logic; the plugin, the CLI and the generated UI were
     thin.
@@ -192,10 +192,10 @@ door, and a run reads its inputs once, computes, then writes its outputs.
 - **Prevents:** a test that needs a real service; a run that acts on inputs read at different
   times; one call per item where one batched read would do.
 - **Implementations:**
-  - se: git only through [`<se>/scripts/git_door.py`](../../../../scripts/git_door.py), which
-    [`<se>/scripts/hygiene.py`](../../../../scripts/hygiene.py) checks in CI's `check` job, with no
+  - se: git only through [`<se>/scripts/git_door.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/git_door.py), which
+    [`<se>/scripts/hygiene.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/hygiene.py) checks in CI's `check` job, with no
     other git subprocess allowed;
-    [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
+    [`<se>/scripts/work_tickets.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/work_tickets.py) reaches GitHub only
     through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
     ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
   - kern: git only through its Go door, `kern/git`, which the same check holds.
@@ -215,7 +215,7 @@ than a little dependency.
 - **Prevents:** duplicated and near-duplicated code; an abstraction with one real user.
 - **Implementations:**
   - se: by judgment, the reviewer for its change; an overhaul reads the duplicate blocks and
-    near-duplicate functions [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
+    near-duplicate functions [`<se>/scripts/overhaul.py facts`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
 - **Related:** gen-002, des-006
 
@@ -228,7 +228,7 @@ Build nothing for a second user or a case that does not exist yet.
 - **Prevents:** speculative generality; unused surfaces; a one-user abstraction.
 - **Implementations:**
   - se: by judgment, the reviewer for its change; an overhaul reads the script commands no
-    authored text names, which [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
+    authored text names, which [`<se>/scripts/overhaul.py facts`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed one-user abstractions and unused surfaces.
 - **Related:** des-005, des-015
 
@@ -242,7 +242,7 @@ changes state, not both.
 - **Prevents:** long functions and large modules; divergent change; a query with a side effect.
 - **Implementations:**
   - se: by judgment, the reviewer for its change; an overhaul reads the longest functions, files
-    and parameter lists [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
+    and parameter lists [`<se>/scripts/overhaul.py facts`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed the longest functions and files.
 - **Related:** des-008, des-014
 
@@ -333,7 +333,7 @@ kind.
 - **Prevents:** the design defects each smell signals, found late.
 - **Implementations:**
   - se: by judgment, the reviewer for its change; an overhaul reads the sizes, duplicates and
-    longest pieces [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) lists.
+    longest pieces [`<se>/scripts/overhaul.py facts`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/overhaul.py) lists.
   - Go line (frozen): `se overhaul read` listed files touched per change, duplicates, longest
     functions, files and parameter lists, sizes and switches on a kind.
 - **Related:** des-001, des-005, des-007
@@ -347,8 +347,8 @@ another place holds.
 - **Without it:** dead code accumulates and misleads readers about what the system does.
 - **Prevents:** dead code; code for a retired state; a second copy of a fact in code.
 - **Implementations:**
-  - se: "No backwards compatibility unless asked" ([`AGENTS.md`](../../../../AGENTS.md)); otherwise
-    by judgment, from what [`<se>/scripts/overhaul.py facts`](../../../../scripts/overhaul.py) finds nothing but tests reaches.
+  - se: "No backwards compatibility unless asked" ([`AGENTS.md`](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md)); otherwise
+    by judgment, from what [`<se>/scripts/overhaul.py facts`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/overhaul.py) finds nothing but tests reaches.
   - Go line (frozen): the battery's `deadcode -test`; `se overhaul read`'s pruning facts.
 - **Related:** des-006, gen-002
 
@@ -369,7 +369,7 @@ affected command at delivery.
 - **Implementations:**
   - se: the work model's [Tests](../SKILL.md#tests); git's contract, `tests/test_git_door.py`,
     against real git and its fake `tests/fake_git.py`; the worker runs the affected real command
-    once against the real service ([worker procedure](../../../agents/worker.agent.md#procedure)).
+    once against the real service ([worker procedure](https://github.com/mb-89/SE/blob/v5.54.0/.github/agents/worker.agent.md#procedure)).
   - Go line (frozen): the battery's `fake-contract` rule ran one contract suite against fake and
     real.
 - **Related:** des-004, tst-002
@@ -402,7 +402,7 @@ within one second.
 - **Prevents:** a slow regression nobody notices; a command that leaves a person waiting with no
   feedback.
 - **Implementations:**
-  - se: the suite's budget in `se.toml` `[tests]` ([Test budget](../../../../README.md#test-budget)),
+  - se: the suite's budget in `se.toml` `[tests]` ([Test budget](https://github.com/mb-89/SE/blob/v5.54.0/README.md#test-budget)),
     enforced by `integrate`, and `work_tickets.py suite --compare`; feedback within a second, by
     judgment.
   - Go line (frozen): `spec/budgets.yaml`, interactive and batch command classes, and answers from
@@ -420,7 +420,7 @@ integration branch past a failing one.
   in CI.
 - **Implementations:**
   - se: the suite (`uv run pytest -q`) that `integrate` runs before each integration push, the
-    [public check](../../../../AGENTS.md#public-safety) on every push, and this book's check.
+    [public check](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety) on every push, and this book's check.
   - Go line (frozen): the battery, with SE's own rules as checks.
 - **Related:** gen-001, wrk-006
 
@@ -436,7 +436,7 @@ owners.
 - **Prevents:** drift between two copies; prose that restates a rule it does not own.
 - **Implementations:**
   - se: generated layouts name their source
-    ([`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py)); every place that names a rule
+    ([`<se>/scripts/se_plugin.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/se_plugin.py)); every place that names a rule
     links to it in this book; otherwise by judgment in review.
   - Go line (frozen): manifests regenerated identically, and every command, path and link named in
     prose existed (`se help manifest`).
@@ -484,7 +484,7 @@ their own outputs.
   - se: the work issue template and `work_tickets.py` (`file`, `route`, `intake`)
     ([Issues](../SKILL.md#issues)); the field report is the pull request's description, never an
     issue; a worker acts on its work issue and its comments, not on messages
-    ([the box](../../../agents/worker.agent.md#the-box)).
+    ([the box](https://github.com/mb-89/SE/blob/v5.54.0/.github/agents/worker.agent.md#the-box)).
   - Go line (frozen): issues created only through `se issue new`; the retro's rule checks.
 - **Related:** wrk-001, dec-011
 
@@ -499,7 +499,7 @@ branch, or at the pin the project sets.
 - **Implementations:**
   - se: `work_tickets.py sync` merges the newest integration branch before intake and every ticket;
     the public check refuses an se off the project's pin
-    ([Public safety](../../../../AGENTS.md#public-safety)).
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** pub-007, wrk-001
 
 ### wrk-004 The fleet works, sessions discuss
@@ -526,7 +526,7 @@ pushed, with nothing steering it in between.
 - **Implementations:**
   - se: the session prompt names the agent and its work issue, and the agent reads its definition
     and `AGENTS.md`; the hooks, `work_tickets.py push` and `integrate` check at the push
-    ([Public safety](../../../../AGENTS.md#public-safety)).
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
   - Go line (frozen): `se issue pull --take` handed the issue's skills over; `se issue land`.
 - **Related:** wrk-006, tst-004
 
@@ -539,8 +539,8 @@ Every push goes through a command that runs its gates, and a gate is never bypas
 - **Prevents:** a change that passes locally and fails in CI; a hook bypassed with `--no-verify`.
 - **Implementations:**
   - se: `work_tickets.py push` (never `git push` by hand) and `deliver`
-    ([worker procedure](../../../agents/worker.agent.md#procedure)); pre-push hooks and CI
-    ([Public safety](../../../../AGENTS.md#public-safety)).
+    ([worker procedure](https://github.com/mb-89/SE/blob/v5.54.0/.github/agents/worker.agent.md#procedure)); pre-push hooks and CI
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** wrk-005, pub-006
 
 ### wrk-007 One piece of work, one issue; no command files issues on its own
@@ -558,10 +558,10 @@ a report.
   - se: `work_tickets.py file`, `backlog file` and `route` are the only paths to the issue-create
     door, which `tests/test_issue_creation.py` checks.
   - se: `review.py file` posts one comment on the reviewed pull request and files no issue
-    (README [Work commands](../../../../README.md#work-commands)).
+    (README [Work commands](https://github.com/mb-89/SE/blob/v5.54.0/README.md#work-commands)).
   - se: `retro.py file` and `overhaul.py file` post one report on their own issue and close it,
     filing no issue; an overhaul's rule changes are marked for the owner's decision list
-    (README [Work commands](../../../../README.md#work-commands)).
+    (README [Work commands](https://github.com/mb-89/SE/blob/v5.54.0/README.md#work-commands)).
   - se: SE, reading a report, bundles related findings into one work issue and sends rule or
     principle changes to the owner's decision list, never as separate issues
     ([Issues](../SKILL.md#issues)).
@@ -684,7 +684,7 @@ A decision names the rule or earlier decision it contradicts and the one it repl
 - **Prevents:** a decision that contradicts a rule unnoticed; two live answers to one question.
 - **Implementations:**
   - se: checklist item 9 of the [decision skill](../../decision/SKILL.md#the-checklist); SE checks
-    every outside issue against this book ([SE](../../../agents/se.agent.md#outside-issues)).
+    every outside issue against this book ([SE](https://github.com/mb-89/SE/blob/v5.54.0/.github/agents/se.agent.md#outside-issues)).
 - **Related:** gen-005, dec-001
 
 ### dec-010 A success criterion
@@ -735,7 +735,7 @@ step that needs the person in its session.
 ## pub: publishing and security
 
 The public check enforces these rules on tracked files, commit messages and identities; its
-behaviour, lists and hooks are owned by [Public safety](../../../../AGENTS.md#public-safety).
+behaviour, lists and hooks are owned by [Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety).
 
 ### pub-001 Publishable at any time
 
@@ -747,9 +747,9 @@ account or an internal host.
 - **Without it:** private names leak into public history, where removing them means rewriting it.
 - **Prevents:** a leaked name, path, address or host; work content in a framework repository.
 - **Implementations:**
-  - se: [`<se>/scripts/public_check.py`](../../../../scripts/public_check.py) with the public and the
+  - se: [`<se>/scripts/public_check.py`](https://github.com/mb-89/SE/blob/v5.54.0/scripts/public_check.py) with the public and the
     local list, run by the hooks, by `work_tickets.py push` and in CI
-    ([Public safety](../../../../AGENTS.md#public-safety)); work-specific content lives in separate
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)); work-specific content lives in separate
     repositories that use se as a module.
 - **Related:** pub-002, pub-005, gen-003
 
@@ -766,7 +766,7 @@ se), and never a real e-mail address.
 - **Implementations:**
   - se: `work_tickets.py sync` writes the identity into the checkout
     ([Commit identity and public check](../SKILL.md#what-the-project-provides)); the public check's
-    commit gates refuse another identity ([Public safety](../../../../AGENTS.md#public-safety)).
+    commit gates refuse another identity ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** pub-001, pub-003
 
 ### pub-003 No attribution trailers
@@ -780,7 +780,7 @@ a host's attribution reminder says.
 - **Prevents:** an address or session link in public history; a host's default overriding the
   owner's rule.
 - **Implementations:**
-  - se: the public check's commit gates ([Public safety](../../../../AGENTS.md#public-safety));
+  - se: the public check's commit gates ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety));
     `commit_trailer` is the one trailer a machine may set
     ([What the project provides](../SKILL.md#what-the-project-provides)).
 - **Related:** pub-002
@@ -794,7 +794,7 @@ an issue or pull request URL).
 - **Without it:** history fills with references that point nowhere or reveal a private tracker.
 - **Prevents:** a dangling reference in history; a private tracker named in a public repository.
 - **Implementations:**
-  - se: the public check's commit gates ([Public safety](../../../../AGENTS.md#public-safety));
+  - se: the public check's commit gates ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety));
     `integrate` writes its merge messages without them
     ([What the project provides](../SKILL.md#what-the-project-provides)).
 - **Related:** pub-001
@@ -809,7 +809,7 @@ file.
 - **Prevents:** a private term published by the list that guards it.
 - **Implementations:**
   - se: the public check refuses to run while git tracks the local list; `<se>/scripts/setup.sh` and
-    `setup.ps1` add it to `.gitignore` ([Public safety](../../../../AGENTS.md#public-safety)).
+    `setup.ps1` add it to `.gitignore` ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** pub-001
 
 ### pub-006 Never bypass the hooks
@@ -821,7 +821,7 @@ A finding is fixed by removing the content or by a reasoned allow entry, never b
 - **Prevents:** a leak pushed past a hook; a false positive silenced without a reason.
 - **Implementations:**
   - se: `.public-check-allow`, whose header owns its format; CI runs the commit gates on every push
-    to `main` ([Public safety](../../../../AGENTS.md#public-safety)).
+    to `main` ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** wrk-006, pub-001
 
 ### pub-007 One se version per check
@@ -835,7 +835,7 @@ A repository that pins se is checked only by se at that pin.
 - **Implementations:**
   - se: the public check refuses an se off the pin with exit code 2 and names the se commit in every
     verdict; `<se>/scripts/se_modules.py sync` brings the clone there
-    ([Public safety](../../../../AGENTS.md#public-safety)).
+    ([Public safety](https://github.com/mb-89/SE/blob/v5.54.0/AGENTS.md#public-safety)).
 - **Related:** wrk-003, gen-003
 
 ## p-go: the Go line on main (frozen)
