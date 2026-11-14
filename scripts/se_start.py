@@ -622,6 +622,17 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
     return [f"{name}: failed: {cause}; see {log}"]
 
 
+# Under Copilot SE works without its core: every step runs through SE's scripts and gh, and the
+# greeting says so under a kern line that failed (the work model's "Host procedure under Copilot").
+WITHOUT_KERN = "SE runs without kern: every step goes through SE's scripts and gh."
+
+
+def without_kern(kern: list[str], host: str) -> list[str]:
+    """The line that says SE runs without kern: under Copilot, after a kern line that failed; none
+    elsewhere, so Claude Code's greeting stays as it is."""
+    return [WITHOUT_KERN] if host == "copilot" and kern and ": failed: " in kern[0] else []
+
+
 def _spawn_detached(argv: list[str]) -> None:
     kwargs = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1040,7 +1051,7 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
                      world.kern)
     lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
-    lines = lines[:1] + kern + lines[1:]
+    lines = lines[:1] + kern + without_kern(kern, args.host) + lines[1:]
     if args.hook:
         print(hook_output(lines, args.note, SE_ROOT, args.host))
     else:

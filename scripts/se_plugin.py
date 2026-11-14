@@ -1,15 +1,23 @@
 """Generate the Copilot and Claude Code layouts of the se plugin from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
-`build` writes both layouts, the Claude Code plugin manifests and Copilot's hooks
-(`.github/hooks/se.json`, a layout setting: `Layout.hooks`); `check`
-refuses when any generated file differs from what `build` would write, so a hand edit to a generated
-file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
+`build` writes both layouts, the Claude Code plugin manifests, Copilot's hooks
+(`.github/hooks/se.json`, a layout setting: `Layout.hooks`), Copilot's one plugin manifest
+(`.github/plugin/plugin.json`) and the MCP door's declarations (`.github/mcp.json`, and a root
+`.mcp.json` only where `se.toml` `[plugin] root_mcp` is on); `check` refuses when any generated file
+differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
 validators of `scripts/agent_lint.py` find them. Where each layout is installed from is the README
 section "Install".
 
 Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
-into that layout, without its prefix; every other key goes into both.
+into that layout, without its prefix; every other key goes into both. In a source's body, the lines
+between a line `<!-- copilot -->` and a line `<!-- /copilot -->` go only into the Copilot layout,
+without the two marker lines; the Claude layout drops them with the markers, so it is byte for byte
+what the source without them builds (`hosts`).
+
+The Copilot layout keeps no relative link that leaves its own folder (`.github/agents`,
+`.github/skills`): such a link becomes a link to the file on GitHub at the project's version, the
+tag `v<version>` (`_rewrite_links`), so the files work copied or installed elsewhere.
 
 The outside skills each role relies on are one list, `se.toml` `[roles.<role>] skills`, never the
 agent's own front matter: `build` writes it into the `skills` field of that agent in every layout
@@ -110,8 +118,23 @@ NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source
 NOTICE_PATTERN = re.compile(
     "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
+# Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
+# layout's .claude-plugin/plugin.json.
+COPILOT_MANIFEST = PurePosixPath(".github/plugin/plugin.json")
+# The MCP door (README "MCP door"), declared per host: Copilot's project file, and the root file
+# Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`).
+COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
+ROOT_MCP_FILE = PurePosixPath(".mcp.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
-             COPILOT_HOOKS_FILE)
+             COPILOT_HOOKS_FILE, COPILOT_MANIFEST, COPILOT_MCP_FILE, ROOT_MCP_FILE)
+# The door's server: its key, and the launcher a host runs, standalone (scripts/se_mcp.sh). A project
+# file names it from the project's root, the folder its host starts it in; a plugin's manifest from
+# the plugin's root, whose variable a host sets in arguments only, never in the command.
+MCP_SERVER = "se"
+LAUNCHER = "scripts/se_mcp.sh"
+COPILOT_PLUGIN_ROOT = "${PLUGIN_ROOT}"
+# The lines that open and close a part of a source's body only the Copilot layout carries (`hosts`).
+COPILOT_OPEN, COPILOT_CLOSE = "<!-- copilot -->", "<!-- /copilot -->"
 
 
 class SourceError(Exception):
@@ -199,7 +222,12 @@ def _relative(target: PurePosixPath, start: PurePosixPath) -> str:
     return PurePosixPath(os.path.relpath(target, start)).as_posix()
 
 
-def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout) -> str:
+def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout,
+                   version: str = "") -> str:
+    """Each relative link as the generated file reaches its target; in the Copilot layout, a
+    target outside the generated file's own folder (`_folder`) as its GitHub URL at `v<version>`."""
+    folder = _folder(generated, layout)
+
     def replace(match: re.Match) -> str:
         link = match.group(2)
         if SCHEME.match(link) or link.startswith("/"):
@@ -207,10 +235,40 @@ def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, l
         resolved = _normalize((source.parent / link).as_posix())
         if resolved.parts[:2] in (("src", "agents"), ("src", "skills")):
             resolved = _target(resolved, layout)
+        if layout.name == "copilot" and not resolved.is_relative_to(folder):
+            kind = "tree" if link.endswith("/") else "blob"
+            return f"{match.group(1)}{REPOSITORY}/{kind}/v{version}/{resolved.as_posix()}{match.group(3)}"
         relative = _relative(resolved, generated.parent) + ("/" if link.endswith("/") else "")
         return match.group(1) + relative + match.group(3)
 
     return LINK.sub(replace, text)
+
+
+def _folder(generated: PurePosixPath, layout: Layout) -> PurePosixPath:
+    """The layout folder a generated file lies in: its agents' or its skills'."""
+    return layout.agents if generated.is_relative_to(layout.agents) else layout.skills
+
+
+def hosts(text: str, source: PurePosixPath | str, layout: Layout, first: int = 1) -> str:
+    """The body with its Copilot-only parts (between COPILOT_OPEN and COPILOT_CLOSE lines) kept
+    without their markers in the Copilot layout and dropped with them in every other; `first` is
+    the source's line number of the body's first line, for the refusals."""
+    lines, kept, inside = text.splitlines(keepends=True), [], 0
+    for number, line in enumerate(lines, first):
+        marker = line.strip()
+        if marker == COPILOT_OPEN:
+            if inside:
+                raise SourceError(f"{source}:{number}: {COPILOT_OPEN} inside another; close it first")
+            inside = number
+        elif marker == COPILOT_CLOSE:
+            if not inside:
+                raise SourceError(f"{source}:{number}: {COPILOT_CLOSE} without its {COPILOT_OPEN}")
+            inside = 0
+        elif not inside or layout.name == "copilot":
+            kept.append(line)
+    if inside:
+        raise SourceError(f"{source}:{inside}: {COPILOT_OPEN} is never closed by {COPILOT_CLOSE}")
+    return "".join(kept)
 
 
 def _front_matter(text: str, source: PurePosixPath, layout: Layout,
@@ -240,7 +298,7 @@ def _front_matter(text: str, source: PurePosixPath, layout: Layout,
 
 
 def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
-                    role_skills: dict[str, list[RoleSkill]]) -> tuple[PurePosixPath, bytes]:
+                    role_skills: dict[str, list[RoleSkill]], version: str = "") -> tuple[PurePosixPath, bytes]:
     generated = _target(source, layout)
     data = (root / source).read_bytes()
     if source.suffix != ".md":
@@ -253,7 +311,8 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
                               "`<se>/scripts/<name>.py` (the work model's \"What the project provides\")")
     role = source.stem if source.parent == SOURCE / "agents" else None
     front, body = _front_matter(text, source, layout, role_skills.get(role, []) if role else [])
-    body = _rewrite_links(body, source, generated, layout)
+    first = text.count("\n", 0, len(text) - len(body)) + 1
+    body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout, version)
     return generated, (front + notice(source) + body).encode("utf-8")
 
 
@@ -271,6 +330,22 @@ def _version(root: Path) -> str:
     return version
 
 
+def root_mcp(root: Path) -> bool:
+    """`se.toml` `[plugin] root_mcp`: whether the build writes a root `.mcp.json`, which Claude Code
+    reads too; off by default."""
+    with (root / "se.toml").open("rb") as handle:
+        table = tomllib.load(handle).get("plugin", {})
+    value = table.get("root_mcp", False) if isinstance(table, dict) else None
+    if not isinstance(value, bool) or (isinstance(table, dict) and set(table) - {"root_mcp"}):
+        raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false`")
+    return value
+
+
+def mcp_server(launcher: str) -> dict:
+    """The door's stdio server, its launcher run with bash for the project it starts in."""
+    return {"type": "stdio", "command": "bash", "args": [launcher, "--root", "."]}
+
+
 def _json(value: dict) -> bytes:
     return (json.dumps(value, indent=2) + "\n").encode("utf-8")
 
@@ -280,7 +355,7 @@ def _copilot_hook(command: str, seconds: int) -> dict:
             "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
 
 
-def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
+def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
     plugin = {
         "name": PLUGIN,
         "version": _version(root),
@@ -301,12 +376,30 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
     files = {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
-    if LAYOUTS[0].hooks:
+    if root_mcp(root):
+        files[ROOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: mcp_server(LAUNCHER)}})
+    if not copilot:
+        return files
+    layout = LAYOUTS[0]
+    if layout.hooks:
         files[COPILOT_HOOKS_FILE] = _json({
             "version": 1,
             "hooks": {event: [_copilot_hook(command, seconds)]
                       for event, (command, seconds) in COPILOT_HOOKS.items()},
         })
+    files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {**mcp_server(LAUNCHER), "tools": ["*"]}}})
+    files[COPILOT_MANIFEST] = _json({
+        "name": PLUGIN,
+        "version": plugin["version"],
+        "description": DESCRIPTION,
+        "author": {"name": OWNER},
+        "repository": REPOSITORY,
+        "license": "MIT",
+        "agents": f"{layout.agents}/",
+        "skills": f"{layout.skills}/",
+        **({"hooks": str(COPILOT_HOOKS_FILE)} if layout.hooks else {}),
+        "mcpServers": {MCP_SERVER: mcp_server(f"{COPILOT_PLUGIN_ROOT}/{LAUNCHER}")},
+    })
     return files
 
 
@@ -323,17 +416,19 @@ def validate(files: dict[PurePosixPath, bytes]) -> list[str]:
     return findings
 
 
-def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
-    """Every generated file and its content, computed from the source alone."""
-    files = _manifests(root)
+def expected(root: Path = ROOT, copilot: bool = True) -> dict[PurePosixPath, bytes]:
+    """Every generated file and its content, computed from the source alone; without `copilot`,
+    the Claude layout alone, which is the same either way."""
+    files = _manifests(root, copilot)
+    version = _version(root)
     sources = _sources(root)
     role_skills = roles(root)
     agents = {source.stem for source in sources if source.parent == SOURCE / "agents"}
     if unknown := sorted(set(role_skills) - agents):
         raise SourceError(f"{root / 'se.toml'}: [roles.{unknown[0]}] names no agent in {SOURCE}/agents")
     for source in sources:
-        for layout in LAYOUTS:
-            path, data = _generated_file(source, layout, root, role_skills)
+        for layout in LAYOUTS if copilot else LAYOUTS[1:]:
+            path, data = _generated_file(source, layout, root, role_skills, version)
             files[path] = data
     if problems := validate(files):
         raise SourceError("; ".join(problems))

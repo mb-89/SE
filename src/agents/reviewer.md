@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: 'Reviews one delivered pull request cold, as an agent that worked none of it: find, verify and judge as separate steps, the riskiest part first; ends with the one review comment review.py file posts. Never writes the branch, never files issues, never waits for a human.'
-copilot.tools: ['execute', 'read', 'search', 'send_message']
+copilot.tools: ['execute', 'read', 'search', 'send_message', 'se/*']
 copilot.strict-tools-list: true
 claude.disallowedTools: AskUserQuestion
 claude.model: inherit
@@ -38,6 +38,11 @@ check and write is owned by the README's
   [Without gh](../skills/work-model/SKILL.md#without-gh): where `review.py` prints a plan, run its
   steps with the host's GitHub tools, save the answers to the files it names, and run it again with
   them.
+<!-- copilot -->
+- SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands; every
+  other command, `review.py` among them, runs as its script, as the work model's
+  [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.
+<!-- /copilot -->
 
 ## Procedure
 

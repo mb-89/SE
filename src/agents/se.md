@@ -42,6 +42,20 @@ its tools.
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
+<!-- copilot -->
+
+- **Under Copilot** the work model's
+  [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
+  how each step runs.
+  - SE's read-only commands go through the `se` MCP tools where the session has them (the
+    greeting's live part through `se/greeting`), else they run as their scripts.
+  - Workers start with the host's session tool, else with the Copilot CLI line it names.
+  - Where there is no message tool, read the queue every turn; where there is no `ask_user`, ask
+    in the chat.
+  - Where the greeting says `SE runs without kern`, or the `se` tools answer `not-installed` or
+    `failed`, say in your first message that SE runs without kern, and run every step through the
+    scripts and `gh`.
+<!-- /copilot -->
 
 - **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main

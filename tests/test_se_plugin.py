@@ -109,7 +109,7 @@ def test_front_matter_keys_go_only_to_their_layout(checkout):
     copilot = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
     claude = (checkout / "agents" / "worker.md").read_text(encoding="utf-8")
     copilot_front, claude_front = copilot.split("---")[1], claude.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message']" in copilot_front
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in copilot_front
     assert "disallowedTools" not in copilot_front
     assert "disallowedTools: AskUserQuestion" in claude_front
     assert "tools:" not in claude_front and "copilot." not in claude_front
@@ -366,3 +366,130 @@ def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp
     for path in (crlf / "src").rglob("*.md"):
         path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     assert se_plugin.expected(crlf) == se_plugin.expected(checkout)
+
+
+def test_copilots_one_manifest_names_its_layout_its_hooks_and_the_door(checkout):
+    manifest = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
+    claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert {key: manifest[key] for key in ("name", "version", "description")} == {
+        key: claude[key] for key in ("name", "version", "description")}
+    assert manifest["agents"] == ".github/agents/" and manifest["skills"] == ".github/skills/"
+    assert manifest["hooks"] == ".github/hooks/se.json"
+    for key in ("agents", "skills", "hooks"):
+        assert (checkout / manifest[key]).exists(), key
+    assert manifest["mcpServers"] == {"se": {"type": "stdio", "command": "bash",
+                                            "args": ["${PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."]}}
+
+
+@pytest.mark.parametrize("name", (".github/mcp.json", ".github/plugin/plugin.json", ".mcp.json"))
+def test_the_door_runs_the_launcher_and_a_plugin_root_only_in_its_arguments(checkout, tmp_path, name):
+    """README "MCP door": every declaration runs the standalone launcher with bash; a host's plugin
+    root variable stands in an argument, never in the command."""
+    root = checkout
+    if name == ".mcp.json":
+        root = tmp_path / "on"
+        shutil.copytree(checkout / "src", root / "src")
+        (root / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
+            "root_mcp = false", "root_mcp = true"), encoding="utf-8")
+        se_plugin.build(root)
+    [server] = json.loads((root / name).read_text(encoding="utf-8"))["mcpServers"].values()
+    assert server["command"] == "bash" and "$" not in server["command"]
+    assert server["args"][0].endswith("scripts/se_mcp.sh") and server["args"][1:] == ["--root", "."]
+    assert (ROOT / "scripts" / "se_mcp.sh").is_file()
+
+
+def test_no_root_mcp_json_with_the_setting_off_and_check_refuses_a_stray_one(checkout, capsys):
+    assert se_plugin.root_mcp(ROOT) is False, "se.toml [plugin] root_mcp is off by default"
+    assert not (ROOT / ".mcp.json").exists() and not (checkout / ".mcp.json").exists()
+    (checkout / ".mcp.json").write_text("{}\n", encoding="utf-8")
+    assert se_plugin.main(["check", "--root", str(checkout)]) == 1
+    assert ".mcp.json: not generated from src/" in capsys.readouterr().err
+    assert se_plugin.main(["build", "--root", str(checkout)]) == 0
+    assert not (checkout / ".mcp.json").exists()
+
+
+@pytest.mark.parametrize("name", (".github/plugin/plugin.json", ".github/mcp.json"))
+def test_check_covers_the_copilot_manifest_and_mcp_file(checkout, capsys, name):
+    path = checkout / name
+    original = path.read_bytes()
+    path.write_bytes(original.replace(b'"se"', b'"other"', 1))
+    try:
+        assert se_plugin.main(["check", "--root", str(checkout)]) == 1
+        assert f"{name}: differs from its source" in capsys.readouterr().err
+    finally:
+        path.write_bytes(original)
+
+
+def test_a_plugin_setting_the_build_cannot_read_is_refused(tmp_path, capsys):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nroot_mcp = "yes"\n', encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert "[plugin] holds only `root_mcp = true|false`" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("folder", (".github/agents", ".github/skills"))
+def test_no_relative_link_leaves_its_folder_in_the_copilot_layout(checkout, folder):
+    """The files work copied or installed elsewhere: a link out of the folder is a GitHub URL at
+    the project's version."""
+    version = tomllib.loads((checkout / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    base = (checkout / folder).resolve()
+    urls = 0
+    for path in (checkout / folder).rglob("*.md"):
+        for target in LINK.findall(path.read_text(encoding="utf-8")):
+            if "://" in target:
+                urls += target.startswith(f"https://github.com/mb-89/SE/blob/v{version}/")
+                continue
+            assert (path.parent / target).resolve().is_relative_to(base), f"{path.relative_to(checkout)}: {target}"
+    assert urls > 0, "the links that left the folder point to GitHub at the pinned version"
+
+
+def test_a_copilot_part_goes_only_to_the_copilot_layout_without_its_markers(tmp_path):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n\nBoth.\n\n"
+                 "<!-- copilot -->\nOnly Copilot, see [it](../skills/x/SKILL.md).\n\n<!-- /copilot -->\nBoth again.\n")
+    write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
+    files = se_plugin.expected(tmp_path)
+    copilot = files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode()
+    claude = files[se_plugin.PurePosixPath("agents/se.md")].decode()
+    assert claude.endswith("# SE\n\nBoth.\n\nBoth again.\n")
+    assert copilot.endswith("# SE\n\nBoth.\n\nOnly Copilot, see "
+                            "[it](https://github.com/mb-89/SE/blob/v1.0.0/.github/skills/x/SKILL.md).\n\nBoth again.\n")
+    assert "<!--" not in copilot.split("-->", 1)[1], "no marker line is left"
+
+
+@pytest.mark.parametrize("body, refusal", (
+    ("<!-- copilot -->\nx\n", "src/agents/se.md:6: <!-- copilot --> is never closed"),
+    ("x\n<!-- /copilot -->\n", "src/agents/se.md:7: <!-- /copilot --> without its <!-- copilot -->"),
+    ("<!-- copilot -->\n<!-- copilot -->\n<!-- /copilot -->\n", "src/agents/se.md:7: <!-- copilot --> inside another"),
+))
+def test_a_copilot_part_the_build_cannot_place_is_refused_naming_its_line(tmp_path, capsys, body, refusal):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n" + body)
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert refusal in capsys.readouterr().err
+
+
+
+def claude_layout(files: dict) -> dict:
+    """The Claude layout of a build: agents/, skills/ and .claude-plugin/, without the version line."""
+    return {path: re.sub(rb'\n  "version": "[^"]*",', b"", data) for path, data in files.items()
+            if path.parts[0] in ("agents", "skills", ".claude-plugin")}
+
+
+def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_content(checkout, tmp_path):
+    """Everything Copilot gains is additive: the Claude layout built from the sources is the one
+    built without any Copilot content, the Copilot parts of the bodies removed from the sources and
+    the Copilot layout and its files not built at all."""
+    files = se_plugin.expected(checkout)
+    assert se_plugin.COPILOT_MANIFEST in files and se_plugin.COPILOT_MCP_FILE in files
+    stripped = tmp_path / "stripped"
+    shutil.copytree(checkout / "src", stripped / "src")
+    (stripped / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
+        'version = "', 'version = "0.0.', 1), encoding="utf-8")
+    parts = 0
+    for path in (stripped / "src").rglob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        parts += text.count(se_plugin.COPILOT_OPEN + "\n")
+        path.write_text(re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", text), encoding="utf-8")
+    assert parts >= 3, "the se, worker and work-model sources carry Copilot parts"
+    without = se_plugin.expected(stripped, copilot=False)
+    assert not any(path.parts[0] == ".github" for path in without)
+    assert claude_layout(without) == claude_layout(files)

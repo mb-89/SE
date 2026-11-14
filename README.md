@@ -278,9 +278,28 @@ door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.js
 Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
 through it as tools. The host spawns it as the session starts; nobody starts anything else.
 
-- **What the host runs.** `se` must already be on the PATH (`~/.se/bin`, [Kern](#kern)), or be
-  reached through a launcher that fetches it. Pass the checkout as `--root`: a host's working
-  directory need not be the repository. Which file names the door for which host is not here yet.
+- **What the host runs.** The launcher `scripts/se_mcp.sh --root <project>`, or its PowerShell
+  twin `se_mcp.ps1`: standalone, it reads only the release pin (`components/release.toml`).
+  - It runs `~/.se/bin/se-<version>` ([Kern](#kern)), or the binary `SE_MCP_BIN` names, as
+    `se mcp --root <project> --home <this SE>`.
+  - Standard output carries MCP alone; the rest goes to `<project>/.se/.runtime/mcp.log`.
+- **Where the binary is missing** the launcher answers at once as a door of one tool, `status`,
+  whose calls say `not-installed` and name the setup to run, SE's start (`scripts/bootstrap.sh`).
+  That fetches the binary and checks it against the release's `SHA256SUMS` in `~/.se/bin`; then
+  restart the server. The launcher fetches nothing itself, so no host waits on a download.
+- **Declared per host, generated** by `scripts/se_plugin.py build`:
+  - `.github/mcp.json` for Copilot in a checkout of SE;
+  - the `mcpServers` entry of Copilot's plugin manifest `.github/plugin/plugin.json` for a plugin
+    install, the plugin's root `${PLUGIN_ROOT}` in an argument only;
+  - a root `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on; it is off, as Claude Code
+    reads that file too.
+- **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
+  or in VS Code `code --add-mcp
+  '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.
+- **In another repository**, one without a `wiring.toml` of its own, the door serves SE's tools
+  from the SE the launcher lies in (the plugin's root, or the pinned module under
+  `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
+  `cli.Source`), its processes placed in that SE with `KERN_ROOT` naming the project.
 - **It answers at once.** `initialize` and `tools/list` come from the catalog the `se` binary reads
   without the core: its Go components, the checkout's `wiring.toml` and its components'
   declarations. Beside them it starts the core detached, or attaches to the one that runs.
