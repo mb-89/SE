@@ -21,7 +21,8 @@ draft with
 
 - the previous retro's findings, each scored: the work issues of the window that name it
   (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
-  (recurred);
+  (recurred); where the overhaul countdown is on (overhaul.py due_after), one that an open issue
+  takes is too early to score (TOO_EARLY), neither;
 
 and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
 `retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
@@ -119,6 +120,9 @@ RULE_CHECKS = {
 }
 # A retro is due once this many work issues landed since the last one (se.toml [retro] due_after).
 DUE_AFTER = 10
+# The state of an earlier run's finding whose issue is still open: it had no time to land, so the
+# run lists it and scores it neither way (no failure, no recurrence).
+TOO_EARLY = "too early to score"
 RETRO_KEYS = ("Went well", "Cost time", "Proposed improvement")
 EMPTY = {"", "none", "none.", "-", "n/a"}
 
@@ -576,13 +580,17 @@ def landed_since_retro(door, tracker: str, branch: str) -> int | None:
                for issue in found.window)
 
 
-def due_after(root: Path) -> int:
-    """`[retro] due_after` in se.toml: how many landed work issues make a retro due; built in
-    DUE_AFTER."""
-    count = work_tickets.se_table(root, "retro").get("due_after", DUE_AFTER)
-    if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
-        raise QueueError(f"retro.due_after in {root / 'se.toml'} must be a positive whole number; "
-                         f"fix it or remove it for the built-in {DUE_AFTER}")
+def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER,
+              off: bool = False) -> int:
+    """`[<table>] due_after` in se.toml: how many counted items make a run of that kind due (for
+    a retro, landed work issues; for an overhaul, closed retros); built in `default`. With `off`,
+    0 is allowed too: the countdown is switched off."""
+    count = work_tickets.se_table(root, table).get("due_after", default)
+    least = 0 if off else 1
+    if isinstance(count, bool) or not isinstance(count, int) or count < least:
+        kind = "a whole number, 0 for off" if off else "a positive whole number"
+        raise QueueError(f"{table}.due_after in {root / 'se.toml'} must be {kind}; "
+                         f"fix it or remove it for the built-in {default}")
     return count
 
 
@@ -684,13 +692,20 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         if door.missing:
             return None
         previous = posted_block(texts, last.number, git_show(root))
+    # An issue that takes one of the previous findings and is still open makes it too early to
+    # score, where the overhaul countdown is on (overhaul.py due_after): only then, and only with
+    # findings to score, are the open issues read.
+    opened = ([issue_of(item) for item in door.open_issues()]
+              if (previous or {}).get("findings") and sibling("overhaul").due_after(root) else [])
+    if door.missing:
+        return None
     # The window's metrics: the local file's lines that started in it, and the line each landing
     # pull request's description ends in, which outlives a cloud integrator's container; a run in
     # both counts once, by its local line (README "Metrics").
     local = [line for line in metrics.read(metrics.path())[0] if in_window(str(line["start"]))]
     landed_runs = [line for pull in landings if (line := metrics.of_text(pull.body)) is not None]
     runs = metrics.merged(local, landed_runs)
-    scored = scored_findings(previous, last.number if last else 0, window, checks)
+    scored = scored_findings(previous, last.number if last else 0, window, checks, opened)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
@@ -709,27 +724,36 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
-                    checks: dict[str, RuleCheck]) -> list[dict]:
+                    checks: dict[str, RuleCheck], opened: list[Issue] = ()) -> list[dict]:
     """Each finding of the previous retro's block, scored against this window: the work issues
-    closed in it that name the finding (`retro #<retro> finding <k>`), its state (closed where one
-    of them closed as completed, else the reason they closed with, else none) and whether the rule
-    check it names broke again (recurred)."""
+    closed in it or still open (`opened`) that name the finding (`retro #<retro> finding <k>`),
+    its state (closed where one of them closed as completed, else TOO_EARLY where one is still
+    open: filed after the previous retro's cut-off, it had no time to land; `opened` is empty
+    where the overhaul countdown is off, so nothing is too early there; else the reason they
+    closed with, else none) and whether the rule check it names broke again (recurred), which a
+    finding too early to score never is."""
     found: list[dict] = []
     for index, finding in enumerate((previous or {}).get("findings") or [], 1):
         if not isinstance(finding, dict):
             continue
         number = int(finding.get("finding") or index)
-        naming = [issue for issue in window
-                  if any(int(match[1]) == retro and int(match[2]) == number
-                         for match in FINDING_REFERENCE.finditer(issue.body))]
+
+        def names(issue: Issue) -> bool:
+            return any(int(match[1]) == retro and int(match[2]) == number
+                       for match in FINDING_REFERENCE.finditer(issue.body))
+
+        naming = [issue for issue in window if names(issue)]
+        still = [issue for issue in opened if names(issue)]
         reasons = [issue.state_reason or "completed" for issue in naming]
-        state = ("closed" if "completed" in reasons else reasons[0] if reasons else "none")
+        state = ("closed" if "completed" in reasons else TOO_EARLY if still
+                 else reasons[0] if reasons else "none")
         check = str(finding.get("check") or "")
         found.append({"finding": number, "title": str(finding.get("title") or ""),
                       "class": str(finding.get("class") or ""), "kind": finding.get("kind"),
-                      "check": check, "issues": [issue.number for issue in naming],
+                      "check": check, "issues": sorted(issue.number for issue in naming + still),
                       "state": state,
-                      "recurred": bool(check) and check in checks and not checks[check].kept})
+                      "recurred": state != TOO_EARLY and bool(check) and check in checks
+                      and not checks[check].kept})
     return found
 
 
@@ -764,7 +788,8 @@ def draft(found: Collected) -> str:
                   "|---|---|---|---|---|---|"]
         for item in scored:
             issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
-            recurred = (("yes" if item["recurred"] else "no") + f" ({item['check']})"
+            recurred = (("not scored" if item["state"] == TOO_EARLY
+                         else "yes" if item["recurred"] else "no") + f" ({item['check']})"
                         if item["check"] else "no check named")
             lines.append(f"| {item['finding']}. {item['title']} | {item['class']} | "
                          f"{item['kind'] or ''} | {issues} | {item['state']} | {recurred} |")

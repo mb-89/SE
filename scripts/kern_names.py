@@ -59,11 +59,12 @@ def read(root: Path | None, names: list[str], wait: float = WAIT) -> dict[str, o
 
 
 def live_work(root: Path | None) -> dict | None:
-    """What is due in the work from the core, in the greeting's work-check shape: a retro part
-    and a fleet part, each marked `"from": "kern"`, and only where the core has read GitHub
-    issues for it (a core that has read none answers nothing, and the cache stays), the fleet's
-    only from a complete read of the open issues and pull requests (a partial view is no
-    verdict); None where no core carries SE's components."""
+    """What is due in the work from the core, in the greeting's work-check shape: a retro part,
+    an overhaul part where its countdown is on (both from `retro-due/due`) and a fleet part, each
+    marked `"from": "kern"`, and only where the core has read GitHub issues for it (a core that
+    has read none answers nothing, and the cache stays), the fleet's only from a complete read of
+    the open issues and pull requests (a partial view is no verdict); None where no core carries
+    SE's components."""
     names = read(root, [FLEET, RETRO])
     if not names:
         return None
@@ -76,4 +77,10 @@ def live_work(root: Path | None) -> dict | None:
     if isinstance(retro, dict) and retro.get("issues"):
         work["retro"] = {"landed": retro.get("landed"), "due_after": retro.get("due_after"),
                          "issues": retro["issues"], "from": "kern"}
+        # Only a core whose countdown is on (overhaul-after above 0) names the overhaul part; a
+        # binary before the countdown names no retros.
+        after = retro.get("overhaul_after")
+        if isinstance(retro.get("retros"), int) and isinstance(after, int) and after > 0:
+            work["overhaul"] = {"retros": retro["retros"], "due_after": after,
+                                "issues": retro["issues"], "from": "kern"}
     return work or None

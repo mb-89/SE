@@ -306,7 +306,9 @@ def run_check(urls: set[str], remote: Callable[[str], list[Version]]) -> dict[st
 
 def work_check(root: Path | None) -> dict | None:
     """What is due in the work of the project at `root`, where gh is signed in: the work issues
-    landed since the last retro (retro.py's window) with the count that makes a retro due, and the
+    landed since the last retro (retro.py's window) with the count that makes a retro due, the
+    retros closed since the last overhaul with the count that makes an overhaul due where that
+    countdown is on (overhaul.py due_after), and the
     fleet check's findings, each part with its error instead where its read failed. None without gh
     or without a project checkout: in the cloud no token reaches SE's code."""
     if root is None or not (root / ".git").exists():
@@ -328,6 +330,14 @@ def work_check(root: Path | None) -> dict | None:
                          "due_after": retro.due_after(root)}
     except failures as error:
         work["retro"] = {"error": str(error)}
+    overhaul = _load("overhaul")
+    try:
+        after = overhaul.due_after(root)
+        if after:  # the countdown is on: 0 (off, the built-in) reads and names nothing
+            door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
+            work["overhaul"] = {"retros": overhaul.retros_since_overhaul(door), "due_after": after}
+    except failures as error:
+        work["overhaul"] = {"error": str(error)}
     try:
         found = work_tickets.fleet_findings(
             work_tickets.Fleet(root, repo, branch), datetime.now(timezone.utc),
@@ -456,8 +466,8 @@ def skill_lines(local: Local) -> list[str]:
 
 
 def work_lines(report: Report, se_root: Path) -> list[str]:
-    """From the cached work check: one line for a retro that is due and one for the fleet's
-    findings, each with the command to run; a part whose read failed is named with the remedy.
+    """From the cached work check: one line for a retro that is due, one for an overhaul that is
+    due and one for the fleet's findings, each with the command to run; a part whose read failed is named with the remedy.
     Nothing where no work check ran (no gh)."""
     work = report.work or {}
     se = se_root.as_posix()
@@ -471,6 +481,16 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
         lines.append(f"Retro due: {_plural(landed, 'work issue')} landed since the last retro "
                      f"(due after {due_after}{live}); file one from .github/ISSUE_TEMPLATE/retro.md, then "
                      f"run: uv run python {se}/scripts/retro.py collect <retro issue> --out <draft>")
+    overhaul = work.get("overhaul") or {}
+    retros, after = overhaul.get("retros"), overhaul.get("due_after")
+    if "error" in overhaul:
+        lines.append(f"Overhaul check not done: {overhaul['error']}; {CHECK_REMEDY.format(se=se)}")
+    elif isinstance(retros, int) and isinstance(after, int) and retros >= after:
+        live = ", live from kern" if overhaul.get("from") == "kern" else ""
+        lines.append(f"Overhaul due: {_plural(retros, 'retro')} closed since the last overhaul "
+                     f"(due after {after}{live}); file one with: uv run python {se}/scripts/"
+                     f"overhaul.py new, then run: uv run python {se}/scripts/overhaul.py read "
+                     f"<overhaul issue> --out <draft>")
     fleet = work.get("fleet") or {}
     findings = fleet.get("findings") or []
     if "error" in fleet:
