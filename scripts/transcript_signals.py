@@ -11,11 +11,31 @@ The core is pure, data in and data out:
 - `tally` counts the hits per signal, per session and in total, with up to `LOCATIONS` locations
   (file and line) each; `render_text` and `render_json` print it.
 
+More signals, only with `--more`: `MORE_SIGNALS` is a second table beside `SIGNALS`, read by
+`tally`, the text output and `--json` only on request, so without it the output is as before.
+
+- `repeated_failures`: failed results grouped by tool, command shape and clause (`failure_clause`:
+  a class of `LACKED`, else `exit <n>`, else `other`); a group of two or more is reported.
+- `misuse`: the agent's misuse of a tool (`MISUSE`), counted by tool and in no group.
+- `voids`: a gap over `VOID_SECONDS` before an agent's event while no tool call is open.
+- `lacked`: what the environment lacked (`LACKED`): a missing command, a refused permission, a
+  blocked host.
+- `greeting`: whether each session's first agent message carries SE's start greeting (`GREETING`)
+  with the counts of the latest one handed before it, in a hook's context or a tool result.
+- Under `--more`, a file that yields no event is listed as `nothing read` and counted in no session.
+
+The research list, `research`, lists the searches and fetches a session made (`RESEARCH_TOOLS`). It
+never enters `tally`; only `--research` writes it, as JSON lines, to
+`<repo>/.se/research/YYYYMMDDTHHMMSSZ.jsonl` (ignored by git), and prints only its count and path.
+
 Privacy: the output names signals, counts, file labels (relative to the directory read, or the
 file's name), line numbers and tool names. Its one quotation is a command's shape (`command_shape`),
 which keeps the program, its leading subcommand words, option names and paths inside the
 repository, and masks every other argument as `<arg>`. Message text, names, outside paths, tokens
-and addresses never reach it.
+and addresses never reach it. The more signals add only classes: a failure's clause, the lacked
+class (with a missing program's name only where the command shape already shows it), who wrote the
+event before a void, and the greeting's class; no error text, handed context, query or address
+reaches stdout. The research list holds queries and addresses, so it goes only to its file.
 
 The thin wiring, `main`, reads the files and passes their lines through the core.
 """
@@ -29,8 +49,8 @@ import re
 import shlex
 import sys
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 LOCATIONS = 5  # the locations shown per signal
@@ -54,6 +74,30 @@ DENIAL = re.compile(
     r"|denied by|blocked by (a |the )?(hook|policy|rule)|not allowed")
 DENIED_DECISIONS = ("deny", "denied", "reject", "rejected", "block", "blocked")
 
+VOID_SECONDS = 300.0  # a gap over it before an agent's event, with no tool call open, is a void
+# The agent's misuse of a tool: the host's own wrappers for a call it could not run as given.
+MISUSE = re.compile(r"<tool_use_error>|InputValidationError")
+# What the environment lacked, by class, in order: the first class a failure's text matches.
+LACKED: dict[str, re.Pattern] = {
+    "command-not-found": re.compile(r"command not found|is not recognized as"),
+    "permission-refused": re.compile(r"Permission denied|Operation not permitted"),
+    "host-blocked": re.compile(
+        r"request blocked: no rule allows host|CONNECT tunnel failed, response 40[37]"
+        r"|HTTP code 40[37] from proxy after CONNECT|Could not resolve host"),
+}
+# The program a not-found message names: `bash: x: command not found`, zsh's
+# `command not found: x`, Windows' `'x' is not recognized as`.
+_NOT_FOUND = re.compile(r"([^\s:'\"]+): command not found|command not found: ([^\s'\"]+)"
+                        r"|'([^'\s]+)' is not recognized as")
+EXIT_CODE = re.compile(r"\s*Exit code (-?\d+)")
+# SE's start greeting, singular forms included, any version (`none` among them).
+GREETING = re.compile(
+    r"SE \S+ started: (\d+) skills?, (\d+) rules?, (\d+) sub-agents?")
+# Per adapter, the tools that search or fetch, by exact name, and the argument each reads.
+RESEARCH_TOOLS: dict[str, dict[str, str]] = {
+    "claude-code": {"WebSearch": "query", "WebFetch": "url"},
+}
+
 
 @dataclass(frozen=True)
 class Event:
@@ -62,7 +106,7 @@ class Event:
     file: str  # the transcript's label: relative to the directory read, or its name
     line: int  # 1-based line in that file
     who: str  # person, agent, tool or system
-    kind: str  # message, tool_call or tool_result
+    kind: str  # message, tool_call, tool_result or context (a hook's handed context)
     tool: str = ""  # the tool called, or whose result this is
     text: str = ""  # a message's text, a tool call's main argument, a result's text
     time: datetime | None = None
@@ -70,6 +114,7 @@ class Event:
     arguments: dict = field(default_factory=dict, compare=False, hash=False)
     error: bool = False  # the result is an error
     denied: bool = False  # the call was refused or denied
+    sidechain: bool = False  # a sub-agent's event (Claude Code's `isSidechain`)
 
 
 @dataclass(frozen=True)
@@ -116,12 +161,28 @@ def _is_system_turn(record: dict, text: str) -> bool:
                 or (kind not in (None, "human", "user")) or text.lstrip().startswith("<"))
 
 
+def _hook_context(record: dict, file: str, line: int) -> list[Event]:
+    """A SessionStart hook's added context, as one `system` event of kind `context`; its content
+    is a list of plain strings, which `_text_of` skips, so they are joined here."""
+    attachment = record.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "hook_additional_context" \
+            or attachment.get("hookEvent", "SessionStart") != "SessionStart":
+        return []
+    content = attachment.get("content")
+    parts = [content] if isinstance(content, str) else content if isinstance(content, list) else []
+    text = "\n".join(part for part in parts if isinstance(part, str))
+    return [Event(file, line, "system", "context", text=text, time=_time(record.get("timestamp")),
+                  sidechain=record.get("isSidechain") is True)]
+
+
 def claude_code_events(raw: str, file: str, line: int) -> list[Event]:
     """The events of one line of a Claude Code transcript; a line that is no event gives none."""
     try:
         record = json.loads(raw)
     except ValueError:
         return []
+    if isinstance(record, dict) and record.get("type") == "attachment":
+        return _hook_context(record, file, line)
     if not isinstance(record, dict) or record.get("type") not in ("user", "assistant"):
         return []
     message = record.get("message")
@@ -132,6 +193,7 @@ def claude_code_events(raw: str, file: str, line: int) -> list[Event]:
     decision = record.get("permissionDecision")
     decision = decision.get("decision", "") if isinstance(decision, dict) else decision or ""
     refused = str(decision).lower() in DENIED_DECISIONS
+    sidechain = record.get("isSidechain") is True
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
     if not isinstance(content, list):
@@ -146,33 +208,37 @@ def claude_code_events(raw: str, file: str, line: int) -> list[Event]:
             tool = str(part.get("name", ""))
             events.append(Event(file, line, "agent", "tool_call", tool,
                                 _main_argument(tool, arguments), time, str(part.get("id", "")),
-                                arguments))
+                                arguments, sidechain=sidechain))
         elif kind == "tool_result":
             text = _text_of(part.get("content"))
             error = bool(part.get("is_error"))
             denied = refused or (error and bool(DENIAL.search(text)))
             events.append(Event(file, line, "tool", "tool_result", "", text, time,
-                                str(part.get("tool_use_id", "")), error=error, denied=denied))
+                                str(part.get("tool_use_id", "")), error=error, denied=denied,
+                                sidechain=sidechain))
         elif kind == "text" and message.get("role") == "assistant":
             events.append(Event(file, line, "agent", "message", text=str(part.get("text", "")),
-                                time=time))
+                                time=time, sidechain=sidechain))
         elif kind == "text":
             text = str(part.get("text", ""))
             who = "system" if _is_system_turn(record, text) else "person"
-            events.append(Event(file, line, who, "message", text=text, time=time))
+            events.append(Event(file, line, who, "message", text=text, time=time,
+                                sidechain=sidechain))
     return events
 
 
 ADAPTERS: dict[str, Callable[[str, str, int], list[Event]]] = {"claude-code": claude_code_events}
 
 
-def read_events(lines: Iterable[str], file: str, adapter: str = "claude-code") -> list[Event]:
-    """Every event of one transcript, its lines given in order; tool results get their tool."""
+def read_events(lines: Iterable[str], file: str, adapter: str = "claude-code",
+                more: bool = False) -> list[Event]:
+    """Every event of one transcript, its lines given in order; tool results get their tool. A
+    hook's handed context (kind `context`) is kept only with `more`."""
     read = ADAPTERS[adapter]
-    events = [event for number, raw in enumerate(lines, 1) for event in read(raw, file, number)]
+    events = [event for number, raw in enumerate(lines, 1) for event in read(raw, file, number)
+              if more or event.kind != "context"]
     tools = {event.call: event.tool for event in events if event.kind == "tool_call"}
-    return [Event(e.file, e.line, e.who, e.kind, tools.get(e.call, e.tool), e.text, e.time, e.call,
-                  e.arguments, e.error, e.denied) if e.kind == "tool_result" else e
+    return [replace(e, tool=tools.get(e.call, e.tool)) if e.kind == "tool_result" else e
             for e in events]
 
 
@@ -373,19 +439,194 @@ SIGNALS: dict[str, Callable[..., list[Hit]]] = {
 }
 
 
+# The more signals, read only with `--more`: failures, voids, what was lacked, the greeting.
+
+
+def lacked_class(text: str) -> str | None:
+    """The first class of `LACKED` the text matches, or None."""
+    return next((name for name, pattern in LACKED.items() if pattern.search(text)), None)
+
+
+def failure_clause(text: str) -> str:
+    """A failure's clause: its lacked class, else `exit <n>` where it opens with `Exit code <n>`,
+    else `other`."""
+    lacked = lacked_class(text)
+    if lacked:
+        return lacked
+    code = EXIT_CODE.match(text)
+    return f"exit {code.group(1)}" if code else "other"
+
+
+def _failures(events: list[Event]) -> Iterator[tuple[Event, Event | None]]:
+    """Each failed result that is no refusal, with its call where the session has it."""
+    for session in _by_file(events).values():
+        calls = {event.call: event for event in session if event.kind == "tool_call" and event.call}
+        for event in session:
+            if event.kind == "tool_result" and event.error and not event.denied:
+                yield event, calls.get(event.call)
+
+
+def _shape(result: Event, call: Event | None, keep_path: Callable[[str], bool]) -> str:
+    if result.tool in SHELL_TOOLS and call is not None and call.text.strip():
+        return command_shape(call.text, keep_path)
+    return ""
+
+
+def repeated_failures(events: list[Event],
+                      keep_path: Callable[[str], bool] = lambda token: False) -> list[Hit]:
+    """Failures that repeat: failed results (no refusal, no misuse) grouped by tool, command shape
+    and clause; each failure of a group of two or more across the sessions read is a hit, keyed
+    `<tool> <shape>: <clause>` (`<tool>: <clause>` without a shape)."""
+    groups: dict[str, list[Event]] = {}
+    for result, call in _failures(events):
+        if MISUSE.search(result.text):
+            continue
+        tool = result.tool or "?"
+        shape = _shape(result, call, keep_path)
+        key = f"{tool} {shape}: " if shape else f"{tool}: "
+        groups.setdefault(key + failure_clause(result.text), []).append(result)
+    return [Hit(event.file, event.line, key)
+            for key, failed in groups.items() if len(failed) >= 2 for event in failed]
+
+
+def misuse(events: list[Event]) -> list[Hit]:
+    """The agent's misuse of a tool (`MISUSE`), keyed by tool; it joins no failure group."""
+    return [Hit(result.file, result.line, result.tool or "?")
+            for result, call in _failures(events) if MISUSE.search(result.text)]
+
+
+def voids(events: list[Event], seconds: float = VOID_SECONDS) -> list[Hit]:
+    """A gap over `seconds` between two events in a row of one session that ends at an agent's
+    event while no tool call is open; a hit at the later event, keyed by who wrote the earlier."""
+    hits = []
+    for session in _by_file(events).values():
+        open_calls: set[str] = set()
+        earlier: Event | None = None
+        for event in session:
+            if event.time is not None:
+                if (earlier is not None and event.who == "agent" and not open_calls
+                        and (event.time - earlier.time).total_seconds() > seconds):
+                    hits.append(Hit(event.file, event.line, earlier.who))
+                earlier = event
+            if event.kind == "tool_call" and event.call:
+                open_calls.add(event.call)
+            elif event.kind == "tool_result":
+                open_calls.discard(event.call)
+    return hits
+
+
+def _not_found_name(text: str, shape: str) -> str:
+    """The missing program's name where the text names one the command shape already shows."""
+    shown = set(shape.split())
+    for match in _NOT_FOUND.finditer(text):
+        named = next(group for group in match.groups() if group)
+        name = PurePosixPath(named.replace("\\", "/")).name
+        if name in shown and name != "<arg>":
+            return name
+    return "<arg>"
+
+
+def lacked(events: list[Event],
+           keep_path: Callable[[str], bool] = lambda token: False) -> list[Hit]:
+    """What the environment lacked: a failed result (no refusal, no misuse) matching a class of
+    `LACKED`, keyed by the class; a not-found key adds the program's name where the command shape
+    shows it, else `<arg>`."""
+    hits = []
+    for result, call in _failures(events):
+        found = None if MISUSE.search(result.text) else lacked_class(result.text)
+        if found == "command-not-found":
+            found += " " + _not_found_name(result.text, _shape(result, call, keep_path))
+        if found:
+            hits.append(Hit(result.file, result.line, found))
+    return hits
+
+
+def _greeting_counts(text: str) -> tuple[str, ...] | None:
+    found = GREETING.findall(text)
+    return tuple(found[-1]) if found else None
+
+
+def greeting_class(session: list[Event]) -> tuple[str, Event | None]:
+    """The class of one session's first agent message against the latest greeting before it, in
+    a hook's context or a tool result: `same`, `other`, `unchecked` or `none`; with that message."""
+    latest = None
+    for event in session:
+        if event.who == "agent" and event.kind == "message":
+            carried = _greeting_counts(event.text)
+            if carried is None:
+                return "none", event
+            if latest is None:
+                return "unchecked", event
+            return ("same" if carried == latest else "other"), event
+        if event.kind in ("context", "tool_result"):
+            latest = _greeting_counts(event.text) or latest
+    return "none", None
+
+
+def greeting(events: list[Event]) -> list[Hit]:
+    """Each session's greeting class (`greeting_class`), one hit keyed by it. Sub-agents' events
+    (sidechain) are skipped; a transcript of only those is no session."""
+    hits = []
+    for file, session in _by_file(event for event in events if not event.sidechain).items():
+        found, message = greeting_class(session)
+        hits.append(Hit(file, (message or session[0]).line, found))
+    return hits
+
+
+MORE_SIGNALS: dict[str, Callable[..., list[Hit]]] = {
+    "repeated-failures": repeated_failures,
+    "misuse": misuse,
+    "voids": voids,
+    "lacked": lacked,
+    "greeting": greeting,
+}
+
+
+# The research list: never in `tally`, written only on request.
+
+
+def research(events: list[Event], adapter: str = "claude-code") -> list[dict]:
+    """Each search or fetch, in order: its tool, the argument `RESEARCH_TOOLS` names and its time.
+    Only exact tool names count."""
+    tools = RESEARCH_TOOLS.get(adapter, {})
+    return [{"tool": event.tool, tools[event.tool]: event.arguments.get(tools[event.tool], ""),
+             "time": event.time.isoformat() if event.time else None}
+            for event in events if event.kind == "tool_call" and event.tool in tools]
+
+
+def research_name(now: datetime, taken: Iterable[str]) -> str:
+    """The research file's name for a run at `now` (UTC), with `-2`, `-3` ... where taken."""
+    stem = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    taken = set(taken)
+    name, number = f"{stem}.jsonl", 1
+    while name in taken:
+        number += 1
+        name = f"{stem}-{number}.jsonl"
+    return name
+
+
 # The tally and its renderings.
 
 
-def tally(events: list[Event], files: list[str], options: dict | None = None) -> dict:
+def tally(events: list[Event], files: list[str], options: dict | None = None,
+          more: bool = False) -> dict:
     """Counts per signal, per session (file) and in total, with up to `LOCATIONS` locations and,
     where a signal keys its hits, the count per key. `options` maps a signal to its keyword
-    arguments."""
+    arguments. With `more`, `MORE_SIGNALS` count too, and a file without events is `unread`: in
+    no signal's sessions, and with no file read no signal is counted."""
     options = options or {}
     result = {"files": len(files), "events": len(events), "signals": {}}
-    for name, signal in SIGNALS.items():
+    table = SIGNALS
+    sessions_of = files
+    if more:
+        read = {event.file for event in events}
+        sessions_of = [file for file in files if file in read]
+        result["unread"] = [file for file in files if file not in read]
+        table = {**SIGNALS, **MORE_SIGNALS} if sessions_of else {}
+    for name, signal in table.items():
         hits = sorted(signal(events, **options.get(name, {})),
                       key=lambda hit: (hit.file, hit.line))
-        sessions = {file: 0 for file in files}
+        sessions = {file: 0 for file in sessions_of}
         by: dict[str, int] = {}
         for hit in hits:
             sessions[hit.file] = sessions.get(hit.file, 0) + 1
@@ -406,6 +647,8 @@ def render_json(result: dict) -> str:
 
 def render_text(result: dict) -> str:
     lines = [f"transcript signals: {result['files']} transcript(s), {result['events']} events"]
+    if result.get("unread"):
+        lines.append(f"nothing read: {', '.join(result['unread'])}")
     for name, signal in result["signals"].items():
         lines.append(f"{name}: {signal['total']}")
         for file, count in signal["sessions"].items():
@@ -460,11 +703,35 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapter", choices=sorted(ADAPTERS), default="claude-code",
                         help="the transcript format (default: claude-code)")
     parser.add_argument("--repo", type=Path, default=Path.cwd(),
-                        help="the repository whose relative paths a command shape may show "
-                             "(default: the working directory)")
+                        help="the repository whose relative paths a command shape may show, and "
+                             "where --research writes (default: the working directory)")
     parser.add_argument("--wait-seconds", type=float, default=WAIT_SECONDS,
                         help=f"a long wait is longer than this (default: {WAIT_SECONDS:g})")
+    parser.add_argument("--more", action="store_true",
+                        help="also count repeated failures, misuse, voids, what the environment "
+                             "lacked and the start greeting, and list files with nothing read")
+    parser.add_argument("--research", action="store_true",
+                        help="write the searches and fetches as JSON lines to "
+                             "<repo>/.se/research/<UTC time>.jsonl and print only their count and "
+                             "that path")
     return parser
+
+
+def write_research(entries: list[dict], repo: Path, now: datetime) -> Path | None:
+    """Writes the research list under `repo`/.se/research/, never over an existing file; none for
+    an empty list. Returns the file written."""
+    if not entries:
+        return None
+    folder = repo / ".se" / "research"
+    folder.mkdir(parents=True, exist_ok=True)
+    while True:
+        path = folder / research_name(now, (p.name for p in folder.iterdir()))
+        try:
+            with path.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.writelines(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries)
+            return path
+        except FileExistsError:
+            continue
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -477,10 +744,18 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         files.append(label)
         with path.open(encoding="utf-8", errors="replace") as handle:
-            events.extend(read_events(handle, label, args.adapter))
+            events.extend(read_events(handle, label, args.adapter, more=args.more))
+    if args.research:
+        entries = research(events, args.adapter)
+        written = write_research(entries, args.repo, datetime.now(timezone.utc))
+        where = f" in {written.relative_to(args.repo).as_posix()}" if written else ", no file written"
+        print(f"research: {len(entries)}{where}")
+        return 0
+    keep_path = repository_paths(args.repo)
     options = {"long-waits": {"seconds": args.wait_seconds},
-               "repeated-commands": {"keep_path": repository_paths(args.repo)}}
-    result = tally(events, files, options)
+               "repeated-commands": {"keep_path": keep_path},
+               "repeated-failures": {"keep_path": keep_path}, "lacked": {"keep_path": keep_path}}
+    result = tally(events, files, options, more=args.more)
     print(render_json(result) if args.json else render_text(result))
     return 0
 
