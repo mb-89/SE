@@ -1,0 +1,38 @@
+# The fleet's settings as they stand live, recorded here (rule book wrk-008); AGENTS.md
+# "Fleet settings" owns this file's format and `work_tickets.py settings-check`, which compares it
+# with what the live doors read. Change a setting live and here in the same change.
+#
+# A value "unchecked: <reason>" is never compared: no door reads it, or it may not be written down
+# in this public repository (pub-001). Names of environment variables only, never their values.
+
+# main's ruleset, as GitHub's rules for the branch read it.
+[ruleset]
+branch = "main"
+required_checks = ["check"]
+strict = false
+merge_methods = ["squash"]
+linear_history = true
+block_force_push = true
+block_deletion = true
+
+# The scheduled tasks the fleet runs, found by name in what list_triggers reads.
+# target: "persistent session" (fires into one session) or "new session" (a fresh one per firing);
+# model "" is the session's default.
+[[scheduled_tasks]]
+name = "Issue intake check"
+schedule = "15 * * * *"
+model = ""
+target = "persistent session"
+enabled = true
+prompt = "unchecked: not publishable"
+
+# The cloud environment the fleet's sessions run in, as get_environment reads it.
+[environment]
+name = "general"
+network = "unrestricted"
+setup_script = '''
+#!/bin/bash
+rm -rf ~/.claude/skills/se
+git clone --depth 1 -b main https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
+exit 0
+#nov14'''
