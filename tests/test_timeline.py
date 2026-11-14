@@ -342,3 +342,123 @@ def test_the_page_has_no_horizontal_scroll_on_a_390_px_phone(tmp_path):
     result = subprocess.run(["node", "-e", PHONE, str(destination)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"closed": 390, "open": 390}
+
+
+# --- How long "needs you" has waited, [timeline] ages (work issue "timeline needs-you age") ---
+
+
+def config(tmp_path, ages: str | None) -> str:
+    """A --config file naming the two fake repositories, with `ages = <ages>` where given."""
+    path = tmp_path / "se.toml"
+    lines = ["[timeline]", 'repositories = ["o/a", "o/b"]'] + ([f"ages = {ages}"] if ages is not None else [])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+class AgesGitHub(FakeGitHub):
+    """The fake GraphQL server, answering whichever query the setting picks."""
+
+    def __call__(self, query: str, variables: dict) -> dict:
+        self.queries = [*getattr(self, "queries", []), query]
+        return super().__call__(timeline.QUERY, variables)
+
+
+def labelled(name: str, at: str) -> dict:
+    return {"createdAt": at, "label": {"name": name}}
+
+
+def person_node(number: int, *events: dict, labels: tuple[str, ...] = ("se-person",)) -> dict:
+    return node(number, labels={"nodes": [{"name": label} for label in labels]},
+                timelineItems={"nodes": list(events)})
+
+
+AGES_REPOSITORIES = {
+    "o/a": {"issues": [person_node(1, labelled("se-person", "2026-10-29T23:59:00Z")),
+                       person_node(2, labelled("se-person", "2026-10-01T10:00:00Z"),
+                                   labelled("work", "2026-11-11T09:00:00Z"),
+                                   labelled("se-person", "2026-11-11T00:01:00Z")),
+                       person_node(3),
+                       person_node(4, labelled("se-person", "2026-11-10T10:00:00Z"),
+                                   labels=("ready", "se-person"))],
+            "tags": []},
+    "o/b": {"issues": [], "tags": []},
+}
+
+
+def test_the_query_without_ages_asks_for_no_label_events():
+    assert timeline.query() == timeline.query(False) == timeline.QUERY
+    assert "timelineItems" not in timeline.QUERY
+
+
+@pytest.mark.parametrize("ages", [None, "false"])
+def test_ages_absent_or_false_keep_the_query_the_snapshot_and_the_page(tmp_path, ages):
+    github = AgesGitHub(AGES_REPOSITORIES)
+    saved, page = tmp_path / "snap.json", tmp_path / "t.html"
+    assert timeline.main(["--config", config(tmp_path, ages), "--destination", str(page),
+                          "--save-snapshot", str(saved)], post=github) == 0
+    assert github.queries == [timeline.QUERY, timeline.QUERY]
+    snap = json.loads(saved.read_text(encoding="utf-8"))
+    assert all("person_since" not in entry for entry in snap["repositories"]["o/a"]["issues"])
+    assert page.read_text(encoding="utf-8") == timeline.render(timeline.model(snap))
+    assert page.read_text(encoding="utf-8").count('<span class="mark">needs you</span>') == 4
+
+
+def test_ages_on_read_the_label_events_in_the_same_request_and_save_person_since(tmp_path):
+    github = AgesGitHub(AGES_REPOSITORIES)
+    saved = tmp_path / "snap.json"
+    assert timeline.main(["--config", config(tmp_path, "true"), "--destination", str(tmp_path / "t.html"),
+                          "--save-snapshot", str(saved)], post=github) == 0
+    assert github.queries == [timeline.AGES_QUERY, timeline.AGES_QUERY]
+    assert [call["owner"] + "/" + call["name"] for call in github.calls] == ["o/a", "o/b"]
+    assert "timelineItems(itemTypes: [LABELED_EVENT], last: 10)" in timeline.AGES_QUERY
+    assert "createdAt label { name }" in timeline.AGES_QUERY
+    snap = json.loads(saved.read_text(encoding="utf-8"))
+    assert [entry["person_since"] for entry in snap["repositories"]["o/a"]["issues"]] == [
+        "2026-10-29T23:59:00Z", "2026-11-11T00:01:00Z", None, "2026-11-10T10:00:00Z"]
+
+
+def test_ages_on_mark_how_long_each_needs_you_issue_has_waited(tmp_path):
+    destination = tmp_path / "t.html"
+    assert timeline.main(["--config", config(tmp_path, "true"), "--destination", str(destination)],
+                         post=AgesGitHub(AGES_REPOSITORIES), now=NOW) == 0
+    html = destination.read_text(encoding="utf-8")
+    assert "#1 t1<span class=\"mark\">needs you, 13 days</span>" in html
+    assert "#2 t2<span class=\"mark\">needs you, today</span>" in html
+    assert "#3 t3<span class=\"mark\">needs you</span></summary>" in html
+    next_row = re.search(r'<details class="row open next">.*?</details></li></ul></div></details>', html, flags=re.S)[0]
+    assert "#4 t4<span class=\"mark\">needs you, 1 day</span>" in next_row
+
+
+def test_the_age_counts_whole_utc_calendar_days_and_is_pure():
+    read_at = "2026-11-11T15:00:00+00:00"
+    assert timeline.waiting_days("2026-10-29T23:59:00Z", read_at) == 13
+    assert timeline.waiting_days("2026-11-10T23:59:00-02:00", read_at) == 0
+    assert timeline.waiting_days(None, read_at) is None
+    assert [timeline.needs_you_mark(days) for days in (None, 0, 1, 2)] == [
+        "needs you", "needs you, today", "needs you, 1 day", "needs you, 2 days"]
+
+
+def test_ages_on_keep_the_bare_mark_for_a_snapshot_saved_without_person_since(tmp_path):
+    source = tmp_path / "snapshot.json"
+    source.write_text(json.dumps(snapshot(issue(1, "se-person"), issue(2, "backlogged", "se-person"))),
+                      encoding="utf-8")
+    destination = tmp_path / "t.html"
+    assert timeline.main(["--config", config(tmp_path, "true"), "--snapshot", str(source),
+                          "--destination", str(destination)]) == 0
+    assert destination.read_text(encoding="utf-8").count('<span class="mark">needs you</span>') == 1
+    page = timeline.model(json.loads(source.read_text(encoding="utf-8")), ages=True)
+    assert page["places"]["needs-you"]["o/a"][0]["waiting_days"] is None
+    assert "waiting_days" not in page["places"]["backlog"]["o/a"][0]
+
+
+def test_without_ages_the_model_sets_no_waiting_days():
+    page = timeline.model(snapshot({**issue(1, "se-person"), "person_since": "2026-11-01T00:00:00Z"}))
+    assert "waiting_days" not in page["places"]["needs-you"]["o/a"][0]
+
+
+@pytest.mark.parametrize("value", ['"yes"', "1", "[true]"])
+def test_an_ages_value_other_than_true_or_false_is_refused(tmp_path, value):
+    with pytest.raises(SystemExit, match=r"\[timeline\] ages"):
+        timeline.main(["--config", config(tmp_path, value), "--destination", str(tmp_path / "t.html")],
+                      post=AgesGitHub(AGES_REPOSITORIES))
+    assert not (tmp_path / "t.html").exists()
