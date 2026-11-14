@@ -163,6 +163,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   (or `scripts/setup.sh <path>`) and so runs se's check without copying it.
   - They also set the clone's commit identity as `work_tickets.py sync` does
     (`work_tickets.py identity`), so its first commit already carries it.
+  - A session's start (`scripts/bootstrap.sh --hook`) sets `core.hooksPath` the same way where it
+    is unset, so a fresh clone's first commit already runs the check; a set one stays
+    (`scripts/se_start.py start-hooks`).
 - Pushes of the integration branch: pre-push and `work_tickets.py push` also need the verdicts the
   [work model](src/skills/work-model/SKILL.md#integration-branch) names.
 - By hand: `uv run python scripts/public_check.py --repo <path>` (`--help` for the options).

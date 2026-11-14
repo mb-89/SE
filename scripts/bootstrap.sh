@@ -9,6 +9,7 @@
 #   Python   3.11 or newer, installed by uv into the user's home when missing
 #   modules  the current project's se.toml modules, synced by se_modules.py
 #   identity in --hook mode: the project's commit identity, set as setup.sh sets it
+#   hooks    in --hook mode: the project's core.hooksPath where it is unset, set as setup.sh sets it
 #   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
 #            its major is moved to it first (se_start.py start-refresh), and the start then runs again
 #            from the moved tree, so the core starts from its pins; a refresh that fails starts with
@@ -285,6 +286,14 @@ if $hook && [ -f "$project/se.toml" ]; then
   uv run --no-project --python ">=$python_version" python "$se_root/scripts/work_tickets.py" \
     identity --worktree "$project" >/dev/null 2>&1 ||
     say "setting the commit identity of $project failed; run: uv run python $se_root/scripts/work_tickets.py identity --worktree $project"
+fi
+# The hooks (AGENTS.md "Public safety"): a checkout whose core.hooksPath is unset gets se's hooks
+# at start, as setup.sh sets them, so a fresh clone's first commit already runs the public check; a
+# checkout that has one keeps it (se_start.py start-hooks owns which hooks).
+if $hook && [ -f "$project/se.toml" ]; then
+  line="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
+    --root "$project" start-hooks 2>/dev/null)"
+  [ -n "$line" ] && notes+=("$line")
 fi
 $hook && kern_step
 finish 0
