@@ -90,7 +90,7 @@ def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and
                     "go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/"):
         assert f"        working-directory: kern\n        run: {command}\n" in platforms
     # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash and macOS's.
-    assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py\n" in platforms
+    assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py\n" in platforms
     # setup.ps1 runs where PowerShell is, Windows only; `-k powershell` selects its SETUPS cases.
     assert ("        if: runner.os == 'Windows'\n        shell: bash\n"
             "        run: uv run pytest -q tests/test_public_check.py -k powershell\n") in platforms

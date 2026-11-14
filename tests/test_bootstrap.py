@@ -15,6 +15,8 @@ from shell_paths import BASH, WINDOWS, sh
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.sh"
+# The SE the core is handed as its home (`--home`), as bash names it.
+SE_ROOT = sh(ROOT)
 # SE's own binary, as se_modules.py app-binary answers it (components/release.toml): kern's core plus
 # SE's Go components, the binary `se`. bootstrap fetches, builds and starts it, not the bare kern.
 APP = tomllib.loads((ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
@@ -296,7 +298,7 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     log = [line for line in calls(home) if line.startswith("kern ")]
-    assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{START}"]
+    assert log == [f"kern start --root {sh(project)} --home {SE_ROOT}", f"kern hook SessionStart --root {sh(project)} <<{START}"]
     assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     assert not any(line.startswith("curl") for line in calls(home)), "a binary already here needs no network"
     assert f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(ROOT)} app-binary --project {sh(project)}" in calls(home)
@@ -324,7 +326,7 @@ def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hand
     assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
     handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","source":"startup"}' % sh(project)
     log = [line for line in calls(home) if line.startswith("kern ")]
-    assert log == [f"kern start --root {sh(project)}", f"kern hook SessionStart --root {sh(project)} <<{handed}"]
+    assert log == [f"kern start --root {sh(project)} --home {SE_ROOT}", f"kern hook SessionStart --root {sh(project)} <<{handed}"]
 
 
 # Copilot's start as .github/hooks/se.json registers it: PascalCase `SessionStart`, so a Claude-shaped
@@ -361,7 +363,7 @@ def test_copilot_starts_a_session_once_however_many_sources_fire(machine):
     first = copilot_start(home, path, base, PASCAL_START % sh(project))
     second = copilot_start(home, path, base, PASCAL_START % sh(project))
     assert first.stdout == '{"greeting": 1}\n' and (second.returncode, second.stdout) == (0, "")
-    assert [line for line in calls(home) if line.startswith("kern start")] == [f"kern start --root {sh(project)}"]
+    assert [line for line in calls(home) if line.startswith("kern start")] == [f"kern start --root {sh(project)} --home {SE_ROOT}"]
     other = copilot_start(home, path, base, (PASCAL_START % sh(project)).replace('"s1"', '"s2"'))
     assert other.stdout == '{"greeting": 1}\n', "another session starts"
 
@@ -414,7 +416,7 @@ def test_the_core_starts_without_uvs_deprecated_tls_variable(machine):
     env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project), "UV_NATIVE_TLS": "1"}
     subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
                    text=True, timeout=60)
-    assert f"kern start --root {sh(project)} native=unset system=1" in calls(home), calls(home)
+    assert f"kern start --root {sh(project)} --home {SE_ROOT} native=unset system=1" in calls(home), calls(home)
 
 
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
@@ -453,7 +455,7 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
                                         "in the background")
     log = until(home, "kern hook SessionStart")
     assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/{NAME}-{APP_VERSION}.SHA256SUMS {APP_BASE}/SHA256SUMS" in log
-    assert f"kern start --root {sh(project)}" in log
+    assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log
     assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
     assert os.access(kern_bin(home), os.X_OK)
     assert sorted(p.name for p in kern_bin(home).parent.iterdir()) == sorted([
@@ -493,7 +495,7 @@ chmod +x "$3"
                                         f"building it from {sh(ROOT)}/{BUILD_DIR} in the background")
     log = until(home, "kern hook SessionStart")
     assert any(line.startswith("go build -o ") and line.endswith(f"{PACKAGE} in {sh(ROOT)}/{BUILD_DIR}") for line in log)
-    assert f"kern start --root {sh(project)}" in log and os.access(kern_bin(home), os.X_OK)
+    assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log and os.access(kern_bin(home), os.X_OK)
 
 
 def test_with_no_release_and_no_go_kern_failed_names_both(machine):
