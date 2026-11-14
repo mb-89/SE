@@ -5268,8 +5268,14 @@ def over_limit_warning(seconds: float, limit: float) -> str:
             "slowest tests faster")
 
 
+#: Why a landing through kern's relay reads no CI suite time: it reads GitHub's check-run
+#: annotations without an account, about 10 GETs past the relay that tells every other step.
+CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside kern's relay; the "
+                       "landing pull request's check judges the budget")
+
+
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
-              full: bool = False) -> str:
+              full: bool = False, ci_skipped: str = "") -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -5284,6 +5290,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     warns with the host's load and refuses only where CI's suite time on the integration
     branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
     limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    `ci_skipped` (a landing through kern's relay, CI_SKIPPED_ON_RELAY) reads no CI time and says
+    so once: the time is unknown, as where it cannot be read.
     Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
     the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
     A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
@@ -5304,7 +5312,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     reference = suite_is_reference()
     over = seconds > budget.limit_seconds
     ci, unknown = (None, "")
-    if not reference and (over or read_ci):
+    if not reference and (over or read_ci) and ci_skipped:
+        unknown = ci_skipped
+        print(f"CI's suite time on {integration_branch(root)}: {ci_skipped}")
+    elif not reference and (over or read_ci):
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
@@ -6582,7 +6593,8 @@ def integrate(
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
-        suite_result = run_suite(root, read_ci=True)
+        suite_result = run_suite(root, read_ci=True, ci_skipped=CI_SKIPPED_ON_RELAY if (
+            handing_off and relay_door(root, remote) is not None) else "")
         tested = checked_git(root, "rev-parse", "HEAD").strip()
         if build_command:
             feedback.phase(f"output regeneration: {build_command}")

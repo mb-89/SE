@@ -3314,12 +3314,17 @@ def test_a_relay_landings_two_reads_of_the_landing_pull_request_name_their_purpo
     told text of each names its purpose, and every told step carries its sequence number."""
     handed_off_worker(main_checkout, monkeypatch, github)
     monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    suites: list[dict] = []
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **options: suites.append(
+        options) or suite_passed(root, "1 passed"))
     session = SessionSteps(github, main_checkout, [
         {"id": 2, "status": "completed", "conclusion": "success",
          "html_url": "https://git.example/owner/repo/runs/2"}])
 
     with work_tickets.sibling("se_relay").stepping(session):
         assert run(main_checkout, "integrate", "7") == 0
+
+    assert [options.get("ci_skipped") for options in suites] == [work_tickets.CI_SKIPPED_ON_RELAY]
 
     merge = next(index for index, (tool, _) in enumerate(session.asked)
                  if tool == "merge_pull_request")
