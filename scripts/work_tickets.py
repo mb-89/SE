@@ -4532,9 +4532,17 @@ class BesideSuite:
     target_seconds: float
     limit_seconds: float
     setup: list[str] | None = None  # run first in `directory`, outside the budget: a cold build
+    # Where set, it runs only where the change touches one of these (a folder ends with "/"), or
+    # in a full run (`suite --full`, CI's nightly); None: always.
+    paths: tuple[str, ...] | None = None
 
     def where(self) -> str:
         return f"[tests.beside.{self.name}] in se.toml"
+
+    def guards(self, changed: set[str]) -> bool:
+        """Whether a changed path is one of `paths` or lies in one of its folders."""
+        return any(path == guarded or (guarded.endswith("/") and path.startswith(guarded))
+                   for guarded in self.paths or () for path in changed)
 
 
 def is_argument_array(value: object) -> bool:
@@ -4620,10 +4628,10 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
     for name, table in tables.items():
         where = f"[tests.beside.{name}] in {root / 'se.toml'}"
         unknown = sorted(set(table) - {"command", "directory", "target_seconds", "limit_seconds",
-                                       "setup"})
+                                       "setup", "paths"})
         if unknown and suite_is_reference():
             raise QueueError(f"{where}: no key {', '.join(unknown)}: a suite beside holds command, "
-                             "directory, target_seconds, limit_seconds and setup; fix it")
+                             "directory, target_seconds, limit_seconds, setup and paths; fix it")
         if unknown:
             # integrate runs the integration branch's scripts on the merged tree, so a key the
             # branch adds and uses lands in one integration: CI's check judges it.
@@ -4644,9 +4652,16 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
             raise QueueError(f"{where}: setup must be a non-empty argument array, the build run "
                              'before the suite, for example setup = ["go", "test", "-run", "^$", '
                              '"./..."]; fix it or remove it')
+        paths = table.get("paths")
+        if paths is not None and not (is_argument_array(paths) and all(
+                not Path(path).is_absolute() and ".." not in Path(path).parts for path in paths)):
+            raise QueueError(f"{where}: paths must be a non-empty array of paths relative to the "
+                             'project root, a folder ending with "/", for example paths = '
+                             '["kern/bus/"]; fix it or remove it to run the suite always')
         values = budget_seconds(table, where)
         suites.append(BesideSuite(name, command, directory, values["target_seconds"],
-                                  values["limit_seconds"], setup))
+                                  values["limit_seconds"], setup,
+                                  tuple(paths) if paths is not None else None))
     return tuple(suites)
 
 
@@ -4932,6 +4947,45 @@ def time_beside(root: Path, suite: BesideSuite) -> BesideRun:
     return BesideRun(suite, seconds, returncode, output, setup_seconds)
 
 
+def changed_since_integration_branch(root: Path) -> tuple[set[str] | None, str]:
+    """The paths the checkout changes against origin's integration branch: its commits since
+    their merge base (a landing's merge, a pull request's merge on CI) and what it holds
+    uncommitted; and the base as `origin/<branch> (<commit>)`. None, with why, where that branch
+    is not fetched."""
+    branch = integration_branch(root)
+    base = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}")
+    if base.returncode != 0:
+        return None, f"origin/{branch} is not fetched here"
+    commit = base.stdout.strip()
+    diff = run_git(root, "diff", "--name-status", "-z", f"{commit}...HEAD")
+    if diff.returncode != 0:
+        return None, f"git diff against origin/{branch} failed: {(diff.stderr or diff.stdout).strip()}"
+    fields, paths, index = diff.stdout.split("\0"), set(), 0
+    while index < len(fields) and fields[index]:
+        count = 2 if fields[index][0] in "RC" else 1  # a rename or copy names both paths
+        paths.update(fields[index + 1:index + 1 + count])
+        index += 1 + count
+    return paths | changed_paths(root), f"origin/{branch} ({commit[:7]})"
+
+
+def beside_to_skip(root: Path, suites: tuple[BesideSuite, ...], full: bool) -> dict[str, str]:
+    """The suites beside this run skips, each with its one line naming why: one with `paths` the
+    change touches none of, outside a full run. Where the change cannot be read, every one runs."""
+    conditional = [suite for suite in suites if suite.paths is not None]
+    if full or not conditional:
+        return {}
+    changed, base = changed_since_integration_branch(root)
+    if changed is None:
+        for suite in conditional:
+            print(f"{suite.name} runs: {base}, so the change it guards cannot be read "
+                  f"(paths of {suite.where()})")
+        return {}
+    return {suite.name: (f"{suite.name} skipped: the change since {base} touches none of its "
+                         f"paths ({', '.join(suite.paths or ())}, {suite.where()}); it runs "
+                         "nightly and with suite --full")
+            for suite in conditional if not suite.guards(changed)}
+
+
 def clean_commit(root: Path) -> str | None:
     """HEAD where the checkout holds exactly its tree (nothing changed or untracked), else None."""
     head = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
@@ -5175,7 +5229,8 @@ def over_limit_warning(seconds: float, limit: float) -> str:
             "slowest tests faster")
 
 
-def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False) -> str:
+def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
+              full: bool = False) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -5192,6 +5247,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
     Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
     the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
+    A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
+    is one line in the output and the result (beside_to_skip).
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
     push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
@@ -5203,7 +5260,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
-    beside = [time_beside(root, suite) for suite in budget.beside]
+    skipped = beside_to_skip(root, budget.beside, full)
+    beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
     over = seconds > budget.limit_seconds
     ci, unknown = (None, "")
@@ -5227,6 +5285,11 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
                          and not beside_refused, seconds)
     slowest = slowest_tests(output, parts, slowest_count)
     summary = result.refuse_failed(budget)
+    if beside_failed and reference:
+        for run in beside_failed:  # an annotation on the run, as the safety net's findings are
+            print(f"::error title={run.suite.name} failed::{run.suite.name} failed: "
+                  f"{failed_tests(run.output) or ' '.join(run.suite.command)} "
+                  f"({run.suite.where()})")
     if beside_failed:
         raise QueueError(f"Complete suite passed ({summary}), but " + "\n".join(
             run.refusal() for run in beside_failed))
@@ -5282,6 +5345,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
                  else f"; its setup {run.setup_seconds:.1f} s (not budgeted)")
         print(f"{run.suite.name} time: {run.timing()}, beside the suite ({run.suite.where()})"
               f"{setup}")
+    for line in skipped.values():
+        print(line)
     if parts:
         print("Parts:\n" + "\n".join(
             "\n".join([f"  {part.line()}", *(f"    {line}" for line in part.setup_lines())])
@@ -5309,7 +5374,16 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
                   f"{run.suite.target_seconds:g} s (target_seconds of {run.suite.where()})",
                   file=sys.stderr)
     return "; ".join([f"{summary}; {timing}",
-                      *(f"{run.suite.name} passed in {run.timing()}" for run in beside)])
+                      *(f"{run.suite.name} passed in {run.timing()}" for run in beside),
+                      *skipped.values()])
+
+
+FAILED_TEST = re.compile(r"^\s*--- FAIL: (\S+)|^FAILED (\S+)", re.MULTILINE)
+
+
+def failed_tests(output: str) -> str:
+    """The failed tests a suite's output names, Go's `--- FAIL:` and pytest's `FAILED` lines."""
+    return ", ".join(dict.fromkeys(go or pytest for go, pytest in FAILED_TEST.findall(output)))
 
 
 COMPARE_RUNS = 2
@@ -8205,13 +8279,16 @@ def stated_component_kinds(root: Path) -> None:
                   "none), interleaved, after one untimed warm-up of each, and say whether this "
                   "checkout is \"not slower\" or \"slower by X s\" than REF"),
          arg("--runs", type=positive_int, default=COMPARE_RUNS, metavar="N",
-             help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"))
+             help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"),
+         arg("--full", action="store_true",
+             help="run every suite beside, also one whose paths the change does not touch "
+                  "(CI's nightly run)"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
     stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
-    print(f"Suite: {run_suite(root, args.slowest)}")
+    print(f"Suite: {run_suite(root, args.slowest, full=args.full)}")
     return 0
 
 

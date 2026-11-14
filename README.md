@@ -637,7 +637,8 @@ no token), the hand-off needs neither a retyped file nor a second run
   `fleet-check` as one call whose reads a simulated session answers on the hook, from the
   checkout's script and from a plugin's copy, then the fallback once kern stops.
   - kern's `contract/longstep_test.go` asks a relay step after a local phase longer than two
-    minutes (`se.toml` `[tests.beside.kern-long-step]`).
+    minutes (`se.toml` `[tests.beside.kern-long-step]`), nightly and where a change touches the
+    files it guards ([Test budget](#test-budget)); its fast guards run in kern's own tests.
 
 The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
@@ -867,6 +868,7 @@ command = ["go", "test", "./..."]
 directory = "kern"
 target_seconds = 30
 limit_seconds = 60
+paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touches one
 ```
 
 - `command`: the project's complete suite, an argument array run without a shell from the project
@@ -890,6 +892,15 @@ limit_seconds = 60
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
+  - Its `paths`, optional, keep a slow suite off the landing path: a file, or a folder ending
+    with `/`, relative to the root. The suite then runs only where the change touches one: the
+    commits since their merge base with origin's integration branch (a landing's merge, a pull
+    request's merge on CI) and what the checkout holds uncommitted.
+    - Elsewhere it is skipped, in one line of the output and of the result, naming the base and
+      the paths. Where that branch is not fetched, it runs, saying why.
+    - `work_tickets.py suite --full` runs it anyway, as CI's nightly run does (`check`'s
+      `schedule`). On CI a failing suite beside is also an error annotation naming its failed
+      tests.
   - A key the running scripts do not know is refused on the reference run (CI's `check`, which
     runs the merged tree's scripts) and elsewhere warns and is ignored. `integrate` runs the
     integration branch's scripts, so a branch can add a key and use it in one landing.
@@ -1605,7 +1616,7 @@ work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTRE
     label change and the Started comment as GitHub steps, or through kern's relay where it serves
     the checkout
 
-work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N]
+work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]
     run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
     when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test
     budget")
