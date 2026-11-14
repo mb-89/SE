@@ -403,6 +403,12 @@ class RecordingPeer:
     def respond(self, msg, data) -> None:
         self.publish(msg.reply, data)
 
+    def flush(self) -> None:
+        """The bus read all: the fake has nothing in flight."""
+
+    def refused(self, subject: str) -> str:
+        return ""  # the fake bus takes every answer
+
     def answer(self, reply: str, wait: float = 30.0) -> dict:
         with self.answered:
             assert self.answered.wait_for(lambda: any(s == reply for s, _ in self.sent), wait), reply

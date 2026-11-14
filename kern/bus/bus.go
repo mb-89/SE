@@ -44,7 +44,8 @@ const (
 	Hook   = "hook."
 	Lease  = "lease."
 	// Say carries a declared instance's live progress line, or its beat, for
-	// the step of a call it runs, on say.<i>.<call>: {"line"?}.
+	// the step of a call it runs, on say.<i>.<call>: {"line"?}, or, where the
+	// bus refused the answer it sent, {"refused": <why>}, which fails the step.
 	Say = "say."
 )
 
@@ -85,8 +86,14 @@ type Bus struct {
 
 // Start runs the server on loopback, on a port the system picks, with a user
 // for the core, one for clients and one for each instance, and waits until it
-// accepts connections.
-func Start(instances []Instance) (*Bus, error) {
+// accepts connections. replyWait is how long an instance may take to answer
+// a request the core sent it, a step of a command or a request on a verb:
+// zero or less, as long as it takes, the core's own waits bounding it; more,
+// the bus refuses an answer sent later (a test's way to see a refused answer,
+// cli.ReplyWaitEnv). NATS's own default, two minutes, would refuse the answer
+// of every step that runs longer, however it beats, and the core would wait
+// out its step wait in silence.
+func Start(instances []Instance, replyWait time.Duration) (*Bus, error) {
 	users := map[string]string{}
 	var accounts []*server.User
 	add := func(name string, perms *server.Permissions) error {
@@ -108,7 +115,7 @@ func Start(instances []Instance) (*Bus, error) {
 		return nil, err
 	}
 	for _, in := range instances {
-		if err := add(in.Name, instancePermissions(in)); err != nil {
+		if err := add(in.Name, instancePermissions(in, replyWait)); err != nil {
 			return nil, err
 		}
 	}
@@ -151,7 +158,9 @@ func password() (string, error) {
 // and input asks, its live progress lines (say.<i>.<call>), and asks any name and
 // command; it hears its own runs,
 // commands and, for an I/O instance, requests, every value, and its own inbox.
-func instancePermissions(in Instance) *server.Permissions {
+// It answers each request the core sends it once, within replyWait where that
+// is positive, and with no time limit otherwise (Start).
+func instancePermissions(in Instance, replyWait time.Duration) *server.Permissions {
 	i := Subject(in.Name)
 	sub := []string{Run + i, Cmd + i + ".>", Val + ">", Inbox(in.Name) + ".>"}
 	if in.IO {
@@ -161,8 +170,18 @@ func instancePermissions(in Instance) *server.Permissions {
 		Publish:   &server.SubjectPermission{Allow: []string{Commit + i, Lease + i, In + i, Say + i + ".>", Get + ">", Call + ">"}},
 		Subscribe: &server.SubjectPermission{Allow: sub},
 		// An instance answers the core's cmd and io requests on the reply subject each names.
-		Response: &server.ResponsePermission{MaxMsgs: 1},
+		Response: &server.ResponsePermission{MaxMsgs: 1, Expires: replyExpires(replyWait)},
 	}
+}
+
+// replyExpires is the server's expiry of a reply permission for replyWait: a
+// negative one never expires, where zero would take NATS's default of two
+// minutes.
+func replyExpires(replyWait time.Duration) time.Duration {
+	if replyWait <= 0 {
+		return -1
+	}
+	return replyWait
 }
 
 // clientPermissions are a command's or a hook's: it asks, it hears values and its own inbox.

@@ -46,6 +46,11 @@ const HoldEnv = "KERN_HOLD_START"
 // show that a step that beats outlives it.
 const StepWaitEnv = "KERN_STEP_WAIT"
 
+// ReplyWaitEnv names a duration that bounds how long a served core's declared
+// process may take to answer one step (host.Options.ReplyWait): a test's way
+// to show that an answer the bus refuses fails the step at once.
+const ReplyWaitEnv = "KERN_REPLY_WAIT"
+
 const usage = "usage: %s <start|status|stop|serve|hook <event>> [--root DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
 
 // Run is the command named name: it serves the components registered with
@@ -276,6 +281,14 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 		}
 		stepWait = d
 	}
+	var replyWait time.Duration
+	if v := os.Getenv(ReplyWaitEnv); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return die(fmt.Sprintf("%s serve: %s=%q is no duration, such as 60s", name, ReplyWaitEnv, v))
+		}
+		replyWait = d
+	}
 	// The ad hoc wiring overlay, .se/wiring.toml, holds the instances `se
 	// component add` placed under the ignored .se/ (index.ReadWiring comment on
 	// Merge); it is read after the tracked wiring and merged into it.
@@ -289,7 +302,7 @@ func serve(name, root string, grace, idle time.Duration, stdout, stderr io.Write
 	}
 	core, err := host.Serve(host.Options{
 		Root: root, Wiring: w, Components: index.Registered(), Grace: grace, Idle: idle, Log: stderr,
-		StepWait: stepWait,
+		StepWait: stepWait, ReplyWait: replyWait,
 	})
 	if err != nil {
 		return die(err.Error())

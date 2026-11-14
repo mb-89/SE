@@ -119,10 +119,18 @@ func (r remote) Command(ctx context.Context, name string, s index.Step, say func
 		case m := <-heard:
 			if m.Subject == said {
 				var w struct {
-					Line *string `json:"line"`
+					Line    *string `json:"line"`
+					Refused string  `json:"refused"`
 				}
 				if json.Unmarshal(m.Data, &w) != nil {
 					continue // no word of a step
+				}
+				if w.Refused != "" {
+					// The process answered, and the bus refused its answer: the
+					// step fails at once, never waiting out its step wait.
+					err := fmt.Errorf("instance %s: command %q, step %d: the bus refused its answer: %s", r.inst, name, s.Step, w.Refused)
+					r.Stop(name, s.Call, err.Error())
+					return a, err
 				}
 				if !quiet.Stop() {
 					<-quiet.C
