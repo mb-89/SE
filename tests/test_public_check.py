@@ -8,7 +8,9 @@ scripts/hygiene.py, a step of CI's `check` job."""
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -177,10 +179,44 @@ def commit(repo: Path, files: dict[str, str | bytes], message: str = "Add files"
 
 
 def run_check(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, cwd=cwd,
-        check=False,
-    )
+    """`public_check.py <args>` in this process, from `cwd`, under the test's environment, its git
+    the door's fake (`shared_fake_git`, the state file a process run reads): stdout and stderr
+    apart, and the exit code as Python would exit with what main returns or raises
+    (test_the_check_answers_alike_in_its_own_process holds it to the process)."""
+    argv = [sys.executable, str(SCRIPT), *args]
+    out, err = io.StringIO(), io.StringIO()
+    before = os.getcwd()
+    try:
+        if cwd is not None:
+            os.chdir(cwd)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = public_check.main(list(args))
+            except SystemExit as exit:
+                code = exit.code
+            if code is None:
+                code = 0
+            elif not isinstance(code, int):
+                print(code, file=sys.stderr)
+                code = 1
+    finally:
+        os.chdir(before)
+    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+
+
+def test_the_check_answers_alike_in_its_own_process(repo: Path) -> None:
+    """run_check answers as `python scripts/public_check.py` run as a process does, clean and with
+    a hit: the same exit code and stdout. stderr is not compared: argparse names the program after
+    sys.argv[0], which is pytest here, and no test of the check reads its stderr."""
+    commit(repo, {"README.md": "clean\n"})
+    for planted, expected in ((False, 0), (True, 1)):
+        if planted:
+            commit(repo, {"leak.txt": "/" + "home/alice/repo\n"})
+        process = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True,
+                                 cwd=repo, check=False)
+        in_test = run_check(cwd=repo)
+        assert process.returncode == expected, process.stdout + process.stderr
+        assert (in_test.returncode, in_test.stdout) == (process.returncode, process.stdout)
 
 
 def test_clean_repository_passes(repo: Path) -> None:
