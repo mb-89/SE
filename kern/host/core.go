@@ -45,6 +45,11 @@ const (
 	// AbandonSubject gives up a call its asker runs, {"call": <its reply
 	// subject>}; it answers whether one ran (docs/go-core.md "A call given up").
 	AbandonSubject = bus.Call + "core.abandon"
+	// LeaseSubject takes, renews or returns a session's lease without a
+	// host's hook event: {"session_id": <id>, "end"?: true}. A door that
+	// lives as long as a session, the MCP door (package mcp), holds its
+	// lease by it.
+	LeaseSubject = bus.Call + "core.lease"
 )
 
 // SessionEnd is the hook event that returns a session's lease.
@@ -471,20 +476,7 @@ func (c *Core) hook(m *nats.Msg) {
 		Session string `json:"session_id"`
 	}
 	_ = json.Unmarshal(m.Data, &body)
-	now := c.o.Clock.Now()
-	c.mu.Lock()
-	c.lastEvent = now
-	if body.Session != "" {
-		if event == SessionEnd {
-			delete(c.sessions, body.Session)
-			if len(c.sessions) == 0 {
-				c.emptySince = now
-			}
-		} else {
-			c.sessions[body.Session] = now
-		}
-	}
-	c.mu.Unlock()
+	now := c.hold(body.Session, event == SessionEnd)
 	if event == PostToolUse {
 		// After the answer: the hook does not wait on the count's one git call,
 		// and the next event, handled in turn, finds it written.
@@ -512,6 +504,46 @@ func (c *Core) hook(m *nats.Msg) {
 		}
 		c.reply(m, HookAnswer{Effect: Output, Output: r.Text})
 	}()
+}
+
+// hold takes or renews the session's lease, or returns it where end is set,
+// and counts as an event; an empty session holds nothing. It answers the time
+// it took.
+func (c *Core) hold(session string, end bool) time.Time {
+	now := c.o.Clock.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastEvent = now
+	if session == "" {
+		return now
+	}
+	if end {
+		delete(c.sessions, session)
+		if len(c.sessions) == 0 {
+			c.emptySince = now
+		}
+	} else {
+		c.sessions[session] = now
+	}
+	return now
+}
+
+// Lease is the body of call.core.lease.
+type Lease struct {
+	Session string `json:"session_id"`
+	End     bool   `json:"end,omitempty"`
+}
+
+// lease answers call.core.lease: it takes, renews or returns the session's
+// lease, and answers the sessions that hold one.
+func (c *Core) lease(m *nats.Msg) {
+	var l Lease
+	if err := json.Unmarshal(m.Data, &l); err != nil || l.Session == "" {
+		c.reply(m, map[string]string{"error": fmt.Sprintf("%s: the body is no {\"session_id\": <id>}: %s", LeaseSubject, m.Data)})
+		return
+	}
+	c.hold(l.Session, l.End)
+	c.reply(m, map[string]any{"sessions": c.Health().Sessions})
 }
 
 // Health is what get.core.health answers.

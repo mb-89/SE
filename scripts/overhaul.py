@@ -1114,6 +1114,11 @@ COMPONENTS = (sibling("se_components").Group(
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
 #: the checkout while a person waits; new, read and file write or read GitHub at length.
 INTERACTIVE_COMMANDS = frozenset({"facts"})
+#: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
+READ_ONLY_COMMANDS = {
+    "facts": "Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting "
+             "or judging an overhaul.",
+}
 
 
 def make_parser() -> argparse.ArgumentParser:
