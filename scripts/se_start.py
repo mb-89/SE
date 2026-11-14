@@ -400,6 +400,7 @@ def greeting(report: Report, se_root: Path) -> list[str]:
     c = local.counts
     lines = [f"SE {_v(local.se_version)} started: {_plural(c.skills, 'skill')}, {_plural(c.rules, 'rule')}, "
              f"{_plural(c.subagents, 'sub-agent')}. Documentation: {local.docs_url or 'none set'}"]
+    lines += stale_plugin_lines(se_root, report.root)
     due = [s for s in report.states if s.due]
     for state in due:
         lines.append(f"  {state.item.name}: {_v(state.item.version)} -> {_v(state.due)}")
@@ -410,6 +411,33 @@ def greeting(report: Report, se_root: Path) -> list[str]:
         lines.append(f"Refresh: {refresh_command(se_root)}")
     lines += _check_lines(report, se_root)
     return lines + skill_lines(report.local) + work_lines(report, se_root)
+
+
+def _plugin_name(root: Path) -> str | None:
+    try:
+        data = json.loads((root / PLUGIN_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) and name else None
+
+
+def stale_plugin_lines(se_root: Path, root: Path | None) -> list[str]:
+    """One line where the project is a checkout of the SE that runs (its plugin manifest names the
+    same plugin) at a newer version: the session runs an older SE than the checkout it works on,
+    as a cloud container restored from a cached snapshot does (README "Cloud sessions")."""
+    if root is None or root.resolve() == se_root.resolve():
+        return []
+    name = _plugin_name(se_root)
+    if name is None or _plugin_name(root) != name:
+        return []
+    running = se_modules.parse_version(_project(se_root).get("version"))
+    checkout = se_modules.parse_version(_project(root).get("version"))
+    if running is None or checkout is None or running >= checkout:
+        return []
+    return [f"SE {_v(running)} runs, older than this checkout's SE {_v(checkout)}: in the cloud, a "
+            "container restored from a cached snapshot, which the environment rebuilds only when "
+            "its setup script changes (README \"Cloud sessions\")"]
 
 
 def skill_lines(local: Local) -> list[str]:

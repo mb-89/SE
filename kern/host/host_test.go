@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -323,6 +324,71 @@ func TestACoreServesOverAStandingFileNamingItsOwnPid(t *testing.T) {
 	if err != nil || s.Pid != os.Getpid() || s.Bus != c.Health().Bus {
 		t.Fatalf("the standing file reads %+v, %v, and wants this core's bus %s", s, err, c.Health().Bus)
 	}
+}
+
+// A container restored from its snapshot may keep its boot id and hand the
+// last core's pid to another process, whose bus port something accepts on:
+// the standing file's start mark tells that process from its core, and a
+// core serves over the file. A dead pid of this boot and a foreign boot id
+// let it serve too.
+func TestACoreServesOverARecordThatNamesNoCore(t *testing.T) {
+	t.Parallel()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	live := fmt.Sprintf("nats://%s", l.Addr())
+	port := l.Addr().(*net.TCPAddr).Port
+	skipWithoutMark(t)
+	reused := host.Standing{Contract: host.Contract, Pid: os.Getpid(), Proc: "another-start", Boot: host.Boot(), Bus: live, Port: port}
+	dead := host.Standing{Contract: host.Contract, Pid: endedPid(t), Boot: host.Boot(), Bus: live, Port: port}
+	// A foreign boot id needs neither: its live pid and bus are no news.
+	foreign := host.Standing{Contract: host.Contract, Pid: os.Getpid(), Boot: "boot-of-another-day", Bus: live, Port: port}
+	for name, s := range map[string]host.Standing{"a reused pid": reused, "a dead pid": dead, "a foreign boot id": foreign} {
+		root := t.TempDir()
+		s.Root = root
+		data, _ := json.Marshal(s)
+		if err := os.MkdirAll(filepath.Join(root, host.Runtime), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(host.StandingPath(root), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := host.ReadStanding(root); !errors.Is(err, host.ErrNotRunning) {
+			t.Fatalf("%s reads as %v, and wants no core running", name, err)
+		}
+		c, err := host.Serve(host.Options{Root: root, Clock: newClock()})
+		if err != nil {
+			t.Fatalf("a core over %s answers %v, and wants to serve", name, err)
+		}
+		got, err := c.Standing()
+		c.Stop("the case ends")
+		<-c.Ended()
+		if err != nil || got.Pid != os.Getpid() || got.Proc == "another-start" || got.Bus == live {
+			t.Fatalf("over %s the standing file reads %+v, %v, and wants this core's", name, got, err)
+		}
+	}
+}
+
+// skipWithoutMark skips where the platform names no process's start: there
+// the bus alone tells a reused pid, and the case's bus is live.
+func skipWithoutMark(t *testing.T) {
+	t.Helper()
+	c := served(t, host.Options{Clock: newClock()})
+	if s, err := c.Standing(); err != nil || s.Proc == "" {
+		t.Skipf("this platform names no start of a process (%+v, %v)", s, err)
+	}
+}
+
+// endedPid answers the pid of a process that ran and ended.
+func endedPid(t *testing.T) int {
+	t.Helper()
+	ended := exec.Command(os.Args[0], "-test.run=^$")
+	if err := ended.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return ended.ProcessState.Pid()
 }
 
 func tank(command []string) index.Wiring {
