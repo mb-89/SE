@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from test_work_ticket_issues import (  # noqa: F401  (the landing's fixtures: checkout, GitHub, config)
-    git_ok, git_run, github, integration_fakes, local_config, main_checkout, reported_at,
+    PROJECT, git_ok, git_run, github, integration_fakes, local_config, main_checkout, reported_at,
     squashed_onto_origin, work_tickets,
 )
 
@@ -23,6 +23,9 @@ SE_RELEASE = ('version = "{version}"\n'
               'binary = "se"\npackage = "./cmd/se"\n')
 KERN_RELEASE = ('version = "{version}"\n'
                 'download = "https://github.com/example/se/releases/download/kern-v{{version}}"\n')
+# kern's application template, which pins kern's battery at kern's release tag.
+TEMPLATE = "kern/template/.github/workflows/check.yml"
+PINNED = "jobs:\n  check:\n    uses: example/se/.github/workflows/kern-battery.yml@kern-v{version}\n"
 
 
 @pytest.mark.parametrize(("base", "claimed", "kind"), [
@@ -72,6 +75,8 @@ def components_on_main(checkout: Path, se: str = "0.2.9", kern: str = "0.4.9") -
     (checkout / "components").mkdir()
     (checkout / "kern" / "release.toml").write_text(KERN_RELEASE.format(version=kern), encoding="utf-8")
     (checkout / "kern" / "core.go").write_text("package kern\n", encoding="utf-8")
+    (checkout / TEMPLATE).parent.mkdir(parents=True)
+    (checkout / TEMPLATE).write_text(PINNED.format(version=kern), encoding="utf-8")
     (checkout / "components" / "release.toml").write_text(SE_RELEASE.format(version=se), encoding="utf-8")
     (checkout / "components" / "se.go").write_text("package se\n", encoding="utf-8")
     with (checkout / "se.toml").open("a", encoding="utf-8") as stream:
@@ -87,6 +92,7 @@ def work_branch(checkout: Path, branch: str, changes: dict[str, str]) -> str:
     git_ok("-C", str(checkout), "fetch", "-q", "origin")
     git_ok("-C", str(checkout), "worktree", "add", "-q", "-b", branch, str(worker), "origin/main")
     for name, text in changes.items():
+        (worker / name).parent.mkdir(parents=True, exist_ok=True)
         (worker / name).write_text(text, encoding="utf-8")
     git_ok("-C", str(worker), "add", "-A")
     git_ok("-C", str(worker), "commit", "-q", "-m", f"Change {branch}")
@@ -162,6 +168,110 @@ def test_a_branch_that_still_claims_a_taken_number_gets_the_next_free_one_of_its
     assert ("Component version: se 0.3.0 -> 0.3.1 (patch, claimed 0.2.10, replaced by the next "
             "free patch version); the push to the integration branch cuts se-v0.3.1") in out
     assert "kern 0.4.9 -> 0.5.0 (minor, claimed 0.5.0); the push to the integration branch cuts kern-v0.5.0" in out
+
+
+KERN = versions.Component("kern", "kern/release.toml", ("kern",), "kern-v{version}")
+
+
+def test_the_landing_moves_every_listed_pin_and_leaves_the_rest_of_the_text_alone():
+    texts = {TEMPLATE: PINNED.format(version="1.2.3") + "# @kern-v1.2.3.\n",
+             "docs/other.md": "uses: x@kern-v1.2.3\n"}
+    assert versions.moved_pins(KERN, texts, (1, 3, 0)) == {
+        TEMPLATE: PINNED.format(version="1.3.0") + "# @kern-v1.3.0.\n"}  # only the listed file
+    # A pin the branch already moved by hand, to the assigned number, stays as it is.
+    assert versions.moved_pins(KERN, {TEMPLATE: PINNED.format(version="1.3.0")}, (1, 3, 0)) == {}
+    assert versions.pin_pattern(KERN, (1, 2, 3)).search("@kern-v1.2.30") is None
+
+
+# What the completeness check skips: git's own folder, local and generated caches, never tracked.
+UNTRACKED = {".git", ".venv", ".se", "__pycache__", ".pytest_cache", "node_modules"}
+
+
+def unlisted_pins_in(root: Path) -> list[str]:
+    """The checkout's files that pin a component's current release tag outside `PINS`."""
+    texts = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if path.is_file() and not UNTRACKED & set(relative.parts):
+            texts[relative.as_posix()] = path.read_bytes().decode("utf-8", errors="replace")
+    found = []
+    for release in ("kern/release.toml", "components/release.toml"):
+        if release in texts:
+            settings = versions.tomllib.loads(texts[release])
+            component = versions.Component(str(settings.get("binary") or "kern"), release, (),
+                                           versions.release_tag(texts[release]))
+            version = versions.read_version(texts[release], release)
+            found += versions.unlisted_pins(component, version, texts)
+    return found
+
+
+def test_every_file_that_pins_a_component_s_current_tag_is_on_the_landing_s_list():
+    assert unlisted_pins_in(PROJECT) == [], (
+        "these files pin a component's current release tag, which the landing would leave behind: "
+        "add each to component_versions.PINS")
+
+
+def test_the_completeness_check_fails_on_a_made_up_file_with_a_stale_pin(tmp_path: Path):
+    for name, text in {"kern/release.toml": KERN_RELEASE.format(version="1.2.3"),
+                       TEMPLATE: PINNED.format(version="1.2.3"),
+                       "components/release.toml": SE_RELEASE.format(version="4.5.6"),
+                       "docs/made-up.yml": "uses: example/se/.github/workflows/x.yml@se-v4.5.6\n",
+                       "docs/history.md": "kern-v1.2.3 shipped; the template once said @kern-v1.1.0\n",
+                       ".se/work/note.md": "@kern-v1.2.3\n"}.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    assert unlisted_pins_in(tmp_path) == ["docs/made-up.yml"]
+    (tmp_path / "docs" / "made-up.yml").write_text("uses: x@kern-v1.2.3\n", encoding="utf-8")
+    assert unlisted_pins_in(tmp_path) == ["docs/made-up.yml"]
+
+
+def test_a_branch_that_changes_kern_and_states_minor_lands_with_the_template_pin_moved(
+        main_checkout, monkeypatch, github, capsys):
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    components_on_main(main_checkout, kern="0.5.1")
+    head = work_branch(main_checkout, "feat/kern", {"kern/core.go": "package kern // minor\n"})
+
+    commit = land(main_checkout, monkeypatch, "feat/kern", head, 7, "kern minor")
+    assert squashed_onto_origin(main_checkout, commit)
+    assert version_on_main(main_checkout, "kern/release.toml") == "0.6.0"
+    template = git_run(main_checkout, "show", f"origin/main:{TEMPLATE}", check=True).stdout
+    assert template == PINNED.format(version="0.6.0")
+    assert "kern 0.5.1 -> 0.6.0 (minor, stated); the push to the integration branch cuts kern-v0.6.0" in (
+        capsys.readouterr().out)
+
+
+def test_branches_that_pinned_the_number_by_hand_land_unchanged_or_on_the_next_free_one(
+        main_checkout, monkeypatch, github, capsys):
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    components_on_main(main_checkout, kern="0.5.1")
+    claim = {"kern/release.toml": KERN_RELEASE.format(version="0.6.0"),
+             TEMPLATE: PINNED.format(version="0.6.0")}
+    first = work_branch(main_checkout, "feat/first", {**claim, "kern/core.go": "package kern // 1\n"})
+    second = work_branch(main_checkout, "feat/second", {**claim, "kern/more.go": "package kern\n"})
+    third = work_branch(main_checkout, "fix/third", {
+        "kern/release.toml": KERN_RELEASE.format(version="0.5.2"),
+        TEMPLATE: PINNED.format(version="0.5.2"), "kern/fix.go": "package kern\n"})
+
+    land(main_checkout, monkeypatch, "feat/first", first, 7)  # the stopgap: claimed by hand
+    assert version_on_main(main_checkout, "kern/release.toml") == "0.6.0"
+    assert git_run(main_checkout, "show", f"origin/main:{TEMPLATE}", check=True).stdout == (
+        PINNED.format(version="0.6.0"))
+    assert "kern 0.5.1 -> 0.6.0 (minor, claimed 0.6.0); the push" in capsys.readouterr().out
+
+    # The same claim, now taken: the next free minor, the pin moved with it.
+    land(main_checkout, monkeypatch, "feat/second", second, 8)
+    assert version_on_main(main_checkout, "kern/release.toml") == "0.7.0"
+    assert git_run(main_checkout, "show", f"origin/main:{TEMPLATE}", check=True).stdout == (
+        PINNED.format(version="0.7.0"))
+
+    # A claim whose pin conflicts with main's: main's pin first, then the assigned one.
+    commit = land(main_checkout, monkeypatch, "fix/third", third, 9)
+    assert squashed_onto_origin(main_checkout, commit)
+    assert version_on_main(main_checkout, "kern/release.toml") == "0.7.1"
+    assert git_run(main_checkout, "show", f"origin/main:{TEMPLATE}", check=True).stdout == (
+        PINNED.format(version="0.7.1"))
+    assert "kern 0.7.0 -> 0.7.1 (patch, claimed 0.5.2, replaced by the next free patch" in (
+        capsys.readouterr().out)
 
 
 def test_a_stated_kind_for_no_component_is_refused_and_nothing_lands(

@@ -662,6 +662,12 @@ landing assigns the number, so branches open in parallel never claim the same on
   part it raised), and the number becomes the next free one of that kind, said in the output.
   Where the claim conflicts with `main`'s version, the landing takes `main`'s version on top of
   the branch first and then assigns the number.
+- **The pins move with the number:** every other file that pins a component's tag as `@<tag>`
+  (kern's template calls kern's battery at `@kern-v<version>`) is on one list,
+  `scripts/component_versions.py` `PINS`, and the landing moves each pin to the assigned tag in
+  the same merge, also where the branch moved it by hand.
+  - `tests/test_component_versions.py` fails where a file pins a component's current tag and is
+    not on the list.
 
 #### Release tags
 
