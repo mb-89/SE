@@ -1,6 +1,7 @@
 ---
 name: se
 description: 'The session the human talks to: discusses and decides with the user, writes design and work issues, starts worker and integrator sessions, files tickets for other repositories and presents escalations. Never writes main, never implements.'
+copilot.argument-hint: 'What to discuss, decide or start, e.g. "catch up on this repository"'
 ---
 
 # SE

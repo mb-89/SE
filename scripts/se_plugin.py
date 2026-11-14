@@ -2,8 +2,9 @@
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
 `build` writes both layouts and the Claude Code plugin manifests; `check` refuses when any generated
-file differs from what `build` would write, so a hand edit to a generated file fails. Where each
-layout is installed from is the README section "Install".
+file differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a
+Copilot agent or a skill its host would reject or skip (`validate`). Where each layout is installed
+from is the README section "Install".
 
 Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
 into that layout, without its prefix; every other key goes into both.
@@ -44,6 +45,22 @@ KERN_EVENTS = ("SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", 
 def kern_hook(event: str) -> str:
     """The plugin's hook command that posts `event` to kern."""
     return f'bash "${{CLAUDE_PLUGIN_ROOT}}/scripts/se_hook.sh" {event} || true'
+
+
+# Copilot's custom agent fields (VS Code's custom agent file reference); `handoffs` and `agents` work
+# only in VS Code's local harness and are not offered.
+COPILOT_AGENT_FIELDS = frozenset({"name", "description", "tools", "model", "model-policy", "hooks", "target",
+                                  "user-invocable", "disable-model-invocation", "argument-hint"})
+COPILOT_TARGETS = frozenset({"vscode", "github-copilot"})
+# Copilot's tool aliases; an MCP server's tools are `<server>/<tool>` or `<server>/*`.
+COPILOT_TOOLS = frozenset({"execute", "read", "edit", "search", "agent", "web", "todo"})
+MCP_TOOL = re.compile(r"^[\w.-]+/(?:\*|[\w.-]+)$")
+# The agentskills.io rules: a name of lowercase letters, digits and single hyphens, at most 64
+# characters, equal to its folder (VS Code skips a skill whose name breaks them); a description of
+# at most 1024 characters.
+SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SKILL_NAME_MAX = 64
+SKILL_DESCRIPTION_MAX = 1024
 
 
 LINK = re.compile(r"(\]\()([^)\s#]+)((?:#[^)\s]*)?\))")
@@ -265,6 +282,68 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
     return {MANIFESTS[0]: _json(plugin), MANIFESTS[1]: _json(marketplace)}
 
 
+def _fields(data: bytes) -> dict[str, str]:
+    """The front matter of a generated Markdown file, each value as written."""
+    text = data.decode("utf-8")
+    if not text.startswith("---\n"):
+        return {}
+    head = text[4:text.find("\n---\n", 4)]
+    return {key.strip(): value.strip() for key, _, value in (line.partition(":") for line in head.splitlines())}
+
+
+def _scalar(value: str) -> str:
+    """A YAML scalar as front matter writes one: plain, 'single-quoted' or "double-quoted"."""
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return json.loads(value)
+    return value
+
+
+def _list(value: str) -> list[str]:
+    """A YAML flow list of scalars, `['a', 'b']`, or one scalar."""
+    if value.startswith("[") and value.endswith("]"):
+        return [_scalar(item.strip()) for item in value[1:-1].split(",") if item.strip()]
+    return [_scalar(value)]
+
+
+def _agent_problems(path: PurePosixPath, fields: dict[str, str]) -> list[str]:
+    problems = [f"{path}: {key} is no Copilot agent field" for key in fields if key not in COPILOT_AGENT_FIELDS]
+    if not _scalar(fields.get("description", "")):
+        problems.append(f"{path}: a Copilot agent needs a description")
+    problems += [f"{path}: tool {tool!r} is no Copilot tool" for tool in _list(fields.get("tools", "[]"))
+                 if tool not in COPILOT_TOOLS and not MCP_TOOL.match(tool)]
+    if "target" in fields and _scalar(fields["target"]) not in COPILOT_TARGETS:
+        problems.append(f"{path}: target is one of {', '.join(sorted(COPILOT_TARGETS))}")
+    return problems
+
+
+def _skill_problems(path: PurePosixPath, fields: dict[str, str]) -> list[str]:
+    name, description = _scalar(fields.get("name", "")), _scalar(fields.get("description", ""))
+    problems = []
+    if not SKILL_NAME.match(name) or len(name) > SKILL_NAME_MAX:
+        problems.append(f"{path}: skill name {name!r} is not 1 to {SKILL_NAME_MAX} lowercase letters, digits "
+                        "and single hyphens")
+    if name != path.parent.name:
+        problems.append(f"{path}: skill name {name!r} differs from its folder {path.parent.name!r}")
+    if not description or len(description) > SKILL_DESCRIPTION_MAX:
+        problems.append(f"{path}: skill description has {len(description)} characters, not 1 to "
+                        f"{SKILL_DESCRIPTION_MAX}")
+    return problems
+
+
+def validate(files: dict[PurePosixPath, bytes]) -> list[str]:
+    """One line per generated agent or skill its host would reject or skip: every Copilot agent
+    against Copilot's fields and tools, every skill of both layouts against the agentskills.io rules."""
+    problems = []
+    for path, data in sorted(files.items()):
+        if path.parent == LAYOUTS[0].agents and path.name.endswith(LAYOUTS[0].agent_suffix):
+            problems += _agent_problems(path, _fields(data))
+        elif path.name == "SKILL.md" and any(path.parent.parent == layout.skills for layout in LAYOUTS):
+            problems += _skill_problems(path, _fields(data))
+    return problems
+
+
 def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
     """Every generated file and its content, computed from the source alone."""
     files = _manifests(root)
@@ -277,6 +356,8 @@ def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
         for layout in LAYOUTS:
             path, data = _generated_file(source, layout, root, role_skills)
             files[path] = data
+    if problems := validate(files):
+        raise SourceError("; ".join(problems))
     return files
 
 
