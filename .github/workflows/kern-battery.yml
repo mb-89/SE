@@ -7,6 +7,12 @@
 #     check:
 #       uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
 #
+# Where the application's se.toml [tests] sets trust_integrator = true, the job trust passes it on
+# the integrator's record of exactly the tree checked out, and the battery's vet and tests do not
+# run (SE's README "Trusted landings"). Its action, integrator-pass, runs from the kern commit this
+# workflow runs at (job.workflow_sha), so always at the kern tag the application pins. The default
+# is off: the battery runs in full, and the application grants nothing more than contents: read.
+#
 # While kern is incubated in SE, it lives here; it moves with kern's workflows to mb-89/kern.
 name: kern-battery
 
@@ -18,25 +24,61 @@ on:
         type: string
         default: "."
 
-permissions:
-  contents: read
+# No permissions of its own: the jobs take the caller's, contents: read where trust is off; where it
+# is on the application grants checks: write (the full pass's mark) and actions: read (the record's
+# run), as SE's README "Trusted landings" names.
 
 jobs:
+  # Whether this run passes on the integrator's record of exactly this tree instead of running the
+  # battery (SE's README "Trusted landings"): only where the application's se.toml [tests]
+  # trust_integrator is on, never on the safety net's runs. Its full history counts the landings for
+  # se.toml [tests] full_every.
+  trust:
+    runs-on: ubuntu-26.04
+    outputs:
+      trusted: ${{ steps.lookup.outputs.trusted }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: kern at the tag the application pins
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .kern-battery
+          sparse-checkout: |
+            .github/actions
+            scripts
+      - name: The integrator's record of this tree
+        id: lookup
+        uses: ./.kern-battery/.github/actions/integrator-pass
+        with:
+          mode: lookup
+          worktree: ${{ inputs.directory }}
   battery:
+    needs: trust
     runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: ${{ inputs.directory }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - name: The integrator's record of this tree is trusted
+        if: needs.trust.outputs.trusted == 'true'
+        run: echo "The battery did not run, as the integrator's record of this tree is trusted"
+      - if: needs.trust.outputs.trusted != 'true'
+        uses: actions/setup-go@v6
         with:
           go-version-file: ${{ inputs.directory }}/go.mod
           cache-dependency-path: ${{ inputs.directory }}/go.sum
-      - uses: astral-sh/setup-uv@v7
+      - if: needs.trust.outputs.trusted != 'true'
+        uses: astral-sh/setup-uv@v7
       - name: The Go code vets
+        if: needs.trust.outputs.trusted != 'true'
         run: go vet ./...
       - name: The tests, within their budget
+        if: needs.trust.outputs.trusted != 'true'
         shell: python3 {0}
         env:
           PYTHONUNBUFFERED: "1"
@@ -63,3 +105,29 @@ jobs:
                              f"{limit}: make the tests faster or raise the budget with its reason") or 1)
           if seconds > target:
               print(f"::warning::battery: {seconds:.1f} s is over se.toml [tests] target_seconds {target}")
+      # The safety net's bookkeeping, where trust_integrator is on (else they do nothing): a full
+      # pass marks its commit; a failed full run names the trusted records since the last one. Its
+      # action comes from the kern commit this workflow runs at, checked out after the tests, so
+      # the tests see the application's checkout alone.
+      - name: kern at the tag the application pins, for the safety net
+        if: ${{ !cancelled() && needs.trust.outputs.trusted != 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .kern-battery
+          sparse-checkout: |
+            .github/actions
+            scripts
+      - name: Mark the full pass
+        if: success() && needs.trust.outputs.trusted != 'true'
+        uses: ./.kern-battery/.github/actions/integrator-pass
+        with:
+          mode: full-pass
+          worktree: ${{ inputs.directory }}
+      - name: Name the trusted records the failure came through
+        if: failure() && needs.trust.outputs.trusted != 'true'
+        uses: ./.kern-battery/.github/actions/integrator-pass
+        with:
+          mode: finding
+          worktree: ${{ inputs.directory }}
