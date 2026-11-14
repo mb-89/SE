@@ -340,9 +340,13 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
         lines: list[str] = []
         threading.Thread(target=lambda: lines.extend(call.stderr), daemon=True).start()
         answered: list[str] = []
+        nexts: list[str] = []
         end = time.monotonic() + 120
         while call.poll() is None and time.monotonic() < end:
             for tool, input_ in told(kern, checkout):
+                if tool == "list_issues":  # the first step after the push, asked another way
+                    nexts.append(run(sys.executable, str(ROOT / "scripts" / "se_relay.py"), "next",
+                                     "--root", str(checkout), cwd=checkout).stdout)
                 payload = json.dumps({
                     "session_id": "s1", "hook_event_name": "PostToolUse",
                     "tool_name": f"mcp__github__{tool}", "tool_input": input_,
@@ -365,6 +369,9 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
             "issue_read get_labels", "issue_write update", "issue_write update", "issue_read get",
         ], answered
         assert "Integrated pull request #7" in out, out
+        assert len(nexts) == 1 and "1. list_issues {" in nexts[0], nexts  # se_relay.py next
+        step = next(line for line in lines if "relay: list_issues" in line)
+        assert "se_relay.py next --root" in step, step  # the step line names that command
         landed = door(origin, "rev-parse", "refs/heads/main")
         assert door(checkout, "rev-parse", "HEAD") == landed  # the checkout at the landed commit
     finally:

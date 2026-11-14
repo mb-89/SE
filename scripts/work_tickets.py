@@ -6470,7 +6470,8 @@ class RelayDoor(Workflows):
         number = next((arguments[key] for key in ("pullNumber", "issue_number") if key in arguments), "")
         feedback.progress(f"GitHub step through kern's relay: {tool}"
                           + (f" {method}" if method else "") + (f" #{number}" if number else "")
-                          + "; run it with the input kern's hook tells")
+                          + "; run it with the input kern's hook tells, or that "
+                          + f"`{sibling('se_relay').NEXT_COMMAND} --root {self.root}` prints")
         return self.step(tool, {**self.where, **arguments}, note, wait)
 
     def paused(self, tracker: str) -> list[dict[str, object]]:
