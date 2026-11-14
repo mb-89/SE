@@ -226,3 +226,117 @@ def test_gather_offline_writes_nothing_and_strict_sets_the_exit_code(tmp_path: P
 ])
 def test_the_host_comes_from_variable_names(env, host):
     assert d.gather_host(env) == host
+
+
+# --probe (off by default)
+
+
+BASE_TEXT = (
+    "SE doctor: 0 problems, 0 notes (read-only; nothing was changed)\n"
+    "  binary   [seen] se 0.2.8 on PATH, the pin\n"
+    "  binary   [seen] se 0.2.8 on the core's start, the pin\n"
+    "  plugin   [seen] SE 5.50.2 at ~/.claude/skills/se, current\n"
+    "  core     [seen] running, pid 370, boot b-1\n"
+    "  core     [seen] core.log ends:\n"
+    "    se: serving <checkout>, pid 370\n"
+    "  hooks    [seen] ~/.claude/skills/se/.claude-plugin/plugin.json (hooks, 1 entries): 1 scripts named, all exist\n"
+    "  checkout [seen] SE 5.50.2 at 0daf4dc; 0 ahead, 0 behind origin/main as last fetched\n"
+    "  gh       [seen] gh signed in\n"
+    "  network  [seen] reached github.com\n"
+    "  host     [seen] claude-code, a cloud session\n"
+    "reused: se_start (plugin registry, cached release check, kern status, cloud marker), se_modules (binary pin)\n")
+BASE_JSON_SHA256 = "8f6e96f36286e62e0bbb951a388647e06d15e92e498f34bfabc9f25ba55a3744"  # render_json before --probe
+
+
+def no_probe(*_args, **_kwargs):
+    raise AssertionError("probed without --probe")
+
+
+def test_without_the_flags_the_report_is_unchanged_byte_for_byte_and_nothing_is_started(tmp_path: Path, monkeypatch,
+                                                                                         capsys):
+    import hashlib
+
+    findings = d.diagnose(clean_facts())
+    assert d.render_text(findings) == BASE_TEXT
+    assert hashlib.sha256(d.render_json(findings, clean_facts()).encode()).hexdigest() == BASE_JSON_SHA256
+    for name in ("gather_probe", "probe_command", "initialize"):
+        monkeypatch.setattr(d, name, no_probe)
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("SE_START_CACHE", str(home / "start-check.json"))
+    monkeypatch.setattr(d.Path, "home", lambda: home)
+    monkeypatch.setattr(d, "SE_ROOT", project)  # no git checkout: the door's real git stays unasked
+    before = sorted(p.as_posix() for p in tmp_path.rglob("*"))
+    assert "probe" not in d.gather(project, project, offline=True, env={}, home=home)
+    assert d.main(["--root", str(project), "--offline"]) == 0
+    assert "probe" not in capsys.readouterr().out
+    assert sorted(p.as_posix() for p in tmp_path.rglob("*")) == before
+
+
+def test_the_probe_rows_come_after_the_problems_with_fix_lines_indented():
+    facts = clean_facts()
+    facts["probe"] = {"platform": "windows", "rows": [
+        {"surface": "copilot-cli", "place": "MCP door", "file": "<checkout>/.github/mcp.json", "state": d.SILENT,
+         "level": d.PROBLEM, "text": "copilot-cli MCP door <checkout>/.github/mcp.json: no answer", "fix": "copilot x"},
+        {"surface": "claude-code", "place": "plugin hooks", "file": "~/p.json", "state": d.SEEN, "level": d.OK,
+         "text": "claude-code plugin hooks ~/p.json: resolves", "fix": None}]}
+    findings = d.diagnose(facts)
+    assert findings[0].text == "copilot-cli MCP door <checkout>/.github/mcp.json: no answer\n    fix (windows): copilot x"
+    text = d.render_text(findings, d.PROBED)
+    assert text.startswith("SE doctor: 1 problem, 0 notes (probed:")
+    assert "  hooks    [seen] claude-code plugin hooks ~/p.json: resolves\n" in text
+
+
+def mcp_script(tmp_path: Path, body: str) -> list[str]:
+    import sys
+
+    script = tmp_path / "door.py"
+    script.write_text(body, encoding="utf-8")
+    return [sys.executable, str(script)]
+
+
+def test_initialize_reads_one_answer_and_names_a_silent_or_exiting_command(tmp_path: Path):
+    answers = mcp_script(tmp_path, "import sys, json\nsys.stdin.readline()\nprint(json.dumps({'jsonrpc': '2.0', "
+                                   "'id': 1, 'result': {'serverInfo': {'name': 'se', 'version': '0.4.0'}}}), flush=True)\n"
+                                   "sys.stdin.read()\n")
+    assert d.initialize(answers, tmp_path, timeout=30) == {"answer": "answered", "detail": "se 0.4.0"}
+    silent = mcp_script(tmp_path, "import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n")
+    assert d.initialize(silent, tmp_path, timeout=0.5) == {"answer": "timeout", "detail": "0.5 s"}
+    exits = mcp_script(tmp_path, "raise SystemExit(3)\n")
+    assert d.initialize(exits, tmp_path, timeout=30) == {"answer": "exited", "detail": "exit code 3"}
+    assert d.initialize([str(tmp_path / "nothing-here")], tmp_path, timeout=30)["answer"] == "exited"
+
+
+def test_gather_probe_reads_each_place_and_probes_without_running_a_hook(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "project"
+    (project / ".github" / "hooks").mkdir(parents=True)
+    (project / "scripts").mkdir()
+    (project / "scripts" / "bootstrap.sh").write_text("", encoding="utf-8")
+    (project / "scripts" / "se_mcp.sh").write_text("", encoding="utf-8")
+    (project / ".github" / "hooks" / "se.json").write_text(json.dumps({"hooks": {"SessionStart": [
+        {"bash": "bash scripts/bootstrap.sh --hook || true", "powershell": "bash scripts/bootstrap.sh --hook; exit 0"}]}}),
+        encoding="utf-8")
+    (project / ".github" / "mcp.json").write_text(json.dumps(
+        {"mcpServers": {"se": {"command": "bash", "args": ["scripts/se_mcp.sh", "--root", "."]}}}), encoding="utf-8")
+    started = []
+    data = {"registrations": {k: v for k, v in
+                              __import__("tomllib").loads(d.HOST_FACTS.read_text(encoding="utf-8"))["registrations"].items()
+                              if k == "copilot-cli"}}
+
+    def start(words, cwd):
+        started.append(words)
+        return {"answer": "timeout", "detail": "10 s"}
+
+    probe = d.gather_probe(project, home, project, [], "windows", data, which=lambda w: f"/bin/{w}", start=start)
+    rows = {r["place"]: r for r in probe["rows"]}
+    assert started == [["/bin/bash", "scripts/se_mcp.sh", "--root", "."]]  # the hook was resolved, never run
+    assert rows["hooks"]["level"] == d.OK
+    assert rows["MCP door"]["level"] == d.PROBLEM and "no answer to initialize" in rows["MCP door"]["text"]
+    assert rows["MCP door"]["fix"].startswith("cd ")
+    assert rows["user MCP config"]["fix"] == ("copilot mcp add se -- powershell -NoProfile -ExecutionPolicy Bypass "
+                                              "-File \"" + (project / "scripts" / "se_mcp.ps1").as_posix() + "\" --root .")
+    assert rows["plugin manifest"]["file"] == "<checkout>/.github/plugin/plugin.json"
+    elsewhere = d.gather_probe(project, home, tmp_path / "se", [], "linux", data, which=lambda _w: None, start=no_probe)
+    assert {r["place"]: r["state"] for r in elsewhere["rows"]}["hooks"] == d.NOT_MEASURED
+
