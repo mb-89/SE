@@ -3825,13 +3825,17 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
     # kern's tests first: they warm Go's build cache for the acceptances after them.
-    kern, go_components, release_guard, new_app, components, relay, scripts = budget.beside
+    kern, go_components, long_step, release_guard, new_app, components, relay, scripts = budget.beside
     assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
     assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
     assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
     assert (go_components.name, go_components.command, go_components.directory) == (
         "go-components", ["go", "test", "./..."], "components"), "after kern's, with Go's cache warm"
     assert go_components.target_seconds < go_components.limit_seconds < budget.limit_seconds
+    # A relay step after a local phase longer than NATS's two minutes: a real wait, its own budget.
+    assert (long_step.name, long_step.directory) == ("kern-long-step", "kern")
+    assert long_step.command[:4] == ["go", "test", "-tags", "longstep"], "out of kern's own tests"
+    assert 130 < long_step.target_seconds < long_step.limit_seconds
     # The released binaries hold what the checkout builds (kern/README.md "Release").
     assert (release_guard.name, release_guard.directory) == ("release-guard", "kern")
     assert release_guard.command == ["go", "run", "./tools/release", "guard", "--dir", ".",

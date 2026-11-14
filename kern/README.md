@@ -138,6 +138,12 @@ The contract suite runs `contract/cases.json` three times: against the Go fake
 Python fake (`python/tests/`, in SE's Python suite through `pyproject.toml`'s `testpaths`, so its
 time counts against SE's budget and needs no Go).
 
+One case waits for real: `contract/longstep_test.go`, behind the build tag `longstep`, asks a relay
+step after a local phase of 130 s, longer than NATS's two minutes, the one limit on the path that
+no fake clock reaches. `go test ./...` leaves it out; SE runs it beside the suite as `se.toml`
+`[tests.beside.kern-long-step]` (`go test -tags longstep -run TestAStepAnswersAfterALongLocalPhase
+./contract/`).
+
 ## Release
 
 `release.toml` owns kern's version and where its release is published:
