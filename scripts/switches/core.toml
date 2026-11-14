@@ -1,0 +1,120 @@
+# SE's switches, core group: the values that flip behaviour, one [[switch]] each, read by
+# scripts/se_switches.py (its docstring owns this format). A later module adds a file of its own
+# to this folder, never a row here; tests/test_se_switches.py holds every file of the folder.
+#
+# A [[switch]] gives
+#   name     how the owner names it; unique across every file of the folder
+#   kind     environment, se.toml, wiring-instance, wiring-wire, local-file or command-flag
+#   reader   the file that reads it, relative to se's checkout
+#   default  its state with nothing set: on, off or set
+#   layers   the layers its reader consults, in its order: environment, local (~/.se/local.toml),
+#            se.toml, wiring, wiring-overlay (.se/wiring.toml), public-check-local
+#   key      in a TOML layer: the dotted key, or on a wiring instance or wire its own key
+#   on, off  the values that read as on and as off (true and false always do)
+#   other    the state of any other value; default set
+#   fold     true where the reader compares the value case-insensitively
+#   help     the section that owns its help text
+# A [[not_switch]] names an SE_* variable that flips no behaviour, with why.
+
+[[switch]]
+name = "SE_KERN"
+kind = "environment"
+reader = "scripts/se_components.py"
+default = "on"
+layers = ["environment"]
+on = ["on"]
+off = ["off"]
+other = "on"
+fold = true
+help = "README.md#commands-as-components"
+note = "on: interactive commands go through kern where it serves, else run directly; SE_KERN=on refuses that fallback"
+
+[[switch]]
+name = "SE_GIT_DOOR"
+kind = "environment"
+reader = "scripts/git_door.py"
+default = "off"
+layers = ["environment"]
+off = ["", "real"]
+help = "scripts/git_door.py"
+note = "off: the git on PATH; set: a test's fake or refused git"
+
+[[switch]]
+name = "enabled"
+kind = "wiring-instance"
+reader = "kern/index/wiring.go"
+default = "on"
+layers = ["wiring", "wiring-overlay"]
+key = "enabled"
+help = "docs/go-core.md#switching-components-on-and-off"
+
+[[switch]]
+name = "builtin"
+kind = "wiring-wire"
+reader = "kern/index/wiring.go"
+default = "off"
+layers = ["wiring", "wiring-overlay"]
+key = "builtin"
+help = "docs/go-core.md#switching-components-on-and-off"
+
+[[switch]]
+name = "off:<label>"
+kind = "local-file"
+reader = "scripts/public_check.py"
+default = "off"
+layers = ["public-check-local"]
+help = "AGENTS.md#public-safety"
+note = "on: the public entries of that label are switched off for this source"
+
+[[switch]]
+name = "[project] public_check"
+kind = "se.toml"
+reader = "scripts/work_tickets.py"
+default = "on"
+layers = ["se.toml"]
+key = "project.public_check"
+help = "README.md#project-settings"
+
+[[switch]]
+name = "[overhaul] due_after"
+kind = "se.toml"
+reader = "scripts/overhaul.py"
+default = "off"
+layers = ["se.toml"]
+key = "overhaul.due_after"
+off = [0]
+other = "on"
+help = "README.md#overhaul-due"
+
+[[switch]]
+name = "[tests] trust_integrator"
+kind = "se.toml"
+reader = "scripts/ci_trust.py"
+default = "off"
+layers = ["se.toml"]
+key = "tests.trust_integrator"
+help = "README.md#trusted-landings"
+
+[[not_switch]]
+name = "SE_ROOT"
+why = "a path constant of se's scripts, not read from the environment"
+
+[[not_switch]]
+name = "SE_MCP_BIN"
+why = "the path of the MCP server binary the launcher runs"
+
+[[not_switch]]
+name = "SE_OBS_DIR"
+why = "where the docs build finds obs"
+
+[[not_switch]]
+name = "SE_SESSION"
+why = "names the session that writes the trust record"
+
+[[not_switch]]
+name = "SE_TEST_REPORTS"
+why = "the directory the suite command writes JUnit reports into"
+
+[[not_switch]]
+name = "SE_START_CACHE"
+why = "where the start keeps its cache"
