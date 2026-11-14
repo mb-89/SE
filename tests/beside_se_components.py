@@ -91,9 +91,11 @@ def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_
         health = json.loads(status.stdout)["health"]
         # The four Python groups placed beside SE's four Go components in the se binary.
         assert sorted(health["instances"]) == sorted(GROUPS + GO)
-        # The Go components run in process (not "attached"); the calls above waited for their
-        # command's component to attach, and the other placed ones attached alone.
-        assert {"tickets"} <= set(health["attached"]) <= set(GROUPS)
+        # The Go components run in process, so attached with the core; the calls above waited
+        # for their command's component to attach, and the other placed ones attached alone.
+        assert {"tickets", *GO} <= set(health["attached"]) <= set(GROUPS + GO)
+        # The github instance names the backend it chose at start.
+        assert health["backends"].get("github") in ("relay", "token")
     finally:
         run(str(kern), "stop", "--root", str(checkout), cwd=checkout)
 

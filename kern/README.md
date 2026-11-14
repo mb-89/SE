@@ -143,7 +143,7 @@ time counts against SE's budget and needs no Go).
 `release.toml` owns kern's version and where its release is published:
 
 ```toml
-version = "0.4.7"
+version = "0.4.8"
 download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```
 

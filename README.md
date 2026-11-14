@@ -245,7 +245,8 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
     them.
 - **Placed:** `wiring.toml` places each in a process of its own, beside SE's Go components in the
   `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
-  the instances and those attached.
+  the instances, those attached (a placed one once its process attached, a Go one with the core)
+  and, under `backends`, the backend each chose (`github`: `relay` or `token`).
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
   through kern's `call.<command>` where kern serves the checkout the command runs in and that
