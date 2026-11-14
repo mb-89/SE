@@ -2140,6 +2140,11 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
         detail = failure_detail(changed)
         raise QueueError(f"Cannot diff {base} against {branch}: {detail}")
     paths = changed.stdout.split("\0")
+    # The branch is compared with where it forked, as `base...branch` diffs it: what the
+    # integration branch gained since is no deletion of the branch's.
+    forked = run_git(root, "merge-base", base, branch)
+    if forked.returncode == 0 and forked.stdout.strip():
+        base = forked.stdout.strip()
     old_files: list[tuple[str, str | None]] = []
     new_files: list[tuple[str, str | None]] = []
     index = 0
@@ -2214,9 +2219,8 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     if missing:
         raise QueueError(
             "Field report must name each deleted or renamed test and authored sentence: "
-            + ", ".join(missing) + f". A branch behind {integration_ref(root)} reads as deleting "
-            "what landed there since: merge it first (work_tickets.py sync; deliver does) and "
-            "check again"
+            + ", ".join(missing) + f", each compared with where the branch forked from "
+            f"{integration_ref(root)}: name them under its Removed behaviour and deliver again"
         )
     return [*removed_tests, *removed_sentences]
 

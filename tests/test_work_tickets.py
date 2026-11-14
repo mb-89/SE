@@ -309,6 +309,21 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
     assert "docs/guide.md: This sentence is removed." in approved.stdout
 
 
+def test_guard_reads_a_branch_behind_main_from_its_merge_base(worktree: Path) -> None:
+    """A branch that forked before main gained a sentence, and edits the same file, deletes
+    nothing: the guard compares it with its merge base, not with main's tip."""
+    repository, guide = authored_repository(
+        worktree.parent / "guard-merge-base-case", "behind-main", "This sentence stays.\n",
+    )
+    guide.write_text("This sentence stays.\nThe branch adds this one.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "the branch's sentence").returncode == 0
+    assert git(repository, "checkout", "main").returncode == 0
+    guide.write_text("This sentence stays.\nMain landed this one since.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "main's new sentence").returncode == 0
+
+    assert work_tickets.deleted_authored_sentences(repository, "behind-main") == []
+
+
 def test_guard_keeps_dots_in_protected_content_whole(worktree: Path) -> None:
     repository, guide = authored_repository(
         worktree.parent / "guard-protected-content-case", "remove-protected-content",
@@ -548,7 +563,7 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     message = str(refused.value)
     assert message.startswith("Field report must name each deleted or renamed test")
     assert unlisted in message and "This sentence stays." not in message
-    assert "merge it first (work_tickets.py sync" in message
+    assert "compared with where the branch forked from main" in message
     assert pushed == [] and posted == []
     assert work_tickets.main(check) == 1
     assert unlisted in capsys.readouterr().err
