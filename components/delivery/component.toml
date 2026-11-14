@@ -28,7 +28,7 @@ class = "batch"
 usage = "work_tickets.py identity --worktree WORKTREE"
 summary = "set the checkout's commit identity (machine-local public_identity, ..."
 group = "Delivery"
-help = "set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh and setup.ps1 run it"
+help = "set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it"
 class = "batch"
 
 [commands."work_tickets.py deliver"]

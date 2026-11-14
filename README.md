@@ -346,6 +346,10 @@ the checkout's git config (`user.name`, `user.email`), so every later commit and
 carries it, unless the machine sets `public_identity`, which wins. Unset, sync leaves the checkout's
 identity as it is.
 
+The plugin's session start (`scripts/bootstrap.sh --hook`) and the setup scripts write it the same
+way (`work_tickets.py identity`), so a fresh clone's first commit never carries the host's default
+identity.
+
 `work_tickets.py push` and its release commit with that identity explicitly, whatever the
 checkout's configuration or environment says, and refuse without one. The
 [public check](AGENTS.md#public-safety) refuses a commit not yet pushed whose author or committer
@@ -1214,8 +1218,8 @@ work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE
 
 work_tickets.py identity --worktree WORKTREE
     set the checkout's commit identity (machine-local public_identity, else se.toml
-    project.identity) as sync does, without fetching or merging; scripts/setup.sh and setup.ps1 run
-    it
+    project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the
+    session's start (bootstrap.sh --hook) run it
 
 work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL
                         --field-report FILE

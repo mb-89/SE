@@ -7782,7 +7782,8 @@ def run_sync(root: Path, args: argparse.Namespace) -> int:
 
 @command("identity", "set the checkout's commit identity (machine-local public_identity, else "
                      "se.toml project.identity) as sync does, without fetching or merging; "
-                     "scripts/setup.sh and setup.ps1 run it", WORKTREE)
+                     "scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run "
+                     "it", WORKTREE)
 def run_identity(root: Path, args: argparse.Namespace) -> int:
     identity = set_commit_identity(root, "identity")
     if identity is None:
