@@ -44,7 +44,8 @@
   ([kern/README.md "Tests"](kern/README.md#tests)).
   - The `check` job vets kern in its own step and fails where `gofmt -l` lists one of its files;
     the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook scripts,
-    on Windows and macOS.
+    on Windows and macOS, and on Windows those of `setup.ps1` (`tests/test_public_check.py -k
+    powershell`).
 - SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
   beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
   and retro-due components to the Python paths ([components/README.md](components/README.md#tests)).
