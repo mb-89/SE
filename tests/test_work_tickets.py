@@ -2665,3 +2665,16 @@ def test_refs_request_runs_its_steps_through_kerns_relay_as_one_call(
     assert "escalated #5: apply the ref change (1 ref(s), dry run passed)?" in out
     assert "after these steps" not in out
     assert fake.comments_posted == [] and fake.dispatched == []  # nothing went through gh
+
+
+def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeypatch, capsys):
+    """On the relay path CI's suite time is not read past kern's relay: the one line says it was
+    skipped, and the time counts as unknown."""
+    reads = budget_suite(worktree, monkeypatch, 40.0, 45.0)
+
+    work_tickets.run_suite(worktree, read_ci=True, ci_skipped=work_tickets.CI_SKIPPED_ON_RELAY)
+
+    assert reads == []
+    out = capsys.readouterr().out
+    assert out.count("CI's suite time") == 1
+    assert "CI's suite time on main: skipped on the relay path" in out

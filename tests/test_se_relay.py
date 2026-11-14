@@ -228,3 +228,48 @@ def test_next_names_the_missing_core(tmp_path: Path, capsys) -> None:
     (tmp_path / ".git").mkdir()
     assert se_relay.main(["next", "--root", str(tmp_path)]) == 1
     assert "no core serves" in capsys.readouterr().err
+
+
+#: A relay's told block as kern's Outbox prints it: each call, then its note indented below it.
+TOLD_BLOCK = (se_relay.TOLD + "; run each with exactly this input (its answer reaches kern "
+              "through the PostToolUse hook):\n"
+              '1. pull_request_read {"method":"get","pullNumber":20}\n'
+              "   step 7: read back the landing pull request #20\n"
+              '2. issue_read {"method":"get","issue_number":5}\n'
+              "   step 8")
+
+
+def test_each_told_step_carries_its_sequence_number() -> None:
+    """Every GitHub step a call through kern asks is numbered in its note, 1 first, so the hook
+    and `next` show it with the call; a step without a note still carries its number."""
+    asked: list[str] = []
+    with se_relay.stepping(lambda tool, input_, note, wait: asked.append(note)):
+        step = se_relay.steps()
+        step("issue_read", {}, "read the work issue", "")
+        step("pull_request_read", {}, "", "")
+    assert asked == ["step 1: read the work issue", "step 2"]
+    assert se_relay.steps() is None
+    with se_relay.stepping(lambda tool, input_, note, wait: asked.append(note)):
+        se_relay.steps()("issue_read", {}, "again", "")
+    assert asked[-1] == "step 1: again"  # each call counts from 1
+
+
+def test_an_answer_to_an_old_step_is_refused_naming_the_current_one() -> None:
+    assert se_relay.waiting_numbers(TOLD_BLOCK) == [7, 8]
+    assert se_relay.stale_step(TOLD_BLOCK, 7) is None
+    assert se_relay.stale_step(TOLD_BLOCK, 8) is None
+    refused = se_relay.stale_step(TOLD_BLOCK, 6)
+    assert refused.startswith("step 6 is answered: the current step is 7") and "\n" not in refused
+    assert "waits for no numbered step" in se_relay.stale_step("", 3)
+
+
+def test_next_refuses_an_old_step_with_one_line(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(se_relay, "told", lambda root, wait=se_relay.NEXT_WAIT: TOLD_BLOCK)
+    assert se_relay.main(["next", "--root", str(tmp_path), "--step", "6"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip().splitlines() == [
+        "se_relay.py next: step 6 is answered: the current step is 7; run that one, as "
+        "`se_relay.py next` prints it"]
+    assert se_relay.main(["next", "--root", str(tmp_path), "--step", "7"]) == 0
+    assert "step 7: read back" in capsys.readouterr().out

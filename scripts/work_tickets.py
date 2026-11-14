@@ -5268,8 +5268,14 @@ def over_limit_warning(seconds: float, limit: float) -> str:
             "slowest tests faster")
 
 
+#: Why a landing through kern's relay reads no CI suite time: it reads GitHub's check-run
+#: annotations without an account, about 10 GETs past the relay that tells every other step.
+CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside kern's relay; the "
+                       "landing pull request's check judges the budget")
+
+
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
-              full: bool = False) -> str:
+              full: bool = False, ci_skipped: str = "") -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -5284,6 +5290,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     warns with the host's load and refuses only where CI's suite time on the integration
     branch (ci_suite_time, read there and also where `read_ci`) is unknown or within 10% of the
     limit. Where `[tests]` over_limit is "warn", no overrun refuses: each only warns.
+    `ci_skipped` (a landing through kern's relay, CI_SKIPPED_ON_RELAY) reads no CI time and says
+    so once: the time is unknown, as where it cannot be read.
     Then runs each `[tests.beside.<name>]` suite (time_beside), prints and returns its time beside
     the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
     A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
@@ -5304,7 +5312,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     reference = suite_is_reference()
     over = seconds > budget.limit_seconds
     ci, unknown = (None, "")
-    if not reference and (over or read_ci):
+    if not reference and (over or read_ci) and ci_skipped:
+        unknown = ci_skipped
+        print(f"CI's suite time on {integration_branch(root)}: {ci_skipped}")
+    elif not reference and (over or read_ci):
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
     metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
@@ -5604,9 +5615,33 @@ def remove_worker_worktree(root: Path, branch: str, landed: str | None = None) -
         raise QueueError(f"Cannot remove worker worktree: {detail}")
 
 
-def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None) -> None:
+def refused_reason(detail: str) -> str:
+    """The short reason of a refused push: its HTTP status where git names one, else its first
+    line."""
+    found = re.search(r"\b(?:HTTP |error: )?([45]\d\d)\b", detail)
+    if found:
+        return f"HTTP {found[1]}"
+    return next((line.strip() for line in detail.splitlines() if line.strip()), detail)
+
+
+def cleanup_refusals(refused: list[tuple[str, str]]) -> str | None:
+    """The one summary line of a landing's branch deletions origin refused, `(branch, detail)`
+    each, or None where it refused none."""
+    if not refused:
+        return None
+    reasons = list(dict.fromkeys(refused_reason(detail) for _, detail in refused))
+    names = ", ".join(branch for branch, _ in refused)
+    return (f"Cleanup: origin refused deleting {len(refused)} merged branch"
+            f"{'es' if len(refused) > 1 else ''} ({names}: {'; '.join(reasons)}); the "
+            "repository's automatic head-branch deletion removes them, not retried")
+
+
+def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None,
+                         refused: list[tuple[str, str]] | None = None) -> None:
     """Delete `branch` locally and on origin once `landed` (default: the integration branch), the
-    tip a squash landing merged, contains its `head`."""
+    tip a squash landing merged, contains its `head`. Where origin refuses and `refused` is given,
+    the refusal is added to it for the landing's one summary line (cleanup_refusals) instead of
+    its own warning."""
     target = landed or integration_branch(root)
     contained = run_git(root, "merge-base", "--is-ancestor", head, target)
     if contained.returncode != 0:
@@ -5623,7 +5658,9 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
     else:
         print("Cleanup: local merged branch deleted")
     remote = run_git(root, "push", f"--force-with-lease=refs/heads/{branch}:{head}", "origin", f":refs/heads/{branch}")
-    if remote.returncode != 0:
+    if remote.returncode != 0 and refused is not None:
+        refused.append((branch, failure_detail(remote)))
+    elif remote.returncode != 0:
         detail = failure_detail(remote)
         print(
             f"warning: merged branch was retained on origin, which refused deleting {branch} "
@@ -5735,6 +5772,22 @@ def integration_merge_message(
 
 
 FIELD_REPORT_IN = "<!-- se:field-report-in {number} -->"
+
+
+#: The footer a host's GitHub tool appends to a body it was told to write, at its end: a
+#: `---` rule and `_Generated by [<tool>](<url>)_`, or `🤖 Generated with [<tool>](<url>)` and a
+#: session link below it.
+TOOL_FOOTER = re.compile(
+    r"\n*(?:^---[ \t]*\n+)?^(?:_Generated by \[[^\]\n]+\]\([^)\s]+\)_"
+    r"|\U0001F916 Generated with \[[^\]\n]+\]\([^)\s]+\)(?:\n+https?://\S+)?)\s*\Z", re.M)
+
+
+def without_tool_footer(body: str) -> str:
+    """`body` without the trailing footers a host's GitHub tool appended (TOOL_FOOTER), so it
+    compares with the body the tool was told to write."""
+    while (found := TOOL_FOOTER.search(body)) is not None:
+        body = body[:found.start()].rstrip("\n") + "\n"
+    return body
 
 
 def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str,
@@ -6073,7 +6126,9 @@ class GitHub:
         output = self.text(path, method, data)
         return json.loads(output) if output.strip() else {}
 
-    def pull(self, number: int) -> dict[str, object]:
+    def pull(self, number: int, purpose: str = "") -> dict[str, object]:
+        """Pull request `number`; `purpose` names why it is read where a told step says so
+        (RelayDoor), as two reads in a row look alike."""
         return self.api(f"pulls/{number}")
 
     def open_pull(self, head: str, base: str) -> dict[str, object] | None:
@@ -6154,11 +6209,12 @@ def tree_of(root: Path, commit: str) -> str:
     return checked_git(root, "rev-parse", f"{commit}^{{tree}}").strip()
 
 
-def onto_integration_branch(root: Path, target: str) -> None:
+def onto_integration_branch(root: Path, target: str, command: str = "integrate") -> None:
     """Put the checkout on the integration branch `target` before a landing reads anything: a
     checkout detached at origin's `target` (a cloud session's source checkout comes up so, with
     the local branch behind it) switches to `target` and fast-forwards it there; any other
-    branch, or a `target` that cannot fast-forward, is refused with the one instruction."""
+    branch, or a `target` that cannot fast-forward, is refused with the one instruction, named
+    after `command`."""
     here = current_branch(root)
     if here == target:
         return
@@ -6166,15 +6222,23 @@ def onto_integration_branch(root: Path, target: str) -> None:
                    f"origin/{target}, or set project.integration_branch in se.toml")
     if here:
         raise QueueError(
-            f"work_tickets.py integrate: {root} is not on the integration branch {target}; "
+            f"work_tickets.py {command}: {root} is not on the integration branch {target}; "
             + instruction)
     detached = checked_git(root, "rev-parse", "HEAD").strip()
     if (run_git(root, "switch", "-q", target).returncode != 0
             or run_git(root, "merge", "-q", "--ff-only", detached).returncode != 0):
         raise QueueError(
-            f"work_tickets.py integrate: {root} is detached at {detached[:12]} and {target} "
+            f"work_tickets.py {command}: {root} is detached at {detached[:12]} and {target} "
             f"cannot fast-forward to it; " + instruction)
     print(f"Detached checkout: {target} fast-forwarded to {detached[:12]}")
+
+
+def relay_landing_waits(root: Path) -> str:
+    """The one line a landing through kern's relay starts with: a step kern's hook tells reaches
+    the agent only at a tool call's end, so a long foreground command stalls the relay."""
+    return (f"Relay landing: run each long wait (a suite, a build, a sleep) in the background and "
+            f"call `{sibling('se_relay').NEXT_COMMAND} --root {root}` after each, as a step kern's "
+            "hook tells reaches you only when a tool call ends")
 
 
 def abandon_landing(root: Path, target: str, landing: str) -> None:
@@ -6253,6 +6317,15 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
     ), then)
 
 
+#: What each read of a landing pull request is for, as the told step names it: the reads of the
+#: merge confirmation and of the read-back are the same tool call in a row.
+MERGE_CONFIRMATION = ("purpose: the merge confirmation of #{number}, merged at the commit the "
+                      "squash returned")
+LANDING_READ_BACK = ("purpose: the read-back of #{number}'s description, for its metrics line, "
+                     "after the merge confirmation")
+REHEARSAL_READ_BACK = "purpose: the read-back of the rehearsal pull request #{number}, merged"
+
+
 def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str,
                     tracker: str) -> dict[str, Action]:
     """The local runner of a landing plan, through the door."""
@@ -6291,7 +6364,7 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
             )
         merged = door.squash(number, str(arguments["expectedHeadSha"]),
                              str(arguments["commit_title"]), str(arguments["commit_message"]))
-        read = door.pull(number)
+        read = door.pull(number, MERGE_CONFIRMATION.format(number=number))
         if not read.get("merged") or str(read.get("merge_commit_sha") or "") != merged or not merged:
             raise QueueError(
                 f"{url} reads back as merged={read.get('merged')} at "
@@ -6481,6 +6554,8 @@ def integrate(
         )
     target = integration_branch(root)
     onto_integration_branch(root, target)
+    if handing_off and relay_door(root, remote) is not None:
+        print(relay_landing_waits(root), file=sys.stderr)
     feedback.phase(f"read pull request #{pull_number} and its field report")
     relay = relay_for(root) if handing_off and pr_description is None else None
     if handing_off and pr_description is None and (stepped := relay_door(root, remote)):
@@ -6555,7 +6630,8 @@ def integrate(
 
     has_public_mirror = any(mirror.public for mirror in mirrors)
     try:
-        suite_result = run_suite(root, read_ci=True)
+        suite_result = run_suite(root, read_ci=True, ci_skipped=CI_SKIPPED_ON_RELAY if (
+            handing_off and relay_door(root, remote) is not None) else "")
         tested = checked_git(root, "rev-parse", "HEAD").strip()
         if build_command:
             feedback.phase(f"output regeneration: {build_command}")
@@ -6606,7 +6682,8 @@ def integrate(
             landing_pull = int(given["pull number"])
             feedback.phase("read back the landing pull request and the landed commit")
             landed_metrics({**state, "plan": plan.data()}, landing_pull,
-                           str(door.pull(landing_pull).get("body") or ""))
+                           str(door.pull(landing_pull, LANDING_READ_BACK.format(
+                               number=landing_pull)).get("body") or ""))
             commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
         elif handing_off:
             path = handoff_path(root, branch)
@@ -6729,12 +6806,13 @@ def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
     """Refuse a landing pull request whose `description` does not end in the metrics line the
     hand-off's plan gave it (step 2's body): the line `retro.py collect` reads the cloud
-    integration's costs back from (README "Metrics")."""
+    integration's costs back from (README "Metrics"). A footer the GitHub tool appended to the
+    told body is no part of it (without_tool_footer)."""
     plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
     bodies = [str((step.get("arguments") or {}).get("body") or "") for step in plan.get("steps", [])
               if isinstance(step, dict) and step.get("tool") == "create_pull_request"]
-    expected = metrics.of_text(bodies[0]) if bodies else None
-    found = metrics.of_text(description)
+    expected = metrics.of_text(without_tool_footer(bodies[0])) if bodies else None
+    found = metrics.of_text(without_tool_footer(description))
     if found is None or (expected is not None and found != expected):
         what = "names another metrics line" if found is not None else "has no metrics line"
         line = metrics.text(expected) if expected is not None else "Metrics: {...}"
@@ -6798,9 +6876,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         checked_git(root, "tag", "-f", str(tag), commit)
         git_push(root, ["origin", f"refs/tags/{tag}"])
     deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
-    if deleted.returncode != 0:
-        print(f"Cleanup: {landing} left on origin ({failure_detail(deleted)}); the repository's "
-              "automatic head-branch deletion removes it")
+    refused = [(landing, failure_detail(deleted))] if deleted.returncode != 0 else []
     for mirror in configured_mirrors(root):
         if mirror.public and check_commands:
             run_project_checks(root, check_commands, temporary)
@@ -6883,7 +6959,10 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
-    delete_merged_branch(root, branch, str(state["head"]), landed)
+    delete_merged_branch(root, branch, str(state["head"]), landed, refused)
+    summary = cleanup_refusals(refused)
+    if summary:
+        print(summary)
     if door is None or getattr(door, "relayed", False):
         print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
         return short
@@ -7002,8 +7081,8 @@ class RelayDoor(Workflows):
                  "url": issue.get("url") or issue.get("html_url")}
                 for issue in tool_items(found, "issues")]
 
-    def pull(self, number: int) -> dict[str, object]:
-        read = self.ask("pull_request_read", {"method": "get", "pullNumber": number})
+    def pull(self, number: int, purpose: str = "") -> dict[str, object]:
+        read = self.ask("pull_request_read", {"method": "get", "pullNumber": number}, purpose)
         read = dict(read) if isinstance(read, dict) else {}
         if read.get("merged") and not read.get("merge_commit_sha") and number in self.merged:
             # The tools name no merge commit (work model, Without gh); the read-back checks it
@@ -8666,7 +8745,9 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     `rehearse/<base>`, then the landing plan (the pause search, the landing pull request into
     `base`, its `check`, the squash merge) and the read-back. It releases and tags nothing,
     touches no issue, and nothing calls it on its own (README "Hand-offs through the relay").
-    Where origin has no `base` yet, it starts there at the integration branch's tip."""
+    Each rehearsal starts `base` at the integration branch's tip, resetting what an earlier one
+    left there; a checkout detached at origin's integration branch fast-forwards it first
+    (onto_integration_branch)."""
     tracker = resolve_repo(root, repo)
     remote = remote_repo(root)
     if remote is None:
@@ -8685,6 +8766,9 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     if checked_git(root, "status", "--porcelain", "--untracked-files=no").strip():
         raise QueueError(f"work_tickets.py rehearse: {root} has uncommitted changes; commit or "
                          "stash them first, as the rehearsal switches branches there")
+    print(relay_landing_waits(root), file=sys.stderr)
+    if not current_branch(root):  # detached, as a cloud session's checkout comes up
+        onto_integration_branch(root, target, "rehearse")
     back = checked_git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
     back_to = ["switch", "-q", "--discard-changes", back] if back != "HEAD" else [
         "switch", "-q", "--discard-changes", "--detach", checked_git(root, "rev-parse", "HEAD").strip()]
@@ -8693,11 +8777,11 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     earlier = door.open_pull(branch, base)
     if earlier:
         print(f"Rehearsal pull request already open: {earlier.get('html_url')}")
-    tip = remote_head(root, base)
-    if not tip:
-        start = remote_head(root, target)
-        feedback.phase(f"start the scratch branch {base} at {target}'s {start[:12]}")
-        git_push(root, ["origin", f"{start}:refs/heads/{base}"])
+    tip, start = remote_head(root, base), remote_head(root, target)
+    if tip != start:  # each rehearsal starts clean, never on an earlier one
+        feedback.phase(f"{'reset' if tip else 'start'} the scratch branch {base} at {target}'s "
+                       f"{start[:12]}")
+        git_push(root, ["--force", "origin", f"{start}:refs/heads/{base}"])
         tip = start
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
     title = f"Rehearse a landing through kern's relay on {base}"
@@ -8728,7 +8812,8 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
                        "squash merge")
         given = run_plan(plan, landing_actions(root, door, branch, base, tip, tracker))
         feedback.phase("read back the rehearsal pull request and the landed commit")
-        read = door.pull(int(given["pull number"]))
+        read = door.pull(int(given["pull number"]), REHEARSAL_READ_BACK.format(
+            number=given["pull number"]))
         if not read.get("merged"):
             raise QueueError(f"{given['pull url']} reads back as not merged")
         commit = landing_read_back(root, base, tip, landed, str(given["merge commit sha"]))
@@ -8746,8 +8831,8 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
                      "nothing and touches no issue; it runs only as one call through kern's relay",
          WORKTREE, REPO,
          arg("--base", required=True,
-             help="the scratch branch it lands on; started at the integration branch's tip where "
-                  "origin has none"),
+             help="the scratch branch it lands on; reset to the integration branch's tip at the "
+                  "start of each rehearsal"),
          arg("--gap", type=float, default=0.0, metavar="SECONDS",
              help="make the local phase this many seconds slow, to force a gap between two relay "
                   "steps (default 0)"))
