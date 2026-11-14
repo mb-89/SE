@@ -1712,6 +1712,14 @@ report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path>
 next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
 numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
 
+`scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
+their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts
+written twice, denials by tool and long waits, per session and in total (`--json`).
+
+It prints counts, locations and masked command shapes, never message text; it judges nothing,
+files nothing, and nothing runs it. Its docstring owns the signals and the adapter a new format
+adds.
+
 `scripts/overhaul.py` holds the overhaul commands, which ask, rarely, whether the design is still
 right. SE starts one and runs it as its issue says, `read`, the judgment, then `file`.
 
