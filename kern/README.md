@@ -158,7 +158,10 @@ download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
   built from (each imported package's files but tests and prose, embedded files, the modules'
   `go.mod` and `go.sum`) differs since that tag; it names the files and the `release.toml` to
   raise. A tag not cut yet passes: the push to `main` that carries the version cuts it. SE runs it
-  for kern and `se` beside its suite, `se.toml` `[tests.beside.release-guard]`.
+  for kern and `se` beside its suite, `se.toml` `[tests.beside.release-guard]`. On a work branch
+  `$SE_COMPONENT_KINDS` (`se=patch,kern=minor`) names the kinds its field report states, and a
+  changed binary of a stated kind passes: SE's landing assigns its version (SE's README
+  ["Component versions"](../README.md#component-versions)).
 - **The workflow is reusable:** `.github/workflows/kern-release.yml` builds the six for the folder
   it is called with (the bare core by default), on every pull request and push to `main` that
   touches kern, and runs [the template](#the-template)'s battery for the bare core. On `main` it

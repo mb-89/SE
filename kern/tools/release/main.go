@@ -6,6 +6,11 @@
 //	go run ./tools/release build --out DIR                   build the six archives and SHA256SUMS into DIR
 //	go run ./tools/release guard [--dir DIR]                 refuse a change to the binary's inputs since its released tag
 //
+// On a work branch, $SE_COMPONENT_KINDS (KindsVariable) names the release kind
+// its field report states for each binary, as `se=patch,kern=minor`: there a
+// changed input passes where its binary's kind is stated, as the landing
+// assigns the version (SE's README "Component versions").
+//
 // plan refuses when --repository is given and the download URL names another
 // repository, so a moved URL never publishes into the old one. guard refuses
 // where the tag release.toml names is cut already and a file the binary is
@@ -331,6 +336,30 @@ func Guard(r Release, dir string) (released bool, changed []string, err error) {
 	return true, changed, nil
 }
 
+// KindsVariable names the release kind a work branch states for each binary,
+// `<binary>=<kind>` joined by commas, as SE's work_tickets.py suite and CI
+// set it from the field report's **Component kinds:**. Unset, as on a
+// landing and on main, the guard refuses as it always did.
+const KindsVariable = "SE_COMPONENT_KINDS"
+
+// Kinds reads KindsVariable's value: each binary and its kind, patch, minor
+// or major; an entry it cannot read is an error naming it.
+func Kinds(value string) (map[string]string, error) {
+	kinds := map[string]string{}
+	for _, entry := range strings.Split(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		name, kind, ok := strings.Cut(entry, "=")
+		if !ok || !binary.MatchString(name) || (kind != "patch" && kind != "minor" && kind != "major") {
+			return nil, fmt.Errorf("%s: %q is no <binary>=patch|minor|major", KindsVariable, entry)
+		}
+		kinds[name] = kind
+	}
+	return kinds, nil
+}
+
 // listed is the part of go list's JSON the guard reads.
 type listed struct {
 	Dir        string
@@ -439,6 +468,12 @@ func guard(args []string, stdout, stderr io.Writer) int {
 	if len(folders) == 0 {
 		folders = dirs{"."}
 	}
+	value, work := os.LookupEnv(KindsVariable)
+	kinds, err := Kinds(value)
+	if err != nil {
+		fmt.Fprintf(stderr, "release guard: %v\n", err)
+		return 2
+	}
 	code := 0
 	for _, dir := range folders {
 		data, err := os.ReadFile(filepath.Join(dir, Settings))
@@ -460,11 +495,17 @@ func guard(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "release guard: %s %s is not cut yet; the push to main that carries it cuts %s\n", r.Binary, r.Version, r.Tag)
 		case len(changed) == 0:
 			fmt.Fprintf(stdout, "release guard: %s %s: the checkout builds the binary %s holds\n", r.Binary, r.Version, r.Tag)
+		case work && kinds[r.Binary] != "":
+			fmt.Fprintf(stdout, "release guard: %s is cut, and %d of the %s binary's inputs changed since; "+
+				"the field report states %s %s, so the landing assigns its next version\n",
+				r.Tag, len(changed), r.Binary, r.Binary, kinds[r.Binary])
 		default:
 			prefix, _ := git(dir, "rev-parse", "--show-prefix")
 			fmt.Fprintf(stderr, "release guard: %s is cut, and %d of the %s binary's inputs changed since: %s; "+
-				"raise version in %s, so the landing cuts a release that holds them\n",
-				r.Tag, len(changed), r.Binary, strings.Join(changed, ", "), path.Join(strings.TrimSpace(prefix), Settings))
+				"state its kind in the field report, **Component kinds:** %s patch|minor|major, so the landing "+
+				"assigns the next version, or raise version in %s, so the landing cuts a release that holds them\n",
+				r.Tag, len(changed), r.Binary, strings.Join(changed, ", "), r.Binary,
+				path.Join(strings.TrimSpace(prefix), Settings))
 			code = 1
 		}
 	}

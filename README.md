@@ -423,6 +423,10 @@ naming the file.
 `["uv", "run", "python", "scripts/se_plugin.py", "build"]`), an argument array run without a shell
 from the project root. Where it fails, push restores `se.toml`, commits nothing and shows its output.
 
+`integrate` also runs it on its merge, before the suite, and commits what it rewrites into the
+landing: a generated file that carries the version, added on a branch before `main` released,
+never makes the branch stale, and the suite's verdict is recorded on the merge's tree.
+
 #### Landing on main
 
 Every integration lands on the integration branch through a squash pull request, which se's `main`
@@ -540,6 +544,31 @@ The squash commit carries the release's `se.toml` version, so the release workfl
 docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
 account (web-flow committer, the account's `users.noreply.github.com` author), which the identity
 gate and a public mirror's guard pass for the account that owns the repository.
+
+#### Component versions
+
+kern (`kern/release.toml`) and the binary `se.toml` `[binary] release` names (SE's `se`,
+`components/release.toml`) have versions of their own, which their release workflows cut as tags
+(`kern-release`, `se-release`). As with the project's version, a branch states the kind and the
+landing assigns the number, so branches open in parallel never claim the same one.
+
+- **The branch states the kind:** a branch that changes a component adds the header line
+  `**Component kinds:** se patch, kern minor` to its field report, beside its Release kind, and
+  leaves the version in the `release.toml` alone; `field-report --check` refuses an unknown kind.
+- **The guard follows on a work branch:** kern's release guard (`se.toml`
+  `[tests.beside.release-guard]`) passes a changed component whose kind is stated, read from
+  `$SE_COMPONENT_KINDS`.
+  - `work_tickets.py suite` sets it from `.se/work/field-report.md`, CI from the pull request's
+    description (`field-report --check --component-kinds-to`).
+  - A landing and `main` set none, so there the guard refuses as before.
+- **The landing assigns the number:** `integrate` writes the next version of that kind after
+  `main`'s into the landing's merge, before the suite runs, for each component whose folder the
+  merge changes (kern's, and the binary's with kern's), and names it with the tag the push to
+  `main` cuts. A kind stated for no component is refused before anything lands.
+- **A branch that still claims a number lands:** its raised version gives the kind (the highest
+  part it raised), and the number becomes the next free one of that kind, said in the output.
+  Where the claim conflicts with `main`'s version, the landing takes `main`'s version on top of
+  the branch first and then assigns the number.
 
 #### Release tags
 
@@ -1272,7 +1301,7 @@ work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SES
 
 work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)
                              [--issue-body FILE] [--comment-count N] [--newest-comment ID]
-                             [--check-runs FILE]
+                             [--check-runs FILE] [--component-kinds-to FILE]
     draft or check the field report a pull request description carries, in the form of
     .github/pull_request_template.md
 

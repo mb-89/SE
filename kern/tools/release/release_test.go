@@ -20,6 +20,7 @@ import (
 // Every test reaches git through kern's git door, on its fake.
 func TestMain(m *testing.M) {
 	gitdoor.Use(gitfake.New())
+	os.Unsetenv(KindsVariable) // a work branch's kinds are each test's own
 	os.Exit(m.Run())
 }
 
@@ -287,5 +288,31 @@ func TestGuardRefusesABinaryInputChangedSinceItsReleasedTag(t *testing.T) {
 	write(t, filepath.Join(app, Settings), strings.Replace(string(settings), "0.1.0", "0.2.0", 1))
 	if code, said := guard(); code != 0 || !strings.Contains(said, "app 0.2.0 is not cut yet; the push to main that carries it cuts app-v0.2.0") {
 		t.Fatalf("the version raised: code %d, %s", code, said)
+	}
+}
+
+// On a work branch (KindsVariable set from its field report) a changed input
+// passes where the binary's kind is stated, as the landing assigns the
+// version; one not stated refuses, naming the field report's line. Unset, as
+// on a landing and on main, it refuses as before.
+func TestOnAWorkBranchTheGuardPassesAChangedInputWhoseKindIsStated(t *testing.T) {
+	app := releasedRepository(t)
+	guard := func() (int, string) {
+		var out, errs bytes.Buffer
+		code := run([]string{"guard", "--dir", app}, &out, &errs)
+		return code, out.String() + errs.String()
+	}
+	write(t, filepath.Join(app, "lib", "lib.go"), "package lib\n\nfunc Name() string { return \"changed\" }\n")
+	t.Setenv(KindsVariable, "other=minor, app=patch")
+	if code, said := guard(); code != 0 || !strings.Contains(said, "the field report states app patch, so the landing assigns its next version") {
+		t.Fatalf("kind stated: code %d, %s", code, said)
+	}
+	t.Setenv(KindsVariable, "other=minor")
+	if code, said := guard(); code != 1 || !strings.Contains(said, "**Component kinds:** app patch|minor|major") {
+		t.Fatalf("kind not stated: code %d, %s", code, said)
+	}
+	t.Setenv(KindsVariable, "app=huge")
+	if code, said := guard(); code != 2 || !strings.Contains(said, `"app=huge" is no <binary>=patch|minor|major`) {
+		t.Fatalf("kind unreadable: code %d, %s", code, said)
 	}
 }

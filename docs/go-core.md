@@ -368,8 +368,9 @@ same for its own binary (core plus its Go components). The binary is fetched int
   refuses that change, `se.toml` `[tests.beside.release-guard]` ([kern/README.md
   "Release"](../kern/README.md#release)): a release is built from one commit and is never changed, so
   the files it is built from are the release's own contents, and the guard needs no download. The
-  raised version is cut by the landing; a session that starts before its release is published
-  builds it from source.
+  landing assigns the raised version from the kind the branch states (README ["Component
+  versions"](../README.md#component-versions)), and the push to `main` cuts it; a session that
+  starts before its release is published builds it from source.
 
 ### Lifetime: bound to the session
 

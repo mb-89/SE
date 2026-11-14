@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.52.1"
+version = "5.52.2"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -54,8 +54,9 @@ limit_seconds = 60
 
 # The released binaries hold what the checkout builds (docs/go-core.md "How the binary arrives"):
 # kern's release tool refuses where kern's or SE's release.toml names a tag already cut and a file
-# its binary is built from changed since that tag; the remedy is a raised version, which the landing
-# cuts. It reads the tags git fetched; a tag not fetched yet refuses nothing.
+# its binary is built from changed since that tag; the remedy is a kind stated in the field report,
+# whose version the landing assigns (README "Component versions"). It reads the tags git fetched; a
+# tag not fetched yet refuses nothing.
 [tests.beside.release-guard]
 command = ["go", "run", "./tools/release", "guard", "--dir", ".", "--dir", "../components"]
 directory = "kern"
