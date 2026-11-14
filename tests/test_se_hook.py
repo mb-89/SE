@@ -1,6 +1,8 @@
 """se_hook.sh posts one session event to the kern SE pins, and fails open (README "Kern")."""
 from pathlib import Path
+import os
 import subprocess
+import time
 
 import pytest
 from shell_paths import BASH, sh
@@ -49,7 +51,7 @@ def install(home: Path, project: Path) -> Path:
     binary.write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     binary.chmod(0o755)
     named = project / ".se" / ".runtime" / "kern.path"
-    named.parent.mkdir(parents=True)
+    named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text(f"{sh(binary)}\n", encoding="utf-8", newline="\n")
     return binary
 
@@ -111,3 +113,92 @@ def test_a_stop_no_command_of_kerns_answers_falls_back_to_stop_check_with_the_ho
     assert (result.returncode, result.stdout, result.stderr) == (
         0, '{"decision": "block", "reason": "from the fallback"}\n', "")
     assert (home / "fallback").read_text(encoding="utf-8").splitlines() == [fallback, fallback]
+
+
+# A late checkout (README "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
+# start it is asked for, with the checkout it was asked for and the hook's JSON.
+FAKE_BOOTSTRAP = """#!/bin/sh
+echo "$CLAUDE_PROJECT_DIR $* <<$(cat)" >> "$HOME/starts"
+"""
+
+
+def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse") -> subprocess.CompletedProcess:
+    scripts = home / "plugin" / "scripts"
+    if not scripts.is_dir():
+        scripts.mkdir(parents=True)
+        (scripts / "se_hook.sh").write_bytes(SCRIPT.read_bytes())
+        (scripts / "bootstrap.sh").write_text(FAKE_BOOTSTRAP, encoding="utf-8", newline="\n")
+    payload = f'{{"session_id":"s1","hook_event_name":"{event}","cwd":"{sh(cwd)}"}}'
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project)}
+    return subprocess.run([BASH, sh(scripts / "se_hook.sh"), event], env=env, input=payload,
+                          capture_output=True, text=True, timeout=30)
+
+
+def starts(home: Path, count: int) -> list[str]:
+    """The starts the fake bootstrap.sh logged, once `count` of them are in (it runs detached)."""
+    log = home / "starts"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        if len(lines) >= count:
+            return lines
+        time.sleep(0.05)
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def clone(path: Path) -> Path:
+    (path / ".git").mkdir(parents=True)
+    (path / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+    (path / "src").mkdir()
+    return path
+
+
+def test_the_first_hook_in_a_late_checkout_starts_its_core_once_and_then_posts_to_it(machine):
+    home, project = machine
+    install(home, project)
+    late = clone(home.parent / "SE")
+    result = late_hook(home, project, late / "src")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    payload = f'{{"session_id":"s1","hook_event_name":"PostToolUse","cwd":"{sh(late / "src")}"}}'
+    assert starts(home, 1) == [f"{sh(late)} --hook <<{payload}"]
+    # The session's own core still takes the hook while the late one comes up; the claim, taken
+    # anew only once ten minutes have passed, holds: a start would have written it again.
+    claim = late / ".se" / ".runtime" / "late-start.claim"
+    five_minutes_ago = time.time() - 300
+    os.utime(claim, (five_minutes_ago, five_minutes_ago))
+    assert late_hook(home, project, late).returncode == 0
+    assert claim.stat().st_mtime == pytest.approx(five_minutes_ago)
+    assert (home / "calls").read_text(encoding="utf-8").splitlines()[0].startswith(
+        f"hook PostToolUse --root {sh(project)} <<")
+    # Once the late start named its binary, the hooks there post to the late checkout's core.
+    install(home, late)
+    late_hook(home, project, late / "src")
+    assert (home / "calls").read_text(encoding="utf-8").splitlines()[-1].startswith(
+        f"hook PostToolUse --root {sh(late)} <<")
+    assert claim.stat().st_mtime == pytest.approx(five_minutes_ago)
+    assert starts(home, 1) == [f"{sh(late)} --hook <<{payload}"]
+
+
+def test_no_late_start_in_the_project_or_a_checkout_without_se(machine):
+    home, project = machine
+    (project / ".git").mkdir()
+    (project / "se.toml").write_text("", encoding="utf-8")
+    other = home.parent / "other"
+    (other / ".git").mkdir(parents=True)
+    for cwd in (project, other, home.parent):
+        assert late_hook(home, project, cwd).returncode == 0
+    # A start claims before it runs, so no claim is no start.
+    assert not (project / ".se").exists() and not (other / ".se").exists()
+    assert not (home / "starts").exists()
+
+
+def test_a_late_claim_older_than_ten_minutes_is_taken_anew(machine):
+    home, project = machine
+    late = clone(home.parent / "SE")
+    late_hook(home, project, late)
+    assert len(starts(home, 1)) == 1
+    claim = late / ".se" / ".runtime" / "late-start.claim"
+    stale = time.time() - 660
+    os.utime(claim, (stale, stale))
+    late_hook(home, project, late)
+    assert len(starts(home, 2)) == 2 and claim.stat().st_mtime > stale + 300
