@@ -3106,6 +3106,51 @@ def test_integrate_read_back_names_commits_pushed_after_the_landing_and_closes_n
     assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
 
 
+def planned_split(report: str) -> str:
+    """`report` as a planned split's piece: partial, naming the pieces of its issue left."""
+    return report.replace("**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone", "## Not delivered\n\nResult partial for #5 overall; this is "
+        "piece 1 of 3. What remains, in order:\n\n- **Piece 2, `tests/test_a.py` (12 sites):** "
+        "the same pattern.\n- **Piece 3, kern:** a Go door.")
+
+
+def test_planned_pieces_are_a_partial_reports_named_pieces_left():
+    report = planned_split(COMPLETE_REPORT)
+    assert work_tickets.planned_pieces(report) == ["Piece 2, `tests/test_a.py` (12 sites)", "Piece 3, kern"]
+    # The last piece is complete; a partial report naming no piece is no planned split.
+    assert work_tickets.planned_pieces(report.replace("**Result:** partial", "**Result:** complete")) == []
+    unplanned = COMPLETE_REPORT.replace("**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone", "## Not delivered\n\n- Requirement 2: blocked by the host.")
+    assert work_tickets.planned_pieces(unplanned) == []
+    issue = {"number": 5, "url": URL, "body": BODY}
+    assert work_tickets.pull_request_body(issue, report).startswith(f"Refs {URL}\n")
+    assert work_tickets.pull_request_body(issue, COMPLETE_REPORT).startswith(f"Fixes {URL}\n")
+
+
+def test_integrate_keeps_a_planned_splits_issue_open_and_comments_the_pieces_left(
+        main_checkout, monkeypatch, github, capsys):
+    """A piece of a planned split lands: the hand-off's close-out comments the pieces its field
+    report names as left and keeps the work issue open, so the integrator runs the plan unedited;
+    the last piece, complete, closes it (the read-back test above)."""
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    saved = main_checkout.parent / "saved" / "pr.md"
+    saved.write_text(planned_split(reported_at(head)), encoding="utf-8")
+    assert run(main_checkout, *arguments) == 0
+    commit = session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert f"Landed: {commit[:12]} on main" in out
+    assert "GitHub plan: close out #5\n" in out
+    assert ("Stays open for the planned pieces left, as the field report names them: Piece 2, "
+            "`tests/test_a.py` (12 sites); Piece 3, kern") in out
+    assert '"state": "closed", "state_reason": "completed"' not in out
+    assert "#5 stays open for its planned pieces left; its last piece closes it" in out
+    assert github.calls == []
+
+
 @pytest.mark.parametrize("landing, message", [
     (None, "is still .*the squash merge has not landed"),
     ("other tree", "its tree is not the tree of"),

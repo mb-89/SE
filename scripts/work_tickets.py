@@ -2746,11 +2746,30 @@ def post_merge_acceptance(body: str) -> list[str]:
     ]
 
 
+# A planned split: a partial delivery whose "Not delivered" names the pieces of its work issue
+# still to land, each a bullet led by its bold name, as `- **Piece 3, <what it moves>:** ...`.
+PLANNED_PIECE_PATTERN = re.compile(
+    r"^\s*[-*]\s+\*\*(Piece\s+\d+[a-z]?\b[^*\n]*?)[:.]?\*\*", re.IGNORECASE | re.MULTILINE)
+
+
+def planned_pieces(report: str) -> list[str]:
+    """The pieces of the work issue a partial field report names as still to land, in its "Not
+    delivered" (`PLANNED_PIECE_PATTERN`); none for a complete report or one naming no piece, so
+    only a planned split keeps its issue open across its landings."""
+    result = FIELD_REPORT_RESULT_PATTERN.search(report)
+    if result is None or result.group(1) != "partial":
+        return []
+    left = section(markdown_sections(report), "not delivered")
+    return [match.group(1).strip() for match in PLANNED_PIECE_PATTERN.finditer(left)]
+
+
 def pull_request_body(issue: dict[str, object], report: str) -> str:
     """The pull request description: `Fixes <issue>` where all its acceptance shows before the
-    merge, else `Refs <issue>`, so GitHub never closes an issue before its acceptance can be seen;
-    then the field report `report` between its markers, without the template's comments."""
-    keyword = "Refs" if post_merge_acceptance(str(issue.get("body", ""))) else "Fixes"
+    merge and the report names no planned piece still to land (`planned_pieces`), else `Refs
+    <issue>`, so GitHub never closes an issue before its acceptance can be seen or its last piece
+    lands; then the field report `report` between its markers, without the template's comments."""
+    keyword = ("Refs" if post_merge_acceptance(str(issue.get("body", ""))) or planned_pieces(report)
+               else "Fixes")
     return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
@@ -5915,7 +5934,8 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
 def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
                   comment: str, pending: list[str]) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
-    take it out of progress and close it unless post-merge acceptance keeps it open."""
+    take it out of progress and close it unless `pending` keeps it open: post-merge acceptance,
+    a review's open points or a planned split's pieces left."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     return Plan(f"close out #{work_number}", (
@@ -6116,6 +6136,7 @@ def integrate(
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
             "open_points": open_points(str(work_issue.get("body", "")), reported_tip(report)),
+            "pieces": planned_pieces(report),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
         }
@@ -6271,18 +6292,22 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
              if late else "")
     pending = list(state.get("pending") or [])
     points = list(state.get("open_points") or [])
+    pieces = list(state.get("pieces") or [])
     waits = ("Stays open until this acceptance is seen after the merge: "
              + "; ".join(pending) + "\n") if pending else ""
     if points:
         waits += ("Stays open for the review's open points, which a worker takes on this issue: "
                   + "; ".join(points) + "\n")
+    if pieces:
+        waits += ("Stays open for the planned pieces left, as the field report names them: "
+                  + "; ".join(pieces) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
         f"Suite: {suite_result}.\n{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
-                         comment, [*pending, *points])
+                         comment, [*pending, *points, *pieces])
     if door is None:
         print(plan.text())
     elif getattr(door, "relayed", False):
@@ -6316,6 +6341,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if points:
         print(f"#{work_number} stays open for the review's open points; start a worker on it for "
               f"them: {'; '.join(points)}")
+    if pieces:
+        print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
+              f"{'; '.join(pieces)}")
     try:
         remove_worker_worktree(root, branch, landed)
         print("Cleanup: worker worktree removed")
