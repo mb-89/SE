@@ -1,6 +1,6 @@
 """SE's doctor: one read-only report of the box SE runs in, to paste whole when something half-works.
 
-    uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline]
+    uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline] [--probe] [--write]
 
 It measures the host, the SE checkout against its upstream, the installed plugin and the `se`
 binary against the pins, the core (standing file, pid, boot id, the last lines of its log), each
@@ -15,7 +15,18 @@ Three layers, so the form can change without the checks:
 - `diagnose` is pure: facts in, findings out; the tests hand it fake facts.
 - `render_text` and `render_json` format the findings.
 
-It writes nothing, starts nothing that stays, and prints no secret: never a token, a bus user, an
+Two options, both off by default; without them the report is the same as before they existed:
+
+- `--probe` adds a row for each place a host reads SE from (scripts/host-limits.toml
+  `[registrations]`, judged by scripts/host_registrations.py): whether the registration is there,
+  whether the interpreter and the scripts it names resolve on this platform (no hook is run), and
+  for an MCP command one `initialize` with a time limit, which may start the core as a host's own
+  spawn would. A missing or broken one ends with its fix line, which names this checkout's
+  launcher exactly, to paste: under home as `$HOME/...`, else by its full path.
+- `--write` also puts the report into one file, `.se/doctor.txt` (`.se/doctor.json` with `--json`)
+  in the project, to paste whole.
+
+Otherwise it writes nothing, starts nothing that stays, and prints no secret: never a token, a bus user, an
 environment value, an e-mail address or a private path (home is `~`, the checkout `<checkout>`, any
 other path only its last part). It exits 0, or with `--strict` 1 where a finding is a problem.
 
@@ -35,6 +46,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 import urllib.error
@@ -58,6 +70,7 @@ def _load(name: str):
 git_door = _load("git_door")
 se_modules = _load("se_modules")
 se_start = _load("se_start")
+host_registrations = _load("host_registrations")
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SEEN, SILENT, NOT_MEASURED = "seen", "silent", "not measured"
@@ -68,6 +81,8 @@ HOSTS = ("github.com", "api.github.com", "objects.githubusercontent.com", "astra
          "proxy.golang.org")
 NET_TIMEOUT = 3.0  # seconds a reachability check may take
 GH_TIMEOUT = 5.0
+MCP_TIMEOUT = 10.0  # seconds an MCP command may take to answer initialize
+HOST_FACTS = Path(__file__).with_name("host-limits.toml")
 LOG_LINES = 3
 # Most important first: a stale program explains most of what half-works.
 AREAS = ("binary", "plugin", "core", "hooks", "checkout", "gh", "network", "host")
@@ -393,14 +408,124 @@ def gather_network(hosts=HOSTS, reach=_reach) -> list[dict]:
         return [{"host": h, "reached": r} for h, r in zip(hosts, pool.map(reach, hosts))]
 
 
+# Probing the registrations (--probe): the only part that starts anything
+
+
+def platform_name(name: str = sys.platform) -> str:
+    return "windows" if name.startswith(("win", "cygwin", "msys")) else ("darwin" if name == "darwin" else "linux")
+
+
+INITIALIZE = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+    "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "se-doctor", "version": "1"}}})
+
+
+def initialize(words: list[str], cwd: Path, timeout: float = MCP_TIMEOUT) -> dict:
+    """One `initialize` to an MCP command over stdio, as a host spawns it; then its standard input
+    closes, so a door returns its lease, and the process ends."""
+    try:
+        proc = subprocess.Popen(words, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+    except OSError as error:
+        return {"answer": "exited", "detail": f"could not start: {type(error).__name__}"}
+    got: dict = {}
+
+    def read() -> None:
+        got["line"] = proc.stdout.readline()
+
+    reader = threading.Thread(target=read, daemon=True)
+    try:
+        proc.stdin.write((INITIALIZE + "\n").encode())
+        proc.stdin.flush()
+    except OSError:
+        pass
+    reader.start()
+    reader.join(timeout)
+    line = None if reader.is_alive() else got.get("line")
+    for step in (proc.stdin.close, proc.terminate):
+        try:
+            step()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    if line is None:
+        return {"answer": "timeout", "detail": f"{timeout:g} s"}
+    if not line.strip():
+        return {"answer": "exited", "detail": f"exit code {proc.returncode}"}
+    try:
+        info = json.loads(line).get("result", {}).get("serverInfo", {})
+    except (ValueError, AttributeError):
+        info = None
+    if not isinstance(info, dict):
+        return {"answer": "exited", "detail": "its first line is no initialize result"}
+    return {"answer": "answered", "detail": f"{info.get('name', '?')} {info.get('version', '?')}".strip()}
+
+
+def probe_command(words: list[str], kind: str, cwd: Path, which=shutil.which, start=initialize) -> dict:
+    """Whether the interpreter and the scripts a command names resolve here, without running it;
+    an MCP command is then started once for `initialize`."""
+    interpreter = which(words[0]) if words else None
+    missing, unresolved = [], []
+    for word in host_registrations.scripts(words):
+        if "$" in word or "%" in word:
+            unresolved.append(word)
+        elif not (Path(word) if Path(word).is_absolute() else cwd / word).is_file():
+            missing.append(word)
+    probe = {"resolves": interpreter is not None, "missing": missing, "unresolved": unresolved}
+    if kind == "mcp" and interpreter and not missing and not unresolved:
+        probe |= start([interpreter, *words[1:]], cwd)
+    return probe
+
+
+def gather_probe(project: Path, home: Path, checkout: Path, plugins: list[Path], platform: str,
+                 data: dict, which=shutil.which, start=initialize) -> dict:
+    """The registration rows: each place's file read, its SE commands probed, the rows judged by
+    host_registrations."""
+    places = host_registrations.parse(data.get("registrations", {}))
+    common = {"HOME": str(home), "CLAUDE_PROJECT_DIR": str(project), "workspaceFolder": str(project)}
+    entries = []
+    for place in places:
+        if place.base == "plugin":
+            roots = [(root, {"CLAUDE_PLUGIN_ROOT": str(root), "PLUGIN_ROOT": str(root)}) for root in plugins]
+        else:
+            base = {"project": project, "home": home, "checkout": checkout}[place.base]
+            extra = {"PLUGIN_ROOT": str(checkout)} if place.base == "checkout" else {}
+            roots = [(base, extra)]
+        if not roots:
+            entries.append((place, host_registrations.Seen("no installed SE plugin", None)))
+        for root, extra in roots:
+            file = root / place.file(platform)
+            try:
+                text = file.read_text(encoding="utf-8") if file.is_file() else None
+            except OSError:
+                text = None
+            here = place.outside or project == checkout
+            entries.append((place, host_registrations.Seen(shown(file, checkout, home), text, common | extra, here)))
+    probes: dict[str, dict] = {}
+    for place, seen in entries:
+        if not seen.here:
+            continue
+        for words in host_registrations.commands(place, seen.text, platform, seen.variables):
+            name = host_registrations.key(words)
+            if name not in probes:
+                probes[name] = probe_command(words, place.kind, project, which, start)
+    fill = {"launcher": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.sh"), str(home)),
+            "launcher_ps1": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.ps1"), str(home)),
+            "checkout": host_registrations.launcher_text(str(checkout), str(home))}
+    rows = host_registrations.rows(entries, probes, platform, fill, show=lambda t: redact(t, checkout, home))
+    return {"platform": platform, "rows": [asdict(row) for row in rows]}
+
+
 def checkout_of(se_root: Path, project: Path) -> Path:
     """The SE checkout measured: the project where it is SE's own checkout, else the SE that runs."""
     return se_modules.app_root(se_root, project) if (project / se_modules.MANIFEST).is_file() else se_root
 
 
 def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, str] | None = None,
-           home: Path | None = None) -> dict:
-    """Every fact the doctor reports, as plain data."""
+           home: Path | None = None, probe: bool = False) -> dict:
+    """Every fact the doctor reports, as plain data; `probe` adds the registration rows."""
     env = dict(os.environ if env is None else env)
     home = home or Path.home()
     claude_dir = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")
@@ -412,7 +537,7 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         core_binary = Path(started.read_text(encoding="utf-8").strip())
     except OSError:
         core_binary = home / ".se" / "bin" / str(binary.get("name") or "se")
-    return {
+    facts = {
         "host": gather_host(env),
         "checkout": gather_checkout(checkout),
         "plugins": gather_plugins(roots, checkout, home),
@@ -423,6 +548,9 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "gh": None if offline else gather_gh(),
         "network": None if offline else gather_network(),
     }
+    if probe:
+        facts["probe"] = gather_probe(project, home, checkout, roots, platform_name(), _toml(HOST_FACTS))
+    return facts
 
 
 # Diagnosis: pure, facts in, findings out
@@ -579,6 +707,15 @@ def check_network(network: list[dict] | None) -> list[Finding]:
     return findings
 
 
+def check_probe(probe: dict | None) -> list[Finding]:
+    """The registration rows host_registrations judged, a fix line indented under its row."""
+    if probe is None:
+        return []
+    return [Finding("hooks", row["state"], row["level"],
+                    row["text"] + (f"\n    fix ({probe['platform']}): {row['fix']}" if row.get("fix") else ""))
+            for row in probe.get("rows", [])]
+
+
 def diagnose(facts: dict) -> list[Finding]:
     """Every finding, the most important first: problems, then notes, then what is fine; within a
     level by AREAS."""
@@ -586,7 +723,7 @@ def diagnose(facts: dict) -> list[Finding]:
                 + check_plugins(facts.get("plugins"), facts.get("checkout"), facts.get("latest"))
                 + check_binary(facts.get("binary")) + check_core(facts.get("core"))
                 + check_registrations(facts.get("registrations")) + check_gh(facts.get("gh"))
-                + check_network(facts.get("network")))
+                + check_network(facts.get("network")) + check_probe(facts.get("probe")))
     rank = {PROBLEM: 0, NOTE: 1, OK: 2}
     return sorted(findings, key=lambda f: (rank[f.level], AREAS.index(f.area)))
 
@@ -598,11 +735,15 @@ REUSED = ("reused: se_start (plugin registry, cached release check, kern status,
           "se_modules (binary pin)")
 
 
-def render_text(findings: list[Finding]) -> str:
+READ_ONLY = "read-only; nothing was changed"
+PROBED = "probed: each MCP command was started once, which may start the core; nothing else was changed"
+
+
+def render_text(findings: list[Finding], mode: str = READ_ONLY) -> str:
     problems = sum(f.level == PROBLEM for f in findings)
     notes = sum(f.level == NOTE for f in findings)
     lines = [f"SE doctor: {problems} problem{'s' * (problems != 1)}, {notes} note{'s' * (notes != 1)} "
-             "(read-only; nothing was changed)"]
+             f"({mode})"]
     marks = {PROBLEM: "!", NOTE: "-", OK: " "}
     for f in findings:
         lines.append(f"{marks[f.level]} {f.area:<8} [{f.state}] {f.text}")
@@ -621,15 +762,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="the same report as data")
     parser.add_argument("--strict", action="store_true", help="exit 1 where a finding is a problem")
     parser.add_argument("--offline", action="store_true", help="skip gh and the network reach")
+    parser.add_argument("--probe", action="store_true",
+                        help="also probe each place a host reads SE from; starts each MCP command once")
+    parser.add_argument("--write", action="store_true",
+                        help="also write the report to .se/doctor.txt (.se/doctor.json with --json)")
     return parser
+
+
+def write_report(project: Path, text: str, as_json: bool) -> Path:
+    """The report as one file under the project's ignored `.se/` folder."""
+    path = project / ".se" / ("doctor.json" if as_json else "doctor.txt")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     project = (args.root or Path.cwd()).resolve()
-    facts = gather(SE_ROOT, project, offline=args.offline)
+    facts = gather(SE_ROOT, project, offline=args.offline, probe=args.probe)
     findings = diagnose(facts)
-    sys.stdout.write(render_json(findings, facts) if args.json else render_text(findings))
+    report = render_json(findings, facts) if args.json else render_text(findings, PROBED if args.probe else READ_ONLY)
+    sys.stdout.write(report)
+    if args.write:
+        path = write_report(project, report, args.json)
+        print(f"SE doctor: written to <project>/.se/{path.name}", file=sys.stderr)
     return 1 if args.strict and any(f.level == PROBLEM for f in findings) else 0
 
 
