@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --font-content: Georgia, "Times New Roman", serif;
+  --font-interface: Arial, "Helvetica Neue", sans-serif;
+  --canvas: #ffffff; --surface: #fafafa; --text: #000000; --muted: #555555;
+  --border: #bdbdbd; --soft: #eeeeee; --accent: #00508f; --accent-soft: #e3f1ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #1f1f1f; --surface: #292929; --text: #dddddd; --muted: #bdbdbd;
+    --border: #5c5c5c; --soft: #383838; --accent: #8cc8ff; --accent-soft: #15334d;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--canvas); color: var(--text); }
+body { margin: 0 auto; max-width: 48rem; padding: 0 1rem 3rem; font: 1rem/1.45 var(--font-content);
+  overflow-wrap: anywhere; }
+h1, h2, .row, .lanes, .meta, .issue > summary, .backlog summary { font-family: var(--font-interface); }
+h1 { font-size: 1.5rem; margin: 1.25rem 0 0.25rem; }
+h2 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
+.meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
+a { color: var(--accent); }
+.lanes, .row > summary { display: grid; grid-template-columns: 4.5rem repeat(var(--lanes), minmax(0, 1fr));
+  column-gap: 0.5rem; align-items: center; }
+.lanes { position: sticky; top: 0; z-index: 1; background: var(--canvas); border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0; font-size: 0.85rem; font-weight: bold; }
+.row > summary { list-style: none; cursor: pointer; min-height: 2.4rem; }
+.row > summary::-webkit-details-marker { display: none; }
+.when { color: var(--muted); font-size: 0.8rem; }
+.year { font: bold 0.8rem var(--font-interface); color: var(--muted); padding: 0.75rem 0 0.25rem; }
+.lane { position: relative; display: flex; align-items: center; gap: 0.35rem; min-width: 0; min-height: 2.4rem;
+  padding-left: 1.15rem; font-size: 0.85rem; }
+.lane::before { content: ""; position: absolute; left: 0.3rem; top: 0; bottom: 0; border-left: 2px solid var(--border); }
+.dot { position: absolute; left: 0; width: 0.75rem; height: 0.75rem; border-radius: 50%;
+  background: var(--canvas); border: 2px solid var(--text); }
+.release .dot { border-radius: 0.1rem; transform: rotate(45deg); background: var(--text); }
+.count { font-weight: bold; white-space: nowrap; flex-shrink: 0; }
+.label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.release .label { color: var(--text); font-weight: bold; }
+.row[open] > summary, .row > summary:hover { background: var(--soft); }
+.list { padding: 0.25rem 0 0.75rem 5rem; }
+.list h3 { font: bold 0.85rem var(--font-interface); margin: 0.5rem 0 0.25rem; }
+.list ul, .backlog ul { list-style: none; margin: 0; padding: 0; }
+.issue > summary { cursor: pointer; padding: 0.2rem 0; font-size: 0.9rem; }
+.issue p { margin: 0.25rem 0 0.25rem 1rem; }
+.issue .link { margin-left: 1rem; font: 0.85rem var(--font-interface); }
+.mark { display: inline-block; font: bold 0.7rem var(--font-interface); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 0.25rem; padding: 0 0.25rem; margin-left: 0.25rem; }
+.release-line { font: 0.85rem var(--font-interface); margin: 0.25rem 0; }
+.today > summary { border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+  background: var(--accent-soft); }
+.today .when, .today .dot { color: var(--accent); border-color: var(--accent); font-weight: bold; }
+.past .dot { background: var(--text); }
+.open .dot { border-style: dashed; }
+.planned .when { font-style: italic; }
+.lane .mark { flex-shrink: 0; margin-left: 0; }
+.needs .dot { border-color: var(--accent); }
+.backlog h3 { font: bold 0.95rem var(--font-interface); margin: 1rem 0 0.25rem; }
+@media (max-width: 30rem) {
+  .lanes, .row > summary { grid-template-columns: 3.9rem repeat(var(--lanes), minmax(0, 1fr)); }
+  .list { padding-left: 0.5rem; }
+}
+</style>
+</head>
+<body style="--lanes: 2">
+<h1>Timeline</h1>
+<p class="meta">Built from the issues and releases of o/a, o/b at <time>.
+Tap a day to list its issues, an issue for its goal.</p>
+<main class="map">
+<div class="lanes"><span></span><span>a</span><span>b</span></div>
+<div class="year">2026</div>
+<details class="row past"><summary><span class="when">11 Nov</span><span class="lane release"><span class="dot"></span><span class="count">1</span><span class="label">v1.0.0</span></span><span class="lane"></span></summary><div class="list"><h3>a</h3><p class="release-line">Release <a href="https://github.com/o/a/releases/tag/v1.0.0">v1.0.0</a></p><ul><li><details class="issue"><summary>#18 issue 18</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/18">Open #18 on GitHub</a></details></li></ul></div></details>
+<details class="row open today" id="today"><summary><span class="when">Today</span><span class="lane late"><span class="dot"></span><span class="count">2</span><span class="mark">late</span><span class="label">issue 13</span></span><span class="lane"></span></summary><div class="list"><h3>a</h3><ul><li><details class="issue"><summary>#14 issue 14</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/14">Open #14 on GitHub</a></details></li><li><details class="issue"><summary>#13 issue 13<span class="mark">late</span></summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/13">Open #13 on GitHub</a></details></li></ul></div></details>
+<details class="row open planned"><summary><span class="when">13 Nov</span><span class="lane"><span class="dot"></span><span class="count">2</span><span class="label">issue 11</span></span><span class="lane"><span class="dot"></span><span class="count">1</span><span class="label">issue 30</span></span></summary><div class="list"><h3>a</h3><ul><li><details class="issue"><summary>#10 issue 10</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/10">Open #10 on GitHub</a></details></li><li><details class="issue"><summary>#11 issue 11</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/11">Open #11 on GitHub</a></details></li></ul><h3>b</h3><ul><li><details class="issue"><summary>#30 issue 30</summary><p>Planned work.</p><a class="link" href="https://github.com/o/b/issues/30">Open #30 on GitHub</a></details></li></ul></div></details>
+<details class="row open planned"><summary><span class="when">14 Nov</span><span class="lane"></span><span class="lane needs"><span class="dot"></span><span class="count">1</span><span class="label">issue 12</span></span></summary><div class="list"><h3>b</h3><ul><li><details class="issue"><summary>#12 issue 12<span class="mark">needs you</span></summary><p>Planned work.</p><a class="link" href="https://github.com/o/b/issues/12">Open #12 on GitHub</a></details></li></ul></div></details>
+<div class="year">2027</div>
+<details class="row open planned"><summary><span class="when">5 Jan</span><span class="lane"><span class="dot"></span><span class="count">1</span><span class="label">issue 21</span></span><span class="lane"></span></summary><div class="list"><h3>a</h3><ul><li><details class="issue"><summary>#21 issue 21</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/21">Open #21 on GitHub</a></details></li></ul></div></details>
+<details class="row open needs"><summary><span class="when">Needs you</span><span class="lane"></span><span class="lane"></span></summary><div class="list"></div></details>
+<details class="row open next"><summary><span class="when">Next</span><span class="lane"><span class="dot"></span><span class="count">4</span><span class="label">issue 15</span></span><span class="lane"></span></summary><div class="list"><h3>a</h3><ul><li><details class="issue"><summary>#20 issue 20</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/20">Open #20 on GitHub</a></details></li><li><details class="issue"><summary>#19 issue 19</summary><p>Was Planned: 2026-11-13 in a sentence.</p><a class="link" href="https://github.com/o/a/issues/19">Open #19 on GitHub</a></details></li><li><details class="issue"><summary>#16 issue 16</summary><p>No date.</p><a class="link" href="https://github.com/o/a/issues/16">Open #16 on GitHub</a></details></li><li><details class="issue"><summary>#15 issue 15</summary><p>The goal.</p><a class="link" href="https://github.com/o/a/issues/15">Open #15 on GitHub</a></details></li></ul></div></details>
+</main>
+<section class="backlog">
+<h2>Backlog</h2>
+<h3>a (1)</h3><ul><li><details class="issue"><summary>#17 issue 17</summary><p>Planned work.</p><a class="link" href="https://github.com/o/a/issues/17">Open #17 on GitHub</a></details></li></ul>
+</section>
+<script>document.getElementById('today')?.scrollIntoView({block: 'center'});</script>
+</body>
+</html>

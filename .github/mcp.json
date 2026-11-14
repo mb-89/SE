@@ -10,7 +10,10 @@
       ],
       "tools": [
         "*"
-      ]
+      ],
+      "env": {
+        "SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"
+      }
     }
   }
 }
