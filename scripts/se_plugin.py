@@ -292,7 +292,10 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "repository": REPOSITORY,
         "license": "MIT",
     }
-    copilot = {**plugin, "agents": f"{LAYOUTS[0].agents}/", "skills": f"{LAYOUTS[0].skills}/"}
+    # No version: it would go stale with every release of main before a branch lands, and the CLI's
+    # manifest needs none.
+    copilot = {**{key: value for key, value in plugin.items() if key != "version"},
+               "agents": f"{LAYOUTS[0].agents}/", "skills": f"{LAYOUTS[0].skills}/"}
     plugin["hooks"] = {
         "SessionStart": [{"hooks": [{"type": "command", "command": BOOTSTRAP}]}],
         **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]

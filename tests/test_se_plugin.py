@@ -162,8 +162,9 @@ def test_copilot_clis_manifest_names_the_copilot_layout(checkout):
     copilot = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
     claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert "hooks" in claude, "Claude Code's hooks stay inline, as on main"
-    del claude["hooks"]
-    assert copilot == {**claude, "agents": ".github/agents/", "skills": ".github/skills/"}
+    del claude["hooks"], claude["version"]
+    assert copilot == {**claude, "agents": ".github/agents/", "skills": ".github/skills/"}, \
+        "no version, so a release of main never makes it stale"
     assert sorted(path.name for path in (checkout / ".github" / "agents").iterdir()) == [
         "integrator.agent.md", "reviewer.agent.md", "se.agent.md", "worker.agent.md"]
 
