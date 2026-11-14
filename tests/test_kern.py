@@ -7,6 +7,9 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
+
+import ci_trust  # scripts/ is on the path (tests/conftest.py)
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKFLOW = PROJECT / ".github" / "workflows" / "check.yml"
@@ -105,13 +108,91 @@ TEMPLATE = PROJECT / "kern" / "template"
 NODE_24 = {"actions/checkout": 5, "actions/setup-go": SETUP_GO_NODE_24, "actions/upload-artifact": 6,
            "actions/download-artifact": 7, "astral-sh/setup-uv": 7}
 
+def workflow(path: Path) -> dict:
+    """A workflow as GitHub reads it: YAML, its `on:` (YAML 1.1's true) under "on"."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if True in data:
+        data["on"] = data.pop(True)
+    return data
+
+
+def step(job: dict, name: str) -> dict:
+    """The one step of `job` named `name`, or whose `uses` is that action."""
+    found = [s for s in job["steps"] if name in (s.get("name"), str(s.get("uses", "")).split("@")[0])]
+    assert len(found) == 1, f"one step {name!r}, found {len(found)}"
+    return found[0]
+
+
+UNTRUSTED = "needs.trust.outputs.trusted != 'true'"
+KERN_AT_THE_PIN = {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}",
+                   "path": ".kern-battery"}
+INTEGRATOR_PASS = "./.kern-battery/.github/actions/integrator-pass"
+
+
 def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
-    text = BATTERY.read_text(encoding="utf-8")
-    assert "on:\n  workflow_call:\n" in text
-    assert "go-version-file: ${{ inputs.directory }}/go.mod" in text
-    assert "run: go vet ./..." in text
-    assert 'tests.get("command"), tests.get("target_seconds"), tests.get("limit_seconds")' in text
-    assert "if seconds > limit:" in text and "if seconds > target:" in text
+    battery = workflow(BATTERY)
+    assert set(battery["on"]) == {"workflow_call"}
+    assert battery["on"]["workflow_call"]["inputs"]["directory"]["default"] == "."
+    job = battery["jobs"]["battery"]
+    assert job["defaults"]["run"]["working-directory"] == "${{ inputs.directory }}"
+    assert step(job, "actions/setup-go")["with"]["go-version-file"] == "${{ inputs.directory }}/go.mod"
+    assert step(job, "The Go code vets")["run"] == "go vet ./..."
+    tests = step(job, "The tests, within their budget")
+    assert tests["shell"] == "python3 {0}"
+    assert 'tests.get("command"), tests.get("target_seconds"), tests.get("limit_seconds")' in tests["run"]
+    assert "if seconds > limit:" in tests["run"] and "if seconds > target:" in tests["run"]
+
+
+def test_the_battery_passes_on_the_integrators_record_through_kern_at_the_applications_pin() -> None:
+    """SE's README "Trusted landings": the job trust runs integrator-pass from the kern commit the
+    battery runs at, the tag the application pins, and the battery's vet and tests run only where
+    it does not vouch for the tree."""
+    battery = workflow(BATTERY)
+    assert list(battery["jobs"]) == ["trust", "battery"]
+    # The caller's permissions apply: contents: read where trust is off, checks: write and
+    # actions: read where an application turns it on.
+    assert "permissions" not in battery
+    assert all("permissions" not in job for job in battery["jobs"].values())
+    trust = battery["jobs"]["trust"]
+    assert trust["outputs"] == {"trusted": "${{ steps.lookup.outputs.trusted }}"}
+    assert trust["steps"][0] == {"uses": "actions/checkout@v7", "with": {"fetch-depth": 0}}, (
+        "the application's checkout, with the history full_every counts")
+    kern = step(trust, "kern at the tag the application pins")
+    assert kern["uses"] == "actions/checkout@v7" and KERN_AT_THE_PIN.items() <= kern["with"].items()
+    sparse = kern["with"]["sparse-checkout"].split()
+    lookup = step(trust, "The integrator's record of this tree")
+    assert lookup["id"] == "lookup" and lookup["uses"] == INTEGRATOR_PASS
+    assert lookup["with"] == {"mode": "lookup", "worktree": "${{ inputs.directory }}"}
+    # What the sparse checkout holds is what the action runs: its action.yml and SE's scripts.
+    action = PROJECT / INTEGRATOR_PASS.removeprefix("./.kern-battery/") / "action.yml"
+    assert action.is_file()
+    assert '"$GITHUB_ACTION_PATH/../../../scripts/ci_trust.py"' in action.read_text(encoding="utf-8")
+    assert sparse == [".github/actions", "scripts"]
+    assert (PROJECT / "scripts" / "ci_trust.py").is_file() and (PROJECT / "scripts" / "git_door.py").is_file()
+
+    job = battery["jobs"]["battery"]
+    assert job["needs"] == "trust"
+    assert job["steps"][0] == {"uses": "actions/checkout@v7"}
+    notice = step(job, "The integrator's record of this tree is trusted")
+    assert notice["if"] == "needs.trust.outputs.trusted == 'true'"
+    for name in ("actions/setup-go", "astral-sh/setup-uv", "The Go code vets", "The tests, within their budget"):
+        assert step(job, name)["if"] == UNTRUSTED, name
+    # The safety net's bookkeeping, after the tests: kern's action at the pin, a full pass marked, a
+    # failure's trusted records named.
+    names = [s.get("name") for s in job["steps"]]
+    net = step(job, "kern at the tag the application pins, for the safety net")
+    assert names.index(net["name"]) > names.index("The tests, within their budget")
+    assert net["if"] == f"${{{{ !cancelled() && {UNTRUSTED} }}}}"
+    assert KERN_AT_THE_PIN.items() <= net["with"].items() and net["with"]["sparse-checkout"].split() == sparse
+    for name, mode, when in (("Mark the full pass", "full-pass", "success()"),
+                             ("Name the trusted records the failure came through", "finding", "failure()")):
+        bookkeeping = step(job, name)
+        assert bookkeeping["uses"] == INTEGRATOR_PASS
+        assert bookkeeping["with"] == {"mode": mode, "worktree": "${{ inputs.directory }}"}
+        assert bookkeeping["if"] == f"{when} && {UNTRUSTED}", name
+        assert names.index(name) > names.index(net["name"])
+    assert set(ci_trust.COMMANDS) >= {"lookup", "full-pass", "finding"}
+
 
 def test_the_template_is_a_bare_application_in_ses_shape() -> None:
     """docs/go-core.md "A bare application, and `se new app`"."""
