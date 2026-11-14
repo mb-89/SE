@@ -146,6 +146,7 @@ func ReadDeclaration(path string) (*Component, error) {
 //	type = "int"; builtin = 1; help = "..."
 //	[commands."tally note"]
 //	usage = "..."; summary = "..."; group = "..."; help = "..."; class = "batch"; session = true
+//	mcp = "..."   # when to use it, as the MCP door offers it; an interactive command needs one
 //	[requests.post]
 //	type = "string"; answer = "int"; help = "..."
 //	[verbs.append]                         # an I/O component's
@@ -232,11 +233,12 @@ func ParseDeclaration(data []byte) (*Component, error) {
 	commands := d.table(doc, "commands")
 	for _, n := range sortedKeys(commands) {
 		where := fmt.Sprintf("commands.%q", n)
-		t := d.sub(commands, n, where, "usage", "summary", "group", "help", "class", "session")
+		t := d.sub(commands, n, where, "usage", "summary", "group", "help", "class", "session", "mcp")
 		k := &command{decl: CommandDecl{
 			Name: n, Usage: d.str(t, "usage", false), Summary: d.str(t, "summary", false),
 			Group: d.str(t, "group", false), Help: d.str(t, "help", false),
 			Class: Class(d.str(t, "class", false)), Session: d.flag(t, where, "session"),
+			MCP: d.str(t, "mcp", false),
 		}, in: in}
 		c.addCommand(k)
 	}

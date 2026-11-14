@@ -100,6 +100,10 @@ type CommandDecl struct {
 	Session bool
 	// Class is Interactive or Batch: whether a person waits on its answer.
 	Class Class
+	// MCP is what an agent host reads of it as a tool of kern's MCP door
+	// (package mcp): when to use it. An interactive command, which only
+	// reads, is offered there and must carry one; a batch command is not.
+	MCP string
 }
 
 // Class says who waits on a command.
@@ -653,6 +657,9 @@ func (c *Component) addCommand(k *command) {
 	}
 	if d.Class != Interactive && d.Class != Batch {
 		c.fail("command %q has no class: %s or %s", d.Name, Interactive, Batch)
+	}
+	if d.Class == Interactive && strings.TrimSpace(d.MCP) == "" {
+		c.fail("command %q is interactive and has no mcp description: the MCP door offers it, and says when to use it", d.Name)
 	}
 	if _, taken := c.commands[d.Name]; taken {
 		c.fail("command %q is declared twice", d.Name)

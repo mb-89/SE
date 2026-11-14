@@ -88,6 +88,8 @@ class CommandDecl:
     help: str
     klass: str
     session: bool = False
+    #: When to use it, as kern's MCP door offers it: an interactive command needs one.
+    mcp: str = ""
 
 
 @dataclass
@@ -179,16 +181,21 @@ def parse(data: bytes) -> Declaration:
         d.outputs[port] = p
     for n, t in sorted(_table(errs, doc, "commands").items()):
         where = f"commands.{_q(n)}"
-        if not _sub(errs, t, where, ("usage", "summary", "group", "help", "class", "session")):
+        keys = ("usage", "summary", "group", "help", "class", "session", "mcp")
+        if not _sub(errs, t, where, keys):
             continue
         k = CommandDecl(name=n, usage=str(t.get("usage", "")), summary=str(t.get("summary", "")),
                         group=str(t.get("group", "")), help=str(t.get("help", "")),
-                        klass=str(t.get("class", "")), session=_flag(errs, t, where, "session"))
+                        klass=str(t.get("class", "")), session=_flag(errs, t, where, "session"),
+                        mcp=str(t.get("mcp", "")))
         for f in ("name", "usage", "summary", "help", "group"):
             if not str(getattr(k, f)).strip():
                 errs.append(f'command "{n}" has no {f}')
         if k.klass not in ("interactive", "batch"):
             errs.append(f'command "{n}" has no class: interactive or batch')
+        if k.klass == "interactive" and not k.mcp.strip():
+            errs.append(f'command "{n}" is interactive and has no mcp description: the MCP door '
+                        "offers it, and says when to use it")
         d.commands[n] = k
     for kind_, into, what in (("requests", d.requests, "request port"), ("verbs", d.verbs, "verb")):
         for n, t in sorted(_table(errs, doc, kind_).items()):
