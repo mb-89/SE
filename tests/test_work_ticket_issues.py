@@ -899,6 +899,50 @@ def test_field_report_check_takes_the_issue_body_from_a_file_or_refuses_without_
     assert run(worktree, "field-report", "--check", str(report), "--issue-body", str(issue)) == 0
 
 
+OWNER_STEPS = ("## Owner step\n\n<!-- what the sessions' filters refuse -->\n\n"
+               "- Schedule the follow-up run for Monday.\n"
+               "- Add `example.com` to the allow list.\n\n")
+
+
+def test_intake_draft_and_check_carry_the_work_issues_owner_steps(worktree, gh, capsys):
+    gh.issue["body"] = BODY.replace("## Verification", OWNER_STEPS + "## Verification")
+    assert run(worktree, "intake", "--issue", "5") == 0
+    delivery = (worktree / ".se" / "work" / "todo" / "delivery.md").read_text(encoding="utf-8")
+    assert ('- [ ] The field report\'s "## Owner step" carries the owner step: Schedule the '
+            "follow-up run for Monday.\n" in delivery)
+    assert "carries the owner step: Add `example.com` to the allow list.\n" in delivery
+    report = draft_complete_field_report(worktree)
+    drafted = report.read_text(encoding="utf-8")
+    assert ("## Owner step\n\n- Schedule the follow-up run for Monday.\n- Add `example.com` to "
+            f"the allow list.\n\n{END}") in drafted
+    assert run(worktree, "field-report", "--check", str(report)) == 0
+    report.write_text(drafted.replace("- Add `example.com` to the allow list.\n", ""),
+                      encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+
+    assert ('section "## Owner step" does not carry the work issue\'s owner step: Add '
+            "`example.com` to the allow list.") in capsys.readouterr().err
+
+
+def test_a_work_issue_without_owner_steps_adds_no_ticket_item_and_no_report_section(worktree, gh):
+    gh.issue["body"] = BODY.replace("## Verification", "## Owner step\n\n<!-- none -->\n\n"
+                                                       "## Verification")
+    assert run(worktree, "intake", "--issue", "5") == 0
+    delivery = (worktree / ".se" / "work" / "todo" / "delivery.md").read_text(encoding="utf-8")
+    assert "Owner step" not in delivery
+    assert "## Owner step" not in draft_complete_field_report(worktree).read_text(encoding="utf-8")
+    assert work_tickets.owner_steps(BODY) == []
+
+
+def test_the_work_issue_template_offers_the_optional_owner_step_section():
+    template = (Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / "work.md"
+                ).read_text(encoding="utf-8")
+    assert "\n## Owner step\n" in template
+    assert work_tickets.owner_steps(template) == []  # its guidance is a comment: no step
+
+
 def with_requirement_3(report: str) -> str:
     row = "| Requirement 2 | complete | `abc1234` | `test`: passed |\n"
     return report.replace(row, row + row.replace("Requirement 2", "Requirement 3"))

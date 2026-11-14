@@ -1621,6 +1621,33 @@ def is_discovery_issue(issue: dict[str, object]) -> bool:
     return DISCOVERY_LABEL in issue_labels(issue)
 
 
+#: The work issue's optional section of steps only the owner takes, which the field report carries
+#: under the same heading (.github/ISSUE_TEMPLATE/work.md).
+OWNER_STEP_SECTION = "Owner step"
+OWNER_STEP_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$")
+
+
+def owner_steps(body: str) -> list[str]:
+    """The steps of a work issue's or field report's "## Owner step" section, one per list item
+    (or per line, outside a list); none without the section."""
+    text = HTML_COMMENT_PATTERN.sub("", section(markdown_sections(body),
+                                                OWNER_STEP_SECTION.casefold()))
+    lines = [line for line in text.splitlines() if line.strip()]
+    items = [match[1] for line in lines if (match := OWNER_STEP_ITEM.match(line))]
+    return items if items else [line.strip() for line in lines]
+
+
+def owner_step_problems(report: str, issue_body: str) -> list[str]:
+    """Each owner step of the work issue its field report's "## Owner step" section does not
+    carry, compared without case and spacing."""
+    def plain(text: str) -> str:
+        return " ".join(text.split()).casefold()
+    carried = plain(HTML_COMMENT_PATTERN.sub("", section(markdown_sections(report),
+                                                         OWNER_STEP_SECTION.casefold())))
+    return [f'section "## {OWNER_STEP_SECTION}" does not carry the work issue\'s owner step: '
+            f"{step}" for step in owner_steps(issue_body) if plain(step) not in carried]
+
+
 def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
     """Derives one ticket per numbered requirement plus the delivery ticket."""
     sections = issue_sections(issue["body"])
@@ -1671,6 +1698,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
             "- [ ] Discovery evidence is complete and linked from the field report.\n"
             if discovery else f"{acceptance}\n"
         )
+        + "".join(f"- [ ] The field report's \"## {OWNER_STEP_SECTION}\" carries the owner step: "
+                  f"{step}\n" for step in owner_steps(str(issue["body"])))
         + "- [ ] Branch pushed, pull request to the integration branch opened with the field "
           "report as its description.\n\n"
         "## Evidence\n"
@@ -3739,6 +3768,10 @@ def draft_field_report(root: Path, file: Path, issue_file: Path | None = None) -
             lambda match: match.group(1) + quoted(requirement),
             body, count=1, flags=re.MULTILINE | re.DOTALL,
         )
+    steps = owner_steps(str(issue["body"]))
+    if steps:
+        body = body.replace(REPORT_END, f"## {OWNER_STEP_SECTION}\n\n"
+                            + "".join(f"- {step}\n" for step in steps) + f"\n{REPORT_END}", 1)
     index = discovery_index(root)
     if index is not None:
         relative_index = index.relative_to(root).as_posix()
@@ -3838,6 +3871,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
         )
     if issue_body is not None:
         problems.extend(field_report_evidence_errors(issue_body, body))
+        problems.extend(owner_step_problems(body, issue_body))
     return problems
 
 
