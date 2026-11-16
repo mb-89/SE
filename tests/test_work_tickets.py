@@ -1635,6 +1635,38 @@ def test_fleet_check_reads_a_blocker_it_did_not_list_through_the_door(tmp_path: 
     assert door.calls == ["issue 6"]
 
 
+def person_finding(created: dict, ages: bool, tmp_path: Path) -> str:
+    door = FakeFleet([{**fleet_issue(11, "Which name?", "se-person"), **created},
+                      fleet_issue(12, "feat/held", "work", blocked_by=(11,))])
+    found = work_tickets.fleet_findings(door, NOW, work_tickets.timedelta(hours=3), "repo", ages=ages)
+    return next(f.what for f in found if f.kind == "waiting on the person")
+
+
+@pytest.mark.parametrize("created", [{"created_at": "2026-10-30T23:59:00Z"},  # the REST API's and the tools'
+                                     {"createdAt": "2026-10-30T23:59:00Z"}])  # gh's
+def test_the_person_finding_says_how_long_it_is_open_only_with_fleet_ages(created, tmp_path: Path) -> None:
+    assert person_finding(created, False, tmp_path) == "waits for the person (se-person), holding up #12"
+    assert person_finding(created, True, tmp_path) == (
+        "waits for the person (se-person), open 13 days, holding up #12")
+
+
+def test_an_ask_is_open_in_whole_utc_calendar_days() -> None:
+    assert work_tickets.open_for("2026-11-12T00:01:00Z", NOW) == ", opened today"
+    assert work_tickets.open_for("2026-11-11T23:59:00Z", NOW) == ", open 1 day"
+    assert work_tickets.open_for("2026-11-12T01:00:00+02:00", NOW) == ", open 1 day"  # 11 Nov in UTC
+    assert work_tickets.open_for("2026-10-30T09:00:00Z", NOW) == ", open 13 days"
+    assert work_tickets.open_for("", NOW) == "" == work_tickets.open_for("soon", NOW)
+
+
+def test_fleet_ages_is_read_from_se_toml_and_off_where_absent(tmp_path: Path) -> None:
+    assert work_tickets.fleet_ages(tmp_path) is False
+    (tmp_path / "se.toml").write_text("[fleet]\nages = true\n", encoding="utf-8")
+    assert work_tickets.fleet_ages(tmp_path) is True
+    (tmp_path / "se.toml").write_text('[fleet]\nages = "yes"\n', encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match="fleet.ages"):
+        work_tickets.fleet_ages(tmp_path)
+
+
 def test_fleet_check_command_prints_findings_and_exits_one(tmp_path: Path, monkeypatch, capsys) -> None:
     door = FakeFleet([fleet_issue(1, "feat/no-branch", "work", "in-progress")], branches={})
     monkeypatch.setattr(work_tickets, "Fleet", door)

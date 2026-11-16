@@ -904,6 +904,25 @@ def test_setup_points_core_hooks_path_at_se_hooks(kind: str, repo: Path) -> None
 
 
 @pytest.mark.parametrize("kind", SETUPS)
+def test_setup_names_the_checkouts_own_hooks_that_stop_running_before_it_sets_core_hooks_path(
+        kind: str, repo: Path) -> None:
+    folder = repo.parent / "own-hooks"  # the checkout's own hook set, which core.hooksPath names now
+    folder.mkdir()
+    git(repo, "config", "core.hooksPath", str(folder))
+    (folder / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
+    (folder / "commit-msg.sample").write_text("#!/bin/sh\n", encoding="utf-8")
+    result = setup_hooks(kind, repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    named = next(line for line in result.stdout.splitlines() if "no longer run" in line)
+    assert "no longer run: pre-commit, as core.hooksPath" in named and "sample" not in named
+    assert f"config core.hooksPath {folder.as_posix()}" in named
+    lines = result.stdout.splitlines()
+    assert lines.index(named) < next(i for i, line in enumerate(lines) if line.startswith("core.hooksPath of "))
+    again = setup_hooks(kind, repo)  # se's hooks in place: nothing else stops
+    assert "no longer run" not in again.stdout
+
+
+@pytest.mark.parametrize("kind", SETUPS)
 def test_setup_ignores_the_local_list_once(kind: str, repo: Path) -> None:
     (repo / ".gitignore").write_text("build/", encoding="utf-8")
     for _ in range(2):

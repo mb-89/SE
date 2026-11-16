@@ -1053,6 +1053,47 @@ def test_start_hooks_leaves_a_set_hooks_path_alone(fresh):
     assert hooks_path(clone) == "custom/hooks"
 
 
+def own_hooks_folder(clone: Path) -> Path:
+    found = se_start.git_door.run("rev-parse", "--git-path", "hooks", root=clone).stdout.strip()
+    return Path(found) if Path(found).is_absolute() else clone / found
+
+
+def test_start_hooks_names_the_checkouts_own_hooks_that_stop_running_and_the_command_that_keeps_them(fresh):
+    clone, base = fresh
+    folder = own_hooks_folder(clone)
+    write(folder / "pre-commit", "#!/bin/sh\n").chmod(0o755)  # a hook set such as the pre-commit framework's
+    write(folder / "pre-push.sample", "#!/bin/sh\n")
+    line = se_start.start_hooks(base / "plugin", clone, base / "local.toml")
+    assert hooks_path(clone) == (base / "plugin" / ".githooks").as_posix()  # set exactly as before
+    assert line == (f"SE: the hooks in {folder.as_posix()} no longer run: pre-commit, as core.hooksPath now names "
+                    f"se's; to keep them, run: git -C {clone.as_posix()} config core.hooksPath {folder.as_posix()} "
+                    "(se's public check then does not run on this checkout's commits)")
+    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""  # a set one stays
+
+
+def test_start_hooks_says_nothing_of_a_hooks_folder_with_only_samples(fresh):
+    clone, base = fresh
+    write(own_hooks_folder(clone) / "pre-commit.sample", "#!/bin/sh\n")
+    assert se_start.start_hooks(base / "plugin", clone, base / "local.toml") == ""
+    assert hooks_path(clone) == (base / "plugin" / ".githooks").as_posix()
+
+
+def test_the_hooks_that_stop_running_are_every_name_but_a_sample_sorted():
+    assert se_start.stopped_hooks(["pre-push", "commit-msg.sample", "pre-commit", "post-merge"]) == [
+        "post-merge", "pre-commit", "pre-push"]
+    assert se_start.stopped_hooks(["pre-commit.sample"]) == [] == se_start.stopped_hooks([])
+
+
+def test_stopped_hooks_names_them_for_setup_and_none_where_the_folder_is_ses_own(fresh, capsys):
+    clone, base = fresh
+    folder = own_hooks_folder(clone)
+    write(folder / "pre-commit", "#!/bin/sh\n")
+    assert se_start.main(["stopped-hooks", "--repo", str(clone), "--hooks", ".githooks"]) == 0
+    assert "no longer run: pre-commit" in capsys.readouterr().out
+    assert se_start.main(["stopped-hooks", "--repo", str(clone), "--hooks", str(folder)]) == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_start_hooks_takes_the_hooks_of_the_se_module_a_project_pins_else_this_ses(fresh):
     clone, base = fresh
     plugin = base / "plugin"

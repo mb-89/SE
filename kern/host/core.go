@@ -1,7 +1,6 @@
 package host
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,8 +127,9 @@ type Core struct {
 	procs      []*placement
 	prev       map[string]uint64
 	reason     string
-	// calls are the running calls, by reply subject, and how each is given up.
-	calls map[string]context.CancelCauseFunc
+	// calls are the running calls, by reply subject: each one's name, start
+	// and how it is given up.
+	calls map[string]runningCall
 	// asks numbers the requests to declared processes' verbs, so a stop word
 	// names the one it ends (remote.Serve).
 	asks atomic.Int64
@@ -188,7 +188,7 @@ func Serve(o Options) (*Core, error) {
 		o: o, ix: ix, pid: os.Getpid(), start: o.Clock.Now(), comps: comps,
 		declared: map[string]*index.Component{}, attached: map[string]chan struct{}{},
 		writer: map[string]string{}, types: map[string]map[string]reflect.Type{}, placed: map[string]bool{},
-		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{}, calls: map[string]context.CancelCauseFunc{},
+		sessions: map[string]time.Time{}, beats: map[string]time.Time{}, prev: map[string]uint64{}, calls: map[string]runningCall{},
 		done: make(chan struct{}), ended: make(chan struct{}), hooks: map[string]index.CommandInfo{},
 	}
 	for _, h := range o.Wiring.Hooks {
@@ -586,6 +586,16 @@ type Health struct {
 	// the value of its output backend, where its component declares one and
 	// it is provided.
 	Backends map[string]string `json:"backends"`
+	// Calls are the calls the core runs now, oldest first: each one's name
+	// and start, so a session sees a call that is alive but has not asked for
+	// its next step.
+	Calls []CallState `json:"calls"`
+}
+
+// CallState is one running call as the health shows it.
+type CallState struct {
+	Name    string    `json:"name"`
+	Started time.Time `json:"started"`
 }
 
 // BackendPort is the output port an instance names its chosen backend by.
@@ -626,9 +636,19 @@ func (c *Core) Health() Health {
 	for s := range c.sessions {
 		h.Sessions = append(h.Sessions, s)
 	}
+	h.Calls = []CallState{}
+	for _, rc := range c.calls {
+		h.Calls = append(h.Calls, CallState{Name: rc.name, Started: rc.started.UTC()})
+	}
 	procs := append([]*placement{}, c.procs...)
 	c.mu.Unlock()
 	sort.Strings(h.Sessions)
+	sort.SliceStable(h.Calls, func(i, j int) bool {
+		if !h.Calls[i].Started.Equal(h.Calls[j].Started) {
+			return h.Calls[i].Started.Before(h.Calls[j].Started)
+		}
+		return h.Calls[i].Name < h.Calls[j].Name
+	})
 	for _, p := range procs {
 		st := PlacementState{Instance: p.instance, Pid: p.cmd.Process.Pid}
 		select {

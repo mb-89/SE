@@ -28,6 +28,8 @@ if (-not $Repo) { $Repo = $seRoot }
 $target = Invoke-SeScript git_door.py -C $Repo rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0) { exit 1 }
 if ($target -eq $seRoot) { $hooks = '.githooks' } else { $hooks = "$seRoot/.githooks" }
+# The checkout's own hooks that stop running once core.hooksPath names se's are named first.
+Invoke-SeScript se_start.py stopped-hooks --repo $target --hooks $hooks
 Invoke-SeScript git_door.py -C $target config core.hooksPath $hooks
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Write-Output "core.hooksPath of $target set to $hooks"

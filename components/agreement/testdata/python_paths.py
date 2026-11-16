@@ -4,7 +4,10 @@ landed_since_retro and scripts/overhaul.py retros_since_overhaul, run on the Git
 a fixture holds, through doors that read them as the Python reads GitHub.
 Prints {"fleet": <fleet-check --json>, "retro": <landed>, "overhaul": <retros>}.
 
-Usage: python python_paths.py <se root> <fixture.json>
+With --ages the fleet check runs with se.toml `[fleet] ages` on, as the Go side with its config
+`ages` on.
+
+Usage: python python_paths.py <se root> <fixture.json> [--ages]
 """
 
 import json
@@ -84,7 +87,7 @@ class SnapshotRetro:
 
 now = datetime.fromisoformat(fixture["now"].replace("Z", "+00:00"))
 found = work_tickets.fleet_findings(SnapshotFleet(), now, timedelta(hours=fixture["lease_hours"]),
-                                    fixture["repository"])
+                                    fixture["repository"], ages="--ages" in sys.argv[3:])
 print(json.dumps({
     "fleet": json.loads(work_tickets.fleet_report(found, True)),
     "retro": retro.landed_since_retro(SnapshotRetro(), fixture["tracker"], fixture["base"]),

@@ -214,10 +214,8 @@ TOLD = "kern's GitHub relay waits for these GitHub tool calls"
 NEXT_WAIT = 5.0
 
 
-def told(root: Path, wait: float = NEXT_WAIT) -> str | None:
-    """The GitHub tool calls kern's relay waits for, as its hook tells them on a prompt: the
-    relay's block of that context, "" where none waits, None where no core answers. The event
-    carries no session, so it takes no lease."""
+def _ask_core(root: Path, subject: str, wait: float) -> dict | None:
+    """The core's answer on `subject`, as the client asks it, None where no core answers."""
     served = se_components.kern_root(root.resolve())
     found = se_components.standing(served) if served else None
     if found is None:
@@ -231,23 +229,69 @@ def told(root: Path, wait: float = NEXT_WAIT) -> str | None:
     except (OSError, KeyError, TypeError, ValueError, NatsError):
         return None
     try:
-        answer = peer.request("hook.UserPromptSubmit", {}, wait).json() or {}
+        answer = peer.request(subject, {}, wait).json()
     except (OSError, NatsError, ValueError):
         return None
     finally:
         peer.close()
+    return answer if isinstance(answer, dict) else {}
+
+
+def told(root: Path, wait: float = NEXT_WAIT) -> str | None:
+    """The GitHub tool calls kern's relay waits for, as its hook tells them on a prompt: the
+    relay's block of that context, "" where none waits, None where no core answers. The event
+    carries no session, so it takes no lease."""
+    answer = _ask_core(root, "hook.UserPromptSubmit", wait)
+    if answer is None:
+        return None
     context = str(answer.get("context") or "")
     start = context.find(TOLD)
     return context[start:].split("\n\n")[0].strip() if start >= 0 else ""
 
 
 NEXT_COMMAND = f"uv run python {Path(__file__).resolve().as_posix()} next"
+#: The core's health, which lists the calls it runs (kern/host/core.go `Health`).
+HEALTH = "get.core.health"
 
 
-def main(argv: list[str] | None = None) -> int:
-    """`se_relay.py next [--root DIR] [--step N]`: print the GitHub steps kern's relay waits for,
-    the same the hook tells on a prompt, whichever tool's PostToolUse ran last; exit 1 where no
-    core serves the checkout, or where `--step` names a step it no longer waits for (stale_step)."""
+def running_calls(root: Path, wait: float = NEXT_WAIT) -> list[dict] | None:
+    """The calls kern's core runs now, oldest first, each its `name` and `started`, from the
+    core's health; None where no core answers."""
+    answer = _ask_core(root, HEALTH, wait)
+    if answer is None:
+        return None
+    return [call for call in answer.get("calls") or [] if isinstance(call, dict)]
+
+
+def _age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+
+
+def calls_lines(calls: list[dict], now: datetime) -> list[str]:
+    """`next --calls`: each running call with its age at `now`, oldest first."""
+    if not calls:
+        return ["kern runs no call"]
+    lines = ["kern runs these calls:"]
+    for call in calls:
+        try:
+            started = datetime.fromisoformat(str(call.get("started", "")).replace("Z", "+00:00"))
+            age = _age((now - started).total_seconds())
+        except ValueError:
+            age = "age unknown"
+        lines.append(f"  {call.get('name', '?')}: running for {age}")
+    return lines
+
+
+def main(argv: list[str] | None = None, now: Callable[[], datetime] | None = None) -> int:
+    """`se_relay.py next [--root DIR] [--step N] [--calls]`: print the GitHub steps kern's relay
+    waits for, the same the hook tells on a prompt, whichever tool's PostToolUse ran last, and with
+    `--calls` each call the core runs with its age; exit 1 where no core serves the checkout, or
+    where `--step` names a step it no longer waits for (stale_step)."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="se_relay.py", description=(
@@ -259,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
     nxt.add_argument("--step", type=int, metavar="N",
                      help="the step number about to be answered: refused, naming the current "
                           "step, where the relay no longer waits for it")
+    nxt.add_argument("--calls", action="store_true",
+                     help="also print each call kern's core runs, with its age, from its health")
     args = parser.parse_args(argv)
     found = told(args.root)
     if found is None:
@@ -269,6 +315,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"se_relay.py next: {refused}", file=sys.stderr)
         return 1
     print(found or "kern's GitHub relay waits for no GitHub tool call")
+    if args.calls:
+        calls = running_calls(args.root)
+        if calls is None:
+            print(f"se_relay.py next: no core serves {args.root.resolve()}", file=sys.stderr)
+            return 1
+        print("\n".join(calls_lines(calls, (now or (lambda: datetime.now(timezone.utc)))())))
     return 0
 
 

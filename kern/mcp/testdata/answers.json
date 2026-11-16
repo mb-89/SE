@@ -21,7 +21,7 @@
     "isError": false,
     "content": [
       {
-        "text": "app: running in /work/checkout, pid 7, 1 session(s), 0 instance(s), 0 placed\n{\"health\":{\"contract\":0,\"pid\":7,\"bus\":\"\",\"started\":\"0001-01-01T00:00:00Z\",\"revision\":0,\"sessions\":[\"s1\"],\"instances\":null,\"placements\":null,\"attached\":null,\"backends\":null},\"root\":\"/work/checkout\",\"state\":\"running\"}"
+        "text": "app: running in /work/checkout, pid 7, 1 session(s), 0 instance(s), 0 placed\n{\"health\":{\"contract\":0,\"pid\":7,\"bus\":\"\",\"started\":\"0001-01-01T00:00:00Z\",\"revision\":0,\"sessions\":[\"s1\"],\"instances\":null,\"placements\":null,\"attached\":null,\"backends\":null,\"calls\":null},\"root\":\"/work/checkout\",\"state\":\"running\"}"
       }
     ],
     "structuredContent": {
@@ -29,6 +29,7 @@
         "attached": null,
         "backends": null,
         "bus": "",
+        "calls": null,
         "contract": 0,
         "instances": null,
         "pid": 7,

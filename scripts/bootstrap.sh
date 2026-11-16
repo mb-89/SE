@@ -63,7 +63,9 @@ se_project "$payload"
 project="$se_project"
 # Once per session under Copilot, which runs every hook source it finds together (a project's and a
 # plugin's): a second start of the same session within a minute ends here, quietly. Claude Code
-# starts a session once and is not guarded.
+# starts a session again after every compaction (the payload's source "compact"); that start is not
+# ended here, as the session keeps <se> and its greeting only from a start's context, but it skips
+# the steps that already ran (see compact below).
 if $hook && [ "$se_payload_host" = copilot ] &&
   [[ $payload =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"/\\]+)\" ]]; then
   claim="$project/.se/.runtime/start-${BASH_REMATCH[1]}.claim"
@@ -74,6 +76,11 @@ if $hook && [ "$se_payload_host" = copilot ] &&
   rm -f "$claim"
   (set -C && : >"$claim") 2>/dev/null || exit 0
 fi
+# A start after a compaction (Claude Code's payload source "compact") runs no release refresh, module
+# sync, commit identity or hooks again: they ran at the session's own start. Every other source
+# (startup, resume, clear, or none) runs every step.
+compact=false
+if $hook && [[ $payload =~ \"source\"[[:space:]]*:[[:space:]]*\"compact\" ]]; then compact=true; fi
 uv_url="https://astral.sh/uv/install.sh"
 uv_ps_url="https://astral.sh/uv/install.ps1"
 python_version="3.11"
@@ -262,7 +269,7 @@ fi
 # SE itself (README "Start and refresh"): where the installed SE moved to a newer release, the start
 # runs again from the moved tree, once, carrying what this one said. It fails open: a refresh that
 # cannot reach the remote or fails says so in one line and the start goes on with the SE in place.
-if $hook && [ -z "${SE_START_REFRESHED:-}" ]; then
+if $hook && ! $compact && [ -z "${SE_START_REFRESHED:-}" ]; then
   if line="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
     --root "$project" start-refresh 2>/dev/null)"; then
     carried=""
@@ -273,7 +280,7 @@ if $hook && [ -z "${SE_START_REFRESHED:-}" ]; then
 fi
 
 # Modules: the project's se.toml modules, fetched at their pins.
-if [ -f "$project/se.toml" ] && grep -q '^\[modules\.' "$project/se.toml"; then
+if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[modules\.' "$project/se.toml"; then
   if ! out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" --root "$project" sync 2>&1)"; then
     say "$out"
     need "syncing the modules of $project/se.toml failed; run this again when the cause above is fixed"
@@ -282,7 +289,7 @@ fi
 # The commit identity (README "Install"): at a session's start the project's checkout gets its
 # commit identity as setup.sh sets it, so a fresh clone's first commit already carries it, never the
 # host's default; work_tickets.py identity owns which one, and leaves git's own where none is set.
-if $hook && [ -f "$project/se.toml" ]; then
+if $hook && ! $compact && [ -f "$project/se.toml" ]; then
   uv run --no-project --python ">=$python_version" python "$se_root/scripts/work_tickets.py" \
     identity --worktree "$project" >/dev/null 2>&1 ||
     say "setting the commit identity of $project failed; run: uv run python $se_root/scripts/work_tickets.py identity --worktree $project"
@@ -290,7 +297,7 @@ fi
 # The hooks (AGENTS.md "Public safety"): a checkout whose core.hooksPath is unset gets se's hooks
 # at start, as setup.sh sets them, so a fresh clone's first commit already runs the public check; a
 # checkout that has one keeps it (se_start.py start-hooks owns which hooks).
-if $hook && [ -f "$project/se.toml" ]; then
+if $hook && ! $compact && [ -f "$project/se.toml" ]; then
   line="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")

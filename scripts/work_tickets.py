@@ -6965,6 +6965,11 @@ def integrate(
         push_gate(root, landing)
         guard_pushed_tree(root, landing)
         git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
+        # Said now, while kern still listens: once the core gives a relay step up, the client stops
+        # listening, and the except's line below would be lost.
+        print(f"{landing} is on origin at {landed[:12]}: should a later step fail, it stays there; "
+              f"the next integrate {pull_number} pushes it again and reuses its landing pull request",
+              file=sys.stderr, flush=True)
         state = {
             "branch": branch, "landing": landing, "target": target, "base": base,
             "landed": landed, "head": head, "tag": tag, "tracker": tracker, "remote": remote,
@@ -8006,16 +8011,45 @@ def fleet_lease(root: Path) -> timedelta:
     return timedelta(hours=hours)
 
 
+def fleet_ages(root: Path) -> bool:
+    """`[fleet] ages` in se.toml: whether the fleet check's person finding says how long the issue
+    has been open (open_for); built in false. The Go fleet component reads its config `ages`."""
+    ages = se_table(root, "fleet").get("ages", False)
+    if not isinstance(ages, bool):
+        raise QueueError(f"fleet.ages in {root / 'se.toml'} must be true or false; fix it or remove "
+                         "it for the built-in false")
+    return ages
+
+
+def open_for(created: str, now: datetime) -> str:
+    """How long an issue has been open at `now`, from its creation time `created`, in whole UTC
+    calendar days, as the person finding says it with `[fleet] ages` on: ", open N days",
+    ", open 1 day" or ", opened today"; "" where the creation time cannot be read.
+    components/fleet OpenFor, rule for rule."""
+    try:
+        when = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if when.tzinfo is None:
+        return ""
+    days = (now.astimezone(timezone.utc).date() - when.astimezone(timezone.utc).date()).days
+    if days <= 0:
+        return ", opened today"
+    return ", open 1 day" if days == 1 else f", open {days} days"
+
+
 def fleet_issue(raw: dict[str, object]) -> dict[str, object]:
     """An issue as the fleet check reads it, from gh's, the REST API's or the GitHub tools' form:
-    number, title, state and state reason in lower case, label names, body and url."""
+    number, title, state and state reason in lower case, label names, body, url and creation
+    time."""
     labels = {str(label.get("name", "")) if isinstance(label, dict) else str(label)
               for label in raw.get("labels") or []}
     reason = raw.get("state_reason") or raw.get("stateReason") or ""
     return {"number": int(raw["number"]), "title": str(raw.get("title") or ""),
             "state": str(raw.get("state") or "").lower(), "reason": str(reason).lower(),
             "labels": labels, "body": str(raw.get("body") or ""),
-            "url": str(raw.get("html_url") or raw.get("url") or "")}
+            "url": str(raw.get("html_url") or raw.get("url") or ""),
+            "created": str(raw.get("created_at") or raw.get("createdAt") or "")}
 
 
 def fleet_pull(raw: dict[str, object]) -> dict[str, object]:
@@ -8207,13 +8241,14 @@ def fleet_plan(repo: str, base: str) -> Plan:
 
 
 def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str,
-                   sessions: list[object] | None = None, restart: bool = False
-                   ) -> list[Finding]:
+                   sessions: list[object] | None = None, restart: bool = False,
+                   ages: bool = False) -> list[Finding]:
     """What is stuck or stray in the fleet `door` reads, in FLEET_KINDS order, lowest issue first
     within a kind; `repository` is the checkout's name, whose `repo:` label (or none) marks the
     issues whose branches live on this origin. Given the session tools' answers `sessions`, the
     worker sessions stopped on a usage limit too (limit_restart.py), their remedy by `restart`,
-    se.toml `[fleet] restart_after_limit`."""
+    se.toml `[fleet] restart_after_limit`. With `ages`, se.toml `[fleet] ages`, the person finding
+    says how long its issue has been open (open_for)."""
     open_issues = {issue["number"]: issue for issue in map(fleet_issue, door.issues("open"))}
     closed = {issue["number"]: issue for issue in map(fleet_issue, door.issues("closed"))}
     pulls = [fleet_pull(pull) for pull in door.pulls()]
@@ -8334,7 +8369,9 @@ def fleet_findings(door: object, now: datetime, lease: timedelta, repository: st
         held = ", ".join(f"#{n}" for n in sorted(holds))
         found.append(Finding(
             "waiting on the person", number,
-            f"waits for the person ({PERSON_LABEL})" + (f", holding up {held}" if held else ""),
+            f"waits for the person ({PERSON_LABEL})"
+            + (open_for(str(issue["created"]), now) if ages else "")
+            + (f", holding up {held}" if held else ""),
             "SE presents it to the person with the decision skill", holds=tuple(sorted(holds))))
 
     if sessions is not None:
@@ -9456,7 +9493,7 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     else:
         door = Fleet(root, repo, base)
     found = fleet_findings(door, datetime.now(timezone.utc), fleet_lease(root),
-                           repository_name(root), sessions, restart)
+                           repository_name(root), sessions, restart, fleet_ages(root))
     print(fleet_report(found, args.json))
     return 1 if any(finding.stuck for finding in found) else 0
 

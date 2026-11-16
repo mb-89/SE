@@ -855,3 +855,87 @@ func TestTheHealthNamesCompiledInInstancesAndTheirBackends(t *testing.T) {
 		t.Fatalf("the health's JSON %s names no backends", data)
 	}
 }
+
+// The health lists each call the core runs, by name and start, oldest first,
+// and drops it once it is answered or given up; with none running it lists
+// none.
+func TestTheHealthListsTheCallsTheCoreRuns(t *testing.T) {
+	t.Parallel()
+	w, comps, release := slowWiring(t)
+	clk := newClock()
+	c := served(t, host.Options{Clock: clk, Wiring: w, Components: comps})
+	client := as(t, c, bus.Client)
+	health := func() []host.CallState {
+		t.Helper()
+		var h host.Health
+		ask(t, client, host.HealthSubject, nil, &h)
+		if h.Calls == nil {
+			t.Fatal("the health has no calls list, and wants an empty one where none runs")
+		}
+		return h.Calls
+	}
+	if calls := health(); len(calls) != 0 {
+		t.Fatalf("the health lists the calls %+v before any runs, and wants none", calls)
+	}
+	inbox := bus.Inbox(bus.Client) + ".case"
+	heard := make(chan *nats.Msg, 64)
+	if _, err := client.ChanSubscribe(inbox+".>", heard); err != nil {
+		t.Fatal(err)
+	}
+	answers := map[string]host.CallAnswer{}
+	// next waits for the subject's first message: a progress line, or a call's answer.
+	next := func(subject string) {
+		t.Helper()
+		for {
+			select {
+			case m := <-heard:
+				if strings.HasSuffix(m.Subject, ".reply") {
+					var a host.CallAnswer
+					if err := json.Unmarshal(m.Data, &a); err != nil {
+						t.Fatal(err)
+					}
+					answers[m.Subject] = a
+				} else {
+					var p host.Progress
+					if err := json.Unmarshal(m.Data, &p); err != nil || p.Line == "" {
+						continue // a beat
+					}
+				}
+				if m.Subject == subject {
+					return
+				}
+			case <-time.After(wait):
+				t.Fatalf("nothing on %s", subject)
+			}
+		}
+	}
+	for _, word := range []string{"a", "b"} {
+		body, _ := json.Marshal(map[string]any{"args": []string{word}, "progress": inbox + "." + word + ".progress"})
+		if err := client.PublishRequest(bus.Call+bus.Token("long run"), inbox+"."+word+".reply", body); err != nil {
+			t.Fatal(err)
+		}
+		next(inbox + "." + word + ".progress") // it runs: its first step said its line
+		clk.move(time.Minute)
+	}
+	start := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	want := []host.CallState{{Name: "long run", Started: start}, {Name: "long run", Started: start.Add(time.Minute)}}
+	if calls := health(); fmt.Sprint(calls) != fmt.Sprint(want) {
+		t.Fatalf("the health lists the calls %+v, and wants %+v, oldest first", calls, want)
+	}
+	var given host.Abandoned
+	ask(t, client, host.AbandonSubject, host.Abandon{Call: inbox + ".a.reply"}, &given)
+	if !given.Abandoned {
+		t.Fatalf("giving up the first call answers %+v", given)
+	}
+	if calls := health(); fmt.Sprint(calls) != fmt.Sprint(want[1:]) {
+		t.Fatalf("the health lists the calls %+v after the first is given up, and wants %+v", calls, want[1:])
+	}
+	close(release)
+	next(inbox + ".b.reply")
+	if a := answers[inbox+".b.reply"]; a.Error != "" || a.Text != "let go b" {
+		t.Fatalf("the second call answers %+v", a)
+	}
+	if calls := health(); len(calls) != 0 {
+		t.Fatalf("the health lists the calls %+v once both ended, and wants none", calls)
+	}
+}
