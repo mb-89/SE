@@ -711,6 +711,17 @@ integrator's push, a person step for the owner:
 - Then set `landing = "fast-forward"` in `se.toml`; obs and every project se lands for set it in
   their own.
 
+One run can land the other way without a change to `se.toml`, to try a ruleset at the cost of
+one landing: `integrate <pull request> --landing fast-forward` (or `--landing squash`).
+
+- The choice holds for that run only and is kept in the hand-off's state, so `--read-back`
+  finishes the landing the way it started, whatever `se.toml` says by then.
+- A refused fast-forward push leaves the integration branch, the landing pull request and its
+  branch as they were and falls back to nothing; integrating again without `--landing` lands as
+  `se.toml` says. The integrate comment names the mode a flagged run used.
+- The identity gate and a public mirror's guard keep reading `se.toml`: a flagged landing commit
+  is `mb <mb>` either way, which both pass.
+
 #### Component versions
 
 kern (`kern/release.toml`) and the binary `se.toml` `[binary] release` names (SE's `se`,
@@ -1733,10 +1744,10 @@ work_tickets.py format [--root ROOT]
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
                           [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]
                           [--read-back BRANCH] [--record-fix BRANCH]
-                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
-                          [--landing-description FILE] [--build-command BUILD_COMMAND]
-                          [--include-late REASON] [--check-command JSON]
-                          [--check-command-temporary-directory]
+                          [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL]
+                          [--check-run CHECK_RUN] [--landing-description FILE]
+                          [--build-command BUILD_COMMAND] [--include-late REASON]
+                          [--check-command JSON] [--check-command-temporary-directory]
                           [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
     land it through a squash pull request once check passes, and close the work issue. Where gh is
