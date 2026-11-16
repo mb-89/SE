@@ -19,12 +19,10 @@ project's commands and hot files by the project's `AGENTS.md`.
 - **Only SE asks the human.** Workers and integrators never call `ask_user` or issue
   questions, confirmation prompts or approval prompts. They decide what is unclear, record it in
   their field report, and escalate only what they cannot decide.
-- **Never block on workers.** Start every work package as an **independent session**
-  (VS Code agent host: `create_session` with `worktree: false` and the worker's worktree folder as
-  `workspace`; Copilot CLI: a separate session). After dispatching, report and **end the turn**.
-  - Never use in-chat subagents (`task`) for work packages: they keep you busy and are cancelled
-    when the user interrupts.
-  - Never call blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
+- **Never block on workers.** Every work package runs in a
+  [visible session](../work-model/SKILL.md#visible-sessions) (VS Code agent host:
+  `create_session` with `worktree: false` and the worker's worktree folder as `workspace`; Copilot
+  CLI: a separate session). After dispatching, report and **end the turn**.
 - **One worktree per worker.** Never two workers in one checkout, never a worker in a main checkout.
   Separate worktrees prevent edit collisions; shared files still conflict at merge time, so check
   overlap before dispatch (step 5).

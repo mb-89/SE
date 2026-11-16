@@ -362,6 +362,19 @@ The owner: "Whatever we do, it needs to be neutral when we build it."
 - The one exception is a line the host reads literally and cannot derive, such as a `uses:` line in
   `.github/workflows`.
 
+### Visible sessions
+
+The owner: "you don't start subagents; you start independent sessions that I can see in the
+session list."
+
+- SE and every role that starts work run it only in independent sessions the person can see in
+  the host's session list, never in in-chat sub-agents (`task`), which the person cannot see and
+  an interruption cancels.
+- The role that starts them never blocks on them: it starts them, says who does what, and ends the
+  turn. No blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
+- Where a host has no way to start a session, the role files or queues the work, or gives the
+  person the line that starts it; it never runs the work in-chat.
+
 ### Suite at a moved pin
 
 When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new
