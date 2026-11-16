@@ -105,9 +105,18 @@ launcher, since its working directory need not be the checkout.
   Once the core runs it takes a session lease on `call.core.lease` and renews it every 30 s and on
   every call, each renewal an event; on EOF and on SIGTERM it returns the lease. A core that ended,
   idle or crashed, is started anew and the lease taken again.
+- **The supervisor's step** is one pure function, `mcp.Next` (`mcp/step.go`): from the core's
+  state, the lease, a start in flight and whether a call asked, it answers lease, start, fail or
+  wait, with the span to wait; the supervisor only carries it out.
+- **A call wakes the supervisor.** A call that finds no core running leaves the supervisor one
+  signal, which never blocks the call and ends its wait, so a core that is gone is started at once,
+  one start however many calls arrive. A core that ended at its start answers `failed` until Renew
+  has passed: no signal starts it again before, so a wiring that cannot start is not spawned in a
+  loop.
 - **A call before the core stands** waits up to 5 s, then answers the typed error `starting`, its
-  structured content `{"error": "starting", "message", "remedy"}`. The other kinds are `failed`
-  (the core ended at its start, with what it said), `no-checkout` and `command-failed`.
+  structured content `{"error": "starting", "message", "remedy"}`, while a start is in flight.
+  The other kinds are `failed` (the core ended at its start, with what it said, or none runs and
+  none starts), `no-checkout` and `command-failed`.
 - **It never exits early.** Without a root folder or a path to its own binary it serves all the
   same, and every call answers `failed` with why; only EOF ends it.
 - **Long answers come in pages** of at most 45,000 bytes (`mcp.PageLimit`), below a host's cut at
@@ -116,7 +125,7 @@ launcher, since its working directory need not be the checkout.
 
 | tool | what |
 |---|---|
-| `status` | the core's state and health, as `kern status --json` |
+| `status` | the core's state and health, as `kern status --json`, and `core`, how the door came to it: `attached`, `started` or `started again` |
 | `greeting` | the names and read-only commands the application names in `cli.Greeting`, read in order; a part the catalog lacks is left out, and with no part there is no greeting tool |
 | `<instance>` | one per switched-on instance with read-only commands, named in snake_case (`mcp.ToolName`: `retro-due` reads `retro_due`): `command`, one of them, `args` and `page`; its description lists each with its `mcp` line and usage |
 
@@ -132,7 +141,7 @@ launcher, since its working directory need not be the checkout.
   tools it made, and its status tool names the refusal; an application's test holds its own
   catalog to the check, as SE's `components/cmd/se/mcp_test.go` does.
 - **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,
-  against a fake core. The one contract test with the SDK's own client runs against the built
+  against a fake core, and `mcp/step_test.go` holds `mcp.Next`'s table. The one contract test with the SDK's own client runs against the built
   binary and the real core: SE's `components/cmd/se/mcp_test.go`.
 
 ## A component in Python
