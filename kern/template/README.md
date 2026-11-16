@@ -14,16 +14,17 @@ pin, fills in the name and makes the first commit.
 | `wiring.toml` | the instances and wires the core starts on, none yet; `enabled = false` switches one off |
 | `se.toml` | `[project]`, the `[tests]` budget and the `[modules.kern]` pin |
 | `tests/` | the battery: the Go tests, and a test that starts the bare core, asks it and stops it |
-| `.github/workflows/check.yml` | CI: kern's reusable battery at kern's release tag |
+| `.github/workflows/check.yml` | CI: kern's battery, through the copy beside it |
+| `.github/workflows/kern-battery.yml` | the battery's copy `se new app` writes at kern's pin (SE's README "Workflows") |
 | `AGENTS.md` | the agent guide |
 
 ## The pin
 
 kern is pinned twice with one owner: `go.mod` requires its version, and `se.toml [modules.kern]`
-says `go = true`, so the version is read from `go.mod`. While kern is incubated in SE, no module
-`github.com/mb-89/kern` can be fetched, so `go.mod`'s `replace` builds against kern's source: the
-kern beside the template here, and kern's source at the pin in `kern/` in an application that
-`se new app` made. The move to `mb-89/kern` drops the `replace` and that folder.
+says `go = true`, so the version is read from `go.mod`. While kern is incubated in SE, kern's
+module (the path `go.mod` requires) cannot be fetched, so `go.mod`'s `replace` builds against kern's
+source: the kern beside the template here, and kern's source at the pin in `kern/` in an application
+that `se new app` made. kern's move to its own repository drops the `replace` and that folder.
 
 ## Building your own binary
 
@@ -35,12 +36,15 @@ gains Go components, it builds its own binary the same way SE builds `se`:
   its `package` (`./cmd/app`), as `kern/release.toml` does for the bare core;
 - point `se.toml` at it with `[binary]\nrelease = "release.toml"`, so `bootstrap.sh` fetches, builds
   and starts that binary instead of the bare kern;
-- add a release workflow that calls kern's reusable one with its folder (`.`):
+- write the copy of kern's reusable release workflow beside the battery's, at the same pin, with
+  `uv run python <se>/scripts/se_workflows.py write --root . .github/workflows/kern-battery.yml
+  .github/workflows/kern-release.yml` (SE's README "Workflows"), and add a release workflow that
+  calls it with its folder (`.`):
 
 ```yaml
   jobs:
     release:
-      uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+      uses: ./.github/workflows/kern-release.yml
       with:
         directory: .
 ```

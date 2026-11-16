@@ -1,5 +1,6 @@
 # The application's CI, the check its main's ruleset requires: kern's battery, the Go and Python
-# tests within se.toml [tests]'s budget (kern's README "The battery").
+# tests within se.toml [tests]'s budget (kern's README "The battery"). It calls the battery's copy
+# that `se new app` writes beside it at kern's pin (SE's README "Workflows").
 name: check
 
 on:
@@ -12,4 +13,4 @@ permissions:
 
 jobs:
   check:
-    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.7.0
+    uses: ./.github/workflows/kern-battery.yml

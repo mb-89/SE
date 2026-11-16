@@ -4,17 +4,17 @@
 # tool (kern/tools/release) which reads the folder's release.toml. On a pull request it only builds
 # (and runs the bare template's battery, for kern); on a push to main it publishes the release that
 # folder's release.toml names, where it does not exist yet, so a push that changes the version cuts
-# its release. An application calls it with
+# its release. An application calls the copy SE writes into it, which keeps only workflow_call
+# (scripts/se_workflows.py, SE's README "Workflows"), with
 #
 #   jobs:
 #     release:
-#       uses: <owner>/<repository>/.github/workflows/kern-release.yml@kern-v<version>
+#       uses: ./.github/workflows/kern-release.yml
 #       with:
 #         directory: <the application's binary folder, e.g. components>
 #
 # SE's own se-release.yml does, for the `se` binary. While kern is incubated in SE, this lives here;
-# it moves with kern's workflows to <owner>/kern,
-# beside it (<owner>/<repository>: the SE these workflows run in, from its origin).
+# it moves with kern's workflows to kern's own repository, beside SE's.
 name: kern-release
 
 on:

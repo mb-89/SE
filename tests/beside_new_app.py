@@ -78,17 +78,19 @@ def run(*args: str, cwd: Path, timeout: float = 300) -> subprocess.CompletedProc
 
 
 def fake_se(root: Path) -> Path:
-    """This working tree's SE in the fake: its scripts, se.toml and kern, kern committed and tagged
-    kern-v<version> at its pin, origin on github.com."""
+    """This working tree's SE in the fake: its scripts, se.toml, kern and the battery the template's
+    CI calls, committed and tagged kern-v<version> at its pin, origin on github.com."""
     se = root / "se"
     ignore = shutil.ignore_patterns("__pycache__", ".venv")
     shutil.copytree(ROOT / "scripts", se / "scripts", ignore=ignore)
     shutil.copytree(ROOT / "kern", se / "kern", ignore=ignore)
     shutil.copy2(ROOT / "se.toml", se / "se.toml")
+    (se / ".github" / "workflows").mkdir(parents=True)
+    shutil.copy2(ROOT / ".github" / "workflows" / "kern-battery.yml", se / ".github" / "workflows")
     _, tag = se_modules.kern_pin(se)
     with git_door.use(DOOR[0]):
         fake_git.init(se, "-b", "main")
-        for args in (("add", "se.toml", "kern"), ("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q",
+        for args in (("add", "se.toml", "kern", ".github"), ("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q",
                      "-m", "SE"), ("tag", tag), ("remote", "add", "origin", "https://github.com/alice/se.git")):
             done = git_door.run(*args, root=se)
             assert done.returncode == 0, done.stderr

@@ -107,6 +107,27 @@ def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
     path.write_text(filled, encoding="utf-8")
 
 
+# The workflows the template's CI calls, written beside it as generated copies (scripts/se_workflows.py).
+APP_WORKFLOWS = (".github/workflows/kern-battery.yml",)
+
+
+def se_repository(se_root: Path) -> str:
+    """How the application's CI reaches SE: the repository beside it, under the same owner, by the
+    name of SE's home (scripts/se_home.py), else of SE's folder."""
+    found = _sibling("se_home").find(se_root)
+    return f"{_sibling('se_workflows').OWNER}/{found.repository if found else se_root.name}"
+
+
+def write_workflows(se_root: Path, ref: str, path: Path) -> None:
+    """The copies of SE's workflows at `ref` that the template's CI calls, into `path`."""
+    workflows = _sibling("se_workflows")
+    try:
+        plan = workflows.Plan(APP_WORKFLOWS, workflows.commit(se_root, ref), se_repository(se_root), se_root)
+        workflows.write(path, plan)
+    except workflows.WorkflowError as error:
+        raise NewError(str(error)) from error
+
+
 def github_owner(se_root: Path) -> str:
     """The owner of SE's home on github.com (scripts/se_home.py), the owner the new repository most
     likely shares; `<owner>` where SE's home is elsewhere or unknown."""
@@ -134,6 +155,7 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     unpack(se_root, ref, path, name)
     _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
+    write_workflows(se_root, ref, path)
     _git(path, "init", "-q", "-b", "main")
     _git(path, "config", "user.name", identity[0])
     _git(path, "config", "user.email", identity[1])

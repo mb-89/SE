@@ -27,8 +27,12 @@ TEMPLATE = {
                "replace example.com/alice/kern => ../\n"),
     "se.toml": '[project]\nidentity = "<name> <name>"\n\n[modules.kern]\ngo = true\n',
     "cmd/app/main.go": 'package main\n\nfunc main() { run("app") } // happy apps stay\n',
-    ".github/workflows/check.yml": "jobs:\n  check:\n    uses: alice/SE/.github/workflows/kern-battery.yml@kern-v0.1.0\n",
+    ".github/workflows/check.yml": "jobs:\n  check:\n    uses: ./.github/workflows/kern-battery.yml\n",
 }
+# The battery the template's CI calls, as SE ships it (scripts/se_workflows.py).
+BATTERY = ("name: kern-battery\non:\n  workflow_call:\njobs:\n  trust:\n    steps:\n"
+           "      - uses: actions/checkout@v7\n        with:\n          repository: ${{ job.workflow_repository }}\n"
+           "          ref: ${{ job.workflow_sha }}\n")
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -64,6 +68,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
                  "kern/release.toml": f'version = "{version}"\n',
                  "kern/go.mod": "module example.com/alice/kern\n\ngo 1.24.7\n",
                  "kern/index/index.go": "package index\n",
+                 ".github/workflows/kern-battery.yml": BATTERY,
                  **{f"kern/template/{name}": text for name, text in TEMPLATE.items()}})
     git(root, "add", "-A")
     git(root, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "kern")
@@ -94,7 +99,14 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     assert (app / "kern" / "index" / "index.go").is_file() and (app / "kern" / "release.toml").is_file()
     assert not (app / "kern" / "template").exists(), "kern's source at the pin, without its template"
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
-    assert "@kern-v0.1.0" in (app / ".github" / "workflows" / "check.yml").read_text()
+    # Its CI calls the battery's copy beside it, at the pin, reaching SE beside the application.
+    assert "uses: ./.github/workflows/kern-battery.yml" in (app / ".github" / "workflows" / "check.yml").read_text()
+    pin = git(source, "rev-parse", "kern-v0.1.0^{commit}")
+    battery = (app / ".github" / "workflows" / "kern-battery.yml").read_text()
+    assert battery.startswith(f"# se-workflows: .github/workflows/kern-battery.yml at {pin} from "
+                              "${{ github.repository_owner }}/se\n")
+    assert f"          repository: ${{{{ github.repository_owner }}}}/se\n          ref: {pin}\n" in battery
+    assert "alice" not in battery and "job.workflow" not in battery
     # One commit on main, as the project identity, and nothing left over.
     assert git(app, "log", "--format=%an <%ae>|%cn <%ce>|%s") == (
         "alice <alice>|alice <alice>|Start ledger, a bare application on kern 0.1.0")
