@@ -12,7 +12,12 @@ trusted records since the last full pass.
 
 Who may write the record: a dispatch of `se-pass-record.yml` by the integrator's account
 (`[tests] integrator`, default the repository's owner), whose run writes it as github-actions. Every
-other record is not trusted. Standard library only: it runs with the runner's `python3` (3.11 or
+other record is not trusted.
+
+Where the host gives the repository no runners, `[tests] ci = false` makes the integrator's commit
+status `se integrator verdict` the verdict instead (README "Landing without CI"): `judge_status`
+accepts one only for exactly the commit's tree and suite hash, written by the integrator. Standard
+library only: it runs with the runner's `python3` (3.11 or
 later) and the Actions token; exit code 0 done, 2 a setup error (se.toml, git, the API)."""
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shlex
 import sys
 import time
@@ -45,6 +51,10 @@ SESSION_VARIABLES = ("SE_SESSION", "CLAUDE_CODE_SESSION_ID")
 RECORD_APP = "github-actions"
 RETRY_SECONDS = 5
 SAFETY_NET_EVENTS = ("schedule", "workflow_dispatch")
+STATUS_CONTEXT = "se integrator verdict"  # the commit status a landing without CI is judged by
+SUITE_DIGITS = 40  # of the suite hash a status names: a sha256 tree and the hash fit in 140
+STATUS_PATTERN = re.compile(r"passed tree (?P<tree>[0-9a-f]{40}|[0-9a-f]{64}) "
+                            r"suite (?P<suite>[0-9a-f]{40})")
 
 
 class TrustError(Exception):
@@ -58,6 +68,7 @@ class Trust:
     on: bool  # trust_integrator, default false
     full_every: int  # full_every: every N-th landing runs the full suite anyway
     integrator: str | None  # the account whose dispatch may write the record; None: the owner
+    ci: bool = True  # ci, default true; false: the integrator's status is the verdict
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -94,7 +105,14 @@ def trust_settings(root: Path, rev: str | None = None) -> Trust:
     integrator = tests.get("integrator")
     if integrator is not None and not (isinstance(integrator, str) and integrator.strip()):
         raise TrustError(f"{where}: integrator must name the integrator's GitHub account")
-    return Trust(on, every, integrator.strip() if integrator else None)
+    ci = tests.get("ci", True)
+    if not isinstance(ci, bool):
+        raise TrustError(f"{where}: ci must be true or false (default true; false where the host "
+                         "gives the repository no runners, README \"Landing without CI\")")
+    if not ci and on:
+        raise TrustError(f"{where}: trust_integrator = true needs a runner for its record, and "
+                         "ci = false says there is none; turn one of them off")
+    return Trust(on, every, integrator.strip() if integrator else None, ci)
 
 
 def suite_hash(root: Path, rev: str | None = None) -> str:
@@ -194,6 +212,48 @@ def judge(check_run: dict, run: dict | None, *, tree_hash: str, suite: str,
     return True, (f"the integrator's record {url}: tree {tree_hash[:12]} passed `{record.get('command')}`"
                   f" in {record.get('seconds') or '?'} s at {record.get('time')}, session "
                   f"{record.get('session')}")
+
+
+def status_description(tree_hash: str, suite: str) -> str:
+    """The description of the status `se integrator verdict` for a pass on `tree_hash` whose
+    suite hashes to `suite` (README "Landing without CI"): the tree, and the suite hash's first
+    SUITE_DIGITS digits, so a sha256 repository's tree fits the host's 140 characters too."""
+    return f"passed tree {tree_hash} suite {suite[:SUITE_DIGITS]}"
+
+
+def newest_status(statuses: list[dict]) -> dict | None:
+    """The newest status of the context `se integrator verdict` among a commit's `statuses`."""
+    named = [status for status in statuses
+             if isinstance(status, dict) and status.get("context") == STATUS_CONTEXT]
+    return max(named, key=lambda status: int(status.get("id") or 0)) if named else None
+
+
+def judge_status(status: dict | None, *, tree_hash: str, suite: str,
+                 integrator: str) -> tuple[bool, str]:
+    """Whether a landing without CI may take `status`, the newest status `se integrator verdict`
+    on a commit, as the verdict for its tree `tree_hash` whose suite hashes to `suite`. Why."""
+    if status is None:
+        return False, f"no status {STATUS_CONTEXT}"
+    url = str(status.get("target_url") or status.get("url") or status.get("id"))
+    if status.get("context") != STATUS_CONTEXT:
+        return False, f"the status {url} is of context {status.get('context')!r}, not {STATUS_CONTEXT!r}"
+    creator = str((status.get("creator") or {}).get("login") or "")
+    if creator.lower() != integrator.lower():
+        return False, (f"the status {url} was written by {creator or 'nobody known'}, not by the "
+                       f"integrator {integrator}")
+    if status.get("state") != "success":
+        return False, f"the status {url} is {status.get('state')}, not success"
+    named = STATUS_PATTERN.fullmatch(str(status.get("description") or ""))
+    if named is None:
+        return False, f"the status {url} names no tree and suite: {status.get('description')!r}"
+    if named["tree"] != tree_hash:
+        return False, (f"the status {url} is of tree {named['tree'][:12]}, the commit's tree is "
+                       f"{tree_hash[:12]}")
+    if named["suite"] != suite[:SUITE_DIGITS]:
+        return False, (f"the status {url} names suite {named['suite'][:12]}, this tree's suite is "
+                       f"{suite[:12]}: stale")
+    return True, (f"the integrator {integrator}'s status {STATUS_CONTEXT}: tree {tree_hash[:12]} "
+                  f"passed with suite {suite[:12]}")
 
 
 class Api:

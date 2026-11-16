@@ -24,6 +24,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from collections.abc import Callable
+from typing import NoReturn
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -959,10 +960,56 @@ def pushed_tree_refusals(root: Path, commit: str) -> list[str]:
 def guard_pushed_tree(root: Path, commit: str) -> None:
     refusals = pushed_tree_refusals(root, commit)
     if refusals:
-        raise QueueError(
-            f"Refusing to push {commit} to the integration branch {integration_branch(root)}; "
-            "nothing was pushed:\n" + "\n".join(f"  {refusal}" for refusal in refusals)
-        )
+        refuse_push(root, commit, refusals)
+
+
+def refuse_push(root: Path, commit: str, refusals: list[str]) -> NoReturn:
+    raise QueueError(
+        f"Refusing to push {commit} to the integration branch {integration_branch(root)}; "
+        "nothing was pushed:\n" + "\n".join(f"  {refusal}" for refusal in refusals)
+    )
+
+
+def guard_integration_push(root: Path, commit: str) -> str | None:
+    """guard_pushed_tree for a push of the integration branch itself. Where se.toml on the
+    commit's first parent sets `[tests] ci = false` (README "Landing without CI"), the
+    integrator's status, accepted on the commit or on the head of the pull request that landed it,
+    stands in for missing local verdicts: the line naming it. None where the local verdicts
+    passed; with the setting off no status is read."""
+    refusals = pushed_tree_refusals(root, commit)
+    if not refusals:
+        return None
+    try:
+        without_ci = landing_without_ci(root, f"{commit}^")
+    except QueueError:
+        without_ci = False  # a malformed setting accepts nothing: the local verdicts decide
+    if not without_ci:
+        refuse_push(root, commit, refusals)
+    try:
+        return f"Verified: {commit[:12]} carries {status_on_pushed(root, commit)}"
+    except QueueError as error:
+        refuse_push(root, commit, [*refusals, str(error)])
+
+
+def status_on_pushed(root: Path, commit: str) -> str:
+    """Why the integrator's status accepts `commit` for the integration branch: its own, or that
+    of the head of the pull request that landed it, for exactly its tree and suite hash."""
+    remote = remote_repo(root)
+    if remote is None or hand_off():
+        raise QueueError(f"the integrator's status {trust.STATUS_CONTEXT} could not be read: "
+                         "gh is not signed in or origin is missing")
+    sha = checked_git(root, "rev-parse", f"{commit}^{{commit}}").strip()
+    door = GitHub(root, remote)
+    integrator = trust.trust_settings(root, f"{sha}^").integrator or owner_repo(remote)["owner"]
+    tree, suite = tree_of(root, sha), trust.suite_hash(root, sha)
+    reasons = []
+    for head in dict.fromkeys([sha, *door.merged_heads(sha)]):
+        accepted, why = trust.judge_status(trust.newest_status(door.statuses(head)),
+                                           tree_hash=tree, suite=suite, integrator=integrator)
+        if accepted:
+            return f"{why} (on {head[:12]})"
+        reasons.append(f"{head[:12]}: {why}")
+    raise QueueError(f"no accepted status {trust.STATUS_CONTEXT}: " + "; ".join(reasons))
 
 
 def run_public_check(root: Path, previous: str) -> None:
@@ -2796,7 +2843,9 @@ def push(root: Path, branch: str | None = None) -> str | None:
         print(f"Release: tag {tag} once the landing is on {target}; it is not pushed now")
         tag = None
     push_gate(root, branch)
-    if branch == target or landing:
+    if branch == target and (accepted := guard_integration_push(root, branch)):
+        print(accepted)
+    elif landing:
         guard_pushed_tree(root, branch)
     git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
     return released
@@ -6272,6 +6321,22 @@ class GitHub:
         })
         return str(merged.get("sha") or "")
 
+    def statuses(self, sha: str) -> list[dict[str, object]]:
+        """The commit statuses on `sha`, as the host lists them (README "Landing without CI")."""
+        found = self.api(f"commits/{sha}/statuses?per_page=100")
+        return found if isinstance(found, list) else []
+
+    def create_status(self, sha: str, state: str, context: str, description: str) -> dict[str, object]:
+        """Write the commit status `context` on `sha` as the account gh is signed in as."""
+        return self.api(f"statuses/{sha}", "POST", {
+            "state": state, "context": context, "description": description})
+
+    def merged_heads(self, sha: str) -> list[str]:
+        """The head commits of the merged pull requests that landed `sha`."""
+        pulls = self.api(f"commits/{sha}/pulls")
+        return [str(pull["head"]["sha"]) for pull in pulls if isinstance(pull, dict)
+                and pull.get("merged_at") and pull.get("head")] if isinstance(pulls, list) else []
+
 
 def wait_for_check(door: GitHub, sha: str, pull_url: str) -> str:
     """Wait for the required check `check` on the landing head `sha`; its run's URL once it
@@ -6370,6 +6435,54 @@ def record_steps(remote: str, landing: str, record: dict[str, str] | None) -> tu
     )
 
 
+def landing_without_ci(root: Path, rev: str) -> bool:
+    """Whether se.toml at `rev` (the integration branch a landing starts from) sets `[tests] ci =
+    false`: the integrator's status is the verdict, not CI's check (README "Landing without CI")."""
+    try:
+        return not trust.trust_settings(root, rev).ci
+    except trust.TrustError as error:
+        raise QueueError(f"Landing without CI: {error}") from error
+
+
+def status_verdict(root: Path, remote: str, base: str, landed: str) -> dict[str, str]:
+    """What the integrator's status on the landing head `landed` names and who may write it: the
+    tree, the suite's hash, its description and the integrator (`[tests] integrator` on `base`,
+    default origin's owner), with the commit's page on origin's host."""
+    integrator = trust.trust_settings(root, base).integrator or owner_repo(remote)["owner"]
+    tree, suite = tree_of(root, landed), trust.suite_hash(root, landed)
+    host = repo_host(remote) or "github.com"
+    return {"sha": landed, "tree": tree, "suite": suite, "integrator": integrator,
+            "description": trust.status_description(tree, suite),
+            "url": "https://" + f"{host}/{api_repo(remote)}/commit/{landed}"}
+
+
+def status_steps(remote: str, verdict: dict[str, str] | None) -> tuple[Step, ...]:
+    """Where the landing runs without CI, the integrator's verdict written on the landing head
+    before the landing pull request opens; none where CI's check is the verdict."""
+    if verdict is None:
+        return ()
+    return (Step("write_status", "create_commit_status", {
+        **owner_repo(remote), "sha": verdict["sha"], "state": "success",
+        "context": trust.STATUS_CONTEXT, "description": verdict["description"]},
+        note=f"Through gh api statuses/{verdict['sha']} as the integrator "
+             f"{verdict['integrator']}: the host's GitHub tools write no commit status"),)
+
+
+def accept_status(door: GitHub, verdict: dict[str, str]) -> str:
+    """The integrator's status on the landing head, accepted only for exactly its tree and suite
+    hash, written by the integrator; the commit's page, refused otherwise."""
+    sha = verdict["sha"]
+    accepted, why = trust.judge_status(
+        trust.newest_status(door.statuses(sha)), tree_hash=verdict["tree"],
+        suite=verdict["suite"], integrator=verdict["integrator"])
+    if not accepted:
+        raise QueueError(
+            f"The landing without CI has no verdict on {sha[:12]}: {why}; nothing was merged into "
+            "the integration branch. Sign gh in as the integrator, then integrate again")
+    print(f"Verdict {trust.STATUS_CONTEXT}: success ({why})")
+    return verdict["url"]
+
+
 def integrator_record(root: Path, landed: str, tested: str) -> dict[str, str] | None:
     """The record's inputs for the landing head `landed`, whose suite passed on `tested`, where
     se.toml [tests] trust_integrator is on; None where it is off (README "Trusted landings")."""
@@ -6385,15 +6498,30 @@ def integrator_record(root: Path, landed: str, tested: str) -> dict[str, str] | 
 
 def landing_plan(remote: str, landing: str, target: str, base: str, landed: str, title: str,
                  message: str, description: str, then: str, tracker: str,
-                 record: dict[str, str] | None = None, mode: str = SQUASH) -> Plan:
+                 record: dict[str, str] | None = None, mode: str = SQUASH, *,
+                 verdict: dict[str, str] | None = None) -> Plan:
     """The pause search on `tracker`, the integrator's record where trust is on, then open or
     reuse the landing pull request, wait for `check` on `landed` and, for a squash landing,
     squash-merge it there with exactly `title` and `message`: the GitHub steps of landing on
     `target`. A fast-forward landing ends at the check: the push that moves `target` to `landed`
-    is git's, the command's that follows (fast_forward)."""
+    is git's, the command's that follows (fast_forward). Where `verdict` names the integrator's
+    status (a landing without CI), that status is written first and read in place of `check`."""
     where = owner_repo(remote)
-    recording = record_steps(remote, landing, record)
+    recording = (*record_steps(remote, landing, record), *status_steps(remote, verdict))
     number = Later("pull number", 2 + len(recording))
+    waiting = Step("wait_check", "pull_request_read", {
+        **where, "method": "get_check_runs", "pullNumber": number},
+        note=f"Every {CHECK_POLL_SECONDS} s, up to {CHECK_POLLS * CHECK_POLL_SECONDS // 60} "
+             f"minutes, until the check run {CHECK_NAME} on {landed} completes; any conclusion "
+             "but success: merge nothing, fix the cause on the work branch, integrate again",
+        gives=("check run url",))
+    if verdict is not None:
+        waiting = Step("wait_check", "pull_request_read", {
+            **where, "method": "get_status", "pullNumber": number},
+            note=f"The newest status {trust.STATUS_CONTEXT} on {landed} must be success, written "
+                 f"by the integrator {verdict['integrator']}, with the description "
+                 f"{verdict['description']}; anything else, or none: merge nothing",
+            gives=("check run url",))
     return Plan(f"land {landing} on {target}", (
         pause_step(tracker),
         *recording,
@@ -6403,12 +6531,7 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  f"{target}) lists one, update_pull_request that one with this title and body "
                  "instead",
             gives=("pull number", "pull url")),
-        Step("wait_check", "pull_request_read", {
-            **where, "method": "get_check_runs", "pullNumber": number},
-            note=f"Every {CHECK_POLL_SECONDS} s, up to {CHECK_POLLS * CHECK_POLL_SECONDS // 60} "
-                 f"minutes, until the check run {CHECK_NAME} on {landed} completes; any conclusion "
-                 "but success: merge nothing, fix the cause on the work branch, integrate again",
-            gives=("check run url",)),
+        waiting,
         *(() if mode == FAST_FORWARD else (Step("squash", "merge_pull_request", {
             **where, "pullNumber": number, "merge_method": "squash", "commit_title": title,
             "commit_message": message, "expectedHeadSha": landed},
@@ -6428,8 +6551,9 @@ REHEARSAL_READ_BACK = "purpose: the read-back of the rehearsal pull request #{nu
 
 
 def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: str,
-                    tracker: str) -> dict[str, Action]:
-    """The local runner of a landing plan, through the door."""
+                    tracker: str, verdict: dict[str, str] | None = None) -> dict[str, Action]:
+    """The local runner of a landing plan, through the door; `verdict`, where the landing runs
+    without CI, names the integrator's status that stands in for `check`."""
     seen: dict[str, str] = {}
 
     def paused(_: dict[str, object], __: str) -> None:
@@ -6451,7 +6575,23 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
 
     def check(arguments: dict[str, object], _: str) -> dict[str, object]:
         landed = checked_git(root, "rev-parse", landing).strip()
+        if verdict is not None:
+            if landed != verdict["sha"]:
+                raise QueueError(f"{landing} is at {landed[:12]}, not the head {verdict['sha'][:12]} "
+                                 "the integrator's status is for; nothing was merged")
+            return {"check run url": accept_status(door, verdict)}
         return {"check run url": wait_for_check(door, landed, seen["url"])}
+
+    def write_status(arguments: dict[str, object], _: str) -> None:
+        sha = str(arguments["sha"])
+        refusals = pushed_tree_refusals(root, sha)
+        if verdict is None or sha != verdict["sha"] or refusals:
+            raise QueueError(f"No verdict written on {sha[:12]}: the suite and the checks have not "
+                             "passed on exactly its tree here; nothing was merged"
+                             + "".join(f"; {refusal}" for refusal in refusals))
+        door.create_status(sha, str(arguments["state"]), str(arguments["context"]),
+                           str(arguments["description"]))
+        print(f"The integrator's status {trust.STATUS_CONTEXT}: success written on {sha[:12]}")
 
     def squash(arguments: dict[str, object], _: str) -> dict[str, object]:
         number, url = int(arguments["pullNumber"]), seen["url"]
@@ -6489,7 +6629,8 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
         print(f"The integrator's record: {run.get('conclusion')} ({run.get('html_url')})")
 
     return {"paused": paused, "dispatch_record": dispatch_record, "wait_record": wait_record,
-            "open_pull": open_pull, "wait_check": check, "squash": squash}
+            "write_status": write_status, "open_pull": open_pull, "wait_check": check,
+            "squash": squash}
 
 
 def push_landing(root: Path, door: GitHub, target: str, base: str, landed: str,
@@ -6703,6 +6844,13 @@ def integrate(
             f"starts from origin's newest {target}, so reset the checkout to it "
             f"(git -C {root} reset --keep origin/{target}) and integrate again"
         )
+    without_ci = landing_without_ci(root, base)
+    if without_ci and handing_off:
+        raise QueueError(
+            f"work_tickets.py integrate: se.toml [tests] ci = false on {target} lands on the "
+            f"integrator's commit status {trust.STATUS_CONTEXT}, which only gh writes (the host's "
+            "GitHub tools write no commit status); nothing was merged. Sign gh in as the "
+            "integrator and integrate again (README \"Landing without CI\")")
     head = str(pull.get("headRefOid", ""))
     late = check_branch_tip(root, report, branch, head or branch, included)
     landing = f"{LANDING_PREFIX}{branch}"
@@ -6785,7 +6933,9 @@ def integrate(
             "landing_mode": mode, "took": took,
         }
         record = integrator_record(root, landed, tested)
-        first = 2 + len(record_steps(remote, landing, record))  # the landing pull request's step
+        verdict = status_verdict(root, remote, base, landed) if without_ci else None
+        first = 2 + len(record_steps(remote, landing, record)) + len(  # the landing pull request's step
+            status_steps(remote, verdict))
         last = first + (2 if mode == SQUASH else 1)  # the merge, or the check a push follows
         landing_desc = ("--landing-description <file: the landing pull request's description, as "
                         f"pull_request_read get reads it after step {last}> ")
@@ -6798,7 +6948,7 @@ def integrate(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number), metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
-                            then, tracker, record, mode)
+                            then, tracker, record, mode, verdict=verdict)
         door = relay_door(root, remote) if handing_off else None
         if door is not None:  # one call through kern: each GitHub step is a github.step
             feedback.phase("landing plan through kern's relay: the landing pull request, its "
@@ -6831,7 +6981,8 @@ def integrate(
             feedback.phase("landing plan: the landing pull request, its check, the "
                            f"{'squash merge' if mode == SQUASH else 'fast-forward'}")
             door = GitHub(root, remote)
-            given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
+            given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker,
+                                                   verdict))
             if mode == FAST_FORWARD:
                 given["merge commit sha"] = push_landing(root, door, target, base, landed,
                                                          int(given["pull number"]))
@@ -8765,8 +8916,9 @@ def run_verified(root: Path, args: argparse.Namespace) -> int:
     if said is not None:
         print(said.line, file=sys.stderr)
     if args.remote_ref == f"refs/heads/{integration_branch(root)}":
-        guard_pushed_tree(root, args.commit)
-        print(f"Verified: {args.commit[:12]} carries the verdicts the integration branch needs")
+        accepted = guard_integration_push(root, args.commit)
+        print(accepted or f"Verified: {args.commit[:12]} carries the verdicts the integration "
+                          "branch needs")
     return 0
 
 

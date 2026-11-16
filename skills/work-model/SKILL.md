@@ -280,6 +280,21 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - The verdicts live in the repository's git directory (`se-verdicts/`, `<se>/scripts/verdicts.py`),
   shared by its worktrees.
 
+### Land without CI
+
+Where the host gives a repository no runners, nothing can wait for `check`. There, and only where
+se.toml on the integration branch sets `[tests] ci = false`, the integrator's own complete run is
+the verdict, through the same landing ([README "Landing without CI"](../../README.md#landing-without-ci)).
+
+- The mode is chosen once, by that setting; se never infers it from the host's answer, and with
+  it off every landing waits for `check` as above.
+- `integrate` runs the complete suite, the project's checks and the public check on exactly the
+  tree it lands, then writes the commit status `se integrator verdict` on that commit through the
+  host's API: the tree, the suite's hash and the result. It lands, by squash or fast-forward,
+  only once that status is accepted.
+- Only the integrator's account may write it, and only a success for exactly that tree and suite
+  hash is accepted; `verified` and `push` accept it for the integration branch the same way.
+
 ## Release kind
 
 A release's kind follows what changed, never the branch name: the worker declares it in the field
@@ -702,6 +717,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
   `pr-body`, `docs`, `format`, `metrics` and `field-report --check`.
+  - Where `[tests] ci = false` ([Land without CI](#land-without-ci)), `push` and `verified`
+    read the integrator's status through gh alone; without it they accept none, and the
+    local verdicts decide.
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
