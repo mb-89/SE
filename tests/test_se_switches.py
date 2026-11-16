@@ -300,10 +300,46 @@ def test_the_command_prints_no_value_and_writes_nothing(monkeypatch, tmp_path, c
         assert found[("[project] public_check", "")] == ("off", "se.toml")
 
 
+DRIFT_FIXTURE = FIXTURE + """
+[[not_switch]]
+name = "[modules]"
+why = "values"
+
+[[not_switch]]
+name = "[tests] beside"
+why = "suites"
+
+[[not_switch]]
+name = "[outside]"
+why = "values"
+"""
+
+
 def test_the_drift_list_names_what_no_table_file_names():
-    texts = ['VARIABLE = "SE_KERN"', 'x = "SE_NEW_THING"', 'echo "${SE_SHELL:-}"', "$env:SE_PS",
+    texts = ['x = "SE_X"', 'x = "SE_NEW_THING"', 'echo "${SE_SHELL:-}"', "$env:SE_PS",
              'SE_ROOT = Path(".")', 'y = "SE_ROOT"']
-    found = se_switches.drift(se_switches.load(), texts,
-                              {"project": {"public_check": True, "name": "x"}, "tests": {"command": []}})
+    found = se_switches.drift(se_switches.parse({"fixture.toml": DRIFT_FIXTURE}), texts,
+                              {"x": {"count": 1, "name": "x"}, "tests": {"command": []}})
     assert found == {"environment": ["SE_NEW_THING", "SE_PS", "SE_SHELL"],
-                     "se.toml": ["project.name", "tests.command"]}
+                     "se.toml": ["tests.command", "x.name"]}
+
+
+def test_the_key_notation_parses():
+    loaded = se_switches.parse({"fixture.toml": DRIFT_FIXTURE})
+    assert {"[modules]", "[tests] beside", "[outside]"} <= set(loaded.not_switches)
+    assert set(loaded.covers()) == {"modules", "tests.beside", "outside"}
+
+
+def test_drift_leaves_out_covered_keys_and_keeps_a_sibling():
+    project = {"modules": {"obs": {"url": "u", "version": "^1"}},
+               "tests": {"beside": {"kern": {"command": []}}, "beside_x": 1, "shards": 2},
+               "outside": {"SE": 1}, "outside-text": {"envelope": True}}
+    found = se_switches.drift(se_switches.parse({"fixture.toml": DRIFT_FIXTURE}), [], project)
+    assert found["se.toml"] == ["outside-text.envelope", "tests.beside_x", "tests.shards"]
+
+
+@pytest.mark.parametrize("name", ["tests.command", "[tests", "[tests] ", "SE_lower", "[] key"])
+def test_a_bad_not_switch_name_is_refused_naming_its_file_and_number(name):
+    text = FIXTURE + f'\n[[not_switch]]\nname = "{name}"\nwhy = "x"\n'
+    with pytest.raises(se_switches.TableError, match=r"^bad\.toml: not_switch 2 "):
+        se_switches.parse({"bad.toml": text})
