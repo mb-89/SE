@@ -35,3 +35,9 @@ func detached(run *exec.Cmd) *exec.Cmd {
 	}
 	return starter
 }
+
+// let releases the starter, which exits once `start /b` has launched the core:
+// the core outlives nothing of this process.
+func let(run *exec.Cmd) error {
+	return run.Process.Release()
+}

@@ -35,6 +35,8 @@ func TestMain(m *testing.M) {
 		os.Exit(caller())
 	case whereArg:
 		os.Exit(where())
+	case spawnedArg:
+		os.Exit(spawned())
 	}
 	// Every test reaches git through kern's git door, on its fake.
 	gitdoor.Use(gitfake.New())
