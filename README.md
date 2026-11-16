@@ -1466,8 +1466,8 @@ uv run python <se>/scripts/se_workflows.py write [<path>...]
 uv run python <se>/scripts/se_workflows.py check
 ```
 
-- What SE ships: `.github/workflows/` `kern-battery.yml`, `kern-release.yml` and `release.yml`,
-  and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
+- What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
+  and `release.yml`, and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
   `scripts/se_workflows.py`). `write` writes the files it names, or regenerates those the project
   holds; each is a generated file whose first line names its source path, the pin and SE's place.
 - The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
@@ -1483,6 +1483,29 @@ uv run python <se>/scripts/se_workflows.py check
   - `check` also fails where a workflow calls `suite-time` with a `shards:` number other than
     `se.toml` `[tests] shards` (default 1), naming both; an expression there is the run's, not
     compared.
+- `branch-cleanup.yml` deletes a closed pull request's head branch, merged or not, and never a
+  fork's, `main`, the default branch, `se`, `rehearsal`, a `ccr-` or `claude/` branch, another open
+  pull request's head or a branch that moved since; its header owns the guards.
+  - SE runs it on its own `pull_request` trigger; a project adds a trigger file of its own beside
+    the copy, such as `branch-cleanup-on-close.yml`:
+
+```yaml
+name: branch-cleanup-on-close
+on:
+  pull_request:
+    types: [closed]
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  cleanup:
+    uses: ./.github/workflows/branch-cleanup.yml
+    with:
+      number: ${{ github.event.pull_request.number }}
+      head_ref: ${{ github.event.pull_request.head.ref }}
+      head_sha: ${{ github.event.pull_request.head.sha }}
+      head_repository: ${{ github.event.pull_request.head.repo.full_name }}
+```
 
 ## New application
 

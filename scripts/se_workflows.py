@@ -40,6 +40,7 @@ MODULE = "se"
 
 # The files a project calls, each by `uses: ./<path>` (an action by its folder).
 SHIPPED = (
+    ".github/workflows/branch-cleanup.yml",
     ".github/workflows/kern-battery.yml",
     ".github/workflows/kern-release.yml",
     ".github/workflows/release.yml",
