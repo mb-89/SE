@@ -227,7 +227,7 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
     plugin = marketplace["plugins"][0]["name"]
-    assert f"`claude plugin install {plugin} --marketplace mb-89/SE`" in readme
+    assert f"`claude plugin install {plugin} --marketplace <owner>/<repository>`" in readme
     assert f"`{plugin}@{marketplace['name']}`" in readme
     for agent in sorted(path.stem for path in (ROOT / "src" / "agents").glob("*.md")):
         assert f"`{plugin}:{agent}`" in readme
@@ -237,7 +237,7 @@ def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     cloud = readme.split("### Claude Code cloud\n", 1)[1].split("\n## ", 1)[0]
     script = cloud.split("```bash\n", 1)[1].split("```", 1)[0]
-    assert "git clone --depth 1 https://github.com/mb-89/SE ~/.claude/skills/se ||" in script
+    assert "git clone --depth 1 https://github.com/<owner>/<repository> ~/.claude/skills/se ||" in script
     assert "-b se" not in readme and "#se`" not in readme  # se replaced main: no command names it
     row = next(line for line in readme.splitlines() if line.startswith("| Claude Code cloud"))
     for kind in ("agents", "skills"):
@@ -477,20 +477,71 @@ def test_a_plugin_setting_the_build_cannot_read_is_refused(tmp_path, capsys):
     assert "[plugin] holds only `root_mcp = true|false`" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("folder", (".github/agents", ".github/skills"))
-def test_no_relative_link_leaves_its_folder_in_the_copilot_layout(checkout, folder):
-    """The files work copied or installed elsewhere: a link out of the folder is a GitHub URL at
-    the project's version."""
-    version = tomllib.loads((checkout / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
-    base = (checkout / folder).resolve()
-    urls = 0
-    for path in (checkout / folder).rglob("*.md"):
-        for target in LINK.findall(path.read_text(encoding="utf-8")):
-            if "://" in target:
-                urls += target.startswith(f"https://github.com/mb-89/SE/blob/v{version}/")
+LAYOUT_FOLDERS = ("agents", "skills", ".github/agents", ".github/skills")
+
+
+def layout_links(root: Path) -> list[tuple[Path, str]]:
+    """Every link of every generated Markdown file under `root`, with the file that holds it."""
+    return [(path, target) for folder in LAYOUT_FOLDERS for path in sorted((root / folder).rglob("*.md"))
+            for target in LINK.findall(path.read_text(encoding="utf-8"))]
+
+
+def test_every_layout_link_resolves_in_ses_checkout_and_in_an_installed_plugins_folder(tmp_path):
+    """Links stay relative to their file, so they reach their target wherever the repository lies:
+    in SE's checkout and in the folder a host installs the plugin to, which holds the repository at
+    another root. No link names where SE lives."""
+    installed = tmp_path / "home" / ".claude" / "plugins" / "cache" / "se" / "se" / "1.0.0"
+    shutil.copytree(ROOT, installed, ignore=shutil.ignore_patterns(
+        ".git", ".se", ".venv", ".pytest_cache", "__pycache__", "node_modules"))
+    relative = 0
+    for root in (ROOT, installed):
+        for path, target in layout_links(root):
+            where = f"{path.relative_to(root).as_posix()}: {target}"
+            assert not re.match(r"https?://[^/]+/[^/]+/[^/]+/(?:blob|tree)/", target), where
+            if "://" in target or target.startswith("mailto:"):
                 continue
-            assert (path.parent / target).resolve().is_relative_to(base), f"{path.relative_to(checkout)}: {target}"
-    assert urls > 0, "the links that left the folder point to GitHub at the pinned version"
+            resolved = (path.parent / target).resolve()
+            assert resolved.is_relative_to(root.resolve()) and resolved.exists(), where
+            relative += 1
+    assert relative > 0, "the layouts link to the files beside them"
+
+
+def test_a_layout_link_out_of_its_folder_stays_relative(tmp_path):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n\n"
+                 "See [the README](../../README.md#install) and [x](../skills/x/SKILL.md).\n")
+    write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
+    files = se_plugin.expected(tmp_path)
+    copilot = files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode()
+    claude = files[se_plugin.PurePosixPath("agents/se.md")].decode()
+    assert "See [the README](../../README.md#install) and [x](../skills/x/SKILL.md)." in copilot
+    assert "See [the README](../README.md#install) and [x](../skills/x/SKILL.md)." in claude
+
+
+def test_the_manifests_name_no_home(checkout):
+    for path in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".github/plugin/plugin.json"):
+        data = json.loads((checkout / path).read_text(encoding="utf-8"))
+        assert "repository" not in data and "author" not in data and "homepage" not in data, path
+        assert "://" not in json.dumps({key: value for key, value in data.items() if key != "hooks"}), path
+
+
+@pytest.mark.parametrize("crlf", (False, True), ids=("lf", "crlf"))
+def test_check_passes_in_an_lf_and_in_a_crlf_checkout(tmp_path, capsys, crlf):
+    """git's autocrlf on Windows checks out text with CRLF line endings: the sources and the
+    generated layouts alike. `check` holds both to the same LF build."""
+    root = tmp_path / "se"
+    shutil.copytree(ROOT / "src", root / "src")
+    shutil.copy(ROOT / "se.toml", root)
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    if crlf:
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in (".md", ".json", ".toml", ".py", ".sh"):
+                path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    capsys.readouterr()
+    assert se_plugin.main(["check", "--root", str(root)]) == 0, capsys.readouterr().err
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before, \
+        "a build of an up-to-date CRLF checkout rewrites nothing"
 
 
 def test_a_copilot_part_goes_only_to_the_copilot_layout_without_its_markers(tmp_path):
@@ -501,8 +552,7 @@ def test_a_copilot_part_goes_only_to_the_copilot_layout_without_its_markers(tmp_
     copilot = files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode()
     claude = files[se_plugin.PurePosixPath("agents/se.md")].decode()
     assert claude.endswith("# SE\n\nBoth.\n\nBoth again.\n")
-    assert copilot.endswith("# SE\n\nBoth.\n\nOnly Copilot, see "
-                            "[it](https://github.com/mb-89/SE/blob/v1.0.0/.github/skills/x/SKILL.md).\n\nBoth again.\n")
+    assert copilot.endswith("# SE\n\nBoth.\n\nOnly Copilot, see [it](../skills/x/SKILL.md).\n\nBoth again.\n")
     assert "<!--" not in copilot.split("-->", 1)[1], "no marker line is left"
 
 
