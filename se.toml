@@ -27,6 +27,11 @@ authored_content = [
 [binary]
 release = "components/release.toml"
 
+# How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
+# integrator's own, so no commit on main carries an address (README "Landing on main").
+[integrate]
+landing = "fast-forward"
+
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (README "Test budget").
 [tests]
