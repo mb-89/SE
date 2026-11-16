@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/bus"
+	"kern/components/github"
+	"kern/host"
+	"kern/index"
 )
 
 // clock is the read times' clock; the case moves it.

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/bus"
-	gitdoor "github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/bus"
+	gitdoor "kern/git"
+	"kern/host"
+	"kern/index"
 )
 
 // The conservative parsing: an ordinary command names no script, and a script

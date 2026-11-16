@@ -2,7 +2,7 @@ module example.com/app
 
 go 1.25.14
 
-require github.com/mb-89/kern v0.1.0
+require kern v0.1.0
 
 require (
 	github.com/antithesishq/antithesis-sdk-go v0.4.3-default-no-op // indirect
@@ -29,4 +29,4 @@ require (
 
 // While kern is incubated in SE, the template builds against the kern beside it;
 // `se new app` replaces this line by kern's source at the pin (README.md "The pin").
-replace github.com/mb-89/kern => ../
+replace kern => ../

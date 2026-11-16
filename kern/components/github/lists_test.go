@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/index"
+	"kern/components/github"
+	"kern/index"
 )
 
 // lister is another component, which lists GitHub through the component's

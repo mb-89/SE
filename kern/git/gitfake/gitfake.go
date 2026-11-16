@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mb-89/kern/git"
+	"kern/git"
 )
 
 // Fake is a git door backend (git.Backend); one serves any number of
@@ -118,7 +118,7 @@ func (f *Fake) Run(_ context.Context, c git.Command) (string, error) {
 	commands := map[string]func(call) (string, *refusal){
 		"init": f.initRepo, "config": f.config, "add": f.add, "commit": f.commit, "tag": f.tag,
 		"update-ref": f.updateRef, "symbolic-ref": f.symbolicRef, "rev-parse": f.revParse,
-		"diff": f.diff, "ls-files": f.lsFiles, "for-each-ref": f.forEachRef,
+		"diff": f.diff, "ls-files": f.lsFiles, "for-each-ref": f.forEachRef, "remote": f.remote,
 	}
 	handler, ok := commands[args[0]]
 	if !ok {
@@ -231,6 +231,23 @@ func (f *Fake) config(c call) (string, *refusal) {
 		return "", nil
 	}
 	return "", refuse(129, "fake git: config takes a key and an optional value")
+}
+
+// remote: `remote get-url <name>` answers the URL `config remote.<name>.url`
+// set (exit 2 where none is), as kern's home reads origin (package home).
+func (f *Fake) remote(c call) (string, *refusal) {
+	r, bad := f.find(c.dir)
+	if bad != nil {
+		return "", bad
+	}
+	if len(c.args) != 2 || c.args[0] != "get-url" {
+		return "", refuse(129, "fake git: remote answers only get-url <name>")
+	}
+	url, ok := r.config["remote."+strings.ToLower(c.args[1])+".url"]
+	if !ok {
+		return "", refuse(2, "error: No such remote '%s'", c.args[1])
+	}
+	return url + "\n", nil
 }
 
 // onDisk answers the working tree's files git sees under the root: without

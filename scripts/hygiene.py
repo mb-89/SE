@@ -69,14 +69,10 @@ SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
 # The list may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {}
 
-# Tracked paths (a folder ends in `/`) that may name the home's owner, each with why. All are frozen
-# until the start path's freeze lifts; part 3 of the neutral home derives them and removes the entries.
-HOME_ALLOWED: dict[str, str] = {
-    "kern/": "frozen: kern's Go module path, its download base and its template move in part 3",
-    "components/": "frozen: the Go components' module path and download base move in part 3",
-    "wiring.toml": "retro-due, a Go component under the freeze, reads its tracker literally; part 3 "
-                   "derives it",
-}
+# Tracked paths (a folder ends in `/`) that may name the home's owner, each with why: none is left,
+# as kern, the Go components, their release.toml and the wiring derive it from origin (kern/home).
+# The list may only shrink: an entry that names no such file is refused.
+HOME_ALLOWED: dict[str, str] = {}
 # Workflows and actions, which no allowed folder covers: they name no home (scripts/se_workflows.py).
 WORKFLOWS = re.compile(r"(?:^|/)\.github/(?:workflows|actions)/")
 

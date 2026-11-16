@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/kerntest"
+	"kern/host"
+	"kern/index"
+	"kern/kerntest"
 )
 
 // A call the fake gives up as the core does: call.core.abandon's

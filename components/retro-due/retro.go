@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/se/components/snap"
+	"kern/components/github"
+	"kern/index"
+	"se/components/snap"
 )
 
 // Name is the component's name, which the wiring's instances name.
@@ -59,7 +59,7 @@ type In struct {
 	Pulls         map[string]github.Snapshot `index:"pulls"`
 	DueAfter      int                        `index:"config/due-after"`
 	OverhaulAfter int                        `index:"config/overhaul-after"`
-	Tracker       string                     `index:"config/tracker"`
+	Tracker       string                     `index:"tracker"`
 	Base          string                     `index:"config/base"`
 }
 
@@ -67,7 +67,6 @@ type In struct {
 var Component = index.Declare(Name, "Whether a retro or an overhaul is due: the work issues landed since the last retro and the retros closed since the last overhaul, from the GitHub names.",
 	index.Config("due-after", 10, "How many landed work issues make a retro due: se.toml [retro] due_after."),
 	index.Config("overhaul-after", 0, "How many closed retros make an overhaul due: se.toml [overhaul] due_after; 0 is off."),
-	index.Config("tracker", "", "The tracker, <owner>/<repo>: a pull request's Fixes or Refs URL names an issue only there."),
 	index.Config("base", "main", "The integration branch: a work issue landed where a pull request naming it merged into it."),
 	index.Derived("due", Due{DueAfter: 10}, "The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.",
 		func(in In) (Due, error) { return Count(in), nil }),

@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mb-89/kern/bus"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
 )
 
 // The waits of a client: the health's, as the greeting's (docs/go-core.md,

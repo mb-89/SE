@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/git"
+	"kern/git"
 )
 
 // StateFormat is the format a state file names.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mb-89/kern/cli"
+	"kern/cli"
 )
 
 // Source serves a checkout its own wiring, wiring.toml or the ad hoc overlay

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
 )
 
 // wait is how long a case waits on an event that comes within milliseconds.

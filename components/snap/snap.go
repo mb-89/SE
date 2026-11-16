@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/components/github"
+	"kern/components/github"
 )
 
 // Issue is an issue as SE's components read it.

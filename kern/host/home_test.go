@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/host"
+	"kern/index"
 )
 
 // whereArg makes this test binary a placed process that writes, into the

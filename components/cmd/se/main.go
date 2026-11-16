@@ -7,12 +7,12 @@ package main
 import (
 	"os"
 
-	"github.com/mb-89/kern/cli"
+	"kern/cli"
 	// kern's shared components and SE's own, one blank import each.
-	_ "github.com/mb-89/kern/components/github"
-	_ "github.com/mb-89/se/components/fleet"
-	_ "github.com/mb-89/se/components/origin"
-	_ "github.com/mb-89/se/components/retro-due"
+	_ "kern/components/github"
+	_ "se/components/fleet"
+	_ "se/components/origin"
+	_ "se/components/retro-due"
 )
 
 // Greeting is what the MCP door's greeting tool reads, the live part of SE's

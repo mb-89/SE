@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	gitdoor "github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/git/gitfake"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	gitdoor "kern/git"
+	"kern/git/gitfake"
+	"kern/host"
+	"kern/index"
 )
 
 // wait is how long a case waits on an event that comes within milliseconds.

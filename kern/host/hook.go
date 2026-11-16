@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mb-89/kern/bus"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
 )
 
 // HookWait is how long a hook waits for the core, a start in progress

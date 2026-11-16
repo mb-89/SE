@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/host"
+	"kern/index"
 )
 
 // PythonEnv names the Python the real leg runs tally's process with; where

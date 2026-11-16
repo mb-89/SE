@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/cli"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"kern/cli"
+	"kern/index"
+	"kern/mcp"
 )
 
 var golden = flag.Bool("golden", false, "rewrite testdata/tools.json from SE's live tool list")

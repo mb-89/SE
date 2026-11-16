@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 type limits struct {

@@ -1,10 +1,10 @@
-module github.com/mb-89/se/components
+module se/components
 
 go 1.25.14
 
 require (
-	github.com/mb-89/kern v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	kern v0.0.0
 )
 
 require (
@@ -29,4 +29,4 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/mb-89/kern => ../kern
+replace kern => ../kern

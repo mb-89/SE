@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"kern/host"
+	"kern/index"
 )
 
 // The door's waits.
