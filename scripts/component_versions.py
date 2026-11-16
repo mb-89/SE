@@ -8,8 +8,8 @@ versions at that moment, into the landing's merge. A branch that still claims a 
 one of that kind.
 
 Every other file that pins a component's release tag, `PINS`, moves with its number in the same
-merge, so the landing never leaves a pin at the old tag (kern's application template calls
-kern's battery at `@kern-v<version>`).
+merge, so the landing never leaves a pin at the old tag. None does today: kern's application
+template calls the battery's local copy, which names a commit (scripts/se_workflows.py).
 
 The logic is pure, `claimed_kind`, `assigned_versions` and `moved_pins`: versions, kinds and file
 texts in, versions and file texts out; `assign` is the wiring that reads them through git's door
@@ -40,7 +40,7 @@ Version = tuple[int, int, int]
 # the checkout root: the landing moves each pin with the number it assigns (`moved_pins`), and
 # tests/test_component_versions.py fails where another file pins a current tag (`unlisted_pins`).
 PINS: dict[str, tuple[str, ...]] = {
-    "kern": ("kern/template/.github/workflows/check.yml",),  # the battery the template calls
+    "kern": (),
     "se": (),
 }
 

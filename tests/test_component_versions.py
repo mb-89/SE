@@ -23,9 +23,15 @@ SE_RELEASE = ('version = "{version}"\n'
               'binary = "se"\npackage = "./cmd/se"\n')
 KERN_RELEASE = ('version = "{version}"\n'
                 'download = "https://github.com/example/se/releases/download/kern-v{{version}}"\n')
-# kern's application template, which pins kern's battery at kern's release tag.
+# A file that pins kern's battery at kern's release tag, as kern's application template did before
+# it called the battery's local copy: the landing's list names it in these tests (`listed`).
 TEMPLATE = "kern/template/.github/workflows/check.yml"
 PINNED = "jobs:\n  check:\n    uses: example/se/.github/workflows/kern-battery.yml@kern-v{version}\n"
+
+
+@pytest.fixture(autouse=True)
+def listed(monkeypatch):
+    monkeypatch.setattr(versions, "PINS", {**versions.PINS, "kern": (TEMPLATE,)})
 
 
 @pytest.mark.parametrize(("base", "claimed", "kind"), [

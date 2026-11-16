@@ -214,17 +214,23 @@ def test_the_neutral_home_check_passes_a_tree_that_names_no_owner_and_fails_a_pl
     ]
 
 
-def test_the_neutral_home_check_exempts_uses_lines_and_allowed_paths_and_refuses_a_stale_entry(
+def test_the_neutral_home_check_covers_workflows_even_in_an_allowed_folder_and_refuses_a_stale_entry(
         tmp_path: Path, fake_git_door) -> None:
+    """A workflow calls SE's files as local copies (scripts/se_workflows.py), so a planted
+    `uses: <owner>/<repository>/...` line fails, and no allowed folder covers a workflow or action."""
     repo = fixture_repo(tmp_path, {
-        ".github/workflows/check.yml": b"jobs:\n  check:\n    uses: alice/project/.github/workflows/x.yml@v1\n"
-                                       b"    # calls alice/project\n",
+        ".github/workflows/check.yml": b"jobs:\n  check:\n    uses: alice/project/.github/workflows/x.yml@v1\n",
+        ".github/workflows/local.yml": b"jobs:\n  check:\n    uses: ./.github/workflows/x.yml\n",
         "frozen/go.mod": b"module example.com/alice/frozen\n",
+        "frozen/template/.github/workflows/check.yml": b"    uses: alice/project/.github/workflows/x.yml@v1\n",
+        "frozen/template/.github/actions/a/action.yml": b"# from alice/project\n",
     })
     allowed = {"frozen/": "frozen until part 3", "gone.toml": "removed"}
+    workflow = "call SE's workflows and actions as local copies, uses: ./.github/... (scripts/se_workflows.py)"
     assert hygiene.home_findings(repo, allowed, HOME) == [
-        ".github/workflows/check.yml:4: names the origin's owner; derive it from origin (scripts/se_home.py) "
-        "or write a placeholder",
+        f".github/workflows/check.yml:3: names the origin's owner; {workflow}",
+        f"frozen/template/.github/actions/a/action.yml:1: names the origin's owner; {workflow}",
+        f"frozen/template/.github/workflows/check.yml:1: names the origin's owner; {workflow}",
         "gone.toml: allowed to name the origin's owner but names it nowhere; remove the entry",
     ]
 

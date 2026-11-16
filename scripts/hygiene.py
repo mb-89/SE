@@ -18,8 +18,9 @@ each named with its check.
 - public: the checkout passes its public check (pub-001), with its history: SE's own line (`se_line`);
 - neutral-home: no tracked text file names the owner of the checkout's origin, nor its
   `<owner>/<repository>`, which `scripts/se_home.py` reads from origin (AGENTS.md "Neutral home"),
-  outside HOME_ALLOWED and the `uses:` lines of `.github/workflows/`, which the host reads
-  literally; a checkout whose home cannot be known skips it, naming why.
+  outside HOME_ALLOWED; a workflow or action (`.github/workflows/`, `.github/actions/`, at any depth)
+  is checked even inside an allowed folder, as it calls SE's files as local copies
+  (`scripts/se_workflows.py`); a checkout whose home cannot be known skips it, naming why.
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -76,9 +77,8 @@ HOME_ALLOWED: dict[str, str] = {
     "wiring.toml": "retro-due, a Go component under the freeze, reads its tracker literally; part 3 "
                    "derives it",
 }
-# A workflow's `uses:` line, which the host reads literally: no origin is there to derive from.
-USES_LINE = re.compile(r"^\s*(?:-\s*)?uses:\s")
-WORKFLOWS = ".github/workflows/"
+# Workflows and actions, which no allowed folder covers: they name no home (scripts/se_workflows.py).
+WORKFLOWS = re.compile(r"(?:^|/)\.github/(?:workflows|actions)/")
 
 # The file whose presence in a commit's tree marks SE's own line (`se_line`).
 SE_LINE_MARKER = "scripts/public_check.py"
@@ -259,15 +259,17 @@ def home_findings(root: Path, allowed: dict[str, str], home: se_home.Home) -> li
         if b"\0" in data[:BINARY_PEEK]:
             continue
         hits = [number for number, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1)
-                if pattern.search(line) and not (path.startswith(WORKFLOWS) and USES_LINE.match(line))]
+                if pattern.search(line)]
         if not hits:
             continue
-        entry = _home_allowed(path, allowed)
+        entry = None if WORKFLOWS.search(path) else _home_allowed(path, allowed)
         if entry is not None:
             used.add(entry)
             continue
-        findings += [f"{path}:{number}: names the origin's owner; derive it from origin "
-                     "(scripts/se_home.py) or write a placeholder" for number in hits]
+        remedy = ("call SE's workflows and actions as local copies, uses: ./.github/... "
+                  "(scripts/se_workflows.py)" if WORKFLOWS.search(path)
+                  else "derive it from origin (scripts/se_home.py) or write a placeholder")
+        findings += [f"{path}:{number}: names the origin's owner; {remedy}" for number in hits]
     findings += [f"{entry}: allowed to name the origin's owner but names it nowhere; remove the entry"
                  for entry in allowed if entry not in used]
     return findings

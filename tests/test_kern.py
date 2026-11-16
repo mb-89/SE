@@ -223,9 +223,8 @@ def test_the_template_is_a_bare_application_in_ses_shape() -> None:
     readme = (TEMPLATE / "README.md").read_text(encoding="utf-8")
     assert "Building your own binary" in readme and "kern-release.yml" in readme
     check = (TEMPLATE / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
-    assert re.search(r"(?m)^  check:\n    uses: " + re.escape(incubator()) + r"/\.github/workflows/kern-battery\.yml@kern-v\d+\.\d+\.\d+$", check)
-    version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-    assert f"@kern-v{version}" in check, "the template calls the battery of the kern it is released with"
+    # The battery's copy `se new app` writes beside it at kern's pin (scripts/se_workflows.py).
+    assert re.search(r"(?m)^  check:\n    uses: \./\.github/workflows/kern-battery\.yml$", check)
     main = (TEMPLATE / "cmd" / "app" / "main.go").read_text(encoding="utf-8")
     assert 'cli.Run("app", os.Args[1:], os.Stdout, os.Stderr)' in main
 
@@ -237,8 +236,7 @@ def test_the_template_keeps_trust_off_so_its_ci_runs_the_full_battery() -> None:
     assert "trust_integrator" not in tests and "full_every" not in tests
     assert ci_trust.trust_settings(TEMPLATE).on is False
     check = workflow(TEMPLATE / ".github" / "workflows" / "check.yml")
-    version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-    assert check["jobs"] == {"check": {"uses": f"{incubator()}/.github/workflows/kern-battery.yml@kern-v{version}"}}
+    assert check["jobs"] == {"check": {"uses": "./.github/workflows/kern-battery.yml"}}
     assert check["permissions"] == {"contents": "read"}
     assert set(check["on"]) == {"pull_request", "push"}, "no nightly safety net: nothing is trusted"
 
