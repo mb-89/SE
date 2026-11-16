@@ -9,9 +9,9 @@ argument-hint: 'Optional focus, e.g. "only the documentation" or "finish release
 
 You are **SE**, the main agent. The user must always be able to talk to you. This skill is your
 procedure; roles and shared rules are owned by the skill [work-model](../work-model/SKILL.md),
-each role's own rules by its agent definition: [SE](https://github.com/mb-89/SE/blob/v5.77.3/.github/agents/se.agent.md),
-[worker](https://github.com/mb-89/SE/blob/v5.77.3/.github/agents/worker.agent.md), [integrator](https://github.com/mb-89/SE/blob/v5.77.3/.github/agents/integrator.agent.md),
-[reviewer](https://github.com/mb-89/SE/blob/v5.77.3/.github/agents/reviewer.agent.md), the
+each role's own rules by its agent definition: [SE](https://github.com/mb-89/SE/blob/v5.77.4/.github/agents/se.agent.md),
+[worker](https://github.com/mb-89/SE/blob/v5.77.4/.github/agents/worker.agent.md), [integrator](https://github.com/mb-89/SE/blob/v5.77.4/.github/agents/integrator.agent.md),
+[reviewer](https://github.com/mb-89/SE/blob/v5.77.4/.github/agents/reviewer.agent.md), the
 project's commands and hot files by the project's `AGENTS.md`.
 
 ## Hard rules
@@ -19,12 +19,10 @@ project's commands and hot files by the project's `AGENTS.md`.
 - **Only SE asks the human.** Workers and integrators never call `ask_user` or issue
   questions, confirmation prompts or approval prompts. They decide what is unclear, record it in
   their field report, and escalate only what they cannot decide.
-- **Never block on workers.** Start every work package as an **independent session**
-  (VS Code agent host: `create_session` with `worktree: false` and the worker's worktree folder as
-  `workspace`; Copilot CLI: a separate session). After dispatching, report and **end the turn**.
-  - Never use in-chat subagents (`task`) for work packages: they keep you busy and are cancelled
-    when the user interrupts.
-  - Never call blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
+- **Never block on workers.** Every work package runs in a
+  [visible session](../work-model/SKILL.md#visible-sessions) (VS Code agent host:
+  `create_session` with `worktree: false` and the worker's worktree folder as `workspace`; Copilot
+  CLI: a separate session). After dispatching, report and **end the turn**.
   - Under Copilot, where the host has no session tool, start each worker detached with the
     Copilot CLI line of the work model's
     [Host procedure under Copilot](../work-model/SKILL.md#host-procedure-under-copilot), or give
@@ -110,7 +108,8 @@ project's commands and hot files by the project's `AGENTS.md`.
      repository and this SE session. Never start workers directly.
    - Work issues quote the user's requirement word for word; work follows the user's priority.
    - Apply the [capability-preservation rule](../work-model/SKILL.md#rules-for-all-roles) before
-     writing a work issue.
+     writing a work issue, and ask for a change that is
+     [neutral by construction](../work-model/SKILL.md#neutral-by-construction).
    - Stale unfinished worktrees: send their continuation requirements to that repository's
      integrator (step 2).
    - New packages: one work issue each from `.github/ISSUE_TEMPLATE/work.md`, title = branch name,
@@ -132,7 +131,7 @@ project's commands and hot files by the project's `AGENTS.md`.
    Apply the answer by updating the source issue or dispatching a worker, mark the source item
    done, steer the integrator to merge, then present the next one. If the answer changes the
    requirement, research it (git history, old code), then dispatch.
-8. **Integration runs through the [integrator](https://github.com/mb-89/SE/blob/v5.77.3/.github/agents/integrator.agent.md)**, triggered as the
+8. **Integration runs through the [integrator](https://github.com/mb-89/SE/blob/v5.77.4/.github/agents/integrator.agent.md)**, triggered as the
    work model's [scheduling rules](../work-model/SKILL.md#freshness-dependencies-and-scheduling)
    say; start each of your own turns with the same `queue` check. You tell it the order when shared
    files are involved (owners first) and anything to watch.
