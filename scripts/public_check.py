@@ -26,6 +26,13 @@ on that one commit, and a `commit:<full sha> message` entry the message hits of 
 for history already published. A --range on a shallow clone that reaches beyond the fetched
 history is refused, so the check never passes over commits it cannot see.
 
+A built page, or a folder of them (--built), is checked as a source of its own: its files' paths
+and raw text with the patterns tracked files get, and obs's data island (`<script
+id="artifact-data">`, plain JSON or base64 gzip of it, the format obs's artifact_data.py owns),
+decoded with the standard library and scanned key by key and string by string, each hit named by
+its field path. It reads no history, applies no allow entry and records no verdict; an island that
+does not decode is a setup error, never a pass.
+
 Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
 se.toml sets lies outside that `version` range, so a stale clone never gives another verdict
@@ -41,15 +48,21 @@ Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import bisect
 import fnmatch
+import gzip
+import json
 import os
 import re
 import sys
 import tomllib
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from html.parser import HTMLParser
+from typing import Callable, Iterable, Iterator
 
 import git_door
 ALLOW_FILE = ".public-check-allow"
@@ -474,6 +487,106 @@ def scan_files(files: Iterable[tuple[str, bytes]], patterns: list[Pattern],
                 report.hits.append(Hit(f"{shown}:{line}:{column}{binary}", label))
 
 
+# obs's data island, as obs's artifact_data.py finds it: the first script element whose opening tag
+# starts `<script id="artifact-data"`, its body up to the first closing tag. Found as two searches,
+# as obs does, not one pattern with a lazy body over a megabyte page.
+ISLAND_OPENING = re.compile(r'<script id="artifact-data"[^>]*>')
+ISLAND_CLOSING = "</script>"
+ISLAND = "artifact-data"
+
+
+class _Attributes(HTMLParser):
+    """The attributes of one opening tag, as HTML reads them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attrs: dict[str, str | None] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.attrs = dict(attrs)
+
+
+def island_text(where: str, text: str) -> str | None:
+    """The JSON text of the page's data island, None where it has none; one that is neither plain
+    JSON nor base64 gzip of UTF-8 JSON is a setup error naming the file and the reason."""
+    opening = ISLAND_OPENING.search(text)
+    if opening is None:
+        return None
+    end = text.find(ISLAND_CLOSING, opening.end())
+    if end < 0:
+        raise SetupError(f"{where}: its {ISLAND} island has no closing </script>")
+    body = text[opening.end():end]
+    parser = _Attributes()
+    parser.feed(opening.group())
+    kind, encoding = parser.attrs.get("type"), parser.attrs.get("data-encoding")
+    if encoding == "gzip":
+        if kind != "application/octet-stream":
+            raise SetupError(f"{where}: its {ISLAND} island is gzip of type {kind!r}, not "
+                             "application/octet-stream")
+        try:
+            return gzip.decompress(base64.b64decode(re.sub(r"\s", "", body), validate=True)
+                                   ).decode("utf-8")
+        except (binascii.Error, ValueError, OSError, EOFError, zlib.error) as error:
+            raise SetupError(f"{where}: its {ISLAND} island is no base64 gzip of UTF-8 text "
+                             f"({error})") from error
+    if encoding is None and kind == "application/json":
+        return body
+    raise SetupError(f"{where}: its {ISLAND} island has data-encoding {encoding!r} and type "
+                     f"{kind!r}, neither gzip nor plain JSON")
+
+
+def island_strings(value: object, where: str) -> Iterator[tuple[str, str]]:
+    """Every key and string value of the island with its field path, named as obs's exposure.py
+    names them: `artifact-data notes[0].html`, a key's path followed by ` (the key)`."""
+    if isinstance(value, str):
+        yield where.rstrip(), value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{where}{'' if where.endswith(' ') else '.'}{key}"
+            yield f"{path} (the key)", str(key)
+            yield from island_strings(item, path)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from island_strings(item, f"{where.rstrip()}[{index}]")
+
+
+def built_files(path: Path) -> list[tuple[str, bytes]]:
+    """The built file at `path`, named by its file name, or every regular file under the folder
+    `path`, recursively, named and sorted by their paths relative to it."""
+    if path.is_file():
+        return [(path.name, path.read_bytes())]
+    if not path.is_dir():
+        raise SetupError(f"--built {path}: no such file or folder")
+    found = sorted((item.relative_to(path).as_posix(), item) for item in path.rglob("*")
+                   if item.is_file())
+    if not found:
+        raise SetupError(f"--built {path}: the folder holds no file, so nothing would be checked")
+    return [(name, item.read_bytes()) for name, item in found]
+
+
+def scan_built(files: Iterable[tuple[str, bytes]], patterns: list[Pattern], report: Report) -> None:
+    """Hits in built files: each path and raw line as a tracked file's, then its decoded island."""
+    for path, data in files:
+        report.files += 1
+        shown = f"built:{redact(path, patterns)}"
+        for _, _, label in find(path, patterns):
+            report.hits.append(Hit(f"{shown} (file name)", label))
+        binary = " (binary)" if is_binary(data) else ""
+        text = decode(data)
+        for line, column, label in find(text, patterns):
+            report.hits.append(Hit(f"{shown}:{line}:{column}{binary}", label))
+        island = island_text(shown, text)
+        if island is None:
+            continue
+        try:
+            value = json.loads(island)
+        except json.JSONDecodeError as error:
+            raise SetupError(f"{shown}: its {ISLAND} island is not JSON ({error})") from error
+        for where, string in island_strings(value, f"{ISLAND} "):
+            for label in sorted({label for _, _, label in find(string, patterns)}):
+                report.hits.append(Hit(f"{shown} {redact(where, patterns)}", label))
+
+
 def scan_message(where: str, message: str, patterns: list[Pattern], report: Report,
                  remedy: str | None = None) -> None:
     """Hits in a commit message; with a remedy, tracker references, attribution trailers and
@@ -642,8 +755,8 @@ def se_modules():
 
 def record_verdict(args: argparse.Namespace, passed: bool) -> None:
     """A check of `--rev` records its verdict on that tree (scripts/verdicts.py), which the push to
-    the integration branch needs."""
-    if not args.rev or args.no_history:
+    the integration branch needs; one of `--built` records none."""
+    if not args.rev or args.no_history or args.built is not None:
         return
     root = Path(args.repo).resolve()
     try:
@@ -711,6 +824,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     source.add_argument("--rev", help="scan the tree of this commit; history defaults to it")
     source.add_argument("--message-file", type=Path,
                         help="scan only this commit message and the current author and committer")
+    source.add_argument("--built", type=Path,
+                        help="scan a built page, or every file of a folder of them, with obs's "
+                             "data island decoded, instead of the repository; no history, no "
+                             "allow entries, no verdict recorded")
     parser.add_argument("--range", dest="revisions",
                         help="git log revisions whose messages and identities are checked, split "
                              "on spaces (for example 'A..B' or 'B --not --remotes'); default: "
@@ -727,6 +844,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def check(args: argparse.Namespace, commit: str | None) -> Report:
+    if args.built is not None:
+        for option, value in (("--range", args.revisions), ("--history", args.history)):
+            if value:
+                raise SetupError(f"--built and {option} exclude each other: a built page has no "
+                                 "commits")
     root = Path(git(Path(args.repo).resolve(), "rev-parse", "--show-toplevel").decode().strip())
     check_se_version(root, commit)
     check_machine_list()
@@ -744,6 +866,9 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     patterns = [p for p in GENERIC_PATTERNS if p.label not in local.off] + local.terms
     if args.message_file is not None:
         scan_message_file(root, args.message_file, patterns, report)
+        return report
+    if args.built is not None:
+        scan_built(built_files(args.built.resolve()), patterns, report)
         return report
     allow = load_allow(root)
     if args.staged or args.rev:
@@ -826,10 +951,14 @@ def main(argv: list[str] | None = None) -> int:
         print(hit)
     used = f"{report.allow_used} allow entries used, " if report.allow_used else ""
     off = f"public entries off locally: {', '.join(report.off)}, " if report.off else ""
-    scope = f"{report.files} files, {report.commits} commits, {used}{off}{version}"
+    counted = (f"{report.files} built files" if args.built is not None
+               else f"{report.files} files, {report.commits} commits")
+    scope = f"{counted}, {used}{off}{version}"
     if report.hits:
         remedy = "fix each as its line says"
-        if any(hit.label not in OWN_REMEDY for hit in report.hits):
+        if args.built is not None:
+            remedy = "remove them from what the page is built from; no allow entry applies to it"
+        elif any(hit.label not in OWN_REMEDY for hit in report.hits):
             remedy = f"remove them or add a reasoned entry to {ALLOW_FILE}"
         print(f"public-check: FAILED with {len(report.hits)} hit(s) ({scope}); {remedy}")
         return 1
