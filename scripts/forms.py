@@ -1452,14 +1452,20 @@ def formed(form: Form, *, body: str | None = None, fields: dict | None = None,
 
 
 def private_findings(form: Form, title: str, body: str, root: Path) -> list[Finding]:
-    """A refused finding for every term of the lists `public_check.py` reads (its public list, and
-    the local list of `root` where it holds one) in the title or the body: each names the field
-    and the list's label, never the term."""
+    """A refused finding for every term of the lists `public_check.py` reads (its public list, the
+    local list of `root` where it holds one, and the cloud list where its variable is set) in the
+    title or the body: each names the field and the list's label, never the term. A list that
+    does not load is a FormError naming only its line."""
     check = _sibling("public_check")
-    local = check.load_local(root)
+    try:
+        local = check.load_local(root)
+        cloud = check.load_cloud()
+    except check.SetupError as error:
+        raise FormError(f"forms: {error}") from error
     lists = [("public", pattern) for pattern in check.GENERIC_PATTERNS
              if local is None or pattern.label not in local.off]
     lists += [("local", pattern) for pattern in (local.terms if local is not None else [])]
+    lists += [("cloud", pattern) for pattern in (cloud or [])]
     document = parse(form, body, title) if not form.is_adapter else None
     found: list[Finding] = []
     seen: set[tuple[str, str]] = set()
@@ -1472,8 +1478,10 @@ def private_findings(form: Form, title: str, body: str, root: Path) -> list[Find
             if key in seen:
                 continue
             seen.add(key)
-            named = (f"the local list ({check.LOCAL_FILE} line {label.split(':', 1)[1]})"
-                     if kind == "local" else f"the public list ({label})")
+            line_of = label.split(":", 1)[-1]
+            named = {"local": f"the local list ({check.LOCAL_FILE} line {line_of})",
+                     "cloud": f"the cloud list ({check.CLOUD_ENV} line {line_of})"}.get(
+                         kind, f"the public list ({label})")
             found.append(Finding(field_name, PRIVATE_RULE, REFUSE,
                                  f"holds a term of {named}: stop and ask the owner before "
                                  "anything is filed"))

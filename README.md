@@ -2199,6 +2199,6 @@ always rendered through the form.
   labelled `off-form` and not `ready`; `ready` and `start` take no such issue until someone fixes
   it and removes the label. Before that count `--hold` is refused.
 - The check also runs the term lists `scripts/public_check.py` reads over the title and the body:
-  the public list and, where the checkout holds one, `.public-check.local`; without a local list
-  only the public list runs. A hit names the field and the list, never the term: stop and ask the
+  the public list, `.public-check.local` where the checkout holds one, and the cloud list where
+  `SE_PUBLIC_CHECK_TERMS` is set; without a local or cloud list only the public list runs. A hit names the field and the list, never the term: stop and ask the
   owner. `--hold` never files such a text.

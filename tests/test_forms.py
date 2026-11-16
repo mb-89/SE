@@ -1297,3 +1297,18 @@ def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     start = readme.index("- `forms/retro.toml`")
     end = readme.index("\n- `forms/review.toml`", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
+
+
+def test_private_findings_run_the_cloud_list_where_its_variable_is_set(catalog, tmp_path,
+                                                                        monkeypatch):
+    work = catalog["work"]
+    body = forms.render(work, dict(work.example["fields"], goal="For Zorbcloud."))
+    assert forms.private_findings(work, "feat/x-20261116", body, tmp_path) == []
+    monkeypatch.setenv("SE_PUBLIC_CHECK_TERMS", "# cloud terms\nzorbcloud\n")
+    found = forms.private_findings(work, "feat/x-20261116", body, tmp_path)
+    assert [(item.field, item.severity) for item in found] == [("goal", "refuse")]
+    assert "the cloud list (SE_PUBLIC_CHECK_TERMS line 2)" in found[0].fix
+    assert "zorb" not in found[0].fix.lower()
+    monkeypatch.setenv("SE_PUBLIC_CHECK_TERMS", "off:email  # no")
+    with pytest.raises(forms.FormError, match="SE_PUBLIC_CHECK_TERMS:1"):
+        forms.private_findings(work, "feat/x-20261116", body, tmp_path)
