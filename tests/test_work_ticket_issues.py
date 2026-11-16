@@ -4050,6 +4050,148 @@ def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_push
     assert github.calls == []
 
 
+def closeout_comments(monkeypatch) -> list[str]:
+    """The integrate comments the close-out plans carry, as closeout_plan is given them."""
+    comments: list[str] = []
+    plan = work_tickets.closeout_plan
+
+    def kept(remote, tracker, pull_number, work_number, line, comment, *rest):
+        comments.append(comment)
+        return plan(remote, tracker, pull_number, work_number, line, comment, *rest)
+    monkeypatch.setattr(work_tickets, "closeout_plan", kept)
+    return comments
+
+
+def test_integrate_landing_fast_forward_overrides_a_squash_se_toml_for_that_run(
+        main_checkout, monkeypatch, github, capsys):
+    delivered_worker(main_checkout, monkeypatch)
+    comments = closeout_comments(monkeypatch)
+    base = origin_main(main_checkout)
+
+    short = work_tickets.integrate(main_checkout, 7, None, None, landing_choice="fast-forward")
+
+    assert [call[0] for call in github.calls] == [
+        "open_pull", "create_pull", "check_run", "pull", "comment", "close_pull"]  # no squash
+    commit = origin_main(main_checkout)
+    assert commit.startswith(short) and fast_forwarded_onto_origin(main_checkout, commit)
+    assert git_run(main_checkout, "rev-parse", f"{commit}^", check=True).stdout.strip() == base
+    assert git_run(main_checkout, "log", "-1", "--format=%an <%ae>|%cn <%ce>",
+                   check=True).stdout.strip() == "mb <mb>|mb <mb>"
+    [comment] = comments
+    assert ("Landing: fast-forward, integrate --landing's choice for this run over se.toml "
+            "[integrate] landing.") in comment
+    assert "squash" not in (main_checkout / "se.toml").read_text(encoding="utf-8")
+
+
+def test_integrate_landing_squash_overrides_a_fast_forward_se_toml_for_that_run(
+        main_checkout, monkeypatch, github):
+    fast_forward_landings(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    comments = closeout_comments(monkeypatch)
+
+    work_tickets.integrate(main_checkout, 7, None, None, landing_choice="squash")
+
+    assert any(call[0] == "squash" for call in github.calls)
+    [comment] = comments
+    assert "Landing: squash, integrate --landing's choice" in comment
+
+
+def test_without_landing_the_handoff_state_and_comment_are_as_before(main_checkout, monkeypatch,
+                                                                     github):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    comments = closeout_comments(monkeypatch)
+    assert run(main_checkout, *arguments) == 0
+    state = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                       .read_text(encoding="utf-8"))
+    assert state["landing_mode"] == "squash" and "landing_once" not in state
+    session_squash(main_checkout, "refs/heads/land/feature/worker")
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    [comment] = comments
+    assert "Landing:" not in comment and "--landing" not in comment
+
+
+def test_a_handed_off_landing_flag_is_kept_and_its_read_back_follows_the_state_not_se_toml(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)  # se.toml: squash
+    base = origin_main(main_checkout)
+    assert run(main_checkout, *arguments, "--landing", "fast-forward") == 0
+    state = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                       .read_text(encoding="utf-8"))
+    assert state["landing_mode"] == "fast-forward" and state["landing_once"] is True
+    assert [step["tool"] for step in state["plan"]["steps"]] == [
+        "list_issues", "create_pull_request", "pull_request_read"]  # the plan ends at the check
+    landed = git_run(main_checkout.parent / "origin.git", "rev-parse",
+                     "refs/heads/land/feature/worker", check=True).stdout.strip()
+    assert origin_main(main_checkout) == base
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert origin_main(main_checkout) == landed and fast_forwarded_onto_origin(main_checkout, landed)
+    assert f"Fast-forward: origin's main moved from {base[:12]} to {landed[:12]}" in out
+    assert "Landing: fast-forward, integrate --landing's choice for this run" in out
+
+
+def test_a_refused_flagged_fast_forward_leaves_main_and_the_handoff_as_they_were(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+    assert run(main_checkout, *arguments, "--landing", "fast-forward") == 0
+    path = main_checkout / ".se" / "handoff" / "feature-worker.json"
+    before = path.read_text(encoding="utf-8")
+    push = work_tickets.run_git_push
+
+    def ruleset(root, arguments):
+        if arguments[-1].endswith(":refs/heads/main"):
+            return subprocess.CompletedProcess(arguments, 1, "", (
+                "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+                "remote: - Changes must be made through a pull request.\n"))
+        return push(root, arguments)
+    monkeypatch.setattr(work_tickets, "run_git_push", ruleset)
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 1
+
+    err = capsys.readouterr().err
+    assert "origin refused to fast-forward main" in err
+    assert "Nothing fell back to GitHub's squash merge" in err
+    assert "integrating again without --landing lands as se.toml [integrate] landing says" in err
+    assert origin_main(main_checkout) == base
+    assert path.read_text(encoding="utf-8") == before
+    assert not any(call[0] == "squash" for call in github.calls)
+
+
+def test_a_refused_fast_forward_of_se_toml_says_nothing_of_the_flag(main_checkout, monkeypatch):
+    def refused(root, arguments):
+        return subprocess.CompletedProcess(arguments, 1, "", "remote: rule violations\n")
+    monkeypatch.setattr(work_tickets, "remote_head", lambda root, target: "b" * 40)
+    monkeypatch.setattr(work_tickets, "run_git_push", refused)
+    for once, said in ((False, False), (True, True)):
+        with pytest.raises(work_tickets.QueueError) as error:
+            work_tickets.fast_forward(main_checkout, "main", "b" * 40, "c" * 40, once)
+        assert ("without --landing" in str(error.value)) is said
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--read-back", "feature/worker", "--landing-pull", "20", "--check-run", "url",
+     "--landing-description", "file"],
+    ["--record-fix", "feature/worker"],
+])
+def test_landing_goes_with_a_pull_request_only(main_checkout, capsys, arguments):
+    assert run(main_checkout, "integrate", *arguments, "--landing", "squash") == 1
+    assert "integrate --landing goes with a pull request number" in capsys.readouterr().err
+
+
+def test_an_unknown_landing_flag_is_refused(main_checkout):
+    with pytest.raises(SystemExit):
+        run(main_checkout, "integrate", "7", "--landing", "rebase")
+    with pytest.raises(work_tickets.QueueError, match="integrate --landing is 'rebase'"):
+        work_tickets.landing_for_run(main_checkout, "rebase")
+
+
 @pytest.mark.parametrize("landing, message", [
     (None, "is still .*the landing has not reached it"),
     ("other tree", "its tree is not the tree of"),
