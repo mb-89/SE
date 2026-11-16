@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.91.0"
+version = "5.91.1"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -26,6 +26,11 @@ authored_content = [
 # sets no [binary] and keeps running the bare kern.
 [binary]
 release = "components/release.toml"
+
+# How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
+# integrator's own, so no commit on main carries an address (README "Landing on main").
+[integrate]
+landing = "fast-forward"
 
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (README "Test budget").
