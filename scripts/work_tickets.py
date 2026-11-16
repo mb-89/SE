@@ -5886,6 +5886,11 @@ def public_push_commits(root: Path, mirror: Mirror) -> list[str]:
 def guard_public_push(root: Path, mirror: Mirror) -> None:
     expected_name, expected_email = configured_public_identity(root)
     public_check = sibling("public_check")
+    # While GitHub squash-merges the landings, its squash commit for the owning account passes;
+    # with a fast-forward landing every commit is the project identity's (README "Landing on main").
+    strict = landing_mode(root) == FAST_FORWARD
+    host, _, path = (remote_repo(root) or "").partition("/")
+    owner = path.split("/", 1)[0].lower() if host.lower() == "github.com" and not strict else None
     for commit in public_push_commits(root, mirror):
         details = run_git(root, "show", "-s", "--format=%B%x00%an%x00%ae%x00%cn%x00%ce", commit)
         if details.returncode != 0:
@@ -5899,6 +5904,9 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
             raise QueueError(f"Cannot push {commit} to a public mirror: message has a tracker reference")
         if public_check.message_addresses(message):
             raise QueueError(f"Cannot push {commit} to a public mirror: message has an e-mail address")
+        if not strict and public_check.made_on_github_by_owner(
+                f"{author_name} <{author_email}>", f"{committer_name} <{committer_email}>", owner):
+            continue  # the squash commit of a landing pull request
         if (author_name, author_email) != (expected_name, expected_email):
             raise QueueError(f"Cannot push {commit} to a public mirror: author differs from public_identity")
         if (committer_name, committer_email) != (expected_name, expected_email):

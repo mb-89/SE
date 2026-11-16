@@ -2607,6 +2607,33 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         )
 
 
+@pytest.mark.parametrize("landing", ["squash", "fast-forward"])
+def test_the_public_mirror_guard_passes_github_s_squash_commit_only_while_landings_squash(
+        main_checkout, local_config, monkeypatch, landing):
+    mirror = main_checkout.parent / "mirror.git"
+    fake_git.init(mirror, "--bare", "-b", "main")
+    git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    monkeypatch.setattr(work_tickets, "landing_mode", lambda root: landing)
+    (main_checkout / "landed.txt").write_text("landed\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "landed.txt")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "owner",
+           "GIT_AUTHOR_EMAIL": "1+owner@users.noreply.github.com",
+           "GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + "@github.com"}
+    assert git_run(main_checkout, "commit", "-q", "-m", "Integrate x", env=env).returncode == 0
+    mirrored = work_tickets.Mirror("mirror", "main", False, True)
+
+    if landing == "squash":
+        work_tickets.guard_public_push(main_checkout, mirrored)
+    else:
+        with pytest.raises(work_tickets.QueueError, match="author differs"):
+            work_tickets.guard_public_push(main_checkout, mirrored)
+
+
 @pytest.mark.parametrize(("goal", "title"), [
     ("Ship the worker, see #" + "12.", "Integrate feature/worker: Ship the worker."),
     ("Two landing checks trip correct work, as obs" + "#627 showed.",

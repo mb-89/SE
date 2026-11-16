@@ -15,9 +15,12 @@ address, in messages, from every author, naming the reference, trailer or line a
 full check leaves old history to them. CI runs
 the --range gate on every pull request and every push to the integration branch
 (.github/workflows/check.yml). The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
-machine sets public_identity), where one is set, as author and as committer: a commit GitHub
-made (its web-flow committer, a squash merge's account author) is foreign like any other. A hit
-names the identity found, redacted. A
+machine sets public_identity), where one is set. Strict, where se.toml [integrate] landing is
+"fast-forward" (landings are the integrator's own commits): a commit GitHub made is foreign like
+any other. Otherwise, while GitHub squash-merges the landings, its web-flow identity passes as
+committer, and on such a commit the author may be the GitHub noreply address of the account
+owning origin on github.com (the squash merge of a pull request into main). A hit names the
+identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
 on that one commit, and a `commit:<full sha> message` entry the message hits of that one commit,
 for history already published. A --range on a shallow clone that reaches beyond the fetched
@@ -58,10 +61,13 @@ LOCAL_FILE = ".public-check.local"
 MACHINE_ENV = "SE_PRIVATE_TERMS"
 MACHINE_DEFAULT = "~/.se/private-terms.txt"
 
-# GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person,
-# so the full check's term list passes it; the identity gate refuses it like any identity other
-# than the project's (a landing's commit is the integrator's own, README "Landing on main").
+# GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person.
+# The identity gate passes it as committer only while landings are GitHub's squash merges; with
+# se.toml [integrate] landing = "fast-forward" it is foreign (README "Landing on main").
 WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
+# The author of a commit made on GitHub (a squash merge): the account that made it, by the GitHub
+# noreply address of its login, `<id>+<login>` or `<login>`.
+GITHUB_ACCOUNT = re.compile(r"<(?:\d+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com>$")
 
 
 def _always(match: re.Match[str]) -> bool:
@@ -506,9 +512,34 @@ def project_identity(root: Path) -> str | None:
     return None if identity is None else f"{identity[0]} <{identity[1]}>"
 
 
+def strict_identity(root: Path) -> bool:
+    """Whether the gate refuses GitHub's own commits too: se.toml [integrate] landing is
+    "fast-forward", so every landing is the integrator's commit (work_tickets.landing_mode)."""
+    work_tickets = sibling("work_tickets")
+    try:
+        return work_tickets.landing_mode(root) == work_tickets.FAST_FORWARD
+    except work_tickets.QueueError as error:
+        raise SetupError(str(error)) from error
+
+
+def repository_owner(root: Path) -> str | None:
+    """The account owning the checkout's origin on github.com (lower case), else None."""
+    repo = sibling("work_tickets").remote_repo(root)
+    host, _, path = (repo or "").partition("/")
+    return path.split("/", 1)[0].lower() if host.lower() == "github.com" else None
+
+
+def made_on_github_by_owner(author: str, committer: str, owner: str | None) -> bool:
+    """A commit GitHub made (web-flow committer) for the repository's owning account, such as
+    the squash merge of a pull request into main: its author is that account's noreply address."""
+    account = GITHUB_ACCOUNT.search(author)
+    return (committer == WEB_FLOW and owner is not None and account is not None
+            and account.group(1).lower() == owner)
+
+
 def scan_project_identity(where: str, role: str, identity: str, expected: str,
-                          patterns: list[Pattern], report: Report) -> None:
-    if identity != expected:
+                          patterns: list[Pattern], report: Report, strict: bool) -> None:
+    if identity != expected and (strict or (role, identity) != ("committer", WEB_FLOW)):
         shown = redact(identity, patterns)  # a foreign identity may name a person
         report.hits.append(Hit(f"{where} {role}", "foreign-identity",
                                f" '{shown}' is not the project identity '{expected}'; "
@@ -519,10 +550,12 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
                  gate: bool, allow: list[AllowEntry]) -> None:
     """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
     refuses tracker references, attribution trailers, e-mail addresses in messages and identities
-    other than the project identity, GitHub's own included. A commit entry of
+    other than the project identity (GitHub's own too where the identity is strict). A commit entry of
     `allow` drops the hits of its role (an identity, or the message) on its commit; in a gate,
     where every hit it may cover is looked for, one that drops none is reported unused."""
     expected = project_identity(root) if gate else None
+    strict = expected is not None and strict_identity(root)
+    owner = repository_owner(root) if expected is not None and not strict else None
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
         if not record.strip():
@@ -534,9 +567,10 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
+        if expected is not None and (strict or not made_on_github_by_owner(author, committer, owner)):
+            scan_project_identity(where, "author", author, expected, patterns, report, strict)
         if expected is not None:
-            scan_project_identity(where, "author", author, expected, patterns, report)
-            scan_project_identity(where, "committer", committer, expected, patterns, report)
+            scan_project_identity(where, "committer", committer, expected, patterns, report, strict)
         scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
         entries = {entry.role: entry for entry in allow if entry.commit == sha}
         kept = []

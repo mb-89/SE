@@ -141,10 +141,14 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
   history already pushed alone.
-  - A commit GitHub made is foreign like any other: its web-flow committer (`GitHub`, `noreply`
-    at `github.com`) and a squash merge's account author fail, the owner's account included. A
-    landing's commit is the integrator's own, as the project identity
-    ([README "Landing on main"](README.md#landing-on-main)).
+  - Where `se.toml` `[integrate] landing` is `"fast-forward"`, the gate is strict: a commit
+    GitHub made is foreign like any other, its web-flow committer (`GitHub`, `noreply` at
+    `github.com`) and a squash merge's account author alike, as every landing is the
+    integrator's own commit ([README "Landing on main"](README.md#landing-on-main)).
+  - While it is `"squash"`, the built-in, GitHub's web-flow identity passes as committer, never
+    as author. On such a commit the author may be the account that owns `origin` on
+    `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
+    into `main`. Every other account stays foreign.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
   against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,

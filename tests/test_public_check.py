@@ -503,25 +503,39 @@ WEB_FLOW = {"GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + A
 NOREPLY = "users.noreply.github.com"
 
 
-@pytest.mark.parametrize("origin, author, committer, refused", [
-    # GitHub's squash merge of a pull request into main, for the owning account: foreign now.
+FAST_FORWARD = '\n[integrate]\nlanding = "fast-forward"\n'
+
+
+@pytest.mark.parametrize("origin, author, committer, squash, strict", [
+    # GitHub's squash merge of a pull request into main, for the owning account: it passes while
+    # landings are squash merges, and is foreign once they are the integrator's fast-forwards.
     ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "web-flow",
-     ["author", "committer"]),
+     [], ["author", "committer"]),
     ("git" + AT + "github.com:Alice/example.git", "alice <alice" + AT + NOREPLY + ">", "web-flow",
-     ["author", "committer"]),
-    # The project identity as author does not make GitHub's committer pass.
-    ("https://github.com/alice/example.git", "mb <mb>", "web-flow", ["committer"]),
-    ("", "agent <agent>", "web-flow", ["author", "committer"]),
+     [], ["author", "committer"]),
+    # The project identity as author with GitHub's committer: a commit made on GitHub.
+    ("https://github.com/alice/example.git", "mb <mb>", "web-flow", [], ["committer"]),
+    # Another account's noreply address stays foreign, as does the owner's off GitHub.
+    ("https://github.com/alice/example.git", "Bob <456+bob" + AT + NOREPLY + ">", "web-flow",
+     ["author"], ["author", "committer"]),
+    ("https://github.com/alice/example.git", "Alice <alice" + AT + "example.com>", "web-flow",
+     ["author"], ["author", "committer"]),
+    ("https://github.com/alice/example.git", "Alice <123+alice" + AT + "noreply.github.com.example.com>",
+     "web-flow", ["author"], ["author", "committer"]),
     ("https://github.com/alice/example.git", "Alice <123+alice" + AT + NOREPLY + ">", "author",
-     ["author", "committer"]),
+     ["author", "committer"], ["author", "committer"]),
+    # Without an origin on github.com no account owns the repository.
+    ("", "agent <agent>", "web-flow", ["author"], ["author", "committer"]),
     # The integrator's own landing commit: the project identity in both roles.
-    ("https://github.com/alice/example.git", "mb <mb>", "author", []),
+    ("https://github.com/alice/example.git", "mb <mb>", "author", [], []),
 ])
-def test_a_commit_github_made_fails_the_gate_like_any_foreign_identity(
-        repo: Path, origin: str, author: str, committer: str, refused: list[str]) -> None:
+@pytest.mark.parametrize("landing", ["squash", "fast-forward"])
+def test_a_commit_github_made_passes_the_gate_only_while_landings_are_squash_merges(
+        repo: Path, origin: str, author: str, committer: str, squash: list[str],
+        strict: list[str], landing: str) -> None:
     git(repo, "config", "user.name", "mb")
     git(repo, "config", "user.email", "mb")
-    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    commit(repo, {"se.toml": PROJECT_IDENTITY + (FAST_FORWARD if landing == "fast-forward" else "")})
     if origin:
         git(repo, "remote", "add", "origin", origin)
     (repo / "README.md").write_text("clean\n", encoding="utf-8")
@@ -533,8 +547,17 @@ def test_a_commit_github_made_fails_the_gate_like_any_foreign_identity(
     git(repo, "commit", "-qm", "Squash the topic", env=env)
     result = run_check("--repo", str(repo), "--range", "HEAD^!")
     hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    refused = strict if landing == "fast-forward" else squash
     assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
     assert result.returncode == (1 if refused else 0), result.stdout
+
+
+def test_an_unknown_landing_setting_stops_the_gate(repo: Path) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY + '\n[integrate]\nlanding = "rebase"\n'})
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    assert result.returncode == 2 and "[integrate] landing" in result.stdout, result.stdout
 
 
 @pytest.mark.parametrize("address", [

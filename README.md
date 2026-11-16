@@ -680,13 +680,14 @@ landing = "squash"
 ```
 
 `landing` is `"squash"`, built in: GitHub squash-merges the landing pull request and commits it
-for the merging account (web-flow committer, the account's `users.noreply.github.com` author).
-The identity gate and a public mirror's guard refuse that commit like any foreign identity, so
-`check` on the push to `main` fails on it, after the landing.
+for the merging account (web-flow committer, the account's `users.noreply.github.com` author),
+which the identity gate and a public mirror's guard pass for the account that owns the
+repository.
 
 `"fast-forward"` lands the integrator's own commit, `mb <mb>` in se, with no address in its
-message: `check` ran on exactly the commit that lands, and every gate passes it. It needs a
-ruleset that takes the integrator's push, a person step for the owner:
+message: `check` ran on exactly the commit that lands. The gate and the guard turn strict with
+it and refuse GitHub's own commits like any foreign identity. It needs a ruleset that takes the
+integrator's push, a person step for the owner:
 
 - In the ruleset of the integration branch (Settings, Rules, Rulesets), remove the rule "Require
   a pull request before merging"; keep "Require status checks to pass" with `check`, "Require

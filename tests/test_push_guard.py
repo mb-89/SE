@@ -133,11 +133,18 @@ def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, c
     assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode == 0
 
 
+@pytest.mark.parametrize("landing", ["squash", "fast-forward"])
 def test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not(
-        checkout, tmp_path, capfd):
+        checkout, tmp_path, capfd, landing):
     """A squash landing's commit on origin's main is GitHub's (web-flow committer, the account's
-    noreply author): the identity gate refuses it, but a branch that merges main pushes only its
-    own commits, so `push` and the hook gate those no remote holds yet."""
+    noreply author): the strict identity gate (fast-forward landings) refuses it, but a branch
+    that merges main pushes only its own commits, so `push` and the hook gate those no remote
+    holds yet."""
+    if landing == "fast-forward":
+        with (checkout / "se.toml").open("a", encoding="utf-8") as config:
+            config.write('\n[integrate]\nlanding = "fast-forward"\n')
+        git(checkout, "commit", "-qam", "Land by fast-forward")
+        git(checkout, "push", "-q", "origin", "main")
     git(checkout, "switch", "-q", "-c", "topic")
     commit(checkout, name="topic.txt")
     assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
