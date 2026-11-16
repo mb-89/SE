@@ -144,6 +144,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_fake_git: fake_
     for variable in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(variable, str(tmp_path / "home"))
     monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
+    monkeypatch.delenv(public_check.CLOUD_ENV, raising=False)
     se_checkout(shared_fake_git)
     path = tmp_path / "repo"
     path.mkdir()
@@ -425,6 +426,88 @@ def test_the_machine_list_is_refused_with_its_remedy(repo: Path, tmp_path: Path,
     assert ("is retired: move its terms into <source>/.public-check.local, the local list at the "
             "root of each repository or vault that needs them") in result.stdout
     assert "secret" not in result.stdout.lower() and str(tmp_path) not in result.stdout
+
+
+# A made-up private term, written apart so this file never holds it whole.
+CLOUD_TERM = "zorbl" + "quux"
+
+
+def test_a_cloud_term_is_found_in_a_file_a_message_and_an_identity_naming_only_its_line(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, f"# made up\n\n{CLOUD_TERM}\n")
+    commit(repo, {"README.md": f"made at {CLOUD_TERM.upper()}\n"}, f"Port the {CLOUD_TERM} tool",
+           f"user.name={CLOUD_TERM}")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 1
+    hits = [line for line in result.stdout.splitlines() if "cloud-term:3" in line]
+    assert [hit.split(": ")[0].rsplit(" ", 1)[-1] for hit in hits] == [
+        "README.md:1:9", "author", "message:1"]
+    assert f"with the cloud list ({public_check.CLOUD_ENV})" in result.stdout
+    assert CLOUD_TERM not in (result.stdout + result.stderr).lower()
+
+
+def test_a_cloud_term_in_a_foreign_identity_is_redacted(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, CLOUD_TERM)
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    commit(repo, {"README.md": "clean\n"}, "Add readme", f"user.name={CLOUD_TERM}")
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    assert result.returncode == 1
+    assert "'<cloud-term:1> <mb>' is not the project identity" in result.stdout
+    assert CLOUD_TERM not in result.stdout.lower()
+
+
+@pytest.mark.parametrize("line, message", [
+    ("off:email-address  # never", "the cloud list only adds terms"),
+    (f"{CLOUD_TERM}[", "is not a valid regex"),
+])
+def test_a_malformed_cloud_line_is_refused_by_its_number_alone(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, line: str, message: str) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, f"fine\n{line}\n")
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 2
+    assert f"{public_check.CLOUD_ENV}:2" in result.stdout and message in result.stdout
+    assert line not in result.stdout and CLOUD_TERM not in result.stdout
+
+
+def test_the_local_list_cannot_switch_a_cloud_term_off_and_still_switches_public_ones_off(
+        repo: Path, local: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, CLOUD_TERM)
+    local.write_text("off:email-address  # a public address book\n", encoding="utf-8")
+    commit(repo, {"README.md": f"alice{AT}corp.test {CLOUD_TERM}\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 1
+    assert "README.md:1:" in result.stdout and "cloud-term:1" in result.stdout
+    assert "email-address" not in result.stdout.split("public entries off locally")[0]
+
+
+@pytest.mark.parametrize("value", [None, "", " \n"])
+def test_without_the_cloud_list_the_verdict_is_as_before(
+        repo: Path, local: Path, monkeypatch: pytest.MonkeyPatch, value: str | None) -> None:
+    if value is not None:
+        monkeypatch.setenv(public_check.CLOUD_ENV, value)
+    commit(repo, {"README.md": f"{CLOUD_TERM}\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0
+    assert "cloud" not in result.stdout
+    local.unlink()
+    result = run_check("--repo", str(repo))
+    assert ("public-check: warning: no local list (.public-check.local); only the public list was "
+            "checked") in result.stdout
+
+
+def test_without_a_local_list_the_warning_names_the_cloud_list(
+        repo: Path, local: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, CLOUD_TERM)
+    local.unlink()
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0
+    assert ("no local list (.public-check.local); only the public and the cloud list were "
+            "checked") in result.stdout
 
 
 def test_missing_local_list_warns(repo: Path, local: Path) -> None:
@@ -1321,6 +1404,25 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     assert 'scripts/work_tickets.py suite --worktree . "${full[@]}"' in suite
 
 
+def test_ci_passes_the_cloud_list_secret_to_the_gate_step_only() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    secret = f"{public_check.CLOUD_ENV}: ${{{{ secrets.{public_check.CLOUD_ENV} }}}}"
+    assert workflow.count("secrets.") == 1 and workflow.count(secret) == 1
+    gate = workflow[workflow.index("- name: Gate the commits"):]
+    gate = gate[:gate.index("\n      - ")]
+    assert secret in gate and "public_check.py --rev" in gate
+
+
+def test_ci_gate_finds_a_cloud_term(repo: Path, tmp_path: Path,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    before, after = owner_push(repo, tmp_path, f"Port the {CLOUD_TERM} tool")
+    monkeypatch.setenv(public_check.CLOUD_ENV, CLOUD_TERM)
+    result = run_ci(tmp_path, before, after)
+    assert result.returncode == 1, result.stdout
+    assert f"commit {after[:12]} message:1: cloud-term:1" in result.stdout
+    assert CLOUD_TERM not in (result.stdout + result.stderr).lower()
+
+
 def field_report_script() -> str:
     """The shell of the check workflow's field-report step, its second `run: |` block."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
@@ -1476,6 +1578,19 @@ def test_a_local_term_in_a_built_page_attribute_is_named_by_line_and_column(
     assert "secret" not in result.stdout.lower()
     assert "public-check: FAILED with 1 hit(s) (1 built files, " in result.stdout
     assert " commits" not in result.stdout
+
+
+def test_a_cloud_term_in_a_built_page_is_named_by_its_line_alone(
+        repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(public_check.CLOUD_ENV, CLOUD_TERM)
+    commit(repo, {"README.md": "clean\n"})
+    site = built(tmp_path, {"index.html": page(f"<p>{CLOUD_TERM}</p>", {"notes": [CLOUD_TERM]})})
+    result = run_check("--repo", str(repo), "--built", str(site))
+    assert result.returncode == 1, result.stdout
+    assert "built:index.html:4:" in result.stdout and ": cloud-term:1" in result.stdout
+    assert "artifact-data notes[0]: cloud-term:1" in result.stdout
+    assert CLOUD_TERM not in result.stdout.lower()
+    assert f"(1 built files, with the cloud list ({public_check.CLOUD_ENV}), " in result.stdout
 
 
 def test_an_address_in_a_gzip_island_is_named_by_its_field_path(repo: Path, tmp_path: Path) -> None:

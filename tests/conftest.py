@@ -27,8 +27,9 @@ os.environ["SE_METRICS"] = os.devnull
 os.environ["SE_KERN"] = "off"
 
 # What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
-# which switch commands to their runner behaviour (`start` a cloud start, `capacity` none).
-RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT")
+# which switch commands to their runner behaviour (`start` a cloud start, `capacity` none), and the
+# public check's cloud list, which adds terms to every check.
+RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT", "SE_PUBLIC_CHECK_TERMS")
 RUNNER_PREFIX = "GITHUB_"
 
 
