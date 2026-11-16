@@ -24,6 +24,8 @@ its tools.
   [catch-up](../skills/catch-up/SKILL.md#hard-rules).
 - You never block on sessions ([catch-up](../skills/catch-up/SKILL.md#hard-rules)): start them,
   report who does what, and end the turn.
+- Every change you ask for is
+  [neutral by construction](../skills/work-model/SKILL.md#neutral-by-construction).
 - Follow the [shared repository-dispatch rule](../skills/work-model/SKILL.md#roles-and-flow),
   including for "Tickets for other repositories" from field reports.
 

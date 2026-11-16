@@ -350,6 +350,18 @@ boundary.
   `capacity`, `queue`, `start`, `close`, `config`); prose steps remain only for judgment. Escalations and product decisions stay
   manual.
 
+### Neutral by construction
+
+The owner: "Whatever we do, it needs to be neutral when we build it."
+
+- No tracked file names where its repository is hosted: not its host, its owner or its path.
+  Links to outside documentation are fine.
+- Where a file needs its repository's location, it derives it from the checkout's origin when it
+  runs or builds.
+- A change is neutral when it is written, so no later pass has to neutralize it.
+- The one exception is a line the host reads literally and cannot derive, such as a `uses:` line in
+  `.github/workflows`.
+
 ### Suite at a moved pin
 
 When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new
