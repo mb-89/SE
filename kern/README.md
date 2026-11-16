@@ -178,10 +178,10 @@ time and budget (SE's [README "Test budget"](../README.md#test-budget)): `integr
 `work_tickets.py suite` and the `check` job, the check `main`'s ruleset requires, run them after the
 suite, so a red kern test refuses the integration and the Python suite's budget is untouched.
 `check` vets kern in its own step, and fails where `gofmt -l` lists a file of kern's. The job
-`kern-platforms` runs kern's vet and tests on Windows and macOS, where the detached start and the
-stop differ, and there also the tests of SE's start and hook scripts (`tests/test_bootstrap.py`,
-`tests/test_se_hook.py`), whose paths differ too: a zip on Windows, `shasum` and no `setsid` on
-macOS. `check` needs it and fails unless every platform passed.
+`kern-platforms` runs kern's vet and tests on Windows, where the detached start and the stop
+differ, and there also the tests of SE's start and hook scripts (`tests/test_bootstrap.py`,
+`tests/test_se_hook.py`), whose paths differ too, a zip among them. `check` needs it and fails
+unless every leg passed. kern is built for darwin, and not tested there: no leg runs on macOS.
 
 The contract suite runs `contract/cases.json` three times: against the Go fake
 (`contract/fake_test.go`), against the real core with tally's Python process placed and attached

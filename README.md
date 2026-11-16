@@ -499,7 +499,7 @@ integration branch does.
 
 Each integration is a first-parent commit whose message starts `Integrate <branch>` and states its
 kind in the trailer `Release-kind: major|minor|patch`: the merge `integrate` builds, and on the
-integration branch the squash commit it lands as ([Landing on main](#landing-on-main)).
+integration branch the one commit it lands as ([Landing on main](#landing-on-main)).
 `integrate` writes it, and `work_tickets.py release-trailer` prints it:
 
 - on a re-integration (an integration `Integrate <branch>` of the same branch is already on the
@@ -530,15 +530,18 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 
 #### Landing on main
 
-Every integration lands on the integration branch through a squash pull request, which se's `main`
-requires: its ruleset allows no direct push, no force push and no deletion, keeps the history
-linear, merges pull requests by squash only and requires the check `check`
-([AGENTS.md "Public safety"](AGENTS.md#public-safety)). `work_tickets.py integrate`
-does all of it:
+Every integration lands on the integration branch through a landing pull request and its check
+`check`, as one commit on the tested base: se's `main` ruleset allows no force push and no
+deletion, keeps the history linear and requires `check`
+([AGENTS.md "Public safety"](AGENTS.md#public-safety)). How that commit reaches `main` is the
+setting `landing` below. `work_tickets.py integrate` does all of it:
 
 1. It merges the work branch into origin's newest integration branch on `land/<branch>` (the
    `Integrate <branch>` merge with its `Release-kind` trailer), runs the complete suite, the
    output regeneration, the project checks and the public check, and releases there.
+   - A fast-forward landing then writes the one landing commit: that tree on the base, as the
+     project identity in both roles, with the merge's title and message less each line that
+     holds an e-mail address (a `commit_trailer` co-author line, say).
 2. It pushes `land/<branch>` and opens a pull request of it into the integration branch, or reuses
    the one still open from an earlier attempt.
    - Its title is the merge's title, `Integrate <branch>: <the first sentence of the work issue's
@@ -557,10 +560,14 @@ does all of it:
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates. A repository whose host has no
    runners accepts the integrator's status instead ([Landing without CI](#landing-without-ci)).
-4. It squash-merges at exactly that head with the merge's message as the commit title and message,
-   so the squash commit carries `Integrate <branch>: <goal>` and the `Release-kind` trailer, and
-   no ` (#<number>)` or `Co-authored-by:` line GitHub's defaults would add. Where origin's
-   integration branch moved while it waited, it merges nothing: integrate again.
+4. It lands that head, once origin's integration branch is still the tested base; where it
+   moved while it waited, it merges nothing: integrate again.
+   - A squash landing squash-merges at exactly that head with the merge's message as the commit
+     title and message: `Integrate <branch>: <goal>` and the `Release-kind` trailer, and no
+     ` (#<number>)` or `Co-authored-by:` line GitHub's defaults would add.
+   - A fast-forward landing pushes the integration branch to exactly that head, which `check`
+     passed: GitHub writes no commit and marks the pull request merged. Where origin refuses the
+     push, it stops with the rule change below and never falls back to the squash merge.
 5. It reads the merge back: the pull request merged at that commit, which is origin's integration
    branch, on the base it tested and with the tree its checks passed.
    - Where origin's work branch holds commits the landing did not take, pushed after step 1 read
@@ -580,14 +587,15 @@ earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
     from what the session's GitHub tools read, does step 1, pushes `land/<branch>`, keeps what the
     read-back needs in `.se/handoff/` and prints the plan.
   - The plan: `create_pull_request` (or `update_pull_request` on the one `list_pull_requests`
-    finds open), `pull_request_read` `get_check_runs` until `check` passes, and
-    `merge_pull_request` with `merge_method` squash, the exact title and message and
+    finds open), `pull_request_read` `get_check_runs` until `check` passes, and for a squash
+    landing `merge_pull_request` with `merge_method` squash, the exact title and message and
     `expectedHeadSha` at the landing head; where trust is on, the
     [record](#trusted-landings)'s two steps come first;
   - the session runs those steps with its GitHub tools;
   - `integrate --read-back <branch> --landing-pull <number> --check-run <url>
-    --landing-description <file>` then reads step 5 back through `git fetch` alone (origin's
-    integration branch one commit on the tested base, with the tested tree).
+    --landing-description <file>` then, for a fast-forward landing, pushes step 4, and reads
+    step 5 back through `git fetch` alone (origin's integration branch one commit on the tested
+    base, with the tested tree).
   - It finishes everything local of step 6 and prints its close-out plan: the work pull request's
     comment and close, and the work issue's comment, label and close.
   - Before that it checks the landing pull request's description, saved after the merge: it must
@@ -664,10 +672,29 @@ no token), the hand-off needs neither a retyped file nor a second run
     minutes (`se.toml` `[tests.beside.kern-long-step]`), nightly and where a change touches the
     files it guards ([Test budget](#test-budget)); its fast guards run in kern's own tests.
 
-The squash commit carries the release's `se.toml` version, so the release workflow tags it and the
-docs workflow publishes it, as both run on every push to `main`. GitHub commits it for the merging
-account (web-flow committer, the account's `users.noreply.github.com` author), which the identity
-gate and a public mirror's guard pass for the account that owns the repository.
+The landed commit carries the release's `se.toml` version, so the release workflow tags it and
+the docs workflow publishes it, as both run on every push to `main`.
+
+```toml
+[integrate]
+landing = "squash"
+```
+
+`landing` is `"squash"`, built in: GitHub squash-merges the landing pull request and commits it
+for the merging account (web-flow committer, the account's `users.noreply.github.com` author),
+which the identity gate and a public mirror's guard pass for the account that owns the
+repository.
+
+`"fast-forward"` lands the integrator's own commit, `mb <mb>` in se, with no address in its
+message: `check` ran on exactly the commit that lands. The gate and the guard turn strict with
+it and refuse GitHub's own commits like any foreign identity. It needs a ruleset that takes the
+integrator's push, a person step for the owner:
+
+- In the ruleset of the integration branch (Settings, Rules, Rulesets), remove the rule "Require
+  a pull request before merging"; keep "Require status checks to pass" with `check`, "Require
+  linear history", "Block force pushes" and "Restrict deletions".
+- Then set `landing = "fast-forward"` in `se.toml`; obs and every project se lands for set it in
+  their own.
 
 #### Component versions
 
@@ -1180,7 +1207,7 @@ To turn it on, the application also grants those two permissions, adds the `sche
 
 Free minutes for a private repository, which the owner sets up:
 
-- Linux runners only (`ubuntu-*`): a Windows minute counts double, a macOS minute ten times.
+- Linux runners only (`ubuntu-*`): a Windows minute counts double.
 - `check` on pull requests only, so a landing is not run again on its push to main; the nightly
   `schedule` keeps main covered.
 - Never on data-only pushes: `paths-ignore` for the files no test reads.
@@ -1215,8 +1242,9 @@ ci = false # default true: CI's check is the verdict, wherever the host has runn
     characters too.
   - The host and its API come from origin (`gh api`, with origin's host), as every step does.
 - **Its check.** The plan's check step reads the newest status of that context on the head
-  instead of the check run `check`, and squash-merges only once it is accepted. The pause, the
-  pull request, the squash at that head and the read-back are the landing above.
+  instead of the check run `check`, and merges only once it is accepted. The pause, the pull
+  request, the squash at that head (or the fast-forward to it, where `[integrate] landing` says
+  so) and the read-back are the landing above.
 - **Accepted only where bound.** A status is accepted only where all of these hold:
   - its state is `success`, its context exactly `se integrator verdict`;
   - its tree is the commit's tree, and its suite hash the commit's;
@@ -1235,8 +1263,11 @@ ci = false # default true: CI's check is the verdict, wherever the host has runn
 
 ### Platform legs and their queue
 
-kern-platforms runs kern's tests and SE's start and hook tests on a Windows and a macOS runner, and
-`check` needs every leg. A job's `timeout-minutes` counts only from when a runner takes it, so it
+kern-platforms runs kern's tests and SE's start and hook tests on a Windows runner, and `check`
+needs every leg. kern is built for darwin; neither it nor the start and hook scripts are tested
+there.
+
+A job's `timeout-minutes` counts only from when a runner takes it, so it
 bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
 until GitHub fails it after 24 hours, and `check` with it.
 

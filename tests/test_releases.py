@@ -301,7 +301,7 @@ def test_push_of_a_landing_branch_releases_against_origin_s_main_and_waits_with_
     shown = git_door.run("show", "land/feature/topic-20261106:se.toml", root=origin).stdout
     assert shown == settings("1.3.0")
     assert "v1.3.0" not in origin_tags(checkout)
-    assert "Release: tag v1.3.0 once the squash commit is on main" in capsys.readouterr().out
+    assert "Release: tag v1.3.0 once the landing is on main" in capsys.readouterr().out
 
 
 def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, capsys):

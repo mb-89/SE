@@ -2357,6 +2357,8 @@ PUSH_FINAL_REFUSALS = (
     ("permission", re.compile(
         r"permission to .* denied|permission denied|\b403\b|authentication failed|"
         r"protected branch", re.I)),
+    # A ruleset's pull_request rule: the branch takes no direct push until its owner allows one.
+    ("pull request required", re.compile(r"changes must be made through a pull request", re.I)),
     ("pre-push hook", re.compile(r"pre-push hook declined", re.I)),
 )
 # Refusals GitHub withdraws on its own: the same push is accepted minutes later.
@@ -2429,9 +2431,11 @@ def push_gate(root: Path, branch: str) -> None:
         )
         return
     pushed = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    # Only commits no remote holds yet: a commit already published (main's, merged in) was gated
+    # where it was pushed, or by CI's push gate, and is no commit of this push's author.
     revisions = (
-        f"{pushed.stdout.strip()}..{branch}" if pushed.returncode == 0 and pushed.stdout.strip()
-        else f"{branch} --not --remotes"
+        f"{pushed.stdout.strip()}..{branch} --not --remotes"
+        if pushed.returncode == 0 and pushed.stdout.strip() else f"{branch} --not --remotes"
     )
     result = subprocess.run(
         [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", branch,
@@ -2823,7 +2827,7 @@ def push(root: Path, branch: str | None = None) -> str | None:
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the squash commit. Returns the
+    like it, needs the verdicts on its tree; its tag waits for the landed commit. Returns the
     release's tag, None where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
@@ -2836,7 +2840,7 @@ def push(root: Path, branch: str | None = None) -> str | None:
         workflow_tags(tag)
         tag = None
     if tag and landing:
-        print(f"Release: tag {tag} once the squash commit is on {target}; it is not pushed now")
+        print(f"Release: tag {tag} once the landing is on {target}; it is not pushed now")
         tag = None
     push_gate(root, branch)
     if branch == target and (accepted := guard_integration_push(root, branch)):
@@ -5931,8 +5935,11 @@ def public_push_commits(root: Path, mirror: Mirror) -> list[str]:
 def guard_public_push(root: Path, mirror: Mirror) -> None:
     expected_name, expected_email = configured_public_identity(root)
     public_check = sibling("public_check")
+    # While GitHub squash-merges the landings, its squash commit for the owning account passes;
+    # with a fast-forward landing every commit is the project identity's (README "Landing on main").
+    strict = landing_mode(root) == FAST_FORWARD
     host, _, path = (remote_repo(root) or "").partition("/")
-    owner = path.split("/", 1)[0].lower() if host.lower() == "github.com" else None
+    owner = path.split("/", 1)[0].lower() if host.lower() == "github.com" and not strict else None
     for commit in public_push_commits(root, mirror):
         details = run_git(root, "show", "-s", "--format=%B%x00%an%x00%ae%x00%cn%x00%ce", commit)
         if details.returncode != 0:
@@ -5944,8 +5951,10 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
         message, author_name, author_email, committer_name, committer_email = values
         if tracker_references(message):
             raise QueueError(f"Cannot push {commit} to a public mirror: message has a tracker reference")
-        if public_check.made_on_github_by_owner(f"{author_name} <{author_email}>",
-                                                f"{committer_name} <{committer_email}>", owner):
+        if public_check.message_addresses(message):
+            raise QueueError(f"Cannot push {commit} to a public mirror: message has an e-mail address")
+        if not strict and public_check.made_on_github_by_owner(
+                f"{author_name} <{author_email}>", f"{committer_name} <{committer_email}>", owner):
             continue  # the squash commit of a landing pull request
         if (author_name, author_email) != (expected_name, expected_email):
             raise QueueError(f"Cannot push {commit} to a public mirror: author differs from public_identity")
@@ -5960,6 +5969,86 @@ CHECK_POLL_SECONDS = 30
 CHECK_POLLS = 120  # an hour: the suite's limit is minutes, a queued runner may add some
 LANDING_PREFIX = "land/"
 HANDOFF_DIRECTORY = "handoff"
+# se.toml [integrate] landing (README "Landing on main"): how a landing reaches the integration
+# branch. "squash", built in: GitHub squash-merges the landing pull request and writes its own
+# commit. "fast-forward": the integrator writes the one landing commit as the project identity,
+# with no e-mail address in its message, and origin's integration branch moves to exactly it.
+LANDING_SETTING = "[integrate] landing"
+SQUASH, FAST_FORWARD = "squash", "fast-forward"
+LANDINGS = (SQUASH, FAST_FORWARD)
+FAST_FORWARD_REMEDY = (
+    "a person step: the owner removes the rule \"Require a pull request before merging\" "
+    "(pull_request) from the repository's ruleset for the integration branch (Settings, Rules, "
+    "Rulesets), keeping \"Require status checks to pass\" with `check`, \"Require linear "
+    "history\", \"Block force pushes\" and \"Restrict deletions\", so the integrator's push of "
+    "the commit `check` passed is the one way in; then integrate again, which reuses the landing "
+    f"pull request. Or set landing = \"{SQUASH}\" in [integrate] of se.toml"
+)
+
+
+def landing_mode(root: Path) -> str:
+    """se.toml [integrate] landing: "squash" (built in) or "fast-forward"; anything else refused."""
+    value = se_table(root, "integrate").get("landing", SQUASH)
+    if value not in LANDINGS:
+        raise QueueError(
+            f"{LANDING_SETTING} in {root / 'se.toml'} is {value!r}; it is one of "
+            f"{', '.join(repr(mode) for mode in LANDINGS)} (README \"Landing on main\"); nothing "
+            "was merged")
+    return str(value)
+
+
+def addressless(message: str) -> str:
+    """`message` without each line that holds an e-mail address (a co-author trailer of
+    `commit_trailer`, say), each dropped line said by its number, never its text."""
+    found = set(sibling("public_check").message_addresses(message))
+    if not found:
+        return message
+    print(f"Landing commit: line(s) {', '.join(map(str, sorted(found)))} of its message hold an "
+          "e-mail address and are left out; a landing commit carries none")
+    lines = message.split("\n")
+    return "\n".join(line for number, line in enumerate(lines, 1) if number not in found).strip()
+
+
+def write_landing_commit(root: Path, base: str, title: str, message: str) -> str:
+    """The fast-forward landing's one commit: the landing branch's tree (the merge, its
+    regeneration and its release) on `base`, as the project identity in both roles, titled
+    `title` with `message`, no line holding an e-mail address. The checkout's branch moves to it,
+    index and worktree unchanged (the same tree); its sha."""
+    identity = required_identity(root, "integrate")
+    text = addressless(f"{title}\n\n{message}".strip())
+    environment = git_door.identity_environment(identity)
+    commit = checked_git(root, "commit-tree", "HEAD^{tree}", "-p", base, "-m", text,
+                         env=environment).strip()
+    previous = checked_git(root, "rev-parse", "HEAD").strip()
+    checked_git(root, "update-ref", f"refs/heads/{current_branch(root)}", commit, previous)
+    print(f"Landing commit: {commit[:12]} on {base[:12]}, {identity[0]} <{identity[1]}> as author "
+          "and committer")
+    return commit
+
+
+def fast_forward(root: Path, target: str, base: str, landed: str) -> None:
+    """Move origin's `target` from `base` to exactly `landed`, the landing commit `check` passed,
+    by a plain push: a fast-forward, so GitHub writes no commit of its own and marks the landing
+    pull request merged. Already there, nothing is pushed; moved elsewhere, or refused, nothing
+    falls back to GitHub's squash merge."""
+    moved = remote_head(root, target)
+    if moved == landed:
+        print(f"Fast-forward: origin's {target} is already {landed[:12]}")
+        return
+    if moved != base:
+        raise QueueError(
+            f"origin's {target} moved from {base[:12]} to {moved[:12] or 'nothing'} while the "
+            f"landing waited; nothing was pushed, as {landed[:12]} no longer fast-forwards it. "
+            "Integrate again, which merges the newest integration branch and reuses the pull "
+            "request")
+    try:
+        git_push(root, ["origin", f"{landed}:refs/heads/{target}"])
+    except QueueError as error:
+        raise QueueError(
+            f"origin refused to fast-forward {target} to the landing commit {landed[:12]}: "
+            f"{error}. Nothing fell back to GitHub's squash merge. Remedy: {FAST_FORWARD_REMEDY}"
+        ) from None
+    print(f"Fast-forward: origin's {target} moved from {base[:12]} to {landed[:12]}")
 
 
 # The GitHub boundary. A command that talks to GitHub does everything local itself and states its
@@ -6409,13 +6498,14 @@ def integrator_record(root: Path, landed: str, tested: str) -> dict[str, str] | 
 
 def landing_plan(remote: str, landing: str, target: str, base: str, landed: str, title: str,
                  message: str, description: str, then: str, tracker: str,
-                 record: dict[str, str] | None = None,
+                 record: dict[str, str] | None = None, mode: str = SQUASH, *,
                  verdict: dict[str, str] | None = None) -> Plan:
     """The pause search on `tracker`, the integrator's record where trust is on, then open or
-    reuse the landing pull request, wait for `check` on `landed`, squash-merge it there with
-    exactly `title` and `message`: the GitHub steps of landing on `target`. Where `verdict` names
-    the integrator's status (a landing without CI), that status is written first and read in
-    place of `check`."""
+    reuse the landing pull request, wait for `check` on `landed` and, for a squash landing,
+    squash-merge it there with exactly `title` and `message`: the GitHub steps of landing on
+    `target`. A fast-forward landing ends at the check: the push that moves `target` to `landed`
+    is git's, the command's that follows (fast_forward). Where `verdict` names the integrator's
+    status (a landing without CI), that status is written first and read in place of `check`."""
     where = owner_repo(remote)
     recording = (*record_steps(remote, landing, record), *status_steps(remote, verdict))
     number = Later("pull number", 2 + len(recording))
@@ -6442,12 +6532,12 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  "instead",
             gives=("pull number", "pull url")),
         waiting,
-        Step("squash", "merge_pull_request", {
+        *(() if mode == FAST_FORWARD else (Step("squash", "merge_pull_request", {
             **where, "pullNumber": number, "merge_method": "squash", "commit_title": title,
             "commit_message": message, "expectedHeadSha": landed},
             note=f"Only while origin's {target} is still {base} (git ls-remote origin "
                  f"refs/heads/{target}); where it moved, merge nothing and integrate again",
-            gives=("merge commit sha",)),
+            gives=("merge commit sha",)),)),
     ), then)
 
 
@@ -6543,6 +6633,21 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
             "squash": squash}
 
 
+def push_landing(root: Path, door: GitHub, target: str, base: str, landed: str,
+                 number: int) -> str:
+    """A fast-forward landing's merge step: move origin's `target` to `landed` (fast_forward) and
+    read landing pull request `number` back, which GitHub marks merged at `landed` itself; the
+    landed commit."""
+    fast_forward(root, target, base, landed)
+    read = door.pull(number, MERGE_CONFIRMATION.format(number=number))
+    if read.get("merged"):
+        print(f"Landing pull request #{number}: merged at {str(read.get('merge_commit_sha'))[:12]}")
+    else:  # origin's branch is the landing already; GitHub marks the pull request in its time
+        print(f"Landing pull request #{number}: not yet shown as merged; origin's {target} is "
+              f"{landed[:12]}, which GitHub marks it merged by")
+    return landed
+
+
 def landing_read_back(root: Path, target: str, base: str, landed: str,
                       merged: str | None = None) -> str:
     """Read the landing back through git alone: origin's `target` (`merged`, where the merge
@@ -6553,7 +6658,7 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
     if merged is None and head == base:
         raise QueueError(
             f"origin's {target} is still {base[:12]}, the base the landing was tested on: the "
-            "squash merge has not landed. Run the plan's merge step, then read back again")
+            "landing has not reached it. Run the plan's merge step, then read back again")
     commit = merged or head
     problems = []
     if head != commit:
@@ -6564,7 +6669,7 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
         problems.append(f"its tree is not the tree of {landed[:12]} that the checks passed")
     if problems:
         raise QueueError(
-            f"The squash commit {commit[:12]} does not read back as tested: "
+            f"The landed commit {commit[:12]} does not read back as tested: "
             + "; ".join(problems) + f". Check origin's {target} before integrating anything else"
         )
     print(f"Landed: {commit[:12]} on {target}, on {base[:12]} with the tree of {landed[:12]}")
@@ -6687,11 +6792,13 @@ def integrate(
     head_branch: str | None = None,
     pr_comments: Path | None = None,
 ) -> str | None:
-    """Land a delivered pull request's branch on the integration branch through a squash pull
+    """Land a delivered pull request's branch on the integration branch through a landing pull
     request: merge it into the newest integration branch on `land/<branch>`, run the checks,
-    release and push; then the landing plan (open or reuse the landing pull request, the field
-    report its description, wait for `check`, squash-merge), the read-back of the merged commit
-    and the close-out. Where gh is not signed in the plan is printed for the session and None
+    release and, for a fast-forward landing (se.toml [integrate] landing), write the one landing
+    commit as the project identity; push; then the landing plan (open or reuse the landing pull
+    request, the field report its description, wait for `check`, squash-merge, or push the
+    integration branch to the landing commit), the read-back of the landed commit and the
+    close-out. Where gh is not signed in the plan is printed for the session and None
     returned: `integrate --read-back <branch>` finishes. `included` states why commits after the
     field report's Branch tip are merged too."""
     tracker = resolve_repo(root, repo)
@@ -6705,6 +6812,7 @@ def integrate(
             "git remote add origin <url>"
         )
     target = integration_branch(root)
+    mode = landing_mode(root)
     onto_integration_branch(root, target)
     if handing_off and relay_door(root, remote) is not None:
         print(relay_landing_waits(root), file=sys.stderr)
@@ -6803,6 +6911,10 @@ def integrate(
             run_public_check(root, base)
         feedback.phase("release")
         tag = release(root, landing, f"refs/remotes/origin/{target}")
+        took = checked_git(root, "rev-parse", "HEAD").strip()  # the merge and its release
+        if mode == FAST_FORWARD:
+            feedback.phase("the landing commit")
+            write_landing_commit(root, base, title, message)
         landed = checked_git(root, "rev-parse", "HEAD").strip()
         feedback.phase(f"push {landing}")
         push_gate(root, landing)
@@ -6818,13 +6930,15 @@ def integrate(
             "pieces": planned_pieces(report),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
+            "landing_mode": mode, "took": took,
         }
         record = integrator_record(root, landed, tested)
         verdict = status_verdict(root, remote, base, landed) if without_ci else None
         first = 2 + len(record_steps(remote, landing, record)) + len(  # the landing pull request's step
             status_steps(remote, verdict))
+        last = first + (2 if mode == SQUASH else 1)  # the merge, or the check a push follows
         landing_desc = ("--landing-description <file: the landing pull request's description, as "
-                        f"pull_request_read get reads it after step {first + 2}> ")
+                        f"pull_request_read get reads it after step {last}> ")
         if relay is not None:  # the relay holds that read: the read-back sources it, no file
             landing_desc = ""
         then = (f"work_tickets.py integrate --read-back {branch} --landing-pull <pull number from "
@@ -6834,13 +6948,16 @@ def integrate(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
             issue_url(tracker, work_number), metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
-                            then, tracker, record, verdict)
+                            then, tracker, record, mode, verdict=verdict)
         door = relay_door(root, remote) if handing_off else None
         if door is not None:  # one call through kern: each GitHub step is a github.step
             feedback.phase("landing plan through kern's relay: the landing pull request, its "
-                           "check, the squash merge")
+                           f"check, the {'squash merge' if mode == SQUASH else 'fast-forward'}")
             given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker))
             landing_pull = int(given["pull number"])
+            if mode == FAST_FORWARD:
+                given["merge commit sha"] = push_landing(root, door, target, base, landed,
+                                                         landing_pull)
             feedback.phase("read back the landing pull request and the landed commit")
             landed_metrics({**state, "plan": plan.data()}, landing_pull,
                            str(door.pull(landing_pull, LANDING_READ_BACK.format(
@@ -6861,10 +6978,14 @@ def integrate(
             print(plan.text())
             return None
         else:
-            feedback.phase("landing plan: the landing pull request, its check, the squash merge")
+            feedback.phase("landing plan: the landing pull request, its check, the "
+                           f"{'squash merge' if mode == SQUASH else 'fast-forward'}")
             door = GitHub(root, remote)
             given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker,
                                                    verdict))
+            if mode == FAST_FORWARD:
+                given["merge commit sha"] = push_landing(root, door, target, base, landed,
+                                                         int(given["pull number"]))
             feedback.phase("read back the landed commit")
             commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except Exception as error:  # a relay step kern gave up raises too: nothing stays behind
@@ -7008,8 +7129,13 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             .read_text(encoding="utf-8")).get("body") or "")
     metrics.note(issue=state["work_number"])
     landed_metrics(state, landing_pull, description)
+    merged = None
+    if state.get("landing_mode") == FAST_FORWARD:  # the plan ended at the check: the push is git's
+        feedback.phase(f"fast-forward {state['target']} to the landing commit")
+        fast_forward(root, str(state["target"]), str(state["base"]), str(state["landed"]))
+        merged = str(state["landed"])
     feedback.phase(f"read back the landing of {branch}")
-    commit = landing_read_back(root, state["target"], state["base"], state["landed"])
+    commit = landing_read_back(root, state["target"], state["base"], state["landed"], merged)
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
                                check_run, None)
     path.unlink()
@@ -7046,7 +7172,10 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             guard_public_push(root, mirror)
         git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
     branch, landed = str(state["branch"]), str(state["landed"])
-    unlanded = left_out(root, branch, landed)
+    # A fast-forward landing's one commit holds none of the branch's history: the merge it was
+    # written from (its tree, its release) holds what it took.
+    took = str(state.get("took") or landed)
+    unlanded = left_out(root, branch, took)
     if unlanded:
         raise QueueError(
             f"Branch {branch} on origin has {len(unlanded)} commit(s) the landing {commit[:12]} "
@@ -7116,12 +7245,12 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     try:
-        remove_worker_worktree(root, branch, landed)
+        remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
     except QueueError as error:
         print(f"warning: worker worktree was not removed: {error}", file=sys.stderr)
         print("Cleanup: worker worktree retained")
-    delete_merged_branch(root, branch, str(state["head"]), landed, refused)
+    delete_merged_branch(root, branch, str(state["head"]), took, refused)
     summary = cleanup_refusals(refused)
     if summary:
         print(summary)
@@ -8855,8 +8984,9 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
                   "request's comments (issue_read get_comments), saved to a file; read only for a "
                   "risky change (README \"Review gate\")"),
          arg("--read-back", metavar="BRANCH",
-             help="after the plan's steps: check that origin's integration branch is the squash "
-                  "commit of land/BRANCH on the tested base with the tested tree, and finish"),
+             help="after the plan's steps: for a fast-forward landing push origin's "
+                  "integration branch to land/BRANCH's commit; check that it is the one landed "
+                  "commit on the tested base with the tested tree, and finish"),
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--landing-description", type=Path, metavar="FILE",

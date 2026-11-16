@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
-"""Rewrite a fresh clone's history once so the public check's commit gates pass over all of it.
+"""Rewrite a fresh clone's history once so no commit or tag carries an address or a foreign identity.
 
-Every local branch and tag of the clone is rewritten in place, through `git fast-export`, a filter
-and `git fast-import` (standard library only):
+Every branch of the clone's origin gets a local branch first; then every local branch and tag is
+rewritten in place, through `git fast-export`, a filter and `git fast-import` (standard library
+only):
 
-- commit messages lose their attribution trailers (`Co-Authored-By:`, `Claude-Session:`, any case)
-  and their tracker references, with the same detectors as the commit gates
-  (scripts/public_check.py, AGENTS.md "Public safety");
-- an author or committer other than the project identity (se.toml `[project] identity`, or the
-  machine's `public_identity`) becomes it; GitHub's web-flow committer passes, as in the gates;
-- every tag moves to its commit's rewritten commit; trees and dates stay as they are, so each
-  rewritten branch carries exactly its old tree.
+- every author, committer and annotated tag's tagger becomes the project identity (se.toml
+  `[project] identity`, or the machine's `public_identity`), name and address alike, GitHub's
+  web-flow committer included, so no account login remains;
+- every commit and tag message loses its attribution trailers (`Co-Authored-By:`,
+  `Claude-Session:`, any case) and its tracker references, with the same detectors as the commit
+  gates (scripts/public_check.py, AGENTS.md "Public safety"), and every body line that holds an
+  email address, with the public list's `email-address` term read without its accept filter, so
+  service and noreply addresses go too; an address in the subject line is cut out of it;
+- every tag moves to its commit's rewritten commit; trees, dates and tag names stay as they are,
+  so each rewritten branch carries exactly its old tree.
 
-It writes the commit map (`<old> <new>` per line) to `<git dir>/rewrite-commit-map` and prints the
-counts, each branch's old and new head, the tags moved and the `.public-check-allow` commit
-entries left stale at each branch tip (a commit entry names a sha the rewrite replaces).
+Before and after, it counts the addresses in every identity and message of the branches and tags,
+per place and kind, and the identities other than the project's; it prints counts and labels only,
+never an address. It writes the commit map (`<old> <new>` per line) to
+`<git dir>/rewrite-commit-map` and prints each branch's old and new head, the tags moved and the
+`.public-check-allow` commit entries left stale at each branch tip (a commit entry names a sha the
+rewrite replaces).
 
 Run it on a fresh full clone only: it refuses a shallow clone or one with local changes. It
-pushes nothing; pushing the result is the switch runbook's step. Exit code 0 rewritten, 2 setup
-error.
+pushes nothing; pushing the result is the owner's runbook step. Exit code 0 rewritten with no
+address or foreign identity left, 1 rewritten but some remain, 2 setup error.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
@@ -47,7 +55,7 @@ def _public_check():
 public_check = _public_check()
 
 MAP_FILE = "rewrite-commit-map"
-IDENTITY_LINE = re.compile(rb"^(author|committer) (.*?) ?<([^>]*)> (\S+ \S+)\n$")
+IDENTITY_LINE = re.compile(rb"^(author|committer|tagger) (.*?) ?<([^>]*)> (\S+ \S+)\n$")
 REFERENCE = f"(?:{public_check.TRACKER_REFERENCE.pattern})"
 # A reference and the punctuation that only existed for it: "(#5)", "#5, ", ", #5", then "#5".
 REFERENCE_FORMS = (
@@ -56,6 +64,29 @@ REFERENCE_FORMS = (
     re.compile(rf"[ \t]*,[ \t]*{REFERENCE}"),
     re.compile(rf"[ \t]*{REFERENCE}"),
 )
+# The public list's email-address term; every match counts, its accept filter only sorts them.
+EMAIL = next(pattern for pattern in public_check.GENERIC_PATTERNS if pattern.label == "email-address")
+# An address cut out of a subject line, with the brackets and the space that only existed for it.
+SUBJECT_ADDRESS = re.compile(rf"[ \t]*<?(?:{EMAIL.regex.pattern.removeprefix('(?i)')})>?",
+                             EMAIL.regex.flags & re.IGNORECASE)
+GITHUB_NOREPLY = "users.noreply.github.com"
+PLACES = ("author", "committer", "tagger", "commit-message", "tag-message")
+KINDS = ("personal", "github-noreply", "other")
+
+
+def addresses(text: str) -> list[str]:
+    """The kind of every email address in `text`: `personal` where the public check's accept filter
+    flags it, `github-noreply` for a GitHub account's noreply address, `other` for the rest (a
+    service's fixed address, an example domain, an SSH remote's user)."""
+    kinds = []
+    for match in EMAIL.regex.finditer(text):
+        if EMAIL.accept(match):
+            kinds.append("personal")
+        elif match.group(2).lower() == GITHUB_NOREPLY:
+            kinds.append("github-noreply")
+        else:
+            kinds.append("other")
+    return kinds
 
 
 class SetupError(Exception):
@@ -65,56 +96,90 @@ class SetupError(Exception):
 @dataclass
 class Counts:
     commits: int = 0
+    tags: int = 0  # annotated tags
     trailers: int = 0  # trailer lines dropped
     trailer_commits: int = 0
     references: int = 0  # tracker references removed
     reference_commits: int = 0
-    identity_commits: int = 0  # commits with an author or committer set to the project identity
+    addresses: int = 0  # addresses removed from messages
+    address_commits: int = 0  # commits and tags whose message lost one
+    identity_commits: int = 0  # commits and tags with an identity set to the project identity
     originals: dict[str, str] = field(default_factory=dict)  # mark -> original commit
 
 
-def clean_message(message: str) -> tuple[str, int, int]:
-    """`message` without attribution trailers and tracker references, with the number of each
-    removed; an untouched message comes back as it was."""
+@dataclass
+class Census:
+    """The addresses in a history's identities and messages, and its foreign identities."""
+    commits: int = 0
+    tags: int = 0
+    found: Counter = field(default_factory=Counter)  # (place, kind) -> addresses
+    carriers: int = 0  # commits and tags with at least one address
+    foreign: int = 0  # identities other than the project identity
+
+    def total(self) -> int:
+        return sum(self.found.values())
+
+    def lines(self, label: str) -> list[str]:
+        """The census as printed lines: counts and labels only, never an address."""
+        found = ", ".join(f"{place} {kind} {self.found[place, kind]}" for place in PLACES
+                          for kind in KINDS if self.found[place, kind]) or "none"
+        return [f"rewrite-history: {label}: {self.commits} commits, {self.tags} annotated tags; "
+                f"{self.total()} addresses in {self.carriers} of them; {self.foreign} identities "
+                f"other than the project's",
+                f"rewrite-history: {label}: addresses by place and kind: {found}"]
+
+
+def clean_message(message: str) -> tuple[str, int, int, int]:
+    """`message` without attribution trailers, tracker references and email addresses, with the
+    number of each removed; an untouched message comes back as it was. A body line that holds an
+    address is dropped; an address in the subject line is cut out of it."""
     trailers = len(public_check.attribution_trailers(message))
     references = len(public_check.tracker_references(message))
-    if not trailers and not references:
-        return message, 0, 0
-    lines = [line for line in message.split("\n")
-             if not public_check.ATTRIBUTION_TRAILER.match(line)]
+    found = len(addresses(message))
+    if not trailers and not references and not found:
+        return message, 0, 0, 0
     cleaned = []
-    for line in lines:
+    for number, line in enumerate(message.split("\n")):
+        if public_check.ATTRIBUTION_TRAILER.match(line):
+            continue
+        if addresses(line):
+            if number:
+                continue
+            line = SUBJECT_ADDRESS.sub("", line).rstrip()
         if public_check.tracker_references(line):
             for form in REFERENCE_FORMS:
                 line = form.sub("", line)
             line = line.rstrip()
         cleaned.append(line)
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip("\n")
-    return text + "\n", trailers, references
+    return text + "\n", trailers, references, found
 
 
 def fix_identity(line: bytes, identity: tuple[str, str]) -> bytes:
-    """An `author` or `committer` line of the stream with the project identity where it differs."""
+    """An `author`, `committer` or `tagger` line of the stream with the project identity where it
+    differs, name and address alike."""
     match = IDENTITY_LINE.match(line)
     if match is None:
         raise SetupError(f"cannot read the identity line {line!r} of git fast-export")
     role, name, email, when = match.groups()
-    found = f"{name.decode('utf-8', 'replace')} <{email.decode('utf-8', 'replace')}>"
-    wanted = f"{identity[0]} <{identity[1]}>"
-    if found == wanted or (role == b"committer" and found == public_check.WEB_FLOW):
+    if (name, email) == (identity[0].encode(), identity[1].encode()):
         return line
     return b"%s %s <%s> %s\n" % (role, identity[0].encode(), identity[1].encode(), when)
 
 
 def filter_stream(source: BinaryIO, sink: BinaryIO, identity: tuple[str, str],
                   counts: Counts) -> None:
-    """Copy a `git fast-export` stream to `sink`, cleaning each commit's message and identities."""
-    header: list[bytes] | None = None  # the lines of a commit before its message
+    """Copy a `git fast-export` stream to `sink`, cleaning each commit's and annotated tag's message
+    and identities."""
+    header: list[bytes] | None = None  # the lines of a commit or tag before its message
     mark = original = None
     while line := source.readline():
-        if line.startswith(b"commit "):
+        if line.startswith((b"commit ", b"tag ")):
             header, mark, original = [line], None, None
-            counts.commits += 1
+            if line.startswith(b"commit "):
+                counts.commits += 1
+            else:
+                counts.tags += 1
             continue
         if header is None:
             if line.startswith(b"data "):
@@ -125,19 +190,21 @@ def filter_stream(source: BinaryIO, sink: BinaryIO, identity: tuple[str, str],
             continue
         if line.startswith(b"data "):
             raw = source.read(int(line[5:]))
-            text, trailers, references = clean_message(raw.decode("utf-8", "surrogateescape"))
-            message = text.encode("utf-8", "surrogateescape") if trailers or references else raw
+            text, trailers, references, found = clean_message(raw.decode("utf-8", "surrogateescape"))
+            message = text.encode("utf-8", "surrogateescape") if trailers or references or found else raw
             counts.trailers += trailers
             counts.trailer_commits += bool(trailers)
             counts.references += references
             counts.reference_commits += bool(references)
-            fixed = [fix_identity(item, identity) if item.startswith((b"author ", b"committer "))
+            counts.addresses += found
+            counts.address_commits += bool(found)
+            fixed = [fix_identity(item, identity) if item.startswith((b"author ", b"committer ", b"tagger "))
                      else item for item in header]
             counts.identity_commits += fixed != header
             sink.writelines(fixed)
             sink.write(b"data %d\n" % len(message))
             sink.write(message)
-            if mark is not None and original is not None:
+            if header[0].startswith(b"commit ") and mark is not None and original is not None:
                 counts.originals[mark] = original
             header = None
             continue
@@ -146,6 +213,37 @@ def filter_stream(source: BinaryIO, sink: BinaryIO, identity: tuple[str, str],
         elif line.startswith(b"original-oid "):
             original = line[13:].strip().decode()
         header.append(line)
+
+
+def census_stream(source: BinaryIO, identity: tuple[str, str]) -> Census:
+    """Count the addresses in the identities and messages of a `git fast-export` stream, and its
+    identities other than `identity`."""
+    census, kind = Census(), None
+    wanted = (identity[0].encode(), identity[1].encode())
+    while line := source.readline():
+        if line.startswith((b"commit ", b"tag ")):
+            kind = "commit" if line.startswith(b"commit ") else "tag"
+            carried = False
+            if kind == "commit":
+                census.commits += 1
+            else:
+                census.tags += 1
+        elif line.startswith(b"data "):
+            raw = source.read(int(line[5:]))
+            if kind is not None:
+                found = addresses(raw.decode("utf-8", "replace"))
+                census.found.update((f"{kind}-message", item) for item in found)
+                census.carriers += bool(found or carried)
+                kind = None
+        elif kind is not None and line.startswith((b"author ", b"committer ", b"tagger ")):
+            match = IDENTITY_LINE.match(line)
+            role, name, email = (match.group(1), match.group(2), match.group(3)) if match else \
+                (line.split(b" ", 1)[0], b"", line)
+            census.foreign += (name, email) != wanted
+            found = addresses(email.decode("utf-8", "replace") + " " + name.decode("utf-8", "replace"))
+            census.found.update((role.decode(), item) for item in found)
+            carried = carried or bool(found)
+    return census
 
 
 def git(repo: Path, *arguments: str) -> str:
@@ -202,12 +300,41 @@ def stale_allow_entries(repo: Path, branch: str) -> list[str]:
 
 
 def fast_export_options(repo: Path) -> list[str]:
-    options = ["--branches", "--tags", "--signed-tags=strip", "--tag-of-filtered-object=rewrite",
-               "--reencode=yes", "--show-original-ids", "--mark-tags"]
+    options = ["--branches", "--tags", "--signed-tags=strip", "--reencode=yes"]
     usage = git_door.run("fast-export", "-h", root=repo)
     if "--signed-commits" in usage.stdout + usage.stderr:
         options.append("--signed-commits=strip")  # a rewritten commit's signature is void anyway
     return options
+
+
+def track_origin_branches(repo: Path) -> list[str]:
+    """Give every branch of origin that has none a local branch at it, so the rewrite covers all
+    branches; the branches created."""
+    output = git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin")
+    local = set(refs(repo))
+    created = []
+    for name in output.split():
+        branch = name.removeprefix("refs/remotes/origin/")
+        if branch != "HEAD" and f"refs/heads/{branch}" not in local:
+            git(repo, "branch", "-q", branch, name)
+            created.append(branch)
+    return created
+
+
+def census(repo: Path, identity: tuple[str, str]) -> Census:
+    """The census of every local branch and tag of `repo`."""
+    with tempfile.TemporaryFile() as errors:
+        exporter = git_door.popen("fast-export", *fast_export_options(repo), "--no-data", root=repo,
+                                  stdout=subprocess.PIPE, stderr=errors)
+        try:
+            counted = census_stream(exporter.stdout, identity)
+        finally:
+            exporter.stdout.close()
+        if exporter.wait():
+            errors.seek(0)
+            raise SetupError(f"git fast-export failed in {repo}: "
+                             f"{errors.read().decode('utf-8', 'replace').strip()}")
+    return counted
 
 
 def rewrite(repo: Path, identity: tuple[str, str]) -> tuple[Counts, dict[str, str], dict, dict]:
@@ -219,7 +346,9 @@ def rewrite(repo: Path, identity: tuple[str, str]) -> tuple[Counts, dict[str, st
     with tempfile.TemporaryDirectory() as scratch:
         marks, errors = Path(scratch) / "marks", Path(scratch) / "errors"
         with errors.open("wb") as log:
-            exporter = git_door.popen("fast-export", *fast_export_options(repo), root=repo,
+            exporter = git_door.popen("fast-export", *fast_export_options(repo),
+                                      "--tag-of-filtered-object=rewrite", "--show-original-ids",
+                                      "--mark-tags", root=repo,
                                       stdout=subprocess.PIPE, stderr=log)
             importer = git_door.popen("fast-import", "--force", "--quiet",
                                       f"--export-marks={marks}", root=repo,
@@ -261,29 +390,43 @@ def main(argv: list[str] | None = None) -> int:
     try:
         check_fresh(repo)
         identity = project_identity(repo, args.identity)
-        counts, mapping, before, after = rewrite(repo, identity)
+        created = track_origin_branches(repo)
+        before = census(repo, identity)
+        counts, mapping, heads, moved_to = rewrite(repo, identity)
+        after = census(repo, identity)
     except SetupError as error:
         print(f"rewrite-history: {error}", file=sys.stderr)
         return 2
+    if created:
+        print(f"rewrite-history: {len(created)} branches of origin given a local branch: "
+              f"{', '.join(sorted(created))}")
     changed = sum(old != new for old, new in mapping.items())
-    print(f"rewrite-history: {counts.commits} commits rewritten, {changed} with a new id; "
-          f"{counts.trailers} trailer lines dropped from {counts.trailer_commits} commits, "
-          f"{counts.references} tracker references from {counts.reference_commits}, the identity "
-          f"'{identity[0]} <{identity[1]}>' set on {counts.identity_commits}")
-    for name in sorted(before):
+    print(f"rewrite-history: {counts.commits} commits and {counts.tags} annotated tags rewritten, "
+          f"{changed} commits with a new id; {counts.trailers} trailer lines dropped from "
+          f"{counts.trailer_commits} commits, {counts.references} tracker references from "
+          f"{counts.reference_commits}, {counts.addresses} addresses from "
+          f"{counts.address_commits} messages, the identity '{identity[0]} <{identity[1]}>' set "
+          f"on {counts.identity_commits}")
+    for line in before.lines("before") + after.lines("after"):
+        print(line)
+    for name in sorted(heads):
         if name.startswith("refs/heads/"):
-            print(f"rewrite-history: {name[11:]} {before[name][:12]} -> {after[name][:12]} "
+            print(f"rewrite-history: {name[11:]} {heads[name][:12]} -> {moved_to[name][:12]} "
                   "(same tree)")
-    tags = [name for name in before if name.startswith("refs/tags/")]
-    moved = sum(before[name] != after[name] for name in tags)
+    tags = [name for name in heads if name.startswith("refs/tags/")]
+    moved = sum(heads[name] != moved_to[name] for name in tags)
     print(f"rewrite-history: {moved} of {len(tags)} tags moved to their rewritten commits")
-    for name in sorted(before):
+    for name in sorted(heads):
         if name.startswith("refs/heads/"):
             for entry in stale_allow_entries(repo, name):
                 print(f"rewrite-history: {name[11:]}: .public-check-allow line {entry} names a "
                       "commit the rewrite replaced; delete it")
     git_dir = git(repo, "rev-parse", "--absolute-git-dir").strip()
     print(f"rewrite-history: commit map in {Path(git_dir) / MAP_FILE}")
+    if after.total() or after.foreign:
+        print(f"rewrite-history: the rewritten history still holds {after.total()} addresses and "
+              f"{after.foreign} foreign identities", file=sys.stderr)
+        return 1
     return 0
 
 

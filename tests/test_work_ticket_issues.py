@@ -1859,7 +1859,12 @@ class FakeGitHub:
 
     def pull(self, number: int, purpose: str = "") -> dict:
         self.calls.append(("pull", number))
-        return next(pull for pull in self.pulls if pull["number"] == number)
+        pull = next(pull for pull in self.pulls if pull["number"] == number)
+        head = self.git("rev-parse", f"refs/heads/{pull['head']}")
+        if not pull["merged"] and head == self.git("rev-parse", f"refs/heads/{pull['base']}"):
+            # Its head pushed to its base: GitHub marks the pull request merged at that commit.
+            pull.update(state="closed", merged=True, merge_commit_sha=head)
+        return pull
 
     def open_pull(self, head: str, base: str) -> dict | None:
         self.calls.append(("open_pull", head, base))
@@ -1920,6 +1925,19 @@ class FakeGitHub:
         self.git("update-ref", f"refs/heads/{pull['base']}", commit, main)
         pull.update(state="closed", merged=True, merge_commit_sha=commit)
         return commit
+
+
+def fast_forwarded_onto_origin(checkout: Path, commit: str) -> bool:
+    """Whether `commit` is origin's main and the checkout's, the one landing commit the integrator
+    wrote as the project identity on the main it was tested on, with no address in its message."""
+    def git(*arguments: str) -> str:
+        return git_run(checkout, *arguments, check=True).stdout.strip()
+    full = git("rev-parse", commit)
+    return (full == git("rev-parse", "origin/main") == git("rev-parse", "main")
+            and len(git("rev-list", "--parents", "-1", full).split()) == 2
+            and git("log", "-1", "--format=%an <%ae>|%cn <%ce>", full) == "mb <mb>|mb <mb>"
+            and not work_tickets.sibling("public_check").message_addresses(
+                git("log", "-1", "--format=%B", full)))
 
 
 def squashed_onto_origin(checkout: Path, commit: str) -> bool:
@@ -2450,7 +2468,7 @@ def test_integrate_refuses_a_failing_kern_test_after_a_passing_suite_and_escalat
 
 @pytest.mark.parametrize("check_fails", [False, True])
 def test_integrate_pushes_a_public_mirror_after_running_the_check(
-        main_checkout, local_config, monkeypatch, capsys, check_fails, public_check_child):
+        main_checkout, local_config, monkeypatch, capsys, check_fails, public_check_child, github):
     worker = main_checkout.parent / "worker"
     mirror = main_checkout.parent / "mirror.git"
     fake_git.init(mirror, "--bare", "-b", "main")
@@ -2487,8 +2505,10 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     checks: list[tuple[list[list[str]], bool]] = []
     guarded: list[tuple[str, Path]] = []
     monkeypatch.setattr(work_tickets, "resolve_repo", lambda root, repo: "git.example/owner/tracker")
-    # On github.com, so the mirror guard knows the owner whose squash commits GitHub writes.
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    # A public mirror takes only the project identity: the landing is the integrator's own commit,
+    # as GitHub's squash commit names its account.
+    monkeypatch.setattr(work_tickets, "landing_mode", lambda root: work_tickets.FAST_FORWARD)
     # The work issue's Goal names the work; the branch's last commit subject ("worker") does not.
     issue = {"body": "## Goal\n\nShip the worker file to main (SE#3, PR #4). It matters.\n\n"
                      + report["body"]}
@@ -2540,7 +2560,8 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
 
     commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
-    assert squashed_onto_origin(main_checkout, commit)
+    assert fast_forwarded_onto_origin(main_checkout, commit)
+    assert not [call for call in github.calls if call[0] == "squash"]
     assert commit and started == [9]
     message = git_run(main_checkout, "log", "-1", "--format=%B").stdout
     assert message.startswith("Integrate feature/worker: Ship the worker file to main.\n\n")
@@ -2573,6 +2594,9 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     [
         ("worker #12", "mb", "tracker reference"),
         ("worker", "other@example.invalid", "author differs"),
+        ("worker\n\nfrom alice@example.com", "mb", "e-mail address"),
+        # GitHub's squash commit of a landing names its account: foreign like any other.
+        ("worker", "123+mb@users.noreply.github.com", "author differs"),
     ],
 )
 def test_public_mirror_guard_rejects_references_and_mismatched_identities(
@@ -2600,6 +2624,33 @@ def test_public_mirror_guard_rejects_references_and_mismatched_identities(
         work_tickets.guard_public_push(
             main_checkout, work_tickets.Mirror("mirror", "main", False, True)
         )
+
+
+@pytest.mark.parametrize("landing", ["squash", "fast-forward"])
+def test_the_public_mirror_guard_passes_github_s_squash_commit_only_while_landings_squash(
+        main_checkout, local_config, monkeypatch, landing):
+    mirror = main_checkout.parent / "mirror.git"
+    fake_git.init(mirror, "--bare", "-b", "main")
+    git_ok("-C", str(main_checkout), "remote", "add", "mirror", str(mirror))
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text('public_identity = "mb <mb>"\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    git_ok("-C", str(main_checkout), "push", "-q", "mirror", "main")
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/owner/repo")
+    monkeypatch.setattr(work_tickets, "landing_mode", lambda root: landing)
+    (main_checkout / "landed.txt").write_text("landed\n", encoding="utf-8")
+    git_ok("-C", str(main_checkout), "add", "landed.txt")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "owner",
+           "GIT_AUTHOR_EMAIL": "1+owner@users.noreply.github.com",
+           "GIT_COMMITTER_NAME": "GitHub", "GIT_COMMITTER_EMAIL": "noreply" + "@github.com"}
+    assert git_run(main_checkout, "commit", "-q", "-m", "Integrate x", env=env).returncode == 0
+    mirrored = work_tickets.Mirror("mirror", "main", False, True)
+
+    if landing == "squash":
+        work_tickets.guard_public_push(main_checkout, mirrored)
+    else:
+        with pytest.raises(work_tickets.QueueError, match="author differs"):
+            work_tickets.guard_public_push(main_checkout, mirrored)
 
 
 @pytest.mark.parametrize(("goal", "title"), [
@@ -2906,6 +2957,87 @@ def test_a_squash_that_does_not_read_back_as_merged_is_refused(main_checkout, mo
 
     with pytest.raises(work_tickets.QueueError, match="reads back as merged=True .*not the squash commit"):
         work_tickets.integrate(main_checkout, 7, None, None)
+
+
+def fast_forward_landings(main_checkout: Path) -> None:
+    """se.toml [integrate] landing = "fast-forward" on origin's main and the checkout's."""
+    git_ok("-C", str(main_checkout), "pull", "-q", "--ff-only", "origin", "main")
+    (main_checkout / "se.toml").write_text(IDENTITY + '\n[integrate]\nlanding = "fast-forward"\n',
+                                           encoding="utf-8")
+    git_ok("-C", str(main_checkout), "commit", "-qam", "Land by fast-forward")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+
+
+def test_a_fast_forward_landing_moves_main_to_the_tested_commit_written_as_the_project_identity(
+        main_checkout, monkeypatch, github, local_config, capsys):
+    fast_forward_landings(main_checkout)
+    local_config.parent.mkdir(parents=True)
+    local_config.write_text(  # an address in the trailer: the landing commit leaves the line out
+        'commit_trailer = "Co-authored-by: Agent <agent@users.noreply.github.com>"\n',
+        encoding="utf-8")
+    head, _ = delivered_worker(main_checkout, monkeypatch)
+    base = origin_main(main_checkout)
+
+    short = work_tickets.integrate(main_checkout, 7, None, None)
+
+    title = "Integrate feature/worker (work issue #5, PR #7)"
+    assert [call[0] for call in github.calls] == [
+        "open_pull", "create_pull", "check_run", "pull", "comment", "close_pull"]  # no squash
+    commit = github.calls[2][1]  # the commit check passed on
+    assert commit == origin_main(main_checkout) and commit.startswith(short)
+    assert fast_forwarded_onto_origin(main_checkout, commit)
+    assert git_run(main_checkout, "rev-parse", f"{commit}^", check=True).stdout.strip() == base
+    body = git_run(main_checkout, "log", "-1", "--format=%B", check=True).stdout
+    assert body.rstrip() == f"{title}\n\nRelease-kind: minor"
+    assert github.pulls[0]["merged"] and github.pulls[0]["merge_commit_sha"] == commit
+    assert git_run(main_checkout, "merge-base", "--is-ancestor", head, commit).returncode != 0
+    out = capsys.readouterr().out
+    assert "of its message hold an e-mail address and are left out" in out
+    assert "users.noreply" not in out
+    assert f"Fast-forward: origin's main moved from {base[:12]} to {commit[:12]}" in out
+    assert "Landing pull request #20: merged at" in out
+    assert "Cleanup: origin merged branch deleted" in out  # held by the merge it was written from
+
+
+def test_a_refused_fast_forward_names_the_rule_change_and_never_squash_merges(
+        main_checkout, monkeypatch, github):
+    fast_forward_landings(main_checkout)
+    _, calls = delivered_worker(main_checkout, monkeypatch)
+    before = origin_main(main_checkout)
+    push = work_tickets.run_git_push
+
+    def ruleset(root, arguments):
+        if arguments[-1].endswith(":refs/heads/main"):
+            return subprocess.CompletedProcess(arguments, 1, "", (
+                "remote: error: GH013: Repository rule violations found for refs/heads/main.\n"
+                "remote: - Changes must be made through a pull request.\n"))
+        return push(root, arguments)
+    monkeypatch.setattr(work_tickets, "run_git_push", ruleset)
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.integrate(main_checkout, 7, None, None)
+
+    message = str(refused.value)
+    assert "origin refused to fast-forward main" in message
+    assert "pull request required" in message and "not retried" in message
+    assert "Nothing fell back to GitHub's squash merge" in message
+    assert 'removes the rule "Require a pull request before merging"' in message
+    assert 'Or set landing = "squash" in [integrate] of se.toml' in message
+    assert origin_main(main_checkout) == before
+    assert not any(call[0] == "squash" for call in github.calls)
+    assert any(call[:5] == ["issue", "edit", "5", "--add-label", "escalated"] for call in calls)
+
+
+def test_an_unknown_landing_setting_is_refused_before_anything_is_merged(main_checkout, monkeypatch,
+                                                                         github):
+    delivered_worker(main_checkout, monkeypatch)
+    (main_checkout / "se.toml").write_text(IDENTITY + '\n[integrate]\nlanding = "rebase"\n',
+                                           encoding="utf-8")
+
+    with pytest.raises(work_tickets.QueueError, match=r"\[integrate\] landing .* is 'rebase'.*"
+                       "'squash', 'fast-forward'.*nothing was merged"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert github.calls == []
 
 
 def test_the_door_speaks_github_s_rest_api_through_gh(tmp_path, monkeypatch):
@@ -3241,7 +3373,7 @@ def test_with_ci_the_landing_plan_is_the_one_before_landing_without_ci():
                  "Integrate feature/worker", "Release-kind: minor", "BODY", "THEN",
                  "git.example/owner/tracker")
     assert work_tickets.landing_plan(*arguments).text() == PLAN_WITH_CI
-    assert work_tickets.landing_plan(*arguments, None, None).text() == PLAN_WITH_CI
+    assert work_tickets.landing_plan(*arguments, None, verdict=None).text() == PLAN_WITH_CI
 
 
 def without_ci(checkout: Path) -> None:
@@ -3291,6 +3423,26 @@ def test_without_ci_a_landing_lands_on_a_green_local_run(main_checkout, monkeypa
     assert github.calls[-2] == (
         "comment", 7, f"Landed on main in {origin_main(main_checkout)[:12]} "
                       "through https://git.example/owner/repo/pull/20.")
+
+
+def test_without_ci_a_fast_forward_landing_lands_on_the_status_of_the_commit_it_pushes(
+        main_checkout, monkeypatch, github, capsys):
+    (main_checkout / "se.toml").write_text(
+        NO_CI + '\n[integrate]\nlanding = "fast-forward"\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "pull", "-q", "origin", "main")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-am", "Land without CI, by fast-forward")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+    delivered_worker(main_checkout, monkeypatch)
+    no_ci_host(github)
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert [call[0] for call in github.calls] == [
+        "create_status", "open_pull", "create_pull", "statuses", "pull", "comment", "close_pull"]
+    landed = github.calls[0][1]
+    assert landed == origin_main(main_checkout)  # main is the very commit the status is on
+    assert fast_forwarded_onto_origin(main_checkout, landed)
+    assert f"Verdict {STATUS}: success" in capsys.readouterr().out
 
 
 def test_without_ci_a_red_local_run_writes_no_status_and_lands_nothing(
@@ -3846,8 +3998,34 @@ def test_integrate_keeps_a_planned_splits_issue_open_and_comments_the_pieces_lef
     assert github.calls == []
 
 
+def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_pushes_main(
+        main_checkout, monkeypatch, github, capsys):
+    fast_forward_landings(main_checkout)
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+    assert run(main_checkout, *arguments) == 0
+    plan = json.loads((main_checkout / ".se" / "handoff" / "feature-worker.json")
+                      .read_text(encoding="utf-8"))["plan"]
+    assert [step["tool"] for step in plan["steps"]] == [
+        "list_issues", "create_pull_request", "pull_request_read"]  # GitHub merges nothing
+    assert "after step 3>" in plan["then"]
+    landed = git_run(main_checkout.parent / "origin.git", "rev-parse",
+                     "refs/heads/land/feature/worker", check=True).stdout.strip()
+    assert origin_main(main_checkout) == base
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert origin_main(main_checkout) == landed
+    assert fast_forwarded_onto_origin(main_checkout, landed)
+    assert f"Landed: {landed[:12]} on main" in out
+    assert "GitHub plan: close out #5\n" in out
+    assert github.calls == []
+
+
 @pytest.mark.parametrize("landing, message", [
-    (None, "is still .*the squash merge has not landed"),
+    (None, "is still .*the landing has not reached it"),
     ("other tree", "its tree is not the tree of"),
 ])
 def test_integrate_read_back_refuses_a_main_that_is_not_the_tested_landing(
@@ -5809,7 +5987,7 @@ def test_deliver_warns_without_blocking_where_github_cannot_be_read(
 
 def test_the_platform_scripts_are_those_kern_platforms_runs():
     workflow = (PROJECT / work_tickets.CHECK_WORKFLOW).read_text(encoding="utf-8")
-    assert work_tickets.platform_legs(PROJECT) == ["windows-2025", "macos-15"]
+    assert work_tickets.platform_legs(PROJECT) == ["windows-2025"]
     for path in work_tickets.PLATFORM_SCRIPTS:
         assert (PROJECT / path).is_file()
         assert path.startswith("scripts/") or path in workflow

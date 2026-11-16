@@ -31,7 +31,7 @@ def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins()
     jobs = workflow[workflow.index("\njobs:\n"):]
     assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "kern-platforms-queue",
                                                          "trust"], (
-        "kern runs in the required job check, and on Windows and macOS in kern-platforms, which check "
+        "kern runs in the required job check, and on Windows in kern-platforms, which check "
         "needs and kern-platforms-queue bounds the queue of; trust decides whether either runs "
         "(README \"Trusted landings\")"
     )
@@ -86,19 +86,19 @@ def test_the_gofmt_step_refuses_an_unformatted_file_and_passes_a_formatted_one(t
     assert "::error::gofmt -l lists files of kern not formatted: bad.go; run gofmt -w . in kern" in result.stdout
 
 
-def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows_and_macos() -> None:
+def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
     platforms = jobs[jobs.index("\n  kern-platforms:\n"):]
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
     assert "    runs-on: ${{ matrix.os }}\n" in platforms
     [matrix] = re.findall(r"(?m)^        os: \[(.*)\]$", platforms)
-    assert sorted(os.split("-")[0] for os in matrix.split(", ")) == ["macos", "windows"]
+    assert matrix == "windows-2025", "the one leg is Windows; darwin is built by the release, not tested"
     assert "      fail-fast: false\n" in platforms, "each platform answers, whichever fails first"
     for command in ("go vet ./...", "go test ./...",
                     "go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/"):
         assert f"        working-directory: kern\n        run: {command}\n" in platforms
-    # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash and macOS's.
+    # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash.
     assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py\n" in platforms
     # setup.ps1 runs where PowerShell is, Windows only; `-k powershell` selects its SETUPS cases.
     assert ("        if: runner.os == 'Windows'\n        shell: bash\n"

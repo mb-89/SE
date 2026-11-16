@@ -290,8 +290,8 @@ the verdict, through the same landing ([README "Landing without CI"](../../../RE
   it off every landing waits for `check` as above.
 - `integrate` runs the complete suite, the project's checks and the public check on exactly the
   tree it lands, then writes the commit status `se integrator verdict` on that commit through the
-  host's API: the tree, the suite's hash and the result. It squash-merges only once that status
-  is accepted.
+  host's API: the tree, the suite's hash and the result. It lands, by squash or fast-forward,
+  only once that status is accepted.
 - Only the integrator's account may write it, and only a success for exactly that tree and suite
   hash is accepted; `verified` and `push` accept it for the integration branch the same way.
 
