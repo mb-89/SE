@@ -6952,6 +6952,11 @@ def integrate(
         push_gate(root, landing)
         guard_pushed_tree(root, landing)
         git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
+        # Said now, while kern still listens: once the core gives a relay step up, the client stops
+        # listening, and the except's line below would be lost.
+        print(f"{landing} is on origin at {landed[:12]}: should a later step fail, it stays there; "
+              f"the next integrate {pull_number} pushes it again and reuses its landing pull request",
+              file=sys.stderr, flush=True)
         state = {
             "branch": branch, "landing": landing, "target": target, "base": base,
             "landed": landed, "head": head, "tag": tag, "tracker": tracker, "remote": remote,
