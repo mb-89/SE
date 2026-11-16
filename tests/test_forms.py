@@ -3,14 +3,27 @@ failing and a passing fixture, the command, and the contracts with the writers S
 
 from __future__ import annotations
 
+import ast
 import json
+import re
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+import deck
 import fake_git
 import forms
 import outside_text
+import overhaul
+import retro
+import review
+import test_deck
+import test_overhaul
+import test_retro
+import test_review
+import test_work_ticket_issues as issue_tests
 import work_tickets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,9 +114,16 @@ uv run pytest
 # Loading
 
 
+ISSUE_FORMS = ("ticket", "work", "routed")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
+            "overhaul", "decision")
+
+
 def test_every_form_loads_with_its_actions_and_the_terms(catalog):
-    assert set(catalog) == {"ticket", "work", "routed"}
-    assert all(form.actions == forms.ACTIONS for form in catalog.values())
+    assert set(catalog) == {*ISSUE_FORMS, *ADAPTERS}
+    assert all(catalog[name].actions == forms.ISSUE_ACTIONS for name in ISSUE_FORMS)
+    assert all(catalog[name].is_adapter for name in ADAPTERS)
+    assert not any(catalog[name].is_adapter for name in ISSUE_FORMS)
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == forms.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -221,7 +241,7 @@ def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(cat
 
 
 def test_parse_of_render_gives_each_example_back(catalog):
-    for form in catalog.values():
+    for form in (catalog[name] for name in ISSUE_FORMS):
         example = dict(form.example["fields"])
         title = example.get("title")
         document = forms.parse(form, forms.render(form, example), title)
@@ -254,7 +274,7 @@ def test_select_takes_the_marker_then_the_conditions_then_the_plain_form(catalog
 
 def test_select_without_a_form_for_the_action_is_free_form(tmp_path):
     write_form(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.edit"]\n'))
-    assert forms.select(forms.load(tmp_path, tree=True), "issue.create", "", "") is None
+    assert forms.select(forms.load(tmp_path, tree=True), "issue.create", "", "").form is None
 
 
 # Refuse rules: one failing and one passing fixture each
@@ -517,8 +537,10 @@ def test_draft_prints_the_empty_form_with_its_says(capsys, catalog):
 def test_list_names_every_form_with_its_actions(capsys):
     assert forms.main(["list", "--tree"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert [line.split(" ")[0] for line in out] == ["routed", "work", "ticket"]
-    assert all("issue.create, issue.edit" in line for line in out)
+    names = [line.split(" ")[0] for line in out]
+    assert sorted(names) == sorted((*ISSUE_FORMS, *ADAPTERS))
+    assert all("issue.create, issue.edit" in line for line in out if line.split(" ")[0]
+               in ISSUE_FORMS)
 
 
 @pytest.mark.parametrize("arguments, error", [
@@ -535,3 +557,636 @@ def test_a_missing_argument_exits_2():
     with pytest.raises(SystemExit) as stopped:
         forms.main(["check", "work", "--tree"])
     assert stopped.value.code == 2
+
+
+# Adapters: the texts SE already writes and checks, registered as they are
+
+
+REPO = "github.com/o/r"
+ISSUE_URL = f"https://{REPO}/issues/7"
+PULL_URL = f"https://{REPO}/pull/5"
+HOME = {REPO}
+
+
+def adapter_verdict(form: forms.Form, body: str, title: str | None = None) -> list[str]:
+    """The refusals of `form` on `body`, without the adapter's name before each."""
+    return [finding.fix.removeprefix(f"{form.name}: ") for finding
+            in forms.check(form, forms.parse(form, body, title)) if finding.severity == forms.REFUSE]
+
+
+def parametrized(test, index: int = 0) -> list:
+    """The cases an existing test is parametrized with, its own fixtures as they stand."""
+    return list(test.pytestmark[index].args[1])
+
+
+def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
+    assert forms.main(["list", "--tree"]) == 0
+    lines = {line.split(" ")[0]: line for line in capsys.readouterr().out.splitlines()}
+    assert "pr.create, pr.edit: checker work_tickets:field_report_problems:" in lines["field-report"]
+    assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
+    assert "checker retro:judgment_problems" in lines["retro"]
+    assert "checker overhaul:judgment_problems" in lines["overhaul"]
+    assert "deck.build: checker deck:_explains:" in lines["decision"]
+    assert ("pr.merge: checker work_tickets:merge_release_kind, title "
+            "work_tickets:INTEGRATION_SUBJECT_PATTERN:") in lines["merge-message"]
+    assert "pr.create, pr.edit: checker none, 3 lines:" in lines["landing"]
+    assert "pr.create, pr.edit: checker none (no field required):" in lines["housekeeping"]
+
+
+def test_every_name_an_adapter_gives_resolves(catalog):
+    for name in ADAPTERS:
+        form = catalog[name]
+        for reference in (form.checker, form.adapter.get("extract"), form.adapter.get("when"),
+                          form.adapter.get("title_rule")):
+            if reference:
+                assert forms.resolve(reference, form) is not None, (name, reference)
+
+
+@pytest.mark.parametrize("top, tables, error", [
+    ('checker = "review:checked_report"\n', '[[fields]]\nname = "goal"\nkind = "text"\n'
+     'heading = "Goal"\n', "a form with fields takes no checker"),
+    ('checker = "review.checked_report"\n', "", "is no \"<module>:<name>\""),
+    ('checker = "review:checked_report"\n', '[adapter]\nread = "body"\n',
+     "[adapter] has unknown keys read"),
+    ('checker = "deck:_explains"\n', '[adapter]\nresult = "truth"\n', "needs its refusal"),
+    ('checker = "deck:_explains"\n', '[adapter]\nresult = "maybe"\n', "result is 'maybe'"),
+    ("", '[[adapter.lines]]\npattern = "x"\n', "each [[adapter.lines]] has a pattern and says"),
+], ids=["fields-and-checker", "no-reference", "unknown-key", "truth-without-refusal",
+        "unknown-result", "line-without-says"])
+def test_an_adapter_that_breaks_the_format_does_not_load(tmp_path, top, tables, error):
+    write_form(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n{top}\n'
+               f'[applies]\nactions = ["comment.create"]\n\n{tables}')
+    with pytest.raises(forms.FormError, match=re.escape(error)):
+        forms.load(tmp_path, tree=True)
+
+
+@pytest.mark.parametrize("applies, error", [
+    ('actions = ["pr.create"]\nbase = "next"\n', "the one base is \"integration\""),
+    ('actions = ["pr.create"]\nbranch = "main"\n', "[applies] has unknown keys branch"),
+    ('actions = ["pr.delete"]\n', "action 'pr.delete' is none of"),
+])
+def test_applies_refuses_what_selection_cannot_read(tmp_path, applies, error):
+    write_form(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n\n'
+               f'[applies]\n{applies}')
+    with pytest.raises(forms.FormError, match=re.escape(error)):
+        forms.load(tmp_path, tree=True)
+
+
+def test_an_adapter_body_is_never_marked_and_has_no_fields_to_render(catalog):
+    body = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL)
+    landing = catalog["landing"]
+    assert forms.render(landing, forms.parse(landing, body)) == body
+    assert forms.FORM_MARKER.format(name="landing") not in forms.render(landing,
+                                                                        forms.parse(landing, body))
+    with pytest.raises(forms.FormError, match="landing is an adapter and has no fields"):
+        forms.render(landing, {})
+    assert forms.draft(landing).startswith("<!-- landing: ")
+
+
+# Selection
+
+
+def test_select_gives_landing_on_integrates_open_pull_step_and_merge_message_on_its_squash(catalog):
+    title = work_tickets.integration_merge_message(
+        "feat/forms-adapters-20261116", 7, 5, True, "## Goal\n\nEvery text selects a form.\n")
+    message = "Release-kind: minor"
+    description = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1})
+    plan = work_tickets.landing_plan(REPO, "land/feat/x", "main", "a" * 40, "b" * 40, title,
+                                     message, description, "then", REPO)
+    steps = {step.action: step.arguments for step in plan.steps}
+    opened, squashed = steps["open_pull"], steps["squash"]
+    form, found = forms.verdict(catalog, "pr.create", opened["body"], opened["title"],
+                                base=opened["base"], repo=REPO, home=HOME)
+    assert form.name == "landing" and found == []
+    form, found = forms.verdict(catalog, "pr.merge", squashed["commit_message"],
+                                squashed["commit_title"], base="main", repo=REPO, home=HOME)
+    assert form.name == "merge-message" and found == []
+
+
+@pytest.mark.parametrize("title, message, refusal", [
+    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate ([^\\\\s:()]+)'"),
+    ("Integrate feat/x", "No trailer.", "it states no kind"),
+    ("Integrate feat/x", "Release-kind: minor\n\nRelease-kind: patch", "it states 'minor', 'patch'"),
+    ("Integrate feat/x", "Release-kind: huge", "it states 'huge'"),
+], ids=["title", "no-trailer", "two-trailers", "unknown-kind"])
+def test_the_merge_message_holds_its_title_and_merge_release_kinds_rule(catalog, title, message,
+                                                                         refusal):
+    refused = adapter_verdict(catalog["merge-message"], message, title)
+    assert len(refused) == 1 and refusal in refused[0]
+    if "Integrate" in title:
+        with pytest.raises(work_tickets.QueueError) as raised:
+            work_tickets.merge_release_kind("", title, message)
+        assert refused == [str(raised.value)]
+
+
+@pytest.mark.parametrize("change, says", [
+    (lambda body: body.replace("Refs ", "See "), "the first line is `Refs <work issue url>`"),
+    (lambda body: body.replace("Lands ", "Brings "), "a line `Lands <work pull request url>"),
+], ids=["no-refs", "no-lands"])
+def test_the_landing_needs_each_line_landing_description_writes(catalog, change, says):
+    body = change(work_tickets.landing_description(PULL_URL, 5, ISSUE_URL))
+    form, found = forms.verdict(catalog, "pr.create", body, "Integrate feat/x", base="main")
+    assert form.name == "landing" and [finding.rule for finding in found] == ["line"]
+    assert says in found[0].fix
+
+
+def test_a_work_issue_carrying_the_decision_marker_is_refused(catalog):
+    body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n<!-- se:form decision -->")
+    form, found = forms.verdict(catalog, "issue.create", body, "feat/forms-20261116")
+    assert form.name == "work"
+    refused = [finding for finding in found if finding.rule == "form"]
+    assert len(refused) == 1 and refused[0].severity == forms.REFUSE
+    assert "the decision form does not apply to issue.create" in refused[0].fix
+
+
+def test_a_housekeeping_pull_request_needs_no_field_report_and_main_without_the_label_does(catalog):
+    body = "Tidy the README's wording.\n"
+    form, found = forms.verdict(catalog, "pr.create", body, "Tidy the README", base="main",
+                                labels=["housekeeping"])
+    assert form.name == "housekeeping" and found == []
+    form, found = forms.verdict(catalog, "pr.create", body, "Tidy the README", base="main")
+    assert form.name == "field-report"
+    assert [finding.rule for finding in found] == ["checker"]
+    assert "holds no field report" in found[0].fix
+
+
+def test_a_marker_narrows_within_the_allowed_set(catalog):
+    body = f"Refs {ISSUE_URL}\n\n" + issue_tests.reported_at(issue_tests.TIP)
+    chosen = forms.select(catalog, "pr.create", body, "feat/x", base="main", labels=["housekeeping"])
+    assert chosen.name == "field-report" and chosen.findings == ()
+
+
+@pytest.mark.parametrize("action, body, where", [
+    ("comment.create", "Integrated in `abc1234`.\n", {}),
+    ("comment.create", "<!-- se:fleet -->\n<!-- se:handled -->\nRouted.\n", {}),
+    ("comment.edit", "<!-- se:open-points " + "a" * 40 + " -->\n1. A point.\n"
+     "<!-- se:open-points:end -->\n", {}),
+    ("comment.create", work_tickets.REFS_REQUEST_MARKER + "\nOne-way ref change.\n", {}),
+    ("pr.create", "Any text.\n", {"base": "scratch"}),
+    ("pr.create", "Any text.\n", {"base": "main", "repo": "github.com/elsewhere/x",
+                                  "home": HOME}),
+    ("issue.create", "Any text.\n", {"repo": "github.com/elsewhere/x", "home": HOME}),
+], ids=["comment", "fleet-and-handled", "open-points", "refs", "other-branch", "other-repo-pull",
+        "other-repo-issue"])
+def test_free_texts_select_no_form(catalog, action, body, where):
+    chosen = forms.select(catalog, action, body, "A title", **where)
+    assert chosen.form is None and chosen.findings == ()
+
+
+def test_an_adapter_marker_outside_the_allowed_set_is_refused(catalog):
+    body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n" + review.VERDICT_MARKER)
+    chosen = forms.select(catalog, "issue.create", body, "feat/forms-20261116")
+    assert chosen.name == "work"
+    assert [finding.fix for finding in chosen.findings] == [
+        "the review form does not apply to issue.create: it shapes comment.create, comment.edit, "
+        "and the body carries its marker"]
+
+
+def test_home_is_origin_and_the_outside_repositories(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    fake_git.git("-C", str(tmp_path), "remote", "add", "origin", "https://github.com/o/r.git")
+    (tmp_path / "se.toml").write_text('[outside]\n"github.com/other/side" = 12\n', encoding="utf-8")
+    home = forms.home_repositories(tmp_path)
+    assert home == {"github.com/o/r", "github.com/other/side"}
+    catalog = forms.load(ROOT, tree=True)
+    assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116", repo="o/r",
+                        home=home).name == "work"
+    assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116",
+                        repo="github.com/other/side", home=home).name == "work"
+
+
+# Same verdicts: each adapter answers as the check it names, on that check's own fixtures
+
+
+def field_report_variants() -> dict[str, str]:
+    """The field reports tests/test_work_ticket_issues.py checks, as descriptions carry them."""
+    complete = issue_tests.reported_at(issue_tests.TIP)
+    begin, end = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
+    return {
+        "complete": complete,
+        "as-written": issue_tests.COMPLETE_REPORT,
+        "unfilled": f"{begin}\n**Work issue:** #<n>  **Branch:** `<branch>` `<integration branch>` "
+                    f"`<commit>`\n{end}\n",
+        "unmarked": complete.replace(begin, ""),
+        "placeholders-below": complete.replace(
+            "## Spec gaps\n\nNone.", "## Spec gaps\n\nThe draft fills `#<n>`, `<branch>`."),
+        **{f"result-{result}": complete.replace("**Result:** complete", f"**Result:** {result}")
+           for result, _ in parametrized(issue_tests.test_field_report_requires_an_exact_result_header)},
+        "no-decisions-table": complete.replace(
+            "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|\n", ""),
+        "wrong-kind": complete.replace("**Re-integration kind:** patch", "**Re-integration kind:** huge"),
+    }
+
+
+@pytest.mark.parametrize("name", list(field_report_variants()))
+def test_the_field_report_adapter_gives_the_structure_checks_verdict(catalog, name):
+    report = field_report_variants()[name]
+    description = f"Refs {ISSUE_URL}\n\n{report}"
+    try:
+        expected = work_tickets.field_report_problems(
+            work_tickets.report_in(description, "The pull request description"), None)
+    except work_tickets.QueueError as error:
+        expected = [str(error)]
+    assert adapter_verdict(catalog["field-report"], description) == expected
+    form, _ = forms.verdict(catalog, "pr.edit", description, "feat/x", base="main")
+    assert form.name == "field-report"
+
+
+def review_comment(given: object) -> str:
+    """The comment `review.py file` posts for the report `given`, or, for one it refuses, the
+    same comment shape around it."""
+    try:
+        return review.verdict_comment(5, review.checked_report(given), False)
+    except work_tickets.QueueError:
+        data = {"pull": 5, **given, "landed": False} if isinstance(given, dict) else given
+        return (f"{review.VERDICT_MARKER}\n## Review of pull request #5\n\n"
+                + review.fenced(json.dumps(data, indent=2), "json") + "\n")
+
+
+REVIEW_CASES = [given for given, _ in parametrized(
+    test_review.test_a_verdict_without_its_evidence_is_refused_and_writes_nothing)] + [
+    test_review.report(),
+    test_review.report(verdict="pass with open points", findings=[test_review.finding("x")]),
+    test_review.report(verdict="decline", findings=[test_review.finding("Breaks", blocking=True)]),
+]
+
+
+@pytest.mark.parametrize("given", REVIEW_CASES)
+def test_the_review_adapter_gives_checked_reports_verdict(catalog, given):
+    try:
+        review.checked_report(given)
+        expected = []
+    except work_tickets.QueueError as error:
+        expected = [str(error)]
+    body = review_comment(given)
+    assert adapter_verdict(catalog["review"], body) == expected
+    form, found = forms.verdict(catalog, "comment.create", body, repo=REPO, home=HOME)
+    assert form.name == "review" and [finding.fix for finding in found
+                                      if finding.severity == forms.REFUSE] == [
+        f"review: {problem}" for problem in expected]
+
+
+def retro_block(**changes: object) -> dict:
+    """The judgment tests/test_retro.py's judged draft holds, `changes` applied."""
+    block = {"window": {"retro": 30}, "previous": {},
+             "classes": [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one"}],
+             "findings": [test_retro.finding(),
+                          test_retro.finding(title="Make the field report a rule of the rule book",
+                                             home=retro.RULE_BOOK, controversial=True,
+                                             why="it changes a rule")],
+             "went_well": ["The fake door kept the tests fast."]}
+    return {**block, **changes}
+
+
+def marked_block(marker: str, block: dict) -> str:
+    return f"# The draft\n\nThe facts.\n\n{marker}\n" + review.fenced(json.dumps(block, indent=2),
+                                                                       "yaml") + "\n"
+
+
+@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
+    test_retro.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
+def test_the_retro_adapter_gives_judgment_problems_verdict(catalog, changes):
+    block = retro_block(**changes)
+    assert adapter_verdict(catalog["retro"], marked_block(retro.BLOCK_MARKER, block)) == \
+        retro.judgment_problems(block)
+
+
+def test_the_retro_report_links_its_block_and_warns_without_refusing(catalog):
+    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
+    text = retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
+                        "a" * 40)
+    form, found = forms.verdict(catalog, "comment.create", text, repo=REPO, home=HOME)
+    assert form.name == "retro"
+    assert [(finding.rule, finding.severity) for finding in found] == [("checker", forms.WARN)]
+    assert f"no {retro.BLOCK_MARKER} block" in found[0].fix
+
+
+def overhaul_block(**changes: object) -> dict:
+    """The judgment tests/test_overhaul.py's judged draft holds, `changes` applied."""
+    rules = [{"id": rule.id, "name": rule.name} for rule in overhaul.book_rules(ROOT)]
+    block = {"overhaul": 50, "rules": rules, "verdicts": test_overhaul.verdicts(),
+             "looked_at": {part: "Nothing to change." for part in overhaul.LOOKED_AT},
+             "findings": [test_overhaul.finding(),
+                          test_overhaul.finding(title="Name the speed of the suite as a rule",
+                                                rule="tst-002", place=overhaul.BOOK.as_posix())],
+             "went_well": ["The retros kept their blocks."]}
+    return {**block, **changes}
+
+
+@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
+    test_overhaul.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
+def test_the_overhaul_adapter_gives_judgment_problems_verdict(catalog, changes):
+    block = overhaul_block(**changes)
+    assert adapter_verdict(catalog["overhaul"], marked_block(overhaul.BLOCK_MARKER, block)) == \
+        overhaul.judgment_problems(block)
+
+
+def test_the_overhaul_report_passes_with_the_block_it_carries(catalog):
+    text = marked_block(overhaul.BLOCK_MARKER, overhaul_block())
+    posted = overhaul.report(text, overhaul.judged(text, 50), 50)
+    form, found = forms.verdict(catalog, "comment.create", posted, repo=REPO, home=HOME)
+    assert form.name == "overhaul" and found == []
+
+
+# The decks whose decision deck.py's section rule refuses: those its test names, and the silent
+# decision, which the build refuses for its missing bless first and which has no sections either.
+UNEXPLAINED = {*parametrized(
+    test_deck.test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options),
+    "decision-without-bless"}
+
+
+@pytest.mark.parametrize("name", list(test_deck.DECKS))
+def test_the_decision_adapter_gives_the_section_rule_of_deck_py(catalog, name):
+    notes, _ = test_deck.DECKS[name]
+    for note, text in notes.items():
+        nodes = forms._nodes(text)
+        expected = deck._holds_pugh(nodes) and name in UNEXPLAINED
+        refused = adapter_verdict(catalog["decision"], text)
+        assert bool(refused) == expected, (name, note)
+        assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
+    form, _ = forms.verdict(catalog, "deck.build", next(iter(notes.values())))
+    assert form.name == "decision"
+
+
+# Contract over every body SE sends: each sending function, the bodies its command sends
+
+
+FREE, NO_BODY = None, "no body"
+SENDING_TOOLS = {"issue_write", "add_issue_comment", "create_pull_request", "update_pull_request",
+                 "merge_pull_request"}
+
+
+def senders(folder: Path) -> set[str]:
+    """`<module>:<function>` of each function in `folder`'s scripts that sends a body: a call of
+    run_gh_with_body, or a Step or an `ask` of a sending tool."""
+    found: set[str] = set()
+    for path in sorted(folder.glob("*.py")):
+        stack: list[str] = []
+
+        class Visitor(ast.NodeVisitor):
+            def scope(self, node) -> None:
+                stack.append(node.name)
+                self.generic_visit(node)
+                stack.pop()
+
+            visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = scope
+
+            def visit_Call(self, node: ast.Call) -> None:
+                name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(
+                    node.func, "id", "")
+                tool = {"Step": 1, "ask": 0}.get(name)
+                sends = name == "run_gh_with_body" or (
+                    tool is not None and len(node.args) > tool and isinstance(
+                        node.args[tool], ast.Constant) and node.args[tool].value in SENDING_TOOLS)
+                if sends and stack:
+                    found.add(f"{path.stem}:{'.'.join(stack)}")
+                self.generic_visit(node)
+
+        Visitor().visit(ast.parse(path.read_text(encoding="utf-8")))
+    return found
+
+
+@dataclass
+class Case:
+    """One body a command sends: its action, the form it selects (FREE, or NO_BODY for a write
+    without one), the body and where it goes."""
+    action: str
+    form: str | None
+    body: str | None = None
+    title: str | None = None
+    base: str | None = None
+    labels: tuple[str, ...] = ()
+
+
+def step_cases(plan, forms_by_step: dict[str, str | None], base: str = "main") -> list[Case]:
+    """The cases of `plan`'s sending steps, each step's form named in `forms_by_step`."""
+    cases = []
+    for step in plan.steps:
+        if step.tool not in SENDING_TOOLS:
+            continue
+        arguments = step.arguments
+        if step.action not in forms_by_step:  # `comment_duplicate:<twin>` and its kin
+            forms_by_step = {**forms_by_step, step.action: forms_by_step.get(
+                step.action.split(":", 1)[0], NO_BODY if "body" not in arguments else "unnamed")}
+        if step.tool == "merge_pull_request":
+            cases.append(Case("pr.merge", forms_by_step[step.action], arguments["commit_message"],
+                              arguments["commit_title"], base))
+        elif "body" not in arguments:
+            cases.append(Case("issue.edit", NO_BODY))
+        elif step.tool == "add_issue_comment":
+            cases.append(Case("comment.create", forms_by_step[step.action], arguments["body"]))
+        elif step.tool == "create_pull_request":
+            cases.append(Case("pr.create", forms_by_step[step.action], arguments["body"],
+                              arguments["title"], arguments["base"]))
+        elif step.tool == "update_pull_request":
+            cases.append(Case("pr.edit", forms_by_step[step.action], arguments["body"],
+                              arguments.get("title"), base))
+        else:
+            action = "issue.create" if arguments.get("method") == "create" else "issue.edit"
+            cases.append(Case(action, forms_by_step[step.action], arguments["body"],
+                              arguments.get("title")))
+    return cases
+
+
+WORK_TITLE = "feat/forms-20261116"
+
+
+def work_issue(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.create", "work", WORK_BODY, WORK_TITLE)]
+
+
+def backlog_issue(catalog, monkeypatch) -> list[Case]:
+    ticket = catalog["ticket"]
+    fields = ticket_fields(catalog)
+    return [Case("issue.create", "ticket", work_tickets.fleet_marked(forms.render(ticket, fields)),
+                 fields["title"])]
+
+
+def routed_issue(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.edit", "routed", work_tickets.routed_body(
+        OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
+
+
+def comment(text: str):
+    return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
+
+
+def no_body(action: str = "issue.edit"):
+    return lambda catalog, monkeypatch: [Case(action, NO_BODY)]
+
+
+def delivered(catalog, monkeypatch) -> list[Case]:
+    report = work_tickets.report_in(issue_tests.reported_at(issue_tests.TIP), "the report")
+    body = work_tickets.pull_request_body({"url": ISSUE_URL, "body": WORK_BODY}, report)
+    return [Case(action, "field-report", body, WORK_TITLE, "main") for action in
+            ("pr.create", "pr.edit")]
+
+
+def merge_title() -> str:
+    return work_tickets.integration_merge_message(WORK_TITLE, 7, 5, True, WORK_BODY)
+
+
+def landing(catalog, monkeypatch) -> list[Case]:
+    plan = work_tickets.landing_plan(
+        REPO, f"land/{WORK_TITLE}", "main", "a" * 40, "b" * 40, merge_title(), "Release-kind: minor",
+        work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1}), "then", REPO)
+    return step_cases(plan, {"open_pull": "landing", "squash": "merge-message"})
+
+
+def landing_door(catalog, monkeypatch, action: str) -> list[Case]:
+    if action == "pr.merge":
+        return [Case(action, "merge-message", "Release-kind: minor", merge_title(), "main")]
+    return [Case(action, "landing", work_tickets.landing_description(PULL_URL, 5, ISSUE_URL),
+                 merge_title(), "main")]
+
+
+def review_report() -> review.Report:
+    return review.checked_report(test_review.report(
+        verdict="pass with open points", findings=[test_review.finding("Name the field")]))
+
+
+def open_points_body() -> str:
+    found = review_report()
+    return work_tickets.with_open_points(WORK_BODY, found.head,
+                                         [item.point(5, found.head) for item in found.findings])
+
+
+def review_steps(catalog, monkeypatch) -> list[Case]:
+    plan = review.file_steps(REPO, REPO, 5, 7, review.verdict_comment(5, review_report(), False),
+                             open_points_body(), True)
+    cases = step_cases(plan, {"comment_pull": "review", "edit_body": "work", "comment_issue": FREE})
+    for case in cases:
+        case.title = WORK_TITLE if case.form == "work" else case.title
+    return cases
+
+
+def review_run(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", "review", review.verdict_comment(5, review_report(), False)),
+            Case("issue.edit", "work", open_points_body(), WORK_TITLE)]
+
+
+def retro_report() -> str:
+    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
+    return retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
+                        "a" * 40)
+
+
+def overhaul_report() -> str:
+    text = marked_block(overhaul.BLOCK_MARKER, overhaul_block())
+    return overhaul.report(text, overhaul.judged(text, 50), 50)
+
+
+def retro_steps(catalog, monkeypatch) -> list[Case]:
+    cases = []
+    for text, form in ((retro_report(), "retro"), (overhaul_report(), "overhaul")):
+        cases += step_cases(retro.file_steps(REPO, 30, [text]), {"comment_issue": form})
+    parts = retro.parts(retro_report(), 30, limit=400)
+    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": "retro"})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2]), {"comment_issue": FREE})
+    return cases
+
+
+def tracker_comment(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", "retro", retro_report()),
+            Case("comment.create", "overhaul", overhaul_report()),
+            Case("comment.create", FREE, "Integration stopped: the suite failed.\n")]
+
+
+def blocker_link(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.edit", "work", blocked(monkeypatch, WORK_BODY, 12), WORK_TITLE)]
+
+
+def plan_of(make, forms_by_step: dict[str, str | None]):
+    return lambda catalog, monkeypatch: step_cases(make(), forms_by_step)
+
+
+def filing(catalog, monkeypatch) -> list[Case]:
+    step = work_tickets.work_issue_filing(REPO, WORK_TITLE, WORK_BODY, ["work", "ready"])
+    plan = work_tickets.filing_plan(REPO, "file", WORK_TITLE, WORK_BODY, step)
+    return step_cases(plan, {"create": "work", "comment_twin": FREE, "comment_duplicate": FREE})
+
+
+def duplicates(catalog, monkeypatch) -> list[Case]:
+    steps = work_tickets.close_duplicate_steps(REPO, 9, work_tickets.Later("twin", 1), "a twin",
+                                               "where it has one")
+    return step_cases(work_tickets.Plan("close", steps), {
+        step.action: FREE for step in steps})
+
+
+#: Each function in scripts/ that sends a body, and what the command it serves sends.
+CONTRACT = {
+    "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:filing_plan": ("file, backlog file and route", filing),
+    "work_tickets:filed_once.create": ("file and backlog file",
+                                       lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
+    "work_tickets:filed_once.route": ("route", routed_issue),
+    "work_tickets:filed_once.comment_twin": ("file", comment("A twin of this would be filed.\n")),
+    "work_tickets:filed_once.comment_duplicate": ("file", comment("Duplicate of #3.\n")),
+    "work_tickets:filed_once.close_duplicate": ("file", no_body()),
+    "work_tickets:close_duplicate_steps": ("file", duplicates),
+    "work_tickets:backlog_file": ("backlog file", backlog_issue),
+    "work_tickets:route_outside_issue": ("route", routed_issue),
+    "work_tickets:block": ("the blocker linker", blocker_link),
+    "work_tickets:delivered_pull_request": ("deliver", delivered),
+    "work_tickets:start_plan": ("start", plan_of(
+        lambda: work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False),
+        {"assign": NO_BODY, "comment_issue": FREE})),
+    "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:escalate": ("escalate", comment("Which of the two forms wins here?\n")),
+    "work_tickets:escalation_plan": ("integrate", plan_of(
+        lambda: work_tickets.escalation_plan(REPO, 7, "the suite failed"), {"comment_issue": FREE})),
+    "work_tickets:label_step": ("start and integrate", no_body()),
+    "work_tickets:tracker_actions.comment": ("retro.py, overhaul.py and escalations", tracker_comment),
+    "work_tickets:landing_plan": ("integrate", landing),
+    "work_tickets:closeout_plan": ("integrate", plan_of(
+        lambda: work_tickets.closeout_plan(REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n",
+                                           []),
+        {"comment_pull": FREE, "comment_issue": FREE})),
+    "work_tickets:RelayDoor.create_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.create")),
+    "work_tickets:RelayDoor.update_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.edit")),
+    "work_tickets:RelayDoor.squash": ("integrate", lambda c, m: landing_door(c, m, "pr.merge")),
+    "work_tickets:RelayDoor.comment": ("integrate", comment("Integrated in abc1234.\n")),
+    "work_tickets:RelayDoor.close_pull": ("integrate", no_body("pr.edit")),
+    "work_tickets:RelayDoor.set_labels": ("integrate and start", no_body()),
+    "work_tickets:RelayDoor.edit_issue": ("route", routed_issue),
+    "work_tickets:RelayDoor.close_issue": ("integrate", no_body()),
+    "work_tickets:refs_request": ("refs request", comment(
+        work_tickets.REFS_REQUEST_MARKER + "\nOne-way ref change for `ref-maintenance`.\n")),
+    "work_tickets:refs_request_read_back": ("refs request", comment(
+        work_tickets.REFS_DRY_RUN_MARKER + "\n<!-- se:refs-request-id 1 -->\nThe dry run.\n")),
+    "work_tickets:refs_apply_read_back": ("refs apply", comment(
+        work_tickets.REFS_APPLIED_MARKER + "\n<!-- se:refs-request-id 1 -->\nApplied.\n")),
+    "review:file_steps": ("review.py file", review_steps),
+    "review:run_file": ("review.py file", review_run),
+    "retro:file_steps": ("retro.py file and overhaul.py file", retro_steps),
+}
+
+
+def test_every_function_that_sends_a_body_has_a_row():
+    assert sorted(senders(ROOT / "scripts")) == sorted(CONTRACT)
+
+
+def test_a_new_sender_without_a_row_fails_the_contract_naming_its_function(tmp_path):
+    copy = tmp_path / "scripts"
+    shutil.copytree(ROOT / "scripts", copy, ignore=shutil.ignore_patterns("__pycache__"))
+    with (copy / "work_tickets.py").open("a", encoding="utf-8") as handle:
+        handle.write("\n\ndef announce(root, number, text):\n"
+                     "    run_gh_with_body(root, ['issue', 'comment', str(number)], text)\n")
+    missing = sorted(senders(copy) - set(CONTRACT))
+    assert missing == ["work_tickets:announce"]
+
+
+@pytest.mark.parametrize("sender", list(CONTRACT))
+def test_each_body_se_sends_selects_its_form_and_passes(catalog, monkeypatch, sender):
+    command, cases = CONTRACT[sender]
+    made = cases(catalog, monkeypatch)
+    assert made, f"{sender} ({command}) has no case"
+    for case in made:
+        if case.form == NO_BODY:
+            assert case.body is None
+            continue
+        form, found = forms.verdict(catalog, case.action, case.body, case.title, base=case.base,
+                                    labels=case.labels, repo=REPO, home=HOME)
+        assert (form.name if form else FREE) == case.form, (sender, case.action)
+        refused = [str(finding) for finding in found if finding.severity == forms.REFUSE]
+        assert refused == [], (sender, case.action, refused)
