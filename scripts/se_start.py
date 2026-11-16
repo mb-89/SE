@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 ROOT_NAME = "SE root"  # the hook's context names SE_ROOT under this name
@@ -981,12 +981,44 @@ def _development(se_root: Path) -> bool:
 HOOKS = ".githooks"  # se's git hooks, beside the se-script they run (AGENTS.md "Public safety")
 
 
+def stopped_hooks(names: Iterable[str]) -> list[str]:
+    """The hooks a checkout's own hooks folder holds that stop running once `core.hooksPath` names
+    another folder: each file name there that is no `.sample`, sorted."""
+    return sorted(name for name in names if not name.endswith(".sample"))
+
+
+def stopped_hooks_line(checkout: str, folder: str, names: list[str]) -> str:
+    """The one line that says a checkout's own hooks no longer run, and the command that keeps them."""
+    return (f"SE: the hooks in {folder} no longer run: {', '.join(names)}, as core.hooksPath now names se's; "
+            f"to keep them, run: git -C {checkout} config core.hooksPath {folder} "
+            f"(se's public check then does not run on this checkout's commits)")
+
+
+def own_hooks(root: Path, hooks: Path | None = None) -> tuple[Path, list[str]]:
+    """The hooks folder git runs for the checkout now (its `core.hooksPath`, else `git rev-parse
+    --git-path hooks`) and the hooks in it that stop running once `core.hooksPath` names `hooks`;
+    no folder, one with only `.sample` files, or `hooks` itself, stops none."""
+    found = git_door.run("config", "--get", "core.hooksPath", root=root)
+    if found.returncode != 0 or not found.stdout.strip():  # unset: git's own folder
+        found = git_door.run("rev-parse", "--git-path", "hooks", root=root)
+    if found.returncode != 0 or not found.stdout.strip():
+        return root, []
+    folder = Path(found.stdout.strip())
+    folder = folder if folder.is_absolute() else root / folder
+    if not folder.is_dir():
+        return folder, []
+    if hooks is not None and (hooks if hooks.is_absolute() else root / hooks).resolve() == folder.resolve():
+        return folder, []
+    return folder, stopped_hooks(entry.name for entry in folder.iterdir() if entry.is_file())
+
+
 def start_hooks(se_root: Path, root: Path | None, local_config: Path | None) -> str:
     """At the session's start: point a project checkout whose `core.hooksPath` is unset at se's
     hooks, as scripts/setup.sh does, so a fresh clone's first commit already runs the public check.
     A checkout that has one keeps it, whatever it names. The hooks are the checkout's own where it
     carries se's (se's own checkout, `.githooks`), else those of the se module it pins, else this
-    SE's. The line to show, empty where nothing changed; it fails open."""
+    SE's. The line to show: empty where nothing changed, else the checkout's own hooks that stop
+    running (`stopped_hooks`) with the command that keeps them; it fails open."""
     if root is None or not (root / se_modules.MANIFEST).is_file():
         return ""
     current = git_door.run("config", "--get", "core.hooksPath", root=root)
@@ -1005,11 +1037,12 @@ def start_hooks(se_root: Path, root: Path | None, local_config: Path | None) -> 
                 hooks = found.parent.as_posix()
         except ModuleError:
             pass  # the start goes on with this SE's hooks
+    folder, stopped = own_hooks(root, Path(hooks))
     done = git_door.run("config", "core.hooksPath", hooks, root=root)
     if done.returncode != 0:
         return (f"SE: setting core.hooksPath of {root.as_posix()} failed; run: sh "
                 f"{(se_root / 'scripts' / 'setup.sh').as_posix()} {root.as_posix()}")
-    return ""
+    return stopped_hooks_line(root.as_posix(), folder.as_posix(), stopped) if stopped else ""
 
 
 def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
@@ -1098,6 +1131,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "is a git checkout to its latest release; exit code 0 where it moved")
     commands.add_parser("start-hooks", help="bootstrap.sh at the session's start: point an unset core.hooksPath "
                         "of the project at se's hooks, as setup.sh does; a set one stays")
+    stopped_parser = commands.add_parser("stopped-hooks", help="setup.sh and setup.ps1, before they set "
+                                         "core.hooksPath: name the checkout's own hooks that stop running")
+    stopped_parser.add_argument("--repo", type=Path, required=True, help="the checkout")
+    stopped_parser.add_argument("--hooks", type=Path, required=True, help="the folder core.hooksPath will name")
     return parser
 
 
@@ -1110,6 +1147,11 @@ def main(argv: list[str] | None = None, world: World | None = None) -> int:
 def run(args: argparse.Namespace, world: World | None) -> int:
     """Run the command `args` selected."""
     world = world or World()
+    if args.command == "stopped-hooks":
+        folder, stopped = own_hooks(args.repo, args.hooks)
+        if stopped:
+            print(stopped_hooks_line(args.repo.as_posix(), folder.as_posix(), stopped))
+        return 0
     root = find_project(args.root)
     cache_path = (args.cache or default_cache()).expanduser()
     if args.command == "start-refresh":
