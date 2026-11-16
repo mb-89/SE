@@ -90,7 +90,7 @@ def test_the_allow_lists_say_why() -> None:
 @pytest.fixture
 def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fixture checkout has none of SE's allowed files, so SE's lists would be stale there."""
-    for name in ("BINARY_ALLOWED", "LARGE_ALLOWED", "GIT_ALLOWED"):
+    for name in ("BINARY_ALLOWED", "LARGE_ALLOWED", "GIT_ALLOWED", "HOME_ALLOWED"):
         monkeypatch.setattr(hygiene, name, {})
 
 
@@ -98,7 +98,9 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
     commit(repo, {"README.md": "# Clean\n\nSee [agents](AGENTS.md).\n", "AGENTS.md": "# Agents\n",
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
-    assert capsys.readouterr().out.splitlines()[-1].startswith("hygiene: passed (6 checks) in ")
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1].startswith("hygiene: passed (7 checks) in ")
+    assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
 
 
 def test_hygiene_refuses_what_each_check_finds_naming_the_check(
@@ -107,7 +109,9 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     marker = "TO" + "DO"
     commit(repo, {"tool.bin": b"\x7fELF\0\0", "dump.json": "x" * 101,
                   "scripts/tool.py": f"import subprocess\n# {marker}: retry\nsubprocess.run(['git', 'status'])\n",
-                  "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n"})
+                  "README.md": "# Leaky\n\nSee [gone](gone.md), copied from /" + "home/alice/notes.\n",
+                  "docs/install.md": "Install from bob/project.\n"})
+    git_door.run("remote", "add", "origin", "https://example.com/bob/project.git", root=repo)
     assert hygiene.main(["--repo", str(repo)]) == 1
     out = capsys.readouterr().out
     assert "hygiene: binary: tool.bin: a tracked binary file" in out
@@ -117,8 +121,10 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "hygiene: references: README.md line 3: `gone.md`" in out
     assert "hygiene: public: " in out and "README.md:3:" in out and "user-profile-path" in out
     assert "alice" not in out, "the public check names locations and labels, never the matched text"
+    assert "hygiene: neutral-home: docs/install.md:1: names the origin's owner" in out
+    assert "bob" not in out, "the neutral-home check names locations, never the matched text"
     assert out.splitlines()[-1].startswith(
-        "hygiene: refused by binary, large, marker, git-door, references, public (")
+        "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home (")
 
 
 class Item:
@@ -184,3 +190,57 @@ def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() 
 def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
+
+
+# The neutral home (hygiene's neutral-home check): no tracked file names the origin's owner.
+
+HOME = hygiene.se_home.Home("example.com", "alice", "project")
+
+
+def test_the_neutral_home_check_passes_a_tree_that_names_no_owner_and_fails_a_planted_line(
+        tmp_path: Path, fake_git_door) -> None:
+    clean = {"README.md": b"Install from <owner>/<repository>.\n", "notes.md": b"malice and alice-x stay\n",
+             "logo.png": b"\x89PNG\0alice/project"}
+    repo = fixture_repo(tmp_path, clean)
+    assert hygiene.home_findings(repo, {}, HOME) == []
+
+    (repo / "docs").mkdir()
+    (repo / "docs" / "guide.md").write_bytes(b"# Guide\n\nClone https://example.com/Alice/project.\n"
+                                             b"Pages: alice.github.io/project.\n")
+    git_door.run("add", "-A", root=repo)
+    assert hygiene.home_findings(repo, {}, HOME) == [
+        "docs/guide.md:3: names the origin's owner; derive it from origin (scripts/se_home.py) or write a placeholder",
+        "docs/guide.md:4: names the origin's owner; derive it from origin (scripts/se_home.py) or write a placeholder",
+    ]
+
+
+def test_the_neutral_home_check_exempts_uses_lines_and_allowed_paths_and_refuses_a_stale_entry(
+        tmp_path: Path, fake_git_door) -> None:
+    repo = fixture_repo(tmp_path, {
+        ".github/workflows/check.yml": b"jobs:\n  check:\n    uses: alice/project/.github/workflows/x.yml@v1\n"
+                                       b"    # calls alice/project\n",
+        "frozen/go.mod": b"module example.com/alice/frozen\n",
+    })
+    allowed = {"frozen/": "frozen until part 3", "gone.toml": "removed"}
+    assert hygiene.home_findings(repo, allowed, HOME) == [
+        ".github/workflows/check.yml:4: names the origin's owner; derive it from origin (scripts/se_home.py) "
+        "or write a placeholder",
+        "gone.toml: allowed to name the origin's owner but names it nowhere; remove the entry",
+    ]
+
+
+def test_without_an_origin_the_neutral_home_check_is_skipped_with_its_reason(
+        tmp_path: Path, fake_git_door, monkeypatch, capsys) -> None:
+    repo = fixture_repo(tmp_path, {"README.md": b"alice/project\n"})
+    assert "no origin remote" in hygiene.home_skip(repo)
+    monkeypatch.setattr(hygiene, "public_findings", lambda root: [])
+    assert hygiene.checks(repo)["neutral-home"] == []
+    git_door.run("remote", "add", "origin", "git@example.com:alice/project.git", root=repo)
+    assert hygiene.home_skip(repo) == ""
+    assert hygiene.checks(repo)["neutral-home"][0] == (
+        "README.md:1: names the origin's owner; derive it from origin (scripts/se_home.py) or write a placeholder")
+
+
+def test_ses_neutral_home_allow_list_names_only_frozen_paths() -> None:
+    assert set(hygiene.HOME_ALLOWED) == {"kern/", "components/", "wiring.toml"}
+    assert all(reason for reason in hygiene.HOME_ALLOWED.values())
