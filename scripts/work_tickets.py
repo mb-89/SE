@@ -2555,7 +2555,7 @@ def push_gate(root: Path, branch: str) -> None:
 
 RELEASE_KINDS = {
     "feature": "minor", "feat": "minor",
-    "fix": "patch", "perf": "patch", "chore": "patch", "docs": "patch",
+    "fix": "patch", "perf": "patch", "chore": "patch", "docs": "patch", "test": "patch",
 }
 RELEASE_ORDER = ("patch", "minor", "major")
 RELEASE_TRAILER = "Release-kind"
@@ -2575,10 +2575,16 @@ def is_breaking(issue_body: str) -> bool:
 
 def default_release_kind(branch: str, issue_body: str) -> str | None:
     """The kind field-report --draft proposes: major where the work issue marks a breaking change,
-    else by the branch prefix; None for a prefix that names none."""
+    else by an old name's `<type>/` prefix, else by the first release kind (patch, minor) or kind
+    of work (feat, fix, ...) its Package kind names; None where neither names one."""
     if is_breaking(issue_body):
         return "major"
-    return RELEASE_KINDS.get(branch.split("/", 1)[0] if "/" in branch else "")
+    if "/" in branch:
+        return RELEASE_KINDS.get(branch.split("/", 1)[0])
+    kind = HTML_COMMENT_PATTERN.sub("", section(issue_sections(issue_body), "Package kind"))
+    words = "|".join([*RELEASE_ORDER[:2], *RELEASE_KINDS])
+    found = re.search(rf"\b({words})\b", kind, re.IGNORECASE)
+    return None if found is None else RELEASE_KINDS.get(found[1].lower(), found[1].lower())
 
 
 def release_kind_problems(report_body: str, issue_body: str | None) -> list[str]:
@@ -4281,6 +4287,47 @@ def read_text_file(file: Path, what: str) -> str:
 # it through gh, the cloud hand-off prints it for the session's GitHub tools.
 
 DATE_SUFFIX_PATTERN = re.compile(r"-\d{8}$")
+
+# The name rule (work model, Issues): a ticket's name, its title and, for a work ticket, its branch,
+# is 1 to NAME_WORDS words of lowercase letters and digits joined by single dashes. A name of the
+# old form, `<type>/<topic>-<yyyymmdd>`, stays valid until its ticket closes.
+NAME_WORDS = 5
+NAME_PATTERN = re.compile(rf"[a-z0-9]+(?:-[a-z0-9]+){{0,{NAME_WORDS - 1}}}")
+OLD_NAME_PATTERN = re.compile(r"[a-z]+/[a-z0-9]+(?:-[a-z0-9]+)*-\d{8}")
+NAME_EXAMPLE = "branch-cleanup-on-pr-close"
+
+
+def short_name(text: str) -> str:
+    """The name derived from `text`: its first NAME_WORDS words of lowercase letters and digits,
+    without a leading label such as "Proposal:" or an old name's `<type>/` and `-<yyyymmdd>`."""
+    topic = re.sub(r"^\s*\w+:\s*(?=\S)", "", text.strip())
+    if OLD_NAME_PATTERN.fullmatch(topic):
+        topic = DATE_SUFFIX_PATTERN.sub("", topic.split("/", 1)[1])
+    return "-".join(re.findall(r"[a-z0-9]+", topic.casefold())[:NAME_WORDS]) or "item"
+
+
+def checked_name(command: str, name: str) -> str:
+    """`name` where it follows the name rule (or is of the old form), else refused, naming what is
+    wrong and how to shorten it."""
+    name = name.strip()
+    if NAME_PATTERN.fullmatch(name) or OLD_NAME_PATTERN.fullmatch(name):
+        return name
+    words = [word for word in re.split(r"-+", name) if word]
+    wrong = ([f"it has {len(words)} words"] if len(words) > NAME_WORDS else [])
+    if re.search(r"[A-Z]", name):
+        wrong.append("it has a capital")
+    if re.search(r"[^A-Za-z0-9-]", name):
+        wrong.append("it has a character other than a letter, a digit or a dash, such as "
+                     + repr(re.search(r"[^A-Za-z0-9-]", name)[0]))
+    if re.search(r"--|^-|-$", name):
+        wrong.append("its dashes are not single dashes between words")
+    hint = short_name(name)
+    raise QueueError(
+        f"{command}: the name {name!r} breaks the name rule"
+        + (f" ({'; '.join(wrong)})" if wrong else "")
+        + f": a name is 1 to {NAME_WORDS} words of lowercase letters and digits joined by single "
+        f"dashes, such as `{NAME_EXAMPLE}`; keep the words that matter, "
+        f"for example `{hint}` (work model, Issues)")
 ROUTED_FROM_PATTERN = re.compile(r"^Routed from: (.+?)[ \t]*$", re.MULTILINE)
 
 
@@ -4343,6 +4390,57 @@ def close_duplicate_steps(repo: str, number: object, of: Later, why: str,
     )
 
 
+def used_steps(repo: str, name: str, existing: int | None) -> tuple[Step, ...]:
+    """The steps that refuse a name already used (work model, Issues): the title of an open issue
+    that is no twin, or of a closed one, or an existing branch of the repository."""
+    other = f" other than #{existing}" if existing is not None else ""
+    stop = (f" Where one is `{name}`, stop: the name is used, nothing is filed; choose another "
+            "name.")
+    return (
+        Step("find_used:issues", "list_issues", {
+            **owner_repo(repo), "state": "CLOSED", "perPage": 100, "fields": ["number", "title"]},
+            note=f"Only where step 1 found no twin. Read every closed issue (page with `after` "
+                 f"until none is left); compare each title, and each open issue's{other} from "
+                 "step 1, with the name." + stop),
+        Step("find_used:branches", "list_branches", {**owner_repo(repo), "perPage": 100},
+             note="Only where step 1 found no twin. Read every branch (page with `page` until "
+                  "none is left)." + stop),
+    )
+
+
+def used_refusal(command: str, name: str, clashes: list[str]) -> QueueError:
+    """The refusal of a name already used, naming each clash."""
+    return QueueError(
+        f"{command}: the name `{name}` is used already by {'; '.join(clashes)}; a name is used "
+        "once, by one ticket and its branch, so choose another (work model, Issues); nothing was "
+        "filed")
+
+
+def used_by_issues(name: str, issues: list[dict[str, object]], exclude: int | None) -> list[str]:
+    """Each issue of `issues` titled `name`, other than `exclude`, as a clash."""
+    return [f"#{issue['number']} ({str(issue.get('state') or 'open').lower()})"
+            for issue in sorted(issues, key=lambda issue: int(str(issue["number"])))
+            if str(issue.get("title") or "").strip() == name
+            and int(str(issue["number"])) != exclude]
+
+
+def issues_titled(root: Path, repo: str, name: str) -> list[dict[str, object]]:
+    """The issues of `repo`, open and closed, whose title holds `name`, through gh's search."""
+    return json.loads(run_gh(root, [
+        "issue", "list", "--state", "all", "--search", f'"{name}" in:title',
+        "--json", "number,title,state", "--limit", "100", *repo_arguments(repo),
+    ]) or "[]")
+
+
+def branch_named(root: Path, repo: str, name: str) -> bool:
+    """Whether `repo` has the branch `name`, read through gh."""
+    hostname = repo_host(repo)
+    found = json.loads(run_gh(root, [
+        "api", f"repos/{api_repo(repo)}/git/matching-refs/heads/{name}",
+        *(("--hostname", hostname) if hostname else ())]) or "[]")
+    return any(isinstance(ref, dict) and ref.get("ref") == f"refs/heads/{name}" for ref in found)
+
+
 def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
                 existing: int | None = None) -> Plan:
     """The dedupe plan around `filing`, the step that files the issue (or, for `route`, turns
@@ -4360,7 +4458,8 @@ def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
         *(close_duplicate_steps(repo, existing, twin, "routed as a twin of it",
                                 "Only where step 1 found a twin.", stop) if existing is not None else ()),
     )
-    at = len(on_twin) + 2
+    used = used_steps(repo, title, existing)
+    at = len(on_twin) + len(used) + 2
     number: object = existing if existing is not None else Later("number", at)
     lower = Later("lower", at + 1)
     filed = Step(filing.action, filing.tool, filing.arguments,
@@ -4371,6 +4470,7 @@ def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
             f"Gives the lowest-numbered twin{f' other than #{existing}' if existing else ''}, "
             "or none."), "twin"),
         *on_twin,
+        *used,
         filed,
         open_issues_step("find_lower", repo, key, (
             f"Only where step {at} ran: gives the lowest-numbered twin with a lower number than "
@@ -4448,9 +4548,24 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
     issues = door.open_issues if door is not None else lambda: open_issues(root, repo)
 
     def find_twin(_: dict[str, object], __: str) -> dict[str, object]:
-        found = twins(issues(), key, existing)
+        state["open"] = issues()
+        found = twins(state["open"], key, existing)  # type: ignore[arg-type]
         state["twin"] = found[0] if found else None
         return {"twin": state["twin"]}
+
+    def find_used(_: dict[str, object], what: str) -> None:
+        if state["twin"] is not None:
+            return
+        if what == "issues":
+            found = ([*door.issues("CLOSED"), *state["open"]]  # type: ignore[misc]
+                     if door is not None else issues_titled(root, repo, title))
+            clashes = used_by_issues(title, found, existing)
+        else:
+            clashes = ([f"the branch `{title}`"]
+                       if (door.branch(title) if door is not None else branch_named(root, repo, title))
+                       else [])
+        if clashes:
+            raise used_refusal(command, title, clashes)
 
     def comment_twin(arguments: dict[str, object], _: str) -> None:
         if state["twin"] is not None and door is not None:
@@ -4529,7 +4644,8 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
                       "-f", "state=closed", "-f", "state_reason=duplicate",
                       *(("--hostname", hostname) if hostname else ())])
 
-    run_plan(plan, {"find_twin": find_twin, "comment_twin": comment_twin, "create": create,
+    run_plan(plan, {"find_twin": find_twin, "comment_twin": comment_twin, "find_used": find_used,
+                    "create": create,
                     "route": route, "find_lower": find_lower,
                     "comment_duplicate": comment_duplicate, "close_duplicate": close_duplicate})
     number = state.get("number")
@@ -4553,7 +4669,8 @@ def file_work_issue(
     with blockers, link them first and add `ready` last, so the issue is never startable before its
     blockers are linked. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
-        raise QueueError("file needs a title, the branch name")
+        raise QueueError("file needs a title, the ticket's name and its branch")
+    title = checked_name("file", title)
     body = fleet_marked(read_text_file(file, "work issue body") + "\n")
     labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
@@ -4573,29 +4690,38 @@ def file_work_issue(
 
 
 def today_stamp() -> str:
-    """Today as a branch name's date, `<yyyymmdd>`."""
+    """Today as a date stamp, `<yyyymmdd>`, as an overhaul's name carries it."""
     return time.strftime("%Y%m%d")
 
 
-def routed_branch(title: str, kind: str) -> str:
-    """The branch name derived from an outside issue's title: `<kind>/<topic>-<yyyymmdd>`, without
-    a leading label such as "Proposal:"."""
+def checked_kind(kind: str) -> str:
+    """`kind` where it names a kind of work (route --type), else refused."""
     if kind not in RELEASE_KINDS:
         raise QueueError(f"route --type {kind!r} names no package kind; use one of "
                          f"{', '.join(RELEASE_KINDS)}")
-    topic = re.sub(r"^\s*\w+:\s*(?=\S)", "", title)
-    return f"{kind}/{slug(topic)}-{today_stamp()}"
+    return kind
 
 
-def routed_body(body: str, title: str, routing: str) -> str:
+def routed_branch(title: str, kind: str) -> str:
+    """The name derived from an outside issue's title, its branch too: its first words as the
+    name rule allows them, without a leading label such as "Proposal:". The kind of work goes to
+    the routed body's Package kind (`routed_body`), not into the name."""
+    checked_kind(kind)
+    return short_name(title)
+
+
+def routed_body(body: str, title: str, routing: str, kind: str | None = None) -> str:
     """The body unchanged, then the handled record and the routing section: the original title as
-    "Routed from" and the routing file's sections, each one heading level down."""
+    "Routed from" and the routing file's sections, each one heading level down; where the routing
+    names no Package kind, one stating `kind`."""
     fenced = False
     lines = []
     for line in routing.strip().splitlines():
         if line.lstrip().startswith("```"):
             fenced = not fenced
         lines.append(f"#{line}" if not fenced and SECTION_PATTERN.fullmatch(line) else line)
+    if kind is not None and not section(markdown_sections(routing), "Package kind"):
+        lines += ["", "### Package kind", "", kind]
     return (f"{body.rstrip()}\n\n{HANDLED_MARKER}\n## {ROUTING_SECTION}\n\n"
             f"Routed from: {title.strip()}\n\n" + "\n".join(lines) + "\n")
 
@@ -4643,13 +4769,16 @@ def route_outside_issue(
         issue = fetch_issue(root, number, repo)
     if section(markdown_sections(str(issue["body"])), ROUTING_SECTION):
         raise QueueError(f"route: #{number} is routed already; edit its {ROUTING_SECTION} section")
-    branch = title.strip() if title is not None else routed_branch(str(issue["title"]), kind)
+    branch = (title.strip() if title is not None
+              else routed_branch(str(issue["title"]), kind))
     if not branch:
-        raise QueueError("route needs a title, the branch name, or none to derive it")
+        raise QueueError("route needs a title, the ticket's name and its branch, or none to "
+                         "derive it")
+    branch = checked_name("route", branch)
     text = str(issue["body"])
     if inside is not None and not is_inside(association, inside):
         text, _ = enveloped(text, f"the body of issue #{number}", association)
-    body = routed_body(text, str(issue["title"]), routing)
+    body = routed_body(text, str(issue["title"]), routing, checked_kind(kind))
     filing = Step("route", "issue_write", {
         **owner_repo(repo), "method": "update", "issue_number": number, "title": branch,
         "body": body, "labels": f"<the issue's labels with {', '.join(work_labels(root, repo))}>"},
@@ -4670,6 +4799,7 @@ def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
     body = read_file(file, "backlog body").strip()
     if not title.strip() or not body:
         raise QueueError("backlog file needs a title and a body")
+    title = checked_name("backlog file", title)
     filing = Step("create", "issue_write", {
         **owner_repo(repo), "method": "create", "title": title.strip(),
         "body": fleet_marked(body + "\n"), "labels": [BACKLOG_LABEL, PERSON_LABEL]},
@@ -7740,16 +7870,33 @@ class RelayDoor(Workflows):
 
     def open_issues(self) -> list[dict[str, object]]:
         """Every open issue, page by page (list_issues with `after`), with its title and body."""
+        return self.issues("OPEN")
+
+    def issues(self, state: str) -> list[dict[str, object]]:
+        """Every issue in `state` (OPEN or CLOSED), page by page (list_issues with `after`)."""
         found: list[dict[str, object]] = []
         after = ""
         while True:
-            data = self.ask("list_issues", {"state": "OPEN", "perPage": 100,
+            data = self.ask("list_issues", {"state": state, "perPage": 100,
                                             **({"after": after} if after else {})})
-            found += tool_items(data, "issues")
+            found += [{"state": state.lower(), **issue} for issue in tool_items(data, "issues")]
             page = data.get("pageInfo") if isinstance(data, dict) else None
             after = str((page or {}).get("endCursor") or "") if (page or {}).get("hasNextPage") else ""
             if not after:
                 return found
+
+    def branch(self, name: str) -> bool:
+        """Whether the repository has the branch `name`, page by page (list_branches with
+        `page`)."""
+        page = 1
+        while True:
+            names = [str(item.get("name") or "") for item in tool_items(
+                self.ask("list_branches", {"perPage": 100, "page": page}), "branches")]
+            if name in names:
+                return True
+            if len(names) < 100:
+                return False
+            page += 1
 
     def edit_issue(self, number: int, title: str, body: str, labels: list[str]) -> None:
         self.ask("issue_write", {"method": "update", "issue_number": number, "title": title,
@@ -8899,7 +9046,9 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
 @command("file", "for SE: file a work issue labelled work, ready and repo:<name>; with "
                  "--blocked-by, ready only once its blockers are linked",
          WORKTREE,
-         arg("--title", required=True, help="the branch name"),
+         arg("--title", required=True,
+             help="the ticket's name, its branch too: 1 to 5 lowercase words joined by dashes, "
+                  "used by no other issue or branch"),
          arg("--body-file", required=True, type=Path,
              help="the filled .github/ISSUE_TEMPLATE/work.md body"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
@@ -8914,12 +9063,15 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("route", "for SE: route a checked outside issue as a work issue in one edit: retitle it "
-                  "to its branch name, label it work, ready and repo:<name>, and append the "
+                  "to its name, label it work, ready and repo:<name>, and append the "
                   "routing section with the handled record to its body",
          WORKTREE,
          arg("issue", type=int),
-         arg("--title", help="the branch name; derived from the issue's title where omitted"),
-         arg("--type", default="feat", help="the derived branch name's type (default feat)"),
+         arg("--title", help="the ticket's name, its branch too; derived from the issue's title "
+                             "(its first 5 words) where omitted"),
+         arg("--type", default="feat",
+             help="the kind of work the routed Package kind states where the routing file has "
+                  "none (default feat)"),
          arg("--routing-file", required=True, type=Path,
              help="the work.md sections the issue lacks, completed, appended to its body under "
                   f"## {ROUTING_SECTION} with the handled marker"),
@@ -8949,7 +9101,7 @@ BACKLOG = command_group(
 
 @command("file", f"file one backlog issue with both labels, creating {BACKLOG_LABEL} where missing",
          WORKTREE,
-         arg("--title", required=True, help="the idea in one line"),
+         arg("--title", required=True, help="the idea's name: 1 to 5 lowercase words joined by dashes"),
          arg("--body-file", required=True, type=Path, help="Markdown body"),
          REPO, parent=BACKLOG)
 def run_backlog_file(root: Path, args: argparse.Namespace) -> int:

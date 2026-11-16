@@ -49,7 +49,7 @@ class = "batch"
 usage = "work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]\n                      --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]\n                      [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION]\n                      [--repo REPO]\n                      issue"
 summary = "for SE: route a checked outside issue as a work issue in one edit: ..."
 group = "Issues"
-help = "for SE: route a checked outside issue as a work issue in one edit: retitle it to its branch name, label it work, ready and repo:<name>, and append the routing section with the handled record to its body"
+help = "for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label it work, ready and repo:<name>, and append the routing section with the handled record to its body"
 class = "batch"
 
 [commands."work_tickets.py backlog file"]
