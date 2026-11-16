@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+import fake_git
+import git_door
 import timeline
 
 NOW = datetime(2026, 11, 11, 15, 0, tzinfo=timezone.utc)
@@ -206,8 +208,23 @@ def test_the_query_names_every_field_the_snapshot_reads():
         assert field in timeline.QUERY
 
 
-def test_the_repositories_come_from_se_toml():
-    assert timeline.repositories() == ["mb-89/SE", "mb-89/obs"]
+def test_the_repositories_come_from_se_toml_beside_the_home():
+    home = timeline.sibling("se_home").Home("example.com", "alice", "project")
+    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs"]
+
+
+def test_a_bare_repository_takes_the_owner_of_the_config_checkout_origin(tmp_path, fake_git_door):
+    config = fake_git.init(tmp_path / "project") / "se.toml"
+    config.write_text('[timeline]\nrepositories = ["project", "bob/tool"]\n', encoding="utf-8")
+    git_door.run("remote", "add", "origin", "git@example.com:alice/project.git", root=config.parent)
+    assert timeline.repositories(config) == ["alice/project", "bob/tool"]
+
+
+def test_a_bare_repository_without_an_origin_is_a_setup_error(tmp_path, fake_git_door):
+    config = fake_git.init(tmp_path / "project") / "se.toml"
+    config.write_text('[timeline]\nrepositories = ["project"]\n', encoding="utf-8")
+    with pytest.raises(SystemExit, match="no origin remote"):
+        timeline.repositories(config)
 
 
 # --- The command (requirements 1 and 5) ---
@@ -227,11 +244,20 @@ def test_the_page_builds_from_a_snapshot_with_no_network(tmp_path, monkeypatch, 
     assert "wrote" in capsys.readouterr().out
 
 
+def absolute_config(tmp_path):
+    """A se.toml naming its repositories as `<owner>/<repo>`, which needs no origin."""
+    config = tmp_path / "se.toml"
+    config.write_text('[timeline]\nrepositories = ["alice/SE", "alice/obs"]\n', encoding="utf-8")
+    return config
+
+
 def test_a_read_saves_its_snapshot_and_rebuilds_the_same_page(tmp_path):
     github = FakeGitHub({name: {"issues": [node(1, labels={"nodes": [{"name": "ready"}]})], "tags": []}
-                         for name in ("mb-89/SE", "mb-89/obs")})
+                         for name in ("alice/SE", "alice/obs")})
+    config = absolute_config(tmp_path)
     saved, first, second = tmp_path / "snap.json", tmp_path / "a.html", tmp_path / "b.html"
-    assert timeline.main(["--destination", str(first), "--save-snapshot", str(saved)], post=github) == 0
+    assert timeline.main(["--config", str(config), "--destination", str(first), "--save-snapshot", str(saved)],
+                         post=github) == 0
     assert len(github.calls) == 2
     assert timeline.main(["--snapshot", str(saved), "--destination", str(second)]) == 0
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
@@ -239,7 +265,7 @@ def test_a_read_saves_its_snapshot_and_rebuilds_the_same_page(tmp_path):
 
 def test_a_read_without_a_token_is_a_setup_error(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    assert timeline.main(["--destination", str(tmp_path / "t.html")]) == 2
+    assert timeline.main(["--config", str(absolute_config(tmp_path)), "--destination", str(tmp_path / "t.html")]) == 2
     assert "GITHUB_TOKEN" in capsys.readouterr().err
 
 
@@ -248,7 +274,8 @@ def test_a_refused_read_writes_nothing(tmp_path, capsys):
         raise timeline.ReadError("GitHub answered 502 to the GraphQL read")
 
     destination = tmp_path / "t.html"
-    assert timeline.main(["--destination", str(destination)], post=refuse) == 1
+    assert timeline.main(["--config", str(absolute_config(tmp_path)), "--destination", str(destination)],
+                         post=refuse) == 1
     assert not destination.exists()
     assert "502" in capsys.readouterr().err
 

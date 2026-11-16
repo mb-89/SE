@@ -9,8 +9,8 @@ release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]
 identity = "mb <mb>"
 # Every push to the integration branch runs se's public check first (README "Project settings").
 public_check = true
-# Where the documentation built from docs.md is published (README "Documentation").
-docs_url = "https://mb-89.github.io/SE/"
+# Where the documentation built from docs.md is published is derived from origin: no docs_url
+# here (README "Documentation").
 authored_content = [
     "AGENTS.md",
     "README.md",
@@ -121,18 +121,19 @@ limit_seconds = 90
 
 # obs builds the documentation (README "Documentation").
 [modules.obs]
-url = "https://github.com/mb-89/obs.git"
+url = "../obs.git"
 version = "^2.0"
 
-# The repositories the Timeline page shows, one lane each (scripts/timeline.py).
+# The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
+# SE's home, which comes from origin (scripts/se_home.py).
 [timeline]
-repositories = ["mb-89/SE", "mb-89/obs"]
+repositories = ["SE", "obs"]
 
 # The repositories SE watches for outside issues, each with the last issue number that existed
-# before the fleet marked its own (work model "Outside issues").
+# before the fleet marked its own (work model "Outside issues"); a bare name lies beside SE's home.
 [outside]
-"github.com/mb-89/SE" = 690
-"github.com/mb-89/obs" = 459
+"SE" = 690
+"obs" = 459
 
 # The plugin's build (scripts/se_plugin.py): `root_mcp` writes a root .mcp.json declaring SE's MCP
 # door. Off, as Claude Code reads that file too; Copilot reads .github/mcp.json, always written

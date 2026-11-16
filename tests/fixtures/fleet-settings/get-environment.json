@@ -11,7 +11,7 @@
   "EXAMPLE_NAME"
  ],
  "has_setup_script": true,
- "setup_script": "#!/bin/bash\nrm -rf ~/.claude/skills/se\ngit clone --depth 1 -b main https://github.com/mb-89/SE ~/.claude/skills/se || echo \"SE: clone failed, this session starts without SE\" >&2\nexit 0\n#nov14",
+ "setup_script": "#!/bin/bash\nrm -rf ~/.claude/skills/se\ngit clone --depth 1 -b main https://github.com/alice/SE ~/.claude/skills/se || echo \"SE: clone failed, this session starts without SE\" >&2\nexit 0\n#nov14",
  "repositories": [],
  "network_secrets": [],
  "is_current": true,

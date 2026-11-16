@@ -28,11 +28,9 @@ it, and which solutions there are.
 - **`## The problem`:** what is wrong with it, and what shows it: a failure, a measurement, the
   person's words.
 - **The `pugh` fence**, the matrix and its checklist. Its fields, marks and letters are obs's
-  contract, owned by obs's capability note
-  [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md) and
-  its input model's
-  [Pugh decision figures](https://github.com/mb-89/obs/blob/main/spec/design_input/input-model.md#pugh-decision-figures).
-  SE asks of it:
+  contract, owned by obs's capability note `spec/capabilities/pugh-decisions.md` and its input
+  model's section "Pugh decision figures" in `spec/design_input/input-model.md`, both in obs, the
+  repository beside SE's (`.se/modules/obs/` in a checkout that pins it). SE asks of it:
   - `context` and `concern`: the situation and the concern the decision answers, for its
     one-sentence summary.
   - The criteria are weighted before any option is marked.
@@ -43,8 +41,7 @@ it, and which solutions there are.
     ([dec-010](../work-model/references/rules.md#dec-010-a-success-criterion)).
   - Every mark carries its reason, `{mark, because}`; the datum's marks, against itself, need none.
   - Every option carries `short`, its short name: one word where possible, at most five. The
-    field is obs's, owned by
-    [pugh-decisions](https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md).
+    field is obs's, owned by obs's `spec/capabilities/pugh-decisions.md`.
   - `chosen` only where the decider prefers an option the matrix does not pick
     ([your own decisions](#your-own-decisions)).
   - The checklist is [the checklist](#the-checklist), one entry per item; an item about particular

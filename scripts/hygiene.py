@@ -15,7 +15,11 @@ each named with its check.
   else in scripts, tests, kern and the components fails, beyond GIT_ALLOWED;
 - references: the agents, the skills (the rule book among them), README.md and AGENTS.md name no
   missing file and no undefined subcommand (`scripts/references.py`);
-- public: the checkout passes its public check (pub-001), with its history: SE's own line (`se_line`).
+- public: the checkout passes its public check (pub-001), with its history: SE's own line (`se_line`);
+- neutral-home: no tracked text file names the owner of the checkout's origin, nor its
+  `<owner>/<repository>`, which `scripts/se_home.py` reads from origin (AGENTS.md "Neutral home"),
+  outside HOME_ALLOWED and the `uses:` lines of `.github/workflows/`, which the host reads
+  literally; a checkout whose home cannot be known skips it, naming why.
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -31,6 +35,7 @@ from pathlib import Path
 
 import git_door
 import references
+import se_home
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -62,6 +67,18 @@ SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
 # Git subprocesses outside the door, each with how many its file holds and why it may: none is left.
 # The list may only shrink: a file with more fails, and one with fewer fails until its count is lowered.
 GIT_ALLOWED: dict[str, tuple[int, str]] = {}
+
+# Tracked paths (a folder ends in `/`) that may name the home's owner, each with why. All are frozen
+# until the start path's freeze lifts; part 3 of the neutral home derives them and removes the entries.
+HOME_ALLOWED: dict[str, str] = {
+    "kern/": "frozen: kern's Go module path, its download base and its template move in part 3",
+    "components/": "frozen: the Go components' module path and download base move in part 3",
+    "wiring.toml": "retro-due, a Go component under the freeze, reads its tracker literally; part 3 "
+                   "derives it",
+}
+# A workflow's `uses:` line, which the host reads literally: no origin is there to derive from.
+USES_LINE = re.compile(r"^\s*(?:-\s*)?uses:\s")
+WORKFLOWS = ".github/workflows/"
 
 # The file whose presence in a commit's tree marks SE's own line (`se_line`).
 SE_LINE_MARKER = "scripts/public_check.py"
@@ -222,6 +239,49 @@ def public_findings(root: Path) -> list[str]:
         f"public_check.py exited with {done.returncode}"]
 
 
+def home_pattern(home: se_home.Home) -> re.Pattern[str]:
+    """The owner of `home` as a name of its own, in any case: `<owner>/<repository>`, the owner's
+    Pages host and its noreply address all contain it."""
+    return re.compile(r"(?<![\w.-])" + re.escape(home.owner) + r"(?![\w-])", re.IGNORECASE)
+
+
+def _home_allowed(path: str, allowed: dict[str, str]) -> str | None:
+    return next((entry for entry in allowed
+                 if path == entry or entry.endswith("/") and path.startswith(entry)), None)
+
+
+def home_findings(root: Path, allowed: dict[str, str], home: se_home.Home) -> list[str]:
+    """Each line of a tracked text file outside `allowed` that names `home`'s owner, by file and
+    line, never the matched text; an entry of `allowed` that names no such file is refused."""
+    pattern, findings, used = home_pattern(home), [], set()
+    for path in tracked(root):
+        data = (root / path).read_bytes()
+        if b"\0" in data[:BINARY_PEEK]:
+            continue
+        hits = [number for number, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1)
+                if pattern.search(line) and not (path.startswith(WORKFLOWS) and USES_LINE.match(line))]
+        if not hits:
+            continue
+        entry = _home_allowed(path, allowed)
+        if entry is not None:
+            used.add(entry)
+            continue
+        findings += [f"{path}:{number}: names the origin's owner; derive it from origin "
+                     "(scripts/se_home.py) or write a placeholder" for number in hits]
+    findings += [f"{entry}: allowed to name the origin's owner but names it nowhere; remove the entry"
+                 for entry in allowed if entry not in used]
+    return findings
+
+
+def home_skip(root: Path) -> str:
+    """Why the neutral-home check cannot run on `root`, or "" where it can."""
+    try:
+        se_home.home(root)
+    except se_home.NoHome as error:
+        return str(error)
+    return ""
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -231,6 +291,8 @@ def checks(root: Path) -> dict[str, list[str]]:
         "git-door": git_door_findings(root, GIT_ALLOWED),
         "references": reference_findings(root),
         "public": public_findings(root),
+        "neutral-home": ([] if (home := se_home.find(root)) is None
+                         else home_findings(root, HOME_ALLOWED, home)),
     }
 
 
@@ -246,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     except HygieneError as error:
         print(f"hygiene: could not run: {error}")
         return 2
+    if skipped := home_skip(root):
+        print(f"hygiene: neutral-home: skipped: {skipped}")
     for name, findings in found.items():
         for finding in findings:
             print(f"hygiene: {name}: {finding}")
