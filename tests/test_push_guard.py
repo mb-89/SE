@@ -336,3 +336,121 @@ def test_an_unknown_late_push_setting_is_refused_naming_the_values(checkout, cap
         f'{IDENTITY}[deliver]\nlate_push = {value}\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
     assert verified(checkout, f"refs/heads/{WORK_BRANCH}") == 1
     assert "deliver.late_push must be one of warn, refuse" in capsys.readouterr().err
+
+
+# Landing without CI (README "Landing without CI"): where se.toml on the pushed commit's parent sets
+# [tests] ci = false, the integrator's commit status stands in for missing local verdicts.
+
+NO_CI = f"{IDENTITY}[tests]\ncommand = {SUITE}\nci = false\n"
+CONTEXT = work_tickets.trust.STATUS_CONTEXT
+
+
+class StatusHost:
+    """The host's commit statuses as work_tickets' door reads them, the integrator alice (the
+    owner of origin, git.example/alice/project); no network."""
+
+    def __init__(self) -> None:
+        self.listed: dict[str, list[dict]] = {}
+        self.landed_by: dict[str, list[str]] = {}
+        self.reads: list[str] = []
+
+    def __call__(self, root: Path, repo: str) -> "StatusHost":
+        return self
+
+    def statuses(self, sha: str) -> list[dict]:
+        self.reads.append(sha)
+        return list(reversed(self.listed.get(sha, [])))
+
+    def merged_heads(self, sha: str) -> list[str]:
+        return self.landed_by.get(sha, [])
+
+    def write(self, root: Path, sha: str, *, tree: str | None = None, suite: str | None = None,
+              creator: str = "alice", state: str = "success", context: str = CONTEXT) -> None:
+        """A status on `sha`, by default the integrator's pass for exactly `sha`'s tree and suite."""
+        tree = tree or git(root, "rev-parse", f"{sha}^{{tree}}")
+        suite = suite or work_tickets.trust.suite_hash(root, sha)
+        listed = self.listed.setdefault(sha, [])
+        listed.append({"id": len(listed) + 1, "state": state, "context": context,
+                       "creator": {"login": creator},
+                       "description": work_tickets.trust.status_description(tree, suite)})
+
+
+@pytest.fixture
+def host(monkeypatch) -> StatusHost:
+    fake = StatusHost()
+    monkeypatch.setattr(work_tickets, "GitHub", fake)
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/alice/project")
+    return fake
+
+
+def without_ci(root: Path) -> str:
+    """main's se.toml with ci = false, then a commit on it whose tree has no local verdict."""
+    (root / "se.toml").write_text(NO_CI, encoding="utf-8")
+    commit(root, name="setting.txt")
+    return commit(root, name="later.txt")
+
+
+def test_without_ci_the_guard_accepts_the_integrators_status_on_the_pushed_commit(
+        checkout, host, capsys):
+    head = without_ci(checkout)
+    host.write(checkout, head)
+    assert verified(checkout) == 0
+    tree = git(checkout, "rev-parse", "HEAD^{tree}")
+    assert (f"Verified: HEAD carries the integrator alice's status {CONTEXT}: tree "
+            f"{tree[:12]} passed") in capsys.readouterr().out
+
+
+def test_without_ci_the_guard_accepts_the_status_on_the_landing_head_that_landed_it(
+        checkout, host, capsys):
+    head = without_ci(checkout)
+    landing = git(checkout, "commit-tree", "HEAD^{tree}", "-p", "HEAD~1", "-m", "Integrate it")
+    host.write(checkout, landing)  # the squash commit carries none; its landing head does
+    host.landed_by[head] = [landing]
+    assert verified(checkout) == 0
+    assert f"(on {landing[:12]})" in capsys.readouterr().out
+
+
+def test_without_ci_push_accepts_the_status_as_the_hook_does(checkout, host, capfd):
+    head = without_ci(checkout)
+    host.write(checkout, head)
+    pushed, output = push_with("push", checkout, capfd)
+    assert pushed, output
+    assert origin_main(checkout) == git(checkout, "rev-parse", "HEAD")
+    assert f"carries the integrator alice's status {CONTEXT}" in output
+
+
+@pytest.mark.parametrize(("status", "named"), [
+    ({}, "no status se integrator verdict"),
+    ({"tree": "d" * 40}, "is of tree dddddddddddd"),
+    ({"suite": "e" * 64}, "names suite eeeeeeeeeeee"),
+    ({"creator": "mallory"}, "written by mallory, not by the integrator alice"),
+    ({"state": "failure"}, "is failure, not success"),
+    ({"context": "ci/other"}, "no status se integrator verdict"),
+])
+def test_without_ci_the_guard_refuses_any_other_status(checkout, host, capsys, status, named):
+    head = without_ci(checkout)
+    if status:
+        host.write(checkout, head, **status)
+    assert verified(checkout) == 1
+    error = capsys.readouterr().err
+    assert "Refusing to push HEAD" in error and "suite: no verdict is recorded" in error
+    assert named in error
+
+
+def test_with_ci_the_guard_reads_no_status_and_refuses_as_before(checkout, host, capsys):
+    head = commit(checkout, name="later.txt")
+    host.write(checkout, head)  # a status that would pass where ci were off
+    assert verified(checkout) == 1
+    assert host.reads == []
+    error = capsys.readouterr().err
+    assert "Refusing to push HEAD to the integration branch main" in error
+    assert CONTEXT not in error
+
+
+def test_a_pushed_commit_cannot_turn_ci_off_for_itself(checkout, host, capsys):
+    (checkout / "se.toml").write_text(NO_CI, encoding="utf-8")
+    head = commit(checkout, name="later.txt")  # the setting arrives with the commit pushed
+    host.write(checkout, head)
+    assert verified(checkout) == 1
+    assert host.reads == []  # its parent keeps CI on: no status is read
