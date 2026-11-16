@@ -3722,6 +3722,32 @@ def test_the_cleanup_summary_names_each_refused_branch_once():
                                        "error: 403") == "HTTP 403"
 
 
+def test_a_relay_landing_says_the_pushed_branch_stays_on_origin_before_its_first_step(
+        main_checkout, monkeypatch, github, capsys):
+    """Right after the landing branch is pushed, while kern still listens, integrate says on stderr
+    that it stays on origin should a later step fail: a relay step kern gives up stops the
+    client listening before the except's line."""
+    handed_off_worker(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "wait", lambda seconds: None)
+    session = SessionSteps(github, main_checkout, [
+        {"id": 2, "status": "completed", "conclusion": "success",
+         "html_url": "https://git.example/owner/repo/runs/2"}])
+    said: list[str] = []
+
+    def first_relay_step(tool, input_, note, wait):
+        if tool == "list_issues" and not said:  # the landing plan's first step, the pause search
+            said.append(capsys.readouterr().err)
+        return session(tool, input_, note, wait)
+
+    with work_tickets.sibling("se_relay").stepping(first_relay_step):
+        assert run(main_checkout, "integrate", "7") == 0
+    lines = [line for line in said[0].splitlines() if "should a later step fail" in line]
+    assert len(lines) == 1, said[0]
+    assert re.fullmatch(r"land/feature/worker is on origin at [0-9a-f]{12}: should a later step fail, it "
+                        r"stays there; the next integrate 7 pushes it again and reuses its landing pull "
+                        r"request", lines[0]), lines[0]
+
+
 def test_a_relay_landing_that_fails_after_the_push_leaves_nothing_behind_and_lands_again(
         main_checkout, monkeypatch, github, capsys):
     """A step after the push that kern gives up (the call through kern stopped) leaves the

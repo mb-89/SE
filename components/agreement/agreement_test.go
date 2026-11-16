@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,13 +77,19 @@ type pythonPaths struct {
 	Overhaul int `json:"overhaul"`
 }
 
-func runPython(t *testing.T) pythonPaths {
+// runPython runs the Python paths on the fixture; with ages, the fleet check
+// runs with se.toml [fleet] ages on.
+func runPython(t *testing.T, ages ...bool) pythonPaths {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(python(t), filepath.Join("testdata", "python_paths.py"), root, filepath.Join("testdata", "snapshot.json"))
+	args := []string{filepath.Join("testdata", "python_paths.py"), root, filepath.Join("testdata", "snapshot.json")}
+	if len(ages) > 0 && ages[0] {
+		args = append(args, "--ages")
+	}
+	cmd := exec.Command(python(t), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -97,16 +104,29 @@ func runPython(t *testing.T) pythonPaths {
 }
 
 // The fleet component and the Python fleet check find the same on one
-// snapshot, finding for finding, word for word; the fixture holds every kind.
+// snapshot, finding for finding, word for word, with the setting ages off
+// and on; the fixture holds every kind.
 func TestTheFleetPathsAgree(t *testing.T) {
 	f := load(t)
-	got := fleet.Check(fleet.In{Issues: f.Issues, Pulls: f.Pulls, Checks: f.Checks, Branches: f.Branches,
-		LeaseHours: f.LeaseHours, Repository: f.Repository, Base: f.Base}, f.Now)
-	want := runPython(t)
-	if got.Healthy != want.Fleet.Healthy || !reflect.DeepEqual(got.Findings, want.Fleet.Findings) {
-		g, _ := json.MarshalIndent(got.Findings, "", " ")
-		w, _ := json.MarshalIndent(want.Fleet.Findings, "", " ")
-		t.Fatalf("the paths disagree:\nGo (healthy %v):\n%s\nPython (healthy %v):\n%s", got.Healthy, g, want.Fleet.Healthy, w)
+	var got fleet.Findings
+	for _, ages := range []bool{false, true} {
+		got = fleet.Check(fleet.In{Issues: f.Issues, Pulls: f.Pulls, Checks: f.Checks, Branches: f.Branches,
+			LeaseHours: f.LeaseHours, Repository: f.Repository, Base: f.Base, Ages: ages}, f.Now)
+		want := runPython(t, ages)
+		if got.Healthy != want.Fleet.Healthy || !reflect.DeepEqual(got.Findings, want.Fleet.Findings) {
+			g, _ := json.MarshalIndent(got.Findings, "", " ")
+			w, _ := json.MarshalIndent(want.Fleet.Findings, "", " ")
+			t.Fatalf("with ages %v the paths disagree:\nGo (healthy %v):\n%s\nPython (healthy %v):\n%s", ages, got.Healthy, g, want.Fleet.Healthy, w)
+		}
+		person := ""
+		for _, finding := range got.Findings {
+			if finding.Kind == "waiting on the person" {
+				person = finding.What
+			}
+		}
+		if open := strings.Contains(person, ", open 13 days"); open != ages {
+			t.Fatalf("with ages %v the person finding reads %q", ages, person)
+		}
 	}
 	kinds := map[string]bool{}
 	for _, finding := range got.Findings {

@@ -405,6 +405,41 @@ def test_claude_code_starts_are_not_guarded(machine):
     assert not list((project / ".se" / ".runtime").glob("start-*.claim"))
 
 
+def start_steps(home: Path) -> dict[str, bool]:
+    """Which of the steps a compaction skips this start ran, read from the fake uv's logs."""
+    log = calls(home)
+    return {"refresh": (home / "refreshes").exists(),
+            "modules": any("se_modules.py" in line and " sync" in line for line in log),
+            "identity": any("work_tickets.py" in line and " identity " in line for line in log),
+            "hooks": any(" start-hooks" in line for line in log)}
+
+
+def test_a_start_after_a_compaction_skips_the_refresh_modules_identity_and_hooks_and_still_greets(machine):
+    """Claude Code fires SessionStart with source "compact" after every compaction: the steps that
+    ran at the session's own start do not run again, and the greeting context still comes, so the
+    session keeps <se>."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    result = run(home, path, project, "--hook", stdin=START.replace("}", ',"source":"compact"}'))
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks"), False)
+    assert greeting_call(home)
+
+
+@pytest.mark.parametrize("source", ['"source":"startup"', '"source":"resume"', '"source":"clear"', None])
+def test_every_other_start_runs_every_step(machine, source):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    payload = START if source is None else START.replace("}", f",{source}}}")
+    result = run(home, path, project, "--hook", stdin=payload)
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks"), True)
+
+
 def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     """`se status` works in the session's shells: the start links ~/.se/bin/<name> to the version
     it runs and puts ~/.se/bin on the session's PATH through Claude Code's env file."""

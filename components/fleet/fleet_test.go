@@ -100,3 +100,49 @@ func TestOnlyACompleteReadOfTheOpenListsIsHealthy(t *testing.T) {
 		t.Fatalf("on both open lists the findings are %+v, and want healthy since the older read", got)
 	}
 }
+
+// A person ask says how long it has been open only with the config ages on,
+// in whole UTC calendar days from its creation to the check's clock; with the
+// config absent its text is as before.
+func TestAPersonAskSaysHowLongItIsOpenOnlyWithAges(t *testing.T) {
+	nine := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	fleet.Now = func() time.Time { return nine }
+	f, err := kerntest.New(fleet.Component)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ask := issue(7, "Which name?", "se-person")
+	ask.Data.(map[string]any)["created_at"] = "2026-10-31T23:30:00Z"
+	if err := f.Seed("issues", map[string]github.Snapshot{"alice.demo.7": ask}); err != nil {
+		t.Fatal(err)
+	}
+	what := func() string {
+		t.Helper()
+		if err := f.Derive("findings"); err != nil {
+			t.Fatal(err)
+		}
+		v, _ := f.Out("findings")
+		for _, finding := range v.V.(fleet.Findings).Findings {
+			if finding.Kind == "waiting on the person" {
+				return finding.What
+			}
+		}
+		t.Fatal("no person finding")
+		return ""
+	}
+	if got := what(); got != "waits for the person (se-person)" {
+		t.Fatalf("without ages the finding reads %q", got)
+	}
+	if err := f.Config("ages", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := what(); got != "waits for the person (se-person), open 13 days" {
+		t.Fatalf("with ages the finding reads %q", got)
+	}
+	for created, want := range map[string]string{"2026-11-13T00:01:00Z": ", opened today",
+		"2026-11-12T23:59:00Z": ", open 1 day", "2026-11-13T01:00:00+02:00": ", open 1 day", "": ""} {
+		if got := fleet.OpenFor(created, nine); got != want {
+			t.Errorf("created %q is open %q at %v, and wants %q", created, got, nine, want)
+		}
+	}
+}

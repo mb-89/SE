@@ -24,6 +24,8 @@ if [ "$repo" = "$se_root" ]; then
 else
     hooks="$se_root/.githooks"
 fi
+# The checkout's own hooks that stop running once core.hooksPath names se's are named first.
+"$script" se_start.py stopped-hooks --repo "$repo" --hooks "$hooks"
 "$script" git_door.py -C "$repo" config core.hooksPath "$hooks"
 echo "core.hooksPath of $repo set to $hooks"
 local_list=.public-check.local

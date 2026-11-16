@@ -364,7 +364,7 @@ func (c *Core) call(m *nats.Msg) {
 		c.reply(m, CallAnswer{Lines: []string{}, Error: fmt.Sprintf("call.%s: the progress subject %q lies outside the caller's inbox, the one its reply %q names", bus.Token(name), body.Progress, m.Reply)})
 		return
 	}
-	ctx, cancel := c.running(m.Reply)
+	ctx, cancel := c.running(m.Reply, name)
 	go func() {
 		defer cancel(nil)
 		var say func(string)
@@ -381,6 +381,7 @@ func (c *Core) call(m *nats.Msg) {
 		} else if ad, ok := c.adhocOf(name); ok {
 			recordUse(c.o.Root, ad, c.activeSession(), c.o.Clock.Now())
 		}
+		cancel(nil) // off the health before its caller hears the answer
 		c.reply(m, a)
 	}()
 }
@@ -395,13 +396,22 @@ var ErrCallerGone = errors.New("its caller is gone: no connection hears its repl
 // ErrCoreEnds is the cause of a call the core gave up as it ends.
 var ErrCoreEnds = errors.New("the core ends")
 
-// running registers a call by its reply subject, so its caller can give it
-// up, and ends it once the core ends; cancel unregisters it.
-func (c *Core) running(reply string) (context.Context, context.CancelCauseFunc) {
+// runningCall is one call the core runs: its name, its start and how it is
+// given up.
+type runningCall struct {
+	name    string
+	started time.Time
+	cancel  context.CancelCauseFunc
+}
+
+// running registers a call by its reply subject, with its name and start, so
+// its caller can give it up and the health lists it, and ends it once the
+// core ends; cancel unregisters it.
+func (c *Core) running(reply, name string) (context.Context, context.CancelCauseFunc) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	c.mu.Lock()
 	if reply != "" {
-		c.calls[reply] = cancel
+		c.calls[reply] = runningCall{name: name, started: c.o.Clock.Now(), cancel: cancel}
 	}
 	c.mu.Unlock()
 	go func() {
@@ -473,10 +483,10 @@ func (c *Core) abandon(m *nats.Msg) {
 		return
 	}
 	c.mu.Lock()
-	cancel, ok := c.calls[a.Call]
+	rc, ok := c.calls[a.Call]
 	c.mu.Unlock()
 	if ok {
-		cancel(ErrCallerGaveUp)
+		rc.cancel(ErrCallerGaveUp)
 	}
 	c.reply(m, Abandoned{Abandoned: ok})
 }

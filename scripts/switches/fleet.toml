@@ -32,3 +32,13 @@ on = ["fast-forward"]
 off = ["squash"]
 help = "README.md#landing-on-main"
 note = "off (squash): GitHub squash-merges the landing pull request; on (fast-forward): the integrator writes the landing commit as the project identity and main moves to exactly it"
+
+[[switch]]
+name = "[fleet] ages"
+kind = "se.toml"
+reader = "scripts/work_tickets.py"
+default = "off"
+layers = ["se.toml"]
+key = "fleet.ages"
+help = "README.md#fleet-check"
+note = "off: a person ask's finding names no time; on: it says how long the issue has been open (', open N days'); the Go fleet component reads its fleet instance's config ages instead"
