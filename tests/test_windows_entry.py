@@ -5,6 +5,8 @@ cases below list it. The real runs start the hand-off from PowerShell, as a Powe
 would, so they run only where PowerShell is: the Windows leg of kern-platforms runs this file from
 a PowerShell step, with the hooks' PowerShell lines the build writes where se.toml [plugin]
 powershell_hooks is "handoff". That nothing but that setting names the file runs everywhere.
+The session start's detached spawn (scripts/se_start.py) is tested here too, beside the hand-off,
+so the Windows leg runs its flags and a real detached child.
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -278,3 +282,59 @@ def test_nothing_but_the_unset_build_setting_names_the_handoff() -> None:
             if "bash.ps1" in path.read_text(encoding="utf-8", errors="replace"):
                 named.append(path.relative_to(PROJECT).as_posix())
     assert named == []
+
+
+# The session start's background check: a detached child with a hidden console on Windows.
+CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS = 0x00000200, 0x08000000, 0x00000008
+SE_START = PROJECT / "scripts" / "se_start.py"
+
+
+def load_se_start():
+    spec = importlib.util.spec_from_file_location("se_start_spawn", SE_START)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_windows_detached_start_hides_its_console_instead_of_having_none() -> None:
+    flags = load_se_start().detached_options("nt")["creationflags"]
+    assert flags & CREATE_NO_WINDOW and flags & CREATE_NEW_PROCESS_GROUP
+    assert not flags & DETACHED_PROCESS
+
+
+CHILD = """
+import sys, time
+from pathlib import Path
+go, marker = Path(sys.argv[1]), Path(sys.argv[2])
+deadline = time.monotonic() + 60
+while not go.exists() and time.monotonic() < deadline:
+    time.sleep(0.1)
+if go.exists():
+    marker.write_text("done", encoding="utf-8")
+"""
+
+PARENT = """
+import importlib.util, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
+spec = importlib.util.spec_from_file_location("se_start", sys.argv[1])
+se_start = importlib.util.module_from_spec(spec)
+sys.modules["se_start"] = se_start
+spec.loader.exec_module(se_start)
+se_start._spawn_detached([sys.executable, *sys.argv[2:]])
+"""
+
+
+def test_a_detached_child_outlives_the_parent_that_started_it(tmp_path: Path) -> None:
+    child, go, marker = tmp_path / "child.py", tmp_path / "go", tmp_path / "marker"
+    child.write_text(CHILD, encoding="utf-8")
+    parent = subprocess.run([sys.executable, "-c", PARENT, str(SE_START), str(child), str(go), str(marker)],
+                            capture_output=True, text=True, timeout=120, check=False)
+    assert parent.returncode == 0, parent.stderr
+    assert not marker.exists()
+    go.write_text("go", encoding="utf-8")
+    deadline = time.monotonic() + 30
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert marker.read_text(encoding="utf-8") == "done"

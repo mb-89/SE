@@ -162,6 +162,10 @@ def test_the_rules_are_the_public_checks_labels():
     assert len(se_start.public_check.RULES) == len(labels) + len(messages)
 
 
+
+def test_the_detached_start_on_linux_and_macos_is_a_new_session_as_before():
+    assert se_start.detached_options("posix") == {"start_new_session": True}
+
 # Requirement 1: each module's state.
 
 
