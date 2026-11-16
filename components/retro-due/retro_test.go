@@ -3,9 +3,9 @@ package retrodue_test
 import (
 	"testing"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/kerntest"
-	retrodue "github.com/mb-89/se/components/retro-due"
+	"kern/components/github"
+	"kern/kerntest"
+	retrodue "se/components/retro-due"
 )
 
 // Against the fake core: a retro is due once due-after work issues landed

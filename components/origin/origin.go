@@ -1,6 +1,8 @@
 // Package origin is SE's origin component: an I/O component whose one
 // outside thing is the checkout's git, writing origin's branches with the
-// committer time of each tip, as the checkout last fetched or pushed them.
+// committer time of each tip, as the checkout last fetched or pushed them,
+// and the tracker, <owner>/<repository>, of the home origin names (kern/home),
+// so no wiring names where SE lives; retro-due reads it.
 // The fleet component reads it for the rules on branches (no branch, quiet
 // branch, stray branch). It reads local refs only and fetches nothing: the
 // Python fleet-check fetches before it reads.
@@ -13,14 +15,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/index"
+	"kern/git"
+	"kern/home"
+	"kern/index"
 )
 
 // Name is the component's name, which the wiring's instances name.
 const Name = "origin"
 
-var branchesOut = index.Output("branches", map[string]time.Time{}, "Origin's branches, each with the committer time of its tip, from refs/remotes/origin.")
+var (
+	branchesOut = index.Output("branches", map[string]time.Time{}, "Origin's branches, each with the committer time of its tip, from refs/remotes/origin.")
+	trackerOut  = index.Output("tracker", "", "The tracker, <owner>/<repository>, of the home origin names (kern/home); \"\" where it names none.")
+)
 
 // The host's events after which origin's refs may have moved and are read again.
 var events = map[string]bool{"SessionStart": true, "UserPromptSubmit": true, "Stop": true, "SubagentStop": true}
@@ -45,6 +51,16 @@ var Read = func(dir string) (map[string]time.Time, error) {
 	return found, nil
 }
 
+// Tracker answers the tracker of the home the checkout at dir's origin
+// names, "" where it names none; a test replaces it.
+var Tracker = func(dir string) string {
+	h, err := home.Of(context.Background(), dir)
+	if err != nil {
+		return ""
+	}
+	return h.Tracker()
+}
+
 type state struct {
 	mu     sync.Mutex
 	dir    string
@@ -65,14 +81,15 @@ func refresh() error {
 	if err != nil {
 		return err
 	}
-	return commit(branchesOut.Set(b))
+	return commit(branchesOut.Set(b), trackerOut.Set(Tracker(dir)))
 }
 
 // Component is the component a binary carries.
-var Component = index.Declare(Name, "Origin's branches and the time of each tip, read from the checkout's git.",
+var Component = index.Declare(Name, "Origin's branches and the time of each tip, and the tracker of the home origin names, read from the checkout's git.",
 	index.IO(),
 	index.Config("dir", ".", "The checkout whose refs/remotes/origin it reads; a detached core runs in its root."),
 	branchesOut,
+	trackerOut,
 	index.Inlet(func(_ string, read index.Reader, commit index.Commit) error {
 		dir, _ := read(index.ConfigPrefix + "dir").(string)
 		s.mu.Lock()

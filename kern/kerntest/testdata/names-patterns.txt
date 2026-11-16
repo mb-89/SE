@@ -4,13 +4,13 @@
 # so the narrower kinds come first.
 
 # SE's workflows, reused by address or named as files in SE's .github/
-se-workflow     mb-89/SE/\.github/workflows/[A-Za-z0-9_.-]+(@[^\s"'`)\]]*)?
+se-workflow     [\w.-]+/SE/\.github/workflows/[A-Za-z0-9_.-]+(@[^\s"'`)\]]*)?
 se-workflow     \.github/workflows/(kern|se)-[a-z0-9_-]+\.yml
 # release addresses of SE's repository
-se-release      mb-89/SE/releases/[^\s"'`)\]\\]*
+se-release      [\w.-]+/SE/releases/[^\s"'`)\]\\]*
 # every other address of SE's repository or its documentation site
-se-repository   mb-89\.github\.io/SE[^\s"'`)\]]*
-se-repository   mb-89/SE\b[^\s"'`)\]]*
+se-repository   [\w-]+\.github\.io/SE[^\s"'`)\]]*
+se-repository   [\w.-]+/SE\b[^\s"'`)\]]*
 # links into SE's documents, relative to kern/
 se-doc-link     (\.\./)+(docs|src|scripts|tests|README\.md|AGENTS\.md)[^\s"'`)\]]*
 # SE's variables

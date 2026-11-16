@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // AdHocDir is where an ad hoc component's component.toml lives under the

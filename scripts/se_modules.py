@@ -265,6 +265,9 @@ def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
 
 
 KERN_RELEASE = Path("kern") / "release.toml"
+# What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
+# then builds the binary from its folder, as where no release matches.
+NO_BASE = "-"
 
 
 def kern_pin(root: Path) -> tuple[str, str]:
@@ -282,12 +285,25 @@ def kern_pin(root: Path) -> tuple[str, str]:
 
 def kern_download(root: Path) -> str:
     """Where the release of the kern `root` pins is published: `kern/release.toml`'s `download`
-    with `{version}` filled in (kern/README.md "Release"), as bootstrap.sh fetches it."""
+    with `{version}` filled in (kern/README.md "Release"), as bootstrap.sh fetches it; "" where it
+    is relative to a home `root`'s origin names none (`release_base`)."""
     version, _ = kern_pin(root)
     download = _read_toml(root / KERN_RELEASE).get("download")
     if not isinstance(download, str) or not download:
         raise ModuleError(f"{root / KERN_RELEASE}: download names no URL (kern/README.md \"Release\")")
-    return download.replace("{version}", version)
+    return release_base(root, download, version)
+
+
+def release_base(root: Path, download: str, version: str) -> str:
+    """A release.toml's `download` with `{version}` filled in: a path such as
+    `releases/download/se-v{version}` lies under the home `root`'s origin names (se_home.py), so no
+    file names where SE lives; "" where origin names none, and the start builds the binary from its
+    folder. An absolute URL comes back as it is."""
+    filled = download.replace("{version}", version)
+    if "://" in filled:
+        return filled
+    home = se_home.find(root)
+    return home.at(filled) if home is not None else ""
 
 
 @dataclass(frozen=True)
@@ -333,7 +349,7 @@ def app_binary(root: Path) -> AppBinary:
         raise ModuleError(f"{path}: download names no URL (kern/README.md \"Release\")")
     if not isinstance(package, str) or not package:
         raise ModuleError(f"{path}: package names no Go package (e.g. \"./cmd/se\")")
-    return AppBinary(name, version, download.replace("{version}", version),
+    return AppBinary(name, version, release_base(root, download, version),
                      PurePosixPath(release).parent.as_posix(), package)
 
 
@@ -716,12 +732,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         root = args.root.resolve() if args.root else find_root(Path.cwd())
         if args.command == "kern-pin":
-            print(kern_pin(root)[0], kern_download(root))
+            print(kern_pin(root)[0], kern_download(root) or NO_BASE)
             return 0
         if args.command == "app-binary":
             source = app_root(root, args.project)
             b = app_binary(source)
-            print(b.name, b.version, b.download, b.build_dir, b.package, source.as_posix())
+            print(b.name, b.version, b.download or NO_BASE, b.build_dir, b.package, source.as_posix())
             return 0
         local = load_local(args.local or default_local_config())
         modules = load_manifest(root)

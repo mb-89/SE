@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/kerntest"
+	"kern/bus"
+	"kern/index"
+	"kern/kerntest"
 )
 
 // The suite's cases, in cases.json: each runs against the Go fake here, the

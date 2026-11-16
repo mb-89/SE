@@ -1,4 +1,4 @@
-module github.com/mb-89/kern
+module kern
 
 go 1.25.14
 

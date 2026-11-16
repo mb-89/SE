@@ -3,6 +3,7 @@ for every other form, and the settings it derives. git runs behind the door's fa
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -13,50 +14,32 @@ import se_home
 from se_home import Home
 
 
-@pytest.mark.parametrize("url", [
-    "https://example.com/alice/project",
-    "https://example.com/alice/project.git",
-    "https://example.com/alice/project/",
-    "https://alice:token@example.com/alice/project.git",
-    "https://x-access-token@example.com:443/alice/project",
-    "ssh://git@example.com/alice/project.git",
-    "ssh://git@example.com:2222/alice/project",
-    "git@example.com:alice/project.git",
-    "example.com:alice/project",
-])
-def test_https_and_ssh_origins_name_the_home_without_credentials(url: str) -> None:
-    home = se_home.parse(url)
+# The one table of origins and answers, which kern's Go helper (kern/home) reads too.
+TABLE = json.loads((Path(__file__).resolve().parents[1] / "kern" / "home" / "testdata" / "origins.json")
+                   .read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", TABLE["origins"], ids=lambda case: repr(case["origin"]))
+def test_every_origin_of_the_shared_table_names_its_home(case: dict) -> None:
+    want = case["home"]
+    assert se_home.parse(case["origin"]) == (None if want is None else Home(**want))
+
+
+@pytest.mark.parametrize("case", TABLE["answers"], ids=lambda case: case["url"])
+def test_every_home_of_the_shared_table_gives_its_answers(case: dict) -> None:
+    home = Home(**case["home"])
+
+    assert (home.url, home.tracker, home.docs_url) == (case["url"], case["tracker"], case["docs"])
+    assert {path: home.at(path) for path in case["at"]} == case["at"]
+    assert {entry: home.named(entry) for entry in case["named"]} == case["named"]
+
+
+def test_https_and_ssh_origins_name_the_home_without_credentials() -> None:
+    home = se_home.parse("https://alice:token@example.com:443/alice/project.git")
 
     assert home == Home("example.com", "alice", "project")
     assert home.url == "https://example.com/alice/project"
     assert home.tracker == "alice/project"
-
-
-@pytest.mark.parametrize("url", [
-    "http://local_proxy@127.0.0.1:41231/git/alice/project",
-    "http://example.com/alice/project",
-    "https://example.com/alice",
-    "https://example.com/group/alice/project",
-    "file:///srv/alice/project.git",
-    "/srv/alice/project.git",
-    "C:\\work\\project",
-    "",
-])
-def test_every_other_form_has_no_home(url: str) -> None:
-    assert se_home.parse(url) is None
-
-
-def test_the_docs_url_is_the_pages_site_of_a_github_home_only() -> None:
-    assert Home("github.com", "Alice", "project").docs_url == "https://alice.github.io/project/"
-    assert Home("example.com", "alice", "project").docs_url == ""
-
-
-def test_a_bare_name_lies_beside_the_home_and_a_longer_one_stays_absolute() -> None:
-    home = Home("example.com", "alice", "project")
-
-    assert home.named("obs") == "example.com/alice/obs"
-    assert home.named("bob/tool") == "example.com/bob/tool"
-    assert home.named("git.example.org/bob/tool") == "git.example.org/bob/tool"
 
 
 @pytest.mark.parametrize(("origin", "want"), [

@@ -4,9 +4,11 @@ kern is the Go core every application builds on: the index (names, the store, sn
 catalog), its NATS bus and its host. Its design is SE's
 [docs/go-core.md](../docs/go-core.md) until kern owns its contract.
 
-**Incubated in SE.** kern's own repository, `mb-89/kern`, does not exist yet; the owner creates
-it. Until then kern grows in SE under `kern/`, as its own Go module `github.com/mb-89/kern`, so the
-move changes no import path. Nothing in SE outside `kern/` imports it.
+**Incubated in SE.** kern's own repository does not exist yet; the owner creates it, beside SE.
+Until then kern grows in SE under `kern/`, as its own Go module `kern`, a path that names no host,
+which builds find through the checkout (a `replace` of `kern`). How outside builds fetch kern once
+it moves is an open point of SE's [docs/go-core.md](../docs/go-core.md). Nothing in SE outside
+`kern/` and SE's Go components imports it.
 
 ## Layout
 
@@ -228,11 +230,12 @@ instance's reply permission never expires where the core sets no reply wait, and
 
 ## Release
 
-`release.toml` owns kern's version and where its release is published:
+`release.toml` owns kern's version and where its release is published, a path under the home the
+checkout's origin names ([home](home/home.go)), so it names no host, owner or repository:
 
 ```toml
 version = "0.5.0"
-download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
+download = "releases/download/kern-v{version}"
 ```
 
 - **The assets:** `<binary>-<version>-<os>-<arch>.tar.gz` for `linux` and `darwin`, `.zip` for
@@ -261,12 +264,15 @@ download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 ```yaml
   jobs:
     release:
-      uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+      uses: ./.github/workflows/kern-release.yml
       with:
         directory: <the application's binary folder>
 ```
+  An application's copy is the one SE writes into it (SE's `scripts/se_workflows.py`), which
+  keeps only `workflow_call`.
 - **Fetching it:** `<download>/kern-<version>-<os>-<arch>.tar.gz` and `<download>/SHA256SUMS`, the
-  archive checked against its line, then unpacked.
+  download under the home origin names, the archive checked against its line, then unpacked.
+  Where origin names no home, nothing is fetched: the start builds the binary from its folder.
 
 | asset | measured on 13 Nov in a Claude Code cloud container, 4 cores, Linux amd64, 5 runs |
 |---|---|
@@ -274,20 +280,21 @@ download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"
 | nats-server v2.11.9 linux-amd64, 6.35 MB, from its GitHub release through the container's proxy: the same steps | 0.68 to 1.27 s |
 | building the six, `go run ./tools/release build`, warm module cache | 17.5 to 18.7 s each, 110 s in all |
 
-**The move to `mb-89/kern` changes one URL:** `release.toml`'s `download`, to
-`https://github.com/mb-89/kern/releases/download/v{version}`. The workflow reads its tag and its
-repository from that URL and refuses to publish into another repository than the one it runs in,
-so it moves with kern's other workflows (the design's move, step 2), as `release.yml`, and
+**The move to kern's own repository changes one line:** `release.toml`'s `download`, to
+`releases/download/v{version}`, under kern's own origin then. The release tool reads the tag from
+that path and the repository from the checkout's origin, and refuses to publish into another
+repository than the one it runs in (`plan --repository`), so it moves with kern's other workflows (the design's move, step 2), as `release.yml`, and
 `battery.yml` below moves beside it.
 
 ## The battery
 
-SE's `.github/workflows/kern-battery.yml` is the reusable CI every kern application calls:
+SE's `.github/workflows/kern-battery.yml` is the reusable CI every kern application calls, through
+the copy SE writes into it (SE's `scripts/se_workflows.py`):
 
 ```yaml
 jobs:
   check:
-    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
+    uses: ./.github/workflows/kern-battery.yml
 ```
 
 It sets up the Go of the application's `go.mod` and uv, vets the Go code, and runs the

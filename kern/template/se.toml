@@ -15,5 +15,5 @@ limit_seconds = 120
 
 # The core this application builds on (kern's docs/go-core.md "Pinning it"): go.mod owns the version.
 [modules.kern]
-url = "https://github.com/mb-89/kern.git"
+url = "../kern.git"
 go = true

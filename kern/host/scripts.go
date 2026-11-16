@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/git"
+	"kern/git"
 )
 
 // Counting an agent's ad hoc scripts, SE's docs/go-core.md "Scripts are ad

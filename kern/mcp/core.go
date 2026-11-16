@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/host"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/host"
 )
 
 // Core is the core as the door reaches it: the real one in the checkout

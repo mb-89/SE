@@ -150,7 +150,9 @@ kern_step() {
   # One reader of the application binary: se_modules.py app-binary, which answers kern's core plus
   # the application's Go components where it has any, else the bare kern (SE's docs/go-core.md "How
   # the binary arrives"), from the project where it is SE's own checkout. One line: "<name>
-  # <version> <download base> <build folder> <package> <the checkout it read>".
+  # <version> <download base> <build folder> <package> <the checkout it read>". The download base
+  # lies under the home the checkout's origin names (scripts/se_home.py), so no file names where SE
+  # lives; it is `-` where origin names none, and the binary is built from its folder.
   spec="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
     --root "$se_root" app-binary --project "$project" 2>/dev/null)" || return 0
   read -r name version base builddir package pins <<<"$spec"
@@ -178,7 +180,9 @@ kern_step() {
   asset="$name-$version-$platform.tar.gz"
   [ -n "$suffix" ] && asset="$name-$version-$platform.zip"
   sums="$HOME/.se/bin/$name-$version.SHA256SUMS"
-  if [ -z "$platform" ]; then
+  if [ "$base" = - ]; then
+    cause="no $name $version release to fetch: the origin of $pins names no home"
+  elif [ -z "$platform" ]; then
     cause="no $name release for $(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
   elif ! command -v curl >/dev/null 2>&1; then
     cause="no curl to fetch the $name $version release"

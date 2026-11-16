@@ -3,9 +3,9 @@ package fixture_test
 import (
 	"testing"
 
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/index/fixture"
-	"github.com/mb-89/kern/kerntest"
+	"kern/index"
+	"kern/index/fixture"
+	"kern/kerntest"
 )
 
 func TestTheFixturePassesAgainstTheFakeCoreAlone(t *testing.T) {

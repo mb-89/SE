@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/kerntest"
-	"github.com/mb-89/se/components/fleet"
+	"kern/components/github"
+	"kern/kerntest"
+	"se/components/fleet"
 )
 
 func issue(n int, title string, labels ...any) github.Snapshot {

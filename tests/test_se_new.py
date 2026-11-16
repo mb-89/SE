@@ -15,6 +15,7 @@ import pytest
 import git_door
 import fake_git as git_fake
 import se
+import se_home
 import se_modules
 import se_new
 
@@ -181,14 +182,36 @@ def test_kern_pin_prints_the_version_and_where_its_release_is_published(tmp_path
     assert "download names no URL" in capsys.readouterr().err
 
 
-def test_app_binary_is_ses_own_binary_where_se_toml_names_one() -> None:
+def test_app_binary_is_ses_own_binary_where_se_toml_names_one(monkeypatch) -> None:
     """bootstrap.sh reads the application binary through this one reader: SE's is the `se` binary,
-    kern's core plus SE's Go components (components/release.toml)."""
+    kern's core plus SE's Go components (components/release.toml), published under the home the
+    checkout's origin names (se_home.py)."""
+    monkeypatch.setattr(se_modules.se_home, "find", lambda root: se_home.Home("example.com", "alice", "project"))
     b = se_modules.app_binary(PROJECT)
     assert (b.name, b.build_dir, b.package) == ("se", "components", "./cmd/se")
     release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
-    assert b.download == release["download"].format(version=b.version)
+    assert "://" not in release["download"], "components/release.toml names no home"
+    assert b.download == "https://example.com/alice/project/" + release["download"].format(version=b.version)
     assert b.download.endswith(f"/releases/download/se-v{b.version}")
+
+
+def test_a_download_path_lies_under_origins_home_and_without_one_there_is_none(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    """A release.toml's download path resolves under the home origin names; where origin names
+    none, app-binary answers `-` and the start builds the binary from its folder."""
+    write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n',
+                     "components/release.toml": 'version = "2.0.0"\ndownload = "releases/download/app-v{version}"\n'
+                     'binary = "app"\npackage = "./cmd/app"\n',
+                     "kern/release.toml": 'version = "0.3.0"\ndownload = "releases/download/kern-v{version}"\n'})
+    monkeypatch.setattr(se_modules.se_home, "find", lambda root: se_home.Home("example.com", "alice", "project"))
+    assert se_modules.app_binary(tmp_path).download == "https://example.com/alice/project/releases/download/app-v2.0.0"
+    assert se_modules.kern_download(tmp_path) == "https://example.com/alice/project/releases/download/kern-v0.3.0"
+    monkeypatch.setattr(se_modules.se_home, "find", lambda root: None)
+    assert se_modules.app_binary(tmp_path).download == ""
+    assert se_modules.main(["--root", str(tmp_path), "app-binary"]) == 0
+    assert capsys.readouterr().out == f"app 2.0.0 - components ./cmd/app {tmp_path.resolve().as_posix()}\n"
+    assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 0
+    assert capsys.readouterr().out == "0.3.0 -\n"
 
 
 def test_app_binary_falls_back_to_the_bare_kern_without_a_binary_section(tmp_path: Path) -> None:

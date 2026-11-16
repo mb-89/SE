@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // kern/README.md's row for cmd.<i>.<command> names what a process answers a

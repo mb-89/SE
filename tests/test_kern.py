@@ -14,13 +14,6 @@ import ci_trust  # scripts/ is on the path (tests/conftest.py)
 PROJECT = Path(__file__).resolve().parents[1]
 
 
-def incubator() -> str:
-    """`<owner>/<repository>` of the repository kern is incubated in, as kern/release.toml's download
-    names it: kern's files are its one owner until kern derives it (no test file names a home)."""
-    download = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["download"]
-    found = re.match(r"https://github\.com/([\w.-]+/[\w.-]+)/releases/download/", download)
-    assert found, download
-    return found[1]
 WORKFLOW = PROJECT / ".github" / "workflows" / "check.yml"
 # The first major of actions/setup-go that runs on Node 24.
 SETUP_GO_NODE_24 = 6
@@ -297,14 +290,15 @@ def test_se_builds_its_own_binary_through_kerns_reusable_release() -> None:
         assert path in text
     release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
     assert release["binary"] == "se" and release["package"] == "./cmd/se"
-    assert release["download"] == f"https://github.com/{incubator()}/releases/download/se-v{{version}}", (
-        "the se-v<version> tag scheme, distinct from v<version> and kern-v<version>")
+    assert release["download"] == "releases/download/se-v{version}", (
+        "the se-v<version> tag scheme, distinct from v<version> and kern-v<version>, under the home "
+        "origin names")
 
 def test_the_release_toml_names_one_url_with_the_tag_while_kern_is_incubated() -> None:
     settings = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))
     assert set(settings) == {"version", "download"}
     assert re.fullmatch(r"\d+\.\d+\.\d+", settings["version"])
-    assert settings["download"] == f"https://github.com/{incubator()}/releases/download/kern-v{{version}}"
+    # A path under the home the checkout's origin names (kern/home): no host, owner or repository.
+    assert settings["download"] == "releases/download/kern-v{version}"
     readme = (PROJECT / "kern" / "README.md").read_text(encoding="utf-8")
-    owner = incubator().split("/")[0]
-    assert f"**The move to `{owner}/kern` changes one URL:** `release.toml`'s `download`" in readme
+    assert "**The move to kern's own repository changes one line:** `release.toml`'s `download`" in readme

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // PostToolUse is the host's event that carries a tool's answer.

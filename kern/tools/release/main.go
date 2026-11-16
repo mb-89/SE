@@ -11,8 +11,12 @@
 // changed input passes where its binary's kind is stated, as the landing
 // assigns the version (SE's README "Component versions").
 //
-// plan refuses when --repository is given and the download URL names another
-// repository, so a moved URL never publishes into the old one. guard refuses
+// release.toml's download is a path, releases/download/<tag with {version}>,
+// under the home the checkout's origin names (kern/home), so it names no host,
+// owner or repository; plan resolves it there and refuses where origin names
+// no home. An absolute https://github.com/<owner>/<name>/releases/download/...
+// URL stays as it is. plan refuses when --repository is given and the download
+// names another repository, so a moved checkout never publishes into the old one. guard refuses
 // where the tag release.toml names is cut already and a file the binary is
 // built from changed since it, so a binary input never changes without the
 // version (Guard). Run from kern/.
@@ -41,8 +45,9 @@ import (
 	"strings"
 	"time"
 
-	gitdoor "github.com/mb-89/kern/git"
 	"github.com/pelletier/go-toml/v2"
+	gitdoor "kern/git"
+	"kern/home"
 )
 
 // Settings is the file that owns kern's version and its release URL.
@@ -74,8 +79,9 @@ var Stamp = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
 // Release is release.toml read and resolved.
 type Release struct {
 	Version    string // 0.1.0
-	Download   string // the download base, the version filled in
-	Repository string // owner/name the download URL names
+	Download   string // the download base, the version filled in; "" until Resolve where release.toml names a path
+	Repository string // owner/name the download names; "" until Resolve where release.toml names a path
+	Path       string // the download's path under the home, the version filled in, where release.toml names one
 	Tag        string // the release's tag, the URL's last path part
 	Binary     string // the binary's name, kern by default
 	Package    string // the binary's Go package, ./cmd/kern by default
@@ -84,6 +90,7 @@ type Release struct {
 var (
 	semver   = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 	download = regexp.MustCompile(`^https://github\.com/([\w.-]+/[\w.-]+)/releases/download/([\w.-]*\{version\}[\w.-]*)$`)
+	relative = regexp.MustCompile(`^releases/download/([\w.-]*\{version\}[\w.-]*)$`)
 	binary   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
@@ -102,9 +109,18 @@ func Read(data []byte) (Release, error) {
 	if !semver.MatchString(doc.Version) {
 		return Release{}, fmt.Errorf("%s: version %q is no <major>.<minor>.<patch>", Settings, doc.Version)
 	}
-	m := download.FindStringSubmatch(doc.Download)
+	m, path := download.FindStringSubmatch(doc.Download), ""
 	if m == nil {
-		return Release{}, fmt.Errorf("%s: download %q is no https://github.com/<owner>/<name>/releases/download/<tag with {version}>", Settings, doc.Download)
+		if rel := relative.FindStringSubmatch(doc.Download); rel != nil {
+			m, path = []string{doc.Download, "", rel[1]}, strings.ReplaceAll(doc.Download, "{version}", doc.Version)
+		}
+	}
+	if m == nil {
+		return Release{}, fmt.Errorf("%s: download %q is no releases/download/<tag with {version}> (or https://github.com/<owner>/<name>/releases/download/<tag with {version}>)", Settings, doc.Download)
+	}
+	full := strings.ReplaceAll(doc.Download, "{version}", doc.Version)
+	if path != "" {
+		full = ""
 	}
 	name, pkg := doc.Binary, doc.Package
 	if name == "" {
@@ -118,12 +134,22 @@ func Read(data []byte) (Release, error) {
 	}
 	return Release{
 		Version:    doc.Version,
-		Download:   strings.ReplaceAll(doc.Download, "{version}", doc.Version),
+		Download:   full,
 		Repository: m[1],
+		Path:       path,
 		Tag:        strings.ReplaceAll(m[2], "{version}", doc.Version),
 		Binary:     name,
 		Package:    pkg,
 	}, nil
+}
+
+// Resolve answers r with its download under h, where release.toml names a
+// path; an absolute download stays as it is.
+func (r Release) Resolve(h home.Home) Release {
+	if r.Path != "" {
+		r.Download, r.Repository = h.At(r.Path), h.Tracker()
+	}
+	return r
 }
 
 // Archive names a target's archive: <binary>-<version>-<os>-<arch>.tar.gz, .zip on Windows.
@@ -426,6 +452,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "plan":
+		if r.Path != "" {
+			h, err := home.Of(context.Background(), *dir)
+			if err != nil {
+				fmt.Fprintf(stderr, "release: %s's download is a path under the checkout's home: %v\n", Settings, err)
+				return 2
+			}
+			r = r.Resolve(h)
+		}
 		if *repository != "" && !strings.EqualFold(*repository, r.Repository) {
 			fmt.Fprintf(stderr, "release: %s's download names %s, but this is %s: move the release workflow with the URL, or fix the URL\n",
 				Settings, r.Repository, *repository)

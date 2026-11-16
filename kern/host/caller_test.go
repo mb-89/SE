@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/bus"
+	"kern/host"
+	"kern/index"
 )
 
 // callerArg makes this test binary a caller's process: it calls "kept run"

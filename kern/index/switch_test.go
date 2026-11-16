@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/index/fixture"
+	"kern/index"
+	"kern/index/fixture"
 )
 
 // The catalog check refuses a wire to a switched-off instance, naming the

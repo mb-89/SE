@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/git/gitfake"
+	"kern/git"
+	"kern/git/gitfake"
 )
 
 // A test binary that chose no backend is refused real git, naming the

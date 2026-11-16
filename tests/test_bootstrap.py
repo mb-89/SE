@@ -21,7 +21,8 @@ SE_ROOT = sh(ROOT)
 # SE's Go components, the binary `se`. bootstrap fetches, builds and starts it, not the bare kern.
 APP = tomllib.loads((ROOT / "components" / "release.toml").read_text(encoding="utf-8"))
 NAME, APP_VERSION = APP["binary"], APP["version"]
-APP_BASE = APP["download"].replace("{version}", APP_VERSION)
+# The download base app-binary answers: release.toml's path under the home origin names (se_home.py).
+APP_BASE = "https://example.com/alice/project/" + APP["download"].replace("{version}", APP_VERSION)
 BUILD_DIR, PACKAGE = "components", APP["package"]
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
          "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find")
@@ -569,6 +570,21 @@ def test_with_no_release_and_no_go_kern_failed_names_both(machine):
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release at {APP_BASE}, and no go "
                                         f"to build it from {sh(ROOT)}/{BUILD_DIR}")
+
+
+def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_its_folder(machine):
+    """app-binary answers `-` for the download base where the checkout's origin names no home: no
+    release is asked for, and the start builds the binary from its folder as where none matches."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "app-binary").write_text(f"{NAME} {APP_VERSION} - {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
+                                     newline="\n")
+    (home / "calls").unlink()
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release to fetch: the origin of "
+                                        f"{sh(ROOT)} names no home, and no go to build it from {sh(ROOT)}/{BUILD_DIR}")
+    assert not any(line.startswith("curl") for line in calls(home))
 
 
 def test_bootstrap_outside_a_session_leaves_kern_alone(machine):

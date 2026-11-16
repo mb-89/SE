@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/cli"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/bus"
+	"kern/cli"
+	"kern/host"
+	"kern/index"
 )
 
 // LongGap is the fixture's local phase: longer than NATS's own expiry of a

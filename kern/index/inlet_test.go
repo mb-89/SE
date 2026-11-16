@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // An inlet and an ear for the host's events are an I/O component's alone.

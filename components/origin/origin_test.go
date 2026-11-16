@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/git/gitfake"
-	"github.com/mb-89/se/components/origin"
+	"kern/git"
+	"kern/git/gitfake"
+	"se/components/origin"
 )
 
 // Every test reaches git through kern's git door, on its fake.
@@ -40,5 +40,23 @@ func TestReadAnswersOriginsBranches(t *testing.T) {
 	want := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
 	if len(got) != 1 || !got["feat/x"].Equal(want) {
 		t.Fatalf("origin's branches are %v, and want feat/x at 09:00 alone", got)
+	}
+}
+
+// Tracker answers <owner>/<repository> of the home origin names, and ""
+// where origin names none, so no wiring names it.
+func TestTrackerIsTheHomeOriginNames(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := git.Run(context.Background(), dir, "init", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	if got := origin.Tracker(dir); got != "" {
+		t.Fatalf("without origin the tracker is %q", got)
+	}
+	if _, err := git.Run(context.Background(), dir, "config", "remote.origin.url", "https://example.com/alice/project.git"); err != nil {
+		t.Fatal(err)
+	}
+	if got := origin.Tracker(dir); got != "alice/project" {
+		t.Fatalf("the tracker is %q", got)
 	}
 }

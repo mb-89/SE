@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/se/components/fleet"
-	"github.com/mb-89/se/components/origin"
-	retrodue "github.com/mb-89/se/components/retro-due"
+	"kern/bus"
+	"kern/components/github"
+	"kern/host"
+	"kern/index"
+	"se/components/fleet"
+	"se/components/origin"
+	retrodue "se/components/retro-due"
 )
 
 // toolUse is a PostToolUse payload as a cloud session's hook hands it, with
@@ -63,6 +63,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	origin.Read = func(string) (map[string]time.Time, error) {
 		return map[string]time.Time{"main": time.Now()}, nil
 	}
+	origin.Tracker = func(string) string { return "alice/SE" }
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
 		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retrodue.Component}})
@@ -73,7 +74,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	s, _ := c.Standing()
 	post := func(n int, answer map[string]any) {
 		t.Helper()
-		in := map[string]any{"method": "get", "owner": "mb-89", "repo": "SE", "issue_number": n}
+		in := map[string]any{"method": "get", "owner": "alice", "repo": "SE", "issue_number": n}
 		if _, err := host.Post(host.Wall{}, s.Root, "PostToolUse", toolUse("mcp__github__issue_read", in, answer), 10*time.Second); err != nil {
 			t.Fatal(err)
 		}

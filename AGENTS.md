@@ -93,9 +93,13 @@
 - Where SE needs its own location, it derives it from the checkout's origin through
   `scripts/se_home.py`, one helper for every Python reader: the home, the tracker, the docs URL and
   module URLs relative to origin (`../obs.git`). Docs write `<owner>/<repository>`, explained once.
+  - Go asks `kern/home`, which answers the same; both suites read one table,
+    `kern/home/testdata/origins.json`.
+  - Go module paths name no host (`kern`, `se/components`), and a `release.toml` names its
+    download as a path under the home (`releases/download/<tag>`).
 - `uv run python scripts/hygiene.py` enforces it (its check `neutral-home`, tested in
   `tests/test_repository.py`): a tracked line that names origin's owner fails, naming file and
-  line, outside its `HOME_ALLOWED` (each entry with its reason) and workflow `uses:` lines.
+  line; its `HOME_ALLOWED` is empty.
 
 ## Public safety
 

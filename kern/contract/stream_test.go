@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/cli"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/cli"
+	"kern/host"
+	"kern/index"
 )
 
 // placeDrip writes drip's folder and a wiring that places it in its own Python

@@ -7,9 +7,9 @@ package main
 import (
 	"os"
 
-	"github.com/mb-89/kern/cli"
+	"kern/cli"
 	// kern's shared components, one blank import each.
-	_ "github.com/mb-89/kern/components/github"
+	_ "kern/components/github"
 )
 
 func main() { os.Exit(cli.Run("kern", os.Args[1:], os.Stdout, os.Stderr)) }

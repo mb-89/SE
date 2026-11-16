@@ -358,6 +358,11 @@ same for its own binary (core plus its Go components). CI tests the core on Linu
 darwin is built, not tested. The binary is fetched into
 `~/.se/bin/<app>-<version>` and kept: a version already there costs nothing.
 
+- **Where from:** `release.toml`'s `download` is a path, `releases/download/<tag>`, under the home
+  the checkout's origin names (`scripts/se_home.py`, and `kern/home` in Go, both held to one table),
+  so no file names a host, owner or repository. Without an origin, or with one that names no home
+  (a local proxy's URL), the start builds the binary from its folder, as where no release matches.
+
 - **Cloud:** as local: the environment's setup script only clones SE (README ["Claude Code
   cloud"](../README.md#claude-code-cloud)), so `bootstrap.sh` fetches the binary at the session
   start that first meets a version, in the background, and the session works without the core
@@ -594,8 +599,9 @@ kern/
 ### Incubated in SE until `<owner>/kern` exists
 
 Until the owner creates `<owner>/kern` (step 1 of [the plan](#the-plan)), kern grows in SE under
-`kern/`, as its own Go module (the path `kern/go.mod` names), so the move changes no import path. Nothing
-in SE outside `kern/` imports it. Meanwhile SE runs kern's tests beside its Python suite (`se.toml`
+`kern/`, as its own Go module `kern` (the path `kern/go.mod` names, which names no host), and builds
+find it through the checkout: SE's Go components and a new application replace the module by the
+source beside them. Nothing in SE outside `kern/` and its Go components imports it. Meanwhile SE runs kern's tests beside its Python suite (`se.toml`
 `[tests.beside.kern]`, README [Test budget](../README.md#test-budget)), and SE's `check` job vets
 it. The move is one work issue, once the repository exists:
 
@@ -792,6 +798,12 @@ as on Go 1.24.7.
   the core's own binary.
 - **Windows.** The detached start and the hook client run on Windows in v5; the core's CI runs its
   contract suite on Windows from step 2.
+- **How outside builds fetch kern after the move.** kern's module path `kern` names no host, so
+  no build can fetch it by its path: while incubated, every build replaces it by the source in the
+  checkout (SE's `components/go.mod`, an application's `kern/` folder, `scripts/se_new.py`). The
+  move decides how a build outside SE finds kern without a file naming its host: a `replace` by a
+  module clone `se_modules.py sync` places, a vanity path served from the home, or another way.
+  Until it is decided, an application keeps carrying kern's source at its pin.
 - **Two languages in one application.** SE's suite stays Python against the Python fake; the Go
   side is tested in the core's repository. An application with Go components runs both in its
   `battery.yml`, under one budget.

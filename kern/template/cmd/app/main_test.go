@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/host"
+	"kern/index"
 )
 
 // The bare application starts on its own wiring with the components it

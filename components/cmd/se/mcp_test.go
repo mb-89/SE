@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/cli"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"kern/cli"
+	"kern/host"
+	"kern/index"
+	"kern/mcp"
 )
 
 // SE's own catalog, its root wiring.toml and its components' declarations as

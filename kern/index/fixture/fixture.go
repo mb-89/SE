@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 type totalIn struct {
