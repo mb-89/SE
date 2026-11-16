@@ -5,8 +5,10 @@ machine, account or internal host. The rule is owned by AGENTS.md, section "Publ
 Scans tracked file names and contents (binary files as bytes), commit messages and author and
 committer identities against the public term list (public-check-terms.toml, beside this script)
 and the source's local list (.public-check.local at its root, never checked in), which adds the
-source's own terms and switches public entries off for it. Output names the location and the
-pattern label only, never the matched text. A tracked local list, and the retired machine-level
+source's own terms and switches public entries off for it, and the cloud list, terms one per line
+in the variable SE_PUBLIC_CHECK_TERMS (CI's repository secret, a cloud environment's setting),
+which only adds terms. Output names the location and the pattern label only, never the matched
+text. A tracked local list, and the retired machine-level
 list (~/.se/private-terms.txt, SE_PRIVATE_TERMS), stop the check with their remedy.
 
 The commit gates (a message file, the commits of a --range) also refuse tracker references,
@@ -60,6 +62,8 @@ LOCAL_FILE = ".public-check.local"
 # The retired machine-level list: found, the check stops and names where its terms go.
 MACHINE_ENV = "SE_PRIVATE_TERMS"
 MACHINE_DEFAULT = "~/.se/private-terms.txt"
+# The cloud list: private terms that may live in CI's secrets and a cloud environment's settings.
+CLOUD_ENV = "SE_PUBLIC_CHECK_TERMS"
 
 # GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person.
 # The identity gate passes it as committer only while landings are GitHub's squash merges; with
@@ -250,6 +254,7 @@ class Report:
     commits: int = 0
     allow_used: int = 0
     off: list[str] = field(default_factory=list)  # public labels the local list switches off
+    cloud: bool = False  # the cloud list (CLOUD_ENV) was checked
 
 
 @dataclass
@@ -324,6 +329,29 @@ def load_local(root: Path) -> LocalList | None:
             ) from None
         local.terms.append(Pattern(f"local-term:{number}", regex))
     return local
+
+
+def load_cloud() -> list[Pattern] | None:
+    """The cloud list from CLOUD_ENV, or None while it is unset or empty: one case-insensitive
+    regex per line, `#` a comment, as the local list's terms. It only adds terms, so an `off:` line
+    is refused. Hits and errors name only its line number, never the term."""
+    value = os.environ.get(CLOUD_ENV, "")
+    if not value.strip():
+        return None
+    terms = []
+    for number, raw in enumerate(value.splitlines(), 1):
+        text = raw.strip()
+        if not text or text.startswith("#"):
+            continue
+        if LOCAL_OFF.match(text):
+            raise SetupError(f"{CLOUD_ENV}:{number}: the cloud list only adds terms; an off: "
+                             f"line belongs in {LOCAL_FILE}")
+        try:
+            regex = re.compile(text, re.IGNORECASE)
+        except re.error:
+            raise SetupError(f"{CLOUD_ENV}:{number} is not a valid regex") from None
+        terms.append(Pattern(f"cloud-term:{number}", regex))
+    return terms
 
 
 def load_allow(root: Path) -> list[AllowEntry]:
@@ -732,16 +760,18 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     check_machine_list()
     check_untracked(root, args.rev)
     report = Report()
+    cloud = load_cloud()
+    report.cloud = cloud is not None
     local = load_local(root)
     has_local = local is not None
     if local is None:
         local = LocalList()
-        report.warnings.append(
-            f"no local list ({LOCAL_FILE}); only the public list was checked"
-        )
+        lists = "the public and the cloud list were" if cloud is not None else "the public list was"
+        report.warnings.append(f"no local list ({LOCAL_FILE}); only {lists} checked")
     else:
         report.off = sorted(local.off)
-    patterns = [p for p in GENERIC_PATTERNS if p.label not in local.off] + local.terms
+    patterns = ([p for p in GENERIC_PATTERNS if p.label not in local.off] + local.terms
+                + (cloud or []))
     if args.message_file is not None:
         scan_message_file(root, args.message_file, patterns, report)
         return report
@@ -826,7 +856,8 @@ def main(argv: list[str] | None = None) -> int:
         print(hit)
     used = f"{report.allow_used} allow entries used, " if report.allow_used else ""
     off = f"public entries off locally: {', '.join(report.off)}, " if report.off else ""
-    scope = f"{report.files} files, {report.commits} commits, {used}{off}{version}"
+    cloud = f"with the cloud list ({CLOUD_ENV}), " if report.cloud else ""
+    scope = f"{report.files} files, {report.commits} commits, {used}{off}{cloud}{version}"
     if report.hits:
         remedy = "fix each as its line says"
         if any(hit.label not in OWN_REMEDY for hit in report.hits):
