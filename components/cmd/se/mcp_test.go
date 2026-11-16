@@ -200,16 +200,16 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 	}
 
 	// The core stopped with se stop is started again by the next call, well
-	// before the door's renewal, Renew away. The stop runs beside it: the
-	// stopped core is the door's child, which waits for it only as it exits,
-	// so se stop sees its pid gone once the client has hung up.
+	// before the door's renewal, Renew away. The stopped core is the door's
+	// child, which reaps it, so se stop returns once the core has ended.
 	stop := exec.Command(se, "stop", "--root", root)
-	var said strings.Builder
-	stop.Stdout, stop.Stderr = &said, &said
-	if err := stop.Start(); err != nil {
-		t.Fatal(err)
-	}
 	stopped := time.Now()
+	if out, err := stop.CombinedOutput(); err != nil {
+		t.Fatalf("se stop: %v\n%s", err, out)
+	}
+	if took := time.Since(stopped); took > 5*time.Second {
+		t.Fatalf("se stop returns %v after it was asked, and wants it at once", took)
+	}
 	if _, how := running(pid, mcp.Renew/2); how != mcp.StartedAgain {
 		t.Fatalf("the door came to the core after se stop %q, and wants %q", how, mcp.StartedAgain)
 	}
@@ -227,8 +227,5 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 			t.Fatalf("the core reads %q a minute after the session ended, and wants not running", st.State)
 		}
 		time.Sleep(50 * time.Millisecond)
-	}
-	if err := stop.Wait(); err != nil {
-		t.Fatalf("se stop: %v\n%s", err, said.String())
 	}
 }
