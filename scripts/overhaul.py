@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """An overhaul: is the design still right? (README "Work commands").
 
-`overhaul.py new` files the overhaul issue, `docs/overhaul-<yyyymmdd>` labelled `discovery`, with
+`overhaul.py new` files the overhaul issue, `overhaul-<yyyymmdd>` labelled `discovery`, with
 the body of `.github/ISSUE_TEMPLATE/overhaul.md`, through `work_tickets.py file`'s filing path:
 once, an open overhaul answering a second `new`.
 
@@ -540,7 +540,10 @@ def sibling(name: str):
 SE_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = SE_ROOT / ".github" / "ISSUE_TEMPLATE" / "overhaul.md"
 BOOK = Path("src") / "skills" / "work-model" / "references" / "rules.md"
-OVERHAUL_TITLE = "docs/overhaul-"
+OVERHAUL_TITLE = "overhaul-"
+# An overhaul's name is `overhaul-<yyyymmdd>` (work model, Issues); one filed before the name rule
+# is `docs/overhaul-<yyyymmdd>`, and both count.
+OVERHAUL_NAME = re.compile(r"(?:docs/)?overhaul-\d{8}")
 OVERHAUL_LABEL = "discovery"
 # An overhaul is due once this many retros closed since the last one (se.toml [overhaul] due_after);
 # 0, the built-in, switches the countdown off, and with it the too-early scoring.
@@ -615,7 +618,7 @@ def book_rules(root: Path) -> list:
 
 
 def is_overhaul(issue) -> bool:
-    return issue.title.startswith(OVERHAUL_TITLE)
+    return OVERHAUL_NAME.fullmatch(issue.title.strip()) is not None
 
 
 def due_after(root: Path) -> int:

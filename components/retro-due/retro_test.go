@@ -84,4 +84,14 @@ func TestAnOverhaulIsDueAfterTheThirdRetroAndResetsWithAnOverhaul(t *testing.T) 
 	if got := retrodue.Count(in); got.Retros != 0 || got.OverhaulDue || got.Overhaul != 7 {
 		t.Fatalf("after the next overhaul: %+v, and wants 0 retros since overhaul #7, not due", got)
 	}
+	// A ticket named like an overhaul is none; an overhaul under the name rule is one.
+	issues["alice.demo.8"] = issue(8, "docs/retro-20261103", "2026-11-03T00:00:00Z", "completed")
+	issues["alice.demo.9"] = issue(9, "overhaul-the-docs", "2026-11-04T00:00:00Z", "completed")
+	if got := retrodue.Count(in); got.Retros != 1 || got.Overhaul != 7 {
+		t.Fatalf("after a ticket named overhaul-the-docs: %+v, and wants overhaul #7 still", got)
+	}
+	issues["alice.demo.10"] = issue(10, "overhaul-20261105", "2026-11-05T00:00:00Z", "completed")
+	if got := retrodue.Count(in); got.Retros != 0 || got.Overhaul != 10 {
+		t.Fatalf("after overhaul-20261105: %+v, and wants 0 retros since overhaul #10", got)
+	}
 }

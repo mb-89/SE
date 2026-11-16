@@ -1,7 +1,7 @@
 ---
 name: Retro
 about: Look back over several packages or a session to improve the agents, templates and rules systematically.
-title: "retro: <scope> <yyyymmdd>"
+title: "retro-<scope>-<yyyymmdd>"
 labels: retro
 ---
 <!-- se:fleet -->
