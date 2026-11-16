@@ -4,12 +4,20 @@ door = "mcp"
 files = [
     "kern/mcp/core.go",
     "kern/mcp/door.go",
+    "kern/mcp/measure.go",
     "kern/mcp/page.go",
+    "kern/mcp/step.go",
     "kern/mcp/tools.go",
     "scripts/se_mcp.sh",
     "scripts/se_mcp.ps1",
 ]
-contract_tests = ["kern/mcp/door_test.go", "components/cmd/se/mcp_test.go", "tests/test_se_mcp.py"]
+contract_tests = [
+    "kern/mcp/door_test.go",
+    "kern/mcp/measure_test.go",
+    "components/cmd/se/mcp_test.go",
+    "components/cmd/se/mcp_surface_test.go",
+    "tests/test_se_mcp.py",
+]
 commands = []
 imports = ["github.com/modelcontextprotocol/go-sdk"]
 calls = []
@@ -17,8 +25,10 @@ literals = ["jsonrpc"]
 
 [baseline]
 "components/cmd/se/launcher_test.go" = { count = 1, reason = "the launcher's test speaks to the se binary's MCP server through the SDK's client" }
+"components/cmd/se/mcp_surface_test.go" = { count = 1, reason = "contract test" }
 "components/cmd/se/mcp_test.go" = { count = 1, reason = "contract test" }
-"kern/mcp/door_test.go" = { count = 2, reason = "contract test" }
+"kern/mcp/door_test.go" = { count = 3, reason = "contract test" }
+"kern/mcp/measure_test.go" = { count = 1, reason = "contract test" }
 "scripts/copilot.py" = { count = 1, reason = "the self-test speaks to the MCP server as Copilot spawns it, writing its own JSON-RPC messages" }
 "scripts/se_doctor.py" = { count = 1, reason = "the doctor's MCP check sends its own initialize message" }
 "tests/test_host_size.py" = { count = 1, reason = "host_size's test hands it a tools/list answer as the server writes it" }
