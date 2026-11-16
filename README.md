@@ -558,7 +558,8 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
      request `<n>`, the field report, against its work issue
      ([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
-   conclusion other than success merges nothing and escalates.
+   conclusion other than success merges nothing and escalates. A repository whose host has no
+   runners accepts the integrator's status instead ([Landing without CI](#landing-without-ci)).
 4. It lands that head, once origin's integration branch is still the tested base; where it
    moved while it waited, it merges nothing: integrate again.
    - A squash landing squash-merges at exactly that head with the merge's message as the commit
@@ -1214,6 +1215,50 @@ Free minutes for a private repository, which the owner sets up:
   stops the runs instead of billing them.
 - Each run's job is billed by the started minute: a trusted `check` and the record's run cost a
   minute each, against the full suite's own minutes.
+
+#### Landing without CI
+
+Some hosts give a repository no runners (the host's administrator turned Actions off): no
+`check` ever runs, and no record can be dispatched, so nothing lands. There the integrator's own
+complete run is the verdict, through the same landing and the same code path:
+
+```toml
+[tests]
+ci = false # default true: CI's check is the verdict, wherever the host has runners
+```
+
+- **Chosen once, by this setting alone.** se never infers it from the host's answer: a runner
+  missing for an hour must not turn a landing with CI into one without. It is off unless set.
+  - It is read from se.toml on the integration branch the landing starts from, and for the
+    pre-push gate on the pushed commit's first parent, never from the branch landed: no branch
+    switches its own verdict source.
+  - `trust_integrator = true` beside it is refused, as the record needs a runner.
+- **The verdict.** Once the complete suite, the project's checks and the public check passed on
+  the landing head, the landing plan writes the commit status `se integrator verdict` on that
+  head through the host's API, before it opens the landing pull request. No workflow, no runner.
+  - Its state is `success` and its description `passed tree <tree> suite <suite hash>`: the
+    tree and the suite's hash (`[tests]` and the se pin) as the [record](#trusted-landings)
+    names them, the hash by its first 40 digits, so a sha256 tree fits the host's 140
+    characters too.
+  - The host and its API come from origin (`gh api`, with origin's host), as every step does.
+- **Its check.** The plan's check step reads the newest status of that context on the head
+  instead of the check run `check`, and merges only once it is accepted. The pause, the pull
+  request, the squash at that head (or the fast-forward to it, where `[integrate] landing` says
+  so) and the read-back are the landing above.
+- **Accepted only where bound.** A status is accepted only where all of these hold:
+  - its state is `success`, its context exactly `se integrator verdict`;
+  - its tree is the commit's tree, and its suite hash the commit's;
+  - its creator is the integrator (`[tests] integrator`, default the repository's owner).
+    The host sets a status's creator from the token that wrote it, so no text in a status can
+    claim it.
+  - Any other status, or none, merges nothing and escalates (`tests/test_ci_trust.py`).
+- **The pre-push gate.** Where it is on, `verified` and `push` accept a push of the integration
+  branch whose tree lacks the local verdicts where that commit, or the head of the pull request
+  that landed it, carries an accepted status. Where it is off, they read no status.
+- **Through `gh` only.** The host's GitHub tools write no commit status, so where `gh` is not
+  signed in `integrate` refuses before it merges anything, naming the setting.
+- **The host's side, the owner's step.** The ruleset of the integration branch requires the
+  status `se integrator verdict` in place of `check`; the token `gh` holds is the integrator's.
 
 
 ### Platform legs and their queue

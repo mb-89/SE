@@ -468,7 +468,9 @@ def test_the_work_model_owns_without_gh_and_lists_the_commands_that_still_run():
     section = without_gh_section()
     line = next(line for line in section.split("\n- ") if line.startswith("**Commands that still run**"))
     listed = set(re.findall(r"`([a-z-]+)`", line.split("Every other command")[0]))
-    assert listed == commands_that_need_no_gh()
+    # push and verified reach gh only for the integrator's status where se.toml sets ci = false,
+    # and without gh accept none (README "Landing without CI"): they still run, so they are listed.
+    assert listed == commands_that_need_no_gh() | {"push", "verified"}
     assert "the host's GitHub tools" in section
     assert "naming itself, the missing `gh` and this section" in " ".join(section.split())
 

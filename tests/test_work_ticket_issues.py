@@ -1846,6 +1846,9 @@ class FakeGitHub:
         self.checks: list[dict | None] = [{"id": 1, "status": "completed", "conclusion": "success",
                                            "html_url": "https://git.example/owner/repo/runs/1"}]
         self.origin: Path | None = None
+        self.login = "owner"  # the account gh is signed in as: the creator of each status written
+        self.status_list: dict[str, list[dict]] = {}  # commit statuses by commit, as written
+        self.landed_by: dict[str, list[str]] = {}  # the merged pull request heads that landed a commit
 
     def __call__(self, root: Path, repo: str) -> "FakeGitHub":
         self.origin = Path(git_run(root, "remote", "get-url", "origin", check=True).stdout.strip())
@@ -1892,6 +1895,22 @@ class FakeGitHub:
     def check_run(self, sha: str, name: str) -> dict | None:
         self.calls.append(("check_run", sha, name))
         return self.checks.pop(0) if len(self.checks) > 1 else self.checks[0]
+
+    def statuses(self, sha: str) -> list[dict]:
+        self.calls.append(("statuses", sha))
+        return list(reversed(self.status_list.get(sha, [])))  # newest first, as the host lists them
+
+    def create_status(self, sha: str, state: str, context: str, description: str) -> dict:
+        self.calls.append(("create_status", sha, state, context, description))
+        listed = self.status_list.setdefault(sha, [])
+        listed.append({"id": 100 + len(listed), "state": state, "context": context,
+                       "description": description, "creator": {"login": self.login},
+                       "url": f"https://git.example/api/statuses/{sha}"})
+        return listed[-1]
+
+    def merged_heads(self, sha: str) -> list[str]:
+        self.calls.append(("merged_heads", sha))
+        return self.landed_by.get(sha, [])
 
     def squash(self, number: int, sha: str, title: str, message: str) -> str:
         self.calls.append(("squash", number, sha, title, message))
@@ -3323,6 +3342,198 @@ def test_integrate_hands_off_the_record_as_steps_the_github_tools_make_where_tru
     assert ("--landing-pull <pull number from step 4> --check-run <check run url from step 5> "
             "--landing-description <file: the landing pull request's description, as "
             "pull_request_read get reads it after step 6>") in plan["then"]
+
+
+# Landing without CI (README "Landing without CI"): where se.toml on main sets [tests] ci = false,
+# the integrator's commit status on the landing head is the verdict in place of check.
+
+NO_CI = IDENTITY + "\n[tests]\ncommand = [\"true\"]\nci = false\n"
+STATUS = work_tickets.trust.STATUS_CONTEXT
+
+# The landing plan with CI as it was before landing without CI existed, captured from that code:
+# with the setting off, the plan stays exactly this.
+PLAN_WITH_CI = """\
+GitHub plan: land land/feature/worker on main
+1. list_issues {"labels": ["pause"], "owner": "owner", "perPage": 20, "repo": "tracker", "state": "OPEN"}
+   An issue listed means the fleet is paused: stop here, run no later step and start, land or route nothing; the owner resumes it by closing that issue
+2. create_pull_request {"base": "main", "body": "BODY", "head": "land/feature/worker", "owner": "owner", "repo": "repo", "title": "Integrate feature/worker"}
+   Where list_pull_requests (state open, head owner:land/feature/worker, base main) lists one, update_pull_request that one with this title and body instead
+   Gives: pull number, pull url
+3. pull_request_read {"method": "get_check_runs", "owner": "owner", "pullNumber": "<pull number from step 2>", "repo": "repo"}
+   Every 30 s, up to 60 minutes, until the check run check on aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa completes; any conclusion but success: merge nothing, fix the cause on the work branch, integrate again
+   Gives: check run url
+4. merge_pull_request {"commit_message": "Release-kind: minor", "commit_title": "Integrate feature/worker", "expectedHeadSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "merge_method": "squash", "owner": "owner", "pullNumber": "<pull number from step 2>", "repo": "repo"}
+   Only while origin's main is still bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (git ls-remote origin refs/heads/main); where it moved, merge nothing and integrate again
+   Gives: merge commit sha
+Then: THEN"""
+
+
+def test_with_ci_the_landing_plan_is_the_one_before_landing_without_ci():
+    arguments = ("git.example/owner/repo", "land/feature/worker", "main", "b" * 40, "a" * 40,
+                 "Integrate feature/worker", "Release-kind: minor", "BODY", "THEN",
+                 "git.example/owner/tracker")
+    assert work_tickets.landing_plan(*arguments).text() == PLAN_WITH_CI
+    assert work_tickets.landing_plan(*arguments, None, verdict=None).text() == PLAN_WITH_CI
+
+
+def without_ci(checkout: Path) -> None:
+    """se.toml [tests] ci = false, pushed to origin's main."""
+    (checkout / "se.toml").write_text(NO_CI, encoding="utf-8")
+    git_ok("-C", str(checkout), "pull", "-q", "origin", "main")
+    git_ok("-C", str(checkout), "commit", "-q", "-am", "Land without CI")
+    git_ok("-C", str(checkout), "push", "-q", "origin", "HEAD:main")
+
+
+def no_ci_host(github) -> None:
+    """A host without runners: no check run is ever there to read."""
+    github.check_run = lambda sha, name: pytest.fail(f"a host without runners has no {name}")
+
+
+def test_with_ci_a_landing_reads_and_writes_no_status(main_checkout, monkeypatch, github):
+    delivered_worker(main_checkout, monkeypatch)
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert squashed_onto_origin(main_checkout, commit)
+    names = [call[0] for call in github.calls]
+    assert "check_run" in names
+    assert not {"statuses", "create_status", "merged_heads"} & set(names)
+
+
+def test_without_ci_a_landing_lands_on_a_green_local_run(main_checkout, monkeypatch, github, capsys):
+    without_ci(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    no_ci_host(github)
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert [call[0] for call in github.calls] == [
+        "create_status", "open_pull", "create_pull", "statuses", "squash", "pull", "comment",
+        "close_pull"]
+    _, sha, state, context, description = github.calls[0]
+    squashed = next(call for call in github.calls if call[0] == "squash")[2]
+    tree = git_run(main_checkout, "rev-parse", f"{sha}^{{tree}}", check=True).stdout.strip()
+    assert (sha, state, context) == (squashed, "success", STATUS)  # on the head it squashes
+    assert description == work_tickets.trust.status_description(
+        tree, work_tickets.trust.suite_hash(main_checkout, sha))
+    assert squashed_onto_origin(main_checkout, commit)
+    out = capsys.readouterr().out
+    assert f"The integrator's status {STATUS}: success written on {sha[:12]}" in out
+    assert f"Verdict {STATUS}: success (the integrator owner's status" in out
+    assert github.calls[-2] == (
+        "comment", 7, f"Landed on main in {origin_main(main_checkout)[:12]} "
+                      "through https://git.example/owner/repo/pull/20.")
+
+
+def test_without_ci_a_fast_forward_landing_lands_on_the_status_of_the_commit_it_pushes(
+        main_checkout, monkeypatch, github, capsys):
+    (main_checkout / "se.toml").write_text(
+        NO_CI + '\n[integrate]\nlanding = "fast-forward"\n', encoding="utf-8")
+    git_ok("-C", str(main_checkout), "pull", "-q", "origin", "main")
+    git_ok("-C", str(main_checkout), "commit", "-q", "-am", "Land without CI, by fast-forward")
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
+    delivered_worker(main_checkout, monkeypatch)
+    no_ci_host(github)
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert [call[0] for call in github.calls] == [
+        "create_status", "open_pull", "create_pull", "statuses", "pull", "comment", "close_pull"]
+    landed = github.calls[0][1]
+    assert landed == origin_main(main_checkout)  # main is the very commit the status is on
+    assert fast_forwarded_onto_origin(main_checkout, landed)
+    assert f"Verdict {STATUS}: success" in capsys.readouterr().out
+
+
+def test_without_ci_a_red_local_run_writes_no_status_and_lands_nothing(
+        main_checkout, monkeypatch, github):
+    without_ci(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    no_ci_host(github)
+    base = origin_main(main_checkout)
+
+    def red(root, **_):
+        raise work_tickets.QueueError("Complete suite failed: 1 failed")
+    monkeypatch.setattr(work_tickets, "run_suite", red)
+
+    with pytest.raises(work_tickets.QueueError, match="Complete suite failed"):
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert not {"create_status", "squash"} & {call[0] for call in github.calls}
+    assert origin_main(main_checkout) == base
+    assert github.status_list == {}
+
+
+@pytest.mark.parametrize(("tamper", "named"), [
+    ("another account", "written by mallory, not by the integrator owner"),
+    ("another tree", "is of tree dddddddddddd"),
+    ("another suite", "names suite eeeeeeeeeeee"),
+    ("a failure", "is failure, not success"),
+    ("none", "no status se integrator verdict"),
+    ("another context", "no status se integrator verdict"),
+])
+def test_without_ci_any_status_but_the_integrators_for_the_landed_tree_merges_nothing(
+        main_checkout, monkeypatch, github, tamper, named):
+    without_ci(main_checkout)
+    delivered_worker(main_checkout, monkeypatch)
+    no_ci_host(github)
+    base = origin_main(main_checkout)
+    write = github.create_status
+
+    def tampered(sha, state, context, description):
+        if tamper == "another account":
+            github.login = "mallory"
+        elif tamper == "another tree":
+            description = description.replace(description.split()[2], "d" * 40)
+        elif tamper == "another suite":
+            description = description.replace(description.split()[4], "e" * 40)
+        elif tamper == "a failure":
+            state = "failure"
+        elif tamper == "another context":
+            context = "ci/other"
+        elif tamper == "none":
+            return {}
+        return write(sha, state, context, description)
+    github.create_status = tampered
+
+    with pytest.raises(work_tickets.QueueError, match="has no verdict") as refused:
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert named in str(refused.value)
+    assert "squash" not in {call[0] for call in github.calls}
+    assert origin_main(main_checkout) == base
+
+
+def test_a_branch_cannot_turn_ci_off_for_its_own_landing(main_checkout, monkeypatch, github):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "se.toml").write_text(NO_CI, encoding="utf-8")  # the branch lands the setting
+    git_ok("-C", str(worker), "commit", "-q", "-am", "Turn CI off")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = git_run(worker, "rev-parse", "HEAD", check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    integration_fakes(monkeypatch, head)
+
+    commit = work_tickets.integrate(main_checkout, 7, None, None)
+
+    assert squashed_onto_origin(main_checkout, commit)
+    names = [call[0] for call in github.calls]
+    assert "check_run" in names and "create_status" not in names  # main's se.toml decides
+
+
+def test_without_ci_a_hand_off_refuses_before_it_merges_anything(
+        main_checkout, monkeypatch, github, capsys):
+    without_ci(main_checkout)
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    base = origin_main(main_checkout)
+
+    assert run(main_checkout, *arguments) == 1
+
+    error = capsys.readouterr().err
+    assert "se.toml [tests] ci = false on main lands on the integrator's commit status" in error
+    assert "the host's GitHub tools write no commit status" in error
+    assert origin_main(main_checkout) == base
+    assert git_run(main_checkout.parent / "origin.git", "rev-parse", "--verify",
+                   "refs/heads/land/feature/worker").returncode != 0
+    assert not (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
 
 
 class SessionSteps:
