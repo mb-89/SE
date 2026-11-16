@@ -381,6 +381,11 @@ def test_an_overhaul_is_due_after_the_third_retro_and_resets_with_an_overhaul(tm
     assert overhaul.retros_since(closed, opened) == 3
     assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "docs/overhaul-20261107",
                                                               "2026-11-07T00:00:00Z"))], []) == 0
+    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "overhaul-20261107",
+                                                              "2026-11-07T00:00:00Z"))], []) == 0
+    # A work ticket whose name starts like an overhaul's is no overhaul.
+    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "overhaul-the-docs",
+                                                              "2026-11-07T00:00:00Z"))], []) == 3
     without = [item for item in closed if not overhaul.is_overhaul(item)]
     open_overhaul = retro.issue_of({**issue(THIS, "docs/overhaul-20261112", None),
                                     "created_at": "2026-10-25T00:00:00Z"})
@@ -605,11 +610,11 @@ def test_new_files_the_overhaul_issue_through_file_labelled_discovery(checkout, 
 
     assert overhaul.main(["new", "--repo", REPO, "--worktree", str(checkout)]) == 0
     title, body, blockers, repo, extra = filed[0]
-    assert (title, blockers, repo, extra) == ("docs/overhaul-20261112", [], REPO, ("discovery",))
+    assert (title, blockers, repo, extra) == ("overhaul-20261112", [], REPO, ("discovery",))
     assert body.startswith("<!-- se:fleet -->\n\n## Goal\n") and "---" not in body.split("\n")[0]
     assert "overhaul.py read <this issue> --out <draft>" in body
     assert "overhaul.py file <this issue> --draft <draft>" in body
     out = capsys.readouterr().out
-    assert "GitHub plan: file docs/overhaul-20261112" in out
+    assert "GitHub plan: file overhaul-20261112" in out
     assert '"labels": ["work", "ready", "repo:repo", "discovery"]' in out
-    assert '"title": "docs/overhaul-20261112"' in out
+    assert '"title": "overhaul-20261112"' in out

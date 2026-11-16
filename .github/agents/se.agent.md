@@ -150,7 +150,7 @@ This routine is its one statement; for each issue it lists:
    escalations, the issues they closed).
 2. Nothing contradicted: route it to that repository's integrator as a work issue with
    `work_tickets.py route <n> --routing-file <file> --repo <repository>`, adding `--title
-   <type>/<topic>-<yyyymmdd>` where the derived branch name does not fit. Then notify the
+   <name>` ([name rule](../skills/work-model/SKILL.md#issues)) where the derived name does not fit. Then notify the
    integrator.
    - The file holds the sections of [work.md](../ISSUE_TEMPLATE/work.md) the issue
      lacks, completed; `route` writes them into its body, as the work model's

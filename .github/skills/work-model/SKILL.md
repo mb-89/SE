@@ -20,7 +20,7 @@ by the project's `AGENTS.md`; see [What the project provides](#what-the-project-
 One issue in, one issue out; the same for local sessions and cloud agents.
 
 - **Work issue (in)**: one GitHub issue per package from `work.md`, carrying only the task. Title
-  = branch name (`<type>/<topic>-<yyyymmdd>`), labelled as [Issues](#issues) says. Everything that
+  = branch name, a name as [Issues](#issues) says, labelled as it says. Everything that
   is the same for every package lives in the agent definitions and this skill, never in issues. A
   session prompt names only the agent, the issue and the worktree.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
@@ -79,6 +79,19 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 An issue is one package of work: its title is its branch name, and it ends as one merge whose
 pull request carries its field report.
 
+- **The name rule**: every ticket, a work ticket or one for the person, is named by 1 to 5 words
+  of lowercase letters and digits joined by single dashes, for example
+  `branch-cleanup-on-pr-close`.
+  - A work ticket's title and its branch are the same name, and its landing branch is
+    `land/<name>`; a ticket for the person has no branch.
+  - A name is used once: `file`, `backlog file` and `route` refuse one that is the title of
+    another open or closed issue, or a branch of the repository, naming the clash, and one that
+    breaks the rule, saying how to shorten it.
+  - The kind of work (feat, fix, chore, docs, test) is the work issue's Package kind, never the
+    name, and no date is part of it.
+  - A name of the old form, `<type>/<topic>-<yyyymmdd>`, stays valid until its ticket closes;
+    nothing renames it.
+
 - **One piece of work, one issue**: no command files issues on its own; reviews, retros, overhauls
   and checks report on the issue or pull request they concern, and only SE files
   ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
@@ -103,8 +116,8 @@ pull request carries its field report.
   - A script path without the `<se>/` root counts as se's only in an issue of se's own repository.
   - `<se>/scripts/references.py` owns the check; each script's parser is its command registry.
 - **Dedupe before filing**: an issue is filed once per purpose.
-  - Sameness: two open issues of one repository are twins when their titles match once a
-    trailing `-yyyymmdd` is dropped and their `Routed from:` lines match (a routed issue has one,
+  - Sameness: two open issues of one repository are twins when their titles match (an old
+    name's trailing `-yyyymmdd` dropped) and their `Routed from:` lines match (a routed issue has one,
     any other none); `purpose_key` in `work_tickets.py` owns the rule.
   - The commands that file an issue, or turn one into a work issue, are `file`, `backlog file`
     and `route`; field reports, escalations and the hand-off plans of `integrate` and `refs` file
@@ -213,11 +226,12 @@ own issues apart instead, and SE labels it once it routes it ([Issues](#issues))
   never outside issues.
 - An outside issue is handled once its body or one of its comments carries `<!-- se:handled -->`,
   so the record lives on the issue itself.
-- Routing one (`work_tickets.py route`) is one edit: its title becomes its branch name, given or
-  derived from its title, and it gets the work labels.
+- Routing one (`work_tickets.py route`) is one edit: its title becomes its name, given or
+  derived from the first five words of its title, and it gets the work labels.
   - Its body, unchanged above, gets the handled marker and one section headed Routing: a
     `Routed from:` line with the original title, then the
-    [work.md](../../ISSUE_TEMPLATE/work.md) sections it lacks, one heading level down.
+    [work.md](../../ISSUE_TEMPLATE/work.md) sections it lacks, one heading level down,
+    with a Package kind naming `route --type` where they have none.
   - Every reader of the issue's sections reads these as its own; `field-report --check` enforces
     the numbered requirements there, named "Routing".
 - `work_tickets.py intake --outside` lists the open, unmarked, unhandled issues above each

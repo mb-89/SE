@@ -27,9 +27,11 @@ const (
 	Label     = "retro"
 	TitleStem = "docs/retro-"
 	Work      = "work"
-	// OverhaulTitleStem is overhaul.py OVERHAUL_TITLE.
-	OverhaulTitleStem = "docs/overhaul-"
 )
+
+// overhaulName is overhaul.py OVERHAUL_NAME: `overhaul-<yyyymmdd>`, or, filed before the name
+// rule, `docs/overhaul-<yyyymmdd>`.
+var overhaulName = regexp.MustCompile(`^(?:docs/)?overhaul-\d{8}$`)
 
 var reference = regexp.MustCompile(`(?i)\b(?:fixes|refs|closes)\s+(?:#(\d+)|https://[^/\s]+/([^/\s]+/[^/\s]+)/issues/(\d+))\b`)
 
@@ -76,7 +78,7 @@ func init() { index.Register(Component) }
 
 func isRetro(i snap.Issue) bool { return strings.HasPrefix(i.Title, TitleStem) || i.Has(Label) }
 
-func isOverhaul(i snap.Issue) bool { return strings.HasPrefix(i.Title, OverhaulTitleStem) }
+func isOverhaul(i snap.Issue) bool { return overhaulName.MatchString(strings.TrimSpace(i.Title)) }
 
 func isDuplicate(i snap.Issue) bool { return i.Reason == "duplicate" || i.Has("duplicate") }
 

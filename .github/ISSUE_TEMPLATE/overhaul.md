@@ -1,7 +1,7 @@
 ---
 name: Overhaul
 about: Ask, rarely, whether the design is still right; SE starts it with overhaul.py new.
-title: "docs/overhaul-<yyyymmdd>"
+title: "overhaul-<yyyymmdd>"
 labels: discovery
 ---
 <!-- se:fleet -->

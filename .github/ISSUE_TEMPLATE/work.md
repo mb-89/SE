@@ -1,7 +1,7 @@
 ---
 name: Work issue (design input)
 about: One package for one worker. Title = branch name. Carries only the task; generic rules live in src/agents/worker.md.
-title: "<type>/<topic>-<yyyymmdd>"
+title: "<name>"
 labels: work
 ---
 <!-- se:fleet -->
