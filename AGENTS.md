@@ -172,8 +172,11 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
-  every pushed commit. A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>`
-  (or `scripts/setup.sh <path>`) and so runs se's check without copying it.
+  every pushed commit no remote holds yet. A repository that uses se as a module runs
+  `scripts/setup.ps1 -Repo <path>` (or `scripts/setup.sh <path>`) and so runs se's check without
+  copying it.
+  - A commit already published, such as main's merged into a branch, was gated where it was
+    pushed and by CI's gate, so a push gates only its own.
   - They also set the clone's commit identity as `work_tickets.py sync` does
     (`work_tickets.py identity`), so its first commit already carries it.
   - A session's start (`scripts/bootstrap.sh --hook`) sets `core.hooksPath` the same way where it

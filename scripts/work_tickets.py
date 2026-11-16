@@ -2384,9 +2384,11 @@ def push_gate(root: Path, branch: str) -> None:
         )
         return
     pushed = run_git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    # Only commits no remote holds yet: a commit already published (main's, merged in) was gated
+    # where it was pushed, or by CI's push gate, and is no commit of this push's author.
     revisions = (
-        f"{pushed.stdout.strip()}..{branch}" if pushed.returncode == 0 and pushed.stdout.strip()
-        else f"{branch} --not --remotes"
+        f"{pushed.stdout.strip()}..{branch} --not --remotes"
+        if pushed.returncode == 0 and pushed.stdout.strip() else f"{branch} --not --remotes"
     )
     result = subprocess.run(
         [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", branch,

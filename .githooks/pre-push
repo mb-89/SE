@@ -9,7 +9,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     case "$local_sha" in *[!0]*) ;; *) continue ;; esac  # branch deletion
     if case "$remote_sha" in *[!0]*) true ;; *) false ;; esac &&
         "$script" git_door.py cat-file -e "$remote_sha^{commit}" </dev/null >/dev/null 2>&1; then
-        range="$remote_sha..$local_sha"
+        range="$remote_sha..$local_sha --not --remotes"  # what no remote holds yet
     else
         range="$local_sha --not --remotes"
     fi
