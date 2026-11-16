@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // held is a declared component whose one command asks the desk once and

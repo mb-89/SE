@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/host"
+	"kern/index"
 )
 
 // slow is a command of two steps: the first says a line and asks the slow I/O

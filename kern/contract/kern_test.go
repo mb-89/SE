@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/host"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/host"
 )
 
 // kern is the binary under test, built once for the suite.
@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 		name += ".exe"
 	}
 	kern = filepath.Join(dir, name)
-	build := exec.Command("go", "build", "-o", kern, "github.com/mb-89/kern/cmd/kern")
+	build := exec.Command("go", "build", "-o", kern, "kern/cmd/kern")
 	build.Stdout, build.Stderr = os.Stderr, os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "contract: go build of cmd/kern failed:", err)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // listKind is one family of list reads: its output, its verb, the tool that

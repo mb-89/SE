@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/git"
-	_ "github.com/mb-89/kern/git/gitfake" // registers the state-file reader
+	"kern/git"
+	_ "kern/git/gitfake" // registers the state-file reader
 )
 
 // The state file SE's Python fake writes (testdata/state, which SE's

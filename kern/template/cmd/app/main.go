@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/mb-89/kern/cli"
+	"kern/cli"
 	// The application's Go components, one blank import each:
 	// _ "example.com/app/components/<name>"
 )

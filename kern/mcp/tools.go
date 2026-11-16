@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // The door's own tools, beside one per instance that offers read-only commands.

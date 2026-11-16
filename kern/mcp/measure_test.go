@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mb-89/kern/host"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"kern/host"
 )
 
 // untouched is a core the test fails on the moment anything asks it:

@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/se/components/fleet"
-	retrodue "github.com/mb-89/se/components/retro-due"
+	"kern/components/github"
+	"se/components/fleet"
+	retrodue "se/components/retro-due"
 )
 
 // PythonEnv names the Python the test runs SE's scripts with; where unset,

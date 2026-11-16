@@ -13,11 +13,16 @@ door (`scripts/git_door.py`):
   without an origin. Nothing guesses one.
 - `Home.tracker`: `<owner>/<repository>`; `Home.docs_url`: the GitHub Pages site of a home on
   `github.com`, `https://<owner>.github.io/<repository>/`, and none on any other host.
+- `Home.at(path)`: a path under the home's URL, such as a release's download base
+  (`releases/download/<tag>`, components/release.toml).
 - `Home.named(entry)`: a setting's repository: `<repository>` is the one beside the home, under the
   same owner on the same host; `<owner>/<repository>` and `<host>/<owner>/<repository>` stay
   absolute, so another repository's se.toml that names them keeps working.
 - `module_url(origin, url)`: a module URL relative to origin (`../obs.git`), resolved against the
   origin URL as git resolves a relative submodule URL; an absolute URL comes back as it is.
+
+kern's Go helper (`kern/home`) answers the same: both suites read one table of origins and answers,
+`kern/home/testdata/origins.json`.
 
 As a command, `se_home.py [--repo <path>] {url,tracker,docs,module <url>}` prints one answer; exit
 code 0, or 1 with the reason where the checkout has no home.
@@ -71,6 +76,10 @@ class Home:
         if self.host.lower() != GITHUB:
             return ""
         return f"https://{self.owner.lower()}.github.io/{self.repository}/"
+
+    def at(self, path: str) -> str:
+        """A path under the home's URL, such as a release's download base."""
+        return f"{self.url}/{path.lstrip('/')}"
 
     def named(self, entry: str) -> str:
         """`<host>/<owner>/<repository>` of a setting's repository: a bare name is beside the home."""

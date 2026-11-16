@@ -247,6 +247,7 @@ def test_without_an_origin_the_neutral_home_check_is_skipped_with_its_reason(
         "README.md:1: names the origin's owner; derive it from origin (scripts/se_home.py) or write a placeholder")
 
 
-def test_ses_neutral_home_allow_list_names_only_frozen_paths() -> None:
-    assert set(hygiene.HOME_ALLOWED) == {"kern/", "components/", "wiring.toml"}
-    assert all(reason for reason in hygiene.HOME_ALLOWED.values())
+def test_ses_neutral_home_allow_list_is_empty() -> None:
+    """kern, the Go components, their release.toml and the wiring derive SE's home from origin
+    (kern/home, scripts/se_home.py), so the guard exempts nothing but what it never reads."""
+    assert hygiene.HOME_ALLOWED == {}

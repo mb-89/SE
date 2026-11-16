@@ -39,10 +39,10 @@ import (
 
 	// The reader of SE_GIT_DOOR=fake:<state file>, so a test that starts a
 	// kern binary reaches the fake it hands it (package git).
-	_ "github.com/mb-89/kern/git/gitfake"
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/mcp"
+	_ "kern/git/gitfake"
+	"kern/host"
+	"kern/index"
+	"kern/mcp"
 )
 
 // Greeting are the names and read-only commands the MCP door's greeting tool

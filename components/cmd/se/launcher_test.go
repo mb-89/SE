@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/cli"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"kern/cli"
 )
 
 // The door in a project that keeps no wiring of its own, as a host starts it

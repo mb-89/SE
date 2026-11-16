@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/git/gitfake"
+	"kern/git"
+	"kern/git/gitfake"
 )
 
 var identity = []string{"-c", "user.name=alice", "-c", "user.email=alice@example.com"}
@@ -126,6 +126,24 @@ func TestACommitWithoutAnIdentityIsRefused(t *testing.T) {
 		d.must(root, "commit", "-q", "-m", "second")
 		if got := strings.TrimSpace(d.must(root, "config", "--get", "user.name")); got != "bob" {
 			t.Fatalf("config --get user.name answers %q", got)
+		}
+	})
+}
+
+// remote get-url answers the URL a remote's config sets, and fails with exit
+// code 2 for a remote that is not set.
+func TestRemoteGetURLAnswersTheConfiguredURL(t *testing.T) {
+	contract(t, func(t *testing.T, d door) {
+		root := t.TempDir()
+		d.must(root, "init", "-q", "-b", "main")
+		_, err := d.run(root, nil, "remote", "get-url", "origin")
+		var refused *git.Error
+		if !errors.As(err, &refused) || refused.Code != 2 {
+			t.Fatalf("remote get-url without an origin answers %v", err)
+		}
+		d.must(root, "config", "remote.origin.url", "https://example.com/alice/project.git")
+		if got := strings.TrimSpace(d.must(root, "remote", "get-url", "origin")); got != "https://example.com/alice/project.git" {
+			t.Fatalf("remote get-url origin answers %q", got)
 		}
 	})
 }

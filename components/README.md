@@ -7,15 +7,15 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
 - **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
-  `github.com/mb-89/se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
+  `se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
 
 ## The Go components
 
 | component | reads | writes | port of |
 |---|---|---|---|
 | `fleet` | `github/issues`, `github/pulls`, `github/checks`, `github/issue-lists`, `github/pull-lists` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed, how many issues, pull requests and branches it read, whether that was a complete read of the open issue and pull-request lists (`complete`) and since when (`since`); only a complete read is `healthy` | `work_tickets.py` `fleet_findings` |
-| `retro-due` | `github/issues`, `github/pulls` whole; config `due-after`, `overhaul-after` (0, off, unless set), `tracker`, `base` | `retro-due/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts; the retros closed since the last overhaul, `overhaul_after`, whether an overhaul is due, where that window starts | `retro.py` `landed_since_retro`, `overhaul.py` `retros_since_overhaul` |
-| `origin` | the checkout's git: `refs/remotes/origin`, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip | `work_tickets.py` `fleet_branches`, without its fetch |
+| `retro-due` | `github/issues`, `github/pulls` whole; `origin/tracker`; config `due-after`, `overhaul-after` (0, off, unless set), `base` | `retro-due/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts; the retros closed since the last overhaul, `overhaul_after`, whether an overhaul is due, where that window starts | `retro.py` `landed_since_retro`, `overhaul.py` `retros_since_overhaul` |
+| `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (`kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
 
 - **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the

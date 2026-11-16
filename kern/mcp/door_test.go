@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/host"
+	"kern/index"
 )
 
 // fakeCore is the core as a test plays it: it stands once started, after

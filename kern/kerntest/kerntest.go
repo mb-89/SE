@@ -14,8 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mb-89/kern/host"
-	"github.com/mb-89/kern/index"
+	"kern/host"
+	"kern/index"
 )
 
 // Answerer answers one request on a request port, as the I/O verb the wiring binds it to would.

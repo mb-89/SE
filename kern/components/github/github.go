@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // Name is the component's name, which the wiring's instances name.

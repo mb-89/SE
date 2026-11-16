@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/kern/index/fixture"
+	"kern/index"
+	"kern/index/fixture"
 )
 
 // CheckBudget is the catalog check's budget at start, for bigCatalog's 200

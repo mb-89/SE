@@ -279,7 +279,7 @@ func TestMoveOutReportsAPlantedReference(t *testing.T) {
 	patterns := readMoveOutPatterns(t)
 	tree := fstest.MapFS{
 		"a/a.go":               {Data: []byte("package a\n// see ../docs/go-core.md#x and $SE_GIT_DOOR\n")},
-		"a/README.md":          {Data: []byte("uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v1\r\n")},
+		"a/README.md":          {Data: []byte("uses: alice/SE/.github/workflows/kern-battery.yml@kern-v1\r\n")},
 		"b/b.go":               {Data: []byte("package b\n")},
 		"b/__pycache__/b.pyc":  {Data: []byte("SE_GIT_DOOR")},
 		"b/bin":                {Data: []byte("SE_GIT_DOOR\x00")},
@@ -300,7 +300,7 @@ func TestMoveOutReportsAPlantedReference(t *testing.T) {
 	want := []string{
 		"se-doc-link\ta/a.go\t../docs/go-core.md#x",
 		"se-variable\ta/a.go\tSE_GIT_DOOR",
-		"se-workflow\ta/README.md\tmb-89/SE/.github/workflows/kern-battery.yml@kern-v1",
+		"se-workflow\ta/README.md\talice/SE/.github/workflows/kern-battery.yml@kern-v1",
 	}
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -334,10 +334,10 @@ func TestMoveOutRefusesMalformedData(t *testing.T) {
 // A release tag's version is written as <version>, whichever release it
 // names; a tag of fewer numbers and a placeholder stay as they are.
 func TestWithoutVersionDropsTheReleaseVersion(t *testing.T) {
-	const want = "mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>"
+	const want = "alice/SE/.github/workflows/kern-battery.yml@kern-v<version>"
 	// The versions are joined in, so this file pins no release itself.
 	for _, version := range []string{"0.6.0", "0.7.0"} {
-		match := "mb-89/SE/.github/workflows/kern-battery.yml@kern-v" + version
+		match := "alice/SE/.github/workflows/kern-battery.yml@kern-v" + version
 		if got := withoutVersion(match); got != want {
 			t.Errorf("withoutVersion(%q) = %q, want %q", match, got, want)
 		}
@@ -346,8 +346,8 @@ func TestWithoutVersionDropsTheReleaseVersion(t *testing.T) {
 		t.Errorf("an se tag answers %q, want se-v<version>", got)
 	}
 	for _, match := range []string{
-		"mb-89/SE/.github/workflows/kern-battery.yml@kern-v1",
-		"mb-89/SE/releases/download/kern-v{version}",
+		"alice/SE/.github/workflows/kern-battery.yml@kern-v1",
+		"alice/SE/releases/download/kern-v{version}",
 		"SE_GIT_DOOR",
 	} {
 		if got := withoutVersion(match); got != match {
@@ -361,7 +361,7 @@ func TestWithoutVersionDropsTheReleaseVersion(t *testing.T) {
 func TestMoveOutStoresAPinWithoutItsVersion(t *testing.T) {
 	patterns := readMoveOutPatterns(t)
 	tree := fstest.MapFS{
-		"check.yml": {Data: []byte("uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v9.9.9\n")},
+		"check.yml": {Data: []byte("uses: alice/SE/.github/workflows/kern-battery.yml@kern-v9.9.9\n")},
 	}
 	found, err := scanMoveOut(tree, patterns, moveOutSkipped)
 	if err != nil {

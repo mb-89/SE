@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mb-89/kern/bus"
-	"github.com/mb-89/kern/index"
 	"github.com/nats-io/nats.go"
+	"kern/bus"
+	"kern/index"
 )
 
 // The waits of the core on a declared component's process.
@@ -482,8 +482,11 @@ func (c *Core) abandon(m *nats.Msg) {
 		c.reply(m, Abandoned{Error: fmt.Sprintf("%s: the call %q lies outside the asker's inbox, the one its reply %q names", AbandonSubject, a.Call, m.Reply)})
 		return
 	}
+	// Off the health before its asker hears it is given up: the call's own
+	// goroutine unregisters it only once it returns.
 	c.mu.Lock()
 	rc, ok := c.calls[a.Call]
+	delete(c.calls, a.Call)
 	c.mu.Unlock()
 	if ok {
 		rc.cancel(ErrCallerGaveUp)

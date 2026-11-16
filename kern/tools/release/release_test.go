@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -13,8 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	gitdoor "github.com/mb-89/kern/git"
-	"github.com/mb-89/kern/git/gitfake"
+	gitdoor "kern/git"
+	"kern/git/gitfake"
+	"kern/home"
 )
 
 // Every test reaches git through kern's git door, on its fake.
@@ -24,7 +26,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestReleaseTomlResolvesTheTagAndTheRepositoryFromTheOneURL(t *testing.T) {
+func TestReleaseTomlNamesAPathUnderTheHomeOriginNames(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", Settings))
 	if err != nil {
 		t.Fatal(err)
@@ -33,31 +35,33 @@ func TestReleaseTomlResolvesTheTagAndTheRepositoryFromTheOneURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Tag != "kern-v"+r.Version || r.Repository != "mb-89/SE" {
-		t.Fatalf("while incubated, kern releases as SE's kern-v<version>: got %+v", r)
-	}
-	if r.Download != "https://github.com/mb-89/SE/releases/download/kern-v"+r.Version {
-		t.Fatalf("download base: %s", r.Download)
+	if r.Tag != "kern-v"+r.Version || r.Path != "releases/download/kern-v"+r.Version || r.Repository != "" || r.Download != "" {
+		t.Fatalf("while incubated, kern releases as kern-v<version> under the checkout's home: got %+v", r)
 	}
 	if r.Binary != DefaultBinary || r.Package != DefaultPackage {
 		t.Fatalf("kern's release.toml names no binary, so it is the bare core's: got %q %q", r.Binary, r.Package)
 	}
-	moved, err := Read([]byte("version = \"1.2.3\"\ndownload = \"https://github.com/mb-89/kern/releases/download/v{version}\"\n"))
-	if err != nil || moved.Tag != "v1.2.3" || moved.Repository != "mb-89/kern" {
-		t.Fatalf("the move is the URL alone: got %+v, %v", moved, err)
+	at := r.Resolve(home.Home{Host: "github.com", Owner: "alice", Repository: "project"})
+	if at.Repository != "alice/project" || at.Download != "https://github.com/alice/project/releases/download/kern-v"+r.Version {
+		t.Fatalf("resolved under the home: got %+v", at)
+	}
+	moved, err := Read([]byte("version = \"1.2.3\"\ndownload = \"https://github.com/alice/kern/releases/download/v{version}\"\n"))
+	if err != nil || moved.Tag != "v1.2.3" || moved.Repository != "alice/kern" || moved.Path != "" ||
+		moved.Resolve(home.Home{Host: "example.com", Owner: "bob", Repository: "x"}) != moved {
+		t.Fatalf("an absolute URL stays as it is: got %+v, %v", moved, err)
 	}
 }
 
 func TestAnApplicationReleaseTomlNamesItsOwnBinaryAndPackage(t *testing.T) {
 	// SE's own binary, core plus its Go components, releases as se-v<version>;
-	// the tag and repository are the one URL's, as kern's are.
+	// the tag is the download's last part, as kern's is.
 	app, err := Read([]byte("version = \"0.1.0\"\n" +
-		"download = \"https://github.com/mb-89/SE/releases/download/se-v{version}\"\n" +
+		"download = \"releases/download/se-v{version}\"\n" +
 		"binary = \"se\"\npackage = \"./cmd/se\"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.Binary != "se" || app.Package != "./cmd/se" || app.Tag != "se-v0.1.0" || app.Repository != "mb-89/SE" {
+	if app.Binary != "se" || app.Package != "./cmd/se" || app.Tag != "se-v0.1.0" || app.Path != "releases/download/se-v0.1.0" {
 		t.Fatalf("an application names its own binary: got %+v", app)
 	}
 	if got := Archive(app, Target{"linux", "amd64"}); got != "se-0.1.0-linux-amd64.tar.gz" {
@@ -73,6 +77,8 @@ func TestReadRefusesAVersionOrURLItCannotPublish(t *testing.T) {
 		"version = \"0.1\"\ndownload = \"https://github.com/o/n/releases/download/v{version}\"\n",
 		"version = \"0.1.0\"\ndownload = \"https://github.com/o/n/releases/download/v0.1.0\"\n",
 		"version = \"0.1.0\"\ndownload = \"https://example.com/o/n/releases/download/v{version}\"\n",
+		"version = \"0.1.0\"\ndownload = \"releases/download/v0.1.0\"\n",
+		"version = \"0.1.0\"\ndownload = \"o/n/releases/download/v{version}\"\n",
 	} {
 		if _, err := Read([]byte(text)); err == nil {
 			t.Errorf("accepted %q", text)
@@ -80,21 +86,34 @@ func TestReadRefusesAVersionOrURLItCannotPublish(t *testing.T) {
 	}
 }
 
-func TestPlanRefusesToPublishIntoARepositoryTheURLDoesNotName(t *testing.T) {
+// plan answers the release under the home the checkout's origin names, and
+// refuses without one, or where --repository names another repository.
+func TestPlanResolvesThePathUnderOriginAndRefusesAnotherRepository(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, Settings), []byte("version = \"0.1.0\"\ndownload = \"https://github.com/mb-89/kern/releases/download/v{version}\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, Settings), []byte("version = \"0.1.0\"\ndownload = \"releases/download/v{version}\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
+	ctx := context.Background()
+	if _, err := gitdoor.Run(ctx, dir, "init", "-q", "-b", "main"); err != nil {
+		t.Fatal(err)
+	}
 	var out, errs bytes.Buffer
-	if code := run([]string{"plan", "--repository", "mb-89/SE"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "names mb-89/kern, but this is mb-89/SE") {
+	if code := run([]string{"plan"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "no origin remote") {
+		t.Fatalf("without origin: code %d, %s", code, errs.String())
+	}
+	if _, err := gitdoor.Run(ctx, dir, "config", "remote.origin.url", "https://github.com/alice/kern.git"); err != nil {
+		t.Fatal(err)
+	}
+	errs.Reset()
+	if code := run([]string{"plan", "--repository", "alice/project"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "names alice/kern, but this is alice/project") {
 		t.Fatalf("code %d, %s", code, errs.String())
 	}
 	out.Reset()
-	if code := run([]string{"plan", "--repository", "MB-89/kern"}, &out, &errs); code != 0 {
+	if code := run([]string{"plan", "--repository", "ALICE/kern"}, &out, &errs); code != 0 {
 		t.Fatalf("code %d, %s", code, errs.String())
 	}
-	if want := "version=0.1.0\ntag=v0.1.0\nrepository=mb-89/kern\ndownload=https://github.com/mb-89/kern/releases/download/v0.1.0\nbinary=kern\n"; out.String() != want {
+	if want := "version=0.1.0\ntag=v0.1.0\nrepository=alice/kern\ndownload=https://github.com/alice/kern/releases/download/v0.1.0\nbinary=kern\n"; out.String() != want {
 		t.Fatalf("plan printed %q", out.String())
 	}
 }

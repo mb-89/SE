@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mb-89/kern/index"
+	"kern/index"
 )
 
 // Runtime is the folder, under the checkout, that holds the core's files of

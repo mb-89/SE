@@ -17,9 +17,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mb-89/kern/components/github"
-	"github.com/mb-89/kern/index"
-	"github.com/mb-89/se/components/snap"
+	"kern/components/github"
+	"kern/index"
+	"se/components/snap"
 )
 
 // Name is the component's name, which the wiring's instances name.
