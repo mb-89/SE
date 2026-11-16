@@ -179,6 +179,7 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
+    order_by_file_seconds(config)
     reports = os.environ.get(REPORTS_VARIABLE)
     if reports and not config.option.xmlpath and not hasattr(config, "workerinput"):
         config.option.xmlpath = str(Path(reports) / "se.xml")
@@ -205,3 +206,109 @@ class SetupTimes:
         elif report.when == "teardown" and (report.nodeid, worker) in setup_seconds:
             seconds = setup_seconds.pop((report.nodeid, worker))
             report.user_properties.extend([("setup_time", f"{seconds:.3f}"), ("worker", worker)])
+
+
+# The order the workers take the test files in (pyproject.toml runs `--dist loadfile`): the
+# heaviest file first, by its seconds in the checkout's last parallel run, so no long file starts
+# last and runs alone while the other workers idle. pytest-xdist's own order is by test count,
+# which sends a file of three slow tests out among the last. The controller records each file's
+# setup, call and teardown seconds in pytest's cache at the end of a parallel run and hands what it
+# read at the start to every worker, so all of them collect one order; a file the cache does not
+# know (all of them in a fresh checkout) counts its tests at the known files' mean seconds per test.
+FILE_SECONDS_KEY = "se/file-seconds"
+FILE_SECONDS_INPUT = "se_file_seconds"
+file_seconds_read = pytest.StashKey[dict[str, float]]()
+
+
+def file_of(nodeid: str) -> str:
+    """The file a test's node id names."""
+    return nodeid.split("::", 1)[0]
+
+
+def file_order(counts: Mapping[str, int], seconds: Mapping[str, float]) -> list[str]:
+    """The files of `counts` (file: its number of tests), heaviest first: by its recorded `seconds`,
+    else by its tests at the known files' mean seconds per test; ties keep the collection order."""
+    known = [name for name in counts if name in seconds]
+    tests = sum(counts[name] for name in known)
+    per_test = sum(seconds[name] for name in known) / tests if tests else 1.0
+    weight = {name: seconds[name] if name in seconds else counts[name] * per_test for name in counts}
+    return sorted(counts, key=lambda name: -weight[name])
+
+
+def parallel(config: pytest.Config) -> bool:
+    """Whether this run's tests are spread over pytest-xdist's workers."""
+    return bool(getattr(config.option, "numprocesses", None)) and getattr(config.option, "dist", "no") != "no"
+
+
+class FileSeconds:
+    """On the controller: reads the recorded seconds at the start, hands them to every worker,
+    adds up this run's seconds per file and records them at the end of a parallel run that passed
+    and took whole files, dropping a file that is gone."""
+
+    def __init__(self, config: pytest.Config) -> None:
+        self.config = config
+        self.run: dict[str, float] = {}
+
+    @property
+    def read(self) -> dict[str, float]:
+        """The recorded seconds, read once: after pytest_configure, as the cache is set up there."""
+        if file_seconds_read not in self.config.stash:
+            cache = getattr(self.config, "cache", None)
+            recorded = cache.get(FILE_SECONDS_KEY, {}) if cache is not None else {}
+            self.config.stash[file_seconds_read] = recorded if isinstance(recorded, dict) else {}
+        return self.config.stash[file_seconds_read]
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_configure_node(self, node) -> None:
+        node.workerinput[FILE_SECONDS_INPUT] = self.read
+
+    def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+        order_items(items, self.read)  # a run without workers collects here
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        name = file_of(report.nodeid)
+        self.run[name] = self.run.get(name, 0.0) + report.duration  # setup, call and teardown
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        cache = getattr(self.config, "cache", None)
+        if self.run and cache is not None and parallel(self.config) and whole_files(self.config) \
+                and session.testsfailed == 0:
+            kept = {name: seconds for name, seconds in self.read.items() if (self.config.rootpath / name).exists()}
+            cache.set(FILE_SECONDS_KEY, {**kept, **{name: round(seconds, 3) for name, seconds in self.run.items()}})
+
+
+def whole_files(config: pytest.Config) -> bool:
+    """Whether this run's selection takes whole files, so each file's seconds are all of it."""
+    return not (config.option.keyword or config.option.markexpr or any("::" in arg for arg in config.args))
+
+
+def order_by_file_seconds(config: pytest.Config) -> None:
+    """pytest_configure's part of the file order: a worker orders by the seconds the controller
+    hands it; the controller reads and records them and, where workers run, keeps pytest-xdist
+    from sorting the files again by their test counts."""
+    if hasattr(config, "workerinput"):
+        seconds = dict(config.workerinput.get(FILE_SECONDS_INPUT, {}))
+        config.pluginmanager.register(WorkerFileOrder(seconds), "se-file-order")
+        return
+    config.pluginmanager.register(FileSeconds(config), "se-file-seconds")
+    if parallel(config):
+        config.option.loadscopereorder = False  # the workers' collection order is the order
+
+
+def order_items(items: list[pytest.Item], seconds: Mapping[str, float]) -> None:
+    """`items` sorted by file_order; a file keeps its own order (the sort is stable)."""
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[file_of(item.nodeid)] = counts.get(file_of(item.nodeid), 0) + 1
+    rank = {name: place for place, name in enumerate(file_order(counts, seconds))}
+    items.sort(key=lambda item: rank[file_of(item.nodeid)])
+
+
+class WorkerFileOrder:
+    """On a worker: collects in the order of the seconds the controller handed over."""
+
+    def __init__(self, seconds: Mapping[str, float]) -> None:
+        self.seconds = seconds
+
+    def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+        order_items(items, self.seconds)
