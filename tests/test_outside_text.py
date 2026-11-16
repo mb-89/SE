@@ -124,12 +124,14 @@ def test_the_module_imports_nothing_from_se_and_nothing_that_reaches_outside():
     assert names <= {"__future__", "collections", "dataclasses", "re", "unicodedata"}
 
 
-def test_no_other_script_imports_the_module():
+def test_only_work_tickets_loads_the_module_behind_its_switch():
+    """work_tickets.py, behind se.toml's [outside-text], is the one caller; review.py and every
+    other script reach the envelope through it."""
     found = [path.name for path in sorted(SCRIPTS.glob("*.py"))
              if path.stem != "outside_text"
              and ("outside_text" in imported(path.read_text(encoding="utf-8"))
                   or "outside_text" in path.read_text(encoding="utf-8"))]
-    assert found == []
+    assert found == ["work_tickets.py"]
 
 
 def test_the_import_check_finds_an_import():

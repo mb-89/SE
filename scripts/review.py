@@ -243,7 +243,7 @@ def brief(root: Path, number: int, door, remote: str, claims: bool) -> Brief:
     """Read pull request `number`'s brief through `door`; the diff and the rule book from git.
     With the `[outside-text]` switch on in `root`'s se.toml, comments by outside authors come
     inside the envelope (`comments`)."""
-    inside = work_tickets.outside_text(root)
+    inside = work_tickets.outside_switch(root)
     pull = door.pull(number)
     head = str((pull.get("head") or {}).get("sha") or "")
     ref = str((pull.get("head") or {}).get("ref") or "")

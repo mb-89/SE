@@ -1899,7 +1899,7 @@ OUTSIDE_TEXT = "outside-text"
 OUTSIDE_TEXT_INSIDE = ("OWNER", "MEMBER", "COLLABORATOR")
 
 
-def outside_text(root: Path) -> tuple[str, ...] | None:
+def outside_switch(root: Path) -> tuple[str, ...] | None:
     """se.toml's `[outside-text]` switch (scripts/switches/outside-text.toml): the author
     associations that count as inside where `envelope = true`, `inside` or by default OWNER,
     MEMBER and COLLABORATOR; None where the table is absent or `envelope = false`, and then no
@@ -2003,7 +2003,7 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object],
 def intake_outside(root: Path) -> list[dict[str, object]]:
     """The outside issues SE has not handled yet, read in one batched query."""
     cutoffs = outside_cutoffs(root)
-    inside = outside_text(root)
+    inside = outside_switch(root)
     host = next(iter(cutoffs)).split("/")[0]
     query = outside_query(list(cutoffs), inside is not None)
     return outside_issues(cutoffs, json.loads(
@@ -2100,15 +2100,17 @@ def refresh(root: Path, number: int | None, repo: str | None) -> dict[str, objec
         if repo is None:
             raise QueueError(
                 "No repository: pass --repo [HOST/]OWNER/REPO or add a git remote origin")
-    inside = outside_text(root)
+    inside = outside_switch(root)
     feedback.phase(f"read work issue #{number}")
     try:  # gh first; where the host gives it no account, kern's relay, else the no-gh message
-        issue = fetch_issue(root, number, repo, inside is not None)
+        issue = (fetch_issue(root, number, repo) if inside is None
+                 else fetch_issue(root, number, repo, associations=True))
     except MissingGhError:
         relay = relay_for(root)
         if relay is None:
             raise
-        issue = relay_issue(relay, root, repo, number, inside is not None)
+        issue = (relay_issue(relay, root, repo, number) if inside is None
+                 else relay_issue(relay, root, repo, number, associations=True))
     if previous is not None and previous["number"] != number:
         previous = None
     feedback.phase("compare it with the last read")
@@ -4098,7 +4100,7 @@ def check_issue_read(
             + " with what your GitHub tools read"
         )
     comments = None
-    inside = outside_text(root)
+    inside = outside_switch(root)
     if current is None or body is None:
         snapshot = load_snapshot(root)
         missing = QueueError(
@@ -4109,14 +4111,15 @@ def check_issue_read(
         if snapshot is None:
             raise missing
         try:  # gh first; where the host gives it no account, kern's relay
-            fetched = fetch_issue(root, int(snapshot["number"]), str(snapshot["repo"]),
-                                  inside is not None)
+            number, repo = int(snapshot["number"]), str(snapshot["repo"])
+            fetched = (fetch_issue(root, number, repo) if inside is None
+                       else fetch_issue(root, number, repo, associations=True))
         except MissingGhError:
             relay = relay_for(root)
             if relay is None:
                 raise missing from None
-            fetched = relay_issue(relay, root, str(snapshot["repo"]), int(snapshot["number"]),
-                                  inside is not None)
+            fetched = (relay_issue(relay, root, repo, number) if inside is None
+                       else relay_issue(relay, root, repo, number, associations=True))
         if current is None:
             comments = fetched["comments"]
             current = comment_state(comments)
@@ -4625,7 +4628,7 @@ def route_outside_issue(
                    "no issue listed: run the plan below").text())
     else:
         refuse_while_paused("route", pause_issues(root, repo))
-    inside = outside_text(root)
+    inside = outside_switch(root)
     if read is not None:
         issue = {"title": read[0], "body": read_file(read[1], "issue body")}
     elif door is not None:

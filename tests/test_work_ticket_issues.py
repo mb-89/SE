@@ -6448,19 +6448,19 @@ def association_issue(number: int, association: str | None, body: str = "From th
 
 
 def test_the_switch_reads_one_table_and_refuses_what_it_does_not_know(worktree):
-    assert work_tickets.outside_text(worktree) is None
+    assert work_tickets.outside_switch(worktree) is None
     for table in OUTSIDE_TEXT_OFF:
         with_outside_text(worktree, table)
-        assert work_tickets.outside_text(worktree) is None
+        assert work_tickets.outside_switch(worktree) is None
     with_outside_text(worktree, "[outside-text]\nenvelope = true\n")
-    assert work_tickets.outside_text(worktree) == ("OWNER", "MEMBER", "COLLABORATOR")
+    assert work_tickets.outside_switch(worktree) == ("OWNER", "MEMBER", "COLLABORATOR")
     with_outside_text(worktree, '[outside-text]\nenvelope = true\ninside = ["OWNER"]\n')
-    assert work_tickets.outside_text(worktree) == ("OWNER",)
+    assert work_tickets.outside_switch(worktree) == ("OWNER",)
     for table in ('[outside-text]\nenvelope = "yes"\n', "[outside-text]\nenvelope = true\ninside = 1\n",
                   "[outside-text]\nenvelope = true\ncutoff = 3\n"):
         with_outside_text(worktree, table)
         with pytest.raises(work_tickets.QueueError, match=r"\[outside-text\] is invalid"):
-            work_tickets.outside_text(worktree)
+            work_tickets.outside_switch(worktree)
 
 
 @pytest.mark.parametrize("table", OUTSIDE_TEXT_OFF, ids=["absent", "false"])
