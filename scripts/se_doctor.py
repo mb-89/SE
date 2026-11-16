@@ -4,7 +4,10 @@
 
 It measures the host, the SE checkout against its upstream, the installed plugin and the `se`
 binary against the pins, the core (standing file, pid, boot id, the last lines of its log), each
-hook and MCP server registration a host reads, `gh` and the reach of the hosts SE fetches from.
+hook and MCP server registration a host reads, `gh` and the reach of the hosts SE fetches from,
+and the instruction files a host may read beside or instead of AGENTS.md (`CLAUDE.md`,
+`.claude/CLAUDE.md`, `CLAUDE.local.md`, `.github/copilot-instructions.md`) in the project and each
+folder above it up to home, by name, folder and whether git tracks them, never their content.
 Each line is "seen", "silent" (asked, no answer) or "not measured"; the most important finding
 comes first. README "Doctor" owns what it reports.
 
@@ -91,7 +94,7 @@ MCP_TIMEOUT = 10.0  # seconds an MCP command may take to answer initialize
 HOST_FACTS = Path(__file__).with_name("host-limits.toml")
 LOG_LINES = 3
 # Most important first: a stale program explains most of what half-works.
-AREAS = ("binary", "plugin", "core", "hooks", "checkout", "gh", "network", "copilot", "host")
+AREAS = ("binary", "plugin", "core", "hooks", "instructions", "checkout", "gh", "network", "copilot", "host")
 SCRIPT_SUFFIXES = (".sh", ".py", ".ps1", ".js", ".mjs", ".cjs", ".ts")
 
 
@@ -386,6 +389,64 @@ def gather_registrations(plugins: list[Path], project: Path, home: Path, claude_
     return found
 
 
+# The instruction files a host may read beside or instead of AGENTS.md, relative to a folder.
+INSTRUCTION_FILES = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", ".github/copilot-instructions.md")
+USER_LEVEL = ".claude/CLAUDE.md"  # in the home folder: the user-level file, which displaces nothing
+AGENTS_IMPORT = "@AGENTS.md"
+ABOVE, TRACKED, UNTRACKED, TRACKING_NOT_MEASURED = ("above the project", "tracked", "untracked",
+                                                    "tracking not measured")
+
+
+def instruction_folders(project: Path, home: Path) -> list[Path]:
+    """The folders looked in, pure: the project, then each folder above it, up to and including
+    home; where the project is not under home, up to and including the filesystem root."""
+    above = list(project.parents)
+    if project.is_relative_to(home):
+        above = above[:len(project.relative_to(home).parts)]
+    return [project, *above]
+
+
+def only_imports_agents(text: str) -> bool:
+    """Whether a CLAUDE.md only imports AGENTS.md: one non-blank line at least, each `@AGENTS.md`."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return bool(lines) and all(line == AGENTS_IMPORT for line in lines)
+
+
+def instruction_entries(found: list[tuple[Path, list[str]]], project: Path, home: Path, checkout: Path,
+                        tracked: set[str] | None, imports_agents: bool) -> list[dict]:
+    """The instruction files to name, pure, in folder order: `found` holds, per folder, which of
+    INSTRUCTION_FILES are files there; `tracked` the project's tracked ones among them, None where
+    git did not answer; `imports_agents` whether the project's CLAUDE.md only imports AGENTS.md."""
+    entries = []
+    for folder, paths in found:
+        for path in paths:
+            if folder == home and path == USER_LEVEL:
+                continue
+            if folder == project:
+                if path == "CLAUDE.md" and imports_agents:
+                    continue
+                mark = TRACKING_NOT_MEASURED if tracked is None else (TRACKED if path in tracked else UNTRACKED)
+            else:
+                mark = ABOVE
+            entries.append({"path": path, "folder": shown(folder, checkout, home), "mark": mark})
+    return entries
+
+
+def gather_instructions(project: Path, home: Path, checkout: Path, git=_git) -> list[dict]:
+    """The instruction files found, by name only: the project's own CLAUDE.md is read for the import
+    predicate alone, and git is asked only where a file in the project is to be named."""
+    found = [(folder, [p for p in INSTRUCTION_FILES if (folder / p).is_file()])
+             for folder in instruction_folders(project, home)]
+    imports = "CLAUDE.md" in found[0][1] and only_imports_agents(_text(project / "CLAUDE.md") or "")
+    entries = instruction_entries(found, project, home, checkout, None, imports)
+    asked = [e["path"] for e in entries if e["mark"] == TRACKING_NOT_MEASURED]
+    if not asked:
+        return entries
+    listed = git(project, "ls-files", "--", *asked)
+    tracked = None if listed is None else {line.strip() for line in listed.splitlines() if line.strip()}
+    return instruction_entries(found, project, home, checkout, tracked, imports)
+
+
 def gather_gh() -> dict:
     """Whether gh is signed in; its output names the account, so only its exit code is kept."""
     if shutil.which("gh") is None:
@@ -582,6 +643,9 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "network": None if offline else gather_network(),
         "copilot": {"guards": gather_copilot_rows(project)},
     }
+    instructions = gather_instructions(project, home, checkout, git=_git)
+    if instructions:  # only where a file is found, so a box without one reports as before
+        facts["instructions"] = instructions
     if probe:
         origin = se_start._origin(checkout)  # an installed copy without git has none
         found = se_home.parse(origin) if origin else None
@@ -759,6 +823,13 @@ def check_copilot(copilot: dict | None) -> list[Finding]:
                     f"under Copilot, {line}") for line in copilot.get("guards", [])]
 
 
+def check_instructions(instructions: list[dict] | None) -> list[Finding]:
+    """One note per instruction file found; a note refuses nothing and leaves the exit code."""
+    return [Finding("instructions", SEEN, NOTE,
+                    f"{entry['path']} in {entry['folder']}, {entry['mark']}: a host may read it beside or "
+                    "instead of AGENTS.md") for entry in instructions or []]
+
+
 def check_probe(probe: dict | None) -> list[Finding]:
     """The registration rows host_registrations judged, a fix line indented under its row."""
     if probe is None:
@@ -774,7 +845,8 @@ def diagnose(facts: dict) -> list[Finding]:
     findings = (check_host(facts.get("host")) + check_checkout(facts.get("checkout"))
                 + check_plugins(facts.get("plugins"), facts.get("checkout"), facts.get("latest"))
                 + check_binary(facts.get("binary")) + check_core(facts.get("core"))
-                + check_registrations(facts.get("registrations")) + check_gh(facts.get("gh"))
+                + check_registrations(facts.get("registrations"))
+                + check_instructions(facts.get("instructions")) + check_gh(facts.get("gh"))
                 + check_network(facts.get("network")) + check_copilot(facts.get("copilot"))
                 + check_probe(facts.get("probe")))
     rank = {PROBLEM: 0, NOTE: 1, OK: 2}
