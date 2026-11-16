@@ -985,10 +985,34 @@ def test_se_ignores_its_local_list() -> None:
     assert public_check.LOCAL_FILE in lines
 
 
+def repository_config(state: fake_git.StateFile, repo: Path) -> dict[str, str]:
+    """The fake's config of `repo`."""
+    return dict(state.load().repositories[repo.resolve()].config)
+
+
+# What each setup kind did to a fresh `repo` (its config and its .gitignore), recorded by its first
+# hook test: the hook tests test the hooks, the setup tests above test setup itself, so a later hook
+# test gets setup's result without paying for its five script processes again.
+SETUP_RESULTS: dict[str, tuple[dict[str, str], bytes]] = {}
+
+
 @pytest.fixture(params=SETUPS)
-def hooked(request: pytest.FixtureRequest, repo: Path) -> Path:
-    result = setup_hooks(request.param, repo)
-    assert result.returncode == 0, result.stdout + result.stderr
+def hooked(request: pytest.FixtureRequest, repo: Path, shared_fake_git: fake_git.StateFile) -> Path:
+    kind = request.param
+    if kind not in SETUP_RESULTS:
+        before = repository_config(shared_fake_git, repo)
+        result = setup_hooks(kind, repo)
+        assert result.returncode == 0, result.stdout + result.stderr
+        after = repository_config(shared_fake_git, repo)
+        changed = {key: value for key, value in after.items() if before.get(key) != value}
+        assert not set(before) - set(after), "setup removed config"
+        assert not any(str(repo.parent) in value for value in changed.values()), changed
+        SETUP_RESULTS[kind] = changed, (repo / ".gitignore").read_bytes()
+        return repo
+    changed, ignore = SETUP_RESULTS[kind]
+    with shared_fake_git.edit() as fake:
+        fake.repositories[repo.resolve()].config.update(changed)
+    (repo / ".gitignore").write_bytes(ignore)
     return repo
 
 
