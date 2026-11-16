@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import git_door
@@ -36,7 +38,12 @@ LOCAL_CONFIG_KEYS = {
     "repos",
     "mirrors",
     "public_identity",
+    "hooks",
 }
+
+
+#: The environment variable that switches SE's session hooks' core off (hooks_core).
+HOOK_CORE_VARIABLE = "SE_HOOK_CORE"
 
 
 class ModuleError(Exception):
@@ -202,6 +209,8 @@ class LocalConfig:
 
     paths: dict[str, Path]
     urls: dict[str, str]
+    #: `[hooks]`: `core`, a string or a boolean, whether SE's session hooks start the core (hooks_core).
+    hooks: dict[str, str | bool] = field(default_factory=dict)
 
     def rewrite(self, url: str) -> str:
         """Apply the longest matching `[urls]` prefix rewrite."""
@@ -234,7 +243,33 @@ def load_local(config: Path) -> LocalConfig:
         name: (config.parent / Path(value).expanduser()).resolve()
         for name, value in _string_table(config, data, "paths").items()
     }
-    return LocalConfig(paths=paths, urls=_string_table(config, data, "urls"))
+    return LocalConfig(paths=paths, urls=_string_table(config, data, "urls"),
+                       hooks=_hooks_table(config, data))
+
+
+def _hooks_table(config: Path, data: dict) -> dict[str, str | bool]:
+    """`[hooks]`: a table that holds `core` alone, as a string or a boolean."""
+    table = data.get("hooks", {})
+    if (not isinstance(table, dict) or set(table) - {"core"}
+            or not all(isinstance(v, (str, bool)) for v in table.values())):
+        raise ModuleError(f'{config}: [hooks] holds only core, as a string or a boolean (core = "off")')
+    return table
+
+
+def hooks_core(environment: Mapping[str, str], local: LocalConfig) -> tuple[str, str]:
+    """Whether SE's session hooks start and use the core, and the layer that answered.
+
+    `SE_HOOK_CORE` in `environment` answers first wherever it is set, even empty: exactly `off`, in
+    any case, is off, every other value on. Only where it is unset does `[hooks] core` of the local
+    file answer: `off` in any case, or false, is off; any other string, or true, is on. Neither set,
+    the hooks are on. Reads no file, environment or process."""
+    if HOOK_CORE_VARIABLE in environment:
+        return ("off" if environment[HOOK_CORE_VARIABLE].lower() == "off" else "on"), "environment"
+    if "core" in local.hooks:
+        value = local.hooks["core"]
+        off = value is False or (isinstance(value, str) and value.lower() == "off")
+        return ("off" if off else "on"), "local"
+    return "on", "default"
 
 
 @dataclass(frozen=True)
@@ -720,6 +755,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "checkout it was read from, on one line")
     app.add_argument("--project", type=Path, help="the session's project: where it is SE's own checkout, "
                      "its pins are read instead of --root's")
+    commands.add_parser("hooks-core", help="print whether SE's session hooks start the core and the layer "
+                        "that answered (SE_HOOK_CORE, else [hooks] core of --local), on one line; "
+                        "needs no se.toml (bootstrap.sh reads it)")
     return parser
 
 
@@ -729,6 +767,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "update" and (args.all == bool(args.name) or (args.all and args.to)):
         parser.error("update takes a module name (optionally with --to) or --all")
     failed = False
+    if args.command == "hooks-core":
+        try:
+            local = load_local(args.local or default_local_config())
+        except ModuleError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(*hooks_core(os.environ, local))
+        return 0
     try:
         root = args.root.resolve() if args.root else find_root(Path.cwd())
         if args.command == "kern-pin":

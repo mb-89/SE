@@ -18,7 +18,8 @@
 #            application's Go components where it has any (the `se` binary for SE), else the bare kern
 #            — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
 #            from its folder where no release matches), started detached for the project, and handed
-#            the session's start
+#            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
+#            skips this step (below)
 # Exit code 0 when everything is in place, 1 when a step needs the person: the line on stdout says
 # what to run and why (the plugin's hook passes it on to the session).
 #
@@ -306,5 +307,25 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")
 fi
-$hook && kern_step
+# The core switch (README "Machine-local `~/.se/local.toml`"): SE_HOOK_CORE in the environment
+# answers first wherever it is set, else [hooks] core of the machine's local file, read through
+# se_modules.py hooks-core only where that file mentions hooks, so a machine without the setting
+# starts no new process. Off, this start runs no kern step and leaves no kern.path, so the later
+# hooks (scripts/se_hook.sh) answer without a core; a core already running is not stopped.
+hook_core=""
+if $hook; then
+  if [ -n "${SE_HOOK_CORE+set}" ]; then
+    case "$SE_HOOK_CORE" in [oO][fF][fF]) hook_core="SE_HOOK_CORE is off in the environment" ;; esac
+  elif [ -f "$HOME/.se/local.toml" ] && grep -q hooks "$HOME/.se/local.toml" 2>/dev/null; then
+    answer="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
+      --local "$HOME/.se/local.toml" hooks-core 2>/dev/null)"
+    [ "${answer%$'\r'}" = "off local" ] && hook_core="[hooks] core is off in ~/.se/local.toml"
+  fi
+fi
+if [ -n "$hook_core" ]; then
+  rm -f "$project/.se/.runtime/kern.path"
+  notes+=("SE: no core at this start: $hook_core; the hooks answer without one")
+elif $hook; then
+  kern_step
+fi
 finish 0

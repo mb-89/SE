@@ -5,6 +5,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 import tomllib
@@ -28,7 +29,8 @@ TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch
          "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
-# A fake uv: `python find` fails until `python install` ran; SE's start prints a greeting unless
+# A fake uv: `python find` fails until `python install` ran; the core switch's read
+# (se_modules.py hooks-core) runs the real script with this interpreter; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
 # `refresh-moves` exists, else has nothing to move, and is logged apart; its hooks at start say
 # nothing, as where they are in place; every other call is logged.
@@ -39,6 +41,7 @@ case "$*" in *"se_start.py "*" start-refresh"*)
   echo "SE: 1.0.0 -> 1.0.1, refreshed at this start"; exit 0 ;;
 esac
 echo "uv $*" >> "$HOME/calls"
+case "$*" in *"se_modules.py --local "*" hooks-core"*) shift 5; exec "@PYTHON@" "$@" ;; esac
 case "$*" in *"se_start.py "*" start-hooks"*) exit 0 ;; esac
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
@@ -46,7 +49,7 @@ case "$1 $2" in
   "python find") [ -f "$HOME/python" ] ;;
   "python install") touch "$HOME/python" ;;
 esac
-"""
+""".replace("@PYTHON@", sh(Path(sys.executable)))
 INSTALLER = f"""mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/uv" <<'UV'
 {FAKE_UV}UV
@@ -99,8 +102,9 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
     return folder
 
 
-def run(home: Path, path: Path, project: Path, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
-    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project)}
+def run(home: Path, path: Path, project: Path, *args: str, stdin: str = "",
+        **variables: str) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project), **variables}
     return subprocess.run([BASH, sh(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
                           input=stdin)
 
@@ -605,3 +609,113 @@ def test_without_a_pin_kern_is_left_alone(machine):
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert "--kern" not in greeting_call(home)
     assert not any(line.startswith(("curl", "kern ")) for line in calls(home))
+
+
+# The core switch (README "Machine-local `~/.se/local.toml`", scripts/switches/hooks.toml):
+# SE_HOOK_CORE in the environment, else [hooks] core in ~/.se/local.toml.
+OFF_VALUES = ("off", "OFF", "Off")
+ON_VALUES = ("", " off", "off ", "0", "false", "on")
+ENV_NOTE = "SE: no core at this start: SE_HOOK_CORE is off in the environment; the hooks answer without one"
+LOCAL_NOTE = "SE: no core at this start: [hooks] core is off in ~/.se/local.toml; the hooks answer without one"
+
+
+def kern_in_place(machine) -> tuple[Path, Path, Path]:
+    """uv, Python and the binary in place, the logs empty: the start the switch decides."""
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    kern_bin(home).parent.mkdir(parents=True)
+    kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
+    kern_bin(home).chmod(0o755)
+    (home / "calls").unlink()
+    return home, project, path
+
+
+def local_file(home: Path, text: str) -> None:
+    (home / ".se" / "local.toml").write_text(text, encoding="utf-8", newline="\n")
+
+
+def files(*folders: Path) -> list[str]:
+    return sorted(p.relative_to(folder).as_posix() for folder in folders for p in folder.rglob("*"))
+
+
+def core_started(home: Path) -> bool:
+    return any(line.startswith("kern ") for line in calls(home))
+
+
+def test_the_switch_rows_default_is_the_starts_behaviour(machine):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import se_switches
+
+    [row] = [switch for switch in se_switches.load().switches if switch.name == "SE_HOOK_CORE"]
+    assert (row.default, row.reader) == ("on", "scripts/bootstrap.sh")
+    home, project, path = kern_in_place(machine)
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    assert core_started(home) and (project / ".se" / ".runtime" / "kern.path").exists()
+
+
+def test_an_empty_hook_core_variable_starts_as_unset(machine):
+    home, project, path = kern_in_place(machine)
+    seen = []
+    for variables in ({}, {"SE_HOOK_CORE": ""}):
+        env_file = home.parent / "env"
+        result = run(home, path, project, "--hook", stdin=START, CLAUDE_ENV_FILE=sh(env_file), **variables)
+        seen.append((result.returncode, result.stdout, calls(home), files(project, home),
+                     env_file.read_text(encoding="utf-8")))
+        (home / "calls").unlink()
+        env_file.unlink()
+    assert seen[0] == seen[1]
+    assert not any("hooks-core" in line for line in seen[0][2])
+
+
+@pytest.mark.parametrize("text", (None, '[paths]\nobs = "~/src/obs"\n'))
+def test_without_hooks_in_the_local_file_the_start_reads_no_setting(machine, text):
+    home, project, path = kern_in_place(machine)
+    if text is not None:
+        local_file(home, text)
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    assert not any("hooks-core" in line for line in calls(home))
+    assert core_started(home)
+
+
+@pytest.mark.parametrize(("variables", "text", "note"), [
+    *(({"SE_HOOK_CORE": value}, None, ENV_NOTE) for value in OFF_VALUES),
+    ({"SE_HOOK_CORE": "off"}, '[hooks]\ncore = "on"\n', ENV_NOTE),
+    ({}, '[hooks]\ncore = "off"\n', LOCAL_NOTE),
+    ({}, '[hooks]\ncore = "OFF"\n', LOCAL_NOTE),
+    ({}, "[hooks]\ncore = false\n", LOCAL_NOTE),
+], ids=["off", "OFF", "Off", "environment first", "local", "local OFF", "local false"])
+def test_hook_core_off_starts_no_core_and_says_so(machine, variables, text, note):
+    home, project, path = kern_in_place(machine)
+    if text is not None:
+        local_file(home, text)
+    runtime = project / ".se" / ".runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "kern.path").write_text(f"{sh(kern_bin(home))}\n", encoding="utf-8")  # an earlier session's
+    env_file = home / "env"
+    result = run(home, path, project, "--hook", stdin=START, CLAUDE_ENV_FILE=sh(env_file), **variables)
+    assert (result.returncode, result.stdout) == (0, '{"greeting": 1}\n'), result.stderr
+    assert not core_started(home)
+    assert not any("app-binary" in line or line.startswith("curl") for line in calls(home))
+    assert not (runtime / "kern.path").exists() and not (runtime / "kern-session-start.json").exists()
+    assert f"{sh(home)}/.se/bin" not in env_file.read_text(encoding="utf-8")
+    greeting = greeting_call(home)
+    assert greeting.endswith(f"--note {note}") and "--kern" not in greeting
+    assert any("hooks-core" in line for line in calls(home)) == (not variables)
+
+
+@pytest.mark.parametrize("value", ON_VALUES)
+def test_any_other_hook_core_value_starts_the_core_as_today(machine, value):
+    home, project, path = kern_in_place(machine)
+    assert run(home, path, project, "--hook", stdin=START, SE_HOOK_CORE=value).returncode == 0
+    assert core_started(home) and "no core at this start" not in greeting_call(home)
+
+
+@pytest.mark.parametrize("text", ('[hooks]\ncore = "on"\n', "[hooks]\ncore = true\n",
+                                  "[hooks]\ncore = 1\n", '[hooks]\ncor = "off"\n'))
+def test_a_local_file_that_does_not_say_off_leaves_the_hooks_on(machine, text):
+    home, project, path = kern_in_place(machine)
+    local_file(home, text)
+    assert run(home, path, project, "--hook", stdin=START).returncode == 0
+    assert any("hooks-core" in line for line in calls(home))
+    assert core_started(home) and "no core at this start" not in greeting_call(home)

@@ -39,8 +39,16 @@ se_payload "$payload"
 payload="$se_payload_text"
 se_project "$payload"
 project="$se_project"
+# SE_HOOK_CORE=off in the environment (README "Machine-local `~/.se/local.toml`"): no late checkout
+# is started, kern.path is not read and no core is posted to, so every event but Stop and
+# SubagentStop ends here quietly and those go to stop-check. Off through the local file, the
+# session's start left no kern.path (scripts/bootstrap.sh), so the hooks answer as without a binary.
+core=true
+if [ -n "${SE_HOOK_CORE+set}" ]; then
+  case "$SE_HOOK_CORE" in [oO][fF][fF]) core=false ;; esac
+fi
 checkout=""
-if [[ $payload =~ \"cwd\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+if $core && [[ $payload =~ \"cwd\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
   dir="${BASH_REMATCH[1]//\\\\/\\}"
   while [ -n "$dir" ]; do
     if [ -e "$dir/.git" ]; then
@@ -71,7 +79,7 @@ elif [ -n "$checkout" ] && [ "$checkout" != "$project" ]; then
   fi
 fi
 bin=""
-read -r bin 2>/dev/null <"$project/.se/.runtime/kern.path"
+$core && read -r bin 2>/dev/null <"$project/.se/.runtime/kern.path"
 case "$event" in
 Stop | SubagentStop) ;;
 *)

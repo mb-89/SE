@@ -30,8 +30,8 @@ STOP = '{"session_id":"s1","hook_event_name":"Stop","cwd":"/w"}'
 EVENT = '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}'
 
 
-def hook(home: Path, project: Path, *args: str, event: str = EVENT) -> subprocess.CompletedProcess:
-    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project)}
+def hook(home: Path, project: Path, *args: str, event: str = EVENT, **variables: str) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project), **variables}
     return subprocess.run([BASH, sh(SCRIPT), *args], env=env, input=event, capture_output=True, text=True,
                           timeout=30)
 
@@ -214,7 +214,8 @@ echo "$CLAUDE_PROJECT_DIR $* <<$(cat)" >> "$HOME/starts"
 """
 
 
-def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse") -> subprocess.CompletedProcess:
+def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse",
+              **variables: str) -> subprocess.CompletedProcess:
     scripts = home / "plugin" / "scripts"
     if not scripts.is_dir():
         scripts.mkdir(parents=True)
@@ -222,7 +223,7 @@ def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse") 
         (scripts / "hosts.sh").write_bytes((SCRIPT.parent / "hosts.sh").read_bytes())
         (scripts / "bootstrap.sh").write_text(FAKE_BOOTSTRAP, encoding="utf-8", newline="\n")
     payload = f'{{"session_id":"s1","hook_event_name":"{event}","cwd":"{sh(cwd)}"}}'
-    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project)}
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project), **variables}
     return subprocess.run([BASH, sh(scripts / "se_hook.sh"), event], env=env, input=payload,
                           capture_output=True, text=True, timeout=30)
 
@@ -295,6 +296,85 @@ def test_a_late_claim_older_than_ten_minutes_is_taken_anew(machine):
     os.utime(claim, (stale, stale))
     late_hook(home, project, late)
     assert len(starts(home, 2)) == 2 and claim.stat().st_mtime > stale + 300
+
+
+# SE_HOOK_CORE (README "Machine-local `~/.se/local.toml`"): exactly `off`, in any case, keeps the
+# hooks from the core; every other value, the empty string among them, leaves them as unset.
+OFF_VALUES = ("off", "OFF", "Off")
+ON_VALUES = ("", " off", "off ", "0", "false", "on")
+
+
+def outcome(home: Path, result: subprocess.CompletedProcess) -> tuple:
+    """What a hook did: its answer and what the fakes were handed."""
+    read = lambda name: (home / name).read_text(encoding="utf-8") if (home / name).exists() else None
+    return result.returncode, result.stdout, result.stderr, read("calls"), read("fallback")
+
+
+@pytest.mark.parametrize(("name", "event"), (("PostToolUse", EVENT), ("Stop", STOP)))
+def test_an_empty_hook_core_variable_acts_as_unset(machine, name, event):
+    home, project = machine
+    install(home, project)
+    (home / "code").write_text("3", encoding="utf-8")  # a Stop falls back to stop-check too
+    seen = []
+    for variables in ({}, {"SE_HOOK_CORE": ""}):
+        for log in ("calls", "fallback"):
+            (home / log).unlink(missing_ok=True)
+        seen.append(outcome(home, hook(home, project, name, event=event, **variables)))
+    assert seen[0] == seen[1]
+    assert seen[0][3] is not None, "the core was posted to"
+
+
+@pytest.mark.parametrize("value", OFF_VALUES)
+def test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop(machine, value):
+    home, project = machine
+    install(home, project)
+    for event in ("PreToolUse", "PostToolUse", "UserPromptSubmit", "SessionEnd"):
+        result = hook(home, project, event, SE_HOOK_CORE=value)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert not (home / "calls").exists() and not (home / "fallback").exists()
+
+
+@pytest.mark.parametrize("value", OFF_VALUES)
+def test_hook_core_off_still_answers_a_stop_with_stop_check(machine, value):
+    home, project = machine
+    install(home, project)
+    fallback = f"run --no-project --python >=3.11 python {sh(ROOT)}/scripts/work_tickets.py stop-check <<{STOP}"
+    for event in ("Stop", "SubagentStop"):
+        result = hook(home, project, event, event=STOP, SE_HOOK_CORE=value)
+        assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
+    assert (home / "fallback").read_text(encoding="utf-8").splitlines() == [fallback, fallback]
+    assert not (home / "calls").exists()
+
+
+def test_hook_core_off_under_copilot_a_stops_advice_is_still_a_hook_warning(machine):
+    home, project = machine
+    install(home, project)
+    stop = '{"hook_event_name":"Stop","session_id":"s1","cwd":"%s"}' % sh(project)
+    (home / "fallback-answer").write_text(ADVICE + "\n", encoding="utf-8", newline="\n")
+    result = copilot_hook(home, "Stop", stop, SE_HOOK_HOST="copilot", SE_HOOK_CORE="off")
+    assert (result.returncode, result.stdout, result.stderr) == (2, "", SAID)
+    assert not (home / "calls").exists()
+
+
+@pytest.mark.parametrize("value", ON_VALUES)
+def test_any_other_hook_core_value_posts_to_the_core_as_today(machine, value):
+    home, project = machine
+    install(home, project)
+    result = hook(home, project, "PreToolUse", SE_HOOK_CORE=value)
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{EVENT}\n"
+
+
+def test_hook_core_off_starts_no_late_checkout_and_claims_none(machine):
+    home, project = machine
+    install(home, project)
+    late = clone(home.parent / "SE")
+    install(home, late)  # even a late checkout that named its binary is not posted to
+    (late / ".se" / ".runtime" / "kern.path").unlink()
+    result = late_hook(home, project, late / "src", SE_HOOK_CORE="off")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert not (late / ".se" / ".runtime" / "late-start.claim").exists()
+    assert starts(home, 1) == [] and not (home / "calls").exists()
 
 
 # A Copilot plugin install's hooks (.github/plugin/hooks.json, scripts/se_plugin.py
