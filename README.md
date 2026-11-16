@@ -2138,3 +2138,31 @@ and its neighbours. It lists:
   text (`se.toml` `authored_content`) names after its script.
 
 `--json` prints the same facts as data.
+
+### Forms
+
+SE keeps the shape of its issues as data: one TOML file per form under `forms/`, read by one engine,
+`scripts/forms.py`, whose docstring owns the file format, the field kinds, the selection order and
+the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
+are advice beside them.
+
+- `forms/ticket.toml` is the owner's ticket: a title in plain words, then Situation, Problem, Goal,
+  Approach (with its `Not picked:` line), Steps, Check and an optional Depends on.
+- `forms/work.toml` extends it for a work issue: its title the branch name, Requirements, Acceptance
+  and Verification in place of Steps and Check, and `## Blocked by` as `block` leaves it.
+- `forms/routed.toml` checks only the routing block `route` appends after the handled marker; the
+  outside text above it is data.
+- `forms/terms.toml` lists inside terms, which only warn.
+
+`check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
+without its alternative, the same text in two fields and an SE command that does not exist; the
+writing rules (word counts, actors, one sentence per step, bare issue numbers, board lines, inside
+terms, unnamed blockers, the title's shape) only warn.
+
+`forms.py check <form> --body-file <file>` (or `--fields <file>`, the JSON `draft --json` prints)
+prints at most ten findings and exits 1 where one refuses; `forms.py draft <form>` prints the empty
+form and `forms.py list` names every form with its actions. They read `forms/` at `origin/main`
+where it holds them, else the working tree (`--tree` always).
+
+No command checks with them yet: the commands that file and edit issues switch the check on in a
+later piece.
