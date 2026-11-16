@@ -9023,6 +9023,16 @@ def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     return 1 if any(finding.stuck for finding in found) else 0
 
 
+def fleet_home(root: Path, explicit: str | None) -> str:
+    """SE's home URL for the recorded setup script: the `--repo` given (`[host/]owner/repo`, host
+    github.com by default), else the checkout's origin (se_home.py); "" where neither is known."""
+    if explicit:
+        parts = explicit.strip("/").split("/")
+        return "https://" + "/".join(["github.com", *parts] if len(parts) == 2 else parts)
+    found = se_home.find(root)
+    return found.url if found else ""
+
+
 @command("settings-check", "compare the fleet's settings the repository records (fleet/settings.toml) "
                            "with the live ones, each difference in one line: main's ruleset "
                            "through gh where it is signed in or from --ruleset, the scheduled "
@@ -9054,7 +9064,7 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
             raise QueueError(f"{file} is not the JSON answer of {what}: {error}") from error
 
     try:
-        recorded = settings.load(root)
+        recorded = settings.load(root, fleet_home(root, args.repo))
         branch = str(recorded["ruleset"].get("branch") or integration_branch(root))
         rules = answer(args.ruleset, "the ruleset read")
         missing_rules = ""

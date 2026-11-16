@@ -25,6 +25,9 @@ import se_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = "ledger"
+# kern's Go module path, as kern/go.mod names it: this file names no home of its own.
+KERN = next(line.split()[1] for line in (ROOT / "kern" / "go.mod").read_text(encoding="utf-8").splitlines()
+            if line.startswith("module "))
 
 # An application's own component: it reads a total, as a report would. kern's fixture component
 # tally, imported beside it, stands in for a shared component until kern has one (its components/).
@@ -33,7 +36,7 @@ REPORT = """package report
 import (
 	"fmt"
 
-	"github.com/mb-89/kern/index"
+	"KERN/index"
 )
 
 type in struct {
@@ -111,11 +114,11 @@ def test_the_new_applications_own_test_run_passes(app: Path) -> None:
 
 def test_its_core_refuses_a_wiring_that_needs_a_switched_off_component_naming_both(app: Path, tmp_path: Path) -> None:
     (app / "components" / "report").mkdir()
-    (app / "components" / "report" / "report.go").write_text(REPORT, encoding="utf-8")
+    (app / "components" / "report" / "report.go").write_text(REPORT.replace("KERN", KERN), encoding="utf-8")
     main = app / "cmd" / NAME / "main.go"
     main.write_text(main.read_text(encoding="utf-8").replace(
-        '"github.com/mb-89/kern/cli"\n',
-        f'"github.com/mb-89/kern/cli"\n\t_ "github.com/mb-89/kern/index/fixture"\n\t_ "example.com/{NAME}/components/report"\n'),
+        f'"{KERN}/cli"\n',
+        f'"{KERN}/cli"\n\t_ "{KERN}/index/fixture"\n\t_ "example.com/{NAME}/components/report"\n'),
         encoding="utf-8")
     binary = tmp_path / (NAME + (".exe" if sys.platform == "win32" else ""))
     built = run("go", "build", "-o", str(binary), f"./cmd/{NAME}", cwd=app)

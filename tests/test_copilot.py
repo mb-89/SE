@@ -25,6 +25,32 @@ SYNTHETIC = FIXTURES / "smoke.synthetic.jsonl"
 RECORDED = FIXTURES / "smoke.jsonl"
 
 
+HOME = copilot.se_home.Home("github.com", "alice", "SE")
+
+
+@pytest.fixture(autouse=True)
+def se_lives_at_a_fake_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SE's home, which the install reads from this checkout's origin, as a generic one."""
+    monkeypatch.setattr(copilot, "home", lambda: HOME)
+
+
+def test_the_marketplace_comes_from_ses_home_on_any_host() -> None:
+    assert copilot.marketplace_source(HOME) == {"source": "github", "repo": "alice/SE"}
+    other = copilot.se_home.Home("git.example.com", "alice", "SE")
+    assert copilot.marketplace_source(other) == {"source": "git", "url": "https://git.example.com/alice/SE.git"}
+
+
+def test_without_a_home_the_install_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                  capsys: pytest.CaptureFixture) -> None:
+    def no_home():
+        raise copilot.InstallError("no origin remote")
+
+    monkeypatch.setattr(copilot, "home", no_home)
+    assert copilot.install(tmp_path, None) == 2
+    assert not (tmp_path / ".github").exists() and not (tmp_path / "se.toml").exists()
+    assert "no origin remote" in capsys.readouterr().err
+
+
 def test_settings_merge_keeps_every_other_key() -> None:
     existing = {"model": "x", "enabledPlugins": {"a@b": False},
                 "extraKnownMarketplaces": {"b": {"source": {"source": "github", "repo": "o/b"}}}}
@@ -32,7 +58,7 @@ def test_settings_merge_keeps_every_other_key() -> None:
     assert merged == {"model": "x",
                       "enabledPlugins": {"a@b": False, "se@se": True},
                       "extraKnownMarketplaces": {"b": {"source": {"source": "github", "repo": "o/b"}},
-                                                 "se": {"source": {"source": "github", "repo": "mb-89/SE"}}}}
+                                                 "se": {"source": {"source": "github", "repo": "alice/SE"}}}}
     assert existing["enabledPlugins"] == {"a@b": False}
 
 
@@ -42,7 +68,7 @@ def test_install_writes_the_settings_file_then_leaves_it_alone(tmp_path: Path) -
     path = tmp_path / ".github" / "copilot" / "settings.json"
     first = path.read_text(encoding="utf-8")
     assert json.loads(first) == {"extraKnownMarketplaces": {"se": {"source": {"source": "github",
-                                                                              "repo": "mb-89/SE"}}},
+                                                                              "repo": "alice/SE"}}},
                                  "enabledPlugins": {"se@se": True}}
     assert copilot.install(tmp_path, synced.append) == 0
     assert path.read_text(encoding="utf-8") == first
@@ -65,8 +91,8 @@ def test_install_pins_se_as_a_range_and_keeps_an_existing_pin(tmp_path: Path) ->
     assert copilot.install(tmp_path, None) == 0
     data = tomllib.loads((tmp_path / "se.toml").read_text(encoding="utf-8"))
     assert data["project"] == {"version": "1.0.0"}
-    assert data["modules"]["se"] == {"url": "https://github.com/mb-89/SE.git", "version": copilot.version_range()}
-    pinned = 'url = "https://github.com/mb-89/SE.git"\nref = "' + "a" * 40 + '"\n'
+    assert data["modules"]["se"] == {"url": "https://github.com/alice/SE.git", "version": copilot.version_range()}
+    pinned = 'url = "https://github.com/alice/SE.git"\nref = "' + "a" * 40 + '"\n'
     (tmp_path / "se.toml").write_text("[modules.se]\n" + pinned, encoding="utf-8")
     assert copilot.install(tmp_path, None) == 0
     assert (tmp_path / "se.toml").read_text(encoding="utf-8") == "[modules.se]\n" + pinned
