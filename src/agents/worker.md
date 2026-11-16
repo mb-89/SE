@@ -152,7 +152,8 @@ every package, so work issues and session prompts never repeat it.
    - **Platform code**: where the branch changes code that Windows or macOS runs differently
      (`*_windows.go`, `*_darwin.go`, `//go:build` tags, `runtime.GOOS`, `sys.platform` or
      `os.name` branches, `.ps1` files, the start and hook scripts `kern-platforms` runs), only
-     the CI job `kern-platforms` tests it, and a worker cannot run it.
+     the CI job `kern-platforms` tests it, on Windows, and a worker cannot run it; darwin is
+     built, not tested.
      - Push the branch and open its work pull request first (`deliver`, or
        [without gh](../skills/work-model/SKILL.md#without-gh) its steps), but do not notify the
        integrator yet.

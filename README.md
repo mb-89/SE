@@ -1205,7 +1205,7 @@ To turn it on, the application also grants those two permissions, adds the `sche
 
 Free minutes for a private repository, which the owner sets up:
 
-- Linux runners only (`ubuntu-*`): a Windows minute counts double, a macOS minute ten times.
+- Linux runners only (`ubuntu-*`): a Windows minute counts double.
 - `check` on pull requests only, so a landing is not run again on its push to main; the nightly
   `schedule` keeps main covered.
 - Never on data-only pushes: `paths-ignore` for the files no test reads.
@@ -1217,8 +1217,11 @@ Free minutes for a private repository, which the owner sets up:
 
 ### Platform legs and their queue
 
-kern-platforms runs kern's tests and SE's start and hook tests on a Windows and a macOS runner, and
-`check` needs every leg. A job's `timeout-minutes` counts only from when a runner takes it, so it
+kern-platforms runs kern's tests and SE's start and hook tests on a Windows runner, and `check`
+needs every leg. kern is built for darwin; neither it nor the start and hook scripts are tested
+there.
+
+A job's `timeout-minutes` counts only from when a runner takes it, so it
 bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
 until GitHub fails it after 24 hours, and `check` with it.
 

@@ -5749,7 +5749,7 @@ def test_deliver_warns_without_blocking_where_github_cannot_be_read(
 
 def test_the_platform_scripts_are_those_kern_platforms_runs():
     workflow = (PROJECT / work_tickets.CHECK_WORKFLOW).read_text(encoding="utf-8")
-    assert work_tickets.platform_legs(PROJECT) == ["windows-2025", "macos-15"]
+    assert work_tickets.platform_legs(PROJECT) == ["windows-2025"]
     for path in work_tickets.PLATFORM_SCRIPTS:
         assert (PROJECT / path).is_file()
         assert path.startswith("scripts/") or path in workflow
