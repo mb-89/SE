@@ -365,6 +365,10 @@ exits 1 on a problem; otherwise it exits 0.
     note ([docs/copilot.md "What a session costs"](docs/copilot.md#what-a-session-costs)).
   - Each hook and MCP server registration a host reads, and whether the scripts it names exist;
     `gh` signed in or not; the reach of the hosts SE fetches from.
+  - The instruction files a host may read beside or instead of `AGENTS.md`: `CLAUDE.md`,
+    `.claude/CLAUDE.md`, `CLAUDE.local.md` and `copilot-instructions.md` under `.github/`, looked
+    for in the project and each folder above it up to home, each a note naming its folder and
+    whether git tracks it, never its content; a note refuses nothing.
 - **Read-only**: it writes nothing, starts nothing that stays, fetches nothing and calls no service
   beyond `gh auth status` and one HEAD request per host, each with a short timeout. Nothing runs it
   automatically.

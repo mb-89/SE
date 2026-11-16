@@ -42,7 +42,7 @@ def problems(facts: dict) -> list[d.Finding]:
 def test_a_clean_box_has_no_problem_and_every_area_is_seen():
     findings = d.diagnose(clean_facts())
     assert problems(clean_facts()) == []
-    assert {f.area for f in findings} == set(d.AREAS)
+    assert {f.area for f in findings} == set(d.AREAS) - {"instructions"}  # shown only where a file is found
     assert all(f.state == d.SEEN for f in findings)
     assert d.render_text(findings).startswith("SE doctor: 0 problems, 0 notes")
 
@@ -525,3 +525,125 @@ def test_the_copilot_rows_name_each_guards_state_and_a_guard_off_is_a_note(tmp_p
     facts = {**clean_facts(), "copilot": {"guards": d.gather_copilot_rows(project)}}
     notes = [f for f in d.diagnose(facts) if f.area == "copilot"]
     assert len(notes) == 2 and all(f.level == d.NOTE and "every guard stays on" in f.text for f in notes)
+
+
+# The instruction files a host may read beside or instead of AGENTS.md
+
+
+def no_git(*_args, **_kwargs):
+    raise AssertionError("git asked")
+
+
+def boxed(tmp_path: Path) -> tuple[Path, Path]:
+    """A project two folders under a temporary home."""
+    home = tmp_path / "home"
+    project = home / "work" / "project"
+    project.mkdir(parents=True)
+    return home, project
+
+
+def put(folder: Path, path: str, text: str = "rules\n") -> None:
+    (folder / path).parent.mkdir(parents=True, exist_ok=True)
+    (folder / path).write_text(text, encoding="utf-8")
+
+
+def notes(home: Path, project: Path, git=no_git) -> list[d.Finding]:
+    return d.check_instructions(d.gather_instructions(project, home, project, git=git))
+
+
+def test_without_an_instruction_file_gather_has_no_key_and_the_report_no_line(tmp_path: Path, monkeypatch, capsys):
+    home, project = boxed(tmp_path)
+    monkeypatch.setenv("SE_START_CACHE", str(home / "start-check.json"))
+    monkeypatch.setattr(d, "SE_ROOT", project)  # no git checkout: the door's real git stays unasked
+    monkeypatch.setattr(d, "_git", no_git)
+    assert d.gather_instructions(project, home, project, git=no_git) == []
+    facts = d.gather(project, project, offline=True, env={}, home=home)
+    assert "instructions" not in facts
+    assert "instructions" not in d.render_text(d.diagnose(facts))
+    assert d.check_instructions(None) == d.check_instructions([]) == []
+
+
+def test_an_untracked_local_file_is_one_note_and_a_failing_git_leaves_tracking_not_measured(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    put(project, "CLAUDE.local.md")
+    asked = []
+
+    def git(root, *args):
+        asked.append((root, args))
+        return ""
+
+    [note] = notes(home, project, git)
+    assert asked == [(project, ("ls-files", "--", "CLAUDE.local.md"))]
+    assert (note.area, note.state, note.level) == ("instructions", d.SEEN, d.NOTE)
+    assert note.text == ("CLAUDE.local.md in <checkout>, untracked: a host may read it beside or instead of "
+                         "AGENTS.md")
+    [note] = notes(home, project, lambda *_a: None)
+    assert "CLAUDE.local.md in <checkout>, tracking not measured:" in note.text
+
+
+def test_a_tracked_copilot_file_is_marked_tracked(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    put(project, ".github/copilot-instructions.md")
+    [note] = notes(home, project, lambda *_a: ".github/copilot-instructions.md")
+    assert note.text.startswith(".github/copilot-instructions.md in <checkout>, tracked:")
+
+
+def test_a_file_above_the_project_names_its_folder_and_asks_no_git(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    put(project.parent, "CLAUDE.md", "@AGENTS.md\n")  # its import names that folder's AGENTS.md
+    [note] = notes(home, project)
+    assert note.text.startswith(f"CLAUDE.md in {d.shown(project.parent, project, home)}, above the project:")
+    assert d.shown(project.parent, project, home) == "~/work"
+
+
+def test_an_agents_import_passes_in_the_project_only_and_an_empty_file_does_not(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    put(project, "CLAUDE.md", "\n".join(["", d.AGENTS_IMPORT, "  ", f" {d.AGENTS_IMPORT} ", ""]))
+    assert notes(home, project) == []
+    put(project, "CLAUDE.md", "")
+    [note] = notes(home, project, lambda *_a: "")
+    assert note.text.startswith("CLAUDE.md in <checkout>, untracked:")
+    assert [d.only_imports_agents(t) for t in ("@AGENTS.md", "", "  \n", "@AGENTS.md\nmore", "@README.md")] == \
+        [True, False, False, False, False]
+
+
+def test_in_home_the_user_level_file_is_no_note_and_a_plain_claude_md_is(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    put(home, ".claude/CLAUDE.md")
+    assert notes(home, project) == []
+    put(home, "CLAUDE.md")
+    [note] = notes(home, project)
+    assert note.text.startswith("CLAUDE.md in ~, above the project:")
+
+
+def test_the_folders_end_at_home_under_home_and_at_the_root_outside_it(tmp_path: Path):
+    home, project = boxed(tmp_path)
+    assert d.instruction_folders(project, home) == [project, project.parent, home]
+    assert d.instruction_folders(home, home) == [home]
+    outside = tmp_path / "elsewhere" / "project"
+    folders = d.instruction_folders(outside, home)
+    assert folders[:2] == [outside, outside.parent] and folders[-1] == Path(outside.anchor)
+    assert home not in folders
+
+
+def test_no_content_of_a_found_file_reaches_the_report(tmp_path: Path, monkeypatch):
+    home, project = boxed(tmp_path)
+    secret = "a-distinctive-line-9f3a"
+    put(project, "CLAUDE.md", f"{secret}\n")
+    put(project.parent, "CLAUDE.md", f"{secret}\n")
+    monkeypatch.setenv("SE_START_CACHE", str(home / "start-check.json"))
+    monkeypatch.setattr(d, "SE_ROOT", project)
+    monkeypatch.setattr(d, "_git", lambda *_a: None)
+    facts = d.gather(project, project, offline=True, env={}, home=home)
+    assert [e["mark"] for e in facts["instructions"]] == [d.TRACKING_NOT_MEASURED, d.ABOVE]
+    findings = d.diagnose(facts)
+    for report in (d.render_text(findings), d.render_json(findings, facts)):
+        assert "CLAUDE.md in" in report and secret not in report
+
+
+def test_notes_alone_leave_the_exit_code_even_strict(tmp_path: Path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    entry = {"path": "CLAUDE.md", "folder": "~", "mark": d.ABOVE}
+    monkeypatch.setattr(d, "gather", lambda *_a, **_k: {"instructions": [entry]})
+    assert d.main(["--root", str(project), "--strict"]) == 0
