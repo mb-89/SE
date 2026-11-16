@@ -6135,6 +6135,10 @@ HANDOFF_DIRECTORY = "handoff"
 LANDING_SETTING = "[integrate] landing"
 SQUASH, FAST_FORWARD = "squash", "fast-forward"
 LANDINGS = (SQUASH, FAST_FORWARD)
+#: What a refused fast-forward of a run that `integrate --landing` chose adds to its message.
+LANDING_ONCE_NOTE = (" This run's landing was integrate --landing's, for this run only: "
+                     "integrating again without --landing lands as se.toml [integrate] landing "
+                     "says, a squash merge by default")
 FAST_FORWARD_REMEDY = (
     "a person step: the owner removes the rule \"Require a pull request before merging\" "
     "(pull_request) from the repository's ruleset for the integration branch (Settings, Rules, "
@@ -6154,6 +6158,18 @@ def landing_mode(root: Path) -> str:
             f"{', '.join(repr(mode) for mode in LANDINGS)} (README \"Landing on main\"); nothing "
             "was merged")
     return str(value)
+
+
+def landing_for_run(root: Path, choice: str | None) -> str:
+    """This run's landing mode: `choice`, integrate's --landing, over se.toml [integrate] landing
+    for that one run (README "Landing on main"); without it, landing_mode's."""
+    if choice is None:
+        return landing_mode(root)
+    if choice not in LANDINGS:
+        raise QueueError(
+            f"integrate --landing is {choice!r}; it is one of "
+            f"{', '.join(repr(mode) for mode in LANDINGS)}; nothing was merged")
+    return choice
 
 
 def addressless(message: str) -> str:
@@ -6185,11 +6201,12 @@ def write_landing_commit(root: Path, base: str, title: str, message: str) -> str
     return commit
 
 
-def fast_forward(root: Path, target: str, base: str, landed: str) -> None:
+def fast_forward(root: Path, target: str, base: str, landed: str, once: bool = False) -> None:
     """Move origin's `target` from `base` to exactly `landed`, the landing commit `check` passed,
     by a plain push: a fast-forward, so GitHub writes no commit of its own and marks the landing
     pull request merged. Already there, nothing is pushed; moved elsewhere, or refused, nothing
-    falls back to GitHub's squash merge."""
+    falls back to GitHub's squash merge. `once`: integrate --landing chose the fast-forward, and a
+    refusal says that integrating again without it lands as se.toml says."""
     moved = remote_head(root, target)
     if moved == landed:
         print(f"Fast-forward: origin's {target} is already {landed[:12]}")
@@ -6206,6 +6223,7 @@ def fast_forward(root: Path, target: str, base: str, landed: str) -> None:
         raise QueueError(
             f"origin refused to fast-forward {target} to the landing commit {landed[:12]}: "
             f"{error}. Nothing fell back to GitHub's squash merge. Remedy: {FAST_FORWARD_REMEDY}"
+            + (f".{LANDING_ONCE_NOTE}" if once else "")
         ) from None
     print(f"Fast-forward: origin's {target} moved from {base[:12]} to {landed[:12]}")
 
@@ -6793,11 +6811,11 @@ def landing_actions(root: Path, door: GitHub, landing: str, target: str, base: s
 
 
 def push_landing(root: Path, door: GitHub, target: str, base: str, landed: str,
-                 number: int) -> str:
+                 number: int, once: bool = False) -> str:
     """A fast-forward landing's merge step: move origin's `target` to `landed` (fast_forward) and
     read landing pull request `number` back, which GitHub marks merged at `landed` itself; the
-    landed commit."""
-    fast_forward(root, target, base, landed)
+    landed commit. `once` as fast_forward takes it."""
+    fast_forward(root, target, base, landed, once)
     read = door.pull(number, MERGE_CONFIRMATION.format(number=number))
     if read.get("merged"):
         print(f"Landing pull request #{number}: merged at {str(read.get('merge_commit_sha'))[:12]}")
@@ -6952,6 +6970,7 @@ def integrate(
     issue_body: Path | None = None,
     head_branch: str | None = None,
     pr_comments: Path | None = None,
+    landing_choice: str | None = None,
 ) -> str | None:
     """Land a delivered pull request's branch on the integration branch through a landing pull
     request: merge it into the newest integration branch on `land/<branch>`, run the checks,
@@ -6961,7 +6980,9 @@ def integrate(
     integration branch to the landing commit), the read-back of the landed commit and the
     close-out. Where gh is not signed in the plan is printed for the session and None
     returned: `integrate --read-back <branch>` finishes. `included` states why commits after the
-    field report's Branch tip are merged too."""
+    field report's Branch tip are merged too. `landing_choice`, --landing, is this run's landing mode
+    over se.toml [integrate] landing; the hand-off's state keeps it for --read-back."""
+    once = landing_choice is not None
     tracker = resolve_repo(root, repo)
     handing_off = hand_off()
     if not handing_off:  # handed off, the landing plan's first step runs the pause search
@@ -6973,7 +6994,7 @@ def integrate(
             "git remote add origin <url>"
         )
     target = integration_branch(root)
-    mode = landing_mode(root)
+    mode = landing_for_run(root, landing_choice)
     onto_integration_branch(root, target)
     if handing_off and relay_door(root, remote) is not None:
         print(relay_landing_waits(root), file=sys.stderr)
@@ -7097,6 +7118,7 @@ def integrate(
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
             "landing_mode": mode, "took": took,
+            **({"landing_once": True} if once else {}),
         }
         record = integrator_record(root, landed, tested)
         verdict = status_verdict(root, remote, base, landed) if without_ci else None
@@ -7123,7 +7145,7 @@ def integrate(
             landing_pull = int(given["pull number"])
             if mode == FAST_FORWARD:
                 given["merge commit sha"] = push_landing(root, door, target, base, landed,
-                                                         landing_pull)
+                                                         landing_pull, once)
             feedback.phase("read back the landing pull request and the landed commit")
             landed_metrics({**state, "plan": plan.data()}, landing_pull,
                            str(door.pull(landing_pull, LANDING_READ_BACK.format(
@@ -7151,7 +7173,7 @@ def integrate(
                                                    verdict))
             if mode == FAST_FORWARD:
                 given["merge commit sha"] = push_landing(root, door, target, base, landed,
-                                                         int(given["pull number"]))
+                                                         int(given["pull number"]), once)
             feedback.phase("read back the landed commit")
             commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
     except Exception as error:  # a relay step kern gave up raises too: nothing stays behind
@@ -7298,7 +7320,8 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
     merged = None
     if state.get("landing_mode") == FAST_FORWARD:  # the plan ended at the check: the push is git's
         feedback.phase(f"fast-forward {state['target']} to the landing commit")
-        fast_forward(root, str(state["target"]), str(state["base"]), str(state["landed"]))
+        fast_forward(root, str(state["target"]), str(state["base"]), str(state["landed"]),
+                     bool(state.get("landing_once")))
         merged = str(state["landed"])
     feedback.phase(f"read back the landing of {branch}")
     hint = (f" (a fix commit pushed onto {state['landing']} after integrate is recorded first, "
@@ -7451,6 +7474,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             f"worktree stay. The worker updates its field report in place (deliver), then "
             f"integrate {pull_number} again lands them")
     short = run_git(root, "rev-parse", "--short", commit).stdout.strip()
+    once = (f"Landing: {state.get('landing_mode')}, integrate --landing's choice for this run "
+            "over se.toml [integrate] landing.\n" if state.get("landing_once") else "")
     suite_result = state["suite"]
     print(f"Suite: {suite_result}")
     late, included = state.get("late") or [], state.get("included")
@@ -7470,7 +7495,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
-        f"Suite: {suite_result}.\n{extra}{waits}")
+        f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
                          comment, [*pending, *points, *pieces])
@@ -9298,6 +9323,9 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
                   "land/BRANCH (a lock move), each the project identity's with no e-mail address "
                   "in its message; runs the suite and the checks on the new head, which the plan "
                   "and --read-back then compare against"),
+         arg("--landing", choices=LANDINGS,
+             help="with a pull request: land this run by squash or fast-forward over se.toml "
+                  "[integrate] landing; the hand-off keeps it for --read-back"),
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--landing-description", type=Path, metavar="FILE",
@@ -9315,6 +9343,9 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if sum(value is not None for value in (args.read_back, args.pull_request, args.record_fix)) != 1:
         raise QueueError("integrate takes a pull request number, --record-fix <branch> or "
                          "--read-back <branch>, one of them")
+    if args.landing is not None and args.pull_request is None:
+        raise QueueError("integrate --landing goes with a pull request number; --read-back and "
+                         "--record-fix follow the mode the hand-off's state keeps")
     if args.record_fix is not None:
         new = record_fix(root, args.record_fix)
         print(f"Run the plan's remaining steps at {new[:12]}, then its last line")
@@ -9332,7 +9363,7 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
     commit = integrate(
         root, args.pull_request, args.repo, args.build_command,
         args.check_command, args.check_command_temporary_directory, args.include_late,
-        args.pr_description, args.issue_body, args.branch, args.pr_comments,
+        args.pr_description, args.issue_body, args.branch, args.pr_comments, args.landing,
     )
     if commit is None:
         print(f"Run the plan's steps, then its last line for pull request #{args.pull_request}")
