@@ -4042,6 +4042,127 @@ def test_integrate_read_back_refuses_a_main_that_is_not_the_tested_landing(
     assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()  # read back again
 
 
+def push_fix(checkout: Path, message: str = "Move the lock", identity: tuple[str, ...] = ()) -> str:
+    """The integrator's fix commit on land/feature/worker after the hand-off pushed it (a lock
+    move), pushed to origin; its sha."""
+    landing = "land/feature/worker"
+    git_ok("-C", str(checkout), "switch", "-q", landing)
+    (checkout / "lock.txt").write_text("moved\n", encoding="utf-8")
+    git_ok("-C", str(checkout), "add", "lock.txt")
+    git_ok("-C", str(checkout), *identity, "commit", "-q", "-m", message)
+    git_ok("-C", str(checkout), "push", "-q", "origin", landing)
+    fix = git_run(checkout, "rev-parse", "HEAD", check=True).stdout.strip()
+    git_ok("-C", str(checkout), "switch", "-q", "main")
+    return fix
+
+
+def handoff_state(checkout: Path) -> dict:
+    return json.loads((checkout / ".se" / "handoff" / "feature-worker.json").read_text(encoding="utf-8"))
+
+
+def test_a_recorded_fix_commit_on_the_landing_is_tested_and_reads_back_clean(
+        main_checkout, monkeypatch, github, capsys):
+    """The integrator pushes a fix onto the landing branch after integrate (obs's lock move):
+    --record-fix tests the new head and makes it the landing the plan merges and the read-back
+    compares against, so a correct landing is closed out by the command, not by hand."""
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    before = handoff_state(main_checkout)
+    fix = push_fix(main_checkout)
+    suites: list[str] = []
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suites.append(
+        git_run(root, "rev-parse", "HEAD", check=True).stdout.strip()) or suite_passed(root, "2 passed"))
+    capsys.readouterr()
+
+    assert run(main_checkout, "integrate", "--record-fix", "feature/worker") == 0
+
+    out = capsys.readouterr().out
+    assert suites == [fix]  # the suite ran on the new head
+    state = handoff_state(main_checkout)
+    assert state["landed"] == fix and state["suite"] == "2 passed"
+    assert [item["sha"] for item in state["fixes"]] == [fix]
+    squash = next(step for step in state["plan"]["steps"] if step["tool"] == "merge_pull_request")
+    assert squash["arguments"]["expectedHeadSha"] == fix
+    old = next(step for step in before["plan"]["steps"] if step["tool"] == "create_pull_request")
+    new = next(step for step in state["plan"]["steps"] if step["tool"] == "create_pull_request")
+    assert new == old  # the landing pull request keeps its body and metrics line
+    assert f"Recorded 1 fix commit(s) on land/feature/worker, now the tested landing at {fix[:12]}" in out
+    assert f"the merge now expects {fix[:12]}" in out
+    assert git_run(main_checkout, "branch", "--show-current", check=True).stdout.strip() == "main"
+    commit = session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert f"Landed: {commit[:12]} on main" in out and f"with the tree of {fix[:12]}" in out
+    assert f"Fix commits recorded on land/feature/worker: {fix[:12]} Move the lock" in out
+    assert "GitHub plan: close out #5\n" in out
+
+
+def test_a_fix_commit_pushed_without_record_fix_is_refused_at_the_read_back(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    push_fix(main_checkout)
+    session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 1
+
+    err = capsys.readouterr().err
+    assert "its tree is not the tree of" in err
+    assert "integrate --record-fix feature/worker" in err and "an unrecorded one is refused" in err
+    assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
+
+
+@pytest.mark.parametrize("message, identity, problem", [
+    ("Move the lock\n\nAsked by someone" + "@example.com", (), "message holds an e-mail address"),
+    ("Move the lock", ("-c", "user.name=Other", "-c", "user.email=other"),
+     "is not the project identity mb as author and committer"),
+])
+def test_record_fix_refuses_a_fix_commit_that_is_no_landing_commit(
+        main_checkout, monkeypatch, github, capsys, message, identity, problem):
+    """A fix commit lands as every landing commit does: the project identity's, with no address
+    in its message; anything else is refused before any test runs and nothing is recorded."""
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    before = handoff_state(main_checkout)
+    fix = push_fix(main_checkout, message, identity)
+    monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: pytest.fail("suite ran"))
+    capsys.readouterr()
+
+    assert run(main_checkout, "integrate", "--record-fix", "feature/worker") == 1
+
+    err = capsys.readouterr().err
+    assert f"- {fix[:12]}{'' if problem.startswith('is') else chr(39) + 's'} {problem}" in err
+    assert "nothing was recorded" in err and "someone@" not in err
+    assert handoff_state(main_checkout) == before
+
+
+def test_record_fix_refuses_without_a_new_head_or_a_hand_off(main_checkout, monkeypatch, github,
+                                                             capsys):
+    assert run(main_checkout, "integrate", "--record-fix", "feature/worker") == 1
+    assert "no hand-off for feature/worker" in capsys.readouterr().err
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    capsys.readouterr()
+    assert run(main_checkout, "integrate", "--record-fix", "feature/worker") == 1
+    assert "push the fix commit onto land/feature/worker first" in capsys.readouterr().err
+
+
+def test_record_fix_leaves_a_fast_forward_landing_alone(main_checkout, monkeypatch, github, capsys):
+    """A fast-forward landing is the one commit integrate writes; a fix on top would land beside
+    it, so the fix goes to the work branch and the landing mode and its gate stay as they are."""
+    fast_forward_landings(main_checkout)
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    capsys.readouterr()
+    assert run(main_checkout, "integrate", "--record-fix", "feature/worker") == 1
+    err = capsys.readouterr().err
+    assert "lands by fast-forward" in err and "Push the fix to feature/worker and integrate again" in err
+
+
 @pytest.mark.parametrize("change, message", [
     ("drop", "description has no metrics line"),
     ("other", "description names another metrics line"),
