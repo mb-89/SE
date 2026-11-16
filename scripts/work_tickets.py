@@ -4616,6 +4616,27 @@ class SuiteBudget:
     tier: str | None = None  # `<module>:<function>`, the project's tier function
     over_limit: str = "fail"  # "warn": an overrun only warns (README "Test budget")
     beside: tuple["BesideSuite", ...] = ()  # `[tests.beside.<name>]`, run after the suite
+    # `[tests] shards`: CI runs the suite in this many shards side by side, and the target and the
+    # limit are each shard's; a whole-suite run is judged against `shards` times each.
+    shards: int = 1
+
+    @property
+    def whole_target(self) -> float:
+        """The target of a run of the whole suite: the target per shard times the shards."""
+        return self.target_seconds * self.shards
+
+    @property
+    def whole_limit(self) -> float:
+        """The limit of a run of the whole suite: the limit per shard times the shards."""
+        return self.limit_seconds * self.shards
+
+    def limit_source(self, key: str = "limit_seconds") -> str:
+        """Where the whole suite's `key` (limit_seconds, target_seconds) comes from, for a message."""
+        if self.shards == 1:
+            return f"[tests] {key} in se.toml"
+        per = self.limit_seconds if key == "limit_seconds" else self.target_seconds
+        return (f"[tests] {key} = {per:g} s per shard times [tests] shards = {self.shards} in "
+                "se.toml, as CI runs the suite in shards")
 
 
 @dataclass(frozen=True)
@@ -4696,9 +4717,15 @@ def suite_budget(root: Path) -> SuiteBudget:
             f'{where}: over_limit must be "fail" (the default) or "warn", what a run over '
             "limit_seconds does; fix it or remove it"
         )
+    shards = tests.get("shards", 1)
+    if isinstance(shards, bool) or not isinstance(shards, int) or shards < 1:
+        raise QueueError(
+            f"{where}: shards must be a whole number of 1 or more, how many shards CI runs the "
+            "suite in (1, the default: unsharded); fix it or remove it"
+        )
     values = budget_seconds(tests, where)
     return SuiteBudget(command, values["target_seconds"], values["limit_seconds"], setup, tier,
-                       over_limit, beside_suites(root, tests.get("beside", {})))
+                       over_limit, beside_suites(root, tests.get("beside", {})), shards)
 
 
 def budget_seconds(table: dict, where: str) -> dict[str, float]:
@@ -5367,13 +5394,14 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         feedback.phase(f"suite setup: {' '.join(budget.setup)}")
         run_suite_setup(root, budget.setup)
     commit = clean_commit(root)
-    feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {budget.limit_seconds:g} s)")
+    limit, target = budget.whole_limit, budget.whole_target  # the whole suite's (`[tests] shards`)
+    feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {limit:g} s)")
     result = time_suite(root, with_durations(budget.command, slowest_count))
     seconds, output, parts = result.seconds, result.output, result.parts
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
-    over = seconds > budget.limit_seconds
+    over = seconds > limit
     ci, unknown = (None, "")
     if not reference and (over or read_ci) and ci_skipped:
         unknown = ci_skipped
@@ -5381,7 +5409,7 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     elif not reference and (over or read_ci):
         feedback.phase(f"CI's suite time on {integration_branch(root)}")
         ci, unknown = ci_suite_time(root)
-    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=budget.limit_seconds,
+    metrics.note(suite_seconds=round(seconds, 3), suite_limit_seconds=limit,
                  **({"ci_suite_seconds": ci.seconds} if ci else {}),
                  **({"beside_seconds": {run.suite.name: round(run.seconds, 3) for run in beside},
                      "beside_limit_seconds": {run.suite.name: run.suite.limit_seconds
@@ -5407,13 +5435,15 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
         raise QueueError(f"Complete suite passed ({summary}), but " + "\n".join(
             run.refusal() for run in beside_failed))
     listing = "\n".join(f"  {line}" for line in slowest) or NO_SLOWEST_TESTS
-    timing = (
-        f"{seconds:.1f} s (target {budget.target_seconds:g} s, limit {budget.limit_seconds:g} s)"
-    )
+    timing = f"{seconds:.1f} s (target {target:g} s, limit {limit:g} s" + (
+        f", {budget.shards} shards of {budget.limit_seconds:g} s)" if budget.shards > 1 else ")")
     if reference:
-        print(suite_notice(seconds, budget.limit_seconds))
+        print(suite_notice(seconds, limit))
     ci_text = (ci_suite_text(ci, integration_branch(root)) if ci
                else f"CI's suite time is unknown: {unknown}")
+    # CI's time is its slowest shard's, so it is held to the limit per shard
+    ci_limit = ("the limit" if budget.shards == 1
+                else f"the limit per shard, {budget.limit_seconds:g} s")
     for run in beside_refused:
         raise SuiteOverLimitError(
             f"{run.suite.name} passed but took {run.seconds:.1f} s on CI, the budget's reference, "
@@ -5423,27 +5453,27 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     if refused and reference:
         raise SuiteOverLimitError(
             f"Complete suite passed ({summary}) but took {seconds:.1f} s on CI, the budget's "
-            f"reference, over its limit of {budget.limit_seconds:g} s ([tests] limit_seconds in "
-            f"se.toml). Slowest tests:\n{listing}\n"
+            f"reference, over its limit of {limit:g} s ({budget.limit_source()}). Slowest "
+            f"tests:\n{listing}\n"
             "Remedy: make the slowest tests above faster (the work model's test rules)."
         )
     if refused:
-        why = (f"{ci_text}, within 10% of the limit, so the suite is near its budget on the "
+        why = (f"{ci_text}, within 10% of {ci_limit}, so the suite is near its budget on the "
                "reference too" if ci else f"{ci_text}, so this run decides")
         raise SuiteOverLimitError(
             f"Complete suite passed ({summary}) but took {seconds:.1f} s here ({host_load()}), "
-            f"over its limit of {budget.limit_seconds:g} s ([tests] limit_seconds in se.toml); "
+            f"over its limit of {limit:g} s ({budget.limit_source()}); "
             f"{why}. Slowest tests:\n{listing}\n"
             "Remedy: make the slowest tests above faster (the work model's test rules)."
         )
     if over and not enforced:
-        print(over_limit_warning(seconds, budget.limit_seconds), file=sys.stderr)
+        print(over_limit_warning(seconds, limit), file=sys.stderr)
     elif over:
         print(
             f"warning: the complete suite took {seconds:.1f} s here ({host_load()}), over its "
-            f"limit of {budget.limit_seconds:g} s; {ci_text}, under 90% of the limit, so this "
-            f"host is slow and the run is not refused: CI's {CHECK_NAME} on the landing pull "
-            "request judges the budget",
+            f"limit of {limit:g} s ({budget.limit_source()}); {ci_text}, under 90% of "
+            f"{ci_limit}, so this host is slow and the run is not refused: CI's {CHECK_NAME} on "
+            "the landing pull request judges the budget",
             file=sys.stderr,
         )
     own_lines = "\n".join(  # stdout only; the durations are listed below, as the slowest tests
@@ -5468,10 +5498,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     print(f"Slowest tests:\n{listing}")
     if tier_of and parts:
         print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
-    if budget.target_seconds < seconds <= budget.limit_seconds:
+    if target < seconds <= limit:
         print(
             f"warning: the complete suite took {seconds:.1f} s, over its target of "
-            f"{budget.target_seconds:g} s ([tests] target_seconds in se.toml); make the slowest "
+            f"{target:g} s ({budget.limit_source('target_seconds')}); make the slowest "
             "tests above faster",
             file=sys.stderr,
         )

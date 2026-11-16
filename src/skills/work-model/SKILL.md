@@ -528,6 +528,9 @@ This section is the one statement of how tests are written
 issues point here and never restate it. The project's suite and its time budget are `[tests]` in
 `se.toml` ([Test budget](../../../README.md#test-budget)), which the integration gate enforces.
 
+Where CI runs the suite in shards (`[tests] shards`), the limit is each shard's, and a local run
+of the whole suite is judged against the shards times it; otherwise it is the whole suite's.
+
 - Test a behaviour once, at the outermost interface (the command a person or role runs), on fakes;
   real outside services appear only in their own contract tests.
 - Each outside thing has one door with a fake held to its contract

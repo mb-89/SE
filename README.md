@@ -954,6 +954,7 @@ limit_seconds = 120
 setup = ["uv", "sync"] # optional
 tier = "tests.tiers:tier" # optional
 over_limit = "fail" # optional, or "warn"
+shards = 1 # optional: how many shards CI runs the suite in
 
 [tests.beside.kern] # optional, one table per suite in another toolchain
 setup = ["go", "test", "-run", "^$", "./..."] # optional
@@ -978,6 +979,12 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
   the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but
   nothing stops the suite from creeping past its budget; each overrun only warns, naming the
   setting.
+- `shards` (default 1): how many shards CI's `check` runs the suite in, side by side (below).
+  SE's own suite, unsharded, keeps the default: its limit is the whole suite's.
+  - Over 1, `target_seconds` and `limit_seconds` are each shard's, which CI's slowest shard is
+    held to.
+  - A run of the whole suite (`integrate`, a worker's `suite`) is judged against `shards` times
+    each, and CI's time it reads is held to the limit per shard.
 - `beside.<name>`: optional, a suite in another toolchain, such as SE's kern Go tests
   ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
   root, default `.`) after the complete suite, wherever the suite runs: `integrate`,

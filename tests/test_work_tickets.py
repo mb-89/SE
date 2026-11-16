@@ -2412,6 +2412,51 @@ def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, mo
     assert reads == [1]
 
 
+def test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_times_its_shards(
+        worktree, monkeypatch, capsys):
+    """obs's CI keeps each of 2 shards under 120 s; a local run of the whole suite (147 s) is
+    judged against 2 x 120 s, not against one shard's limit, so it does not warn on every landing;
+    over its target (2 x 60 s) it still warns, naming both settings."""
+    path = worktree / "metrics.jsonl"
+    monkeypatch.setenv("SE_METRICS", str(path))
+    reads = budget_suite(worktree, monkeypatch, 147.0, 77.0, "shards = 2\n")
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
+
+    captured = capsys.readouterr()
+    assert "Suite: 3 passed; 147.0 s (target 120 s, limit 240 s, 2 shards of 120 s)" in captured.out
+    assert "over its limit" not in captured.err and reads == []
+    assert ("over its target of 120 s ([tests] target_seconds = 60 s per shard times [tests] "
+            "shards = 2 in se.toml, as CI runs the suite in shards)") in captured.err
+    line, = metrics_lines(path)
+    assert (line["suite_seconds"], line["suite_limit_seconds"]) == (147.0, 240.0)
+
+
+@pytest.mark.parametrize("ci, refused", [(77.0, False), (110.0, True)])
+def test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard(
+        worktree, monkeypatch, capsys, ci, refused):
+    budget_suite(worktree, monkeypatch, 250.0, ci, "shards = 2\n")
+
+    code = work_tickets.main(["suite", "--worktree", str(worktree)])
+
+    error = capsys.readouterr().err
+    assert ("over its limit of 240 s ([tests] limit_seconds = 120 s per shard times [tests] "
+            "shards = 2 in se.toml") in error
+    if refused:
+        assert code == work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
+        assert "within 10% of the limit per shard, 120 s" in error
+    else:
+        assert code == 0 and "under 90% of the limit per shard, 120 s, so this host is slow" in error
+
+
+@pytest.mark.parametrize("value", ["0", "true", "1.5"])
+def test_shards_takes_a_whole_number_of_one_or_more(worktree, monkeypatch, capsys, value):
+    budget_suite(worktree, monkeypatch, 40.0, None, f"shards = {value}\n")
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+    assert "shards must be a whole number of 1 or more" in capsys.readouterr().err
+
+
 def record_two_shards(root: Path, monkeypatch, fast: float, slow: float) -> Path:
     """Two shards, `fast` and `slow`, recorded by suite-shard as a fake clock times them."""
     records = root / "shards"
