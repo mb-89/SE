@@ -2,8 +2,8 @@
 """SE's home, from the checkout's origin: the one answer to where a checkout lives.
 
 The same tree may live on more than one Git host, and only a machine that holds both remotes knows
-that, so no tracked file names a host, owner or repository (AGENTS.md "Neutral home"). Where SE
-needs its own location, every Python reader asks this module, which reads `origin` through git's
+that, so no tracked file should name a host, owner or repository. Where SE needs its own
+location, a Python reader asks this module, which reads `origin` through git's
 door (`scripts/git_door.py`):
 
 - `home(root)`: `https://<host>/<owner>/<repository>`, with no credentials, no port and no `.git`,

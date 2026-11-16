@@ -5,7 +5,7 @@
 #
 #   jobs:
 #     check:
-#       uses: <owner>/<repository>/.github/workflows/kern-battery.yml@kern-v<version>
+#       uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v<version>
 #
 # Where the application's se.toml [tests] sets trust_integrator = true, the job trust passes it on
 # the integrator's record of exactly the tree checked out, and the battery's vet and tests do not
@@ -13,8 +13,7 @@
 # workflow runs at (job.workflow_sha), so always at the kern tag the application pins. The default
 # is off: the battery runs in full, and the application grants nothing more than contents: read.
 #
-# While kern is incubated in SE, it lives here; it moves with kern's workflows to <owner>/kern,
-# beside it (<owner>/<repository>: the SE these workflows run in, from its origin).
+# While kern is incubated in SE, it lives here; it moves with kern's workflows to mb-89/kern.
 name: kern-battery
 
 on:

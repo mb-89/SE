@@ -2,19 +2,19 @@
   {
     "type": "deletion",
     "ruleset_source_type": "Repository",
-    "ruleset_source": "alice/SE",
+    "ruleset_source": "mb-89/SE",
     "ruleset_id": 25011907
   },
   {
     "type": "non_fast_forward",
     "ruleset_source_type": "Repository",
-    "ruleset_source": "alice/SE",
+    "ruleset_source": "mb-89/SE",
     "ruleset_id": 25011907
   },
   {
     "type": "required_linear_history",
     "ruleset_source_type": "Repository",
-    "ruleset_source": "alice/SE",
+    "ruleset_source": "mb-89/SE",
     "ruleset_id": 25011907
   },
   {
@@ -34,7 +34,7 @@
       ]
     },
     "ruleset_source_type": "Repository",
-    "ruleset_source": "alice/SE",
+    "ruleset_source": "mb-89/SE",
     "ruleset_id": 25011907
   },
   {
@@ -49,7 +49,7 @@
       ]
     },
     "ruleset_source_type": "Repository",
-    "ruleset_source": "alice/SE",
+    "ruleset_source": "mb-89/SE",
     "ruleset_id": 25011907
   }
 ]

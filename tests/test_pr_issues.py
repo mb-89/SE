@@ -13,7 +13,7 @@ import pytest
 
 import pr_issues
 
-REPO = "carol/SE"
+REPO = "mb-89/SE"
 TOKEN = "actions-token"
 ISSUE_URL = f"https://github.com/{REPO}/issues"
 PULL_URL = f"https://github.com/{REPO}/pull"
@@ -90,7 +90,7 @@ def run(github: FakeGitHub, tmp_path: Path, body: str, *, base: str = "main",
         "pull_request": {"number": 900, "body": body, "base": {"ref": base},
                          "user": {"login": author},
                          "labels": [{"name": label} for label in labels]},
-        "repository": {"full_name": REPO, "owner": {"login": "carol"}},
+        "repository": {"full_name": REPO, "owner": {"login": "mb-89"}},
     }), encoding="utf-8")
     env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_TOKEN": token, "GITHUB_REPOSITORY": REPO,
            "GITHUB_API_URL": github.url}
@@ -102,7 +102,7 @@ def test_a_pull_request_naming_no_issue_is_refused_with_the_remedy(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, out = run(github, tmp_path, "Some work done outside the issue system.", capsys=capsys)
     assert code == 1, out
-    assert "::error::pr-issues: pull request #900 names no open issue of carol/SE labelled work" in out
+    assert "::error::pr-issues: pull request #900 names no open issue of mb-89/SE labelled work" in out
     assert "Refs <issue url>" in out
     assert github.requests == []
 
@@ -152,12 +152,12 @@ def test_a_landing_whose_work_pull_request_names_no_work_issue_is_refused(
 
 def test_the_owners_housekeeping_pull_request_is_exempt_and_no_one_elses(
         github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    code, out = run(github, tmp_path, "Tidy up.", author="carol", labels=("housekeeping",),
+    code, out = run(github, tmp_path, "Tidy up.", author="mb-89", labels=("housekeeping",),
                     capsys=capsys)
     assert (code, out.strip()) == (0, "pr-issues: pull request #900 is the owner's housekeeping: exempt")
     assert run(github, tmp_path, "Tidy up.", author="alice", labels=("housekeeping",),
                capsys=capsys)[0] == 1
-    assert run(github, tmp_path, "Tidy up.", author="carol", capsys=capsys)[0] == 1
+    assert run(github, tmp_path, "Tidy up.", author="mb-89", capsys=capsys)[0] == 1
 
 
 def test_a_pull_request_into_another_branch_is_not_checked(

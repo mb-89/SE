@@ -229,18 +229,3 @@ def test_the_repository_records_the_fleet_settings_it_checks():
     assert set(fleet_settings.RULESET_KEYS) <= set(settings["ruleset"])
     assert [task["name"] for task in settings["scheduled_tasks"]] == ["Issue intake check"]
     assert settings["environment"]["setup_script"].rstrip().endswith("#nov14")
-
-
-def test_the_recorded_setup_script_names_ses_home_by_a_placeholder_the_check_fills(worktree, tmp_path):
-    (worktree / "fleet" / "settings.toml").write_text(
-        SETTINGS.replace(SCRIPT, "#!/bin/bash\ngit clone <se-home> ~/se\n#nov14"), encoding="utf-8")
-    assert fleet_settings.load(worktree)["environment"]["setup_script"].count("<se-home>") == 1
-    filled = fleet_settings.load(worktree, "https://example.com/alice/SE")["environment"]["setup_script"]
-    assert "git clone https://example.com/alice/SE ~/se" in filled
-    assert work_tickets.fleet_home(worktree, "git.example/owner/repo") == "https://git.example/owner/repo"
-    assert work_tickets.fleet_home(worktree, "owner/repo") == "https://github.com/owner/repo"
-
-
-def test_ses_own_setup_script_names_no_home():
-    script = fleet_settings.load(PROJECT)["environment"]["setup_script"]
-    assert "git clone --depth 1 -b main <se-home> ~/.claude/skills/se" in script

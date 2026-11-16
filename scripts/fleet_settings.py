@@ -2,8 +2,7 @@
 advisory check, standalone, that nothing runs on its own and that never blocks a landing, a push
 or a session start. This docstring owns the file's format and the check.
 
-`fleet/settings.toml` records main's ruleset, the scheduled tasks and the cloud environment, whose
-setup script names SE's home `<se-home>`, filled in from the checkout's origin. Each
+`fleet/settings.toml` records main's ruleset, the scheduled tasks and the cloud environment. Each
 part is read live through its own door, and only `work_tickets.py settings-check` opens the doors:
 gh (or a file holding the REST answer) for the ruleset, the answers of the session's
 claude-code-remote tools `list_triggers` and `get_environment` as files for the rest. This module
@@ -34,9 +33,6 @@ RULESET_KEYS = ("required_checks", "strict", "merge_methods", "linear_history",
 TASK_KEYS = ("schedule", "model", "target", "enabled", "prompt")
 #: The environment keys the check compares.
 ENVIRONMENT_KEYS = ("name", "network", "setup_script")
-#: The placeholder the recorded setup script names SE's home by: the checkout's origin fills it in
-#: (scripts/se_home.py), so the file names no host, owner or repository.
-HOME = "<se-home>"
 #: The targets a scheduled task fires into, as the file names them.
 TARGETS = ("persistent session", "new session")
 
@@ -58,9 +54,8 @@ class Line:
         return f"{self.kind}: {self.where}" + (f": {self.text}" if self.text else "")
 
 
-def load(root: Path, home: str = "") -> dict[str, object]:
-    """The recorded settings of the checkout at `root`, the setup script's `<se-home>` filled in
-    with `home`, SE's home URL, where it is known; unknown, the placeholder stays."""
+def load(root: Path) -> dict[str, object]:
+    """The recorded settings of the checkout at `root`."""
     path = root / SETTINGS
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -75,9 +70,6 @@ def load(root: Path, home: str = "") -> dict[str, object]:
     if not isinstance(tasks, list) or not all(
             isinstance(task, dict) and isinstance(task.get("name"), str) for task in tasks):
         raise SettingsError(f"{path}: each [[scheduled_tasks]] needs a name")
-    script = data["environment"].get("setup_script")
-    if home and isinstance(script, str):
-        data["environment"]["setup_script"] = script.replace(HOME, home)
     return data
 
 

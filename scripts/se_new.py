@@ -1,9 +1,9 @@
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
-what the command does. While kern is incubated in SE, kern's Go module (the path `kern/go.mod`
-names) cannot be fetched, so the application carries kern's source at the pin in `kern/` and its
-go.mod replaces the module by it; kern's move to its own repository drops both.
+what the command does. While kern is incubated in SE, no Go module `github.com/mb-89/kern` can be
+fetched, so the application carries kern's source at the pin in `kern/` and its go.mod replaces the
+module by it; the move to `mb-89/kern` drops both.
 """
 
 from __future__ import annotations
@@ -23,17 +23,13 @@ NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 # except in the command's own name, `se new app`.
 TEMPLATE_NAME = re.compile(r"(?<!se new )\bapp\b")
 TEMPLATE_IDENTITY = 'identity = "<name> <name>"'
-# go.mod's replace of kern, with the comment lines above it, as the template writes it: the one
-# replace of the template, by kern's source one folder up.
-KERN_REPLACE = re.compile(r"(?m)(?:^//.*\n)*^replace (?P<module>\S+) => \.\./?[ \t]*\n?")
-
-
-def app_replace(match: re.Match) -> str:
-    """The application's replace of kern's module, by the source it carries in kern/."""
-    module = match["module"]
-    return (f"// kern is incubated in SE: no module {module} can be fetched yet, so kern's\n"
-            "// source at its pin is in kern/; kern's move to its own repository drops this line and\n"
-            f"// that folder.\nreplace {module} => ./kern\n")
+# go.mod's replace of kern, with the comment lines above it, as the template writes it.
+KERN_REPLACE = re.compile(r"(?m)(?:^//.*\n)*^replace github\.com/mb-89/kern => .*\n?")
+APP_REPLACE = (
+    "// kern is incubated in SE: no module github.com/mb-89/kern can be fetched yet, so kern's\n"
+    "// source at its pin is in kern/; the move to mb-89/kern drops this line and that folder.\n"
+    "replace github.com/mb-89/kern => ./kern\n"
+)
 
 
 class NewError(Exception):
@@ -97,7 +93,7 @@ def unpack(se_root: Path, ref: str, path: Path, name: str) -> None:
                 target.chmod(0o755)
 
 
-def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
+def _fill(path: Path, old: re.Pattern | str, new: str, tag: str) -> None:
     text = path.read_text(encoding="utf-8")
     filled = old.sub(new, text, count=1) if isinstance(old, re.Pattern) else text.replace(old, new, 1)
     if filled == text:
@@ -108,10 +104,11 @@ def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
 
 
 def github_owner(se_root: Path) -> str:
-    """The owner of SE's home on github.com (scripts/se_home.py), the owner the new repository most
-    likely shares; `<owner>` where SE's home is elsewhere or unknown."""
-    found = _sibling("se_home").find(se_root)
-    return found.owner if found and found.host == "github.com" else "<owner>"
+    """The owner of SE's origin on github.com, the owner the new repository most likely shares;
+    `<owner>` where origin is elsewhere."""
+    url = git_door.run("remote", "get-url", "origin", cwd=se_root).stdout.strip()
+    found = re.match(r"(?:https://|ssh://git@|git@)github\.com[/:]([A-Za-z0-9-]+)/", url)
+    return found[1] if found else "<owner>"
 
 
 def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
@@ -132,7 +129,7 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     commit = _git(se_root, "rev-parse", "--short=12", ref)
     path.mkdir(parents=True, exist_ok=True)
     unpack(se_root, ref, path, name)
-    _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
+    _fill(path / "go.mod", KERN_REPLACE, APP_REPLACE, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
     _git(path, "init", "-q", "-b", "main")
     _git(path, "config", "user.name", identity[0])

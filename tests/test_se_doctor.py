@@ -389,7 +389,7 @@ class Fakes:
 def probe_rows(project: Path, home: Path, fakes: Fakes, env: dict | None = None) -> list[dict]:
     copilot = d.copilot_plugins(env or {}, home)
     probe = d.gather_probe(project, home, tmp_checkout(project), [], "linux", copilot_only(), which=fakes.find,
-                           start=fakes.start, copilot=copilot, tracker="alice/SE")
+                           start=fakes.start, copilot=copilot)
     assert not fakes.asked_for_copilot()  # the probe never runs the Copilot CLI
     return [r for r in probe["rows"] if r["place"] == "installed plugin MCP"]
 
@@ -406,7 +406,7 @@ def test_an_install_naming_a_missing_script_shows_it_with_the_fix_line(tmp_path:
     [row] = probe_rows(project, home, fakes)
     assert row["level"] == d.PROBLEM and row["file"] == "~/.copilot/installed-plugins/se/se/.github/mcp.json"
     assert "scripts/se_mcp.sh, which does not exist" in row["text"]
-    assert row["fix"] == "copilot plugin marketplace add alice/SE && copilot plugin install se@se"
+    assert row["fix"] == "copilot plugin marketplace add mb-89/SE && copilot plugin install se@se"
     assert fakes.started == []
 
 
@@ -428,7 +428,7 @@ def test_an_installs_relative_script_resolves_and_starts_in_the_install_not_the_
 
 def test_a_direct_install_is_found_and_a_plugin_of_another_name_is_not(tmp_path: Path):
     home = tmp_path / "home"
-    direct = copilot_install(home / ".copilot", "_direct", "alice-SE", manifest=".claude-plugin/plugin.json")
+    direct = copilot_install(home / ".copilot", "_direct", "mb-89-SE", manifest=".claude-plugin/plugin.json")
     copilot_install(home / ".copilot", "se", "other", name="other")
     assert d.copilot_plugins({}, home) == [direct]
 
@@ -483,23 +483,3 @@ def test_write_puts_the_report_into_one_file_under_dot_se(tmp_path: Path, monkey
     assert (project / ".se" / "doctor.txt").read_text(encoding="utf-8") == out.out == BASE_TEXT
     assert "written to <project>/.se/doctor.txt" in out.err
     assert ".se/" in (Path(d.SE_ROOT) / ".gitignore").read_text(encoding="utf-8").splitlines()
-
-
-def test_the_latest_release_is_read_under_ses_own_url(tmp_path: Path) -> None:
-    cache = tmp_path / "start-check.json"
-    se_url, other = "https://example.com/alice/SE", "https://example.com/alice/obs.git"
-    d.se_start.Cache(100.0, None, {other: {"versions": [[9, 0, 0]]},
-                                        se_url: {"versions": [[1, 2, 0], [1, 3, 0]]}}).write(cache)
-    assert d.gather_latest(cache, 160.0, se_url) == {"version": "1.3.0", "age_seconds": 60}
-    assert d.gather_latest(cache, 160.0, None) == {"version": "9.0.0", "age_seconds": 60}
-
-
-def test_without_a_home_the_fix_line_names_a_placeholder(tmp_path: Path):
-    home, project = tmp_path / "home", tmp_path / "project"
-    project.mkdir()
-    copilot_install(home / ".copilot", "se", "se")
-    fakes = Fakes()
-    probe = d.gather_probe(project, home, tmp_checkout(project), [], "linux", copilot_only(), which=fakes.find,
-                           start=fakes.start, copilot=d.copilot_plugins({}, home))
-    [row] = [r for r in probe["rows"] if r["place"] == "installed plugin MCP"]
-    assert row["fix"] == "copilot plugin marketplace add <owner>/<repository> && copilot plugin install se@se"

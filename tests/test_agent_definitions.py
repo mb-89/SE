@@ -386,7 +386,7 @@ def test_the_decision_skill_owns_the_shape_of_the_decision_note():
 
 def test_the_decision_skill_points_to_obs_for_the_fence_contract_and_restates_none_of_it():
     text = normalized(DECISION)
-    assert "obs's capability note `spec/capabilities/pugh-decisions.md`" in text
+    assert "(https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md)" in text
     for restated in ("`criteria`", "`candidates`", "`datum`", "`marks`", "`what`", "`wins`", "`item`",
                      "`answer`", "`pass`", "`checklistWeight`", "`-1` worse", "second tab"):
         assert restated not in text, restated
@@ -511,7 +511,7 @@ def test_roles_point_to_without_gh_and_do_not_restate_it(role):
 def test_under_copilot_each_role_names_ses_mcp_tools_and_points_to_the_host_procedure(role):
     text = normalized(ROOT / ".github" / "agents" / f"{role}.agent.md")
     assert "MCP tools" in text
-    assert "(../skills/work-model/SKILL.md#host-procedure-under-copilot)" in text
+    assert "/.github/skills/work-model/SKILL.md#host-procedure-under-copilot)" in text
     assert "Host procedure under Copilot" not in claude_text(AGENTS / f"{role}.md")
     assert "MCP" not in normalized(ROOT / "agents" / f"{role}.md").replace("GitHub MCP", "")
 
@@ -784,7 +784,7 @@ def test_the_worked_example_answers_every_checklist_item_in_its_fence():
 def test_the_decision_skill_asks_every_option_for_a_short_name_and_points_to_obs_for_the_field():
     text = normalized(DECISION)
     assert "Every option carries `short`" in text and "one word where possible, at most five" in text
-    assert "owned by obs's `spec/capabilities/pugh-decisions.md`" in text
+    assert "(https://github.com/mb-89/obs/blob/main/spec/capabilities/pugh-decisions.md)" in text
 
 
 @pytest.mark.parametrize("path", POINTERS, ids=lambda path: path.name)

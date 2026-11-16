@@ -58,12 +58,25 @@ path = "themes/plain"
 
 def test_a_module_url_relative_to_origin_names_the_repository_beside_it(tmp_path, fake_git_door):
     root = fake_git.init(tmp_path / "project")
-    write(root / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n')
+    write(root / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n'
+                            f'[modules.se]\nurl = "../SE.git"\nversion = "^1.0"\n')
     with pytest.raises(se_modules.ModuleError, match="module obs: ../obs.git is relative to origin"):
         se_modules.load_manifest(root)
 
     fake_git.git("-C", str(root), "remote", "add", "origin", "https://git.example.org/team/project")
-    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/obs.git"
+    assert [m.url for m in se_modules.load_manifest(root)] == [
+        "https://git.example.org/team/obs.git", "https://git.example.org/team/SE.git"]
+    fake_git.git("-C", str(root), "remote", "set-url", "origin", "git@git.example.org:team/project.git")
+    assert [m.url for m in se_modules.load_manifest(root)] == [
+        "git@git.example.org:team/obs.git", "git@git.example.org:team/SE.git"]
+
+
+def test_an_absolute_module_url_is_read_as_it_stands_with_or_without_an_origin(tmp_path, fake_git_door):
+    root = fake_git.init(tmp_path / "project")
+    write(root / "se.toml", f'[modules.se]\nurl = "https://git.example.org/team/SE.git"\nref = "{SHA_A}"\n')
+    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/SE.git"
+    fake_git.git("-C", str(root), "remote", "add", "origin", "git@example.com:alice/project.git")
+    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/SE.git"
 
 
 def test_manifest_without_modules_is_empty(tmp_path):

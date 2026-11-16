@@ -43,16 +43,17 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import git_door  # noqa: E402
-import se_home  # noqa: E402
 import se_plugin  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = PurePosixPath(".github/copilot/settings.json")
-# The plugin key `<plugin>@<marketplace>` Copilot reads: the marketplace se_plugin.py generates
-# (.claude-plugin/marketplace.json) is named after the plugin, so the key is `se@se`. The repository
-# it lives in is SE's home, from this checkout's origin (scripts/se_home.py): no file names it.
+# The repository SE's marketplace lives in, `owner/name`, and the plugin key `<plugin>@<marketplace>`
+# Copilot reads: the marketplace se_plugin.py generates (.claude-plugin/marketplace.json) is named
+# after the plugin, so the key is `se@se`.
+SOURCE_REPO = se_plugin.REPOSITORY.removeprefix("https://github.com/")
 MARKETPLACE_NAME = se_plugin.PLUGIN
 PLUGIN_KEY = f"{se_plugin.PLUGIN}@{MARKETPLACE_NAME}"
+SE_URL = se_plugin.REPOSITORY + ".git"
 IGNORED = ".se/"
 
 
@@ -60,38 +61,20 @@ class InstallError(Exception):
     """A file the install cannot merge into; the message names it and nothing is written."""
 
 
-def home() -> se_home.Home:
-    """SE's home, from the origin of the checkout this script runs from; InstallError without one."""
-    try:
-        return se_home.home(ROOT)
-    except se_home.NoHome as error:
-        raise InstallError(f"{error}; install SE from a clone of the repository it lives in") from error
-
-
-def marketplace_source(found: se_home.Home) -> dict:
-    """The marketplace source Copilot reads for SE's home: a GitHub repository by `<owner>/<repo>`,
-    any other host by its clone URL."""
-    if found.host == se_home.GITHUB:
-        return {"source": "github", "repo": found.tracker}
-    return {"source": "git", "url": f"{found.url}.git"}
-
-
-def settings(existing: dict | None = None, found: se_home.Home | None = None) -> dict:
+def settings(existing: dict | None = None) -> dict:
     """`existing` with SE's marketplace and plugin merged in: every other key kept, `se`'s own
     entries set."""
-    found = found or home()
     data = dict(existing or {})
     for key in ("extraKnownMarketplaces", "enabledPlugins"):
         if not isinstance(data.get(key, {}), dict):
             raise InstallError(f"{SETTINGS}: `{key}` is no object")
     data["extraKnownMarketplaces"] = {**data.get("extraKnownMarketplaces", {}),
-                                      MARKETPLACE_NAME: {"source": marketplace_source(found)}}
+                                      MARKETPLACE_NAME: {"source": {"source": "github", "repo": SOURCE_REPO}}}
     data["enabledPlugins"] = {**data.get("enabledPlugins", {}), PLUGIN_KEY: True}
     return data
 
 
-def merge_settings(repo: Path, found: se_home.Home | None = None) -> str:
-    found = found or home()
+def merge_settings(repo: Path) -> str:
     path = repo / SETTINGS
     existing = None
     if path.exists():
@@ -102,12 +85,12 @@ def merge_settings(repo: Path, found: se_home.Home | None = None) -> str:
                                "run the install again") from error
         if not isinstance(existing, dict):
             raise InstallError(f"{path}: holds no JSON object")
-    merged = settings(existing, found)
+    merged = settings(existing)
     if merged == existing:
         return f"{SETTINGS}: already enables {PLUGIN_KEY}"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-    return f"{SETTINGS}: enables {PLUGIN_KEY} from the marketplace {found.tracker}"
+    return f"{SETTINGS}: enables {PLUGIN_KEY} from the marketplace {SOURCE_REPO}"
 
 
 def version_range(root: Path = ROOT) -> str:
@@ -119,7 +102,7 @@ def version_range(root: Path = ROOT) -> str:
     return f"^{major}.{minor}"
 
 
-def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
+def pin_se(repo: Path, wanted: str) -> str:
     path = repo / "se.toml"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
@@ -128,7 +111,7 @@ def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
         raise InstallError(f"{path}: cannot read it as TOML ({error})") from error
     if isinstance(modules, dict) and "se" in modules:
         return "se.toml: keeps its [modules.se] pin"
-    block = f'[modules.se]\nurl = "{(found or home()).url}.git"\nversion = "{wanted}"\n'
+    block = f'[modules.se]\nurl = "{SE_URL}"\nversion = "{wanted}"\n'
     if text and not text.endswith("\n"):
         text += "\n"
     path.write_text(text + ("\n" if text else "") + block, encoding="utf-8")
@@ -158,8 +141,7 @@ def install(repo: Path, run_sync=sync) -> int:
         print("copilot install: SE's own checkout needs nothing installed (docs/copilot.md, \"Install\")")
         return 0
     try:
-        found = home()
-        for line in (merge_settings(repo, found), pin_se(repo, version_range(), found), ignore_se(repo)):
+        for line in (merge_settings(repo), pin_se(repo, version_range()), ignore_se(repo)):
             print(f"copilot install: {line}")
     except InstallError as error:
         print(f"copilot install: error: {error}", file=sys.stderr)

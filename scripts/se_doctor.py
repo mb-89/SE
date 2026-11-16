@@ -72,9 +72,6 @@ def _load(name: str):
 git_door = _load("git_door")
 se_modules = _load("se_modules")
 se_start = _load("se_start")
-se_home = _load("se_home")
-# The fix lines' `{tracker}` where SE's checkout has no home (scripts/se_home.py): a placeholder.
-UNKNOWN_TRACKER = "<owner>/<repository>"
 host_registrations = _load("host_registrations")
 
 SE_ROOT = Path(__file__).resolve().parents[1]
@@ -219,13 +216,12 @@ def gather_plugins(roots: list[Path], checkout: Path, home: Path) -> list[dict]:
              "exists": root.is_dir()} for root in roots]
 
 
-def gather_latest(cache_path: Path, now: float, se_url: str | None = None) -> dict | None:
-    """SE's latest release as the start's last update check cached it, under `se_url`, where SE
-    itself is looked up (its checkout's origin, as the start reads it); else the first entry."""
+def gather_latest(cache_path: Path, now: float) -> dict | None:
+    """SE's latest release as the start's last update check cached it."""
     cache = se_start.Cache.read(cache_path)
     if cache.checked_at is None:
         return None
-    entry = (cache.remotes.get(se_url) if se_url else None) or next(iter(cache.remotes.values()), {})
+    entry = cache.remotes.get("https://github.com/mb-89/SE") or next(iter(cache.remotes.values()), {})
     versions = [tuple(v) for v in entry.get("versions", []) if isinstance(v, list) and len(v) == 3]
     if not versions:
         return None
@@ -508,8 +504,7 @@ NO_ROOT = {"plugin": "no installed SE plugin", "copilot-plugin": "no installed C
 
 
 def gather_probe(project: Path, home: Path, checkout: Path, plugins: list[Path], platform: str,
-                 data: dict, which=shutil.which, start=initialize, copilot: list[Path] = (),
-                 tracker: str = UNKNOWN_TRACKER) -> dict:
+                 data: dict, which=shutil.which, start=initialize, copilot: list[Path] = ()) -> dict:
     """The registration rows: each place's file read, its SE commands probed, the rows judged by
     host_registrations. A plugin's commands start in its root where the host starts them there
     (Copilot's installs), so their scripts resolve against it, not against the project."""
@@ -542,7 +537,7 @@ def gather_probe(project: Path, home: Path, checkout: Path, plugins: list[Path],
                 probes[name] = probe_command(words, place.kind, Path(seen.cwd) if seen.cwd else project, which, start)
     fill = {"launcher": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.sh"), str(home)),
             "launcher_ps1": host_registrations.launcher_text(str(checkout / "scripts" / "se_mcp.ps1"), str(home)),
-            "checkout": host_registrations.launcher_text(str(checkout), str(home)), "tracker": tracker}
+            "checkout": host_registrations.launcher_text(str(checkout), str(home))}
     present = {base for base, found in (("plugin", plugins), ("copilot-plugin", copilot)) if found}
     rows = host_registrations.rows(entries, probes, platform, fill, show=lambda t: redact(t, checkout, home),
                                    present=present)
@@ -572,8 +567,7 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "host": gather_host(env),
         "checkout": gather_checkout(checkout),
         "plugins": gather_plugins(roots, checkout, home),
-        "latest": gather_latest(se_start.default_cache(), time.time(),
-                                se_start._origin(se_root) or se_start._plugin_repository(se_root)),
+        "latest": gather_latest(se_start.default_cache(), time.time()),
         "binary": binary,
         "core": gather_core(project, core_binary, home, checkout),
         "registrations": gather_registrations(roots, project, home, claude_dir, checkout),
@@ -581,11 +575,8 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "network": None if offline else gather_network(),
     }
     if probe:
-        origin = se_start._origin(checkout)  # an installed copy without git has none
-        found = se_home.parse(origin) if origin else None
         facts["probe"] = gather_probe(project, home, checkout, roots, platform_name(), _toml(HOST_FACTS),
-                                      copilot=copilot_plugins(env, home),
-                                      tracker=found.tracker if found else UNKNOWN_TRACKER)
+                                      copilot=copilot_plugins(env, home))
     return facts
 
 

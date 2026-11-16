@@ -8,7 +8,6 @@ directory. The application's own test run, which builds the core, is the suite b
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 import pytest
 
@@ -22,12 +21,12 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 TEMPLATE = {
     "README.md": "# app\n\nA bare application; `se new app <name> --path <dir>` copies it.\n",
-    "go.mod": ("module example.com/app\n\ngo 1.24.7\n\nrequire example.com/alice/kern v0.1.0\n\n"
+    "go.mod": ("module example.com/app\n\ngo 1.24.7\n\nrequire github.com/mb-89/kern v0.1.0\n\n"
                "// While kern is incubated in SE, the template builds against the kern beside it.\n"
-               "replace example.com/alice/kern => ../\n"),
+               "replace github.com/mb-89/kern => ../\n"),
     "se.toml": '[project]\nidentity = "<name> <name>"\n\n[modules.kern]\ngo = true\n',
     "cmd/app/main.go": 'package main\n\nfunc main() { run("app") } // happy apps stay\n',
-    ".github/workflows/check.yml": "jobs:\n  check:\n    uses: alice/SE/.github/workflows/kern-battery.yml@kern-v0.1.0\n",
+    ".github/workflows/check.yml": "jobs:\n  check:\n    uses: mb-89/SE/.github/workflows/kern-battery.yml@kern-v0.1.0\n",
 }
 
 
@@ -62,7 +61,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
     git_fake.init(root, "-b", "main")
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n',
                  "kern/release.toml": f'version = "{version}"\n',
-                 "kern/go.mod": "module example.com/alice/kern\n\ngo 1.24.7\n",
+                 "kern/go.mod": "module github.com/mb-89/kern\n\ngo 1.24.7\n",
                  "kern/index/index.go": "package index\n",
                  **{f"kern/template/{name}": text for name, text in TEMPLATE.items()}})
     git(root, "add", "-A")
@@ -87,10 +86,8 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
         'package main\n\nfunc main() { run("ledger") } // happy apps stay\n')
     assert not (app / "cmd" / "app").exists()
     go_mod = (app / "go.mod").read_text()
-    assert go_mod.startswith("module example.com/ledger\n") and "require example.com/alice/kern v0.1.0\n" in go_mod
-    assert go_mod.endswith("// that folder.\nreplace example.com/alice/kern => ./kern\n")
-    assert "no module example.com/alice/kern can be fetched yet" in go_mod
-    assert "=> ../" not in go_mod and "beside it" not in go_mod
+    assert go_mod.startswith("module example.com/ledger\n") and "require github.com/mb-89/kern v0.1.0\n" in go_mod
+    assert go_mod.endswith(se_new.APP_REPLACE) and "=> ../" not in go_mod and "beside it" not in go_mod
     assert (app / "kern" / "index" / "index.go").is_file() and (app / "kern" / "release.toml").is_file()
     assert not (app / "kern" / "template").exists(), "kern's source at the pin, without its template"
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
@@ -174,19 +171,17 @@ def test_app_binary_is_ses_own_binary_where_se_toml_names_one() -> None:
     kern's core plus SE's Go components (components/release.toml)."""
     b = se_modules.app_binary(PROJECT)
     assert (b.name, b.build_dir, b.package) == ("se", "components", "./cmd/se")
-    release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
-    assert b.download == release["download"].format(version=b.version)
-    assert b.download.endswith(f"/releases/download/se-v{b.version}")
+    assert b.download == f"https://github.com/mb-89/SE/releases/download/se-v{b.version}"
 
 
 def test_app_binary_falls_back_to_the_bare_kern_without_a_binary_section(tmp_path: Path) -> None:
     """An application with no Go components sets no [binary] and runs the bare kern."""
     write(tmp_path, {"se.toml": "[project]\nversion = \"0.1.0\"\n",
                      "kern/release.toml": 'version = "0.3.0"\n'
-                     'download = "https://example.com/alice/SE/releases/download/kern-v{version}"\n'})
+                     'download = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n'})
     b = se_modules.app_binary(tmp_path)
     assert (b.name, b.version, b.build_dir, b.package) == ("kern", "0.3.0", "kern", "./cmd/kern")
-    assert b.download == "https://example.com/alice/SE/releases/download/kern-v0.3.0"
+    assert b.download == "https://github.com/mb-89/SE/releases/download/kern-v0.3.0"
 
 
 def test_app_binary_refuses_a_binary_release_that_cannot_build(tmp_path: Path) -> None:

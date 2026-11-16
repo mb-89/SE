@@ -1,6 +1,6 @@
 {"type": "se.fixture", "synthetic": true, "note": "Written by hand, not recorded: only the result line's shape was seen from Copilot CLI 1.0.112 (a run refused at sign-in). The first real run of scripts/copilot_smoke.sh --record writes tests/fixtures/copilot/smoke.jsonl, which the test then reads too (docs/copilot.md, Monday checklist)."}
 {"type": "session.start", "timestamp": "2026-11-14T12:00:00.000Z", "sessionId": "00000000-0000-0000-0000-000000000000", "data": {"agent": "se"}}
-{"type": "assistant.message", "timestamp": "2026-11-14T12:00:02.000Z", "data": {"content": "SE 5.59.0 started: 3 skills, 6 rules, 3 sub-agents. Documentation: https://alice.github.io/SE/\nI'll check SE's status."}}
+{"type": "assistant.message", "timestamp": "2026-11-14T12:00:02.000Z", "data": {"content": "SE 5.59.0 started: 3 skills, 6 rules, 3 sub-agents. Documentation: https://mb-89.github.io/SE/\nI'll check SE's status."}}
 {"type": "tool.execution_start", "timestamp": "2026-11-14T12:00:03.000Z", "data": {"toolCallId": "call-1", "toolName": "se-status", "mcpServerName": "se", "arguments": {}}}
 {"type": "tool.execution_complete", "timestamp": "2026-11-14T12:00:03.100Z", "data": {"toolCallId": "call-1", "toolName": "se-status", "success": true, "result": {"content": "se: running in <checkout>, pid 100, 1 session(s), 13 instance(s), 9 placed"}}}
 {"type": "assistant.message", "timestamp": "2026-11-14T12:00:04.000Z", "data": {"content": "SE's core is running."}}

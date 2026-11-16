@@ -134,7 +134,6 @@ def se_checkout(state: fake_git.StateFile) -> None:
         fake.commits[SE_HEAD] = fake_git.Commit(fake.store_tree({}), (), "se\n", ("alice", "alice"),
                                                 ("alice", "alice"), moment, moment)
         fake.repositories[SE_ROOT] = fake_git.Repository(SE_ROOT, False, head=SE_HEAD)
-        fake.repositories[SE_ROOT].config["remote.origin.url"] = "https://github.com/alice/SE"
 
 
 @pytest.fixture
@@ -896,10 +895,10 @@ def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(k
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert data == {"model": "x",
                     "enabledPlugins": {"other@else": True, "se@se": True},
-                    "extraKnownMarketplaces": {"se": {"source": {"source": "github", "repo": "alice/SE"}}}}
+                    "extraKnownMarketplaces": {"se": {"source": {"source": "github", "repo": "mb-89/SE"}}}}
     pin = tomllib.loads((repo / "se.toml").read_text(encoding="utf-8"))["modules"]["se"]
     major, minor = tomllib.loads((SE_ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"].split(".")[:2]
-    assert pin == {"url": "https://github.com/alice/SE.git", "version": f"^{major}.{minor}"}
+    assert pin == {"url": "https://github.com/mb-89/SE.git", "version": f"^{major}.{minor}"}
     assert (repo / ".gitignore").read_text(encoding="utf-8").splitlines().count(".se/") == 1
     assert "se: local" in result.stdout, result.stdout
 

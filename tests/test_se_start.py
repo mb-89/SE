@@ -258,23 +258,6 @@ def test_an_installed_copy_is_checked_against_its_plugin_manifests_repository(se
     assert SE_URL in setup["remotes"].calls
 
 
-def test_an_installed_copy_is_checked_against_the_marketplace_claude_code_installed_it_from(
-        setup, tmp_path, monkeypatch):
-    shutil.rmtree(setup["se"] / ".git")
-    claude = tmp_path / "claude-config"
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
-    write(claude / "plugins" / "installed_plugins.json",
-          json.dumps({"plugins": {"se@team": [{"installPath": str(setup["se"])}]}}))
-    write(claude / "plugins" / "known_marketplaces.json",
-          json.dumps({"team": {"source": {"source": "git", "url": SE_URL}}}))
-    states = by_name(report(setup, "check"))
-    assert states["SE"].item.note == "an installed copy" and states["SE"].due == (1, 3, 0)
-    assert SE_URL in setup["remotes"].calls
-    write(claude / "plugins" / "known_marketplaces.json",
-          json.dumps({"team": {"source": {"source": "github", "repo": "alice/se"}}}))
-    assert se_start._marketplace_repository(setup["se"]) == "https://github.com/alice/se"
-
-
 def test_an_installed_copy_without_a_repository_is_not_checked(setup):
     shutil.rmtree(setup["se"] / ".git")
     states = by_name(report(setup, "check"))
@@ -357,7 +340,7 @@ def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
     """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
     write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+          'version = "0.2.0"\ndownload = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n')
     asked = []
     world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
@@ -413,7 +396,7 @@ def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monk
     Claude Code's greeting stays as it is."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
     write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+          'version = "0.2.0"\ndownload = "https://github.com/mb-89/SE/releases/download/kern-v{version}"\n')
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]), "--cache",
                           str(setup["cache"]), "status", "--hook", "--offline", "--host", host, *args],
                          world=setup["world"]) == 0
@@ -435,7 +418,7 @@ def test_the_greeting_names_the_applications_own_binary_where_it_builds_one(setu
     # kern: SE's is se (components/release.toml), kern's core plus SE's Go components.
     write(setup["se"] / "se.toml", '[project]\nversion = "5.0.0"\n[binary]\nrelease = "components/release.toml"\n')
     write(setup["se"] / "components" / "release.toml",
-          'version = "0.1.0"\ndownload = "https://example.com/alice/SE/releases/download/se-v{version}"\n'
+          'version = "0.1.0"\ndownload = "https://github.com/mb-89/SE/releases/download/se-v{version}"\n'
           'binary = "se"\npackage = "./cmd/se"\n')
     lines, asked = kern_greeting(setup, capsys, monkeypatch, "--kern-bin", "/k/se-0.1.0",
                                  answer={"state": "running", "health": {"pid": 7}})
@@ -1055,13 +1038,3 @@ def test_start_hooks_changes_nothing_outside_a_project_checkout(tmp_path):
     assert se_start.start_hooks(tmp_path / "plugin", plain, None) == ""
     assert se_start.start_hooks(tmp_path / "plugin", None, None) == ""
     assert se_start.main(["--root", str(plain), "start-hooks"]) == 0
-
-
-def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path, fake_git_door) -> None:
-    se_root = fake_git.init(tmp_path / "se")
-    write(se_root / "se.toml", '[project]\nversion = "1.0.0"\n')
-    assert se_start._docs_url(se_root) == ""  # no origin: nothing guesses one
-    se_start.git_door.run("remote", "add", "origin", "https://github.com/alice/se.git", root=se_root)
-    assert se_start._docs_url(se_root) == "https://alice.github.io/se/"
-    write(se_root / "se.toml", '[project]\nversion = "1.0.0"\ndocs_url = "https://docs.example.com/se/"\n')
-    assert se_start._docs_url(se_root) == "https://docs.example.com/se/"

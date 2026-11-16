@@ -4672,16 +4672,6 @@ def test_intake_outside_refuses_without_cut_offs_or_with_issues_beyond_one_page(
         capsys.readouterr().err)
 
 
-def test_an_outside_bare_name_lies_beside_the_checkout_home(tmp_path, fake_git_door) -> None:
-    root = fake_git.init(tmp_path / "project")
-    (root / "se.toml").write_text('[outside]\n"repo" = 10\n"other" = 0\n', encoding="utf-8")
-    with pytest.raises(work_tickets.QueueError, match="bare name: .*no origin remote"):
-        work_tickets.outside_cutoffs(root)
-
-    git_door.run("remote", "add", "origin", "https://git.example/owner/repo.git", root=root)
-    assert work_tickets.outside_cutoffs(root) == {"git.example/owner/repo": 10, "git.example/owner/other": 0}
-
-
 def test_backlog_files_with_both_labels_and_lists_by_title_and_body(worktree, gh, monkeypatch, capsys):
     idea = worktree / "idea.md"
     idea.write_text("A far-out idea.\n", encoding="utf-8")

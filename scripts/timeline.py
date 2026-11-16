@@ -68,26 +68,16 @@ class ReadError(Exception):
     """GitHub refused the read."""
 
 
-def repositories(config: Path = CONFIG, home=None) -> list[str]:
-    """se.toml's `[timeline] repositories`: the one list of the repositories the page shows, each
-    `<owner>/<repo>`; a bare `<repo>` lies beside the home of the config's checkout, read from its
-    origin (`scripts/se_home.py`) where `home` is not given."""
+def repositories(config: Path = CONFIG) -> list[str]:
+    """se.toml's `[timeline] repositories`: the one list of the repositories the page shows."""
     try:
         data = tomllib.loads(config.read_text(encoding="utf-8"))
         names = data["timeline"]["repositories"]
     except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as error:
         raise SystemExit(f"timeline: {config} has no [timeline] repositories ({error})") from error
-    if not names or not all(isinstance(name, str) and re.fullmatch(r"(?:[\w.-]+/)?[\w.-]+", name) for name in names):
-        raise SystemExit(f"timeline: [timeline] repositories in {config} must be <repo> or <owner>/<repo> strings")
-    if all("/" in name for name in names):
-        return list(names)
-    se_home = sibling("se_home")
-    if home is None:
-        try:
-            home = se_home.home(config.parent)
-        except se_home.NoHome as error:
-            raise SystemExit(f"timeline: [timeline] repositories in {config} names a bare repository: {error}") from error
-    return [name if "/" in name else f"{home.owner}/{name}" for name in names]
+    if not names or not all(isinstance(name, str) and re.fullmatch(r"[\w.-]+/[\w.-]+", name) for name in names):
+        raise SystemExit(f"timeline: [timeline] repositories in {config} must be <owner>/<repo> strings")
+    return list(names)
 
 
 def ages_setting(config: Path = CONFIG) -> bool:
