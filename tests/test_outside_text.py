@@ -124,12 +124,13 @@ def test_the_module_imports_nothing_from_se_and_nothing_that_reaches_outside():
     assert names <= {"__future__", "collections", "dataclasses", "re", "unicodedata"}
 
 
-def test_no_other_script_imports_the_module():
+def test_only_the_retro_imports_the_module():
+    """Its one caller is `retro.py collect --refusals`; the guard keeps any other off."""
     found = [path.name for path in sorted(SCRIPTS.glob("*.py"))
              if path.stem != "outside_text"
              and ("outside_text" in imported(path.read_text(encoding="utf-8"))
                   or "outside_text" in path.read_text(encoding="utf-8"))]
-    assert found == []
+    assert found == ["retro.py"]
 
 
 def test_the_import_check_finds_an_import():
