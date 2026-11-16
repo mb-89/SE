@@ -92,5 +92,7 @@ def payload(event: Mapping[str, object]) -> dict[str, object]:
 
 
 def payload_host(event: Mapping[str, object]) -> str:
-    """`copilot` where the payload carries a camelCase field of the table, else `claude`."""
-    return "copilot" if set(event) & set(payload_keys()) else "claude"
+    """`copilot` where the payload carries a camelCase field of the table, or the host field
+    se_hook.sh adds (SE_PAYLOAD_HOST) naming it; else `claude`."""
+    field = table()["SE_PAYLOAD_HOST"][0]
+    return "copilot" if set(event) & set(payload_keys()) or event.get(field) == "copilot" else "claude"

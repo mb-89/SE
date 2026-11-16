@@ -12,6 +12,56 @@ No session that built this had a Copilot token, so nothing here ran against a si
 What a token-less Copilot CLI could show was run (below); everything else is on the
 [checklist](#monday-checklist), each with what you should see.
 
+## What a session costs
+
+Read on 16 Nov 2026: GitHub's [usage-based billing for individuals][ubb], [models and
+pricing][pricing], [requests in Copilot (legacy)][legacy], [AI credit session limits][limits] and
+[hooks configuration][hooks], and Copilot CLI 1.0.112's own `copilot help billing` and
+`copilot help limits`, which it prints without signing in.
+
+- **Since 1 June 2026 a monthly plan pays in AI credits**, 1 credit = $0.01: each model call costs
+  its tokens at the model's price, input, cache reads and writes, and output. Every call sends the
+  conversation so far again, mostly from the cache at about a tenth of the input price; sub-agents
+  and compaction count too. Copilot Pro includes 1,500 credits a month, Pro+ 7,000.
+- **An annual Pro or Pro+ plan stays on premium requests**: one per prompt the person sends, times
+  the model's multiplier; tool calls cost none, an autopilot continuation costs one. Pro includes
+  300 a month, Pro+ 1,500.
+
+So under AI credits nothing is free: one person prompt costs every model call the agent makes for
+it. What SE adds on top are the paths below, each a model turn or a session the person did not ask
+for. Each guard is on by default under Copilot only; its se.toml setting turns it off, and under
+Claude Code nothing reads it.
+
+| Path | What one person prompt can cost | Guard, and the setting that turns it off |
+|---|---|---|
+| The Stop hook refusing a stop, up to `[stop] refusals` (5) in a row | Each refusal is one more agent turn, its reason the prompt ([hooks][hooks]): credits for that turn's model calls, the whole conversation sent again each call. Premium requests on a legacy plan: not sourced; the docs count only the person's prompts and autopilot continuations. | The hook never refuses; it names what is undelivered as Copilot's hook warning, stderr with exit code 2. `[copilot] refuse_stop = true` |
+| A session SE starts: a worker, the integrator, a reviewer (`create_session`, or the detached `copilot -p` line) | A whole agent run the person did not prompt: every model call of it in credits; one premium request per session on a legacy plan, more with its own Stop refusals. Not measured: no session here had a token. | SE starts none: it prints the line, and the person runs it. `[copilot] start_sessions = true` |
+| In-chat sub-agents (`task`) | Their model calls count ([CLI billing help](#what-a-session-costs)). | None needed: SE never starts one, on either host ([Visible sessions](../src/skills/work-model/SKILL.md#visible-sessions)). |
+| SE's start context: the agent, the greeting, the skills it loads | No extra request: it rides on the calls the person's prompt makes. 28,611 bytes always handed to `se` (`host_size.py report`, 16 Nov), about 7,000 tokens at 4 bytes a token (estimate), up to 129,999 bytes with every skill loaded. | None: a constant per call, mostly cached; a guard would remove SE's procedure. |
+
+[ubb]: https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals
+[pricing]: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
+[legacy]: https://docs.github.com/en/copilot/concepts/billing/copilot-requests
+[limits]: https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/set-session-limit
+[hooks]: https://docs.github.com/en/copilot/reference/hooks-configuration
+
+With the defaults, a session costs only the model calls of the person's own prompts.
+`[copilot] refuse_stop = true` adds up to five turns per undelivered stop, and
+`[copilot] start_sessions = true` adds every session SE starts.
+
+```toml
+[copilot]
+refuse_stop = false     # built in: the Stop hook never refuses under Copilot
+start_sessions = false  # built in: SE prints the line that starts a session, never starts one
+```
+
+- **Where they show**: the greeting under Copilot ends with a `Copilot guards:` line naming each
+  setting; `uv run python <se>/scripts/se_doctor.py` has a `copilot` row for each.
+- **To cap a session yourself**: `--max-ai-credits <n>` (at least 30) on a `copilot -p` line, or
+  `/limits set max-ai-credits <n>` in a session; sub-agents share it ([limits][limits]).
+- **To measure one**: `--usage-output-file <file>` writes a session's credits, premium requests and
+  tokens per model and per agent when it ends; `/usage` shows the running session.
+
 ## What a token-less Copilot CLI showed
 
 Copilot CLI 1.0.112 (npm `@github/copilot`), in a cloud container on 14 Nov, with an empty home.
@@ -202,12 +252,12 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    - Ask for `tickets` and `integration` `fleet-check`. Expect answers, a long one in pages; a first
      call right after the start may answer `starting`, the next one the result (#1122: paging,
      `starting`, the tool timeout).
-   - End the turn. Expect the `Stop` hook to run the delivery check, silent here (#1121); a
-     [refused stop](#remedies) is safe.
-   - A silent `Stop` leaves no trace on main: kern logs no hook event, and the check writes
-     `.se/work/stop-refusals.json` only when it refuses. Step 4's worker run is where it shows, as
-     `se Stop hook (1 of 5 in a row): ...` while that worker is undelivered. If it never shows
-     there, the `Stop` hook never ran: note it in the cold-run record.
+   - End the turn. Expect the `Stop` hook to run the delivery check, silent here (#1121); an
+     [advising stop](#remedies) is safe.
+   - A silent `Stop` leaves no trace on main: kern logs no hook event. Step 4's worker run is where
+     it shows, as the hook warning `se Stop hook, advice only under Copilot ...` while that worker
+     is undelivered. If it never shows there, the `Stop` hook never ran: note it in the cold-run
+     record.
 2. **VS Code, SE's checkout.** Open the checkout with no install, trust it ([trust](#remedies)),
    add the door with the user-level line of README [The MCP door](../README.md#the-mcp-door)
    (`code --add-mcp ...`), pick the session target Copilot and the agent `se`, say `status`.
@@ -226,7 +276,8 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
      ([SE's own checkout](#ses-own-checkout)).
    - In a new run, `--allow-tool='se(status)'`: expect no prompt for `se-status` (#1122). Then
      `copilot --continue`: expect `se-status` to answer, the core kept or started again (#1121).
-   - Run the worker launch line of the work model's "Host procedure under Copilot" once on step 3's
+   - Expect `se` to print that line rather than run it ([What a session costs](#what-a-session-costs)).
+     Run the worker launch line of the work model's "Host procedure under Copilot" once on step 3's
      issue: expect `copilot` to take `-C`, `--trust-folder`, `--no-ask-user`, `--allow-tool`, `-n`
      and `-p`, and to go on detached (#1123). Close the issue as not planned.
    - Quit every session. Expect `se status --root <checkout>` to show no session once the core's
@@ -273,10 +324,11 @@ Each is an expected result with its one-line remedy.
   `se` server once (CLI `/mcp reload`; VS Code **MCP: List Servers**, `se`, **Restart**).
 - **No `bash` on Windows.** CLI: the `@file` whose command is `powershell` with `se_mcp.ps1`
   ([Windows](#windows)); VS Code: `code --add-mcp` with the same `command` and `args`.
-- **A refused stop.** Copilot's stop event carries no agent name, so the delivery check can judge
+- **An advising stop.** Copilot's stop event carries no agent name, so the delivery check can judge
   SE's own session as a worker's in a checkout whose ticket queue is for a work issue, off the
-  integration branch. You see `se Stop hook (1 of 5 in a row): ...`, naming what is undelivered.
-  Ending the session is safe: the check only advises, and lets the turn end after five refusals.
+  integration branch. You see the hook warning `se Stop hook, advice only under Copilot ...`,
+  naming what is undelivered; the turn ends. With `[copilot] refuse_stop = true` it refuses
+  instead, `se Stop hook (1 of 5 in a row): ...`, and lets the turn end after five.
 
 ## Cloud agent, optional and untested
 

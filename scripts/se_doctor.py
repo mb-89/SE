@@ -76,6 +76,7 @@ se_home = _load("se_home")
 # The fix lines' `{tracker}` where SE's checkout has no home (scripts/se_home.py): a placeholder.
 UNKNOWN_TRACKER = "<owner>/<repository>"
 host_registrations = _load("host_registrations")
+copilot_guards = _load("copilot_guards")
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 SEEN, SILENT, NOT_MEASURED = "seen", "silent", "not measured"
@@ -90,7 +91,7 @@ MCP_TIMEOUT = 10.0  # seconds an MCP command may take to answer initialize
 HOST_FACTS = Path(__file__).with_name("host-limits.toml")
 LOG_LINES = 3
 # Most important first: a stale program explains most of what half-works.
-AREAS = ("binary", "plugin", "core", "hooks", "checkout", "gh", "network", "host")
+AREAS = ("binary", "plugin", "core", "hooks", "checkout", "gh", "network", "copilot", "host")
 SCRIPT_SUFFIXES = (".sh", ".py", ".ps1", ".js", ".mjs", ".cjs", ".ts")
 
 
@@ -579,6 +580,7 @@ def gather(se_root: Path, project: Path, offline: bool = False, env: dict[str, s
         "registrations": gather_registrations(roots, project, home, claude_dir, checkout),
         "gh": None if offline else gather_gh(),
         "network": None if offline else gather_network(),
+        "copilot": {"guards": gather_copilot_rows(project)},
     }
     if probe:
         origin = se_start._origin(checkout)  # an installed copy without git has none
@@ -743,6 +745,20 @@ def check_network(network: list[dict] | None) -> list[Finding]:
     return findings
 
 
+def gather_copilot_rows(project: Path) -> list[str]:
+    """The Copilot guards' state in the project's se.toml, one line each (copilot_guards.state)."""
+    return copilot_guards.state(project)
+
+
+def check_copilot(copilot: dict | None) -> list[Finding]:
+    """The Copilot guards' state (scripts/copilot_guards.py), one row each: a guard that is off, or
+    an se.toml it cannot read, is a note, as it lets SE spend the person's Copilot requests."""
+    if not copilot:
+        return [Finding("copilot", NOT_MEASURED, NOTE, "Copilot guards not measured")]
+    return [Finding("copilot", SEEN, NOTE if ": off, " in line or "every guard stays on" in line else OK,
+                    f"under Copilot, {line}") for line in copilot.get("guards", [])]
+
+
 def check_probe(probe: dict | None) -> list[Finding]:
     """The registration rows host_registrations judged, a fix line indented under its row."""
     if probe is None:
@@ -759,7 +775,8 @@ def diagnose(facts: dict) -> list[Finding]:
                 + check_plugins(facts.get("plugins"), facts.get("checkout"), facts.get("latest"))
                 + check_binary(facts.get("binary")) + check_core(facts.get("core"))
                 + check_registrations(facts.get("registrations")) + check_gh(facts.get("gh"))
-                + check_network(facts.get("network")) + check_probe(facts.get("probe")))
+                + check_network(facts.get("network")) + check_copilot(facts.get("copilot"))
+                + check_probe(facts.get("probe")))
     rank = {PROBLEM: 0, NOTE: 1, OK: 2}
     return sorted(findings, key=lambda f: (rank[f.level], AREAS.index(f.area)))
 

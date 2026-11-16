@@ -51,6 +51,8 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
   them, runs as its script, as the work model's [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.
+- You start no worker session yourself: where a landing unblocks work, print the line that starts
+  it, as that section says, unless the greeting reads `[copilot] start_sessions = true`.
 
 ## Procedure
 

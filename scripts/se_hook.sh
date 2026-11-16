@@ -20,6 +20,12 @@
 # SessionStart would have, `bootstrap.sh --hook` for that checkout in the background, claimed once
 # per ten minutes; once it has named its binary, the hooks post to that checkout's core.
 #
+# Under Copilot (docs/copilot.md "What a session costs"), a Stop's payload carries the host field
+# SE_PAYLOAD_HOST names, so the delivery check advises rather than refuses there unless se.toml
+# `[copilot] refuse_stop` is true; a check that advises answers a `systemMessage`, which Copilot's
+# stop hook does not read, so its text goes to stderr with exit code 2, which Copilot shows the
+# person as a warning and the run goes on.
+#
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
 # variable, else the checkout holding the payload's cwd, else the working directory.
@@ -73,14 +79,35 @@ Stop | SubagentStop) ;;
   exec "$bin" hook "$event" --root "$project" 2>/dev/null <<<"$payload"
   ;;
 esac
+if [ "$se_payload_host" = copilot ] && [[ $payload == *"{"* ]]; then
+  rest="${payload#*\{}"
+  comma=","
+  [[ $rest =~ ^[[:space:]]*\} ]] && comma=""
+  payload="${payload%%\{*}{\"${SE_PAYLOAD_HOST[0]}\":\"copilot\"$comma$rest"
+fi
+# The answer as the host reads it: under Copilot a systemMessage, the check's advice, goes to stderr
+# with exit code 2 (above); every other answer is printed as it is.
+answer() { # <answer>
+  local message='{"systemMessage": "'
+  if [ "$se_payload_host" = copilot ] && [[ $1 == "$message"*'"}' ]]; then
+    local text="${1#"$message"}"
+    text="${text%'"}'}"
+    text="${text//\\\"/\"}"
+    printf '%b\n' "$text" >&2
+    exit 2
+  fi
+  [ -n "$1" ] && printf '%s\n' "$1"
+  exit 0
+}
 # The fallback's exit code from kern; the wait covers a stop-check that reads GitHub through gh.
 unanswered=3
 if [ -n "$bin" ] && [ -x "$bin" ]; then
-  answer="$("$bin" hook "$event" --root "$project" --wait 10s --unanswered "$unanswered" 2>/dev/null <<<"$payload")"
-  if [ $? -ne "$unanswered" ]; then
-    [ -n "$answer" ] && printf '%s\n' "$answer"
-    exit 0
-  fi
+  said="$("$bin" hook "$event" --root "$project" --wait 10s --unanswered "$unanswered" 2>/dev/null <<<"$payload")"
+  [ $? -ne "$unanswered" ] && answer "$said"
 fi
 # uv where bootstrap.sh installs it; --no-project so no project's environment is synced.
-PATH="$HOME/.local/bin:$PATH" exec uv run --no-project --python ">=3.11" python "$here/work_tickets.py" stop-check <<<"$payload"
+check=(uv run --no-project --python ">=3.11" python "$here/work_tickets.py" stop-check)
+if [ "$se_payload_host" = copilot ]; then
+  answer "$(PATH="$HOME/.local/bin:$PATH" "${check[@]}" <<<"$payload")"
+fi
+PATH="$HOME/.local/bin:$PATH" exec "${check[@]}" <<<"$payload"
