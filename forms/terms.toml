@@ -1,0 +1,35 @@
+# Inside terms: words of SE's own machinery that a reader outside the fleet does not know. A form
+# whose rule `terms` is on warns where a field uses one, never refuses (scripts/forms.py).
+says = "Inside terms and the plain words to use instead."
+
+[[terms]]
+term = "worktree"
+plain = "a separate checkout of the repository"
+
+[[terms]]
+term = "kern"
+plain = "SE's background service"
+
+[[terms]]
+term = "relay"
+plain = "the path through which a cloud session reaches GitHub"
+
+[[terms]]
+term = "door"
+plain = "the one place that talks to that outside thing"
+
+[[terms]]
+term = "verdict"
+plain = "the recorded test result"
+
+[[terms]]
+term = "field report"
+plain = "the worker's report in the pull request"
+
+[[terms]]
+term = "fleet"
+plain = "SE's sessions"
+
+[[terms]]
+term = "hand-off"
+plain = "the steps a session runs for a command"
