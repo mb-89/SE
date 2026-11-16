@@ -1,0 +1,13 @@
+# SE's switches, release group: who pushes the release tags (scripts/work_tickets.py); core.toml's
+# header owns the keys of a row, scripts/se_switches.py's docstring the format.
+
+[[switch]]
+name = "[project] release"
+kind = "se.toml"
+reader = "scripts/work_tickets.py"
+default = "off"
+layers = ["se.toml"]
+key = "project.release"
+on = ["workflow"]
+help = "README.md#release-tags"
+note = "off: push pushes the tags itself; on (\"workflow\"): the release workflow pushes them"

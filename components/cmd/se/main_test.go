@@ -11,6 +11,7 @@ import (
 
 	"kern/bus"
 	"kern/components/github"
+	"kern/components/session"
 	"kern/host"
 	"kern/index"
 	"se/components/fleet"
@@ -119,5 +120,60 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	get("retro-due/due", &due)
 	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 10 {
 		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, due after 10", due)
+	}
+}
+
+// SE's tracked wiring places no instance of the session record, so the `se`
+// binary carries it switched off: through the real core, with the component
+// carried and its folder under a temporary root, posted events leave no folder.
+func TestSEsTrackedWiringLeavesTheSessionRecordOff(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "wiring.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := index.ParseWiring(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var goInstances []index.Instance
+	kept := map[string]bool{}
+	for _, in := range w.Instances {
+		if in.Component == session.Name {
+			t.Fatalf("SE's wiring.toml places instance %s of the session record, and wants none", in.Name)
+		}
+		if len(in.Command) == 0 {
+			goInstances = append(goInstances, in)
+			kept[in.Name] = true
+		}
+	}
+	var wires []index.Wire
+	for _, wire := range w.Wires {
+		if inst, _, _ := strings.Cut(wire.Port, "."); kept[inst] {
+			wires = append(wires, wire)
+		}
+	}
+	w.Instances, w.Wires, w.Hooks = goInstances, wires, nil
+	origin.Read = func(string) (map[string]time.Time, error) {
+		return map[string]time.Time{"main": time.Now()}, nil
+	}
+	origin.Tracker = func(string) string { return "alice/SE" }
+	root := t.TempDir()
+	dir := filepath.Join(root, session.Dir)
+	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
+	rec := session.New(session.Options{Dir: dir})
+	c, err := host.Serve(host.Options{Root: root, Wiring: w,
+		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retrodue.Component, rec.Component}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Stop("the case ends"); <-c.Ended() })
+	s, _ := c.Standing()
+	for _, event := range []string{"SessionStart", "PostToolUse", "Stop"} {
+		if _, err := host.Post(host.Wall{}, s.Root, event, []byte(`{"session_id": "s1"}`), 10*time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("SE's tracked wiring made the session folder (%v), and wants none", err)
 	}
 }

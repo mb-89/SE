@@ -42,8 +42,8 @@ EARS (the Easy Approach to Requirements Syntax, Mavin et al., IEEE RE 2009;
 - Unwanted behaviour: `If <trigger>, then the <system> shall <response>.`
 - Optional feature: `Where <feature is included>, the <system> shall <response>.`
 
-Quality scenarios and stakeholders are left to their cards (the To come list of
-[SKILL.md](../SKILL.md#to-come)).
+Quality scenarios and stakeholders are left to their cards:
+[stakeholders](cards/stakeholders.md) and [quality scenarios](cards/quality-scenarios.md).
 
 ## What quackitect learned
 

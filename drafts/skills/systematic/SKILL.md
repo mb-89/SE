@@ -29,17 +29,25 @@ A request becomes requirements in two steps, always in this order:
   moved to the design.
 - Every number and unit names its source, or the record calls it a guess.
 
-## To come
+## Methods
 
-A later piece of work adds these references. None exists yet; each becomes a link when it lands.
+Each reference is read only when its condition holds.
 
-- `references/process.md`: read when a request is large enough to need the whole path, from the
-  first questions to the verified requirement.
-- `references/cards/stakeholders.md`: read when it is unclear whose need a record serves.
-- `references/cards/use-cases.md`: read when a functional requirement needs the steps around it.
-- `references/cards/quality-scenarios.md`: read when writing a quality requirement.
-- `references/cards/options.md`: read when a requirement leaves more than one way to meet it.
-- `references/cards/spike.md`: read when a question can only be answered by trying.
-- `references/cards/prior-art.md`: read before inventing what may already exist elsewhere.
-- `references/cards/working-a-problem.md`: read when the request names a problem, not a need.
-- `references/cards/design-brief.md`: read when the requirements are handed on to a design.
+- [references/process.md](references/process.md): read when a request is large enough to need
+  the whole path, from the first questions to the verified requirement.
+- [references/cards/stakeholders.md](references/cards/stakeholders.md): read when it is unclear
+  whose need a record serves.
+- [references/cards/use-cases.md](references/cards/use-cases.md): read when a functional
+  requirement needs the steps around it.
+- [references/cards/quality-scenarios.md](references/cards/quality-scenarios.md): read when
+  writing a quality requirement.
+- [references/cards/options.md](references/cards/options.md): read when a requirement leaves more
+  than one way to meet it.
+- [references/cards/spike.md](references/cards/spike.md): read when a question can only be
+  answered by trying.
+- [references/cards/prior-art.md](references/cards/prior-art.md): read before inventing what may
+  already exist elsewhere.
+- [references/cards/working-a-problem.md](references/cards/working-a-problem.md): read when the
+  request names a problem, not a need.
+- [references/cards/design-brief.md](references/cards/design-brief.md): read when the requirements
+  are handed on to a design.

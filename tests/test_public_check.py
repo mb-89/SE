@@ -985,10 +985,34 @@ def test_se_ignores_its_local_list() -> None:
     assert public_check.LOCAL_FILE in lines
 
 
+def repository_config(state: fake_git.StateFile, repo: Path) -> dict[str, str]:
+    """The fake's config of `repo`."""
+    return dict(state.load().repositories[repo.resolve()].config)
+
+
+# What each setup kind did to a fresh `repo` (its config and its .gitignore), recorded by its first
+# hook test: the hook tests test the hooks, the setup tests above test setup itself, so a later hook
+# test gets setup's result without paying for its five script processes again.
+SETUP_RESULTS: dict[str, tuple[dict[str, str], bytes]] = {}
+
+
 @pytest.fixture(params=SETUPS)
-def hooked(request: pytest.FixtureRequest, repo: Path) -> Path:
-    result = setup_hooks(request.param, repo)
-    assert result.returncode == 0, result.stdout + result.stderr
+def hooked(request: pytest.FixtureRequest, repo: Path, shared_fake_git: fake_git.StateFile) -> Path:
+    kind = request.param
+    if kind not in SETUP_RESULTS:
+        before = repository_config(shared_fake_git, repo)
+        result = setup_hooks(kind, repo)
+        assert result.returncode == 0, result.stdout + result.stderr
+        after = repository_config(shared_fake_git, repo)
+        changed = {key: value for key, value in after.items() if before.get(key) != value}
+        assert not set(before) - set(after), "setup removed config"
+        assert not any(str(repo.parent) in value for value in changed.values()), changed
+        SETUP_RESULTS[kind] = changed, (repo / ".gitignore").read_bytes()
+        return repo
+    changed, ignore = SETUP_RESULTS[kind]
+    with shared_fake_git.edit() as fake:
+        fake.repositories[repo.resolve()].config.update(changed)
+    (repo / ".gitignore").write_bytes(ignore)
     return repo
 
 
@@ -1409,3 +1433,137 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
     hits = [line for line in result.stdout.splitlines() if "attribution-trailer" in line]
     assert [hit.split(": ", 1)[0] for hit in hits] == ([f"commit {head[:12]} message:3"] if refused else [])
     assert result.returncode == (1 if refused else 0), result.stdout
+
+
+# --built: a built page, or a folder of them, checked as a source of its own. Pages are written
+# here from fragments, so no tracked file holds the value a test plants.
+
+def island(data: dict, encoding: str = "gzip") -> str:
+    """obs's data island holding `data`: base64 gzip of its JSON, plain JSON, or another encoding."""
+    import base64
+    import gzip
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    if encoding == "plain":
+        return f'<script id="artifact-data" type="application/json" data-artifact-data>{text}</script>'
+    body = base64.b64encode(gzip.compress(text.encode("utf-8"), mtime=0)).decode("ascii")
+    return ('<script id="artifact-data" type="application/octet-stream" data-artifact-data '
+            f'data-compression="{encoding}" data-encoding="{encoding}">{body}</script>')
+
+
+def page(body: str = "<p>clean</p>", data: dict | None = None, encoding: str = "gzip") -> str:
+    found = island(data, encoding) if data is not None else ""
+    return f"<!doctype html>\n<html>\n<body>\n{body}\n{found}\n</body>\n</html>\n"
+
+
+def built(tmp_path: Path, files: dict[str, str]) -> Path:
+    folder = tmp_path / "site"
+    for name, content in files.items():
+        target = folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8", newline="\n")
+    return folder
+
+
+def test_a_local_term_in_a_built_page_attribute_is_named_by_line_and_column(
+        repo: Path, local: Path, tmp_path: Path) -> None:
+    local.write_text("# kept private\n\nexample-secret\\w*\n", encoding="utf-8")
+    commit(repo, {"README.md": "clean\n"})
+    site = built(tmp_path, {"index.html": page('<a title="by Example-SecretCorp">x</a>',
+                                               {"notes": []})})
+    result = run_check("--repo", str(repo), "--built", str(site / "index.html"))
+    assert result.returncode == 1, result.stdout
+    assert "built:index.html:4:14: local-term:3" in result.stdout
+    assert "secret" not in result.stdout.lower()
+    assert "public-check: FAILED with 1 hit(s) (1 built files, " in result.stdout
+    assert " commits" not in result.stdout
+
+
+def test_an_address_in_a_gzip_island_is_named_by_its_field_path(repo: Path, tmp_path: Path) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    address = "alice" + AT + "corp.test"
+    site = built(tmp_path, {"docs/index.html": page(data={"notes": [
+        {"id": "a", "html": "<p>clean</p>"}, {"id": "b", "html": f"<p>Write to {address}</p>"}]})})
+    result = run_check("--repo", str(repo), "--built", str(site))
+    assert result.returncode == 1, result.stdout
+    assert "built:docs/index.html artifact-data notes[1].html: email-address" in result.stdout
+    assert address not in result.stdout and "corp" not in result.stdout
+
+
+def test_a_key_and_a_plain_island_are_scanned_by_line_and_by_field_path(
+        repo: Path, local: Path, tmp_path: Path) -> None:
+    local.write_text("example-secret\\w*\n", encoding="utf-8")
+    commit(repo, {"README.md": "clean\n"})
+    site = built(tmp_path, {"p.html": page(data={"Example-SecretCorp": {"x": 1}}, encoding="plain")})
+    result = run_check("--repo", str(repo), "--built", str(site / "p.html"))
+    assert result.returncode == 1, result.stdout
+    assert "built:p.html artifact-data <local-term:1> (the key): local-term:1" in result.stdout
+    assert "built:p.html:5:" in result.stdout  # the raw text of a plain island, by line too
+    assert "secret" not in result.stdout.lower()
+
+
+def test_a_built_file_name_hit_is_redacted(repo: Path, local: Path, tmp_path: Path) -> None:
+    local.write_text("example-secret\\w*\n", encoding="utf-8")
+    commit(repo, {"README.md": "clean\n"})
+    site = built(tmp_path, {"example-secretcorp/index.html": page()})
+    result = run_check("--repo", str(repo), "--built", str(site))
+    assert result.returncode == 1, result.stdout
+    assert "built:<local-term:1>/index.html (file name): local-term:1" in result.stdout
+    assert "secret" not in result.stdout.lower()
+
+
+def test_clean_built_pages_pass_and_no_allow_entry_applies(repo: Path, tmp_path: Path) -> None:
+    commit(repo, {public_check.ALLOW_FILE: "# reasoned\nnowhere.txt:1\n", "README.md": "clean\n"})
+    site = built(tmp_path, {"index.html": page(data={"notes": [{"html": "<p>clean</p>"}]}),
+                            "timeline.html": page(), "assets/app.js": "console.log(1)\n"})
+    for target, count in ((site / "index.html", 1), (site, 3)):
+        result = run_check("--repo", str(repo), "--built", str(target))
+        assert result.returncode == 0, result.stdout
+        assert f"public-check: passed ({count} built files, se {SE_HEAD[:7]})" in result.stdout
+        assert "allow" not in result.stdout
+        assert "verdict recorded" not in result.stdout
+
+
+def test_built_files_are_read_in_sorted_order_of_their_relative_paths(tmp_path: Path) -> None:
+    site = built(tmp_path, {"b/z.html": "z", "a.html": "a", "b/a.html": "b"})
+    assert [name for name, _ in public_check.built_files(site)] == ["a.html", "b/a.html", "b/z.html"]
+
+
+@pytest.mark.parametrize("make, named", [
+    (lambda site: site / "missing.html", "missing.html: no such file or folder"),
+    (lambda site: site, "the folder holds no file"),
+    (lambda site: (site / "p.html").write_text(page(data={}, encoding="zstd"), encoding="utf-8")
+     and site / "p.html", "built:p.html: its artifact-data island has data-encoding 'zstd'"),
+    (lambda site: (site / "p.html").write_text(
+        page().replace("<p>clean</p>", '<script id="artifact-data" type="application/json">{'
+                       '</script>'), encoding="utf-8") and site / "p.html",
+     "built:p.html: its artifact-data island is not JSON"),
+    (lambda site: (site / "p.html").write_text(
+        page().replace("<p>clean</p>", '<script id="artifact-data" type="application/octet-stream" '
+                       'data-encoding="gzip">not base64!</script>'), encoding="utf-8")
+     and site / "p.html", "built:p.html: its artifact-data island is no base64 gzip"),
+])
+def test_what_the_built_check_cannot_read_is_a_setup_error_naming_it(
+        repo: Path, tmp_path: Path, make, named: str) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    site = tmp_path / "site"
+    site.mkdir()
+    result = run_check("--repo", str(repo), "--built", str(make(site)))
+    assert result.returncode == 2, result.stdout
+    assert named in result.stdout
+
+
+@pytest.mark.parametrize("option", ["--range", "--history"])
+def test_built_with_a_history_option_is_a_setup_error_naming_both(
+        repo: Path, tmp_path: Path, option: str) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    site = built(tmp_path, {"index.html": page()})
+    result = run_check("--repo", str(repo), "--built", str(site), option, "HEAD")
+    assert result.returncode == 2, result.stdout
+    assert f"--built and {option} exclude each other" in result.stdout
+
+
+@pytest.mark.parametrize("option", ["--staged", "--rev=HEAD", "--message-file=m.txt"])
+def test_built_excludes_the_other_sources(tmp_path: Path, option: str) -> None:
+    with pytest.raises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()):
+        public_check.parse_args(["--built", str(tmp_path), option])
+    assert raised.value.code == 2
