@@ -463,3 +463,73 @@ def test_the_action_runs_ses_script_from_its_own_checkout() -> None:
     assert 'python3 "$GITHUB_ACTION_PATH/../../../scripts/ci_trust.py" "$MODE"' in action
     assert "description: lookup, record, full-pass or finding." in action
     assert set(ci_trust.COMMANDS) == {"lookup", "record", "full-pass", "finding"}
+
+
+# Landing without CI (README "Landing without CI"): the integrator's commit status, judged.
+
+NO_CI = '[tests]\ncommand = ["uv", "run", "pytest", "-q"]\nci = false\n'
+TREE, SUITE = "a" * 40, "b" * 64
+
+
+def verdict(state: str = "success", tree: str = TREE, suite: str = SUITE, creator: str = OWNER,
+            context: str = ci_trust.STATUS_CONTEXT, status_id: int = 1) -> dict:
+    """A commit status as the host lists it."""
+    return {"id": status_id, "state": state, "context": context, "creator": {"login": creator},
+            "description": ci_trust.status_description(tree, suite),
+            "url": f"https://api.example.com/statuses/{status_id}"}
+
+
+def test_ci_is_on_by_default_and_off_only_where_se_toml_says_so(tmp_path: Path) -> None:
+    root = fake_git.init(tmp_path / "project", "-b", "main")
+    commit(root, {"se.toml": '[tests]\ncommand = ["true"]\n'})
+    assert ci_trust.trust_settings(root, "HEAD").ci is True
+    assert ci_trust.trust_settings(ROOT).ci is True  # SE's own landings keep CI
+    commit(root, {"se.toml": NO_CI})
+    assert ci_trust.trust_settings(root, "HEAD").ci is False
+
+
+@pytest.mark.parametrize(("text", "named"), [
+    ('[tests]\nci = "no"\n', "ci must be true or false"),
+    ('[tests]\nci = false\ntrust_integrator = true\n', "needs a runner for its record"),
+])
+def test_a_malformed_or_contradictory_ci_setting_is_refused(tmp_path: Path, text, named) -> None:
+    (tmp_path / "se.toml").write_text(text, encoding="utf-8")
+    with pytest.raises(ci_trust.TrustError, match=named):
+        ci_trust.trust_settings(tmp_path)
+
+
+def test_the_status_description_fits_the_hosts_limit_and_names_tree_and_suite() -> None:
+    description = ci_trust.status_description("c" * 64, SUITE)  # a sha256 repository's tree
+    assert len(description) <= 140
+    named = ci_trust.STATUS_PATTERN.fullmatch(description)
+    assert (named["tree"], named["suite"]) == ("c" * 64, SUITE[:40])
+
+
+def test_the_integrators_status_for_exactly_the_tree_and_suite_is_accepted() -> None:
+    accepted, why = ci_trust.judge_status(verdict(), tree_hash=TREE, suite=SUITE, integrator="ALICE")
+    assert accepted, why
+    assert why == (f"the integrator ALICE's status se integrator verdict: tree {TREE[:12]} "
+                   f"passed with suite {SUITE[:12]}")
+
+
+@pytest.mark.parametrize(("status", "named"), [
+    (None, "no status se integrator verdict"),
+    (verdict(tree="d" * 40), "is of tree dddddddddddd"),
+    (verdict(suite="e" * 64), "names suite eeeeeeeeeeee"),
+    (verdict(state="failure"), "is failure, not success"),
+    (verdict(state="pending"), "is pending, not success"),
+    (verdict(creator="mallory"), "written by mallory, not by the integrator alice"),
+    (verdict(context="ci/other"), "is of context 'ci/other'"),
+    ({**verdict(), "description": "passed"}, "names no tree and suite"),
+])
+def test_any_other_status_is_not_accepted(status, named) -> None:
+    accepted, why = ci_trust.judge_status(status, tree_hash=TREE, suite=SUITE, integrator=OWNER)
+    assert not accepted
+    assert named in why
+
+
+def test_the_newest_status_of_the_context_is_the_one_judged() -> None:
+    statuses = [verdict(status_id=3, state="failure"), verdict(status_id=2),
+                verdict(status_id=9, context="ci/other")]
+    assert ci_trust.newest_status(statuses)["id"] == 3  # a later failure outweighs an earlier pass
+    assert ci_trust.newest_status([verdict(context="ci/other")]) is None

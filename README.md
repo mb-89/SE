@@ -1211,7 +1211,8 @@ ci = false # default true: CI's check is the verdict, wherever the host has runn
   head through the host's API, before it opens the landing pull request. No workflow, no runner.
   - Its state is `success` and its description `passed tree <tree> suite <suite hash>`: the
     tree and the suite's hash (`[tests]` and the se pin) as the [record](#trusted-landings)
-    names them.
+    names them, the hash by its first 40 digits, so a sha256 tree fits the host's 140
+    characters too.
   - The host and its API come from origin (`gh api`, with origin's host), as every step does.
 - **Its check.** The plan's check step reads the newest status of that context on the head
   instead of the check run `check`, and squash-merges only once it is accepted. The pause, the
