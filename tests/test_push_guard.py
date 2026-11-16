@@ -133,6 +133,49 @@ def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, c
     assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode == 0
 
 
+@pytest.mark.parametrize("landing", ["squash", "fast-forward"])
+def test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not(
+        checkout, tmp_path, capfd, landing):
+    """A squash landing's commit on origin's main is GitHub's (web-flow committer, the account's
+    noreply author): the strict identity gate (fast-forward landings) refuses it, but a branch
+    that merges main pushes only its own commits, so `push` and the hook gate those no remote
+    holds yet."""
+    if landing == "fast-forward":
+        with (checkout / "se.toml").open("a", encoding="utf-8") as config:
+            config.write('\n[integrate]\nlanding = "fast-forward"\n')
+        git(checkout, "commit", "-qam", "Land by fast-forward")
+        git(checkout, "push", "-q", "origin", "main")
+    git(checkout, "switch", "-q", "-c", "topic")
+    commit(checkout, name="topic.txt")
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
+    origin = tmp_path / "origin.git"
+    main = git(origin, "rev-parse", "refs/heads/main")
+    squash = git_door.run("commit-tree", f"{main}^{{tree}}", "-p", main, "-m", "Integrate x",
+                          root=origin, env={**os.environ, "GIT_AUTHOR_NAME": "owner",
+                                            "GIT_AUTHOR_EMAIL": "1+owner@users.noreply.github.com",
+                                            "GIT_COMMITTER_NAME": "GitHub",
+                                            "GIT_COMMITTER_EMAIL": "noreply" + "@github.com"})
+    assert squash.returncode == 0, squash.stderr
+    git(origin, "update-ref", "refs/heads/main", squash.stdout.strip(), main)
+    git(checkout, "fetch", "-q", "origin")
+    git(checkout, "merge", "-q", "--no-edit", "origin/main")
+    git(checkout, "config", "core.hooksPath", str(PROJECT / ".githooks"))
+    capfd.readouterr()
+
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
+
+    assert "foreign-identity" not in capfd.readouterr().out
+    (checkout / "foreign.txt").write_text("foreign", encoding="utf-8")
+    git(checkout, "add", "foreign.txt")
+    foreign = git_door.run("commit", "-q", "-m", "Add foreign.txt", root=checkout,
+                           env={**os.environ, "GIT_AUTHOR_NAME": "bob", "GIT_AUTHOR_EMAIL": "bob"})
+    assert foreign.returncode == 0, foreign.stderr
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 1
+    assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode != 0
+    out = capfd.readouterr()
+    assert "author: foreign-identity 'bob <bob>'" in out.out + out.err
+
+
 def verified(root: Path, ref: str = "refs/heads/main") -> int:
     return work_tickets.main(["verified", ref, "HEAD", "--worktree", str(root)])
 

@@ -9,15 +9,18 @@ source's own terms and switches public entries off for it. Output names the loca
 pattern label only, never the matched text. A tracked local list, and the retired machine-level
 list (~/.se/private-terms.txt, SE_PRIVATE_TERMS), stop the check with their remedy.
 
-The commit gates (a message file, the commits of a --range) also refuse tracker references and
-attribution trailers (`Co-Authored-By:`, `Claude-Session:`) in messages, from every author,
-naming the reference or trailer and the remedy; a full check leaves old history to them. CI runs
+The commit gates (a message file, the commits of a --range) also refuse tracker references,
+attribution trailers (`Co-Authored-By:`, `Claude-Session:`) and any e-mail address, whatever the
+address, in messages, from every author, naming the reference, trailer or line and the remedy; a
+full check leaves old history to them. CI runs
 the --range gate on every pull request and every push to the integration branch
 (.github/workflows/check.yml). The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
-machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
-commit made on GitHub, passes as committer, and on such a commit the author may be the GitHub
-noreply address of the account owning origin on github.com (the squash merge of a pull request into
-main). A hit names the identity found, redacted. A
+machine sets public_identity), where one is set. Strict, where se.toml [integrate] landing is
+"fast-forward" (landings are the integrator's own commits): a commit GitHub made is foreign like
+any other. Otherwise, while GitHub squash-merges the landings, its web-flow identity passes as
+committer, and on such a commit the author may be the GitHub noreply address of the account
+owning origin on github.com (the squash merge of a pull request into main). A hit names the
+identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
 on that one commit, and a `commit:<full sha> message` entry the message hits of that one commit,
 for history already published. A --range on a shallow clone that reaches beyond the fetched
@@ -58,8 +61,9 @@ LOCAL_FILE = ".public-check.local"
 MACHINE_ENV = "SE_PRIVATE_TERMS"
 MACHINE_DEFAULT = "~/.se/private-terms.txt"
 
-# GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person,
-# so the identity gate accepts it as committer next to the project identity, never as author.
+# GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person.
+# The identity gate passes it as committer only while landings are GitHub's squash merges; with
+# se.toml [integrate] landing = "fast-forward" it is foreign (README "Landing on main").
 WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
 # The author of a commit made on GitHub (a squash merge): the account that made it, by the GitHub
 # noreply address of its login, `<id>+<login>` or `<login>`.
@@ -138,13 +142,21 @@ ATTRIBUTION_RULE = (
     "AGENTS.md 'Public safety'"
 )
 ATTRIBUTION_TRAILER = re.compile(r"(?im)^[ \t]*(co-authored-by|claude-session)[ \t]*:")
+ADDRESS_RULE = (
+    "rule: commit messages carry no e-mail address, whatever the address, AGENTS.md 'Public "
+    "safety'"
+)
+# Any e-mail address, a service's fixed noreply and an example.* domain included: the commit gates
+# accept none in a message (the public list's email-address term filters; this one does not).
+MESSAGE_ADDRESS = re.compile(
+    r"(?i)(?<![\w.%+-])[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b")
 # Where a co-author line comes from, named with its hit: an editor adds it on commit.
 CO_AUTHOR_SOURCE = (
     "an editor's AI co-author setting writes this line: turn it off (VS Code: "
     "git.addAICoAuthor off, README 'Install')"
 )
 # The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
-MESSAGE_RULES = ("tracker-reference", "attribution-trailer")
+MESSAGE_RULES = ("tracker-reference", "attribution-trailer", "message-address")
 RULES = tuple(dict.fromkeys(pattern.label for pattern in GENERIC_PATTERNS)) + MESSAGE_RULES
 REWORD_BEFORE_COMMIT = "reword the message before committing"
 REWORD_BEFORE_PUSH = (
@@ -179,6 +191,12 @@ def attribution_trailers(text: str) -> list[tuple[int, str]]:
         (text.count("\n", 0, match.start()) + 1, match.group(1))
         for match in ATTRIBUTION_TRAILER.finditer(text)
     ]
+
+
+def message_addresses(text: str) -> list[int]:
+    """The line of every e-mail address in a commit message, whatever the address, one entry per
+    address. The one test both commit gates apply."""
+    return [text.count("\n", 0, match.start()) + 1 for match in MESSAGE_ADDRESS.finditer(text)]
 
 
 class SetupError(Exception):
@@ -458,8 +476,8 @@ def scan_files(files: Iterable[tuple[str, bytes]], patterns: list[Pattern],
 
 def scan_message(where: str, message: str, patterns: list[Pattern], report: Report,
                  remedy: str | None = None) -> None:
-    """Hits in a commit message; with a remedy, tracker references and attribution trailers too
-    (the commit gates)."""
+    """Hits in a commit message; with a remedy, tracker references, attribution trailers and
+    e-mail addresses too (the commit gates)."""
     for line, _, label in find(message, patterns):
         report.hits.append(Hit(f"{where} message:{line}", label))
     if remedy is None:
@@ -472,6 +490,9 @@ def scan_message(where: str, message: str, patterns: list[Pattern], report: Repo
         source = f"; {CO_AUTHOR_SOURCE}" if key.lower() == "co-authored-by" else ""
         report.hits.append(Hit(f"{where} message:{line}", "attribution-trailer",
                                f" '{key}:' ({ATTRIBUTION_RULE}); {remedy}{source}"))
+    for line in message_addresses(message):  # the address may name a person: never shown
+        report.hits.append(Hit(f"{where} message:{line}", "message-address",
+                               f" ({ADDRESS_RULE}); {remedy}"))
 
 
 def scan_identity(where: str, role: str, identity: str, patterns: list[Pattern],
@@ -491,6 +512,16 @@ def project_identity(root: Path) -> str | None:
     return None if identity is None else f"{identity[0]} <{identity[1]}>"
 
 
+def strict_identity(root: Path) -> bool:
+    """Whether the gate refuses GitHub's own commits too: se.toml [integrate] landing is
+    "fast-forward", so every landing is the integrator's commit (work_tickets.landing_mode)."""
+    work_tickets = sibling("work_tickets")
+    try:
+        return work_tickets.landing_mode(root) == work_tickets.FAST_FORWARD
+    except work_tickets.QueueError as error:
+        raise SetupError(str(error)) from error
+
+
 def repository_owner(root: Path) -> str | None:
     """The account owning the checkout's origin on github.com (lower case), else None."""
     repo = sibling("work_tickets").remote_repo(root)
@@ -507,8 +538,8 @@ def made_on_github_by_owner(author: str, committer: str, owner: str | None) -> b
 
 
 def scan_project_identity(where: str, role: str, identity: str, expected: str,
-                          patterns: list[Pattern], report: Report) -> None:
-    if identity != expected and (role, identity) != ("committer", WEB_FLOW):
+                          patterns: list[Pattern], report: Report, strict: bool) -> None:
+    if identity != expected and (strict or (role, identity) != ("committer", WEB_FLOW)):
         shown = redact(identity, patterns)  # a foreign identity may name a person
         report.hits.append(Hit(f"{where} {role}", "foreign-identity",
                                f" '{shown}' is not the project identity '{expected}'; "
@@ -518,12 +549,13 @@ def scan_project_identity(where: str, role: str, identity: str, expected: str,
 def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], report: Report,
                  gate: bool, allow: list[AllowEntry]) -> None:
     """Hits in the identities and messages of `revisions`; a gate (commits not yet pushed) also
-    refuses tracker references, attribution trailers and identities other than the project
-    identity. A commit entry of
+    refuses tracker references, attribution trailers, e-mail addresses in messages and identities
+    other than the project identity (GitHub's own too where the identity is strict). A commit entry of
     `allow` drops the hits of its role (an identity, or the message) on its commit; in a gate,
     where every hit it may cover is looked for, one that drops none is reported unused."""
     expected = project_identity(root) if gate else None
-    owner = repository_owner(root) if expected is not None else None
+    strict = expected is not None and strict_identity(root)
+    owner = repository_owner(root) if expected is not None and not strict else None
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
         if not record.strip():
@@ -535,10 +567,10 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
-        if expected is not None and not made_on_github_by_owner(author, committer, owner):
-            scan_project_identity(where, "author", author, expected, patterns, report)
+        if expected is not None and (strict or not made_on_github_by_owner(author, committer, owner)):
+            scan_project_identity(where, "author", author, expected, patterns, report, strict)
         if expected is not None:
-            scan_project_identity(where, "committer", committer, expected, patterns, report)
+            scan_project_identity(where, "committer", committer, expected, patterns, report, strict)
         scan_message(where, message, patterns, report, REWORD_BEFORE_PUSH if gate else None)
         entries = {entry.role: entry for entry in allow if entry.commit == sha}
         kept = []
