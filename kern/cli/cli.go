@@ -8,6 +8,7 @@
 //	<name> serve  [--root DIR] [--home DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
 //	<name> hook <event> [--root DIR] [--wait D] [--unanswered N]  post the host's hook JSON on stdin to the core
 //	<name> mcp    [--root DIR] [--home DIR] [--grace D] [--idle D]   the MCP door over stdio, starting the core or attaching to it (package mcp)
+//	<name> mcp --tools [--root DIR] [--home DIR]          print the tools the door would serve, as JSON in served order, and exit
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
@@ -68,7 +69,7 @@ const StepWaitEnv = "KERN_STEP_WAIT"
 // to show that an answer the bus refuses fails the step at once.
 const ReplyWaitEnv = "KERN_REPLY_WAIT"
 
-const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--home DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N]"
+const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--home DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N] [--tools]"
 
 // Run is the command named name: it serves the components registered with
 // index.Register before it is called, and answers the exit code.
@@ -86,12 +87,15 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 	root := fs.String("root", "", "the checkout the core serves")
 	var grace, idle, wait *time.Duration
 	var asJSON *bool
-	home := new(string)
+	home, tools := new(string), new(bool)
 	switch verb {
 	case "start", "serve", "mcp":
 		home = fs.String("home", "", "the application's own folder, whose wiring a root without one is served")
 		grace = fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
 		idle = fs.Duration("idle", host.Idle, "how long the core runs without any event")
+		if verb == "mcp" {
+			tools = fs.Bool("tools", false, "print the tools the door would serve, as JSON in served order, and exit: starts no core, reads no input")
+		}
 	case "status":
 		wait = fs.Duration("wait", 0, "how long to wait for a starting core to answer")
 		asJSON = fs.Bool("json", false, "print the health as JSON")
@@ -104,6 +108,9 @@ func Run(name string, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	dir, err := rootOf(*root)
+	if verb == "mcp" && *tools {
+		return listTools(name, dir, *home, err, stdout, stderr)
+	}
 	if verb == "mcp" {
 		// The door a host spawns never exits early: what keeps it from a core
 		// is every call's answer instead.
@@ -400,6 +407,51 @@ func homeOf(root, source string) string {
 // find (rooted) or no path to this binary leaves it serving, each call
 // answering why it starts no core.
 func door(name, root, home string, rooted error, grace, idle time.Duration, stderr io.Writer) int {
+	o := doorOptions(name, root, home, rooted, stderr)
+	bin, err := os.Executable()
+	if err != nil {
+		o.NoStart = fmt.Sprintf("no path to this binary: %v", err)
+	}
+	o.Core = mcp.Host{Root: root, Bin: bin, Args: serveArgs(home, grace, idle)}
+	// SIGTERM, as a host ends its server, ends the door as EOF does: it returns the lease.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := mcp.Serve(ctx, o, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(stderr, "%s mcp: %v\n", name, err)
+		return 2
+	}
+	return 0
+}
+
+// listTools prints the tools the door would serve for root, as tools/list
+// answers them (mcp.Listed), indented JSON in served order, and answers 0:
+// it starts no core, takes no lease and reads no input. A root it could not
+// find answers 2. A catalog the check
+// refuses is said on stderr, as the door says it, and its tools listed all
+// the same.
+func listTools(name, root, home string, rooted error, stdout, stderr io.Writer) int {
+	if rooted != nil {
+		fmt.Fprintf(stderr, "%s mcp --tools: %v\n", name, rooted)
+		return 2
+	}
+	o := doorOptions(name, root, home, rooted, stderr)
+	tools, err := mcp.Listed(context.Background(), o)
+	if err == nil {
+		var data []byte
+		if data, err = json.MarshalIndent(map[string]any{"tools": tools}, "", "  "); err == nil {
+			_, err = fmt.Fprintf(stdout, "%s\n", data)
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s mcp --tools: %v\n", name, err)
+		return 2
+	}
+	return 0
+}
+
+// doorOptions are the door's options for root without its core: the
+// application, the checkout and the catalog the core would serve.
+func doorOptions(name, root, home string, rooted error, stderr io.Writer) mcp.Options {
 	version := Version
 	if info, ok := debug.ReadBuildInfo(); ok && version == "" {
 		version = info.Main.Version
@@ -416,19 +468,7 @@ func door(name, root, home string, rooted error, grace, idle time.Duration, stde
 		o.Catalog, err = host.Catalog(source, w, index.Registered())
 	}
 	o.CatalogErr = err
-	bin, err := os.Executable()
-	if err != nil {
-		o.NoStart = fmt.Sprintf("no path to this binary: %v", err)
-	}
-	o.Core = mcp.Host{Root: root, Bin: bin, Args: serveArgs(home, grace, idle)}
-	// SIGTERM, as a host ends its server, ends the door as EOF does: it returns the lease.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := mcp.Serve(ctx, o, os.Stdin, os.Stdout); err != nil {
-		fmt.Fprintf(stderr, "%s mcp: %v\n", name, err)
-		return 2
-	}
-	return 0
+	return o
 }
 
 // rootOf answers the checkout: the folder given, else the nearest one up from
