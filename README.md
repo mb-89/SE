@@ -650,6 +650,8 @@ no token), the hand-off needs neither a retyped file nor a second run
     `numbered`), under the call in the hook and in `next`; `next --step <n>` refuses a step the
     relay no longer waits for with one line naming the current one. The two reads of a landing
     pull request in a row, its merge confirmation and its read-back, each name their purpose.
+  - kern refuses an answer to an old step the same way, in one line on its hook
+    ([kern's GitHub component](kern/components/github/README.md#the-verb-step-a-write-tool-through-the-relay)).
   - A relay landing (`integrate`, `rehearse`) starts with one line: run each long wait in the
     background and call `next` after each, as a told step reaches the agent only when a tool call
     ends. It reads no CI suite time past the relay, and says once that it skipped it.

@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -205,6 +207,10 @@ func (g *GitHub) hear(instance, event string, payload []byte) error {
 		g.mu.Lock()
 		g.answered[string(payload)] = true
 		g.mu.Unlock()
+	} else if line := g.staleStep(use); line != "" {
+		g.mu.Lock()
+		g.stale[string(payload)] = line
+		g.mu.Unlock()
 	}
 	bare := use.Tool[strings.LastIndex(use.Tool, "__")+2:]
 	if l, r, ok := matchList(use, bare); ok {
@@ -361,7 +367,36 @@ const MatchTextMax = 200
 type waitingStep struct {
 	ask    StepAsk
 	asked  time.Time
+	number int // the step's number, from its note's `step <n>`; 0 where it names none
 	answer chan stepResult
+}
+
+// answeredStep is a numbered step a tool use answered: a later tool use that
+// matches it, and no waiting step, answers an old step.
+type answeredStep struct {
+	ask    StepAsk
+	number int
+}
+
+// keepAnswered is how many answered numbered steps the relay keeps to tell an
+// answer to an old step by.
+const keepAnswered = 32
+
+// stepNumber is a step's number at the start of its note, as the asker
+// numbers its steps (`step <n>`, se_relay.numbered).
+var stepNumber = regexp.MustCompile(`^step (\d+)\b`)
+
+// numberOf reads a step's number from its note; 0 where it names none.
+func numberOf(note string) int {
+	m := stepNumber.FindStringSubmatch(note)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 type stepResult struct {
@@ -404,7 +439,7 @@ func (g *GitHub) step(ctx context.Context, a StepAsk) (StepAnswer, error) {
 	}
 	key := StepKey(a)
 	now := g.o.Now().UTC()
-	w := &waitingStep{ask: a, asked: now, answer: make(chan stepResult, 1)}
+	w := &waitingStep{ask: a, asked: now, number: numberOf(a.Note), answer: make(chan stepResult, 1)}
 	g.mu.Lock()
 	if _, taken := g.steps[key]; taken {
 		g.mu.Unlock()
@@ -446,8 +481,9 @@ func (g *GitHub) drop(key string) {
 	}
 }
 
-// answerStep answers the oldest waiting step a tool use matches, and says
-// whether one was.
+// answerStep answers the oldest waiting step a tool use matches, by the
+// time it was asked, and says whether one was; a numbered step it answers is
+// kept, so a later answer to it is told apart (staleStep).
 func (g *GitHub) answerStep(use toolUse) bool {
 	if !strings.HasPrefix(use.Tool, "mcp__") {
 		return false
@@ -457,8 +493,14 @@ func (g *GitHub) answerStep(use toolUse) bool {
 	var key string
 	var w *waitingStep
 	for k, s := range g.steps {
-		if s.ask.Tool == bare && matches(s.ask, use.Input) && (w == nil || k < key) {
+		if s.ask.Tool == bare && matches(s.ask, use.Input) && (w == nil || older(s, k, w, key)) {
 			key, w = k, s
+		}
+	}
+	if w != nil && w.number > 0 {
+		g.done = append(g.done, answeredStep{ask: w.ask, number: w.number})
+		if len(g.done) > keepAnswered {
+			g.done = g.done[len(g.done)-keepAnswered:]
 		}
 	}
 	g.mu.Unlock()
@@ -476,6 +518,49 @@ func (g *GitHub) answerStep(use toolUse) bool {
 	}
 	w.answer <- stepResult{StepAnswer{Tool: bare, Input: use.Input, Read: g.o.Now().UTC(), Data: data}, err}
 	return true
+}
+
+// older says whether waiting step s at key k was asked before w at key;
+// steps asked at one time go by key.
+func older(s *waitingStep, k string, w *waitingStep, key string) bool {
+	if !s.asked.Equal(w.asked) {
+		return s.asked.Before(w.asked)
+	}
+	return k < key
+}
+
+// staleStep is the one line that refuses a tool use which answers no waiting
+// step but a numbered step already answered, the newest such: `step <n> is
+// answered: the current step is <m>`, m the oldest numbered step waiting;
+// "" where the use matches no answered step.
+func (g *GitHub) staleStep(use toolUse) string {
+	if !strings.HasPrefix(use.Tool, "mcp__") {
+		return ""
+	}
+	bare := use.Tool[strings.LastIndex(use.Tool, "__")+2:]
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	old := 0
+	for i := len(g.done) - 1; i >= 0; i-- {
+		if d := g.done[i]; d.ask.Tool == bare && matches(d.ask, use.Input) {
+			old = d.number
+			break
+		}
+	}
+	if old == 0 {
+		return ""
+	}
+	var current *waitingStep
+	var at string
+	for k, s := range g.steps {
+		if s.number > 0 && (current == nil || older(s, k, current, at)) {
+			current, at = s, k
+		}
+	}
+	if current == nil {
+		return fmt.Sprintf("step %d is answered: kern's GitHub relay waits for no numbered step now", old)
+	}
+	return fmt.Sprintf("step %d is answered: the current step is %d", old, current.number)
 }
 
 // matches says whether a tool use's input carries every key the step matches
@@ -549,6 +634,8 @@ func stepAnswerOf(raw json.RawMessage) (any, error) {
 // agent context: every outbox entry, oldest first, as the tool call to run.
 // Where this event's tool answer answered a step, it first waits up to
 // tell-wait for the next step to be asked, so the agent is told that one.
+// Where it answered no waiting step but one already answered, the tell opens
+// with the line that refuses it (staleStep), and tells what waits below.
 func (g *GitHub) tell(_ string, event string, payload []byte) string {
 	if event != PostToolUse && event != "UserPromptSubmit" && event != "SessionStart" {
 		return ""
@@ -556,8 +643,16 @@ func (g *GitHub) tell(_ string, event string, payload []byte) string {
 	g.mu.Lock()
 	answered := g.answered[string(payload)]
 	delete(g.answered, string(payload))
+	stale, old := g.stale[string(payload)]
+	delete(g.stale, string(payload))
 	wait := g.tellWait
 	g.mu.Unlock()
+	if old { // an answer to an old step: its one line, then what waits
+		if waits := g.Outbox(); waits != "" {
+			return stale + "\n" + waits
+		}
+		return stale
+	}
 	if answered {
 		timer := time.NewTimer(wait)
 		select {
