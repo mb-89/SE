@@ -86,6 +86,17 @@
   `SE_CLOUD_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
+## Neutral home
+
+- No tracked file names where SE lives: no host, owner or repository of SE. The same tree may live
+  on more than one Git host, and only a machine that holds both remotes knows that.
+- Where SE needs its own location, it derives it from the checkout's origin through
+  `scripts/se_home.py`, one helper for every Python reader: the home, the tracker, the docs URL and
+  module URLs relative to origin (`../obs.git`). Docs write `<owner>/<repository>`, explained once.
+- `uv run python scripts/hygiene.py` enforces it (its check `neutral-home`, tested in
+  `tests/test_repository.py`): a tracked line that names origin's owner fails, naming file and
+  line, outside its `HOME_ALLOWED` (each entry with its reason) and workflow `uses:` lines.
+
 ## Public safety
 
 The rules are the rule book's [`pub` section](src/skills/work-model/references/rules.md#pub-publishing-and-security); this

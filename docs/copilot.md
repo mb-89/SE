@@ -5,6 +5,9 @@ owns the opt-in install into another repository, the self-test and smoke test, t
 the first run with Copilot, and the cloud agent's notes. The install line of each host is README
 [Install](../README.md#install); the MCP door is README [The MCP door](../README.md#the-mcp-door).
 
+`<owner>/<repository>` below is the owner and repository of the SE you install from: the
+repository its checkout's origin names (`uv run python scripts/se_home.py tracker` prints it).
+
 No session that built this had a Copilot token, so nothing here ran against a signed-in Copilot.
 What a token-less Copilot CLI could show was run (below); everything else is on the
 [checklist](#monday-checklist), each with what you should see.
@@ -15,10 +18,10 @@ Copilot CLI 1.0.112 (npm `@github/copilot`), in a cloud container on 14 Nov, wit
 It reads plugins, skills and MCP servers without signing in; a session (`-p`, `--acp`) stops at
 sign-in before it starts any MCP server.
 
-- `copilot plugin marketplace add mb-89/SE` registered the marketplace `se`, and `copilot plugin
-  install se@se` installed `se@se` 5.59.0 from the generated `.claude-plugin/marketplace.json`.
-  `copilot plugin install mb-89/SE` installed it too, with a warning that direct installs are
-  deprecated.
+- `copilot plugin marketplace add <owner>/<repository>` registered the marketplace `se`, and
+  `copilot plugin install se@se` installed `se@se` 5.59.0 from the generated
+  `.claude-plugin/marketplace.json`. `copilot plugin install <owner>/<repository>` installed it
+  too, with a warning that direct installs are deprecated.
 - The install takes the Copilot layout: `copilot skill list --json` gives `catch-up`, `decision`
   and `work-model` from the plugin's `.github/skills/`. With `.github/plugin/plugin.json` and
   `.github/mcp.json` removed, the CLI read `.claude-plugin/plugin.json` and gave no `se` server.
@@ -129,7 +132,8 @@ above it, the line is in `~/.se/.runtime/mcp.log`. Where none has a line, the la
 hooks as without the flag, then `scripts/copilot.py install`:
 
 - merges into `<repo>/.github/copilot/settings.json`, keeping every other key,
-  `{"extraKnownMarketplaces":{"se":{"source":{"source":"github","repo":"mb-89/SE"}}},"enabledPlugins":{"se@se":true}}`;
+  `{"extraKnownMarketplaces":{"se":{"source":{"source":"github","repo":"<owner>/<repository>"}}},"enabledPlugins":{"se@se":true}}`
+  (on a host other than GitHub, `{"source":"git","url":"<home>.git"}`);
 - pins `[modules.se]` in `<repo>/se.toml` at `^MAJOR.MINOR` of the SE that ran it, keeping an
   existing pin, ignores `.se/` in git, and runs `se_modules.py --root <repo> sync se`.
 
@@ -215,7 +219,7 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    issue as a person step (label `se-person`), so no worker takes it into the live fleet; or close
    it as not planned right after. Expect `se` to say what it files, file it, and name it.
 4. **Plugin install, resume and the worker launch line, CLI.** `copilot plugin marketplace add
-   mb-89/SE`, `copilot plugin install se@se`, then `copilot --agent se` in the checkout.
+   <owner>/<repository>`, `copilot plugin install se@se`, then `copilot --agent se` in the checkout.
    - Expect the greeting once, though the checkout and the plugin both register hooks (#1121: the
      plugin's hooks skip SE's checkout, [Hooks](#hooks); the guard keeps a second start quiet; the
      plugin's Claude hooks fail open). The plugin's `se` hides the checkout's server here
@@ -233,7 +237,7 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    `~/.se/bin/se-<version>.exe` for one session: expect `se-status` to answer `not-installed`
    naming SE's start, Copilot accepting the stand-in door (#1123); rename it back.
 6. **VS Code, another repository** (expected to differ, documented). **Chat: Install Plugin from
-   Source** with `https://github.com/mb-89/SE`; no trust prompt, which shows only for marketplace
+   Source** with `https://github.com/<owner>/<repository>`; no trust prompt, which shows only for marketplace
    and deep-link installs. Add the user-level door ([VS Code](#vs-code)), pick Copilot and `se`,
    say `status`. Expect the greeting and the user-level door's `se/status` naming that repository
    (#1123: VS Code reads the install as a Claude-format plugin, so the door is the user-level

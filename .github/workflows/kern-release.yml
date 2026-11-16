@@ -8,12 +8,13 @@
 #
 #   jobs:
 #     release:
-#       uses: mb-89/SE/.github/workflows/kern-release.yml@kern-v<version>
+#       uses: <owner>/<repository>/.github/workflows/kern-release.yml@kern-v<version>
 #       with:
 #         directory: <the application's binary folder, e.g. components>
 #
 # SE's own se-release.yml does, for the `se` binary. While kern is incubated in SE, this lives here;
-# it moves with kern's workflows to mb-89/kern.
+# it moves with kern's workflows to <owner>/kern,
+# beside it (<owner>/<repository>: the SE these workflows run in, from its origin).
 name: kern-release
 
 on:

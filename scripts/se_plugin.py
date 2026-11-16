@@ -19,9 +19,11 @@ between a line `<!-- copilot -->` and a line `<!-- /copilot -->` go only into th
 without the two marker lines; the Claude layout drops them with the markers, so it is byte for byte
 what the source without them builds (`hosts`).
 
-The Copilot layout keeps no relative link that leaves its own folder (`.github/agents`,
-`.github/skills`): such a link becomes a link to the file on GitHub at the project's version, the
-tag `v<version>` (`_rewrite_links`), so the files work copied or installed elsewhere.
+Every link of both layouts stays relative to its generated file (`_rewrite_links`), so it resolves
+both in SE's checkout and in an installed plugin's folder, which holds the whole repository; no
+generated file names where SE lives (AGENTS.md "Neutral home"), and the manifests carry no author,
+repository or home. A checkout with CRLF line endings (git on Windows) builds and checks the same
+layouts as an LF one: generated text is compared without its line endings (`same`).
 
 The outside skills each role relies on are one list, `se.toml` `[roles.<role>] skills`, never the
 agent's own front matter: `build` writes it into the `skills` field of that agent in every layout
@@ -49,8 +51,6 @@ if "agent_lint" not in sys.modules:
     _lint_spec.loader.exec_module(agent_lint)
 SOURCE = PurePosixPath("src")
 PLUGIN = "se"
-OWNER = "mb-89"
-REPOSITORY = "https://github.com/mb-89/SE"
 DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and reviewer "
                "sub-agents and their skills.")
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
@@ -254,11 +254,8 @@ def _relative(target: PurePosixPath, start: PurePosixPath) -> str:
     return PurePosixPath(os.path.relpath(target, start)).as_posix()
 
 
-def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout,
-                   version: str = "") -> str:
-    """Each relative link as the generated file reaches its target; in the Copilot layout, a
-    target outside the generated file's own folder (`_folder`) as its GitHub URL at `v<version>`."""
-    folder = _folder(generated, layout)
+def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout) -> str:
+    """Each relative link as the generated file reaches its target, relative to that file."""
 
     def replace(match: re.Match) -> str:
         link = match.group(2)
@@ -267,18 +264,10 @@ def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, l
         resolved = _normalize((source.parent / link).as_posix())
         if resolved.parts[:2] in (("src", "agents"), ("src", "skills")):
             resolved = _target(resolved, layout)
-        if layout.name == "copilot" and not resolved.is_relative_to(folder):
-            kind = "tree" if link.endswith("/") else "blob"
-            return f"{match.group(1)}{REPOSITORY}/{kind}/v{version}/{resolved.as_posix()}{match.group(3)}"
         relative = _relative(resolved, generated.parent) + ("/" if link.endswith("/") else "")
         return match.group(1) + relative + match.group(3)
 
     return LINK.sub(replace, text)
-
-
-def _folder(generated: PurePosixPath, layout: Layout) -> PurePosixPath:
-    """The layout folder a generated file lies in: its agents' or its skills'."""
-    return layout.agents if generated.is_relative_to(layout.agents) else layout.skills
 
 
 def hosts(text: str, source: PurePosixPath | str, layout: Layout, first: int = 1) -> str:
@@ -330,7 +319,7 @@ def _front_matter(text: str, source: PurePosixPath, layout: Layout,
 
 
 def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
-                    role_skills: dict[str, list[RoleSkill]], version: str = "") -> tuple[PurePosixPath, bytes]:
+                    role_skills: dict[str, list[RoleSkill]]) -> tuple[PurePosixPath, bytes]:
     generated = _target(source, layout)
     data = (root / source).read_bytes()
     if source.suffix != ".md":
@@ -344,7 +333,7 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
     role = source.stem if source.parent == SOURCE / "agents" else None
     front, body = _front_matter(text, source, layout, role_skills.get(role, []) if role else [])
     first = text.count("\n", 0, len(text) - len(body)) + 1
-    body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout, version)
+    body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout)
     return generated, (front + notice(source) + body).encode("utf-8")
 
 
@@ -472,8 +461,6 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         "name": PLUGIN,
         "version": _version(root),
         "description": DESCRIPTION,
-        "author": {"name": OWNER},
-        "repository": REPOSITORY,
         "license": "MIT",
     }
     plugin["hooks"] = {
@@ -483,7 +470,7 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
     }
     marketplace = {
         "name": PLUGIN,
-        "owner": {"name": OWNER},
+        "owner": {"name": "SE"},
         "description": "SE, installed from this repository.",
         "plugins": [{"name": PLUGIN, "source": "./", "description": DESCRIPTION}],
     }
@@ -503,8 +490,6 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         "name": PLUGIN,
         "version": plugin["version"],
         "description": DESCRIPTION,
-        "author": {"name": OWNER},
-        "repository": REPOSITORY,
         "license": "MIT",
         "agents": f"{layout.agents}/",
         "skills": f"{layout.skills}/",
@@ -532,7 +517,6 @@ def expected(root: Path = ROOT, copilot: bool = True) -> dict[PurePosixPath, byt
     """Every generated file and its content, computed from the source alone; without `copilot`,
     the Claude layout alone, which is the same either way."""
     files = _manifests(root, copilot)
-    version = _version(root)
     sources = _sources(root)
     role_skills = roles(root)
     agents = {source.stem for source in sources if source.parent == SOURCE / "agents"}
@@ -540,7 +524,7 @@ def expected(root: Path = ROOT, copilot: bool = True) -> dict[PurePosixPath, byt
         raise SourceError(f"{root / 'se.toml'}: [roles.{unknown[0]}] names no agent in {SOURCE}/agents")
     for source in sources:
         for layout in LAYOUTS if copilot else LAYOUTS[1:]:
-            path, data = _generated_file(source, layout, root, role_skills, version)
+            path, data = _generated_file(source, layout, root, role_skills)
             files[path] = data
     if problems := validate(files):
         raise SourceError("; ".join(problems))
@@ -558,6 +542,16 @@ def _existing(root: Path) -> set[PurePosixPath]:
     return found
 
 
+def same(found: bytes, want: bytes) -> bool:
+    """Whether a generated file on disk holds what its source builds: text compared without its
+    line endings, so a CRLF checkout (git's autocrlf on Windows) matches the LF build."""
+    if found == want:
+        return True
+    if b"\0" in found or b"\0" in want:
+        return False
+    return found.replace(b"\r\n", b"\n") == want.replace(b"\r\n", b"\n")
+
+
 def differences(root: Path = ROOT) -> list[str]:
     """One line per generated file that is missing, stale (hand-edited) or not generated at all."""
     want = expected(root)
@@ -567,7 +561,7 @@ def differences(root: Path = ROOT) -> list[str]:
             lines.append(f"{path}: not generated from {SOURCE}/; remove it or add its source")
         elif not (root / path).is_file():
             lines.append(f"{path}: missing")
-        elif (root / path).read_bytes() != want[path]:
+        elif not same((root / path).read_bytes(), want[path]):
             lines.append(f"{path}: differs from its source (edited by hand?)")
     return lines
 
@@ -581,7 +575,7 @@ def build(root: Path = ROOT) -> list[PurePosixPath]:
         changed.append(path)
     for path, data in sorted(want.items()):
         target = root / path
-        if not target.is_file() or target.read_bytes() != data:
+        if not target.is_file() or not same(target.read_bytes(), data):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             changed.append(path)
