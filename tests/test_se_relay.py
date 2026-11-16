@@ -273,3 +273,32 @@ def test_next_refuses_an_old_step_with_one_line(tmp_path: Path, monkeypatch, cap
         "`se_relay.py next` prints it"]
     assert se_relay.main(["next", "--root", str(tmp_path), "--step", "7"]) == 0
     assert "step 7: read back" in capsys.readouterr().out
+
+
+def test_next_calls_prints_each_running_call_with_its_age_and_next_alone_prints_as_today(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    from datetime import datetime, timezone
+    monkeypatch.setattr(se_relay, "told", lambda root, wait=se_relay.NEXT_WAIT: TOLD_BLOCK)
+    asked: list[Path] = []
+    monkeypatch.setattr(se_relay, "running_calls", lambda root, wait=se_relay.NEXT_WAIT: asked.append(root) or [
+        {"name": "integrate", "started": "2026-11-16T10:00:00.123456789Z"},
+        {"name": "fleet-check", "started": "2026-11-16T10:04:30Z"}])
+    clock = lambda: datetime(2026, 11, 16, 10, 5, 0, tzinfo=timezone.utc)  # noqa: E731
+    assert se_relay.main(["next", "--root", str(tmp_path)], now=clock) == 0
+    assert capsys.readouterr().out == TOLD_BLOCK + "\n" and asked == []  # plain next: as today
+    assert se_relay.main(["next", "--root", str(tmp_path), "--calls"], now=clock) == 0
+    assert capsys.readouterr().out == TOLD_BLOCK + "\n" + (
+        "kern runs these calls:\n  integrate: running for 4m 59s\n  fleet-check: running for 30s\n")
+    monkeypatch.setattr(se_relay, "running_calls", lambda root, wait=se_relay.NEXT_WAIT: [])
+    assert se_relay.main(["next", "--root", str(tmp_path), "--calls"], now=clock) == 0
+    assert capsys.readouterr().out.endswith("kern runs no call\n")
+
+
+def test_running_calls_reads_the_cores_health(tmp_path: Path, monkeypatch) -> None:
+    asked: list[str] = []
+    monkeypatch.setattr(se_relay, "_ask_core", lambda root, subject, wait: asked.append(subject) or {
+        "pid": 1, "calls": [{"name": "start", "started": "2026-11-16T10:00:00Z"}]})
+    assert se_relay.running_calls(tmp_path) == [{"name": "start", "started": "2026-11-16T10:00:00Z"}]
+    assert asked == ["get.core.health"]
+    monkeypatch.setattr(se_relay, "_ask_core", lambda root, subject, wait: None)
+    assert se_relay.running_calls(tmp_path) is None
