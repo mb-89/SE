@@ -101,6 +101,13 @@ def to_come_findings(folder: Path) -> list[str]:
             for path in to_come(folder) if (folder / path).exists()]
 
 
+def unrooted_findings(folder: Path) -> list[str]:
+    """A Markdown line naming a script without SE's root, which the build refuses (se_plugin.UNROOTED_SCRIPT)."""
+    return [f"{path}:{number}: names a script without SE's root; write `<se>/scripts/<name>.py`"
+            for path in markdown(folder) for number, line in enumerate(read(path).splitlines(), 1)
+            if se_plugin.UNROOTED_SCRIPT.search(line)]
+
+
 def mark_findings(folder: Path) -> list[str]:
     """The old marks in SKILL.md and every file under references/."""
     files = [folder / "SKILL.md", *sorted(path for path in (folder / "references").rglob("*") if path.is_file())]
@@ -109,7 +116,7 @@ def mark_findings(folder: Path) -> list[str]:
 
 
 CHECKS = (lint_findings, invocation_findings, length_findings, dangling_findings, outside_findings,
-          to_come_findings, mark_findings)
+          to_come_findings, unrooted_findings, mark_findings)
 
 
 def folder_findings(folder: Path) -> list[str]:
@@ -247,6 +254,15 @@ def test_a_to_come_path_that_exists_fails(tmp_path):
 
 def test_a_draft_without_to_come_has_no_to_come_paths(tmp_path):
     assert to_come(draft(tmp_path)) == []
+
+
+def test_a_bare_script_path_fails_and_a_rooted_one_passes(tmp_path):
+    bare = draft(tmp_path, "bare", extra={"references/two.md": "Run `uv run python scripts/review.py`.\n"})
+    assert unrooted_findings(bare) == [f"{bare / 'references' / 'two.md'}:1: names a script without SE's root; "
+                                       "write `<se>/scripts/<name>.py`"]
+    assert folder_findings(bare) == unrooted_findings(bare)
+    rooted = draft(tmp_path, "rooted", extra={"references/two.md": "Run `uv run python <se>/scripts/review.py`.\n"})
+    assert folder_findings(rooted) == []
 
 
 def test_a_work_tag_fails_and_an_anchor_passes(tmp_path):

@@ -40,7 +40,7 @@ Each example is SE's own, tied to its result.
   checkout would have asked the person about a command that already existed; that is why the look
   runs on the freshly fetched branch.
 - **There, with its path.** In the same retro, issue #875's reviewer procedure named
-  `review.py brief` and `review.py file`. The look found both in `scripts/review.py`, with their
-  help text: `uv run python scripts/review.py --help` lists `{brief,file}`.
+  `review.py brief` and `review.py file`. The look found both in `<se>/scripts/review.py`, with
+  their help text: `uv run python <se>/scripts/review.py --help` lists `{brief,file}`.
 - **Cut, naming where it is met.** obs#658's field report, from the obs repository: the issue
   asked to add what was already there. The ask is cut, and the record names where it is met.
