@@ -28,6 +28,22 @@ and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_bloc
 `retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
 `went_well`.
 
+Off by default, three additions leave that draft as it is without them:
+
+- `--signals FILE...` runs the pure functions of the transcript reader (transcript_signals.py, its
+  more signals among them) over the session records given and adds a block of counts with a line
+  per source; where no file was read it says so, never zero findings (`session_signals`).
+- `--refusals` lists each refused delivery (the `Integration stopped:` comments collect already
+  reads) and each declined review (the verdict block review.py writes on the pull request that a
+  work issue's escalation comment names) with its link, its author's association, inside or
+  outside by outside_text.py's `inside` over INSIDE, and its first FIRST_LINES lines in
+  outside_text.py's envelope, as data (`refusal_records`).
+- A class of the judgment may carry the optional keys CLASS_KEYS (`status`, `pattern`, a regular
+  expression, and `limits`); the next collect counts each earlier class's pattern over what it
+  already reads of each work issue of the window (title, body, comments, field report) and lists
+  the classes that carry one (`class_patterns`). A block without them is scored and filed as
+  before.
+
 `retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, and a
 draft the integration branch does not hold as it stands; it files no issue (wrk-007). It posts the
 report proper, the judgment with each finding's proposed fix and its kind (`work`, which SE
@@ -94,6 +110,13 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
 CLASS_FIELDS = ("name", "fix")
+# The optional keys of a class: its status, the pattern (a regular expression) the next collect
+# counts over the window, and the limits of its fix.
+CLASS_KEYS = ("status", "pattern", "limits")
+# The author associations `--refusals` counts as inside the fleet (outside_text.inside).
+INSIDE = ("OWNER", "MEMBER", "COLLABORATOR")
+# How many of a refusal's first lines `--refusals` shows.
+FIRST_LINES = 3
 JUDGMENT = ("findings", "classes", "went_well")
 TITLE_WORDS = 5
 # A finding whose home is the rule book changes a rule: controversial.
@@ -105,6 +128,9 @@ RETRO_TITLE = "docs/retro-"
 WORK_LABEL = work_tickets.WORK_LABELS[0]
 ESCALATED_LABEL = "escalated"
 REFUSED = "Integration stopped:"
+# The escalation comment review.py writes on the work issue of a declined pull request.
+DECLINED = re.compile(r"^Declined by the review of pull request #(\d+) \((\S+?)\)")
+REFUSED_DELIVERY, DECLINED_REVIEW = "refused delivery", "declined review"
 INTEGRATED = "Integrated in "
 SUITE_TIME = re.compile(r"Suite: .*?(\d+(?:\.\d+)?) s \(target")
 REPORT_IN = re.compile(r"<!-- se:field-report-in (\d+) -->")
@@ -223,6 +249,7 @@ class GhDoor:
     def __init__(self, root: Path, tracker: str, remote: str) -> None:
         self.issues_door = work_tickets.GitHub(root, tracker)
         self.pulls_door = work_tickets.GitHub(root, remote)
+        self.remote = remote
         self.missing: list[Step] = []
 
     def pages(self, door, path: str) -> list[dict]:
@@ -258,11 +285,15 @@ class GhDoor:
         return listed(self.pulls_door.api(f"commits/{pull.head_sha}/check-runs?per_page=100"),
                       "check_runs")
 
+    def pull_comments(self, number: int) -> list[dict]:
+        return listed(self.pulls_door.api(f"issues/{number}/comments?per_page=100"), "comments")
+
 
 class FileDoor:
     """The same reads from the answers the session saved with its GitHub tools into `directory`:
     `issues.json`, `pulls.json`, `issue-<issue>.json` (where the list names no close time, as
-    the host's `list_issues` does not), `comments-<issue>.json` and `checks-<pull>.json`. A missing
+    the host's `list_issues` does not), `comments-<issue>.json`, `checks-<pull>.json` and, for
+    `--refusals`, `pull-comments-<pull>.json` of each declined pull request. A missing
     answer reads as empty and is kept as the plan step that saves it (`missing`)."""
 
     def __init__(self, directory: Path, tracker: str, remote: str) -> None:
@@ -318,6 +349,13 @@ class FileDoor:
             **work_tickets.owner_repo(self.remote), "method": "get_check_runs",
             "pullNumber": pull.number},
             note=f"Save the answer as JSON to {self.directory / name}")), "check_runs")
+
+    def pull_comments(self, number: int) -> list[dict]:
+        name = f"pull-comments-{number}.json"
+        return listed(self.read(name, Step(name, "pull_request_read", {
+            **work_tickets.owner_repo(self.remote), "method": "get_comments",
+            "pullNumber": number},
+            note=f"Save the answer as JSON to {self.directory / name}")), "comments")
 
 
 def is_retro(issue: Issue) -> bool:
@@ -433,6 +471,16 @@ class Collected:
     run_sources: dict[str, int] = field(default_factory=dict)  # lines read per source
     adhoc: list[dict] = field(default_factory=list)  # the ad hoc components to promote (se_usage)
     scripts: list[dict] = field(default_factory=list)  # the most-run ad hoc scripts (se_usage)
+    # Off by default, outside the block: the session signals (--signals) and the refused
+    # deliveries and declined reviews (--refusals); None where not asked for.
+    signals: dict | None = None
+    refusals: list[dict] | None = None
+
+    def extras(self) -> dict:
+        """What the flags asked for, by name: `--json` adds it beside the block's data."""
+        return {name: value for name, value in (("signals", self.signals),
+                                                ("refusals", self.refusals))
+                if value is not None}
 
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
@@ -595,10 +643,13 @@ def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER,
 
 
 def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
-            now: datetime, since: str | None = None, retro: int | None = None) -> Collected | None:
+            now: datetime, since: str | None = None, retro: int | None = None,
+            refusals: bool = False, signals: list[Path] | None = None) -> Collected | None:
     """The window of retro `number` read through `door`, starting at `since` or where retro
     `retro` closed where given (`read_window`); None where the door is still missing answers
-    (`door.missing`)."""
+    (`door.missing`). With `refusals`, the refused deliveries and declined reviews
+    (`refusal_records`); with `signals`, the session signals of those files
+    (`session_signals`)."""
     read = read_window(door, number, since, retro)
     if read is None:
         return None
@@ -610,8 +661,13 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     landings = [pull for pull in merged if pull.base == branch and in_window(pull.merged_at)]
 
     closed: list[Closed] = []
+    # What collect reads of each work issue, for the earlier classes' patterns, and its comments,
+    # for the refusals.
+    issue_texts: dict[int, list[str]] = {}
+    read_comments: dict[int, list[dict]] = {}
     for issue in window:
-        comments = [str(item.get("body") or "") for item in door.comments(issue.number)]
+        read_comments[issue.number] = door.comments(issue.number)
+        comments = [str(item.get("body") or "") for item in read_comments[issue.number]]
         refused = sum(body.lstrip().startswith(REFUSED) for body in comments)
         escalations = refused or int(ESCALATED_LABEL in issue.labels)
         suite = None
@@ -629,6 +685,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             report_pull = next((pull for pull in sorted(naming, key=lambda p: -p.number)
                                 if report_of(pull.body)), None)
         report = report_of(report_pull.body) if report_pull else None
+        issue_texts[issue.number] = [issue.title, issue.body, *comments, report or ""]
         duplicate = is_duplicate(issue)
         closed.append(Closed(
             number=issue.number, title=issue.title, state_reason=issue.state_reason or "completed",
@@ -705,7 +762,12 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     local = [line for line in metrics.read(metrics.path())[0] if in_window(str(line["start"]))]
     landed_runs = [line for pull in landings if (line := metrics.of_text(pull.body)) is not None]
     runs = metrics.merged(local, landed_runs)
+    records = (refusal_records(read_comments, door, tracker, remote_of(door, tracker))
+               if refusals else None)
+    if door.missing:
+        return None
     scored = scored_findings(previous, last.number if last else 0, window, checks, opened)
+    patterns = class_patterns(previous, issue_texts)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
@@ -718,9 +780,137 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         Window(number, read.since, read.since_retro,
                now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), read.start),
         sizes, closed, list(checks.values()),
-        {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored}
+        {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored,
+         **({"classes": patterns} if patterns else {})}
         if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc,
-        scripts)
+        scripts, session_signals(signals, root) if signals is not None else None, records)
+
+
+def remote_of(door, tracker: str) -> str:
+    """The repository of the pull requests `door` reads, for their links; the tracker's where the
+    door names none."""
+    return str(getattr(door, "remote", "") or tracker)
+
+
+def first_lines(text: str, count: int = FIRST_LINES) -> str:
+    """The first `count` lines of `text` that hold anything once its HTML comments are gone."""
+    shown = [line.rstrip() for line in work_tickets.HTML_COMMENT_PATTERN.sub("", text).splitlines()
+             if line.strip()]
+    return "\n".join(shown[:count])
+
+
+def refusal(kind: str, issue: int, pull: int | None, comment: dict, link: str,
+            text: str) -> dict:
+    """One refused delivery or declined review: where it is, who wrote it, inside or outside the
+    fleet (outside_text.inside over INSIDE), and its first lines in outside_text's envelope."""
+    outside_text = sibling("outside_text")
+    association = str(first(comment, "author_association", "authorAssociation") or "")
+    quoted, _ = outside_text.envelope(first_lines(text), link, association or None)
+    return {"kind": kind, "issue": issue, "pull": pull, "link": link,
+            "association": association or outside_text.UNKNOWN,
+            "inside": outside_text.inside(association or None, INSIDE), "text": quoted}
+
+
+def verdict_of(body: str) -> dict | None:
+    """The verdict block review.py writes in its review comment: the last JSON object fenced in
+    `body` after review.VERDICT_MARKER that names a verdict; None where it has none."""
+    at = body.find(review.VERDICT_MARKER)
+    if at < 0:
+        return None
+    found = None
+    for match in re.finditer(r"^(`{3,})[^\n]*\n(.*?)^\1[ \t]*$", body[at:],
+                             re.MULTILINE | re.DOTALL):
+        try:
+            data = json.loads(match[2])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and "verdict" in data:
+            found = data
+    return found
+
+
+def refusal_records(comments: dict[int, list[dict]], door, tracker: str,
+                    remote: str) -> list[dict]:
+    """Each refused delivery and each declined review of the window's work issues, by issue: a
+    refused delivery is an `Integration stopped:` comment among `comments` (read already, so no
+    further read); a declined review is the review comment with a `decline` verdict block on the
+    pull request a `Declined by the review of pull request #<n>` comment names, read through
+    `door` (its escalation comment stands in where that pull request holds none)."""
+    records: list[dict] = []
+    for number, items in sorted(comments.items()):
+        for item in items:
+            body = str(item.get("body") or "")
+            link = str(first(item, "html_url", "url") or work_tickets.issue_url(tracker, number))
+            if body.lstrip().startswith(REFUSED):
+                records.append(refusal(REFUSED_DELIVERY, number, None, item, link, body))
+                continue
+            declined = DECLINED.match(body.lstrip())
+            if declined is None:
+                continue
+            pull = int(declined[1])
+            reviews = [comment for comment in door.pull_comments(pull)
+                       if (verdict_of(str(comment.get("body") or "")) or {}).get(
+                           "verdict") == review.DECLINE]
+            if reviews:
+                comment = reviews[-1]
+                records.append(refusal(
+                    DECLINED_REVIEW, number, pull, comment,
+                    str(first(comment, "html_url", "url") or work_tickets.pull_url(remote, pull)),
+                    str(comment.get("body") or "")))
+            else:
+                records.append(refusal(DECLINED_REVIEW, number, pull, item, link, body))
+    return records
+
+
+def class_patterns(previous: dict | None, texts: dict[int, list[str]]) -> list[dict]:
+    """Each class of the previous retro's block that carries a `pattern`, counted over `texts`
+    (what collect read of each work issue of the window): its matches in all and the issues it
+    matched in, with its `status` and `limits` where given."""
+    found: list[dict] = []
+    for given in (previous or {}).get("classes") or []:
+        if not isinstance(given, dict) or not isinstance(given.get("pattern"), str):
+            continue
+        pattern = re.compile(given["pattern"])
+        counts = {number: sum(len(pattern.findall(text)) for text in read)
+                  for number, read in texts.items()}
+        found.append({"name": str(given.get("name") or ""), "status": given.get("status"),
+                      "pattern": given["pattern"], "limits": given.get("limits"),
+                      "matches": sum(counts.values()),
+                      "issues": sorted(number for number, count in counts.items() if count)})
+    return found
+
+
+def session_signals(paths: list[Path], root: Path) -> dict:
+    """The transcript reader's counts (transcript_signals.py, its more signals among them) over
+    the session records at `paths` (files or directories of them): how many were given and read,
+    a line per source (its events and hits, `nothing read`, or `not found`) and the total per
+    signal; with no file read, no signal is counted."""
+    signals = sibling("transcript_signals")
+    events: list = []
+    files: list[str] = []
+    missing: list[str] = []
+    for path, label in signals.transcripts(list(paths)):
+        if not path.is_file():
+            missing.append(label)
+            continue
+        files.append(label)
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            events.extend(signals.read_events(handle, label, more=True))
+    keep_path = signals.repository_paths(root)
+    options = {"repeated-commands": {"keep_path": keep_path},
+               "repeated-failures": {"keep_path": keep_path}, "lacked": {"keep_path": keep_path}}
+    result = signals.tally(events, files, options, more=True)
+    per_file = {file: sum(signal["sessions"].get(file, 0) for signal in result["signals"].values())
+                for file in files}
+    counted = {file: sum(event.file == file for event in events) for file in files}
+    sources = [{"source": file, "events": counted[file], "hits": per_file[file],
+                "read": file not in result.get("unread", [])} for file in files]
+    sources += [{"source": label, "events": 0, "hits": 0, "read": False, "missing": True}
+                for label in missing]
+    return {"given": len(files) + len(missing),
+            "read": sum(source["read"] for source in sources),
+            "sources": sources,
+            "signals": {name: signal["total"] for name, signal in result["signals"].items()}}
 
 
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
@@ -795,6 +985,7 @@ def draft(found: Collected) -> str:
                          f"{item['kind'] or ''} | {issues} | {item['state']} | {recurred} |")
     elif found.previous:
         lines.append("None.")
+    lines += class_lines(found)
     lines += ["", "## Landed issues", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
@@ -849,6 +1040,7 @@ def draft(found: Collected) -> str:
     lines += ["", "## Not delivered", ""]
     entries = [(item.number, text) for item in found.issues for text in item.not_delivered]
     lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
+    lines += signal_lines(found.signals) + refusal_lines(found.refusals)
     block = json.dumps(found.data(), indent=2, ensure_ascii=False)
     lines += ["", JUDGE_BEGIN, "## Judgment", "",
               "The judge fills `findings`, `classes` and `went_well` in the block below, then runs "
@@ -860,6 +1052,64 @@ def draft(found: Collected) -> str:
               "and `fix`; `went_well` lists what went well. This part is not posted.", JUDGE_END,
               "", BLOCK_MARKER, review.fenced(block, "yaml")]
     return "\n".join(lines) + "\n"
+
+
+def class_lines(found: Collected) -> list[str]:
+    """The earlier classes that carry a pattern, each counted over the window; none without."""
+    classes = (found.previous or {}).get("classes") or []
+    if not classes:
+        return []
+    lines = ["", f"## The classes of retro #{found.previous['retro']}", "",
+             "Each class that carries a pattern, counted over the window's work issues (title, "
+             "body, comments, field report).", "",
+             "| class | status | pattern | matches | issues | limits |", "|---|---|---|---|---|---|"]
+    for item in classes:
+        issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
+        limits = item.get("limits")
+        limits = "; ".join(limits) if isinstance(limits, list) else (limits or "")
+        pattern = item["pattern"].replace("|", "\\|")
+        lines.append(f"| {item['name']} | {item.get('status') or ''} | `{pattern}` | "
+                     f"{item['matches']} | {issues} | {one_line(limits)} |")
+    return lines
+
+
+def signal_lines(signals: dict | None) -> list[str]:
+    """The session signals block (--signals); none where not asked for."""
+    if signals is None:
+        return []
+    lines = ["", "## Session signals", ""]
+    if not signals["read"]:
+        lines.append(f"0 files read of {signals['given']} given: no signal was counted, which "
+                     "is not zero findings.")
+    else:
+        lines.append(f"{signals['read']} files read of {signals['given']} given, counted by "
+                     "transcript_signals.py.")
+    lines.append("")
+    for source in signals["sources"]:
+        state = ("not found" if source.get("missing") else "nothing read" if not source["read"]
+                 else f"{source['events']} events, {source['hits']} hits")
+        lines.append(f"- {source['source']}: {state}")
+    if signals["read"]:
+        lines += ["", "| signal | total |", "|---|---|"]
+        lines += [f"| {name} | {total} |" for name, total in signals["signals"].items()]
+    return lines
+
+
+def refusal_lines(refusals: list[dict] | None) -> list[str]:
+    """The refused deliveries and declined reviews block (--refusals); none where not asked
+    for."""
+    if refusals is None:
+        return []
+    lines = ["", "## Refused deliveries and declined reviews", ""]
+    if not refusals:
+        return lines + ["None."]
+    for item in refusals:
+        pull = f" (pull request #{item['pull']})" if item["pull"] else ""
+        where = "inside" if item["inside"] else "outside"
+        lines.append(f"- #{item['issue']} {item['kind']}{pull}: {item['link']}; author "
+                     f"association {item['association']}, {where} the fleet")
+        lines += [f"  {line}".rstrip() for line in item["text"].rstrip("\n").splitlines()]
+    return lines
 
 
 def finding_basics(given: dict, index: int, fields: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -876,6 +1126,29 @@ def finding_basics(given: dict, index: int, fields: tuple[str, ...]) -> tuple[st
     return name, problems
 
 
+def class_key_problems(given: dict, name: str) -> list[str]:
+    """What is wrong with a class's optional keys (CLASS_KEYS): a status that is no text, a
+    pattern that is no regular expression, limits that are neither a text nor a list of texts."""
+    problems: list[str] = []
+    if "status" in given and not (isinstance(given["status"], str) and given["status"].strip()):
+        problems.append(f"{name}: status is a text")
+    if "pattern" in given:
+        pattern = given["pattern"]
+        if not (isinstance(pattern, str) and pattern):
+            problems.append(f"{name}: pattern is a regular expression, as a text")
+        else:
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                problems.append(f"{name}: pattern is no regular expression ({error})")
+    if "limits" in given:
+        limits = given["limits"]
+        if not (isinstance(limits, str) or (isinstance(limits, list)
+                                            and all(isinstance(entry, str) for entry in limits))):
+            problems.append(f"{name}: limits is a text or a list of texts")
+    return problems
+
+
 def judgment_problems(block: dict) -> list[str]:
     """What keeps the judgment in `block` from being complete; none where it is."""
     problems: list[str] = []
@@ -890,10 +1163,11 @@ def judgment_problems(block: dict) -> list[str]:
         if not isinstance(given, dict):
             problems.append(f"class {index} is not an object with {', '.join(CLASS_FIELDS)}")
             continue
-        extra = sorted(set(given) - set(CLASS_FIELDS))
+        extra = sorted(set(given) - set(CLASS_FIELDS) - set(CLASS_KEYS))
         name = review.words(given.get("name"))
         if extra:
             problems.append(f"class {index} has the unknown field {extra[0]}")
+        problems += class_key_problems(given, f'class "{name}"' if name else f"class {index}")
         if not name:
             problems.append(f"class {index} has no name")
         elif not review.words(given.get("fix")):
@@ -973,11 +1247,27 @@ def facts_of(text: str, marker: str = BLOCK_MARKER,
     return review.demoted("\n".join(lines)).strip()
 
 
+def class_key_lines(keys: dict) -> list[str]:
+    """A class's optional keys as the report shows them; none without."""
+    lines = []
+    if "status" in keys:
+        lines.append(f"Status: {keys['status'].strip()}")
+    if "pattern" in keys:
+        lines.append(f"Pattern: `{keys['pattern']}`")
+    if "limits" in keys:
+        limits = keys["limits"]
+        lines.append("Limits: " + ("; ".join(entry.strip() for entry in limits)
+                                   if isinstance(limits, list) else limits.strip()))
+    return ["", *lines] if lines else []
+
+
 def report(block: dict, number: int, doc: str, url: str, sha: str) -> str:
     """The retro's report proper, its closing comment: the judgment, each finding with its
     proposed fix and kind, what follows, then the link to the committed retro doc `doc` at commit
     `sha` (`url`), which holds the facts and the block the next collect reads."""
     fixes = {entry["name"].strip(): entry["fix"].strip() for entry in block["classes"]}
+    keys = {entry["name"].strip(): {key: entry[key] for key in CLASS_KEYS if key in entry}
+            for entry in block["classes"]}
     lines = [REPORT_MARKER, f"## Retro #{number}: the report", "", "### Findings"]
     if not block["findings"]:
         lines += ["", "None."]
@@ -985,7 +1275,8 @@ def report(block: dict, number: int, doc: str, url: str, sha: str) -> str:
         members = [item for item in block["findings"] if item["class"].strip() == name]
         if not members:
             continue
-        lines += ["", f"#### {name} ({len(members)})", "", f"Fix: {fix}", ""]
+        lines += ["", f"#### {name} ({len(members)})", "", f"Fix: {fix}",
+                  *class_key_lines(keys.get(name, {})), ""]
         for item in members:
             kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                     if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
@@ -1140,20 +1431,23 @@ def run_collect(args: argparse.Namespace) -> int:
     else:
         door = GhDoor(root, tracker, remote)
     found = collect(root, args.retro, door, tracker, branch, ref, datetime.now(timezone.utc),
-                    since_of(args.since), args.since_retro)
+                    since_of(args.since), args.since_retro, args.refusals, args.signals)
     if found is None:
         directory = args.answers or Path("<dir>")
         window = (f" --since {args.since}" if args.since else "") + (
             f" --retro {args.since_retro}" if args.since_retro is not None else "")
+        flags = (" --refusals" if args.refusals else "") + (
+            " --signals " + " ".join(str(path) for path in args.signals) if args.signals else "")
         then = (f"retro.py collect {args.retro}{window} --answers {directory}"
                 f"{f' --out {args.out}' if args.out else ''}{' --json' if args.json else ''}"
+                f"{flags}"
                 f"{f' --repo {args.repo}' if args.repo else ''} --worktree {root}")
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools "
               f"and saves their answers into {directory}:")
         print(Plan(f"the window of retro #{args.retro}", tuple(door.missing), then).text())
         return 0
-    output = (json.dumps(found.data(), indent=2, ensure_ascii=False) + "\n" if args.json
-              else draft(found))
+    output = (json.dumps({**found.data(), **found.extras()}, indent=2, ensure_ascii=False) + "\n"
+              if args.json else draft(found))
     if args.out:
         args.out.write_text(output, encoding="utf-8")
         print(f"Wrote the retro draft of #{args.retro} to {args.out}: "
@@ -1196,6 +1490,13 @@ def make_parser() -> argparse.ArgumentParser:
                                  help="write the draft to FILE (default: print it)")
     collect_command.add_argument("--json", action="store_true",
                                  help="the block's data as JSON instead of the draft")
+    collect_command.add_argument("--signals", type=Path, nargs="+", metavar="FILE",
+                                 help="add the counts of the transcript reader over these session "
+                                      "records (files or directories), a line per source")
+    collect_command.add_argument("--refusals", action="store_true",
+                                 help="add each refused delivery and declined review of the "
+                                      "window with its link, its author's association and its "
+                                      "first lines")
     collect_command.add_argument("--answers", type=Path, metavar="DIR",
                                  help="without gh: the directory the session saves the plan's "
                                       "answers into")
