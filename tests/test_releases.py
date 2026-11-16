@@ -784,14 +784,14 @@ def test_the_release_workflow_is_one_copy_whose_only_se_lines_are_its_branch_and
     readme = (PROJECT / "README.md").read_text(encoding="utf-8")
     assert "name: release-tag" not in readme
     assert "](.github/workflows/release-tag.yml)" in readme
-    assert "`mb-89/SE/.github/workflows/release.yml@v<major>`" in readme
+    assert "`<owner>/<repository>/.github/workflows/release.yml@v<major>`" in readme
 
 
 def test_nothing_calls_an_se_workflow_at_a_branch():
     """se's workflows are referenced at `@v<major>` (README "Release tags"), never at a branch."""
     for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
         for line in path.read_text(encoding="utf-8").splitlines():
-            assert not re.search(r"mb-89/SE/\S+@(se|main)\b", line), f"{path.name}: {line}"
+            assert not re.search(r"/\.github/(?:workflows|actions)/\S+@(se|main)\b", line), f"{path.name}: {line}"
 
 
 def test_every_runner_image_is_pinned():

@@ -12,14 +12,16 @@ License: MIT, see [LICENSE](LICENSE).
 ## Install
 
 One step per place. What each agent does is in its own file in [src/agents/](src/agents/).
+`<owner>/<repository>` is the owner and repository of the SE you install from, on GitHub (`uv run
+python scripts/se_home.py tracker` prints it in a clone); no file of SE names it.
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | `claude plugin install se --marketplace mb-89/SE` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
+| Claude Code | `claude plugin install se --marketplace <owner>/<repository>` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/mb-89/SE` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
-| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/mb-89/SE` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
-| GitHub Copilot CLI | `copilot plugin marketplace add mb-89/SE`, then `copilot plugin install se@se` (or `copilot plugin install mb-89/SE`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
+| GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
+| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
+| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
 | GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/`, `.github/skills/` and `.github/hooks/se.json`; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task and pick `se` | its `sessionStart` hook hands the session SE's greeting, as above |
 
 Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
@@ -58,7 +60,7 @@ built, touches no repository and holds no secret:
 
 ```bash
 rm -rf ~/.claude/skills/se
-git clone --depth 1 https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
+git clone --depth 1 https://github.com/<owner>/<repository> ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
 ```
 
 It replaces any older SE line (a clone into `/opt/se` that runs `/opt/se/src/build.sh`). A failed
@@ -386,9 +388,10 @@ demand.
 
 se's documentation is one HTML file, published at the GitHub Pages site of SE's home,
 `https://<owner>.github.io/<repository>/`, which `scripts/se_home.py` derives from the checkout's
-origin; a project that publishes elsewhere sets `docs_url` in `se.toml` `[project]`. `docs.md` is
-its manifest: it lists se's notes as chapters and restates none of them. The obs module
-(`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
+origin; a project that publishes elsewhere sets `docs_url` in `se.toml` `[project]`.
+
+`docs.md` is its manifest: it lists se's notes as chapters and restates none of them. The obs
+module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
 
 ```sh
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
@@ -721,7 +724,7 @@ not tags (Claude's cloud sessions).
 A repository turns it on with `release = "workflow"` and a copy of se's own
 [`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only in
 `branches` to name its integration branch (se's names `main`), so that worker branches run nothing,
-and in `uses`, which calls `mb-89/SE/.github/workflows/release.yml@v<major>`.
+and in `uses`, which calls `<owner>/<repository>/.github/workflows/release.yml@v<major>`.
 
 Other repositories reference se's reusable workflows and actions at `@v<major>`, never at a branch,
 so a breaking change reaches them only with the major they choose.
@@ -988,7 +991,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: mb-89/SE/.github/actions/suite-shard@<se ref>
+      - uses: <owner>/<repository>/.github/actions/suite-shard@<se ref>
         with:
           name: ${{ matrix.shard }}
           command: uv run pytest -q tests/${{ matrix.shard }}
@@ -998,7 +1001,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: mb-89/SE/.github/actions/suite-time@<se ref>
+      - uses: <owner>/<repository>/.github/actions/suite-time@<se ref>
         with:
           shards: 2
 ```
@@ -1135,8 +1138,8 @@ integrator = "<login>" # optional: the account that records; default the reposit
     through.
 
 A project's own `check` uses the action at the se ref it pins, as the sharded suite does; its
-copy of `se-pass-record.yml` calls the same action, `mb-89/SE/.github/actions/integrator-pass@<se
-ref>`, with `mode: record`:
+copy of `se-pass-record.yml` calls the same action,
+`<owner>/<repository>/.github/actions/integrator-pass@<se ref>`, with `mode: record`:
 
 ```yaml
 jobs:
@@ -1149,7 +1152,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: lookup
-        uses: mb-89/SE/.github/actions/integrator-pass@<se ref>
+        uses: <owner>/<repository>/.github/actions/integrator-pass@<se ref>
         with:
           mode: lookup
   check:
@@ -1351,7 +1354,7 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **The pin:** while kern is incubated, `kern/release.toml`'s version and its tag `kern-v<version>`,
   read by `se_modules.py`'s `kern_pin`. A version not tagged yet comes from SE's `HEAD`, which the
   command says.
-- **kern beside it:** no module `github.com/mb-89/kern` can be fetched yet, so the application holds
+- **kern beside it:** kern's module (the path `kern/go.mod` names) cannot be fetched yet, so the application holds
   kern's source at the pin in `kern/`, and its `go.mod` replaces the module by it.
 - **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery, the `[tests]` budget
