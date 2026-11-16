@@ -6930,7 +6930,7 @@ def test_switched_on_refresh_and_the_unread_refusal_mark_an_outside_comment(
 # The form check of the filing commands (README "Forms"): se.toml [forms] at the integration branch.
 
 FORMS = work_tickets.sibling("forms")
-WORK_FORM = FORMS.load(PROJECT)["work"]
+WORK_FORM = FORMS.load(PROJECT, tree=True)["work"]
 WORK_TITLE = WORK_FORM.example["title"]
 WORK_FIELDS = dict(WORK_FORM.example["fields"])
 

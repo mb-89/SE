@@ -4316,8 +4316,18 @@ def checked_name(command: str, name: str) -> str:
     """`name` where it follows the name rule (or is of the old form), else refused, naming what is
     wrong and how to shorten it."""
     name = name.strip()
+    refusal = name_refusal(name)
+    if refusal:
+        raise QueueError(f"{command}: {refusal}")
+    return name
+
+
+def name_refusal(name: str) -> str:
+    """Why `name` breaks the name rule, with a shorter name to use; empty where `checked_name`
+    accepts it. The forms' title shape (forms/ticket.toml) names it."""
+    name = name.strip()
     if NAME_PATTERN.fullmatch(name) or OLD_NAME_PATTERN.fullmatch(name):
-        return name
+        return ""
     words = [word for word in re.split(r"-+", name) if word]
     wrong = ([f"it has {len(words)} words"] if len(words) > NAME_WORDS else [])
     if re.search(r"[A-Z]", name):
@@ -4328,8 +4338,8 @@ def checked_name(command: str, name: str) -> str:
     if re.search(r"--|^-|-$", name):
         wrong.append("its dashes are not single dashes between words")
     hint = short_name(name)
-    raise QueueError(
-        f"{command}: the name {name!r} breaks the name rule"
+    return (
+        f"the name {name!r} breaks the name rule"
         + (f" ({'; '.join(wrong)})" if wrong else "")
         + f": a name is 1 to {NAME_WORDS} words of lowercase letters and digits joined by single "
         f"dashes, such as `{NAME_EXAMPLE}`; keep the words that matter, "

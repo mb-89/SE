@@ -1,5 +1,6 @@
-# The owner's ticket schema: a title in plain words, then Situation, Problem, Goal, Approach,
-# Steps, Check and an optional Depends on. scripts/forms.py's docstring owns this file's format.
+# The owner's ticket schema: a title that is a name under the name rule, then Situation, Problem,
+# Goal, Approach, Steps, Check and an optional Depends on. scripts/forms.py's docstring owns this
+# file's format.
 name = "ticket"
 reader = "owner"
 says = "An issue the owner reads: what is, what is wrong, what should be, how, and how we know."
@@ -29,8 +30,8 @@ name = "title"
 kind = "line"
 source = "title"
 required = true
-shape = "words"
-says = "The GitHub title in plain words: what changes, for whom; never repeated in the body."
+shape = "work_tickets:name_refusal"
+says = "The name: 1 to 5 lowercase words joined by dashes, such as `branch-cleanup-on-pr-close`; never repeated in the body."
 
 [[fields]]
 name = "situation"
@@ -91,10 +92,10 @@ none_ok = true
 says = "The issues that must be done first, each linked and named, or None."
 
 [example]
-title = "Say in plain words what each issue is about"
+title = "plain-issue-titles"
 
 [example.fields]
-title = "Say in plain words what each issue is about"
+title = "plain-issue-titles"
 situation = "Issues are titled by their branch name."
 problem = "The owner cannot tell from the list what an issue changes."
 goal = "Every issue title says in plain words what changes."

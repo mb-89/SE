@@ -42,8 +42,9 @@ says = "The outcome, where the outside issue does not say it."
 name = "package_kind"
 kind = "choice"
 heading = "Package kind"
-choices = ["standard", "discovery", "breaking", "patch", "minor", "major"]
-says = "standard, discovery (read-only research) or breaking (a major release)."
+choices = ["standard", "discovery", "breaking", "patch", "minor", "major",
+           "work_tickets:RELEASE_KINDS"]
+says = "standard, discovery (read-only research), breaking (a major release), or a kind of work, as `route --type` takes it."
 
 [[fields]]
 name = "blocked_by"
