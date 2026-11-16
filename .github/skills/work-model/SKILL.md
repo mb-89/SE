@@ -717,6 +717,9 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
   `pr-body`, `docs`, `format`, `metrics` and `field-report --check`.
+  - Where `[tests] ci = false` ([Land without CI](#land-without-ci)), `push` and `verified`
+    read the integrator's status through gh alone; without it they accept none, and the
+    local verdicts decide.
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
   check the result through git with `--read-back` (README
