@@ -1,0 +1,128 @@
+# SE's not-switches: the SE_* names SE's code quotes and the se.toml keys that flip no
+# behaviour, each with its why: a name that only SE sets for its own steps, or that holds a
+# path, a list or a value rather than a choice. The drift list of scripts/se_switches.py leaves
+# them out; core.toml's header owns the notation of a key name.
+
+[[not_switch]]
+name = "SE_BASH_ARGC"
+why = "set by the PowerShell hand-off for its own bash run: the count of the arguments it hands over"
+
+[[not_switch]]
+name = "SE_BASH_ARG_"
+why = "the prefix of the SE_BASH_ARG_<i> variables the PowerShell hand-off sets for its own bash run, one per argument"
+
+[[not_switch]]
+name = "SE_BASH_ARG_0"
+why = "set by the PowerShell hand-off for its own bash run: the script it hands over"
+
+[[not_switch]]
+name = "SE_BASH_RUN"
+why = "set by the PowerShell hand-off for its own bash run: the code that rebuilds the arguments"
+
+[[not_switch]]
+name = "SE_CLOUD_AGENT"
+why = "a value: the agent a cloud start names, the fallback of --cloud-agent (scripts/work_tickets.py)"
+
+[[not_switch]]
+name = "SE_CLOUD_MARKS"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the variables that mark a cloud or CI run"
+
+[[not_switch]]
+name = "SE_COMPONENT_KINDS"
+why = "a value: the release kind each changed component takes, which the release guard reads (scripts/component_versions.py)"
+
+[[not_switch]]
+name = "SE_HOOK_HOST"
+why = "set by the hooks file scripts/se_plugin.py generates, to copilot (line 517), and read by scripts/hosts.sh (line 40): SE names the host for its own hooks"
+
+[[not_switch]]
+name = "SE_HOOK_HOSTS"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the variable a hook file names its host in, and its hosts"
+
+[[not_switch]]
+name = "SE_HOST_MARKS"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the variables that mark each host"
+
+[[not_switch]]
+name = "SE_MCP_PLUGIN_FOLDER"
+why = "set by scripts/se_mcp.sh for the binary it starts: the plugin folder, a path"
+
+[[not_switch]]
+name = "SE_METRICS"
+why = "a path: where scripts/metrics.py writes its lines, else ~/.se/metrics.jsonl"
+
+[[not_switch]]
+name = "SE_PAYLOAD_HOST"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the payload key that names the host"
+
+[[not_switch]]
+name = "SE_PAYLOAD_KEYS"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the payload keys each host spells its own way"
+
+[[not_switch]]
+name = "SE_PRIVATE_TERMS"
+why = "a path of the retired machine-level list; scripts/public_check.py stops while one is set and names where its terms go"
+
+[[not_switch]]
+name = "SE_PROJECT_VARIABLES"
+why = "a shell array in scripts/hosts.sh, not an environment variable: the variables that name a hook's project"
+
+[[not_switch]]
+name = "SE_SESSION_CWD"
+why = "a path: the session's folder, set by the hooks and MCP config scripts/se_plugin.py generates"
+
+[[not_switch]]
+name = "SE_START_REFRESHED"
+why = "set by scripts/bootstrap.sh for its own one-time re-run after a refresh (the start-refresh block): the notes it carries over"
+
+[[not_switch]]
+name = "[modules]"
+why = "the modules a repository pins: each one's url and version, values"
+
+[[not_switch]]
+name = "[outside]"
+why = "the issue numbers already read per outside repository, values"
+
+[[not_switch]]
+name = "[roles]"
+why = "the outside skills each role relies on, lists"
+
+[[not_switch]]
+name = "[binary] release"
+why = "a path: the release pin of the se binary"
+
+[[not_switch]]
+name = "[timeline] repositories"
+why = "a list: the repositories the Timeline reads"
+
+[[not_switch]]
+name = "[project] version"
+why = "a value: the project's released version"
+
+[[not_switch]]
+name = "[project] release_build"
+why = "a command: what a release runs to build"
+
+[[not_switch]]
+name = "[project] identity"
+why = "a value: the project's commit identity"
+
+[[not_switch]]
+name = "[project] authored_content"
+why = "a list: the globs of the project's authored content"
+
+[[not_switch]]
+name = "[tests] command"
+why = "a command: the complete suite"
+
+[[not_switch]]
+name = "[tests] target_seconds"
+why = "a value: the suite's time target"
+
+[[not_switch]]
+name = "[tests] limit_seconds"
+why = "a value: the suite's time limit"
+
+[[not_switch]]
+name = "[tests] beside"
+why = "the suites declared beside the main one, each a command, a folder and budgets"

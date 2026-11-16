@@ -14,7 +14,11 @@
 #   other    the state of any other value; default set
 #   fold     true where the reader compares the value case-insensitively
 #   help     the section that owns its help text
-# A [[not_switch]] names an SE_* variable that flips no behaviour, with why.
+# A [[not_switch]] names, with why, what flips no behaviour: an SE_* variable, or se.toml keys as
+#   [table]        every key under that table
+#   [table] key    table.key and every key under it
+# matched by whole dotted parts ([outside] covers outside.SE, not outside-text.envelope); only the
+# drift list reads them.
 
 [[switch]]
 name = "SE_KERN"
