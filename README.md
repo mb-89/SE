@@ -424,7 +424,10 @@ version = "^1.4"                             # in place of ref: a semver range o
 ```
 
 - `url`: the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in
-  the machine-local file below, never here.
+  the machine-local file below, never here. A URL starting `../` or `./` is relative to the
+  checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository
+  `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin
+  refuses it.
 - `ref`: the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only
   releases; `update` moves it.
 - `version`: in place of `ref`, a semantic version range of the module's release tags
