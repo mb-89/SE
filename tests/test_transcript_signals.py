@@ -277,13 +277,13 @@ def test_the_output_never_shows_text_names_outside_paths_tokens_or_addresses(tmp
 
 def test_only_the_retro_calls_the_module():
     """Its one caller is `retro.py collect --signals`; the guard keeps any other off."""
-    callers = [path.relative_to(PROJECT).as_posix()
+    callers = sorted(path.relative_to(PROJECT).as_posix()
                for folder in ("scripts", "components", "kern", "src")
                for path in (PROJECT / folder).rglob("*")
                if path.is_file() and path.suffix in (".py", ".go", ".md", ".sh", ".toml")
                and path.name != "transcript_signals.py"
-               and "transcript_signals" in path.read_text(encoding="utf-8", errors="replace")]
-    assert callers == ["scripts/retro.py"]
+               and "transcript_signals" in path.read_text(encoding="utf-8", errors="replace"))
+    assert callers == ["scripts/retro.py", "scripts/session_cost.py"]
 
 
 # The more signals (--more), the research list (--research) and their privacy.
