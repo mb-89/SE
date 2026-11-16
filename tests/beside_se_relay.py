@@ -341,6 +341,7 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
         threading.Thread(target=lambda: lines.extend(call.stderr), daemon=True).start()
         answered: list[str] = []
         nexts: list[str] = []
+        refusals: list[str] = []
         end = time.monotonic() + 120
         while call.poll() is None and time.monotonic() < end:
             for tool, input_ in told(kern, checkout):
@@ -355,6 +356,12 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
                              cwd=checkout, stdin=payload)
                 assert posted.returncode == 0, posted.stderr
                 answered.append(f"{tool} {input_.get('method') or ''}".strip())
+                if tool == "list_pull_requests":  # the same answer again: an old step's, refused
+                    again = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
+                                cwd=checkout, stdin=payload)
+                    assert again.returncode == 0, again.stderr
+                    refusals.append(json.loads(again.stdout)["hookSpecificOutput"]
+                                    ["additionalContext"].splitlines()[0])
             time.sleep(0.05)
         if call.poll() is None:
             call.kill()
@@ -370,6 +377,10 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
         ], answered
         assert "Integrated pull request #7" in out, out
         assert len(nexts) == 1 and "1. list_issues {" in nexts[0], nexts  # se_relay.py next
+        assert re.search(r"^\s+step \d+\b", nexts[0], re.M), nexts  # each told step's number
+        assert len(refusals) == 1 and re.fullmatch(r"step \d+ is answered: (the current step is "
+                                                   r"\d+|kern's GitHub relay waits for no "
+                                                   r"numbered step now)", refusals[0]), refusals
         step = next(line for line in lines if "relay: list_issues" in line)
         assert "se_relay.py next --root" in step, step  # the step line names that command
         landed = door(origin, "rev-parse", "refs/heads/main")
