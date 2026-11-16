@@ -3,14 +3,27 @@ failing and a passing fixture, the command, and the contracts with the writers S
 
 from __future__ import annotations
 
+import ast
 import json
+import re
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+import deck
 import fake_git
 import forms
 import outside_text
+import overhaul
+import retro
+import review
+import test_deck
+import test_overhaul
+import test_retro
+import test_review
+import test_work_ticket_issues as issue_tests
 import work_tickets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,9 +114,16 @@ uv run pytest
 # Loading
 
 
+ISSUE_FORMS = ("ticket", "work", "routed")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
+            "overhaul", "decision")
+
+
 def test_every_form_loads_with_its_actions_and_the_terms(catalog):
-    assert set(catalog) == {"ticket", "work", "routed"}
-    assert all(form.actions == forms.ACTIONS for form in catalog.values())
+    assert set(catalog) == {*ISSUE_FORMS, *ADAPTERS}
+    assert all(catalog[name].actions == forms.ISSUE_ACTIONS for name in ISSUE_FORMS)
+    assert all(catalog[name].is_adapter for name in ADAPTERS)
+    assert not any(catalog[name].is_adapter for name in ISSUE_FORMS)
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == forms.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -221,7 +241,7 @@ def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(cat
 
 
 def test_parse_of_render_gives_each_example_back(catalog):
-    for form in catalog.values():
+    for form in (catalog[name] for name in ISSUE_FORMS):
         example = dict(form.example["fields"])
         title = example.get("title")
         document = forms.parse(form, forms.render(form, example), title)
@@ -254,7 +274,7 @@ def test_select_takes_the_marker_then_the_conditions_then_the_plain_form(catalog
 
 def test_select_without_a_form_for_the_action_is_free_form(tmp_path):
     write_form(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.edit"]\n'))
-    assert forms.select(forms.load(tmp_path, tree=True), "issue.create", "", "") is None
+    assert forms.select(forms.load(tmp_path, tree=True), "issue.create", "", "").form is None
 
 
 # Refuse rules: one failing and one passing fixture each
@@ -517,8 +537,10 @@ def test_draft_prints_the_empty_form_with_its_says(capsys, catalog):
 def test_list_names_every_form_with_its_actions(capsys):
     assert forms.main(["list", "--tree"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert [line.split(" ")[0] for line in out] == ["routed", "work", "ticket"]
-    assert all("issue.create, issue.edit" in line for line in out)
+    names = [line.split(" ")[0] for line in out]
+    assert sorted(names) == sorted((*ISSUE_FORMS, *ADAPTERS))
+    assert all("issue.create, issue.edit" in line for line in out if line.split(" ")[0]
+               in ISSUE_FORMS)
 
 
 @pytest.mark.parametrize("arguments, error", [
@@ -535,3 +557,352 @@ def test_a_missing_argument_exits_2():
     with pytest.raises(SystemExit) as stopped:
         forms.main(["check", "work", "--tree"])
     assert stopped.value.code == 2
+
+
+# Adapters: the texts SE already writes and checks, registered as they are
+
+
+REPO = "github.com/o/r"
+ISSUE_URL = f"https://{REPO}/issues/7"
+PULL_URL = f"https://{REPO}/pull/5"
+HOME = {REPO}
+
+
+def adapter_verdict(form: forms.Form, body: str, title: str | None = None) -> list[str]:
+    """The refusals of `form` on `body`, without the adapter's name before each."""
+    return [finding.fix.removeprefix(f"{form.name}: ") for finding
+            in forms.check(form, forms.parse(form, body, title)) if finding.severity == forms.REFUSE]
+
+
+def parametrized(test, index: int = 0) -> list:
+    """The cases an existing test is parametrized with, its own fixtures as they stand."""
+    return list(test.pytestmark[index].args[1])
+
+
+def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
+    assert forms.main(["list", "--tree"]) == 0
+    lines = {line.split(" ")[0]: line for line in capsys.readouterr().out.splitlines()}
+    assert "pr.create, pr.edit: checker work_tickets:field_report_problems:" in lines["field-report"]
+    assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
+    assert "checker retro:judgment_problems" in lines["retro"]
+    assert "checker overhaul:judgment_problems" in lines["overhaul"]
+    assert "deck.build: checker deck:_explains:" in lines["decision"]
+    assert ("pr.merge: checker work_tickets:merge_release_kind, title "
+            "work_tickets:INTEGRATION_SUBJECT_PATTERN:") in lines["merge-message"]
+    assert "pr.create, pr.edit: checker none, 3 lines:" in lines["landing"]
+    assert "pr.create, pr.edit: checker none (no field required):" in lines["housekeeping"]
+
+
+def test_every_name_an_adapter_gives_resolves(catalog):
+    for name in ADAPTERS:
+        form = catalog[name]
+        for reference in (form.checker, form.adapter.get("extract"), form.adapter.get("when"),
+                          form.adapter.get("title_rule")):
+            if reference:
+                assert forms.resolve(reference, form) is not None, (name, reference)
+
+
+@pytest.mark.parametrize("top, tables, error", [
+    ('checker = "review:checked_report"\n', '[[fields]]\nname = "goal"\nkind = "text"\n'
+     'heading = "Goal"\n', "a form with fields takes no checker"),
+    ('checker = "review.checked_report"\n', "", "is no \"<module>:<name>\""),
+    ('checker = "review:checked_report"\n', '[adapter]\nread = "body"\n',
+     "[adapter] has unknown keys read"),
+    ('checker = "deck:_explains"\n', '[adapter]\nresult = "truth"\n', "needs its refusal"),
+    ('checker = "deck:_explains"\n', '[adapter]\nresult = "maybe"\n', "result is 'maybe'"),
+    ("", '[[adapter.lines]]\npattern = "x"\n', "each [[adapter.lines]] has a pattern and says"),
+], ids=["fields-and-checker", "no-reference", "unknown-key", "truth-without-refusal",
+        "unknown-result", "line-without-says"])
+def test_an_adapter_that_breaks_the_format_does_not_load(tmp_path, top, tables, error):
+    write_form(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n{top}\n'
+               f'[applies]\nactions = ["comment.create"]\n\n{tables}')
+    with pytest.raises(forms.FormError, match=re.escape(error)):
+        forms.load(tmp_path, tree=True)
+
+
+@pytest.mark.parametrize("applies, error", [
+    ('actions = ["pr.create"]\nbase = "next"\n', "the one base is \"integration\""),
+    ('actions = ["pr.create"]\nbranch = "main"\n', "[applies] has unknown keys branch"),
+    ('actions = ["pr.delete"]\n', "action 'pr.delete' is none of"),
+])
+def test_applies_refuses_what_selection_cannot_read(tmp_path, applies, error):
+    write_form(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n\n'
+               f'[applies]\n{applies}')
+    with pytest.raises(forms.FormError, match=re.escape(error)):
+        forms.load(tmp_path, tree=True)
+
+
+def test_an_adapter_body_is_never_marked_and_has_no_fields_to_render(catalog):
+    body = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL)
+    landing = catalog["landing"]
+    assert forms.render(landing, forms.parse(landing, body)) == body
+    assert forms.FORM_MARKER.format(name="landing") not in forms.render(landing,
+                                                                        forms.parse(landing, body))
+    with pytest.raises(forms.FormError, match="landing is an adapter and has no fields"):
+        forms.render(landing, {})
+    assert forms.draft(landing).startswith("<!-- landing: ")
+
+
+# Selection
+
+
+def test_select_gives_landing_on_integrates_open_pull_step_and_merge_message_on_its_squash(catalog):
+    title = work_tickets.integration_merge_message(
+        "feat/forms-adapters-20261116", 7, 5, True, "## Goal\n\nEvery text selects a form.\n")
+    message = "Release-kind: minor"
+    description = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1})
+    plan = work_tickets.landing_plan(REPO, "land/feat/x", "main", "a" * 40, "b" * 40, title,
+                                     message, description, "then", REPO)
+    steps = {step.action: step.arguments for step in plan.steps}
+    opened, squashed = steps["open_pull"], steps["squash"]
+    form, found = forms.verdict(catalog, "pr.create", opened["body"], opened["title"],
+                                base=opened["base"], repo=REPO, home=HOME)
+    assert form.name == "landing" and found == []
+    form, found = forms.verdict(catalog, "pr.merge", squashed["commit_message"],
+                                squashed["commit_title"], base="main", repo=REPO, home=HOME)
+    assert form.name == "merge-message" and found == []
+
+
+@pytest.mark.parametrize("title, message, refusal", [
+    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate ([^\\\\s:()]+)'"),
+    ("Integrate feat/x", "No trailer.", "it states no kind"),
+    ("Integrate feat/x", "Release-kind: minor\n\nRelease-kind: patch", "it states 'minor', 'patch'"),
+    ("Integrate feat/x", "Release-kind: huge", "it states 'huge'"),
+], ids=["title", "no-trailer", "two-trailers", "unknown-kind"])
+def test_the_merge_message_holds_its_title_and_merge_release_kinds_rule(catalog, title, message,
+                                                                         refusal):
+    refused = adapter_verdict(catalog["merge-message"], message, title)
+    assert len(refused) == 1 and refusal in refused[0]
+    if "Integrate" in title:
+        with pytest.raises(work_tickets.QueueError) as raised:
+            work_tickets.merge_release_kind("", title, message)
+        assert refused == [str(raised.value)]
+
+
+@pytest.mark.parametrize("change, says", [
+    (lambda body: body.replace("Refs ", "See "), "the first line is `Refs <work issue url>`"),
+    (lambda body: body.replace("Lands ", "Brings "), "a line `Lands <work pull request url>"),
+], ids=["no-refs", "no-lands"])
+def test_the_landing_needs_each_line_landing_description_writes(catalog, change, says):
+    body = change(work_tickets.landing_description(PULL_URL, 5, ISSUE_URL))
+    form, found = forms.verdict(catalog, "pr.create", body, "Integrate feat/x", base="main")
+    assert form.name == "landing" and [finding.rule for finding in found] == ["line"]
+    assert says in found[0].fix
+
+
+def test_a_work_issue_carrying_the_decision_marker_is_refused(catalog):
+    body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n<!-- se:form decision -->")
+    form, found = forms.verdict(catalog, "issue.create", body, "feat/forms-20261116")
+    assert form.name == "work"
+    refused = [finding for finding in found if finding.rule == "form"]
+    assert len(refused) == 1 and refused[0].severity == forms.REFUSE
+    assert "the decision form does not apply to issue.create" in refused[0].fix
+
+
+def test_a_housekeeping_pull_request_needs_no_field_report_and_main_without_the_label_does(catalog):
+    body = "Tidy the README's wording.\n"
+    form, found = forms.verdict(catalog, "pr.create", body, "Tidy the README", base="main",
+                                labels=["housekeeping"])
+    assert form.name == "housekeeping" and found == []
+    form, found = forms.verdict(catalog, "pr.create", body, "Tidy the README", base="main")
+    assert form.name == "field-report"
+    assert [finding.rule for finding in found] == ["checker"]
+    assert "holds no field report" in found[0].fix
+
+
+def test_a_marker_narrows_within_the_allowed_set(catalog):
+    body = f"Refs {ISSUE_URL}\n\n" + issue_tests.reported_at(issue_tests.TIP)
+    chosen = forms.select(catalog, "pr.create", body, "feat/x", base="main", labels=["housekeeping"])
+    assert chosen.name == "field-report" and chosen.findings == ()
+
+
+@pytest.mark.parametrize("action, body, where", [
+    ("comment.create", "Integrated in `abc1234`.\n", {}),
+    ("comment.create", "<!-- se:fleet -->\n<!-- se:handled -->\nRouted.\n", {}),
+    ("comment.edit", "<!-- se:open-points " + "a" * 40 + " -->\n1. A point.\n"
+     "<!-- se:open-points:end -->\n", {}),
+    ("comment.create", work_tickets.REFS_REQUEST_MARKER + "\nOne-way ref change.\n", {}),
+    ("pr.create", "Any text.\n", {"base": "scratch"}),
+    ("pr.create", "Any text.\n", {"base": "main", "repo": "github.com/elsewhere/x",
+                                  "home": HOME}),
+    ("issue.create", "Any text.\n", {"repo": "github.com/elsewhere/x", "home": HOME}),
+], ids=["comment", "fleet-and-handled", "open-points", "refs", "other-branch", "other-repo-pull",
+        "other-repo-issue"])
+def test_free_texts_select_no_form(catalog, action, body, where):
+    chosen = forms.select(catalog, action, body, "A title", **where)
+    assert chosen.form is None and chosen.findings == ()
+
+
+def test_an_adapter_marker_outside_the_allowed_set_is_refused(catalog):
+    body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n" + review.VERDICT_MARKER)
+    chosen = forms.select(catalog, "issue.create", body, "feat/forms-20261116")
+    assert chosen.name == "work"
+    assert [finding.fix for finding in chosen.findings] == [
+        "the review form does not apply to issue.create: it shapes comment.create, comment.edit, "
+        "and the body carries its marker"]
+
+
+def test_home_is_origin_and_the_outside_repositories(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    fake_git.git("-C", str(tmp_path), "remote", "add", "origin", "https://github.com/o/r.git")
+    (tmp_path / "se.toml").write_text('[outside]\n"github.com/other/side" = 12\n', encoding="utf-8")
+    home = forms.home_repositories(tmp_path)
+    assert home == {"github.com/o/r", "github.com/other/side"}
+    catalog = forms.load(ROOT, tree=True)
+    assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116", repo="o/r",
+                        home=home).name == "work"
+    assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116",
+                        repo="github.com/other/side", home=home).name == "work"
+
+
+# Same verdicts: each adapter answers as the check it names, on that check's own fixtures
+
+
+def field_report_variants() -> dict[str, str]:
+    """The field reports tests/test_work_ticket_issues.py checks, as descriptions carry them."""
+    complete = issue_tests.reported_at(issue_tests.TIP)
+    begin, end = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
+    return {
+        "complete": complete,
+        "as-written": issue_tests.COMPLETE_REPORT,
+        "unfilled": f"{begin}\n**Work issue:** #<n>  **Branch:** `<branch>` `<integration branch>` "
+                    f"`<commit>`\n{end}\n",
+        "unmarked": complete.replace(begin, ""),
+        "placeholders-below": complete.replace(
+            "## Spec gaps\n\nNone.", "## Spec gaps\n\nThe draft fills `#<n>`, `<branch>`."),
+        **{f"result-{result}": complete.replace("**Result:** complete", f"**Result:** {result}")
+           for result, _ in parametrized(issue_tests.test_field_report_requires_an_exact_result_header)},
+        "no-decisions-table": complete.replace(
+            "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|\n", ""),
+        "wrong-kind": complete.replace("**Re-integration kind:** patch", "**Re-integration kind:** huge"),
+    }
+
+
+@pytest.mark.parametrize("name", list(field_report_variants()))
+def test_the_field_report_adapter_gives_the_structure_checks_verdict(catalog, name):
+    report = field_report_variants()[name]
+    description = f"Refs {ISSUE_URL}\n\n{report}"
+    try:
+        expected = work_tickets.field_report_problems(
+            work_tickets.report_in(description, "The pull request description"), None)
+    except work_tickets.QueueError as error:
+        expected = [str(error)]
+    assert adapter_verdict(catalog["field-report"], description) == expected
+    form, _ = forms.verdict(catalog, "pr.edit", description, "feat/x", base="main")
+    assert form.name == "field-report"
+
+
+def review_comment(given: object) -> str:
+    """The comment `review.py file` posts for the report `given`, or, for one it refuses, the
+    same comment shape around it."""
+    try:
+        return review.verdict_comment(5, review.checked_report(given), False)
+    except work_tickets.QueueError:
+        data = {"pull": 5, **given, "landed": False} if isinstance(given, dict) else given
+        return (f"{review.VERDICT_MARKER}\n## Review of pull request #5\n\n"
+                + review.fenced(json.dumps(data, indent=2), "json") + "\n")
+
+
+REVIEW_CASES = [given for given, _ in parametrized(
+    test_review.test_a_verdict_without_its_evidence_is_refused_and_writes_nothing)] + [
+    test_review.report(),
+    test_review.report(verdict="pass with open points", findings=[test_review.finding("x")]),
+    test_review.report(verdict="decline", findings=[test_review.finding("Breaks", blocking=True)]),
+]
+
+
+@pytest.mark.parametrize("given", REVIEW_CASES)
+def test_the_review_adapter_gives_checked_reports_verdict(catalog, given):
+    try:
+        review.checked_report(given)
+        expected = []
+    except work_tickets.QueueError as error:
+        expected = [str(error)]
+    body = review_comment(given)
+    assert adapter_verdict(catalog["review"], body) == expected
+    form, found = forms.verdict(catalog, "comment.create", body, repo=REPO, home=HOME)
+    assert form.name == "review" and [finding.fix for finding in found
+                                      if finding.severity == forms.REFUSE] == [
+        f"review: {problem}" for problem in expected]
+
+
+def retro_block(**changes: object) -> dict:
+    """The judgment tests/test_retro.py's judged draft holds, `changes` applied."""
+    block = {"window": {"retro": 30}, "previous": {},
+             "classes": [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one"}],
+             "findings": [test_retro.finding(),
+                          test_retro.finding(title="Make the field report a rule of the rule book",
+                                             home=retro.RULE_BOOK, controversial=True,
+                                             why="it changes a rule")],
+             "went_well": ["The fake door kept the tests fast."]}
+    return {**block, **changes}
+
+
+def marked_block(marker: str, block: dict) -> str:
+    return f"# The draft\n\nThe facts.\n\n{marker}\n" + review.fenced(json.dumps(block, indent=2),
+                                                                       "yaml") + "\n"
+
+
+@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
+    test_retro.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
+def test_the_retro_adapter_gives_judgment_problems_verdict(catalog, changes):
+    block = retro_block(**changes)
+    assert adapter_verdict(catalog["retro"], marked_block(retro.BLOCK_MARKER, block)) == \
+        retro.judgment_problems(block)
+
+
+def test_the_retro_report_links_its_block_and_warns_without_refusing(catalog):
+    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
+    text = retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
+                        "a" * 40)
+    form, found = forms.verdict(catalog, "comment.create", text, repo=REPO, home=HOME)
+    assert form.name == "retro"
+    assert [(finding.rule, finding.severity) for finding in found] == [("checker", forms.WARN)]
+    assert f"no {retro.BLOCK_MARKER} block" in found[0].fix
+
+
+def overhaul_block(**changes: object) -> dict:
+    """The judgment tests/test_overhaul.py's judged draft holds, `changes` applied."""
+    rules = [{"id": rule.id, "name": rule.name} for rule in overhaul.book_rules(ROOT)]
+    block = {"overhaul": 50, "rules": rules, "verdicts": test_overhaul.verdicts(),
+             "looked_at": {part: "Nothing to change." for part in overhaul.LOOKED_AT},
+             "findings": [test_overhaul.finding(),
+                          test_overhaul.finding(title="Name the speed of the suite as a rule",
+                                                rule="tst-002", place=overhaul.BOOK.as_posix())],
+             "went_well": ["The retros kept their blocks."]}
+    return {**block, **changes}
+
+
+@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
+    test_overhaul.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
+def test_the_overhaul_adapter_gives_judgment_problems_verdict(catalog, changes):
+    block = overhaul_block(**changes)
+    assert adapter_verdict(catalog["overhaul"], marked_block(overhaul.BLOCK_MARKER, block)) == \
+        overhaul.judgment_problems(block)
+
+
+def test_the_overhaul_report_passes_with_the_block_it_carries(catalog):
+    text = marked_block(overhaul.BLOCK_MARKER, overhaul_block())
+    posted = overhaul.report(text, overhaul.judged(text, 50), 50)
+    form, found = forms.verdict(catalog, "comment.create", posted, repo=REPO, home=HOME)
+    assert form.name == "overhaul" and found == []
+
+
+# The decks whose decision deck.py's section rule refuses: those its test names, and the silent
+# decision, which the build refuses for its missing bless first and which has no sections either.
+UNEXPLAINED = {*parametrized(
+    test_deck.test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options),
+    "decision-without-bless"}
+
+
+@pytest.mark.parametrize("name", list(test_deck.DECKS))
+def test_the_decision_adapter_gives_the_section_rule_of_deck_py(catalog, name):
+    notes, _ = test_deck.DECKS[name]
+    for note, text in notes.items():
+        nodes = forms._nodes(text)
+        expected = deck._holds_pugh(nodes) and name in UNEXPLAINED
+        refused = adapter_verdict(catalog["decision"], text)
+        assert bool(refused) == expected, (name, note)
+        assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
+    form, _ = forms.verdict(catalog, "deck.build", next(iter(notes.values())))
+    assert form.name == "decision"

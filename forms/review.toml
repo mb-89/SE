@@ -1,0 +1,16 @@
+# The review comment `review.py file` posts: its JSON block, checked by review.py's own
+# checked_report. scripts/forms.py's docstring owns this file's format.
+name = "review"
+reader = "fleet"
+says = "A cold review's one comment: what a person reads, then the JSON block the retro reads."
+checker = "review:checked_report"
+
+[applies]
+actions = ["comment.create", "comment.edit"]
+marker = "<!-- se:review -->"
+order = 10
+
+[adapter]
+json_after = "<!-- se:review -->"
+drop = { "." = ["pull", "landed"] }  # what verdict_data adds beside the report
+result = "raises"

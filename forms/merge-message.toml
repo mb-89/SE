@@ -1,0 +1,18 @@
+# The squash commit `integrate` lands: its title and its one Release-kind trailer, the rule
+# work_tickets.py's merge_release_kind applies. scripts/forms.py's docstring owns this file's format.
+name = "merge-message"
+reader = "fleet"
+says = "An integration's squash commit: `Integrate <branch>` and one Release-kind trailer."
+checker = "work_tickets:merge_release_kind"
+
+[applies]
+actions = ["pr.merge"]
+base = "integration"
+fallback = true
+
+[adapter]
+title_rule = "work_tickets:INTEGRATION_SUBJECT_PATTERN"
+text_as = "message"
+title_as = "subject"
+with = { commit = "" }
+result = "raises"

@@ -1,0 +1,18 @@
+# The retro's judged block, checked by retro.py's own judgment_problems. Its report comment links
+# the committed retro doc that holds the block, so a comment without one has nothing to judge here
+# and warns. scripts/forms.py's docstring owns this file's format.
+name = "retro"
+reader = "fleet"
+says = "A retro's report or draft: its judged block, under its marker."
+checker = "retro:judgment_problems"
+
+[applies]
+actions = ["comment.create", "comment.edit"]
+marker = "<!-- se:retro-report -->"
+order = 20
+
+[adapter]
+json_after = "<!-- se:retro-yaml -->"
+drop = { findings = ["finding", "kind"] }  # what judged adds to each finding
+missing = "warn"
+result = "problems"

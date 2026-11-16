@@ -1,0 +1,20 @@
+# The field report, the description of a work pull request: structure only, through the check
+# work_tickets.py owns. `deliver`, the job `check` and `integrate` keep the full check with its
+# evidence against the work issue. scripts/forms.py's docstring owns this file's format.
+name = "field-report"
+reader = "fleet"
+says = "A work pull request's description: the field report between its markers."
+checker = "work_tickets:field_report_problems"
+
+[applies]
+actions = ["pr.create", "pr.edit"]
+base = "integration"
+marker = "<!-- se:field-report -->"
+order = 30
+fallback = true
+
+[adapter]
+extract = "work_tickets:report_in"
+extract_with = { where = "The pull request description" }
+none = ["issue_body"]
+result = "problems"

@@ -2,14 +2,18 @@
 """Forms: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 No command checks with forms yet: nothing calls this module but its tests and its own command line.
-A later piece switches the check on for the commands that file and edit issues.
+A later piece switches the check on for the commands that send a body to GitHub.
 
 **Form files.** One TOML file per form, `forms/<name>.toml`; `forms/terms.toml` is no form but the
 list of inside terms (below). A form declares:
 
 - `name`, `reader` (`owner` or `fleet`: who reads what it shapes) and `says`, one line;
-- `[applies] actions`, the actions it shapes (`issue.create`, `issue.edit`): required, so a form
-  without it does not load; `order` and the conditions `marker` and `title` (selection, below);
+- `[applies] actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
+  `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`): required, so a form
+  without it does not load; `order`, the conditions `marker`, `marker_pattern` (a regular
+  expression a whole line matches) and `title`, and the filters `labels` (every one present) and
+  `base = "integration"` (a pull request into the integration branch); `fallback` (selection,
+  below);
 - `extends`, another form whose fields, rules, actors and `[applies]` it inherits; `remove` names
   inherited fields it drops, a field of the same name replaces the inherited one, and `order`
   lists its final field order (every field once) where the inherited order does not fit;
@@ -21,6 +25,28 @@ list of inside terms (below). A form declares:
 - `[scope]` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is.
+
+**Adapters.** A form without `[[fields]]` is an adapter: a text SE already writes and already
+checks elsewhere. It names that check, `checker = "<module>:<function>"` (a script beside this
+one), and the engine calls it instead of field rules of its own; `[adapter]` says how:
+
+- what the checker gets: the body, or `extract` (`"<module>:<function>"`, called with the body and
+  `extract_with`), or `json_after` (the data of the last fenced block after the last line that is
+  that marker), or `sections = true` (the body's headings and `pugh` fences as the obs nodes
+  deck.py reads); `drop` maps `"."` (the data itself) or a key (its list's items) to the keys the
+  writer adds beside what the checker reads, left out; `missing` (`refuse`, `warn` or `pass`)
+  where there is none;
+- how it is called: the value first, or as `text_as`; the title as `title_as`; `with`, constant
+  keyword arguments, and `none`, the ones passed as None; `when` (`"<module>:<function>"`), only
+  where that holds for the value;
+- what it answers (`result`): `problems` (a list of texts, each a refusal), `raises` (its error is
+  the refusal) or `truth` (false refuses with `refusal`);
+- besides or instead: `title_rule`, a `"<module>:<NAME>"` pattern the title must match from its
+  start, and `[[adapter.lines]]`, each a `pattern` a whole line (with `first`, the first line)
+  must match, and what it `says`.
+
+The engine never adds `<!-- se:form <name> -->` to an adapter's body: `render` gives it back as it
+stands, and its findings name the field `body`.
 
 **Fields**, `[[fields]]`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
 fills it), `says` (what belongs there, the fix's wording and the draft's comment), `exact_heading`
@@ -46,30 +72,47 @@ the form marker alone, after the scope's marker), then `## ` headings. A section
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
-**Selection** (`select`, for `issue.create` and `issue.edit`): among the forms that name the
-action, a body's own `<!-- se:form <name> -->` wins; then, by `[applies] order` (then name), the
-first form with conditions that all hold (`marker`: the body has that line; `title`: the title
-matches that regular expression); then the first form without conditions. None is free form.
+**Selection** (`select(forms, action, body, title, labels=, base=, integration=, repo=, home=)`),
+in this order:
+
+1. Free where `repo` is given and is not in `home`, the repositories SE writes to (origin and
+   se.toml `[outside]`, `home_repositories`).
+2. The allowed forms: those that name the action, whose `labels` the text carries and, with
+   `base = "integration"`, whose pull request goes into the integration branch.
+3. A marker only narrows the choice within the allowed set: a body's own
+   `<!-- se:form <name> -->` naming an allowed form wins. Such a line naming a form outside the
+   allowed set, or an adapter's marker of an adapter outside it, is a refused finding (rule
+   `form`), and selection goes on without it. SE's other markers (`se:fleet`, `se:handled` in a
+   comment, `se:open-points`, `se:refs-*`) name no form and select nothing on their own.
+4. By `[applies] order` (then name), the first allowed form with conditions that all hold
+   (`marker`, `marker_pattern`: the body has that line; `title`: the title matches).
+5. The first allowed form without conditions, or with `fallback = true`.
+6. None: free form. For a pull request into the integration branch this tries `landing` and
+   `housekeeping` before `field-report`; an unmarked comment, and a pull request into any other
+   branch, are free.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
 `choice`, `not-picked` (no `Not picked:` line), `duplicate` (the same text in two fields) and
 `dangling` (an SE command that does not exist, through `references.dangling` as
-`work_tickets.refuse_dangling` calls it). Warn-only rules, never refused: `words`, `actor`,
-`one-sentence`, `bare-number`, `board` (Status, Labels, Priority, Assignee or Milestone lines),
-`terms` (`forms/terms.toml`), `unnamed-entry` (a blocker without a name) and `title-shape`.
+`work_tickets.refuse_dangling` calls it); an adapter refuses with `checker`, `line` and `title`.
+Warn-only rules, never refused: `words`, `actor`, `one-sentence`, `bare-number`, `board` (Status,
+Labels, Priority, Assignee or Milestone lines), `terms` (`forms/terms.toml`), `unnamed-entry` (a
+blocker without a name) and `title-shape`.
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `forms/` at
 `origin/<integration branch>` through `git_door` where that ref holds forms, else from the working
 tree; `parse(form, body, title)` gives a `Document`; `render(form, document_or_fields)`;
-`check(form, document)` gives `Finding`s; `select(forms, action, body, title)`; `draft(form)`;
-`list_forms(forms)` (named so beside Python's `list`). All but `load` are pure.
+`check(form, document)` gives `Finding`s; `select(...)` gives a `Selection`, its form (None: free)
+and its findings; `verdict(forms, action, body, title, ...)` both at once; `draft(form)`;
+`list_forms(forms)` (named so beside Python's `list`). All but `load` and `home_repositories` are
+pure, but for the checkers an adapter names.
 
 **Command.** `forms.py check <form> (--body-file FILE | --fields FILE) [--title TEXT] [--tree]`
 prints at most 10 lines of findings and exits 0 when nothing refuses, 1 when something does, 2 on a
 usage error; `forms.py draft <form> [--json]` prints the empty form; `forms.py list` names every
-form with its actions. `--tree` reads the working tree's `forms/`. None writes a file, calls GitHub
-or starts a model.
+form with its actions and, for an adapter, its checker. `--tree` reads the working tree's `forms/`.
+None writes a file, calls GitHub or starts a model.
 """
 
 from __future__ import annotations
@@ -91,18 +134,27 @@ FLEET_MARKER = "<!-- se:fleet -->"
 FORM_MARKER = "<!-- se:form {name} -->"
 FORM_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:form ([\w-]+) -->[ \t]*$", re.MULTILINE)
 
-ACTIONS = ("issue.create", "issue.edit")
+ISSUE_ACTIONS = ("issue.create", "issue.edit")
+ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
+           "deck.build")
 READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
+ADAPTER_RULES = ("checker", "line", "title", "form")  # always refuse; an adapter has no [rules]
 WARN_RULES = ("words", "actor", "one-sentence", "bare-number", "board", "terms", "unnamed-entry",
               "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "actor", "one_sentence", "not_picked", "shape"}
 FORM_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields"}
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
+APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
+                "fallback"}
+ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
+                "title_as", "with", "none", "when", "result", "refusal", "title_rule", "lines"}
+RESULTS = ("problems", "raises", "truth")
+REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -188,6 +240,17 @@ class Form:
     scope: dict = dataclass_field(default_factory=dict)
     terms: tuple[Term, ...] = ()
     path: str = ""
+    marker_pattern: str = ""
+    labels: tuple[str, ...] = ()
+    base: str = ""
+    fallback: bool = False
+    checker: str = ""
+    adapter: dict = dataclass_field(default_factory=dict)
+
+    @property
+    def is_adapter(self) -> bool:
+        """Whether the form is an adapter: no fields of its own, a check SE already has."""
+        return not self.fields
 
     def field(self, name: str) -> Field | None:
         return next((item for item in self.fields if item.name == name), None)
@@ -326,6 +389,10 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
             raise FormError(f"{where}: extends {base!r}, which is no form in {FORMS}/")
         parent = _build(base, raw, terms, (*seen, name))
     applies = data.get("applies")
+    if isinstance(applies, dict) and set(applies) - APPLIES_KEYS:
+        raise FormError(f"{where}: [applies] has unknown keys "
+                        f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
+                        f"{', '.join(sorted(APPLIES_KEYS))}")
     if not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
             raise FormError(f"{where}: [applies] actions is required; name the actions the form "
@@ -365,6 +432,17 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         if rule in WARN_RULES and severity == REFUSE:
             raise FormError(f"{where}: rule {rule} only warns, never refuses; mark it warn")
     example = data.get("example", {})
+    adapter = _adapter(data, where, fields, parent)
+    base_branch = str(applies.get("base", parent.base if parent else ""))
+    if base_branch not in ("", "integration"):
+        raise FormError(f"{where}: [applies] base is {base_branch!r}; the one base is "
+                        "\"integration\", the integration branch")
+    marker_pattern = str(applies.get("marker_pattern", ""))
+    try:
+        re.compile(marker_pattern)
+    except re.error as error:
+        raise FormError(f"{where}: [applies] marker_pattern is no regular expression "
+                        f"({error})") from error
     return Form(
         name=name, reader=reader, says=str(data.get("says", parent.says if parent else "")),
         actions=actions, fields=tuple(fields), rules=rules,
@@ -373,7 +451,53 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         keep_unknown=bool(data.get("keep_unknown", parent.keep_unknown if parent else True)),
         actors=tuple(data.get("actors", parent.actors if parent else ())),
         example=example if example else {}, scope=dict(data.get("scope", {})),
-        terms=terms, path=where)
+        terms=terms, path=where, marker_pattern=marker_pattern,
+        labels=tuple(str(label) for label in applies.get("labels", parent.labels if parent else ())),
+        base=base_branch, fallback=bool(applies.get("fallback", False)),
+        checker=str(data.get("checker", "")), adapter=adapter)
+
+
+def _adapter(data: dict, where: str, fields: list[Field], parent: Form | None) -> dict:
+    """An adapter's `[adapter]` table, checked as far as it can be without importing its
+    checker; a form with fields takes none."""
+    adapter = data.get("adapter", {})
+    if fields:
+        if "checker" in data or adapter:
+            raise FormError(f"{where}: a form with fields takes no checker or [adapter]; an "
+                            "adapter is a form without [[fields]]")
+        return {}
+    if parent is not None:
+        raise FormError(f"{where}: an adapter extends no form")
+    if not isinstance(adapter, dict) or set(adapter) - ADAPTER_KEYS:
+        extra = sorted(set(adapter) - ADAPTER_KEYS) if isinstance(adapter, dict) else ["?"]
+        raise FormError(f"{where}: [adapter] has unknown keys {', '.join(extra)}; the keys are "
+                        f"{', '.join(sorted(ADAPTER_KEYS))} (scripts/forms.py's docstring)")
+    references = [data.get("checker", ""), adapter.get("extract", ""), adapter.get("when", ""),
+                  adapter.get("title_rule", "")]
+    for reference in references:
+        if reference and not REFERENCE.match(str(reference)):
+            raise FormError(f"{where}: {reference!r} is no \"<module>:<name>\" of a script "
+                            "beside scripts/forms.py")
+    if adapter.get("result", "problems") not in RESULTS:
+        raise FormError(f"{where}: [adapter] result is {adapter.get('result')!r}; one of "
+                        f"{', '.join(RESULTS)}")
+    if adapter.get("missing", REFUSE) not in (REFUSE, WARN, "pass"):
+        raise FormError(f"{where}: [adapter] missing is {adapter.get('missing')!r}; one of "
+                        "refuse, warn, pass")
+    if adapter.get("result") == "truth" and not adapter.get("refusal"):
+        raise FormError(f"{where}: [adapter] result \"truth\" needs its refusal, the fix a "
+                        "false answer gives")
+    for line in adapter.get("lines", []):
+        if set(line) - {"pattern", "first", "says"} or not line.get("pattern") or \
+                not line.get("says"):
+            raise FormError(f"{where}: each [[adapter.lines]] has a pattern and says, and may "
+                            "set first")
+        try:
+            re.compile(line["pattern"])
+        except re.error as error:
+            raise FormError(f"{where}: [[adapter.lines]] pattern {line['pattern']!r} is no "
+                            f"regular expression ({error})") from error
+    return dict(adapter)
 
 
 def _field(entry: dict, where: str) -> Field:
@@ -537,6 +661,9 @@ def value_of(item: Field, raw: str) -> object:
 
 def parse(form: Form, body: str, title: str | None = None) -> Document:
     """`body` read into `form`'s fields (the module docstring: reading)."""
+    if form.is_adapter:  # the body as it stands: its own check reads it
+        fields = {} if title is None else {"title": title}
+        return Document(form=form.name, fields=fields, source=body, read=dict(fields))
     text = FRONT_MATTER.sub("", body, count=1)
     document = Document(form=form.name, fields={}, source=text)
     if form.scope:
@@ -663,6 +790,11 @@ def _without_markers(text: str) -> str:
 def render(form: Form, document: Document | dict) -> str:
     """Canonical Markdown of `document` (a parsed Document, or a mapping of field values), as the
     module docstring's "Writing" says."""
+    if form.is_adapter:
+        if not isinstance(document, Document):
+            raise FormError(f"forms: {form.name} is an adapter and has no fields to render; the "
+                            "command that writes it writes its body")
+        return document.source  # never marked: the adapter's own writer owns its text
     if not isinstance(document, Document):
         document = Document(form=form.name, fields=dict(document))
     values = document.fields
@@ -758,7 +890,10 @@ def _labels(form: Form, document: Document, preamble: str) -> str:
 
 
 def draft(form: Form) -> str:
-    """The empty form as Markdown, each field's `says` as a comment."""
+    """The empty form as Markdown, each field's `says` as a comment; an adapter's says what
+    writes and checks it."""
+    if form.is_adapter:
+        return f"<!-- {form.name}: {form.says} -->\n<!-- {_checked_by(form)} -->\n"
     lines = []
     if form.scope:
         lines += [form.scope.get("after", ""), FORM_MARKER.format(name=form.name),
@@ -785,34 +920,133 @@ def draft_fields(form: Form) -> dict[str, object]:
             "field_says": {item.name: item.says for item in form.fields}}
 
 
+def _checked_by(form: Form) -> str:
+    """What checks an adapter: its checker, its title rule and its lines."""
+    parts = [f"checker {form.checker or 'none'}"]
+    if form.adapter.get("title_rule"):
+        parts.append(f"title {form.adapter['title_rule']}")
+    if form.adapter.get("lines"):
+        parts.append(f"{len(form.adapter['lines'])} lines")
+    return ", ".join(parts) + ("" if len(parts) > 1 or form.checker else " (no field required)")
+
+
 def list_forms(forms: dict[str, Form]) -> list[str]:
-    """One line per form: its name, reader, actions and what it says."""
-    return [f"{form.name} ({form.reader}): {', '.join(form.actions)}: {form.says}"
+    """One line per form: its name, reader, actions, an adapter's checker, and what it says."""
+    return [f"{form.name} ({form.reader}): {', '.join(form.actions)}: "
+            + (f"{_checked_by(form)}: " if form.is_adapter else "") + form.says
             for form in sorted(forms.values(), key=lambda item: (item.order, item.name))]
 
 
-def select(forms: dict[str, Form], action: str, body: str, title: str | None = None) -> Form | None:
-    """The form that shapes `body` for `action` (the module docstring: selection); None is free
-    form."""
+@dataclass(frozen=True)
+class Selection:
+    """What `select` chose: the form (None: free form) and the refused markers it met."""
+    form: Form | None
+    findings: tuple[Finding, ...] = ()
+
+    @property
+    def name(self) -> str | None:
+        return self.form.name if self.form else None
+
+
+def _repository(name: str) -> str:
+    return name.strip().strip("/").removesuffix(".git").casefold()
+
+
+def _at_home(repo: str, home) -> bool:
+    """Whether `repo` (`<host>/<owner>/<repo>` or `<owner>/<repo>`) is one of `home`."""
+    wanted = _repository(repo)
+    for known in map(_repository, home):
+        if wanted == known or (wanted.count("/") == 1 and known.endswith("/" + wanted)) or (
+                known.count("/") == 1 and wanted.endswith("/" + known)):
+            return True
+    return False
+
+
+def home_repositories(root: Path = ROOT) -> set[str]:
+    """The repositories SE writes forms for: origin's, and each one se.toml `[outside]` lists."""
+    found = set()
+    origin = _sibling("work_tickets").remote_repo(root)
+    if origin:
+        found.add(origin)
+    try:
+        outside = tomllib.loads((root / "se.toml").read_text(encoding="utf-8")).get("outside", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        outside = {}
+    found.update(str(name) for name in (outside if isinstance(outside, dict) else {}))
+    return found
+
+
+def _carries(form: Form, lines: set[str]) -> bool:
+    """Whether the body's stripped `lines` hold `form`'s marker condition."""
+    if form.marker and form.marker in lines:
+        return True
+    return bool(form.marker_pattern) and any(re.fullmatch(form.marker_pattern, line)
+                                             for line in lines)
+
+
+def _why_not(form: Form, action: str) -> str:
+    if action not in form.actions:
+        return (f"the {form.name} form does not apply to {action}: it shapes "
+                f"{', '.join(form.actions)}")
+    return (f"the {form.name} form does not apply here: it needs the labels "
+            f"{', '.join(form.labels) or 'none'}"
+            + (" and a pull request into the integration branch" if form.base else ""))
+
+
+def select(forms: dict[str, Form], action: str, body: str, title: str | None = None, *,
+           labels=(), base: str | None = None, integration: str = "main",
+           repo: str | None = None, home=None) -> Selection:
+    """The form that shapes `body` for `action`, in the order the module docstring's
+    "Selection" gives; its form None is free form."""
     if action not in ACTIONS:
         raise FormError(f"select: action {action!r} is none of {', '.join(ACTIONS)}")
-    candidates = sorted((form for form in forms.values() if action in form.actions),
+    if repo is not None and home is not None and not _at_home(repo, home):
+        return Selection(None)
+    have = {str(label).casefold() for label in labels}
+
+    def allowed(form: Form) -> bool:
+        return (action in form.actions
+                and all(label.casefold() in have for label in form.labels)
+                and (not form.base or base == integration))
+
+    candidates = sorted((form for form in forms.values() if allowed(form)),
                         key=lambda form: (form.order, form.name))
-    named = FORM_MARKER_PATTERN.search(body)
-    if named:
-        chosen = next((form for form in candidates if form.name == named.group(1)), None)
-        if chosen is not None:
-            return chosen
     lines = {line.strip() for line in body.splitlines()}
+    refused: list[Finding] = []
+    for named in dict.fromkeys(FORM_MARKER_PATTERN.findall(body)):
+        if named in forms and forms[named] not in candidates:
+            refused.append(Finding("body", "form", REFUSE, _why_not(forms[named], action)
+                                   + f"; take out `{FORM_MARKER.format(name=named)}`"))
+    for form in sorted(forms.values(), key=lambda item: item.name):
+        if form.is_adapter and form not in candidates and _carries(form, lines):
+            refused.append(Finding("body", "form", REFUSE, _why_not(form, action)
+                                   + ", and the body carries its marker"))
+    named = next((form for form in candidates for name in FORM_MARKER_PATTERN.findall(body)
+                  if form.name == name), None)
+    if named is not None:
+        return Selection(named, tuple(refused))
     for form in candidates:
-        if not form.marker and not form.title_pattern:
+        if not form.marker and not form.marker_pattern and not form.title_pattern:
             continue
-        if form.marker and form.marker not in lines:
+        if (form.marker or form.marker_pattern) and not _carries(form, lines):
             continue
         if form.title_pattern and not re.search(form.title_pattern, title or ""):
             continue
-        return form
-    return next((form for form in candidates if not form.marker and not form.title_pattern), None)
+        return Selection(form, tuple(refused))
+    plain = next((form for form in candidates if form.fallback or (
+        not form.marker and not form.marker_pattern and not form.title_pattern)), None)
+    return Selection(plain, tuple(refused))
+
+
+def verdict(forms: dict[str, Form], action: str, body: str, title: str | None = None,
+            **where) -> tuple[Form | None, list[Finding]]:
+    """The form `select` takes for `body` and every finding: its refused markers, then the
+    form's check; (None, the refused markers) where the body is free."""
+    chosen = select(forms, action, body, title, **where)
+    found = list(chosen.findings)
+    if chosen.form is not None:
+        found += check(chosen.form, parse(chosen.form, body, title))
+    return chosen.form, found
 
 
 # Checking
@@ -865,7 +1099,10 @@ def _entries(value: object) -> list[str]:
 
 def check(form: Form, document: Document, *, root: Path = ROOT,
           bare_scripts: bool = True) -> list[Finding]:
-    """Every finding of `document` against `form`, refusals first, in field order."""
+    """Every finding of `document` against `form`, refusals first, in field order; an adapter's
+    are its own check's."""
+    if form.is_adapter:
+        return adapter_findings(form, document)
     found: list[Finding] = []
 
     def add(rule: str, item: str, fix: str) -> None:
@@ -961,6 +1198,154 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(form.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+class _Refused(Exception):
+    """What an adapter's reading of a body refuses: its message is the finding's fix."""
+
+
+#: The errors that mean an adapter is written wrong, never that the text is: they stop the check.
+_MISCONFIGURED = (TypeError, AttributeError, NameError, ImportError, KeyError)
+
+
+def resolve(reference: str, form: Form):
+    """`"<module>:<name>"`, a function or a value of a script beside this one."""
+    module, name = reference.split(":", 1)
+    try:
+        found = getattr(_sibling(module), name)
+    except (ImportError, AttributeError, OSError) as error:
+        raise FormError(f"{form.path}: {reference} does not resolve ({error}); name a script "
+                        "beside scripts/forms.py and what it defines") from error
+    return found
+
+
+def _json_after(body: str, marker: str):
+    """The data of the last fenced block after the last line that is `marker`; None without
+    the marker."""
+    lines = body.splitlines(keepends=True)
+    at = max((index for index, line in enumerate(lines) if line.strip() == marker), default=None)
+    if at is None:
+        return None
+    blocks = re.findall(r"^(`{3,})[^\n]*\n(.*?)^\1[ \t]*$", "".join(lines[at + 1:]),
+                        re.MULTILINE | re.DOTALL)
+    if not blocks:
+        raise _Refused(f"the {marker} block has no fenced block under it")
+    try:
+        return json.loads(blocks[-1][1])
+    except json.JSONDecodeError as error:
+        raise _Refused(f"the {marker} block is not JSON: {error}") from error
+
+
+def _nodes(body: str) -> list[dict]:
+    """The body's headings and `pugh` fences as obs's Document nodes, as deck.py reads a
+    chapter's content: sections with their level and text, and the fences."""
+    nodes: list[dict] = []
+    fence: str | None = None
+    for line in FRONT_MATTER.sub("", body, count=1).splitlines():
+        marker = FENCE.match(line)
+        if fence is None and marker:
+            fence = marker.group(1)
+            if line.strip()[len(fence):].strip().startswith("pugh"):
+                nodes.append({"type": "pugh", "attrs": {}, "children": []})
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence) and not line.strip()[len(fence):]:
+                fence = None
+        elif heading := HEADING.match(line):
+            nodes.append({"type": "section", "attrs": {"level": len(heading.group(1))},
+                          "children": [{"type": "text", "text": heading.group(2), "children": []}]})
+    return nodes
+
+
+def _dropped(value: object, drop: dict) -> object:
+    """`value` without the keys `drop` names: `"."` its own, a key its list's items'."""
+    if not isinstance(value, dict):
+        return value
+    value = dict(value)
+    for path, names in drop.items():
+        if path == ".":
+            value = {key: item for key, item in value.items() if key not in names}
+        elif isinstance(value.get(path), list):
+            value[path] = [{key: item for key, item in entry.items() if key not in names}
+                           if isinstance(entry, dict) else entry for entry in value[path]]
+    return value
+
+
+def adapter_findings(form: Form, document: Document) -> list[Finding]:
+    """An adapter's findings: its lines, its title rule, then its checker's answer, called as
+    `[adapter]` says (the module docstring: adapters)."""
+    spec, body = form.adapter, document.source
+    title = document.fields.get("title")
+    found: list[Finding] = []
+
+    def refuse(rule: str, fix: str, severity: str = REFUSE) -> None:
+        found.append(Finding("body", rule, severity, f"{form.name}: {fix}"))
+
+    lines = [line.strip() for line in body.splitlines()]
+    for line in spec.get("lines", []):
+        pattern = re.compile(line["pattern"])
+        if line.get("first"):
+            held = bool(lines) and pattern.fullmatch(lines[0]) is not None
+        else:
+            held = any(pattern.fullmatch(text) for text in lines)
+        if not held:
+            refuse("line", line["says"])
+    if spec.get("title_rule"):
+        rule = resolve(spec["title_rule"], form)
+        rule = rule if isinstance(rule, re.Pattern) else re.compile(str(rule))
+        if title is None or rule.match(title) is None:
+            refuse("title", f"the title {title!r} does not match {rule.pattern!r} "
+                   f"({spec['title_rule']})")
+    if not form.checker:
+        return found
+    try:
+        if spec.get("extract"):
+            value = resolve(spec["extract"], form)(body, **dict(spec.get("extract_with", {})))
+        elif spec.get("json_after"):
+            value = _json_after(body, spec["json_after"])
+        elif spec.get("sections"):
+            value = _nodes(body)
+        else:
+            value = body
+    except _MISCONFIGURED as error:
+        raise FormError(f"{form.path}: its reading failed ({type(error).__name__}: {error}); "
+                        "fix [adapter]") from error
+    except Exception as error:  # the extractor's own refusal, such as a QueueError
+        refuse("checker", str(error))
+        return found
+    if value is None:
+        missing = spec.get("missing", REFUSE)
+        if missing != "pass":
+            refuse("checker", f"the body holds nothing for {form.checker} to check"
+                   + (f" (no {spec['json_after']} block)" if spec.get("json_after") else ""),
+                   missing)
+        return found
+    value = _dropped(value, dict(spec.get("drop", {})))
+    if spec.get("when") and not resolve(spec["when"], form)(value):
+        return found
+    keywords = {**dict(spec.get("with", {})), **{name: None for name in spec.get("none", [])}}
+    if spec.get("title_as"):
+        keywords[spec["title_as"]] = title or ""
+    arguments = [] if spec.get("text_as") else [value]
+    if spec.get("text_as"):
+        keywords[spec["text_as"]] = value
+    checker = resolve(form.checker, form)
+    result = spec.get("result", "problems")
+    try:
+        answer = checker(*arguments, **keywords)
+    except _MISCONFIGURED as error:
+        raise FormError(f"{form.path}: {form.checker} failed ({type(error).__name__}: {error}); "
+                        "fix [adapter]") from error
+    except Exception as error:  # the checker's refusal
+        if result != "raises":
+            raise
+        refuse("checker", str(error))
+        return found
+    if result == "problems":
+        for problem in answer or []:
+            refuse("checker", str(problem))
+    elif result == "truth" and not answer:
+        refuse("checker", spec["refusal"])
+    return found
 
 
 def _title(form: Form, item: Field, title: str, document: Document, add) -> None:
