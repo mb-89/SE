@@ -20,3 +20,15 @@ layers = ["se.toml"]
 key = "fleet.restart_after_limit"
 help = "README.md#fleet-check"
 note = "off: a worker stopped on a usage limit is reported only; on: the remedy resumes it once the limit lifts, once per issue"
+
+[[switch]]
+name = "[integrate] landing"
+kind = "se.toml"
+reader = "scripts/work_tickets.py"
+default = "off"
+layers = ["se.toml"]
+key = "integrate.landing"
+on = ["fast-forward"]
+off = ["squash"]
+help = "README.md#landing-on-main"
+note = "off (squash): GitHub squash-merges the landing pull request; on (fast-forward): the integrator writes the landing commit as the project identity and main moves to exactly it"
