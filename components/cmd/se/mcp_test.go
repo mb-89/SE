@@ -62,8 +62,9 @@ func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 // handshake and tools/list answer while the core's start is held, from a cold
 // start (a fresh `se mcp`, no core running), and the test logs how long the
 // first answer took; status answers once the core runs with the door's
-// session holding a lease, and the core ends its grace after the client hangs
-// up.
+// session holding a lease; the core stopped with se stop is started again by
+// the next call, before the door's renewal; and the core ends its grace after
+// the client hangs up.
 func TestTheMCPDoorStartsTheCoreAndEndsItWithTheSession(t *testing.T) {
 	dir := t.TempDir()
 	se := filepath.Join(dir, "se")
@@ -166,28 +167,53 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 	}
 
 	write(release, "")
-	var running bool
-	for end := time.Now().Add(time.Minute); !running && time.Now().Before(end); {
-		r, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "status", Arguments: map[string]any{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, _ := json.Marshal(r.StructuredContent)
-		var got struct {
-			State  string      `json:"state"`
-			Health host.Health `json:"health"`
-		}
-		_ = json.Unmarshal(data, &got)
-		if got.State == string(host.StateRunning) {
-			running = true
-			if len(got.Health.Sessions) != 1 || !strings.HasPrefix(got.Health.Sessions[0], "mcp-") {
-				t.Fatalf("the running core's sessions are %v, and want the door's one", got.Health.Sessions)
+	// running asks the status tool until it answers a core running that is
+	// not the one of pid not, within the span given, and answers its pid and
+	// how the door came to it.
+	running := func(not int, within time.Duration) (int, string) {
+		t.Helper()
+		for end := time.Now().Add(within); time.Now().Before(end); {
+			r, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "status", Arguments: map[string]any{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(r.StructuredContent)
+			var got struct {
+				State  string      `json:"state"`
+				Health host.Health `json:"health"`
+				Core   string      `json:"core"`
+			}
+			_ = json.Unmarshal(data, &got)
+			if got.State == string(host.StateRunning) && got.Health.Pid != not {
+				if len(got.Health.Sessions) != 1 || !strings.HasPrefix(got.Health.Sessions[0], "mcp-") {
+					t.Fatalf("the running core's sessions are %v, and want the door's one", got.Health.Sessions)
+				}
+				return got.Health.Pid, got.Core
 			}
 		}
+		t.Fatalf("status never answers a new core running within %v", within)
+		return 0, ""
 	}
-	if !running {
-		t.Fatal("status never answers running after the start's release")
+	pid, how := running(0, time.Minute)
+	if how != mcp.Started {
+		t.Fatalf("the door came to its first core %q, and wants %q", how, mcp.Started)
 	}
+
+	// The core stopped with se stop is started again by the next call, well
+	// before the door's renewal, Renew away. The stop runs beside it: the
+	// stopped core is the door's child, which waits for it only as it exits,
+	// so se stop sees its pid gone once the client has hung up.
+	stop := exec.Command(se, "stop", "--root", root)
+	var said strings.Builder
+	stop.Stdout, stop.Stderr = &said, &said
+	if err := stop.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := time.Now()
+	if _, how := running(pid, mcp.Renew/2); how != mcp.StartedAgain {
+		t.Fatalf("the door came to the core after se stop %q, and wants %q", how, mcp.StartedAgain)
+	}
+	t.Logf("a call after se stop answered a new core running %v after the stop", time.Since(stopped))
 
 	if err := session.Close(); err != nil {
 		t.Fatalf("the client's hang-up: %v", err)
@@ -201,5 +227,8 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 			t.Fatalf("the core reads %q a minute after the session ended, and wants not running", st.State)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if err := stop.Wait(); err != nil {
+		t.Fatalf("se stop: %v\n%s", err, said.String())
 	}
 }
