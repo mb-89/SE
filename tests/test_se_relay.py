@@ -93,7 +93,7 @@ def test_intake_reads_the_issue_and_comments_from_the_relay(served) -> None:
         "number": 42, "title": "feat/x", "body": body, "comments": 1,
         "html_url": "https://github.com/alice/demo/issues/42"})
     names["github/comments/alice.demo.42"] = snapshot(42, [
-        {"id": 5, "body": "Started", "user": {"login": "mb-89"},
+        {"id": 5, "body": "Started", "user": {"login": "alice"},
          "created_at": "2026-11-13T09:00:00Z", "html_url": "https://github.com/alice/demo/issues/42#c5"}])
     issue, created, _ = work_tickets.intake(worktree, 42, "alice/demo")
     assert issue["number"] == 42 and len(issue["comments"]) == 1
@@ -180,7 +180,7 @@ def test_refresh_reads_the_issue_and_comments_from_the_relay(served, monkeypatch
     assert work_tickets.refresh(worktree, None, None)["changed"] is False
     names["github/issues/alice.demo.42"] = snapshot(42, {**issue, "comments": 1})
     names["github/comments/alice.demo.42"] = snapshot(42, [
-        {"id": 5, "body": "Also two.", "user": {"login": "mb-89"},
+        {"id": 5, "body": "Also two.", "user": {"login": "alice"},
          "created_at": "2026-11-13T09:05:00Z", "html_url": "https://github.com/alice/demo/issues/42#c5"}])
     changes = work_tickets.refresh(worktree, None, None)
     assert changes["changed"] is True

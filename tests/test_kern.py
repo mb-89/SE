@@ -12,6 +12,15 @@ import yaml
 import ci_trust  # scripts/ is on the path (tests/conftest.py)
 
 PROJECT = Path(__file__).resolve().parents[1]
+
+
+def incubator() -> str:
+    """`<owner>/<repository>` of the repository kern is incubated in, as kern/release.toml's download
+    names it: kern's files are its one owner until kern derives it (no test file names a home)."""
+    download = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["download"]
+    found = re.match(r"https://github\.com/([\w.-]+/[\w.-]+)/releases/download/", download)
+    assert found, download
+    return found[1]
 WORKFLOW = PROJECT / ".github" / "workflows" / "check.yml"
 # The first major of actions/setup-go that runs on Node 24.
 SETUP_GO_NODE_24 = 6
@@ -214,7 +223,7 @@ def test_the_template_is_a_bare_application_in_ses_shape() -> None:
     readme = (TEMPLATE / "README.md").read_text(encoding="utf-8")
     assert "Building your own binary" in readme and "kern-release.yml" in readme
     check = (TEMPLATE / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
-    assert re.search(r"(?m)^  check:\n    uses: mb-89/SE/\.github/workflows/kern-battery\.yml@kern-v\d+\.\d+\.\d+$", check)
+    assert re.search(r"(?m)^  check:\n    uses: " + re.escape(incubator()) + r"/\.github/workflows/kern-battery\.yml@kern-v\d+\.\d+\.\d+$", check)
     version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
     assert f"@kern-v{version}" in check, "the template calls the battery of the kern it is released with"
     main = (TEMPLATE / "cmd" / "app" / "main.go").read_text(encoding="utf-8")
@@ -229,7 +238,7 @@ def test_the_template_keeps_trust_off_so_its_ci_runs_the_full_battery() -> None:
     assert ci_trust.trust_settings(TEMPLATE).on is False
     check = workflow(TEMPLATE / ".github" / "workflows" / "check.yml")
     version = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))["version"]
-    assert check["jobs"] == {"check": {"uses": f"mb-89/SE/.github/workflows/kern-battery.yml@kern-v{version}"}}
+    assert check["jobs"] == {"check": {"uses": f"{incubator()}/.github/workflows/kern-battery.yml@kern-v{version}"}}
     assert check["permissions"] == {"contents": "read"}
     assert set(check["on"]) == {"pull_request", "push"}, "no nightly safety net: nothing is trusted"
 
@@ -290,13 +299,14 @@ def test_se_builds_its_own_binary_through_kerns_reusable_release() -> None:
         assert path in text
     release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
     assert release["binary"] == "se" and release["package"] == "./cmd/se"
-    assert release["download"] == "https://github.com/mb-89/SE/releases/download/se-v{version}", (
+    assert release["download"] == f"https://github.com/{incubator()}/releases/download/se-v{{version}}", (
         "the se-v<version> tag scheme, distinct from v<version> and kern-v<version>")
 
 def test_the_release_toml_names_one_url_with_the_tag_while_kern_is_incubated() -> None:
     settings = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))
     assert set(settings) == {"version", "download"}
     assert re.fullmatch(r"\d+\.\d+\.\d+", settings["version"])
-    assert settings["download"] == "https://github.com/mb-89/SE/releases/download/kern-v{version}"
+    assert settings["download"] == f"https://github.com/{incubator()}/releases/download/kern-v{{version}}"
     readme = (PROJECT / "kern" / "README.md").read_text(encoding="utf-8")
-    assert "**The move to `mb-89/kern` changes one URL:** `release.toml`'s `download`" in readme
+    owner = incubator().split("/")[0]
+    assert f"**The move to `{owner}/kern` changes one URL:** `release.toml`'s `download`" in readme
