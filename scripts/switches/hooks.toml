@@ -1,0 +1,15 @@
+# SE's switches, hooks group: whether SE's session hooks start and use the core
+# (scripts/se_switches.py's docstring owns this format, core.toml's header its keys).
+
+[[switch]]
+name = "SE_HOOK_CORE"
+kind = "environment"
+reader = "scripts/bootstrap.sh"
+default = "on"
+layers = ["environment", "local"]
+key = "hooks.core"
+off = ["off"]
+other = "on"
+fold = true
+help = "README.md#machine-local-selocaltoml"
+note = "off: the session start starts no core and leaves no kern.path, and the later hooks post to none; the refresh, the greeting and the Stop check still answer"

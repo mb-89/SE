@@ -1397,7 +1397,7 @@ config in place of the project's `identity` ([Project settings](#project-setting
 Each machine may adapt modules without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
 
-The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]` and `[urls]`;
+The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]`, `[urls]` and `[hooks]`;
 `work_tickets.py` owns the top-level `integrator_session`, `public_identity` and `commit_trailer`
 settings, and the `[trackers]`, `[worktree_roots]`, `[repos]`, and `[mirrors]` tables. Each tool ignores sections
 owned by the other.
@@ -1418,6 +1418,14 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
   a range, is an error naming that file.
 - `[urls]`: prefix rewrites applied to `url` before any git step, for example a private mirror of a
   public host. The longest matching prefix wins.
+- `[hooks] core = "off"`, or `SE_HOOK_CORE=off` in the environment, which answers first: SE's
+  session hooks then start no core and post to none, and nothing is uninstalled. The start still
+  refreshes, syncs and greets, and the Stop check still answers.
+  - Set in the file, it takes effect at the next session start.
+  - It does not reach the MCP server, which can start the core by itself: a host switches its own
+    MCP server off. `SE_KERN=off` is another switch, which keeps commands direct.
+- `[paths] se = "<the installed SE's folder>"`: this machine's SE stays at its version, because the
+  start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)).
 
 Work queue tracker, worktree and mirror settings are documented in the
 [work model](src/skills/work-model/SKILL.md#what-the-project-provides), the `[outside]` table in its

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -769,3 +770,98 @@ def test_update_of_another_module_leaves_the_workflows_alone(world, capsys):
     code, out = run(world, capsys, "update", "lib")
     assert code == 0, out
     assert calls.read_text() == "jobs: {}\n" and "generated" not in out
+
+
+# The core switch of SE's session hooks (README "Machine-local `~/.se/local.toml`"): `[hooks] core`
+# in the local file, read by hooks_core after SE_HOOK_CORE.
+def local_hooks(tmp_path: Path, text: str) -> se_modules.LocalConfig:
+    return se_modules.load_local(write(tmp_path / "local.toml", text))
+
+
+@pytest.mark.parametrize(("text", "core"), [
+    ('[hooks]\ncore = "off"\n', "off"), ("[hooks]\ncore = false\n", False), ("[hooks]\n", None)])
+def test_local_config_accepts_hooks_core_as_a_string_or_a_boolean(tmp_path, text, core):
+    local = local_hooks(tmp_path, text)
+    assert local.hooks == ({} if core is None else {"core": core})
+    assert se_modules.LocalConfig(paths={}, urls={}).hooks == {}
+
+
+@pytest.mark.parametrize("text", ["[hooks]\ncore = 1\n", '[hooks]\ncor = "off"\n',
+                                  '[hooks]\ncore = "off"\nother = "x"\n', 'hooks = "off"\n',
+                                  "[hooks]\ncore = [\"off\"]\n"])
+def test_local_config_refuses_any_other_hooks_naming_the_file(tmp_path, text):
+    with pytest.raises(se_modules.ModuleError, match="local.toml: \\[hooks\\]"):
+        local_hooks(tmp_path, text)
+
+
+@pytest.mark.parametrize(("environment", "text", "answer"), [
+    ({}, "", ("on", "default")),
+    ({"SE_HOOK_CORE": "off"}, "", ("off", "environment")),
+    ({"SE_HOOK_CORE": "OFF"}, "", ("off", "environment")),
+    ({"SE_HOOK_CORE": "Off"}, '[hooks]\ncore = "on"\n', ("off", "environment")),
+    ({"SE_HOOK_CORE": ""}, '[hooks]\ncore = "off"\n', ("on", "environment")),
+    *(({"SE_HOOK_CORE": value}, "", ("on", "environment")) for value in (" off", "off ", "0", "false", "on")),
+    ({}, '[hooks]\ncore = "off"\n', ("off", "local")),
+    ({}, '[hooks]\ncore = "oFF"\n', ("off", "local")),
+    ({}, "[hooks]\ncore = false\n", ("off", "local")),
+    ({}, "[hooks]\ncore = true\n", ("on", "local")),
+    ({}, '[hooks]\ncore = "no"\n', ("on", "local")),
+    ({}, "[hooks]\n", ("on", "default")),
+])
+def test_hooks_core_reads_the_environment_first_then_the_local_file(tmp_path, environment, text, answer):
+    assert se_modules.hooks_core(environment, local_hooks(tmp_path, text)) == answer
+
+
+def test_hooks_core_command_needs_no_manifest_and_names_a_refused_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)  # no se.toml here or above
+    monkeypatch.delenv("SE_HOOK_CORE", raising=False)
+    config = write(tmp_path / "local.toml", '[hooks]\ncore = "off"\n')
+    assert se_modules.main(["--local", str(config), "hooks-core"]) == 0
+    assert capsys.readouterr().out == "off local\n"
+    monkeypatch.setenv("SE_HOOK_CORE", "on")
+    assert se_modules.main(["--local", str(config), "hooks-core"]) == 0
+    assert capsys.readouterr().out == "on environment\n"
+    monkeypatch.delenv("SE_HOOK_CORE")
+    assert se_modules.main(["--local", str(tmp_path / "absent.toml"), "hooks-core"]) == 0
+    assert capsys.readouterr().out == "on default\n"
+    write(config, "[hooks]\ncore = 1\n")
+    assert se_modules.main(["--local", str(config), "hooks-core"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and str(config) in captured.err
+
+
+@pytest.mark.parametrize("text", ['[hooks]\ncore = "off"\n', "[hooks]\ncore = 1\n", '[hooks]\ncor = "off"\n'])
+def test_sync_accepts_hooks_core_and_refuses_any_other_hooks(world, capsys, text):
+    write(world.local, text)
+    code, out = run(world, capsys, "sync")
+    if text == '[hooks]\ncore = "off"\n':
+        assert code == 0 and "lib: pinned" in out, out
+    else:
+        assert code == 1 and str(world.local) in out, out
+
+
+def switches_json(monkeypatch, capsys, home: Path, root: Path) -> dict:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import se_switches
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    capsys.readouterr()
+    se_switches.main(["--json", "--root", str(root)])
+    [effect] = [e for e in json.loads(capsys.readouterr().out)["switches"] if e["name"] == "SE_HOOK_CORE"]
+    return effect
+
+
+def test_the_switch_table_shows_hook_core_by_its_answering_layer(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "home"
+    (home / ".se").mkdir(parents=True)
+    monkeypatch.delenv("SE_HOOK_CORE", raising=False)
+    effect = switches_json(monkeypatch, capsys, home, tmp_path)
+    assert (effect["state"], effect["layer"]) == ("on", "default")
+    write(home / ".se" / "local.toml", '[hooks]\ncore = "off"\n')
+    effect = switches_json(monkeypatch, capsys, home, tmp_path)
+    assert (effect["state"], effect["layer"]) == ("off", "local")
+    monkeypatch.setenv("SE_HOOK_CORE", "OFF")
+    (home / ".se" / "local.toml").unlink()
+    effect = switches_json(monkeypatch, capsys, home, tmp_path)
+    assert (effect["state"], effect["layer"]) == ("off", "environment")
