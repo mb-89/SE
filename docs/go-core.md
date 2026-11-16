@@ -354,7 +354,8 @@ budget; the real-core runs are the core's CI.
 
 The core's release workflow builds `linux`, `darwin` and `windows` for `amd64` and `arm64`,
 attaches them with a `SHA256SUMS` file to the core's tag, and an application's release does the
-same for its own binary (core plus its Go components). The binary is fetched into
+same for its own binary (core plus its Go components). CI tests the core on Linux and Windows;
+darwin is built, not tested. The binary is fetched into
 `~/.se/bin/<app>-<version>` and kept: a version already there costs nothing.
 
 - **Cloud:** as local: the environment's setup script only clones SE (README ["Claude Code
