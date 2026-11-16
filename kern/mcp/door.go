@@ -80,6 +80,11 @@ type door struct {
 	o      Options
 	mu     sync.Mutex
 	failed string // why the core does not start, once it said so
+	came   string // how the door came to its core (Came), once it leased one
+	// wake is the supervisor's one signal from calls that found no core.
+	wake chan struct{}
+	// inFlight is set while the door's start is in flight.
+	inFlight atomic.Bool
 	// leased is set while the session's lease stands.
 	leased atomic.Bool
 	// pages are the answers that need more than one page, by tool and arguments.
@@ -107,7 +112,7 @@ func Serve(ctx context.Context, o Options, in io.ReadCloser, out io.WriteCloser)
 	if o.Session == "" {
 		o.Session = fmt.Sprintf("mcp-%d-%d", os.Getpid(), time.Now().UnixNano())
 	}
-	d := &door{o: o, pages: map[string][]string{}}
+	d := &door{o: o, pages: map[string][]string{}, wake: make(chan struct{}, 1)}
 	server, err := d.server()
 	if err != nil {
 		fmt.Fprintf(o.Log, "%s mcp: %v\n", o.App, err)
@@ -206,8 +211,11 @@ func schema(t Tool) map[string]any {
 
 // supervise starts the core or attaches to it, takes the session's lease
 // once it runs and renews it every Renew, starting it anew where it ended;
-// as ctx ends, it returns the lease.
+// as ctx ends, it returns the lease. Next decides each step; supervise only
+// carries it out, and its wait ends early on a call's signal (d.wake) where
+// the step allows.
 func (d *door) supervise(ctx context.Context) {
+	spans := Spans{Look: look, Renew: d.o.Renew}
 	leased := false
 	defer func() {
 		d.leased.Store(false)
@@ -217,45 +225,97 @@ func (d *door) supervise(ctx context.Context) {
 			}
 		}
 	}()
-	started := false
+	inFlight, spawned, asked := false, false, false
+	reached, pid := false, 0 // a core leased in this session, and its pid
 	for {
-		wait := look
 		st, err := d.o.Core.Status()
-		switch {
-		case err != nil:
+		state := coreState(st, err)
+		if err != nil {
 			fmt.Fprintf(d.o.Log, "%s mcp: status: %v\n", d.o.App, err)
-			wait = d.o.Renew
-		case st.State == host.StateRunning:
+		}
+		step := Next(Look{Core: state, Leased: leased, InFlight: inFlight, Asked: asked}, spans)
+		switch step.Do {
+		case Lease:
 			if err := d.o.Core.Lease(d.o.Session, false); err != nil {
 				fmt.Fprintf(d.o.Log, "%s mcp: lease: %v\n", d.o.App, err)
 				leased = false
 				d.leased.Store(false)
+				step = Refused(Lease, spans)
 				break
 			}
-			leased, started = true, false
+			if !reached || inFlight || st.Health.Pid != pid { // a core the door has not leased yet
+				d.setCame(Came(inFlight && spawned, reached))
+			}
+			reached, pid = true, st.Health.Pid
+			leased, inFlight, spawned = true, false, false
 			d.leased.Store(true)
+			d.inFlight.Store(false)
 			d.fail("")
-			wait = d.o.Renew
-		case st.State == host.StateStopped && st.Died != "" && started:
+		case Fail:
 			d.fail("the core ended at its start; it said:\n" + st.Died)
-			wait = d.o.Renew
-			started = false
-		case st.State == host.StateStopped:
+			inFlight = false
+			d.inFlight.Store(false)
+		case Start:
 			leased = false
 			d.leased.Store(false)
-			if _, err := d.o.Core.Start(); err != nil {
+			started, err := d.o.Core.Start()
+			if err != nil {
 				d.fail(err.Error())
-				wait = d.o.Renew
+				step = Refused(Start, spans)
 				break
 			}
-			started = true
+			inFlight, spawned = true, started == host.Spawned
+			d.inFlight.Store(true)
+		}
+		asked = false
+		var wake <-chan struct{}
+		if step.Wake {
+			wake = d.wake
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-wake:
+			asked = true
+		case <-time.After(step.Wait):
 		}
 	}
+}
+
+// coreState is the state a status answers, for Next.
+func coreState(st host.Status, err error) CoreState {
+	switch {
+	case err != nil:
+		return CoreUnread
+	case st.State == host.StateRunning:
+		return CoreRunning
+	case st.State == host.StateStopped && st.Died != "":
+		return CoreEnded
+	case st.State == host.StateStopped:
+		return CoreStopped
+	}
+	return CoreStarting
+}
+
+// ask leaves the supervisor one signal that a call found no core running,
+// and never blocks: calls arriving together leave one.
+func (d *door) ask() {
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (d *door) setCame(how string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.came = how
+}
+
+func (d *door) cameBy() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.came
 }
 
 func (d *door) fail(why string) {
@@ -272,8 +332,9 @@ func (d *door) failure() string {
 
 // await waits up to StartWait for a running core that holds the session's
 // lease, and renews the lease; it answers the failed call's result where none
-// runs by then. A core that runs and has not taken the lease by then is
-// called all the same.
+// runs by then: starting while a start is in flight, else failed. A core that
+// runs and has not taken the lease by then is called all the same. A call
+// that finds no core running leaves the supervisor its signal, once.
 func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 	o := d.o
 	if o.NoStart != "" {
@@ -285,6 +346,7 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 			"configure the server to run in the repository's folder (its cwd), or pass --root <checkout>")
 	}
 	end := time.Now().Add(o.StartWait)
+	asked := false
 	for {
 		leased := d.leased.Load() // before the status, so a running core's health shows the lease
 		st, err := o.Core.Status()
@@ -300,7 +362,19 @@ func (d *door) await(ctx context.Context) (host.Status, *sdk.CallToolResult) {
 			return st, failure(Failed, fmt.Sprintf("%s's core does not start in %s: %s", o.App, o.Root, why),
 				fmt.Sprintf("read %s, fix what it names, then call again", host.LogPath(o.Root)))
 		}
+		if !running && !asked {
+			d.ask() // the supervisor starts a core that is gone at once
+			asked = true
+		}
 		if !time.Now().Before(end) || ctx.Err() != nil {
+			if !d.inFlight.Load() && (err != nil || st.State != host.StateStarting) {
+				why := "no core runs and none is starting"
+				if err != nil {
+					why = err.Error()
+				}
+				return st, failure(Failed, fmt.Sprintf("%s's core does not answer in %s: %s", o.App, o.Root, why),
+					fmt.Sprintf("read %s and the status tool, then call again", host.LogPath(o.Root)))
+			}
 			return st, failure(Starting, fmt.Sprintf("%s's core is starting in %s and did not answer within %v", o.App, o.Root, o.StartWait),
 				fmt.Sprintf("call again in a few seconds; the status tool says when it runs, and %s holds what it said", host.LogPath(o.Root)))
 		}
@@ -390,6 +464,10 @@ func (d *door) status(ctx context.Context) *sdk.CallToolResult {
 		h := st.Health
 		answer["health"] = h
 		line = fmt.Sprintf("%s: running in %s, pid %d, %d session(s), %d instance(s), %d placed", d.o.App, d.o.Root, h.Pid, len(h.Sessions), len(h.Instances), len(h.Placements))
+	}
+	if how := d.cameBy(); how != "" {
+		answer["core"] = how
+		line += ", " + how
 	}
 	if why := d.failure(); why != "" {
 		answer["failed"] = why

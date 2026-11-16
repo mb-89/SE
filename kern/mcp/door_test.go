@@ -28,7 +28,9 @@ type fakeCore struct {
 	standAfter int // looks at the status after the start until it stands; -1 never
 	looks      int
 	starts     int
+	pending    bool // started and not yet standing
 	died       string
+	statusErr  error
 	leases     []string // "take <id>" or "end <id>"
 	calls      []string
 	answers    map[string]host.CallAnswer
@@ -42,23 +44,26 @@ func (f *fakeCore) Start() (host.Started, error) {
 	if f.running {
 		return host.Running, nil
 	}
-	f.looks = 0
+	f.looks, f.pending = 0, true
 	return host.Spawned, nil
 }
 
 func (f *fakeCore) Status() (host.Status, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.running && f.starts > 0 && f.standAfter >= 0 {
+	if f.statusErr != nil {
+		return host.Status{}, f.statusErr
+	}
+	if !f.running && f.pending && f.standAfter >= 0 && f.died == "" {
 		f.looks++
 		if f.looks > f.standAfter {
-			f.running = true
+			f.running, f.pending = true, false
 		}
 	}
 	switch {
 	case f.running:
 		return host.Status{State: host.StateRunning, Health: host.Health{Pid: 7, Sessions: f.sessions()}}, nil
-	case f.starts > 0 && f.died == "":
+	case f.pending && f.died == "":
 		return host.Status{State: host.StateStarting}, nil
 	}
 	return host.Status{State: host.StateStopped, Died: f.died}, nil
@@ -67,6 +72,10 @@ func (f *fakeCore) Status() (host.Status, error) {
 func (f *fakeCore) sessions() []string {
 	held := map[string]bool{}
 	for _, l := range f.leases {
+		if l == "gone" {
+			held = map[string]bool{}
+			continue
+		}
 		verb, id, _ := strings.Cut(l, " ")
 		held[id] = verb == "take"
 	}
@@ -110,6 +119,20 @@ func (f *fakeCore) Get(_ context.Context, name string) (host.NameValue, error) {
 		return v, nil
 	}
 	return host.NameValue{Name: name, Error: "no name " + name}, nil
+}
+
+// stop ends the running core, as `se stop` does, its lease with it.
+func (f *fakeCore) stop() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.running = false
+	f.leases = append(f.leases, "gone")
+}
+
+func (f *fakeCore) startCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.starts
 }
 
 func (f *fakeCore) record() (leases, calls []string) {
@@ -714,4 +737,152 @@ func theToolsAndAnAnswer(t *testing.T, handshake string) {
 	if string(got) != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Fatalf("the door answers\n%s\nand wants what %s holds:\n%s", got, filepath.ToSlash(path), want)
 	}
+}
+
+// With a core that keeps running, every tool answers what
+// testdata/answers.json recorded before the door learnt to wake its
+// supervisor, save the status tool's one new field, core, and its word on the
+// text line. Rewrite it with -golden, only where the change is meant.
+func TestEveryAnswerStaysTheSameWhileTheCoreRuns(t *testing.T) {
+	core := &fakeCore{running: true,
+		names:   map[string]host.NameValue{"desk/due": {Name: "desk/due", Value: 3, Provided: true}},
+		answers: map[string]host.CallAnswer{"desk list": {Text: "two items", Lines: []string{"reading"}}}}
+	c := open(t, options(core, catalog(t)))
+	c.initialize()
+	answers := map[string]any{}
+	for _, ask := range []struct {
+		tool string
+		args map[string]any
+	}{{"status", map[string]any{}}, {"greeting", map[string]any{}}, {"desk", map[string]any{"command": "desk list"}}} {
+		r := c.call(ask.tool, ask.args)
+		if ask.tool == "status" {
+			if (r.Structured["core"] != Attached || !strings.Contains(r.Content[0].Text, ", attached\n")) && !*golden {
+				t.Fatalf("status answers %+v, and wants the door to say it attached", r)
+			}
+			delete(r.Structured, "core")
+			line, data, _ := strings.Cut(r.Content[0].Text, "\n")
+			r.Content[0].Text = strings.TrimSuffix(line, ", attached") + "\n" + strings.Replace(data, `"core":"attached",`, "", 1)
+		}
+		answers[ask.tool] = r
+	}
+	c.hangUp()
+	got, err := json.MarshalIndent(answers, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	path := filepath.Join("testdata", "answers.json")
+	if *golden {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != strings.ReplaceAll(string(want), "\r\n", "\n") {
+		t.Fatalf("the door answers\n%s\nand wants what %s holds:\n%s", got, filepath.ToSlash(path), want)
+	}
+}
+
+// callAll sends n calls of tool at once, then reads their n answers.
+func (c *client) callAll(n int, tool string, args map[string]any) []called {
+	c.t.Helper()
+	first := c.id + 1
+	for i := 0; i < n; i++ {
+		c.id++
+		c.send(map[string]any{"jsonrpc": "2.0", "id": c.id, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
+	}
+	out := make([]called, n)
+	for got := 0; got < n; {
+		line, err := c.out.ReadBytes('\n')
+		if err != nil {
+			c.t.Fatalf("the door answered %d of %d calls: %v", got, n, err)
+		}
+		var m struct {
+			ID     *int   `json:"id"`
+			Result called `json:"result"`
+		}
+		if err := json.Unmarshal(line, &m); err != nil {
+			c.t.Fatalf("the door wrote no JSON-RPC line: %q", line)
+		}
+		if m.ID == nil || *m.ID < first || *m.ID > c.id {
+			continue
+		}
+		out[*m.ID-first] = m.Result
+		got++
+	}
+	return out
+}
+
+// A core stopped between two of the supervisor's looks is started by the
+// next call at once, Renew an hour away: the call answers the command within
+// StartWait, and twenty calls sent together cause one start. Status says how
+// the door came to its core.
+func TestACallThatFindsTheCoreGoneStartsIt(t *testing.T) {
+	core := &fakeCore{answers: map[string]host.CallAnswer{"desk list": {Text: "two items"}}}
+	o := options(core, catalog(t))
+	o.StartWait = 5 * time.Second
+	c := open(t, o)
+	c.initialize()
+	if r := c.call("status", map[string]any{}); r.Structured["state"] != "running" || r.Structured["core"] != Started || !strings.Contains(r.Content[0].Text, "placed, started\n") {
+		t.Fatalf("status answers %+v, and wants the core the door started", r)
+	}
+	core.stop()
+	began := time.Now()
+	r := c.call("desk", map[string]any{"command": "desk list"})
+	if r.IsError || r.Content[0].Text != "two items" || time.Since(began) >= o.StartWait {
+		t.Fatalf("a call after the core stopped answers %+v after %v, and wants the command's answer within %v", r, time.Since(began), o.StartWait)
+	}
+	if n := core.startCount(); n != 2 {
+		t.Fatalf("the door made %d start(s), and wants two: at its open and on the call", n)
+	}
+	if r := c.call("status", map[string]any{}); r.Structured["core"] != StartedAgain {
+		t.Fatalf("status answers %+v, and wants the core started again", r)
+	}
+	core.stop()
+	for i, r := range c.callAll(20, "desk", map[string]any{"command": "desk list"}) {
+		if r.IsError || len(r.Content) != 1 || r.Content[0].Text != "two items" {
+			t.Fatalf("call %d of twenty answers %+v, and wants the command's answer", i, r)
+		}
+	}
+	if n := core.startCount(); n != 3 {
+		t.Fatalf("twenty calls together made %d start(s) in all, and want one more than the two before", n-2)
+	}
+	c.hangUp()
+}
+
+// A core that ends at its start answers failed with its log, and further
+// calls start it no further before Renew has passed.
+func TestACoreThatEndsAtItsStartIsNotStartedInALoop(t *testing.T) {
+	core := &fakeCore{died: "wiring line 3: no component x"}
+	c := open(t, options(core, catalog(t)))
+	c.initialize()
+	for i := 0; i < 5; i++ {
+		r := c.call("desk", map[string]any{"command": "desk list"})
+		if !r.IsError || r.Structured["error"] != Failed || !strings.Contains(fmt.Sprint(r.Structured["remedy"]), host.LogPath("/work/checkout")) {
+			t.Fatalf("call %d answers %+v, and wants failed with the log as its remedy", i, r)
+		}
+	}
+	if n := core.startCount(); n != 1 {
+		t.Fatalf("the door made %d starts of a core that ends at its start, and wants one before Renew", n)
+	}
+	c.hangUp()
+}
+
+// starting is answered only while a start is in flight: where the core's
+// status cannot be read and none is, the call answers failed, naming why.
+func TestACallAnswersStartingOnlyWhileAStartIsInFlight(t *testing.T) {
+	core := &fakeCore{statusErr: errors.New("the standing file is unreadable")}
+	c := open(t, options(core, catalog(t)))
+	c.initialize()
+	r := c.call("desk", map[string]any{"command": "desk list"})
+	if !r.IsError || r.Structured["error"] != Failed || !strings.Contains(fmt.Sprint(r.Structured["message"]), "unreadable") {
+		t.Fatalf("a call whose core cannot be read answers %+v, and wants failed naming why", r)
+	}
+	if n := core.startCount(); n != 0 {
+		t.Fatalf("the door made %d start(s) of a core it cannot read, and wants none", n)
+	}
+	c.hangUp()
 }
