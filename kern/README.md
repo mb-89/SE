@@ -49,6 +49,7 @@ One core runs per checkout, the nearest folder up from the working directory tha
 | `kern stop` | asks `call.core.stop` and waits until the process has exited |
 | `kern serve [--grace D] [--idle D]` | the core in the foreground: reads `wiring.toml` where the checkout has one |
 | `kern mcp [--grace D] [--idle D]` | the MCP door over stdio ([The MCP door](#the-mcp-door)): starts the core with the grace and idle given, or attaches to it, and holds a session lease while the client is connected |
+| `kern mcp --tools` | prints the tools the door would serve for the checkout, as `tools/list` answers them, indented JSON in served order, and exits 0: starts no core, takes no lease, reads no input ([The tool list's size](#the-tool-lists-size)) |
 | `kern hook <event> [--wait D] [--unanswered N]` | posts the host's hook JSON from stdin on `hook.<event>`, waiting up to 500 ms for a core whose start's claim stands; prints the answer as the host's hook JSON: the bound command's output, else the context the components told on `PostToolUse`, `UserPromptSubmit` and `SessionStart` (the [GitHub component](components/github/README.md)'s waiting tool calls) as `additionalContext`, nothing for a `pass` with nothing told; where no core answers, prints nothing; exits 0, or N where no command answered the event and nothing was told |
 
 - **The standing file**, `.se/.runtime/standing.json`, readable by its owner alone: the bus's
@@ -143,6 +144,23 @@ launcher, since its working directory need not be the checkout.
 - **Tests.** `mcp/door_test.go` drives the door with a fake client, JSON-RPC lines over pipes,
   against a fake core, and `mcp/step_test.go` holds `mcp.Next`'s table. The one contract test with the SDK's own client runs against the built
   binary and the real core: SE's `components/cmd/se/mcp_test.go`.
+
+### The tool list's size
+
+The tool list rides in every turn on every host, and a host may cut a long description without a
+notice, so it is measured and can be held.
+
+- **`<name> mcp --tools`** prints it: `mcp.Listed` asks the door's own server, with the SDK's
+  client over an in-memory connection, so the list is the served one, in the SDK's order (by
+  name), and two runs print the same bytes. A catalog the check refuses is said on stderr and its
+  tools listed all the same; without the flag `mcp` serves as before.
+- **`mcp.Measure`** (`mcp/measure.go`) is pure: tools in; their count, order, each description's
+  bytes and characters, each tool's bytes as served and their sum out. `Surface.Over` holds it to
+  an `mcp.Budget` of three numbers (most tools, most bytes for one description, most bytes for the
+  list), each unset at 0; `Surface.Table` writes it as Markdown.
+- **An application holds its own**: SE's `components/cmd/se/mcp_surface_test.go` compares its
+  committed `testdata/tools.json` with the live list, naming the command that rewrites it, and
+  logs the measure against its budget, `surfaceBudget`, which reports only while unset.
 
 ## A component in Python
 
