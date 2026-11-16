@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "5.98.0"
+version = "5.99.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -127,7 +127,7 @@ limit_seconds = 90
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "../obs.git"
-version = "^2.0"
+version = "^3.0"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).

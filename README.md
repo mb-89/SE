@@ -1358,7 +1358,7 @@ Top spenders by wall time:
 Top spenders by GitHub calls:
   work_tickets.py integrate: 1 runs, 300.0 s wall, 40 GitHub calls, 2 refused, 120 s waiting
 Overruns: 1
-  2026-11-10T09:00:00Z work_tickets.py integrate #749: suite 130.5 s over its budget 120 s
+  2026-11-10 work_tickets.py integrate #749: suite 130.5 s over its budget 120 s
 ```
 
 The lines are per machine; the retro reads the report of the machine its integrations ran on
