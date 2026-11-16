@@ -645,7 +645,7 @@ def repos(tmp_path, isolated_git):
     """An se remote with v1.0.0, v1.1.0 and v2.0.0, a clone of it at v1.0.0; module remotes lib
     (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
-               for name in ("se_start.py", "git_door.py", "se_modules.py", "public_check.py",
+               for name in ("se_start.py", "git_door.py", "se_modules.py", "se_home.py", "public_check.py",
                              "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
                              "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
@@ -1038,3 +1038,13 @@ def test_start_hooks_changes_nothing_outside_a_project_checkout(tmp_path):
     assert se_start.start_hooks(tmp_path / "plugin", plain, None) == ""
     assert se_start.start_hooks(tmp_path / "plugin", None, None) == ""
     assert se_start.main(["--root", str(plain), "start-hooks"]) == 0
+
+
+def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path, fake_git_door) -> None:
+    se_root = fake_git.init(tmp_path / "se")
+    write(se_root / "se.toml", '[project]\nversion = "1.0.0"\n')
+    assert se_start._docs_url(se_root) == ""  # no origin: nothing guesses one
+    se_start.git_door.run("remote", "add", "origin", "https://github.com/alice/se.git", root=se_root)
+    assert se_start._docs_url(se_root) == "https://alice.github.io/se/"
+    write(se_root / "se.toml", '[project]\nversion = "1.0.0"\ndocs_url = "https://docs.example.com/se/"\n')
+    assert se_start._docs_url(se_root) == "https://docs.example.com/se/"

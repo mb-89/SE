@@ -56,6 +56,7 @@ metrics = _load("metrics")
 feedback = _load("feedback")
 kern_names = _load("kern_names")
 se_plugin = _load("se_plugin")
+se_home = _load("se_home")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -113,6 +114,17 @@ def _origin(se_root: Path) -> str | None:
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
+def _docs_url(se_root: Path) -> str:
+    """se.toml's `docs_url` where it sets one, else the docs URL of SE's home, from its origin
+    (scripts/se_home.py); "" where neither is known."""
+    explicit = _project(se_root).get("docs_url")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    origin = _origin(se_root)
+    home = se_home.parse(origin) if origin else None
+    return home.docs_url if home else ""
+
+
 @dataclass(frozen=True)
 class Item:
     """One thing SE uses: SE itself or a module of the project."""
@@ -166,7 +178,7 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
         missing, skills_error = lacking(se_root), ""
     except se_plugin.SourceError as error:
         missing, skills_error = [], str(error)
-    return Local(se_version, str(_project(se_root).get("docs_url", "")), counts(se_root), items, errors,
+    return Local(se_version, _docs_url(se_root), counts(se_root), items, errors,
                  missing, skills_error)
 
 

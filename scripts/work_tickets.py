@@ -30,6 +30,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import git_door
+import se_home
 
 STATES = ("todo", "held", "done")
 DIRECTORIES = (*STATES, "notes")
@@ -1799,13 +1800,22 @@ def outside_cutoffs(root: Path) -> dict[str, int]:
     table = se_table(root, "outside")
     remedy = (
         f'name each repository and its cut-off in {root / "se.toml"}, as '
-        '[outside] "<host>/<owner>/<repo>" = <last issue number before the fleet marker> '
+        '[outside] "<repo>" (beside the checkout\'s origin) or "<host>/<owner>/<repo>" = <last issue '
+        'number before the fleet marker> '
         '(the se checkout\'s src/skills/work-model/SKILL.md#outside-issues)'
     )
     if not table:
         raise QueueError(f"intake --outside: no [outside] table; {remedy}")
     cutoffs: dict[str, int] = {}
+    home = None
     for repo, cutoff in table.items():
+        if "/" not in repo:
+            # A bare name lies beside the checkout's home, read from its origin (se_home.py).
+            try:
+                home = home or se_home.home(root)
+            except se_home.NoHome as error:
+                raise QueueError(f"intake --outside: [outside] entry {repo!r} is a bare name: {error}") from error
+            repo = home.named(repo)
         if len(repo.split("/")) != 3 or not all(repo.split("/")) or isinstance(cutoff, bool) \
                 or not isinstance(cutoff, int) or cutoff < 0:
             raise QueueError(f"intake --outside: [outside] entry {repo!r} = {cutoff!r} is invalid; {remedy}")

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import git_door
+import se_home
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
@@ -171,6 +172,11 @@ def load_manifest(root: Path) -> list[Module]:
         url, ref, version = table.get("url"), table.get("ref"), table.get("version")
         if not isinstance(url, str) or not url:
             raise ModuleError(f"module {name}: url is required")
+        try:
+            # `../<name>.git`: the repository beside this one, on its origin's host (se_home.py).
+            url = se_home.resolve_module(root, url)
+        except se_home.NoHome as error:
+            raise ModuleError(f"module {name}: {error}") from error
         path = _check_subpath(name, table["path"]) if "path" in table else None
         if version is not None:
             if ref is not None:

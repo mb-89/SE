@@ -56,6 +56,16 @@ path = "themes/plain"
     assert modules[1].path == "themes/plain"
 
 
+def test_a_module_url_relative_to_origin_names_the_repository_beside_it(tmp_path, fake_git_door):
+    root = fake_git.init(tmp_path / "project")
+    write(root / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n')
+    with pytest.raises(se_modules.ModuleError, match="module obs: ../obs.git is relative to origin"):
+        se_modules.load_manifest(root)
+
+    fake_git.git("-C", str(root), "remote", "add", "origin", "https://git.example.org/team/project")
+    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/obs.git"
+
+
 def test_manifest_without_modules_is_empty(tmp_path):
     write(tmp_path / "se.toml", "")
     assert se_modules.load_manifest(tmp_path) == []

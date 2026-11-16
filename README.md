@@ -113,7 +113,7 @@ What a cloud session meets, whatever state its container comes up in.
 ## Start and refresh
 
 SE's first message is its greeting, for example `SE 1.2.0 started: 3 skills, 5 rules, 2 sub-agents.
-Documentation: <docs_url>`. Under it, and only then, one line per module or SE itself with a newer
+Documentation: <docs_url>`, the documentation's URL ([Documentation](#documentation)). Under it, and only then, one line per module or SE itself with a newer
 version, and the refresh command. [scripts/se_start.py](scripts/se_start.py) implements this
 section:
 
@@ -384,10 +384,11 @@ demand.
 
 ## Documentation
 
-se's documentation is one HTML file, published at the `docs_url` of `se.toml` `[project]`
-(<https://mb-89.github.io/SE/>), the one setting that names it. `docs.md` is its manifest: it lists
-se's notes as chapters and restates none of them. The [obs](https://github.com/mb-89/obs) module
-(`[modules.obs]` in `se.toml`) builds it:
+se's documentation is one HTML file, published at the GitHub Pages site of SE's home,
+`https://<owner>.github.io/<repository>/`, which `scripts/se_home.py` derives from the checkout's
+origin; a project that publishes elsewhere sets `docs_url` in `se.toml` `[project]`. `docs.md` is
+its manifest: it lists se's notes as chapters and restates none of them. The obs module
+(`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
 
 ```sh
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
@@ -398,8 +399,8 @@ default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
 to `main`; a failed build publishes nothing, so the previous artifact stays.
 
-The Timeline, <https://mb-89.github.io/SE/timeline.html>, builds itself from the issues and
-releases of the repositories in `se.toml` `[timeline]`; [scripts/timeline.py](scripts/timeline.py)
+The Timeline, `timeline.html` beside the documentation, builds itself from the issues and
+releases of the repositories in `se.toml` `[timeline]` (a bare name lies beside SE's home); [scripts/timeline.py](scripts/timeline.py)
 owns what shows where, and the same workflow rebuilds it hourly and on each issue event.
 
 ## Modules
@@ -424,7 +425,10 @@ version = "^1.4"                             # in place of ref: a semver range o
 ```
 
 - `url`: the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in
-  the machine-local file below, never here.
+  the machine-local file below, never here. A URL starting `../` or `./` is relative to the
+  checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository
+  `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin
+  refuses it.
 - `ref`: the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only
   releases; `update` moves it.
 - `version`: in place of `ref`, a semantic version range of the module's release tags
