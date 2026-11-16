@@ -31,6 +31,13 @@ OLD_MARKS = (
 )
 TO_COME = re.compile(r"^## To come[ \t]*$(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
 ITEM = re.compile(r"^[ \t]*[-*+][ \t]+`([^`]+)`", re.MULTILINE)
+# A method card under references/cards/: a `Reader:` line under its title, four sections, at most seven
+# numbered steps and at most sixty lines.
+CARD_SECTIONS = ("When", "Steps", "Where it goes in SE", "Source")
+CARD_STEPS = 7
+CARD_LINES = 60
+READER = re.compile(r"\A# [^\n]+\n\nReader: ")
+STEP = re.compile(r"^\d+\.[ \t]", re.MULTILINE)
 
 
 # The walk and the checks of one draft folder.
@@ -101,6 +108,28 @@ def to_come_findings(folder: Path) -> list[str]:
             for path in to_come(folder) if (folder / path).exists()]
 
 
+def section(text: str, title: str) -> str | None:
+    """The body of a `## <title>` section, up to the next `## ` heading; None without it."""
+    match = re.search(rf"^## {re.escape(title)}[ \t]*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    return match.group(1) if match else None
+
+
+def card_findings(folder: Path) -> list[str]:
+    """Every card under references/cards/ that breaks the card shape."""
+    found = []
+    for path in sorted((folder / "references" / "cards").glob("*.md")):
+        text = read(path)
+        if not READER.match(text):
+            found.append(f"{path}: no Reader: line under its title")
+        found += [f"{path}: no ## {title} section" for title in CARD_SECTIONS if section(text, title) is None]
+        steps = len(STEP.findall(section(text, "Steps") or ""))
+        if steps > CARD_STEPS:
+            found.append(f"{path}: {steps} steps, more than {CARD_STEPS}")
+        if (lines := len(text.splitlines())) > CARD_LINES:
+            found.append(f"{path}: {lines} lines, more than {CARD_LINES}")
+    return found
+
+
 def unrooted_findings(folder: Path) -> list[str]:
     """A Markdown line naming a script without SE's root, which the build refuses (se_plugin.UNROOTED_SCRIPT)."""
     return [f"{path}:{number}: names a script without SE's root; write `<se>/scripts/<name>.py`"
@@ -116,7 +145,7 @@ def mark_findings(folder: Path) -> list[str]:
 
 
 CHECKS = (lint_findings, invocation_findings, length_findings, dangling_findings, outside_findings,
-          to_come_findings, unrooted_findings, mark_findings)
+          to_come_findings, card_findings, unrooted_findings, mark_findings)
 
 
 def folder_findings(folder: Path) -> list[str]:
@@ -168,10 +197,19 @@ def test_every_draft_folder_keeps_the_skill_rules():
     assert [finding for folder in walk(SKILLS) for finding in folder_findings(folder)] == []
 
 
-def test_the_systematic_draft_lists_its_nine_to_come_paths():
-    assert to_come(SKILLS / "systematic") == ["references/process.md", *(
-        f"references/cards/{name}.md" for name in ("stakeholders", "use-cases", "quality-scenarios", "options",
-                                                   "spike", "prior-art", "working-a-problem", "design-brief"))]
+CARDS = ("stakeholders", "use-cases", "quality-scenarios", "options", "spike", "prior-art", "working-a-problem",
+         "design-brief")
+
+
+def test_the_systematic_draft_links_its_nine_references():
+    folder = SKILLS / "systematic"
+    text = read(folder / "SKILL.md")
+    assert TO_COME.search(text) is None and to_come(folder) == []
+    linked = {match.group(1) for match in references.LINK.finditer(references.split_code(text)[0])}
+    paths = ["references/process.md", *(f"references/cards/{name}.md" for name in CARDS)]
+    assert [path for path in paths if path not in linked] == []
+    assert sorted(path.stem for path in (folder / "references" / "cards").glob("*.md")) == sorted(CARDS)
+    assert card_findings(folder) == []
 
 
 def test_no_host_surface_reaches_drafts():
@@ -257,12 +295,40 @@ def test_a_draft_without_to_come_has_no_to_come_paths(tmp_path):
 
 
 def test_a_bare_script_path_fails_and_a_rooted_one_passes(tmp_path):
-    bare = draft(tmp_path, "bare", extra={"references/two.md": "Run `uv run python scripts/review.py`.\n"})
+    bare = draft(tmp_path, "bare", extra={"references/two.md": "Run `uv run python scripts/x.py`.\n"})
     assert unrooted_findings(bare) == [f"{bare / 'references' / 'two.md'}:1: names a script without SE's root; "
                                        "write `<se>/scripts/<name>.py`"]
-    assert folder_findings(bare) == unrooted_findings(bare)
+    real = draft(tmp_path, "real", extra={"references/two.md": "Run `uv run python scripts/review.py`.\n"})
+    assert folder_findings(real) == unrooted_findings(real) != []
     rooted = draft(tmp_path, "rooted", extra={"references/two.md": "Run `uv run python <se>/scripts/review.py`.\n"})
     assert folder_findings(rooted) == []
+
+
+CARD = "# Card\n\nReader: someone.\n\n## When\n\n- Now.\n\n## Steps\n\n{steps}\n## Where it goes in SE\n\n" \
+       "The work issue's Situation section.\n\n## Source\n\nAn Author, 2000.\n"
+
+
+def card(steps: int = 3, text: str | None = None) -> str:
+    return CARD.format(steps="".join(f"{n}. Step.\n" for n in range(1, steps + 1))) if text is None else text
+
+
+def test_a_good_made_up_card_passes(tmp_path):
+    folder = draft(tmp_path, extra={"references/cards/one.md": card(CARD_STEPS)})
+    assert folder_findings(folder) == []
+
+
+def test_each_broken_card_fails(tmp_path):
+    seven = card(CARD_STEPS)
+    broken = {
+        "no-where": (card().replace("## Where it goes in SE", "## Elsewhere"), "no ## Where it goes in SE section"),
+        "no-reader": (card().replace("Reader: someone.\n\n", ""), "no Reader: line under its title"),
+        "eight-steps": (card(CARD_STEPS + 1), f"8 steps, more than {CARD_STEPS}"),
+        "long": (seven + "\n" * (CARD_LINES + 1 - len(seven.splitlines())), f"61 lines, more than {CARD_LINES}"),
+    }
+    for name, (text, finding) in broken.items():
+        folder = draft(tmp_path, name, extra={"references/cards/one.md": card(text=text)})
+        assert card_findings(folder) == [f"{folder / 'references' / 'cards' / 'one.md'}: {finding}"], name
+        assert folder_findings(folder) == card_findings(folder), name
 
 
 def test_a_work_tag_fails_and_an_anchor_passes(tmp_path):
