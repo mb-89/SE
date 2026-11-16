@@ -96,6 +96,5 @@ func spawn(root, bin string, args []string) error {
 	if err := run.Start(); err != nil {
 		return fmt.Errorf("kern start: spawn %s: %w", bin, err)
 	}
-	// The core, or on Windows its starter, outlives nothing of this process.
-	return run.Process.Release()
+	return let(run)
 }
