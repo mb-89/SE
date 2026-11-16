@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Forms: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
-No command checks with forms yet: nothing calls this module but its tests and its own command line.
-A later piece switches the check on for the commands that send a body to GitHub.
+The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
+where se.toml `[forms] enforce` is on (README "Forms"); this module owns that switch's reading
+(`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
+the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
 **Form files.** One TOML file per form, `forms/<name>.toml`; `forms/terms.toml` is no form but the
 list of inside terms (below). A form declares:
@@ -118,6 +120,7 @@ None writes a file, calls GitHub or starts a model.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -1383,18 +1386,211 @@ def _field_at(form: Form, document: Document, line: int) -> str:
     return name
 
 
+# Enforcing: the switch the filing commands read, the private terms, the refusal and its count
+
+
+#: se.toml `[forms] enforce`: the values the filing commands know, `off` the default.
+ENFORCE_VALUES = (OFF, WARN, REFUSE)
+#: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
+DEFAULT_REFUSALS = 2
+PRIVATE_RULE = "private"
+REFUSAL_LINES = 10
+ALSO = "Also (does not block):"
+
+
+@dataclass(frozen=True)
+class Enforcement:
+    """se.toml `[forms]` as the filing commands read it, and where it was read."""
+    enforce: str = OFF
+    refusals: int = DEFAULT_REFUSALS
+    where: str = "se.toml"
+
+
+def enforcement(root: Path) -> Enforcement:
+    """`[forms]` of `root`'s se.toml at `origin/<integration branch>` through git_door, so a branch
+    cannot switch its own check off; the working tree's only where that ref does not exist. A value
+    outside the switch's set is a FormError naming the file."""
+    door = _sibling("git_door")
+    ref = f"origin/{_integration_branch(root)}"
+    known = door.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", root=root)
+    if known.returncode == 0:
+        where = f"{ref}:se.toml"
+        shown = door.run("show", where, root=root)
+        text = shown.stdout if shown.returncode == 0 else ""
+    else:
+        where = "se.toml"
+        path = root / "se.toml"
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    try:
+        table = tomllib.loads(text).get("forms", {})
+    except tomllib.TOMLDecodeError as error:
+        raise FormError(f"forms: {where} is no TOML ({error}); fix it") from error
+    if not isinstance(table, dict):
+        raise FormError(f"forms: [forms] in {where} must be a table")
+    enforce = table.get("enforce", OFF)
+    if enforce not in ENFORCE_VALUES:
+        raise FormError(f"forms: [forms] enforce = {enforce!r} in {where} is none of "
+                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Forms\")")
+    refusals = table.get("refusals", DEFAULT_REFUSALS)
+    if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
+        raise FormError(f"forms: [forms] refusals = {refusals!r} in {where} must be a whole "
+                        "number of at least 1")
+    return Enforcement(enforce, refusals, where)
+
+
+def formed(form: Form, *, body: str | None = None, fields: dict | None = None,
+           enforce: str = OFF) -> str:
+    """The body a filing command files: `fields` always rendered through `render`; `body` as it
+    stands with `enforce` off, else parsed and rendered again, its unknown sections kept."""
+    if fields is not None:
+        return render(form, fields)
+    if body is None:
+        raise FormError("forms: give a body or fields")
+    if enforce == OFF or form.is_adapter:
+        return body
+    return render(form, parse(form, body))
+
+
+def private_findings(form: Form, title: str, body: str, root: Path) -> list[Finding]:
+    """A refused finding for every term of the lists `public_check.py` reads (its public list, the
+    local list of `root` where it holds one, and the cloud list where its variable is set) in the
+    title or the body: each names the field and the list's label, never the term. A list that
+    does not load is a FormError naming only its line."""
+    check = _sibling("public_check")
+    try:
+        local = check.load_local(root)
+        cloud = check.load_cloud()
+    except check.SetupError as error:
+        raise FormError(f"forms: {error}") from error
+    lists = [("public", pattern) for pattern in check.GENERIC_PATTERNS
+             if local is None or pattern.label not in local.off]
+    lists += [("local", pattern) for pattern in (local.terms if local is not None else [])]
+    lists += [("cloud", pattern) for pattern in (cloud or [])]
+    document = parse(form, body, title) if not form.is_adapter else None
+    found: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for where, text in (("title", title), ("body", body)):
+        for line, _, label in check.find(text, [pattern for _, pattern in lists]):
+            kind = next(name for name, pattern in lists if pattern.label == label)
+            field_name = (where if where == "title" or document is None
+                          else _field_at(form, document, line))
+            key = (field_name, label)
+            if key in seen:
+                continue
+            seen.add(key)
+            line_of = label.split(":", 1)[-1]
+            named = {"local": f"the local list ({check.LOCAL_FILE} line {line_of})",
+                     "cloud": f"the cloud list ({check.CLOUD_ENV} line {line_of})"}.get(
+                         kind, f"the public list ({label})")
+            found.append(Finding(field_name, PRIVATE_RULE, REFUSE,
+                                 f"holds a term of {named}: stop and ask the owner before "
+                                 "anything is filed"))
+    return found
+
+
+def _heading(form: Form, name: str) -> str:
+    item = form.field(name)
+    return (item.heading or item.name) if item is not None else name
+
+
+def _line(form: Form, finding: Finding) -> str:
+    """A finding as `<field>: <what is wrong>: <the fix>`."""
+    heading = _heading(form, finding.field)
+    fix = finding.fix
+    if fix.startswith(f"{heading} "):
+        fix = fix[len(heading) + 1:]
+        fix = fix[3:] if fix.startswith("is ") else fix
+    return f"{heading}: {fix}"
+
+
+def _fit(head: list[str], lines: list[str], tail: list[str]) -> list[str]:
+    """`head`, `lines` and `tail` in at most REFUSAL_LINES lines: lines beyond the room are joined
+    onto the last one, so every finding is still named."""
+    room = max(1, REFUSAL_LINES - len(head) - len(tail))
+    if len(lines) > room:
+        lines = lines[:room - 1] + ["; ".join(lines[room - 1:])]
+    return head + lines + tail
+
+
+def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
+           hold: str = "", scripts: Path = ROOT / "scripts") -> str:
+    """The text a filing command prints for `findings` against `form`, at most REFUSAL_LINES
+    lines: every refused finding with its fix, the warnings after ALSO, the `draft` command with
+    the real path of SE's scripts and, with `hold` (the label it files with), the `--hold` way
+    out. It never counts tries."""
+    refusing = [f"  {_line(form, item)}" for item in findings if item.severity == REFUSE]
+    warning = [_line(form, item) for item in findings if item.severity != REFUSE]
+    if refused:
+        head = [f"{command}: the {form.name} form refuses this text; fix every finding and run "
+                "it again:"]
+        lines = refusing
+        tail = [f"{ALSO} {'; '.join(warning)}"] if warning else []
+    else:
+        head = [f"{command}: the {form.name} form finds this ([forms] enforce = warn); filed "
+                "anyway:"]
+        lines = [f"  {_line(form, item)}" for item in findings]
+        tail = []
+    tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
+    if hold:
+        tail.append("Or run it again with --hold: it files the text as given, labelled "
+                    f"{hold} and not ready, and nobody starts it until it is fixed")
+    return "\n".join(_fit(head, lines, tail))
+
+
+def target(form: str, repo: str, action: str, *, number: int | None = None,
+           title: str = "") -> str:
+    """What one count of refusals is about: the form, the repository and the action, then the
+    issue's number, or the normalised title of a new issue."""
+    what = f"#{number}" if number is not None else " ".join(title.casefold().split())
+    return f"{form}|{repo.casefold()}|{action}|{what}"
+
+
+def counts_file(environ: dict[str, str] | None = None) -> Path:
+    """The session's count of refusals: `~/.se/forms/<session>.json`, never inside a checkout.
+    The session is the one the variables `ci_trust.SESSION_VARIABLES` name."""
+    _sibling("git_door")
+    name = _sibling("ci_trust").session(environ)
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+    return Path.home() / ".se" / "forms" / f"{digest}.json"
+
+
+def _counts(path: Path) -> dict[str, int]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(key): int(value) for key, value in data.items()
+            if isinstance(value, int)} if isinstance(data, dict) else {}
+
+
+def refusals(key: str, environ: dict[str, str] | None = None) -> int:
+    """How many times this session's filing of `key` was refused."""
+    return _counts(counts_file(environ)).get(key, 0)
+
+
+def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
+    """Count one more refusal of `key` in this session; gives the count now."""
+    path = counts_file(environ)
+    counts = _counts(path)
+    counts[key] = counts.get(key, 0) + 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    return counts[key]
+
+
 # Command
 
 
-def _fields_file(path: Path) -> dict[str, object]:
+def fields_file(path: Path, command: str = "forms.py check") -> dict[str, object]:
+    """The field values of a `--fields` file: an object of them, or `draft --json`'s answer."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise FormError(f"forms.py check: --fields {path} is no JSON file ({error})") from error
+        raise FormError(f"{command}: --fields {path} is no JSON file ({error})") from error
     if isinstance(data, dict) and isinstance(data.get("fields"), dict):
         data = data["fields"]
     if not isinstance(data, dict):
-        raise FormError(f"forms.py check: --fields {path} must hold an object of field values")
+        raise FormError(f"{command}: --fields {path} must hold an object of field values")
     return data
 
 
@@ -1439,7 +1635,7 @@ def main(arguments: list[str] | None = None) -> int:
                                 f"({error})") from error
             document = parse(form, body, options.title)
         else:
-            values = _fields_file(options.fields)
+            values = fields_file(options.fields)
             title = next((item.name for item in form.fields if item.source == "title"), None)
             if options.title is not None and title:
                 values[title] = options.title

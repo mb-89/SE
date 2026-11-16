@@ -117,11 +117,14 @@ PAUSE_LABEL = "pause"  # an open issue with it pauses the fleet (work model, Pau
 # label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
 WORK_LABELS = ("work", "ready")
 IN_PROGRESS_LABEL = "in-progress"
-NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL})
+# An issue filed with --hold past its form's refusals (README "Forms"): never started until fixed.
+OFF_FORM_LABEL = "off-form"
+NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_FORM_LABEL})
 LABEL_DESCRIPTIONS = {
     "work": "A work issue: one package for one worker",
     "ready": "Checked by SE and may be worked",
     BACKLOG_LABEL: "A far-out idea for the person; not work until SE re-files it",
+    OFF_FORM_LABEL: "Filed with --hold outside its form; nobody starts it until it is fixed",
 }
 OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
@@ -3762,6 +3765,9 @@ def start_handed_off(
     if not {"work", "ready"} <= labels:
         raise QueueError(f"Issue #{number} is not startable: it is labelled "
                          f"{', '.join(sorted(labels)) or 'nothing'}, not work and ready")
+    if labels & NOT_STARTABLE_LABELS:
+        raise QueueError(f"Issue #{number} is not startable: it is labelled "
+                         f"{', '.join(sorted(labels & NOT_STARTABLE_LABELS))}")
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
     if cloud and not agent:
@@ -4483,12 +4489,14 @@ def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
 @dataclass(frozen=True)
 class Filed:
     """What a dedupe plan did: the twin it answered, or the issue it filed (`number`, `url`) and
-    the lower twin it then closed it as a duplicate of; all None where it was handed off."""
+    the lower twin it then closed it as a duplicate of; all None where it was handed off. `held`: filed
+    with --hold, off its form."""
 
     twin: int | None = None
     number: int | None = None
     url: str = ""
     lower: int | None = None
+    held: bool = False
 
     @property
     def duplicate(self) -> bool:
@@ -4504,7 +4512,9 @@ class Filed:
             return f"Run the GitHub plan above to file the {what} once"
         url = self.url or issue_url(repo, self.number)
         return f"Filed {what} {url}" + (
-            f", closed as a duplicate of #{self.lower}" if self.lower is not None else "")
+            f", closed as a duplicate of #{self.lower}" if self.lower is not None else "") + (
+            f", held: labelled {OFF_FORM_LABEL} and not ready until it is fixed" if self.held
+            else "")
 
 
 def open_issues(root: Path, repo: str) -> list[dict[str, object]]:
@@ -4518,14 +4528,19 @@ def open_issues(root: Path, repo: str) -> list[dict[str, object]]:
 SE_ROOT = Path(__file__).resolve().parents[1]
 
 
+def own_scripts(repo: str) -> bool:
+    """Whether a bare `scripts/…` path in an issue of `repo` names se's own scripts: only in an
+    issue of se's own repository; elsewhere it may be that repository's."""
+    own = remote_repo(SE_ROOT)
+    return own is not None and api_repo(own).lower() == api_repo(repo).lower()
+
+
 def refuse_dangling(repo: str, command: str, body: str) -> None:
     """Refuse an issue body that names a missing se command or subcommand, unless one of its
-    Requirements says it is new work of that issue (one owner: references.dangling). A bare `scripts/…` path names se's
-    own scripts only in an issue of se's own repository; elsewhere it may be that repository's."""
-    own = remote_repo(SE_ROOT)
+    Requirements says it is new work of that issue (one owner: references.dangling); a bare
+    `scripts/…` path counts as described at `own_scripts`."""
     found = sibling("references").dangling(
-        body, SE_ROOT, paths=False, created=True,
-        bare_scripts=own is not None and api_repo(own).lower() == api_repo(repo).lower())
+        body, SE_ROOT, paths=False, created=True, bare_scripts=own_scripts(repo))
     if found:
         raise QueueError(
             f"{command}: the body names what se does not have; correct it, or say in its "
@@ -4533,16 +4548,129 @@ def refuse_dangling(repo: str, command: str, body: str) -> None:
             + "\n".join(f"  {finding}" for finding in found))
 
 
+def form_of(name: str):
+    """The form `name` of SE's forms (`forms.load`), a QueueError where they do not load."""
+    forms = sibling("forms")
+    try:
+        return forms.load(SE_ROOT)[name]
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+
+
+def enforcement(root: Path):
+    """se.toml `[forms]` as `forms.enforcement` reads it for `root`, a QueueError where it is
+    wrong."""
+    forms = sibling("forms")
+    try:
+        return forms.enforcement(root)
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+
+
+def form_body(root: Path, form: str, command: str, file: Path | None, fields: Path | None,
+              read: Callable[[Path], str]) -> tuple[str, str]:
+    """The body a filing command files and the body as given (what `--hold` files): from
+    `fields` always rendered through the form; from `file` (`read` reads it) as it stands with
+    `[forms] enforce` off, else parsed and rendered again (README "Forms")."""
+    forms = sibling("forms")
+    if (file is None) == (fields is None):
+        raise QueueError(f"{command} takes exactly one of --body-file and --fields")
+    try:
+        if fields is not None:
+            rendered = forms.render(form_of(form), forms.fields_file(fields, command))
+            return rendered, rendered
+        given = read(file)
+        gate = enforcement(root)
+        if gate.enforce == forms.OFF:
+            return given, given
+        return forms.formed(form_of(form), body=given, enforce=gate.enforce), given
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+
+
+def held_labels(labels: list[str]) -> list[str]:
+    """The labels of an issue filed with --hold: without `ready`, with OFF_FORM_LABEL."""
+    return [*(label for label in labels if label != "ready"), OFF_FORM_LABEL]
+
+
+def form_check(root: Path, repo: str, command: str, title: str, body: str, form: str,
+               existing: int | None = None, hold: bool = False, given: str | None = None) -> bool:
+    """The form check of a filing (README "Forms"), before anything is written: with `[forms]
+    enforce` off nothing; `warn` prints the findings on stderr; `refuse` raises the refusal and
+    counts it for this session. Gives whether the issue is filed held: `hold` past the count of
+    refusals, never with a private term in the title, the body or the text as `given`."""
+    forms = sibling("forms")
+    gate = enforcement(root)
+    if gate.enforce == forms.OFF:
+        if hold:
+            raise QueueError(f"{command} --hold: [forms] enforce is off in {gate.where}, so "
+                             "nothing refuses; run it without --hold")
+        return False
+    chosen = form_of(form)
+    try:
+        private = forms.private_findings(chosen, title, body, root)
+        if hold and given is not None and given != body:
+            private += [finding for finding in forms.private_findings(chosen, title, given, root)
+                        if finding not in private]
+        found = private + forms.check(chosen, forms.parse(chosen, body, title), root=SE_ROOT,
+                                      bare_scripts=own_scripts(repo))
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+    refused = [finding for finding in found if finding.severity == forms.REFUSE]
+    if gate.enforce == forms.WARN:
+        if found:
+            print(forms.report(command, chosen, found, refused=False), file=sys.stderr)
+        if hold:
+            raise QueueError(f"{command} --hold: [forms] enforce is warn in {gate.where}, so "
+                             "nothing refuses; run it without --hold")
+        return False
+    if not refused:
+        if hold:
+            raise QueueError(f"{command} --hold: the {form} form refuses nothing here; run it "
+                             "without --hold")
+        if found:
+            print(forms.report(command, chosen, found, refused=False).replace(
+                "([forms] enforce = warn); filed anyway", "(none refuses); filed"),
+                file=sys.stderr)
+        return False
+    action = "issue.edit" if existing is not None else "issue.create"
+    key = forms.target(form, api_repo(repo), action, number=existing, title=title)
+    if hold and not private and forms.refusals(key) >= gate.refusals:
+        return True
+    if hold:
+        why = ("--hold never files a text with a private term" if private else
+               "--hold opens only after this issue was refused more than once in this session")
+        raise QueueError(f"{command} --hold: {why}; fix it first.\n"
+                         + forms.report(command, chosen, found, refused=True))
+    count = forms.count_refusal(key)
+    offer = OFF_FORM_LABEL if count >= gate.refusals and not private else ""
+    raise QueueError(forms.report(command, chosen, found, refused=True, hold=offer))
+
+
 def filed_once(root: Path, repo: str, command: str, title: str, body: str, filing: Step,
-               existing: int | None = None) -> Filed:
+               existing: int | None = None, *, form: str, hold: bool = False,
+               given: str | None = None) -> Filed:
     """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in; a
-    body naming a missing se command is refused first (`refuse_dangling`)."""
+    body naming a missing se command is refused first (`refuse_dangling`), then the title and the
+    body are checked against `form` (`form_check`), before anything is printed or written. Held
+    (`--hold`), the text as `given` is filed instead, labelled OFF_FORM_LABEL and not ready."""
     refuse_dangling(repo, command, body)
+    held = form_check(root, repo, command, title, body, form, existing, hold, given)
+    if held and given is not None and given != body:
+        refuse_dangling(repo, command, given)
+        body = given
+    if held:
+        labels = filing.arguments.get("labels")
+        filing = Step(filing.action, filing.tool, {
+            **filing.arguments, "body": body,
+            "labels": held_labels([str(label) for label in labels]) if isinstance(labels, list)
+            else f"<the issue's labels with {', '.join(held_labels(work_labels(root, repo)))}>"},
+            note=filing.note, gives=filing.gives)
     plan = filing_plan(repo, command, title, body, filing, existing)
     door = relay_door(root, repo) if hand_off() else None
     if hand_off() and door is None:
         print(plan.text())
-        return Filed()
+        return Filed(held=held)
     key = purpose_key(title, body)
     state: dict[str, object] = {}
     issues = door.open_issues if door is not None else lambda: open_issues(root, repo)
@@ -4599,7 +4727,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
     def route(arguments: dict[str, object], _: str) -> None:
         if state["twin"] is not None:
             return
-        labels = work_labels(root, repo)
+        labels = held_labels(work_labels(root, repo)) if held else work_labels(root, repo)
         if door is not None:
             have = door.labels(int(str(existing)))
             door.edit_issue(int(str(existing)), str(arguments["title"]), str(arguments["body"]),
@@ -4651,7 +4779,7 @@ def filed_once(root: Path, repo: str, command: str, title: str, body: str, filin
     number = state.get("number")
     return Filed(twin=state["twin"],  # type: ignore[arg-type]
                  number=None if number is None else int(str(number)), url=str(state.get("url", "")),
-                 lower=state.get("lower"))  # type: ignore[arg-type]
+                 lower=state.get("lower"), held=held)  # type: ignore[arg-type]
 
 
 def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> Step:
@@ -4662,16 +4790,19 @@ def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> St
 
 
 def file_work_issue(
-    root: Path, title: str, file: Path, blockers: list[int], repo: str | None,
-    extra: tuple[str, ...] = ()
+    root: Path, title: str, file: Path | None, blockers: list[int], repo: str | None,
+    extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False,
 ) -> str:
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
-    blockers are linked. Returns the filed issue's URL, or the line naming the twin it answered."""
+    blockers are linked. The body is `file`, or `fields` rendered through the work form, checked
+    against it (README "Forms"). Returns the filed issue's URL, or the line naming the twin it
+    answered."""
     if not title.strip():
         raise QueueError("file needs a title, the ticket's name and its branch")
     title = checked_name("file", title)
-    body = fleet_marked(read_text_file(file, "work issue body") + "\n")
+    body, given = form_body(root, "work", "file", file, fields, lambda path: fleet_marked(
+        read_text_file(path, "work issue body") + "\n"))
     labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
     first = [label for label in labels if not blockers or label != "ready"]
@@ -4680,12 +4811,14 @@ def file_work_issue(
             "file --blocked-by links blockers through gh, which is not signed in here; file "
             "without --blocked-by and link the blockers on GitHub, or run it where gh is signed in")
     outcome = filed_once(root, repo, "file", title.strip(), body,
-                         work_issue_filing(repo, title.strip(), body, first))
+                         work_issue_filing(repo, title.strip(), body, first), form="work",
+                         hold=hold, given=given)
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
             block(root, outcome.number, blocker, repo)
-        run_gh(root, ["issue", "edit", str(outcome.number), "--add-label", "ready",
-                      *repo_arguments(repo)])
+        if not outcome.held:
+            run_gh(root, ["issue", "edit", str(outcome.number), "--add-label", "ready",
+                          *repo_arguments(repo)])
     return outcome.line(repo, "work issue")
 
 
@@ -4726,9 +4859,25 @@ def routed_body(body: str, title: str, routing: str, kind: str | None = None) ->
             f"Routed from: {title.strip()}\n\n" + "\n".join(lines) + "\n")
 
 
+def routed_fields(body: str, title: str, fields: Path, kind: str) -> str:
+    """The body unchanged, then the routing block rendered through the routed form from `fields`:
+    "Routed from" the original title and, where the fields name none, the Package kind `kind`,
+    as `routed_body` states them."""
+    forms = sibling("forms")
+    try:
+        values = forms.fields_file(fields, "route")
+        values.setdefault("routed_from", title.strip())
+        if not values.get("package_kind"):
+            values["package_kind"] = kind
+        return f"{body.rstrip()}\n\n" + forms.render(form_of("routed"), values)
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+
+
 def route_outside_issue(
-    root: Path, number: int, title: str | None, kind: str, file: Path, repo: str | None,
+    root: Path, number: int, title: str | None, kind: str, file: Path | None, repo: str | None,
     read: tuple[str, Path] | None = None, association: str | None = None,
+    fields: Path | None = None, hold: bool = False,
 ) -> str:
     """Route a checked outside issue as a work issue in one edit, once
     (dedupe: work model, Issues): its title becomes its branch name (given, or derived from
@@ -4738,8 +4887,12 @@ def route_outside_issue(
     signed in, and `association` its author's association as they read it.
 
     With the `[outside-text]` switch on, an outside author's body (one whose association is not
-    inside, or not known) goes into the routed issue inside the envelope instead of unchanged."""
-    routing = read_text_file(file, "routing sections")
+    inside, or not known) goes into the routed issue inside the envelope instead of unchanged.
+    The routing is `file`, or `fields` rendered through the routed form, checked against it
+    (README "Forms")."""
+    if (file is None) == (fields is None):
+        raise QueueError("route takes exactly one of --routing-file and --fields")
+    routing = read_text_file(file, "routing sections") if file is not None else ""
     repo = resolve_repo(root, repo)
     handing_off = hand_off()
     door = relay_door(root, repo) if handing_off else None  # one call through kern's relay
@@ -4778,34 +4931,50 @@ def route_outside_issue(
     text = str(issue["body"])
     if inside is not None and not is_inside(association, inside):
         text, _ = enveloped(text, f"the body of issue #{number}", association)
-    body = routed_body(text, str(issue["title"]), routing, checked_kind(kind))
+    if fields is None:
+        given = routed_body(text, str(issue["title"]), routing, checked_kind(kind))
+        body, _ = form_body(root, "routed", "route", file, None, lambda _: given)
+    else:
+        given = body = routed_fields(text, str(issue["title"]), fields, checked_kind(kind))
     filing = Step("route", "issue_write", {
         **owner_repo(repo), "method": "update", "issue_number": number, "title": branch,
         "body": body, "labels": f"<the issue's labels with {', '.join(work_labels(root, repo))}>"},
         note="issue_read get_labels reads the issue's labels; issue_write sets the whole list")
-    outcome = filed_once(root, repo, "route", branch, body, filing, existing=number)
+    outcome = filed_once(root, repo, "route", branch, body, filing, existing=number, form="routed",
+                         hold=hold, given=given)
     if outcome.twin is not None:
         return outcome.line(repo, branch)
     if outcome.number is None:
         return f"Run the GitHub plan above to route #{number} as {branch} once"
     return f"Routed issue #{number} as {branch}" + (
-        f"; closed as a duplicate of #{outcome.lower}" if outcome.duplicate else "")
+        f"; closed as a duplicate of #{outcome.lower}" if outcome.duplicate else "") + (
+        f"; held: labelled {OFF_FORM_LABEL} and not ready until it is fixed" if outcome.held
+        else "")
 
 
-def backlog_file(root: Path, title: str, file: Path, repo: str | None) -> str:
+def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
+                 fields: Path | None = None, hold: bool = False) -> str:
     """File a far-out idea as a backlog issue for the person, once
-    (dedupe: work model, Issues), creating its label where missing."""
+    (dedupe: work model, Issues), creating its label where missing; its body is `file`, or
+    `fields` rendered through the ticket form, checked against it (README "Forms")."""
     repo = resolve_repo(root, repo)
-    body = read_file(file, "backlog body").strip()
-    if not title.strip() or not body:
+
+    def read(path: Path) -> str:
+        text = read_file(path, "backlog body").strip()
+        if not text:
+            raise QueueError("backlog file needs a title and a body")
+        return fleet_marked(text + "\n")
+
+    if not title.strip():
         raise QueueError("backlog file needs a title and a body")
+    body, given = form_body(root, "ticket", "backlog file", file, fields, read)
     title = checked_name("backlog file", title)
     filing = Step("create", "issue_write", {
         **owner_repo(repo), "method": "create", "title": title.strip(),
-        "body": fleet_marked(body + "\n"), "labels": [BACKLOG_LABEL, PERSON_LABEL]},
+        "body": body, "labels": [BACKLOG_LABEL, PERSON_LABEL]},
         gives=("number",))
-    return filed_once(root, repo, "backlog file", title.strip(), fleet_marked(body + "\n"),
-                      filing).line(repo, "backlog issue")
+    return filed_once(root, repo, "backlog file", title.strip(), body, filing, form="ticket",
+                      hold=hold, given=given).line(repo, "backlog issue")
 
 
 def backlog_list(root: Path, search: str | None, repo: str | None) -> list[dict[str, object]]:
@@ -9049,8 +9218,14 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
          arg("--title", required=True,
              help="the ticket's name, its branch too: 1 to 5 lowercase words joined by dashes, "
                   "used by no other issue or branch"),
-         arg("--body-file", required=True, type=Path,
-             help="the filled .github/ISSUE_TEMPLATE/work.md body"),
+         Exclusive((
+             arg("--body-file", type=Path, help="the filled .github/ISSUE_TEMPLATE/work.md body"),
+             arg("--fields", type=Path, metavar="FILE",
+                 help="instead: JSON with the work form's fields (forms.py draft work --json), "
+                      "rendered through it")), required=True),
+         arg("--hold", action="store_true",
+             help="after [forms] refusals of this issue in this session: file the text as given, "
+                  "labelled off-form and not ready (README \"Forms\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
          arg("--label", action="append", default=[], metavar="LABEL",
@@ -9058,7 +9233,7 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
          REPO)
 def run_file(root: Path, args: argparse.Namespace) -> int:
     print(file_work_issue(root, args.title, args.body_file, args.blocked_by, args.repo,
-                          tuple(args.label)))
+                          tuple(args.label), args.fields, args.hold))
     return 0
 
 
@@ -9072,9 +9247,16 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
          arg("--type", default="feat",
              help="the kind of work the routed Package kind states where the routing file has "
                   "none (default feat)"),
-         arg("--routing-file", required=True, type=Path,
-             help="the work.md sections the issue lacks, completed, appended to its body under "
-                  f"## {ROUTING_SECTION} with the handled marker"),
+         Exclusive((
+             arg("--routing-file", type=Path,
+                 help="the work.md sections the issue lacks, completed, appended to its body under "
+                      f"## {ROUTING_SECTION} with the handled marker"),
+             arg("--fields", type=Path, metavar="FILE",
+                 help="instead: JSON with the routed form's fields (forms.py draft routed --json), "
+                      "rendered through it")), required=True),
+         arg("--hold", action="store_true",
+             help="after [forms] refusals of this issue in this session: file the text as given, "
+                  "labelled off-form and not ready (README \"Forms\")"),
          arg("--issue-title", help="without gh: the issue's title as the GitHub tools read it"),
          arg("--issue-body", type=Path,
              help="without gh: a file with the issue's body as the GitHub tools read it"),
@@ -9090,7 +9272,7 @@ def run_route(root: Path, args: argparse.Namespace) -> int:
     read = None if args.issue_body is None else (args.issue_title, args.issue_body)
     print(route_outside_issue(
         root, args.issue, args.title, args.type, args.routing_file, args.repo, read,
-        args.issue_association))
+        args.issue_association, args.fields, args.hold))
     return 0
 
 
@@ -9102,10 +9284,17 @@ BACKLOG = command_group(
 @command("file", f"file one backlog issue with both labels, creating {BACKLOG_LABEL} where missing",
          WORKTREE,
          arg("--title", required=True, help="the idea's name: 1 to 5 lowercase words joined by dashes"),
-         arg("--body-file", required=True, type=Path, help="Markdown body"),
+         Exclusive((
+             arg("--body-file", type=Path, help="Markdown body"),
+             arg("--fields", type=Path, metavar="FILE",
+                 help="instead: JSON with the ticket form's fields (forms.py draft ticket --json), "
+                      "rendered through it")), required=True),
+         arg("--hold", action="store_true",
+             help="after [forms] refusals of this issue in this session: file the text as given, "
+                  "labelled off-form and not ready (README \"Forms\")"),
          REPO, parent=BACKLOG)
 def run_backlog_file(root: Path, args: argparse.Namespace) -> int:
-    print(backlog_file(root, args.title, args.body_file, args.repo))
+    print(backlog_file(root, args.title, args.body_file, args.repo, args.fields, args.hold))
     return 0
 
 

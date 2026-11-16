@@ -100,3 +100,31 @@ def comment(root):
     assert [path.split(":", 1)[1] for path in door_paths("review.py", fixture)] == [
         "5 report: gh issue create", "8 plan: issue_write create", "11 by_api: POST issues",
         "14 deduped: calls filed_once"]
+
+
+# The form each filing path checks with (README "Forms"), and where in the door the check runs.
+FORMS = {"file_work_issue": "work", "backlog_file": "ticket", "route_outside_issue": "routed"}
+WRITES = {"filing_plan", "print", "run_plan", "relay_door", "run_gh", "run_gh_with_body"}
+
+
+def calls_in_order(node: ast.AST) -> list[ast.Call]:
+    found = [item for item in ast.walk(node) if isinstance(item, ast.Call)]
+    return sorted(found, key=lambda call: (call.lineno, call.col_offset))
+
+
+def called(call: ast.Call) -> str | None:
+    return call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", None)
+
+
+def test_the_form_check_runs_in_the_door_before_its_first_write_on_every_filing_path():
+    tree = ast.parse((SCRIPTS / "work_tickets.py").read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    order = [called(call) for call in calls_in_order(functions["filed_once"])]
+    assert order.index("refuse_dangling") < order.index("form_check")
+    assert order.index("form_check") < min(order.index(name) for name in WRITES if name in order)
+    for path, form in FORMS.items():
+        filings = [call for call in calls_in_order(functions[path]) if called(call) == "filed_once"]
+        assert len(filings) == 1, path
+        keywords = {keyword.arg: keyword.value for keyword in filings[0].keywords}
+        assert isinstance(keywords.get("form"), ast.Constant) and keywords["form"].value == form
+        assert {"hold", "given"} <= set(keywords), path

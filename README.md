@@ -1633,8 +1633,8 @@ work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGR
 escalation, filing, routing, the backlog, blockers and the fleet's pause.
 
 ```text
-work_tickets.py backlog file --worktree WORKTREE --title TITLE --body-file BODY_FILE
-                             [--repo REPO]
+work_tickets.py backlog file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
+                             --fields FILE) [--hold] [--repo REPO]
     file one backlog issue with both labels, creating backlogged where missing
 
 work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
@@ -1654,8 +1654,8 @@ work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST
 work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]
     comment a question on an issue and label it escalated
 
-work_tickets.py file --worktree WORKTREE --title TITLE --body-file BODY_FILE [--blocked-by N]
-                     [--label LABEL] [--repo REPO]
+work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
+                     --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]
     for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
     once its blockers are linked
 
@@ -1678,9 +1678,9 @@ work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--jso
     author, marked as intake marks it (--json: byOwner)
 
 work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
-                      --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]
-                      [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION]
-                      [--repo REPO]
+                      (--routing-file ROUTING_FILE | --fields FILE) [--hold]
+                      [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY]
+                      [--issue-association ISSUE_ASSOCIATION] [--repo REPO]
                       issue
     for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label
     it work, ready and repo:<name>, and append the routing section with the handled record to its
@@ -2157,13 +2157,29 @@ SE keeps the shape of its issues as data: one TOML file per form under `forms/`,
 the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
 are advice beside them.
 
-- `forms/ticket.toml` is the owner's ticket: a title in plain words, then Situation, Problem, Goal,
-  Approach (with its `Not picked:` line), Steps, Check and an optional Depends on.
-- `forms/work.toml` extends it for a work issue: its title the branch name, Requirements, Acceptance
-  and Verification in place of Steps and Check, and `## Blocked by` as `block` leaves it.
-- `forms/routed.toml` checks only the routing block `route` appends after the handled marker; the
-  outside text above it is data.
-- `forms/terms.toml` lists inside terms, which only warn.
+- `forms/decision.toml`: A decision note: the situation and the problem before the options' pugh
+  fence.
+- `forms/field-report.toml`: A work pull request's description: the field report between its
+  markers.
+- `forms/housekeeping.toml`: The owner's housekeeping pull request: no field report, no field
+  required.
+- `forms/landing.toml`: A landing pull request: it names the work issue, the work pull request and
+  its report.
+- `forms/merge-message.toml`: An integration's squash commit: `Integrate <branch>` and one
+  Release-kind trailer.
+- `forms/overhaul.toml`: An overhaul's report: the verdicts, the findings and the judged block the
+  next one reads.
+- `forms/retro.toml`: A retro's report or draft: its judged block, under its marker.
+- `forms/review.toml`: A cold review's one comment: what a person reads, then the JSON block the
+  retro reads.
+- `forms/routed.toml`: The routing block SE appends to an outside issue: where it came from and
+  what it lacks.
+- `forms/terms.toml`, the term list and no form: Inside terms and the plain words to use instead.
+  They only warn.
+- `forms/ticket.toml`: An issue the owner reads: what is, what is wrong, what should be, how, and
+  how we know.
+- `forms/work.toml`: One package for one worker: the ticket's why, then numbered requirements and
+  acceptance.
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the
@@ -2175,5 +2191,22 @@ prints at most ten findings and exits 1 where one refuses; `forms.py draft <form
 form and `forms.py list` names every form with its actions. They read `forms/` at `origin/main`
 where it holds them, else the working tree (`--tree` always).
 
-No command checks with them yet: the commands that file and edit issues switch the check on in a
-later piece.
+The commands that file issues check with them where se.toml `[forms] enforce` says so: `file`
+against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
+`--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
+always rendered through the form.
+
+- `enforce` is `off` (the default: a `--body-file` body is filed byte for byte as before), `warn`
+  (the findings go to stderr and the issue is filed) or `refuse` (nothing is printed, asked or
+  written; the refusal lists every finding in at most ten lines). With `warn` or `refuse` a
+  `--body-file` body is parsed and rendered again, its unknown sections kept.
+- They read `[forms]` from `se.toml` at `origin/<integration branch>`, the working tree's only
+  where that ref does not exist, so a branch cannot switch its own check off.
+- `refusals` (default 2) caps the retries: refusals are counted per session, form and issue in
+  `~/.se/forms/`. From that count on each refusal names `--hold`, which files the text as given,
+  labelled `off-form` and not `ready`; `ready` and `start` take no such issue until someone fixes
+  it and removes the label. Before that count `--hold` is refused.
+- The check also runs the term lists `scripts/public_check.py` reads over the title and the body:
+  the public list, `.public-check.local` where the checkout holds one, and the cloud list where
+  `SE_PUBLIC_CHECK_TERMS` is set; without a local or cloud list only the public list runs. A hit names the field and the list, never the term: stop and ask the
+  owner. `--hold` never files such a text.

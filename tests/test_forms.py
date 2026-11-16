@@ -7,6 +7,7 @@ import ast
 import json
 import re
 import shutil
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1190,3 +1191,124 @@ def test_each_body_se_sends_selects_its_form_and_passes(catalog, monkeypatch, se
         assert (form.name if form else FREE) == case.form, (sender, case.action)
         refused = [str(finding) for finding in found if finding.severity == forms.REFUSE]
         assert refused == [], (sender, case.action, refused)
+
+
+# Enforcing: the switch, the body a filing command files, private terms, the refusal, the count
+
+
+def test_enforcement_defaults_to_off_and_reads_the_working_tree_without_the_ref(tmp_path,
+                                                                                 fake_git_door):
+    assert forms.enforcement(tmp_path) == forms.Enforcement("off", 2, "se.toml")
+    (tmp_path / "se.toml").write_text('[forms]\nenforce = "warn"\nrefusals = 3\n', encoding="utf-8")
+    assert forms.enforcement(tmp_path) == forms.Enforcement("warn", 3, "se.toml")
+
+
+def test_enforcement_reads_the_integration_branch_where_its_ref_exists(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    (tmp_path / "se.toml").write_text('[project]\nintegration_branch = "dev"\n', encoding="utf-8")
+    commit_all(tmp_path)
+    fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/dev", "HEAD")
+    (tmp_path / "se.toml").write_text('[project]\nintegration_branch = "dev"\n[forms]\n'
+                                      'enforce = "refuse"\n', encoding="utf-8")
+    assert forms.enforcement(tmp_path) == forms.Enforcement("off", 2, "origin/dev:se.toml")
+    commit_all(tmp_path)
+    fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/dev", "HEAD")
+    assert forms.enforcement(tmp_path).enforce == "refuse"
+
+
+@pytest.mark.parametrize("table", ['enforce = "on"', "enforce = true", "refusals = 0",
+                                   "refusals = true", 'refusals = "2"'])
+def test_enforcement_refuses_a_value_outside_the_switch(tmp_path, fake_git_door, table):
+    (tmp_path / "se.toml").write_text(f"[forms]\n{table}\n", encoding="utf-8")
+    with pytest.raises(forms.FormError, match=r"\[forms\]"):
+        forms.enforcement(tmp_path)
+
+
+def test_formed_keeps_a_body_with_enforce_off_and_renders_it_otherwise(catalog):
+    work = catalog["work"]
+    body = "## Goal\n\nG.\n\n## Odd section\n\nKept.\n"
+    assert forms.formed(work, body=body) == body
+    again = forms.formed(work, body=body, enforce="warn")
+    assert again.startswith(f"{forms.FLEET_MARKER}\n<!-- se:form work -->\n")
+    assert "## Odd section\n\nKept.\n" in again
+    fields = dict(work.example["fields"])
+    assert forms.formed(work, fields=fields, enforce="off") == forms.render(work, fields)
+
+
+def test_private_findings_name_the_field_and_the_list_never_the_term(catalog, tmp_path):
+    (tmp_path / ".public-check.local").write_text("quuxcorp\n", encoding="utf-8")
+    work = catalog["work"]
+    body = forms.render(work, dict(work.example["fields"], goal="For Quuxcorp."))
+    found = forms.private_findings(work, "feat/quuxcorp-20261116", body, tmp_path)
+    assert [(item.field, item.rule, item.severity) for item in found] == [
+        ("title", "private", "refuse"), ("goal", "private", "refuse")]
+    assert all("quux" not in item.fix.lower() and "local list" in item.fix for item in found)
+    assert forms.private_findings(work, "feat/x-20261116", body, tmp_path / "none") == []
+
+
+def test_report_fits_ten_lines_names_every_finding_and_counts_no_tries(catalog):
+    work = catalog["work"]
+    found = [forms.Finding(f"f{index}", "required", "refuse", f"fix {index}") for index in range(14)]
+    found.append(forms.Finding("goal", "words", "warn", "Goal has 99 words; keep it to 60"))
+    text = forms.report("file", work, found, refused=True, hold="off-form")
+    lines = text.splitlines()
+    assert len(lines) <= forms.REFUSAL_LINES
+    assert all(f"fix {index}" in text for index in range(14))
+    assert any(line.startswith(f"{forms.ALSO} Goal: has 99 words") for line in lines)
+    assert "forms.py draft work" in text and "--hold" in text and "off-form" in text
+    assert "--hold" not in forms.report("file", work, found, refused=True)
+
+
+def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    one = forms.target("work", "git.example/O/R", "issue.create", title="Feat/X-20261116 ")
+    assert one == forms.target("work", "git.example/o/r", "issue.create", title="feat/x-20261116")
+    other = forms.target("routed", "git.example/o/r", "issue.edit", number=4)
+    env = {"SE_SESSION": "a"}
+    assert forms.refusals(one, env) == 0
+    assert [forms.count_refusal(one, env), forms.count_refusal(one, env)] == [1, 2]
+    assert forms.refusals(other, env) == 0 and forms.refusals(one, {"SE_SESSION": "b"}) == 0
+    assert forms.counts_file(env).parent == tmp_path / ".se" / "forms"
+
+
+
+def missing_from_readme(readme: str) -> list[str]:
+    """The files under `forms/` that README's "Forms" section does not name with their `says`."""
+    start = readme.index("\n### Forms\n")
+    after = re.search(r"\n#{1,3} ", readme[start + 1:])
+    section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
+    missing = []
+    for path in sorted((ROOT / "forms").glob("*.toml")):
+        says = " ".join(tomllib.loads(path.read_text(encoding="utf-8"))["says"].split())
+        if f"`forms/{path.name}`" not in section or says not in section:
+            missing.append(path.name)
+    return missing
+
+
+def test_readme_forms_names_every_file_under_forms_with_its_says():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert missing_from_readme(readme) == []
+    assert "No command checks with them yet" not in readme
+
+
+def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    start = readme.index("- `forms/retro.toml`")
+    end = readme.index("\n- `forms/review.toml`", start)
+    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
+
+
+def test_private_findings_run_the_cloud_list_where_its_variable_is_set(catalog, tmp_path,
+                                                                        monkeypatch):
+    work = catalog["work"]
+    body = forms.render(work, dict(work.example["fields"], goal="For Zorbcloud."))
+    assert forms.private_findings(work, "feat/x-20261116", body, tmp_path) == []
+    monkeypatch.setenv("SE_PUBLIC_CHECK_TERMS", "# cloud terms\nzorbcloud\n")
+    found = forms.private_findings(work, "feat/x-20261116", body, tmp_path)
+    assert [(item.field, item.severity) for item in found] == [("goal", "refuse")]
+    assert "the cloud list (SE_PUBLIC_CHECK_TERMS line 2)" in found[0].fix
+    assert "zorb" not in found[0].fix.lower()
+    monkeypatch.setenv("SE_PUBLIC_CHECK_TERMS", "off:email  # no")
+    with pytest.raises(forms.FormError, match="SE_PUBLIC_CHECK_TERMS:1"):
+        forms.private_findings(work, "feat/x-20261116", body, tmp_path)
