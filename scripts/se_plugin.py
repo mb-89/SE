@@ -82,6 +82,11 @@ COPILOT_HOOKS = {
     # It also fires for the se agent; stop-check lets any checkout without a work issue end.
     "Stop": ("scripts/se_hook.sh Stop", 60),
 }
+# The events whose hook may end with WARN, Copilot's warning: the person sees the hook's stderr and the
+# run goes on (docs/copilot.md "What a session costs"). The Stop hook advises so under Copilot rather
+# than refusing; every other exit code still fails open.
+WARN = 2
+WARN_EVENTS = ("Stop",)
 # A Copilot plugin install's hooks (.github/plugin/hooks.json, which the manifest names): the same
 # events, scripts and settings, each run from the plugin's own folder, `$PLUGIN_ROOT` without braces
 # so no host's `${...}` expander rewrites it. Without PLUGIN_ROOT a command runs nothing, so it never
@@ -423,36 +428,50 @@ def powershell_bash(script: str, setting: str = "bash", root: str = "") -> str:
     return f'{HANDOFF_START} "$env:PLUGIN_ROOT/{HANDOFF}" "{root}/{script}"'
 
 
-def plugin_hook_commands(command: str, setting: str = "bash") -> tuple[str, str]:
+def _fail_open(warn: bool) -> tuple[str, str]:
+    """What follows a hook's bash and PowerShell start so it fails open; with `warn`, WARN passes
+    through. Pure."""
+    if not warn:
+        return " || true", ""
+    return f" || [ $? -ne {WARN} ] || exit {WARN}", f"; if ($LASTEXITCODE -eq {WARN}) {{ exit {WARN} }}"
+
+
+def plugin_hook_commands(command: str, setting: str = "bash", warn: bool = False) -> tuple[str, str]:
     """The bash and PowerShell commands of a plugin install's hook running `command` (a script under
     `scripts/` and its arguments) from `$PLUGIN_ROOT`, guarded as PLUGIN_HOOKS_FILE says; `setting`
-    is powershell_hooks'. Pure."""
+    is powershell_hooks'; `warn` passes WARN through (WARN_EVENTS). Pure."""
     script, _, arguments = command.partition(" ")
     tail = f" {arguments}" if arguments else ""
     guard = COPILOT_HOOKS_FILE
+    bash_end, powershell_end = _fail_open(warn)
     bash = (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f {guard} ]; then '
-            f'bash "$PLUGIN_ROOT/{script}"{tail} || true; fi')
+            f'bash "$PLUGIN_ROOT/{script}"{tail}{bash_end}; fi')
     start = powershell_bash(script, setting, root="$($env:PLUGIN_ROOT.Replace([char]92,[char]47))")
-    powershell = f"if ($env:PLUGIN_ROOT -and -not (Test-Path {guard})) {{ {start}{tail} }}; exit 0"
+    powershell = (f"if ($env:PLUGIN_ROOT -and -not (Test-Path {guard})) {{ {start}{tail}{powershell_end} }}"
+                  "; exit 0")
     return bash, powershell
 
 
-def hook_commands(command: str, setting: str = "bash") -> tuple[str, str]:
+def hook_commands(command: str, setting: str = "bash", warn: bool = False) -> tuple[str, str]:
     """The bash and PowerShell commands of a repository hook running `command` (a script under
-    `scripts/` and its arguments) from the repository's root; `setting` is powershell_hooks'. Pure."""
+    `scripts/` and its arguments) from the repository's root; `setting` is powershell_hooks'; `warn`
+    passes WARN through (WARN_EVENTS). Pure."""
     script, _, arguments = command.partition(" ")
     tail = f" {arguments}" if arguments else ""
-    return f"bash {command} || true", f"{powershell_bash(script, setting)}{tail}; exit 0"
+    bash_end, powershell_end = _fail_open(warn)
+    return f"bash {command}{bash_end}", f"{powershell_bash(script, setting)}{tail}{powershell_end}; exit 0"
 
 
-def _copilot_hook(command: str, seconds: int, plugin: bool = False, setting: str = "bash") -> dict:
-    bash, powershell = (plugin_hook_commands if plugin else hook_commands)(command, setting)
+def _copilot_hook(command: str, seconds: int, plugin: bool = False, setting: str = "bash",
+                  warn: bool = False) -> dict:
+    bash, powershell = (plugin_hook_commands if plugin else hook_commands)(command, setting, warn)
     return {"type": "command", "bash": bash, "powershell": powershell,
             "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
 
 
 def _copilot_hooks(plugin: bool, setting: str = "bash") -> bytes:
-    return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin, setting)]
+    return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin, setting,
+                                                                event in WARN_EVENTS)]
                                          for event, (command, seconds) in COPILOT_HOOKS.items()}})
 
 

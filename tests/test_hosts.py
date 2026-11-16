@@ -57,3 +57,11 @@ def test_no_table_line_shadows_a_variable_the_table_names():
     """The hook scripts source the table, so a line named like a variable it reads would replace it."""
     named = {*hosts.variables(), *hosts.table()["SE_PROJECT_VARIABLES"], hosts.table()["SE_HOOK_HOSTS"][0]}
     assert not set(hosts.table()) & named
+
+
+def test_the_host_field_se_hook_adds_marks_a_payload_as_copilots():
+    """se_hook.sh adds it to a Copilot Stop, so the delivery check knows the host in kern's process."""
+    [field] = hosts.table()["SE_PAYLOAD_HOST"]
+    assert hosts.payload_host({field: "copilot", "session_id": "s"}) == "copilot"
+    assert hosts.payload_host({field: "claude", "session_id": "s"}) == "claude"
+    assert hosts.payload_host({"session_id": "s"}) == "claude"

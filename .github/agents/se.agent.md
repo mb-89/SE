@@ -51,7 +51,9 @@ its tools.
   how each step runs.
   - SE's read-only commands go through the `se` MCP tools where the session has them (the
     greeting's live part through `se/greeting`), else they run as their scripts.
-  - Workers start with the host's session tool, else with the Copilot CLI line it names.
+  - You start no session yourself: give the person the line that starts each worker, integrator
+    or reviewer (the host's session tool's call, else the Copilot CLI line it names) and end the
+    turn, unless the greeting's `Copilot guards:` line reads `[copilot] start_sessions = true`.
   - Where there is no message tool, read the queue every turn; where there is no `ask_user`, ask
     in the chat.
   - Where the greeting says `SE runs without kern`, or the `se` tools answer `not-installed` or

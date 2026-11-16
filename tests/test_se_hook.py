@@ -23,6 +23,7 @@ exit 0
 # A fake uv where bootstrap.sh installs it: logs its arguments and stdin, and answers as stop-check.
 FAKE_UV = """#!/bin/sh
 echo "$* <<$(cat)" >> "$HOME/fallback"
+if [ -f "$HOME/fallback-answer" ]; then cat "$HOME/fallback-answer"; exit 0; fi
 echo '{"decision": "block", "reason": "from the fallback"}'
 """
 STOP = '{"session_id":"s1","hook_event_name":"Stop","cwd":"/w"}'
@@ -154,17 +155,56 @@ def test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does(machine):
     result = copilot_hook(home, "Stop", stop, SE_HOOK_HOST="copilot")
     assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
     [line] = (home / "fallback").read_text(encoding="utf-8").splitlines()
-    assert line.endswith(f"work_tickets.py stop-check <<{stop}")
+    assert line.endswith(f'work_tickets.py stop-check <<{{"se_host":"copilot",{stop[1:]}')
 
 
 def test_a_copilot_agent_stop_falls_back_to_stop_check_with_the_payload_in_snake_case(machine):
     home, project = machine
     result = copilot_hook(home, "Stop", COPILOT_STOP % sh(project))
     assert (result.returncode, result.stdout) == (0, '{"decision": "block", "reason": "from the fallback"}\n')
-    handed = ('{"session_id":"s1","timestamp":1,"cwd":"%s","transcript_path":"/t","stop_reason":"end_turn"}'
-              % sh(project))
+    handed = ('{"se_host":"copilot","session_id":"s1","timestamp":1,"cwd":"%s","transcript_path":"/t",'
+              '"stop_reason":"end_turn"}' % sh(project))
     [line] = (home / "fallback").read_text(encoding="utf-8").splitlines()
     assert line.endswith(f"work_tickets.py stop-check <<{handed}")
+
+
+# The Stop hook's advice under Copilot (docs/copilot.md "What a session costs"): stop-check's
+# systemMessage, as json.dumps writes it, becomes Copilot's hook warning, stderr with exit code 2;
+# `\"`, `\\` and `\n` are unescaped, a `\uXXXX` stays as it is.
+ADVICE = '{"systemMessage": "se Stop hook, advice only: \\"x\\" undelivered\\nrun deliver now"}'
+SAID = 'se Stop hook, advice only: "x" undelivered\nrun deliver now\n'
+
+
+@pytest.mark.parametrize("through", ("kern", "fallback"))
+def test_under_copilot_a_stops_advice_is_a_hook_warning_never_output(machine, through):
+    home, project = machine
+    stop = '{"hook_event_name":"Stop","session_id":"s1","cwd":"%s"}' % sh(project)
+    if through == "kern":
+        install(home, project)
+        (home / "answer").write_text(ADVICE + "\n", encoding="utf-8", newline="\n")
+    else:
+        (home / "fallback-answer").write_text(ADVICE + "\n", encoding="utf-8", newline="\n")
+    result = copilot_hook(home, "Stop", stop, SE_HOOK_HOST="copilot")
+    assert (result.returncode, result.stdout, result.stderr) == (2, "", SAID)
+    handed = (home / ("calls" if through == "kern" else "fallback")).read_text(encoding="utf-8")
+    assert f'<<{{"se_host":"copilot",{stop[1:]}' in handed
+
+
+def test_under_claude_code_a_stops_advice_stays_its_output(machine):
+    home, project = machine
+    install(home, project)
+    (home / "answer").write_text(ADVICE + "\n", encoding="utf-8", newline="\n")
+    result = hook(home, project, "Stop", event=STOP)
+    assert (result.returncode, result.stdout, result.stderr) == (0, ADVICE + "\n", "")
+    assert "se_host" not in (home / "calls").read_text(encoding="utf-8")
+
+
+def test_an_empty_copilot_stop_payload_gets_the_host_field_alone(machine):
+    home, project = machine
+    install(home, project)
+    result = copilot_hook(home, "Stop", "{ }", SE_HOOK_HOST="copilot", CLAUDE_PROJECT_DIR=sh(project))
+    assert result.returncode == 0, result.stderr
+    assert (home / "calls").read_text(encoding="utf-8").endswith('<<{"se_host":"copilot" }\n')
 
 
 # A late checkout (README "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
@@ -315,3 +355,17 @@ def test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout(plugi
     for event in ("SessionStart", "Stop"):
         result = plugin_hook(kind, event, repository, root)
         assert (result.returncode, result.stdout.strip()) == (0, ""), (event, result.stderr)
+
+
+@pytest.mark.parametrize("kind", PLUGIN_FORMS)
+@pytest.mark.parametrize(("code", "passed"), ((2, 2), (1, 0), (0, 0)))
+def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
+        plugin_and_repository, kind, code, passed):
+    """Copilot shows a hook's stderr on exit code 2 and goes on; every other exit fails open."""
+    plugin, repository = plugin_and_repository
+    (plugin / "scripts" / "se_hook.sh").write_text(f"echo advice >&2; exit {code}\n", encoding="utf-8",
+                                                    newline="\n")
+    result = plugin_hook(kind, "Stop", repository, plugin_root(kind, plugin))
+    assert result.returncode == passed and "advice" in result.stderr
+    start = plugin_hook(kind, "SessionStart", repository, plugin_root(kind, plugin))
+    assert start.returncode == 0

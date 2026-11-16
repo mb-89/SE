@@ -16,8 +16,8 @@
     "Stop": [
       {
         "type": "command",
-        "bash": "bash scripts/se_hook.sh Stop || true",
-        "powershell": "bash scripts/se_hook.sh Stop; exit 0",
+        "bash": "bash scripts/se_hook.sh Stop || [ $? -ne 2 ] || exit 2",
+        "powershell": "bash scripts/se_hook.sh Stop; if ($LASTEXITCODE -eq 2) { exit 2 }; exit 0",
         "cwd": ".",
         "env": {
           "SE_HOOK_HOST": "copilot"
