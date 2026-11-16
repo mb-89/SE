@@ -1,0 +1,25 @@
+# SE's switches, forms group: the form check of the commands that file issues (`file`,
+# `backlog file`, `route`), read from se.toml at origin's integration branch; core.toml's header
+# owns the keys of a row, scripts/se_switches.py's docstring the format.
+
+[[switch]]
+name = "[forms] enforce"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.enforce"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): filing as without forms, byte for byte; warn prints the findings and files; refuse refuses, listing every finding"
+
+[[switch]]
+name = "[forms] refusals"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "set"
+layers = ["se.toml"]
+key = "forms.refusals"
+help = "README.md#forms"
+note = "set: 2 unless se.toml names another count, the refusals of one issue in one session after which --hold files it labelled off-form"

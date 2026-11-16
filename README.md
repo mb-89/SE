@@ -1625,8 +1625,8 @@ work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGR
 escalation, filing, routing, the backlog, blockers and the fleet's pause.
 
 ```text
-work_tickets.py backlog file --worktree WORKTREE --title TITLE --body-file BODY_FILE
-                             [--repo REPO]
+work_tickets.py backlog file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
+                             --fields FILE) [--hold] [--repo REPO]
     file one backlog issue with both labels, creating backlogged where missing
 
 work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
@@ -1646,8 +1646,8 @@ work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST
 work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]
     comment a question on an issue and label it escalated
 
-work_tickets.py file --worktree WORKTREE --title TITLE --body-file BODY_FILE [--blocked-by N]
-                     [--label LABEL] [--repo REPO]
+work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
+                     --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]
     for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
     once its blockers are linked
 
@@ -1670,9 +1670,9 @@ work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--jso
     author, marked as intake marks it (--json: byOwner)
 
 work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
-                      --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]
-                      [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION]
-                      [--repo REPO]
+                      (--routing-file ROUTING_FILE | --fields FILE) [--hold]
+                      [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY]
+                      [--issue-association ISSUE_ASSOCIATION] [--repo REPO]
                       issue
     for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label
     it work, ready and repo:<name>, and append the routing section with the handled record to its
@@ -2167,5 +2167,22 @@ prints at most ten findings and exits 1 where one refuses; `forms.py draft <form
 form and `forms.py list` names every form with its actions. They read `forms/` at `origin/main`
 where it holds them, else the working tree (`--tree` always).
 
-No command checks with them yet: the commands that file and edit issues switch the check on in a
-later piece.
+The commands that file issues check with them where se.toml `[forms] enforce` says so: `file`
+against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
+`--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
+always rendered through the form.
+
+- `enforce` is `off` (the default: a `--body-file` body is filed byte for byte as before), `warn`
+  (the findings go to stderr and the issue is filed) or `refuse` (nothing is printed, asked or
+  written; the refusal lists every finding in at most ten lines). With `warn` or `refuse` a
+  `--body-file` body is parsed and rendered again, its unknown sections kept.
+- They read `[forms]` from `se.toml` at `origin/<integration branch>`, the working tree's only
+  where that ref does not exist, so a branch cannot switch its own check off.
+- `refusals` (default 2) caps the retries: refusals are counted per session, form and issue in
+  `~/.se/forms/`. From that count on each refusal names `--hold`, which files the text as given,
+  labelled `off-form` and not `ready`; `ready` and `start` take no such issue until someone fixes
+  it and removes the label. Before that count `--hold` is refused.
+- The check also runs the term lists `scripts/public_check.py` reads over the title and the body:
+  the public list and, where the checkout holds one, `.public-check.local`; without a local list
+  only the public list runs. A hit names the field and the list, never the term: stop and ask the
+  owner. `--hold` never files such a text.
