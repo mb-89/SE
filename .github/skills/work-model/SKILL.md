@@ -781,29 +781,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - A refused report is fixed and checked again, never delivered.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
     like the work issue and based on the integration branch.
-  - `integrate`: the hand-off, the cloud path of [Landing on main](../../../README.md#landing-on-main).
-    - Save the pull request's description and its work issue's body to files, then run
-      `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
-      branch>`. Where kern's relay serves the checkout, run `integrate <pull request>` alone: it
-      reads the pull request and its work issue from the relay, no file.
-    - It checks the report, merges on `land/<branch>`, runs the complete suite, the checks and
-      the public check, releases, pushes `land/<branch>` and prints the landing plan.
-    - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
-      states why late commits are included.
-    - Run the plan's steps; anything but a passed `check` merges nothing.
-    - A fix commit pushed onto `land/<branch>` after this (a lock move) is recorded with
-      `integrate --record-fix <branch>`: it refuses one that is not the project identity's or
-      whose message holds an e-mail address, tests the new head and prints the plan at it. An
-      unrecorded one is refused at the read-back.
-    - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
-      --landing-description <file>`, the landing pull request's description saved after the merge;
-      through the relay, run it without `--landing-description` and it reads that description from
-      the relay too.
-    - It refuses a description without the plan's `Metrics:` line, reads the landing back through
-      git, fast-forwards the checkout, cleans up and prints the close-out plan; run its steps. It starts no session: start what is unblocked as `start`
-      above says.
-  - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
-    as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
+  - `integrate`, `refs request` and `refs apply`: [Land](#land).
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a
@@ -828,6 +806,35 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
   ```
+
+#### Land
+
+The hand-off steps that land a pull request, by hand:
+
+- `integrate`: the hand-off, the cloud path of [Landing on main](../../../README.md#landing-on-main).
+  - Save the pull request's description and its work issue's body to files, then run
+    `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
+    branch>`. Where kern's relay serves the checkout, run `integrate <pull request>` alone: it
+    reads the pull request and its work issue from the relay, no file.
+  - It checks the report, merges on `land/<branch>`, runs the complete suite, the checks and
+    the public check, releases, pushes `land/<branch>` and prints the landing plan.
+  - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
+    states why late commits are included.
+  - Run the plan's steps; anything but a passed `check` merges nothing.
+  - A fix commit pushed onto `land/<branch>` after this (a lock move) is recorded with
+    `integrate --record-fix <branch>`: it refuses one that is not the project identity's or
+    whose message holds an e-mail address, tests the new head and prints the plan at it. An
+    unrecorded one is refused at the read-back.
+  - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
+    --landing-description <file>`, the landing pull request's description saved after the merge;
+    through the relay, run it without `--landing-description` and it reads that description from
+    the relay too.
+  - It refuses a description without the plan's `Metrics:` line, reads the landing back through
+    git, fast-forwards the checkout, cleans up and prints the close-out plan; run its steps. It starts no session: start what is unblocked as `start`
+    above says.
+- `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
+  as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
+
 
 ## Host procedure under Copilot
 

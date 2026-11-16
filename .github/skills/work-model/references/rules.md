@@ -567,6 +567,35 @@ a report.
     ([Issues](../SKILL.md#issues)).
 - **Related:** wrk-002, dec-011
 
+### wrk-008 Neutral by construction
+
+A change names no host, owner or path of the repository it lives in, and is neutral when it is
+written.
+
+- **Why:** the same tree may live on more than one host; a name written in is wrong on the next.
+- **Without it:** every change needs a later pass to neutralize it, and a second remote breaks.
+- **Prevents:** a host, owner or repository path in a tracked file; a workflow call bound to one
+  host's owner.
+- **Implementations:**
+  - se: the owner's rule as landed, [Neutral by construction](../SKILL.md#neutral-by-construction),
+    and its workflows, [Neutral workflows](../SKILL.md#neutral-workflows); `<se>/scripts/hygiene.py`'s
+    check `neutral-home` ([Neutral home](../../../../AGENTS.md#neutral-home)).
+- **Related:** pub-001, pub-005, gen-001
+
+### wrk-009 Visible sessions
+
+Work runs only in independent sessions the person can see in the host's session list, and the
+role that starts them never blocks on them.
+
+- **Why:** the person sees what runs, and an interruption of the starting session cancels nothing.
+- **Without it:** work hides in in-chat sub-agents that the person cannot see and that die with the
+  turn.
+- **Prevents:** invisible in-chat work; a starting role stuck in a blocking wait or polling loop.
+- **Implementations:**
+  - se: the owner's rule as landed, [Visible sessions](../SKILL.md#visible-sessions); by
+    judgment.
+- **Related:** wrk-004, wrk-001, dec-011
+
 ## dec: decisions
 
 Rules `dec-001` to `dec-009` are the decision skill's [checklist](../../decision/SKILL.md#the-checklist),
