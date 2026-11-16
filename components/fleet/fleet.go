@@ -86,6 +86,7 @@ type In struct {
 	LeaseHours float64                    `index:"config/lease-hours"`
 	Repository string                     `index:"config/repository"`
 	Base       string                     `index:"config/base"`
+	Ages       bool                       `index:"config/ages"`
 }
 
 // Now is the clock the lease is counted on; a test replaces it.
@@ -96,6 +97,7 @@ var Component = index.Declare(Name, "What is stuck or stray in the fleet, with i
 	index.Config("lease-hours", 3.0, "How long in-progress work may go without a push to its branch: se.toml [fleet] lease_hours."),
 	index.Config("repository", "", "The checkout's repository name: an issue labelled repo:<other> keeps its branch elsewhere."),
 	index.Config("base", "main", "The integration branch: the pull requests to it are the delivered work."),
+	index.Config("ages", false, "Whether a person ask says how long it has been open: se.toml [fleet] ages."),
 	index.Derived("findings", Findings{Findings: []Finding{}}, "Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
 		func(in In) (Findings, error) { return Check(in, Now().UTC()), nil }),
 )
@@ -103,6 +105,29 @@ var Component = index.Declare(Name, "What is stuck or stray in the fleet, with i
 func init() { index.Register(Component) }
 
 type issue = snap.Issue
+
+// OpenFor is how long an issue created at created has been open at now, in
+// whole UTC calendar days, as the person finding says it with the setting
+// ages on: ", open N days", ", open 1 day" or ", opened today"; "" where the
+// creation time cannot be read. work_tickets.py open_for, rule for rule.
+func OpenFor(created string, now time.Time) string {
+	t, ok := snap.When(created)
+	if !ok {
+		return ""
+	}
+	day := func(t time.Time) time.Time {
+		u := t.UTC()
+		return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+	}
+	days := int(day(now).Sub(day(t)).Hours() / 24)
+	switch {
+	case days <= 0:
+		return ", opened today"
+	case days == 1:
+		return ", open 1 day"
+	}
+	return fmt.Sprintf(", open %d days", days)
+}
 
 // Check is the fleet check over in at now: work_tickets.py fleet_findings,
 // rule for rule, on what the names hold. The names carry no comments, so the
@@ -296,6 +321,9 @@ func Check(in In, now time.Time) Findings {
 		}
 		held := sortedKeys(holds)
 		what := fmt.Sprintf("waits for the person (%s)", Person)
+		if in.Ages {
+			what += OpenFor(open[n].CreatedAt, now)
+		}
 		if len(held) > 0 {
 			names := make([]string, len(held))
 			for i, h := range held {
