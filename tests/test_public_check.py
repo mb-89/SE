@@ -553,6 +553,71 @@ def test_a_commit_github_made_for_the_owning_account_passes_the_gate(
     assert result.returncode == (1 if refused else 0), result.stdout
 
 
+ALICE = "Alice <123+alice" + AT + NOREPLY + ">"
+
+
+@pytest.mark.parametrize("remotes, author, committer, refused", [
+    # The same tree on two hosts: origin elsewhere, the github.com copy a second remote.
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice/example.git"}, ALICE, "web-flow", []),
+    ({"origin": "ssh://git" + AT + "git.example.com/carol/example.git",
+      "hub": "git" + AT + "github.com:Alice/example.git"}, ALICE, "web-flow", []),
+    ({"hub": "https://github.com/alice/example.git"}, ALICE, "web-flow", []),
+    # Another account stays foreign, though it owns origin on the other host.
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice/example.git"},
+     "Carol <789+carol" + AT + NOREPLY + ">", "web-flow", ["author"]),
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice/example.git"},
+     "Bob <456+bob" + AT + NOREPLY + ">", "web-flow", ["author"]),
+    # The owner's address still needs GitHub's web-flow committer.
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice/example.git"}, ALICE, "author", ["author", "committer"]),
+    # The web-flow identity itself is never an author.
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice/example.git"},
+     "GitHub <noreply" + AT + "github.com>", "web-flow", ["author"]),
+    # A remote that names alice on another host, or no repository on github.com, owns nothing.
+    ({"origin": "https://git.example.com/carol/example.git",
+      "mirror": "https://git.example.com/alice/example.git"}, ALICE, "web-flow", ["author"]),
+    ({"origin": "https://git.example.com/carol/example.git",
+      "hub": "https://github.com/alice"}, ALICE, "web-flow", ["author"]),
+    ({"origin": "https://git.example.com/carol/example.git"}, ALICE, "web-flow", ["author"]),
+])
+def test_a_commit_github_made_for_the_owner_of_any_github_remote_passes_the_gate(
+        repo: Path, remotes: dict[str, str], author: str, committer: str,
+        refused: list[str]) -> None:
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY})
+    for name, url in remotes.items():
+        git(repo, "remote", "add", name, url)
+    (repo / "README.md").write_text("clean\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    name, email = author[:-1].split(" <")
+    env = {**os.environ, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+           **(WEB_FLOW if committer == "web-flow" else
+              {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email})}
+    git(repo, "commit", "-qm", "Squash the topic", env=env)
+    result = run_check("--repo", str(repo), "--range", "HEAD^!")
+    hits = [line for line in result.stdout.splitlines() if "foreign-identity" in line]
+    assert [hit.split(": ", 1)[0].rsplit(" ", 1)[1] for hit in hits] == refused, result.stdout
+    assert result.returncode == (1 if refused else 0), result.stdout
+    if refused:
+        assert public_check.REIDENTIFY_BEFORE_PUSH in hits[0]
+
+
+def test_the_owners_are_those_of_every_github_remote(repo: Path) -> None:
+    assert public_check.repository_owners(repo) == set()
+    git(repo, "remote", "add", "origin", "https://git.example.com/carol/example.git")
+    assert public_check.repository_owners(repo) == set()
+    git(repo, "remote", "add", "hub", "https://github.com/Alice/example.git")
+    git(repo, "remote", "add", "fork", "git" + AT + "github.com:bob/example.git")
+    assert public_check.repository_owners(repo) == {"alice", "bob"}
+    git(repo, "remote", "set-url", "origin", "https://github.com/dave/example.git")
+    assert public_check.repository_owners(repo) == {"alice", "bob", "dave"}
+
+
 def test_without_a_project_identity_any_generic_identity_passes_the_gate(repo: Path) -> None:
     commit(repo, {"README.md": "clean\n"})
     result = run_check("--repo", str(repo), "--range", "HEAD^!")

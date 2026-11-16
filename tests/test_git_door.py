@@ -144,6 +144,9 @@ def test_config_sets_and_gets_and_a_missing_key_fails(door, tmp_path: Path) -> N
     git(root, "remote", "add", "origin", "https://github.com/alice/project.git")
     assert git(root, "remote", "get-url", "origin") == "https://github.com/alice/project.git"
     assert git(root, "remote") == "origin"
+    git(root, "remote", "add", "hub", "git@example.com:alice/project.git")
+    assert sorted(git(root, "remote").split()) == ["hub", "origin"]
+    assert git(root, "remote", "get-url", "hub") == "git@example.com:alice/project.git"
 
 
 # Branches, merges and the main line

@@ -16,8 +16,8 @@ the --range gate on every pull request and every push to the integration branch
 (.github/workflows/check.yml). The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set; GitHub's web-flow identity, the committer of a
 commit made on GitHub, passes as committer, and on such a commit the author may be the GitHub
-noreply address of the account owning origin on github.com (the squash merge of a pull request into
-main). A hit names the identity found, redacted. A
+noreply address of an account owning one of the checkout's remotes on github.com, origin or any
+other (the squash merge of a pull request into main, made on that copy). A hit names the identity found, redacted. A
 `commit:<full sha> author|committer` entry in .public-check-allow allows the identity in that role
 on that one commit, and a `commit:<full sha> message` entry the message hits of that one commit,
 for history already published. A --range on a shallow clone that reaches beyond the fetched
@@ -491,11 +491,22 @@ def project_identity(root: Path) -> str | None:
     return None if identity is None else f"{identity[0]} <{identity[1]}>"
 
 
-def repository_owner(root: Path) -> str | None:
-    """The account owning the checkout's origin on github.com (lower case), else None."""
+def repository_owners(root: Path) -> set[str]:
+    """The accounts owning the checkout's remotes on github.com (lower case): origin's, read as
+    work_tickets.remote_repo reads it, and that of every other remote whose URL se_home.parse
+    reads as a repository on github.com; empty where no remote is on github.com."""
     repo = sibling("work_tickets").remote_repo(root)
     host, _, path = (repo or "").partition("/")
-    return path.split("/", 1)[0].lower() if host.lower() == "github.com" else None
+    owners = {path.split("/", 1)[0].lower()} if host.lower() == "github.com" else set()
+    se_home = sibling("se_home")
+    for name in git(root, "remote").decode("utf-8", "replace").split():
+        if name == "origin":
+            continue
+        result = git_door.run("remote", "get-url", name, root=root)
+        home = se_home.parse(result.stdout) if result.returncode == 0 else None
+        if home is not None and home.host == se_home.GITHUB:
+            owners.add(home.owner.lower())
+    return owners
 
 
 def made_on_github_by_owner(author: str, committer: str, owner: str | None) -> bool:
@@ -523,7 +534,7 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
     `allow` drops the hits of its role (an identity, or the message) on its commit; in a gate,
     where every hit it may cover is looked for, one that drops none is reported unused."""
     expected = project_identity(root) if gate else None
-    owner = repository_owner(root) if expected is not None else None
+    owners = repository_owners(root) if expected is not None else set()
     output = git(root, "log", "-z", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>%x1f%B", *revisions, "--")
     for record in output.decode("utf-8", "replace").split("\0"):
         if not record.strip():
@@ -535,7 +546,8 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
         scan_identity(where, "author", author, patterns, report)
         if committer != author:
             scan_identity(where, "committer", committer, patterns, report)
-        if expected is not None and not made_on_github_by_owner(author, committer, owner):
+        if expected is not None and not any(made_on_github_by_owner(author, committer, owner)
+                                            for owner in owners):
             scan_project_identity(where, "author", author, expected, patterns, report)
         if expected is not None:
             scan_project_identity(where, "committer", committer, expected, patterns, report)
