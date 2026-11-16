@@ -23,12 +23,12 @@ project's commands and hot files by the project's `AGENTS.md`.
   `create_session` with `worktree: false` and the worker's worktree folder as `workspace`; Copilot
   CLI: a separate session). After dispatching, report and **end the turn**.
 <!-- copilot -->
-  - Under Copilot, start no session yourself: give the person the line that starts each one,
-    the session tool's call or the Copilot CLI line of the work model's
-    [Host procedure under Copilot](../work-model/SKILL.md#host-procedure-under-copilot), as each
-    costs them requests; start them yourself only where the greeting's `Copilot guards:` line reads
-    `[copilot] start_sessions = true`. Read the queue at each turn where no message tool announces
-    a delivery.
+  - Under Copilot, start no session yourself: give the person the line that starts each one, as
+    the work model's
+    [Host procedure under Copilot](../work-model/SKILL.md#host-procedure-under-copilot) says, since
+    each costs them requests; only where the greeting reads `[copilot] start_sessions = true` do
+    you start them yourself.
+  - Read the queue at each turn where no message tool announces a delivery.
 <!-- /copilot -->
 - **One worktree per worker.** Never two workers in one checkout, never a worker in a main checkout.
   Separate worktrees prevent edit collisions; shared files still conflict at merge time, so check
