@@ -1837,7 +1837,8 @@ review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] 
 the judged draft and closes the retro issue with its report.
 
 ```text
-retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json] [--answers DIR]
+retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json]
+                 [--signals FILE [FILE ...]] [--refusals] [--answers DIR]
                  [--worktree WORKTREE] [--repo REPO]
                  retro
     read a retro's window from GitHub and write its draft
