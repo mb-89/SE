@@ -864,7 +864,6 @@ func TestACoreThatEndsAtItsStartIsNotStartedInALoop(t *testing.T) {
 		if !r.IsError || r.Structured["error"] != Failed || !strings.Contains(fmt.Sprint(r.Structured["remedy"]), host.LogPath("/work/checkout")) {
 			t.Fatalf("call %d answers %+v, and wants failed with the log as its remedy", i, r)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if n := core.startCount(); n != 1 {
 		t.Fatalf("the door made %d starts of a core that ends at its start, and wants one before Renew", n)
