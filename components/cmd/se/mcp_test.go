@@ -162,7 +162,22 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 	if got := strings.Join(names, " "); got != "desk status" {
 		t.Fatalf("tools/list answers %q, and wants desk and status", got)
 	}
-	if st, _ := host.AskStatus(host.Wall{}, root); st.State != host.StateStarting {
+	// The door's supervisor starts the core beside the handshake, so its
+	// claim can land after the first answers: the check waits for the claim
+	// or a standing file, either a fact of a start begun, and then asks.
+	begun := func() bool {
+		for _, path := range []string{host.ClaimPath(root), host.StandingPath(root)} {
+			if _, err := os.Stat(path); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+	st, err := heldStart(begun, func() (host.Status, error) { return host.AskStatus(host.Wall{}, root) }, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.State != host.StateStarting {
 		t.Fatalf("while the start is held the core reads %q, and wants starting: the door answered before the core stood", st.State)
 	}
 
@@ -227,5 +242,44 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 			t.Fatalf("the core reads %q a minute after the session ended, and wants not running", st.State)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// heldStart waits until begun answers that the core's start has begun (its
+// claim or its standing file is written), within the span given, and then
+// answers the status ask reads. It fails naming what it waited for where the
+// start never begins, and it never waits past the first fact, so a core that
+// stood before the check reads running there.
+func heldStart(begun func() bool, ask func() (host.Status, error), within time.Duration) (host.Status, error) {
+	for end := time.Now().Add(within); !begun(); time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			return host.Status{}, fmt.Errorf("the core's start wrote neither its claim nor its standing file within %v of the door's answers", within)
+		}
+	}
+	return ask()
+}
+
+// The wait before the held start's check: it answers the status once the
+// start has begun, a running core among them, so a door that answers only
+// after the core stood still fails the check; a start that never begins fails
+// the wait, naming the claim.
+func TestHeldStartWaitsForTheStartAndHidesNoRunningCore(t *testing.T) {
+	after := func(n int) func() bool {
+		calls := 0
+		return func() bool { calls++; return calls > n }
+	}
+	for _, state := range []host.State{host.StateStarting, host.StateRunning} {
+		asked := 0
+		st, err := heldStart(after(3), func() (host.Status, error) { asked++; return host.Status{State: state}, nil }, time.Minute)
+		if err != nil || st.State != state || asked != 1 {
+			t.Errorf("a start begun on the fourth look reads %q (%v), asked %d times, and wants %q, asked once", st.State, err, asked, state)
+		}
+	}
+	_, err := heldStart(func() bool { return false }, func() (host.Status, error) {
+		t.Error("a start that never begins is asked its status")
+		return host.Status{}, nil
+	}, 20*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "claim") {
+		t.Errorf("a start that never begins fails the wait with %v, and wants it to name the claim", err)
 	}
 }
