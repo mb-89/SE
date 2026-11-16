@@ -1,0 +1,169 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "se greeting"
+      },
+      "description": "se's start greeting, live from its core: what is due and what is queued. Use it at the start of a session, and whenever you ask what to do next. It reads:\n- `retro-due/due`: The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.\n- `fleet/findings`: Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "greeting",
+      "title": "se greeting"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "se integration"
+      },
+      "description": "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the generated docs. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `work_tickets.py capacity`: Shows how many workers may run now: the local slots, or unlimited in the cloud. Use it before starting workers. Usage: `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]`\n- `work_tickets.py config`: Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read. Usage: `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]`\n- `work_tickets.py fleet-check`: Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet. Usage: `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]`\n- `work_tickets.py metrics`: Prints what the commands cost from the line each run records: top spenders by wall time and GitHub calls, and each overrun of a budget. Use it to find what is slow. Usage: `work_tickets.py metrics [--since DATE] [--file FILE]`\n- `work_tickets.py ready`: Lists the ready work issues a session may start now. Use it to choose the next package to start. Usage: `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]`\n- `work_tickets.py settings-check`: Compares the fleet's settings the repository records (fleet/settings.toml) with the live ones, one line per difference; advisory. Use it to see whether main's ruleset, the scheduled tasks or the cloud environment drifted. Usage: `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "work_tickets.py capacity",
+              "work_tickets.py config",
+              "work_tickets.py fleet-check",
+              "work_tickets.py metrics",
+              "work_tickets.py ready",
+              "work_tickets.py settings-check"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "integration",
+      "title": "se integration"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "se overhaul"
+      },
+      "description": "An overhaul: new files its issue, read writes its draft, file checks the judged draft and closes the issue with its report, and facts lists a checkout's pruning facts. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `overhaul.py facts`: Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul. Usage: `overhaul.py facts [--repo REPO] [--json]`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "overhaul.py facts"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "overhaul",
+      "title": "se overhaul"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "se status"
+      },
+      "description": "Whether se's core runs in this checkout, and its health: pid, bus, the sessions holding a lease, the instances and the placed processes. Use it when another tool of this server answers \"starting\" or fails, or to see what the core carries; it never starts anything the door has not.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "status",
+      "title": "se status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
+        "title": "se tickets"
+      },
+      "description": "The worker's local ticket queue under .se/work: tickets, notes, discovery evidence and the worktree's close. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `work_tickets.py status`: Reports the local ticket queue of a worker's worktree (--worktree): the tickets todo, held and done. Use it before and after each ticket to see what remains. Usage: `work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGRATION_TARGET]`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "work_tickets.py status"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "tickets",
+      "title": "se tickets"
+    }
+  ]
+}
