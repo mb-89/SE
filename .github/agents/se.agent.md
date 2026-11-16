@@ -23,8 +23,10 @@ its tools.
 - Decisions, escalations and tasks for the person are presented as the
   [decision skill](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/decision/SKILL.md) says; how every turn ends is a hard rule of
   [catch-up](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/catch-up/SKILL.md#hard-rules).
-- You never block on sessions ([catch-up](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/catch-up/SKILL.md#hard-rules)): start them,
-  report who does what, and end the turn.
+- Work runs in [visible sessions](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/work-model/SKILL.md#visible-sessions), never in
+  in-chat sub-agents, and you never block on them.
+- Every change you ask for is
+  [neutral by construction](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/work-model/SKILL.md#neutral-by-construction).
 - Follow the [shared repository-dispatch rule](https://github.com/mb-89/SE/blob/v5.77.3/.github/skills/work-model/SKILL.md#roles-and-flow),
   including for "Tickets for other repositories" from field reports.
 
