@@ -121,6 +121,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   the remedy, reword before pushing. A full check leaves history already pushed alone.
   - Every author is refused, the owner included; a co-author line's hit also names the editor
     setting that writes it ([README "Install"](README.md#install)).
+- E-mail addresses in commit messages: the commit gates refuse a message line that holds one,
+  whatever the address (a service's `noreply`, `example.*` included), naming the commit and the
+  line, never the address; reword before pushing. A full check leaves history already pushed alone.
 - CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
   the commits of every pull request and of every push to `main`, so a push the hooks did not see
   fails there; `check` is the check `main`'s ruleset requires.
@@ -138,11 +141,14 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
   refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
   history already pushed alone.
-  - GitHub's web-flow identity (`GitHub`, `noreply` at `github.com`), the committer of a commit
-    made on GitHub, passes as committer, never as author.
-  - On such a commit, the author may be the account that owns `origin` on `github.com`, by its
-    `users.noreply.github.com` address: the squash merge of a pull request into `main`. Every
-    other account stays foreign.
+  - Where `se.toml` `[integrate] landing` is `"fast-forward"`, the gate is strict: a commit
+    GitHub made is foreign like any other, its web-flow committer (`GitHub`, `noreply` at
+    `github.com`) and a squash merge's account author alike, as every landing is the
+    integrator's own commit ([README "Landing on main"](README.md#landing-on-main)).
+  - While it is `"squash"`, the built-in, GitHub's web-flow identity passes as committer, never
+    as author. On such a commit the author may be the account that owns `origin` on
+    `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
+    into `main`. Every other account stays foreign.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
   against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,
@@ -170,8 +176,11 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
-  every pushed commit. A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>`
-  (or `scripts/setup.sh <path>`) and so runs se's check without copying it.
+  every pushed commit no remote holds yet. A repository that uses se as a module runs
+  `scripts/setup.ps1 -Repo <path>` (or `scripts/setup.sh <path>`) and so runs se's check without
+  copying it.
+  - A commit already published, such as main's merged into a branch, was gated where it was
+    pushed and by CI's gate, so a push gates only its own.
   - They also set the clone's commit identity as `work_tickets.py sync` does
     (`work_tickets.py identity`), so its first commit already carries it.
   - A session's start (`scripts/bootstrap.sh --hook`) sets `core.hooksPath` the same way where it
