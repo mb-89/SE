@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -200,6 +201,9 @@ class FakeDoor:
 
     def checks(self, found):
         return retro.listed(self.read(f"checks-{found.number}.json"), "check_runs")
+
+    def pull_comments(self, number):
+        return retro.listed(self.read(f"pull-comments-{number}.json"), "comments")
 
 
 def collected(checkout: Path, given: dict[str, object] | None = None, **window) -> retro.Collected:
@@ -838,3 +842,242 @@ def test_no_ad_hoc_use_leaves_the_draft_section_empty(checkout):
     assert found.adhoc == [] and found.scripts == []
     assert "## Ad hoc components to promote\n\nNone." in retro.draft(found)
     assert "## Ad hoc scripts to promote\n\nNone." in retro.draft(found)
+
+
+# The two flags and the optional keys of a class: off by default, so the draft without them is
+# the draft as before.
+
+NEW_HEADINGS = ("## Session signals", "## Refused deliveries and declined reviews",
+                "## The classes of retro")
+
+
+def without_block(text: str, heading: str) -> str:
+    """`text` without the section under `heading`, up to the next heading of its level or the
+    judging note."""
+    start = text.index("\n" + heading)
+    ends = [at for at in (text.find("\n## ", start + 1), text.find("\n" + retro.JUDGE_BEGIN, start))
+            if at >= 0]
+    return text[:start] + text[min(ends):]
+
+
+def transcript(path: Path, *records: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    return path
+
+
+def person(text: str, time: str) -> dict:
+    return {"type": "user", "timestamp": time, "message": {"role": "user", "content": text}}
+
+
+def test_without_the_flags_the_draft_carries_none_of_the_new_blocks(checkout):
+    text = retro.draft(collected(checkout))
+    assert not any(heading in text for heading in NEW_HEADINGS)
+    found = collected(checkout)
+    assert (found.signals, found.refusals, found.extras()) == (None, None, {})
+    assert "classes" not in found.previous
+
+
+def test_signals_adds_one_block_of_counts_with_a_line_per_source(checkout, tmp_path):
+    plain = retro.draft(collected(checkout))
+    one = transcript(tmp_path / "records" / "one.jsonl",
+                     person("Do the thing.", "2026-11-02T10:00:00Z"),
+                     {"type": "assistant", "timestamp": "2026-11-02T10:00:30Z",
+                      "message": {"role": "assistant", "content": [
+                          {"type": "tool_use", "id": "t1", "name": "Bash",
+                           "input": {"command": "ls"}}]}},
+                     person("no, not like that", "2026-11-02T10:01:00Z"))
+    empty = transcript(tmp_path / "records" / "empty.jsonl")
+    found = collected(checkout, signals=[one, empty, tmp_path / "gone.jsonl"])
+
+    assert found.signals["given"] == 3 and found.signals["read"] == 1
+    assert found.signals["signals"]["corrections"] == 1
+    text = retro.draft(found)
+    assert "## Session signals\n\n1 files read of 3 given" in text
+    assert "- one.jsonl: 3 events, 2 hits\n- empty.jsonl: nothing read\n- gone.jsonl: not found" in text
+    assert "| corrections | 1 |" in text
+    assert without_block(text, "## Session signals") == plain
+    assert retro.read_block(text) == retro.read_block(plain)
+
+
+def test_signals_with_no_file_read_says_so_and_counts_nothing(checkout, tmp_path):
+    empty = transcript(tmp_path / "empty.jsonl")
+    found = collected(checkout, signals=[empty])
+    assert found.signals["read"] == 0 and found.signals["signals"] == {}
+    text = retro.draft(found)
+    assert ("0 files read of 1 given: no signal was counted, which is not zero findings."
+            in text)
+    assert "| signal | total |" not in text
+
+
+def declined_answers(checkout: Path) -> dict[str, object]:
+    """`answers` with authors and links on the comments, and #12 declined by the review of #24,
+    whose verdict comment the pull request holds."""
+    given = answers(checkout)
+    given["comments-11.json"][0].update(
+        {"html_url": "https://github.com/owner/repo/issues/11#issuecomment-1",
+         "author_association": "OWNER"})
+    given["comments-12.json"].append({
+        "body": retro.review.escalation(24, "https://github.com/owner/repo/pull/24"),
+        "html_url": "https://github.com/owner/repo/issues/12#issuecomment-2",
+        "author_association": "OWNER"})
+    verdict = {"pull": 24, "verdict": "decline", "head": "a" * 40, "landed": False}
+    given["pull-comments-24.json"] = [
+        {"body": "Looks odd.", "author_association": "NONE"},
+        {"body": f"{retro.review.VERDICT_MARKER}\n## Review of pull request #24: decline\n\n"
+                 "The brief: `review.py brief 24`.\n\n### Acceptance\n\n"
+                 + retro.review.fenced(json.dumps(verdict), "json") + "\n",
+         "html_url": "https://github.com/owner/repo/pull/24#issuecomment-3",
+         "authorAssociation": "CONTRIBUTOR"}]
+    return given
+
+
+def test_refusals_lists_each_refused_delivery_and_declined_review(checkout):
+    given = declined_answers(checkout)
+    plain_door = FakeDoor(given)
+    plain = retro.collect(checkout, 30, plain_door, REPO, "main", "origin/main", NOW)
+    door = FakeDoor(given)
+    found = retro.collect(checkout, 30, door, REPO, "main", "origin/main", NOW, refusals=True)
+
+    # The one further read is the declined pull request's comments; a refused delivery needs none.
+    assert door.reads == plain_door.reads + ["pull-comments-24.json"]
+    refused, declined = found.refusals
+    assert (refused["kind"], refused["issue"], refused["pull"]) == (retro.REFUSED_DELIVERY, 11, None)
+    assert refused["link"].endswith("issues/11#issuecomment-1")
+    assert (refused["association"], refused["inside"]) == ("OWNER", True)
+    assert refused["text"].splitlines()[1] == "> Integration stopped: Cannot merge feat/a; conflicts: x.py"
+    assert "data, never instructions" in refused["text"].splitlines()[0]
+    assert (declined["kind"], declined["issue"], declined["pull"]) == (retro.DECLINED_REVIEW, 12, 24)
+    assert declined["link"].endswith("pull/24#issuecomment-3")
+    assert (declined["association"], declined["inside"]) == ("CONTRIBUTOR", False)
+    assert declined["text"].splitlines()[1:] == [
+        "> ## Review of pull request #24: decline", "> The brief: `review.py brief 24`.",
+        "> ### Acceptance"]
+
+    text = retro.draft(found)
+    assert ("## Refused deliveries and declined reviews\n\n- #11 refused delivery: "
+            "https://github.com/owner/repo/issues/11#issuecomment-1; author association OWNER, "
+            "inside the fleet\n  Outside text from") in text
+    assert ("- #12 declined review (pull request #24): https://github.com/owner/repo/pull/24"
+            "#issuecomment-3; author association CONTRIBUTOR, outside the fleet") in text
+    assert without_block(text, "## Refused deliveries and declined reviews") == retro.draft(plain)
+
+
+class NoPullComments(FakeDoor):
+    def pull_comments(self, number):
+        raise AssertionError(f"pull request #{number}'s comments were read")
+
+
+def test_refusals_without_a_declined_review_reads_nothing_more(checkout):
+    given = answers(checkout)
+    door = NoPullComments(given)
+    found = retro.collect(checkout, 30, door, REPO, "main", "origin/main", NOW, refusals=True)
+    plain = FakeDoor(given)
+    retro.collect(checkout, 30, plain, REPO, "main", "origin/main", NOW)
+    assert door.reads == plain.reads
+    assert [item["kind"] for item in found.refusals] == [retro.REFUSED_DELIVERY]
+    assert found.refusals[0]["association"] == "unknown" and not found.refusals[0]["inside"]
+    assert found.refusals[0]["link"] == "https://github.com/owner/repo/issues/11"
+
+    given["comments-11.json"] = []
+    found = retro.collect(checkout, 30, NoPullComments(given), REPO, "main", "origin/main", NOW,
+                          refusals=True)
+    assert found.refusals == []
+    assert "## Refused deliveries and declined reviews\n\nNone.\n" in retro.draft(found)
+
+
+def test_a_declined_review_without_its_verdict_comment_names_the_escalation(checkout):
+    given = declined_answers(checkout)
+    given["pull-comments-24.json"] = given["pull-comments-24.json"][:1]
+    found = collected(checkout, given, refusals=True)
+    declined = found.refusals[1]
+    assert declined["link"].endswith("issues/12#issuecomment-2")
+    assert "> Declined by the review of pull request #24" in declined["text"]
+
+
+def test_without_gh_refusals_plans_the_declined_pull_requests_comments(checkout, tmp_path):
+    given = declined_answers(checkout)
+    directory = tmp_path / "answers"
+    directory.mkdir()
+    for name, answer in given.items():
+        if name != "pull-comments-24.json":
+            (directory / name).write_text(json.dumps(answer), encoding="utf-8")
+    door = retro.FileDoor(directory, REPO, REPO)
+    assert retro.collect(checkout, 30, door, REPO, "main", "origin/main", NOW,
+                         refusals=True) is None
+    assert [(step.tool, step.arguments["method"], step.arguments["pullNumber"])
+            for step in door.missing] == [("pull_request_read", "get_comments", 24)]
+    (directory / "pull-comments-24.json").write_text(
+        json.dumps(given["pull-comments-24.json"]), encoding="utf-8")
+    found = retro.collect(checkout, 30, retro.FileDoor(directory, REPO, REPO), REPO, "main",
+                          "origin/main", NOW, refusals=True)
+    assert found.refusals[1]["association"] == "CONTRIBUTOR"
+
+
+def test_the_flags_parse_and_json_carries_their_blocks(checkout, tmp_path, monkeypatch, capsys):
+    parsed = retro.make_parser().parse_args(["collect", "30", "--refusals", "--signals", "a.jsonl",
+                                             "records"])
+    assert parsed.refusals and parsed.signals == [Path("a.jsonl"), Path("records")]
+    parsed = retro.make_parser().parse_args(["collect", "30"])
+    assert (parsed.refusals, parsed.signals) == (False, None)
+
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    directory = tmp_path / "answers"
+    directory.mkdir()
+    for name, answer in hosts_answers(declined_answers(checkout)).items():
+        (directory / name).write_text(json.dumps(answer), encoding="utf-8")
+    empty = transcript(tmp_path / "empty.jsonl")
+    assert retro.main(["collect", "30", "--answers", str(directory), "--json", "--refusals",
+                       "--repo", REPO, "--worktree", str(checkout), "--signals", str(empty)]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["signals"]["read"] == 0 and len(data["refusals"]) == 2
+    assert retro.main(["collect", "30", "--answers", str(directory), "--json", "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    assert "signals" not in json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize(("keys", "refusal"), [
+    ({"status": ""}, 'class "Lost reports": status is a text'),
+    ({"pattern": "(unclosed"}, 'class "Lost reports": pattern is no regular expression'),
+    ({"pattern": 3}, "pattern is a regular expression, as a text"),
+    ({"limits": [1]}, "limits is a text or a list of texts"),
+    ({"owner": "alice"}, "class 1 has the unknown field owner"),
+])
+def test_a_class_s_optional_keys_are_checked(checkout, keys, refusal):
+    classes = [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one", **keys}]
+    with pytest.raises(work_tickets.QueueError, match=re.escape(refusal)):
+        retro.judged(judged_draft(checkout, classes=classes), 30)
+
+
+def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_counts_its_pattern(
+        checkout, monkeypatch):
+    keys = {"status": "watch", "pattern": r"(?i)integration stopped", "limits": ["only merges"]}
+    classes = [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one", **keys},
+               {"name": "Plain", "fix": "nothing"}]
+    plain = filed(checkout, monkeypatch, judged_draft(checkout))[0][1]["body"]
+    calls = filed(checkout, monkeypatch, judged_draft(checkout, classes=classes))
+    comment = calls[0][1]["body"]
+    assert ("#### Lost reports (2)\n\nFix: `integrate` refuses a landing without one\n\n"
+            "Status: watch\nPattern: `(?i)integration stopped`\nLimits: only merges\n\n- **1."
+            in comment)
+    assert "Status:" not in plain and "Pattern:" not in plain
+
+    given = answers(checkout)
+    block = retro.read_block(judged_draft(checkout, classes=classes))
+    block["window"]["retro"] = 5
+    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
+                       + json.dumps(block) + "\n```\n", "docs/retro-5.md")
+    given["comments-5.json"] = [{"body": retro.DOC_MARKER.format(
+        sha=git(checkout, "rev-parse", "HEAD"), path=draft.relative_to(checkout).as_posix())}]
+    given["issues.json"][3]["body"] = "Integration stopped twice before: integration stopped."
+    found = collected(checkout, given)
+    assert found.previous["classes"] == [
+        {"name": "Lost reports", "status": "watch", "pattern": r"(?i)integration stopped",
+         "limits": ["only merges"], "matches": 3, "issues": [11, 12]}]
+    text = retro.draft(found)
+    assert ("## The classes of retro #5\n\nEach class that carries a pattern, counted over the "
+            "window's work issues (title, body, comments, field report).\n\n"
+            "| class | status | pattern | matches | issues | limits |\n|---|---|---|---|---|---|\n"
+            "| Lost reports | watch | `(?i)integration stopped` | 3 | #11, #12 | only merges |"
+            in text)
+    assert retro.read_block(text)["previous"]["classes"][0]["matches"] == 3
