@@ -45,6 +45,9 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.pull_request.head.sha || github.sha }}
           BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          # The cloud list (AGENTS.md "Public safety"), to this step only; unset where the secret
+          # is missing, as for a pull request from a fork.
+          SE_PUBLIC_CHECK_TERMS: ${{ secrets.SE_PUBLIC_CHECK_TERMS }}
         run: |
           # A pull request: its commits, those its head holds and its base branch does not. A push:
           # the commits after the branch's old tip, as the pre-push hook takes them; where that tip
