@@ -600,6 +600,17 @@ earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
     comment and close, and the work issue's comment, label and close.
   - Before that it checks the landing pull request's description, saved after the merge: it must
     end in the plan's [metrics](#metrics) line, or the read-back fails and closes nothing.
+  - An integration-fix commit, one the integrator pushes onto `land/<branch>` after the hand-off
+    (a lock move), is recorded with `integrate --record-fix <branch>` before the read-back.
+    - Each fix commit has one parent on the tested landing and is the project identity's, author
+      and committer, with no e-mail address or tracker reference in its message, as every landing
+      commit is; anything else is refused and nothing is recorded.
+    - It runs the complete suite, the project checks and the public check on the new head, makes
+      that head the tested landing in `.se/handoff/` and prints the plan again at it: a landing
+      pull request already open is reused, and the merge expects the new head.
+    - The read-back then compares against that head and names the fix commits. A head that
+      changed without the command reads back with another tree and is refused, naming the
+      command; a fast-forward landing takes no fix commit, its fix goes to the work branch.
 - A failure on the way prints the escalation as a plan too: the comment and the `escalated`
   label.
 
@@ -1700,10 +1711,11 @@ work_tickets.py format [--root ROOT]
 
 work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
                           [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]
-                          [--read-back BRANCH] [--landing-pull LANDING_PULL]
-                          [--check-run CHECK_RUN] [--landing-description FILE]
-                          [--build-command BUILD_COMMAND] [--include-late REASON]
-                          [--check-command JSON] [--check-command-temporary-directory]
+                          [--read-back BRANCH] [--record-fix BRANCH]
+                          [--landing-pull LANDING_PULL] [--check-run CHECK_RUN]
+                          [--landing-description FILE] [--build-command BUILD_COMMAND]
+                          [--include-late REASON] [--check-command JSON]
+                          [--check-command-temporary-directory]
                           [pull_request]
     validate the field report a pull request's description carries, merge it on land/<branch>, test,
     land it through a squash pull request once check passes, and close the work issue. Where gh is

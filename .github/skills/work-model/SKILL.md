@@ -788,6 +788,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
       states why late commits are included.
     - Run the plan's steps; anything but a passed `check` merges nothing.
+    - A fix commit pushed onto `land/<branch>` after this (a lock move) is recorded with
+      `integrate --record-fix <branch>`: it refuses one that is not the project identity's or
+      whose message holds an e-mail address, tests the new head and prints the plan at it. An
+      unrecorded one is refused at the read-back.
     - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
       --landing-description <file>`, the landing pull request's description saved after the merge;
       through the relay, run it without `--landing-description` and it reads that description from

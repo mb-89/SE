@@ -6649,10 +6649,11 @@ def push_landing(root: Path, door: GitHub, target: str, base: str, landed: str,
 
 
 def landing_read_back(root: Path, target: str, base: str, landed: str,
-                      merged: str | None = None) -> str:
+                      merged: str | None = None, fix_hint: str = "") -> str:
     """Read the landing back through git alone: origin's `target` (`merged`, where the merge
     returned one) is one commit on `base` with the tree of `landed`, the tree the checks passed;
-    that commit."""
+    that commit. `fix_hint` follows a tree that is not the tested one: how a fix commit pushed
+    onto the landing branch is recorded (record_fix)."""
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")
     head = remote_head(root, target)
     if merged is None and head == base:
@@ -6666,7 +6667,8 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
     if checked_git(root, "rev-parse", f"{commit}^").strip() != base:
         problems.append(f"its parent is not {base[:12]}")
     if tree_of(root, commit) != tree_of(root, landed):
-        problems.append(f"its tree is not the tree of {landed[:12]} that the checks passed")
+        problems.append(f"its tree is not the tree of {landed[:12]} that the checks passed"
+                        + fix_hint)
     if problems:
         raise QueueError(
             f"The landed commit {commit[:12]} does not read back as tested: "
@@ -7135,11 +7137,111 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
         fast_forward(root, str(state["target"]), str(state["base"]), str(state["landed"]))
         merged = str(state["landed"])
     feedback.phase(f"read back the landing of {branch}")
-    commit = landing_read_back(root, state["target"], state["base"], state["landed"], merged)
+    hint = (f" (a fix commit pushed onto {state['landing']} after integrate is recorded first, "
+            f"with integrate --record-fix {branch}, which tests it; an unrecorded one is refused)")
+    commit = landing_read_back(root, state["target"], state["base"], state["landed"], merged,
+                               hint)
+    if state.get("fixes"):
+        print(f"Fix commits recorded on {state['landing']}: " + "; ".join(
+            f"{fix['sha'][:12]} {fix['subject']}" for fix in state["fixes"]))
     short = finish_integration(root, state, commit, pull_url(state["remote"], landing_pull),
                                check_run, None)
     path.unlink()
     return short
+
+
+def record_fix(root: Path, branch: str) -> str:
+    """Record an integration-fix commit (README "Landing on main"): the commits the integrator
+    pushed onto `land/<branch>` after a handed-off `integrate`, such as a lock move. Each must have
+    one parent and be the project identity's, author and committer, with no e-mail address in its
+    message. The suite, the project checks and the public check run on the new head, which then
+    stands for the tested landing: the hand-off's state and plan name it, so `--read-back`
+    compares the landed tree against it. Returns the new head."""
+    path = handoff_path(root, branch)
+    if not path.is_file():
+        raise QueueError(
+            f"integrate --record-fix: no hand-off for {branch} in {root} ({path} is missing); a "
+            "fix commit is recorded on a handed-off landing only, after integrate <pull request> "
+            "pushed it")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    landing, target, old = str(state["landing"]), str(state["target"]), str(state["landed"])
+    if state.get("landing_mode") == FAST_FORWARD:
+        raise QueueError(
+            f"integrate --record-fix: {target} lands by fast-forward (se.toml [integrate] landing), "
+            f"whose one landing commit integrate writes itself; a fix commit on {landing} would "
+            f"land beside it. Push the fix to {branch} and integrate again; nothing was recorded")
+    feedback.phase(f"read origin's {landing}")
+    checked_git(root, "fetch", "-q", "origin",
+                f"+refs/heads/{landing}:refs/remotes/origin/{landing}")
+    new = remote_head(root, landing)
+    if not new or new == old:
+        raise QueueError(
+            f"integrate --record-fix: origin's {landing} is {new[:12] or 'missing'}, the landing "
+            f"integrate recorded ({old[:12]}); push the fix commit onto {landing} first, then "
+            "record it")
+    if run_git(root, "merge-base", "--is-ancestor", old, new).returncode != 0:
+        raise QueueError(
+            f"integrate --record-fix: origin's {landing} at {new[:12]} is not on top of the tested "
+            f"landing {old[:12]}; a fix commit goes on top of it, never replaces it. Push {landing} "
+            "back onto it, or integrate again; nothing was recorded")
+    name, email = required_identity(root, "integrate --record-fix")
+    address = sibling("public_check").message_addresses
+    commits = [line for line in checked_git(
+        root, "rev-list", "--reverse", f"{old}..{new}").splitlines() if line]
+    problems, fixes = [], []
+    for commit in commits:
+        values = checked_git(root, "show", "-s", "--format=%P%x00%an%x00%ae%x00%cn%x00%ce%x00%s"
+                             "%x00%B", commit).rstrip("\n").split("\x00")
+        parents, author, author_email, committer, committer_email, subject, message = values
+        short = commit[:12]
+        if len(parents.split()) != 1:
+            problems.append(f"{short} is a merge; a fix commit has one parent")
+        if (author, author_email) != (name, email) or (committer, committer_email) != (name, email):
+            problems.append(f"{short} is not the project identity {name} as author and committer")
+        if address(message):
+            problems.append(f"{short}'s message holds an e-mail address")
+        if tracker_references(message):
+            problems.append(f"{short}'s message holds a tracker reference")
+        fixes.append({"sha": commit, "subject": subject})
+    if problems:
+        raise QueueError(
+            f"integrate --record-fix: the fix commits on {landing} are refused, nothing was "
+            "recorded:\n" + "\n".join(f"- {problem}" for problem in problems) + "\n"
+            f"Reword or recommit them as {name} (work_tickets.py identity), push {landing} again "
+            "and record again")
+    checked_git(root, "switch", "-q", "-C", landing, new)
+    try:
+        suite_result = run_suite(root, read_ci=True)
+        if state.get("check_commands"):
+            feedback.phase("project checks")
+            run_project_checks(root, state["check_commands"],
+                               bool(state.get("check_temporary_working_directory")))
+        if public_check_enabled(root):
+            feedback.phase("public check")
+            run_public_check(root, old)
+        guard_pushed_tree(root, new)
+        record = integrator_record(root, new, new)
+    finally:
+        run_git(root, "switch", "-q", "--discard-changes", target)
+    old_plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
+    steps = {step.get("tool"): step.get("arguments") or {} for step in old_plan.get("steps", [])}
+    opened, squashed = steps.get("create_pull_request", {}), steps.get("merge_pull_request", {})
+    plan = landing_plan(str(state["remote"]), landing, target, str(state["base"]), new,
+                        str(opened.get("title") or ""), str(squashed.get("commit_message") or ""),
+                        str(opened.get("body") or ""), str(old_plan.get("then") or ""),
+                        str(state["tracker"]), record, SQUASH)
+    state.update(landed=new, suite=suite_result, plan=plan.data(),
+                 fixes=[*(state.get("fixes") or []), *fixes])
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Recorded {len(fixes)} fix commit(s) on {landing}, now the tested landing at "
+          f"{new[:12]} (was {old[:12]}):\n" + "\n".join(
+              f"- {fix['sha'][:12]} {fix['subject']}" for fix in fixes))
+    print(f"Suite: {suite_result}")
+    print("The landing plan, at the new head: a landing pull request already open is reused "
+          "(its check runs again on the new head), steps already run need not run again, and "
+          f"the merge now expects {new[:12]}:")
+    print(plan.text())
+    return new
 
 
 def finish_integration(root: Path, state: dict[str, object], commit: str, landing_url: str,
@@ -8987,6 +9089,11 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
              help="after the plan's steps: for a fast-forward landing push origin's "
                   "integration branch to land/BRANCH's commit; check that it is the one landed "
                   "commit on the tested base with the tested tree, and finish"),
+         arg("--record-fix", metavar="BRANCH",
+             help="after a handed-off integrate: record the fix commits pushed onto "
+                  "land/BRANCH (a lock move), each the project identity's with no e-mail address "
+                  "in its message; runs the suite and the checks on the new head, which the plan "
+                  "and --read-back then compare against"),
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--landing-description", type=Path, metavar="FILE",
@@ -9001,8 +9108,13 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
 def run_integrate(root: Path, args: argparse.Namespace) -> int:
     if args.check_command_temporary_directory and not args.check_command:
         raise QueueError("--check-command-temporary-directory requires --check-command")
-    if (args.read_back is None) == (args.pull_request is None):
-        raise QueueError("integrate takes a pull request number or --read-back <branch>, one of them")
+    if sum(value is not None for value in (args.read_back, args.pull_request, args.record_fix)) != 1:
+        raise QueueError("integrate takes a pull request number, --record-fix <branch> or "
+                         "--read-back <branch>, one of them")
+    if args.record_fix is not None:
+        new = record_fix(root, args.record_fix)
+        print(f"Run the plan's remaining steps at {new[:12]}, then its last line")
+        return 0
     if args.read_back is not None:
         read_back_arguments(args, "landing_pull", "check_run")
         if args.landing_description is None and relay_for(root) is None:
