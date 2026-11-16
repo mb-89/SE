@@ -28,6 +28,14 @@ layouts as an LF one: generated text is compared without its line endings (`same
 The outside skills each role relies on are one list, `se.toml` `[roles.<role>] skills`, never the
 agent's own front matter: `build` writes it into the `skills` field of that agent in every layout
 whose host preloads skills (`roles` parses it; AGENTS.md "Agents and skills" owns the rule).
+
+A draft skill (`drafts/skills/<name>/`) enters no layout unless the build setting `se.toml`
+`[plugin] draft_skills` lists it by name (`draft_skills`): each listed draft is generated into
+both layouts' skills folders as a skill of `src/skills` would be, so the owner can try it by name
+on a real host without moving it into `src/skills`. Unset or empty, the build writes exactly what
+it writes without drafts. The build refuses a listed draft that is missing, shares its name with a
+skill of `src/skills`, or whose `SKILL.md` front matter lacks `disable-model-invocation: true`, so
+a draft never loads by its description.
 """
 
 from __future__ import annotations
@@ -50,6 +58,7 @@ if "agent_lint" not in sys.modules:
     sys.modules["agent_lint"] = agent_lint
     _lint_spec.loader.exec_module(agent_lint)
 SOURCE = PurePosixPath("src")
+DRAFTS = PurePosixPath("drafts/skills")
 PLUGIN = "se"
 DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and reviewer "
                "sub-agents and their skills.")
@@ -223,18 +232,23 @@ def roles(root: Path = ROOT) -> dict[str, list[RoleSkill]]:
     return found
 
 
-def _sources(root: Path) -> list[PurePosixPath]:
+def _sources(root: Path, drafts: list[str] = ()) -> list[PurePosixPath]:
+    """Every source file: the agents and skills of `src/`, then the folders of the listed drafts."""
     base = root / SOURCE
+    folders = [base / "agents", base / "skills", *(root / DRAFTS / name for name in drafts)]
     found = []
-    for kind in ("agents", "skills"):
-        for path in sorted((base / kind).rglob("*")):
+    for folder in folders:
+        for path in sorted(folder.rglob("*")):
             if path.is_file():
                 found.append(PurePosixPath(path.relative_to(root).as_posix()))
     return found
 
 
 def _target(source: PurePosixPath, layout: Layout) -> PurePosixPath:
-    """The path a source file (or a link target inside the source) has in one layout."""
+    """The path a source file (or a link target inside the source) has in one layout; a draft's
+    lies in the layout's skills folder as a skill of `src/skills` would."""
+    if source.is_relative_to(DRAFTS):
+        return layout.skills / source.relative_to(DRAFTS)
     kind, *rest = source.relative_to(SOURCE).parts
     if kind == "agents":
         if len(rest) != 1 or not rest[0].endswith(".md"):
@@ -259,15 +273,19 @@ def _relative(target: PurePosixPath, start: PurePosixPath) -> str:
     return PurePosixPath(os.path.relpath(target, start)).as_posix()
 
 
-def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout) -> str:
-    """Each relative link as the generated file reaches its target, relative to that file."""
+def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout,
+                   drafts: frozenset[str] = frozenset()) -> str:
+    """Each relative link as the generated file reaches its target, relative to that file; a link
+    into an included draft (`drafts`) reaches its generated copy."""
 
     def replace(match: re.Match) -> str:
         link = match.group(2)
         if SCHEME.match(link) or link.startswith("/"):
             return match.group(0)
         resolved = _normalize((source.parent / link).as_posix())
-        if resolved.parts[:2] in (("src", "agents"), ("src", "skills")):
+        if (resolved.parts[:2] in (("src", "agents"), ("src", "skills"))
+                or (resolved.is_relative_to(DRAFTS) and len(resolved.parts) > len(DRAFTS.parts)
+                    and resolved.parts[len(DRAFTS.parts)] in drafts)):
             resolved = _target(resolved, layout)
         relative = _relative(resolved, generated.parent) + ("/" if link.endswith("/") else "")
         return match.group(1) + relative + match.group(3)
@@ -324,7 +342,8 @@ def _front_matter(text: str, source: PurePosixPath, layout: Layout,
 
 
 def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
-                    role_skills: dict[str, list[RoleSkill]]) -> tuple[PurePosixPath, bytes]:
+                    role_skills: dict[str, list[RoleSkill]],
+                    drafts: frozenset[str] = frozenset()) -> tuple[PurePosixPath, bytes]:
     generated = _target(source, layout)
     data = (root / source).read_bytes()
     if source.suffix != ".md":
@@ -338,7 +357,7 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
     role = source.stem if source.parent == SOURCE / "agents" else None
     front, body = _front_matter(text, source, layout, role_skills.get(role, []) if role else [])
     first = text.count("\n", 0, len(text) - len(body)) + 1
-    body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout)
+    body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout, drafts)
     return generated, (front + notice(source) + body).encode("utf-8")
 
 
@@ -360,13 +379,17 @@ def _plugin_settings(root: Path) -> dict:
     """`se.toml` `[plugin]`, refused where it holds what the build cannot read."""
     with (root / "se.toml").open("rb") as handle:
         table = tomllib.load(handle).get("plugin", {})
-    if (not isinstance(table, dict) or set(table) - {"root_mcp", "copilot_manifest", "powershell_hooks"}
+    drafts = table.get("draft_skills", []) if isinstance(table, dict) else []
+    if (not isinstance(table, dict)
+            or set(table) - {"root_mcp", "copilot_manifest", "powershell_hooks", "draft_skills"}
             or not isinstance(table.get("root_mcp", False), bool)
+            or not isinstance(drafts, list) or not all(isinstance(name, str) for name in drafts)
             or table.get("copilot_manifest", "github") not in COPILOT_MANIFEST_PLACES
             or table.get("powershell_hooks", "bash") not in POWERSHELL_HOOKS):
         raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false`, "
                           f"`copilot_manifest = {'|'.join(map(json.dumps, COPILOT_MANIFEST_PLACES))}` and "
-                          f"`powershell_hooks = {'|'.join(map(json.dumps, POWERSHELL_HOOKS))}`")
+                          f"`powershell_hooks = {'|'.join(map(json.dumps, POWERSHELL_HOOKS))}` and "
+                          '`draft_skills = ["<draft>", ...]`')
     return table
 
 
@@ -386,6 +409,31 @@ def powershell_hooks(root: Path) -> str:
     """`se.toml` `[plugin] powershell_hooks`: how a PowerShell hook line starts its bash script
     (POWERSHELL_HOOKS); unset, `"bash"`."""
     return _plugin_settings(root).get("powershell_hooks", "bash")
+
+
+def draft_skills(root: Path) -> list[str]:
+    """`se.toml` `[plugin] draft_skills`: the drafts of `drafts/skills` the build includes, by
+    name, each refused where it is missing, shadows a skill of `src/skills` or may load by its
+    description; unset, none."""
+    names = _plugin_settings(root).get("draft_skills", [])
+    path = root / "se.toml"
+    for name in names:
+        if names.count(name) > 1:
+            raise SourceError(f"{path}: [plugin] draft_skills names {name!r} twice")
+        skill = root / DRAFTS / name / "SKILL.md"
+        if not agent_lint.SKILL_NAME.match(name) or not skill.is_file():
+            raise SourceError(f"{path}: [plugin] draft_skills names {name!r}, but {DRAFTS}/{name}/SKILL.md "
+                              "is no draft")
+        if (root / SOURCE / "skills" / name).exists():
+            raise SourceError(f"{path}: [plugin] draft_skills names {name!r}, which is a skill of "
+                              f"{SOURCE}/skills already")
+        text = skill.read_text(encoding="utf-8").replace("\r\n", "\n")
+        value = agent_lint.scalar(agent_lint.fields(text).get("disable-model-invocation", ""))
+        if value != "true":
+            raise SourceError(f"{DRAFTS}/{name}/SKILL.md: a listed draft needs "
+                              "`disable-model-invocation: true` in its front matter, so it never loads "
+                              "by its description")
+    return names
 
 
 @dataclass(frozen=True)
@@ -536,14 +584,15 @@ def expected(root: Path = ROOT, copilot: bool = True) -> dict[PurePosixPath, byt
     """Every generated file and its content, computed from the source alone; without `copilot`,
     the Claude layout alone, which is the same either way."""
     files = _manifests(root, copilot)
-    sources = _sources(root)
+    drafts = draft_skills(root)
+    sources = _sources(root, drafts)
     role_skills = roles(root)
     agents = {source.stem for source in sources if source.parent == SOURCE / "agents"}
     if unknown := sorted(set(role_skills) - agents):
         raise SourceError(f"{root / 'se.toml'}: [roles.{unknown[0]}] names no agent in {SOURCE}/agents")
     for source in sources:
         for layout in LAYOUTS if copilot else LAYOUTS[1:]:
-            path, data = _generated_file(source, layout, root, role_skills)
+            path, data = _generated_file(source, layout, root, role_skills, frozenset(drafts))
             files[path] = data
     if problems := validate(files):
         raise SourceError("; ".join(problems))

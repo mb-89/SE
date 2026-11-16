@@ -1,0 +1,14 @@
+# SE's switches, draft-skills group: which skill drafts the plugin build includes
+# (scripts/se_switches.py's docstring owns this format, core.toml's header its keys).
+
+[[switch]]
+name = "[plugin] draft_skills"
+kind = "se.toml"
+reader = "scripts/se_plugin.py"
+default = "off"
+layers = ["se.toml"]
+key = "plugin.draft_skills"
+off = [[]]
+other = "on"
+help = "scripts/se_plugin.py"
+note = "off: no draft enters a layout; on: each listed drafts/skills/<name> is built into both layouts, by name only"
