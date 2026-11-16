@@ -9,5 +9,7 @@ SE doctor: 0 problems, 0 notes (read-only; nothing was changed)
   checkout [seen] SE 5.50.2 at 0daf4dc; 0 ahead, 0 behind origin/main as last fetched
   gh       [seen] gh signed in
   network  [seen] reached github.com
+  copilot  [seen] under Copilot, [copilot] refuse_stop = false: on, the Stop hook never refuses a stop; it says what is undelivered
+  copilot  [seen] under Copilot, [copilot] start_sessions = false: on, SE starts no session; it prints the line that starts one
   host     [seen] claude-code, a cloud session
 reused: se_start (plugin registry, cached release check, kern status, cloud marker), se_modules (binary pin)

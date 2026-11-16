@@ -18,6 +18,9 @@ SE_HOOK_HOSTS=(SE_HOOK_HOST claude copilot)
 # The clouds, each `<cloud>:<variable>` (set and not empty) or `<cloud>:<variable>=<value>` (that
 # value, in any case). `ci` is any GitHub Actions run, not a host.
 SE_CLOUD_MARKS=(claude:CLAUDE_CODE_REMOTE=true ci:GITHUB_ACTIONS=true)
+# The field se_hook.sh adds to a Stop payload it posts for Copilot, `"<field>":"copilot"`: kern hands the
+# payload on as it is, so the delivery check knows the host in whichever process judges it.
+SE_PAYLOAD_HOST=(se_host)
 # Copilot's camelCase payload fields and the snake_case name Claude Code's payload, kern and
 # stop-check read, each `<camelCase>:<snake_case>`. A payload with any of them is Copilot's.
 SE_PAYLOAD_KEYS=(sessionId:session_id hookEventName:hook_event_name transcriptPath:transcript_path agentTranscriptPath:agent_transcript_path stopReason:stop_reason stopHookActive:stop_hook_active toolName:tool_name initialPrompt:initial_prompt)

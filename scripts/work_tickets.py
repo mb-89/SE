@@ -3374,10 +3374,19 @@ def set_stop_count(root: Path, count: int) -> None:
     path.write_text(json.dumps({"refused": count}) + "\n", encoding="utf-8", newline="\n")
 
 
+def copilot_advises(root: Path, event: dict[str, object]) -> bool:
+    """Whether the Stop hook advises rather than refuses: the event is Copilot's (scripts/hosts.py)
+    and se.toml `[copilot] refuse_stop` is not true, so no refusal costs the person a model turn
+    (scripts/copilot_guards.py)."""
+    return (sibling("hosts").payload_host(event) == "copilot"
+            and sibling("copilot_guards").guarded(root, "refuse_stop"))
+
+
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, at most `[stop] refusals` times in a row; everywhere else, and where it cannot
-    judge, let the turn end (advice fails open). `count` false judges without counting."""
+    is not delivered, at most `[stop] refusals` times in a row; under Copilot only advise
+    (copilot_advises); everywhere else, and where it cannot judge, let the turn end (advice fails
+    open). `count` false judges without counting."""
     if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
         return StopVerdict()
     root = checkout_top(path)
@@ -3402,6 +3411,10 @@ def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> St
     if problem is None:
         set_stop_count(root, 0)
         return StopVerdict()
+    if copilot_advises(root, event):
+        set_stop_count(root, 0)
+        return StopVerdict(note=f"se Stop hook, advice only under Copilot ([copilot] refuse_stop = "
+                                f"true refuses): undelivered: {problem}")
     refused = stop_count(root) + 1
     if refused > cap:
         set_stop_count(root, 0)
@@ -9560,7 +9573,9 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "is for a work issue, refuse the turn's end while its branch has no open "
                        "pull request whose description carries a field report that passes "
                        "field-report --check at the branch tip, naming what is missing and the "
-                       "commands; at most [stop] refusals times in a row (se.toml, built in 5). "
+                       "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
+                       "under Copilot it only says what is undelivered unless [copilot] "
+                       "refuse_stop is true. "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",

@@ -1182,7 +1182,8 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
                      world.kern)
     lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
-    lines = lines[:1] + kern + without_kern(kern, args.host) + lines[1:]
+    lines = (lines[:1] + kern + without_kern(kern, args.host) + lines[1:]
+             + (_load("copilot_guards").greeting(root, args.host) if args.host == "copilot" else []))
     if args.hook:
         print(hook_output(lines, args.note, SE_ROOT, args.host))
     else:

@@ -225,7 +225,8 @@ def check_layout(plugin: Path, report: Report) -> None:
 
 def check_hooks(plugin: Path, report: Report) -> None:
     """Copilot's hooks file registers SessionStart and Stop, each a fail-open command of a script the
-    plugin carries, for the host `copilot`."""
+    plugin carries, for the host `copilot`; Stop passes Copilot's warning exit code through
+    (se_plugin.WARN_EVENTS)."""
     manifest = _json_file(plugin / se_plugin.COPILOT_MANIFEST)
     hooks = _json_file(plugin / manifest["hooks"]).get("hooks", {})
     problems = []
@@ -235,8 +236,9 @@ def check_hooks(plugin: Path, report: Report) -> None:
             problems.append(f"{event} has {len(entries)} entries")
             continue
         entry = entries[0]
-        if script not in entry.get("bash", "") or "|| true" not in entry.get("bash", ""):
-            problems.append(f"{event}'s bash command is not `bash {script} ... || true`")
+        tail = se_plugin._fail_open(event in se_plugin.WARN_EVENTS)[0]
+        if script not in entry.get("bash", "") or tail not in entry.get("bash", ""):
+            problems.append(f"{event}'s bash command is not `bash {script} ...{tail}`")
         if script not in entry.get("powershell", "") or "exit 0" not in entry.get("powershell", ""):
             problems.append(f"{event}'s powershell command does not run {script} and exit 0")
         if entry.get("env", {}).get("SE_HOOK_HOST") != "copilot":

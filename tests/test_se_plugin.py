@@ -142,6 +142,13 @@ def copilot_hooks(checkout: Path) -> dict:
     return data["hooks"]
 
 
+# How each Copilot hook ends: SessionStart fails open whatever its exit; Stop passes Copilot's warning
+# exit code 2 through, its advice under Copilot (docs/copilot.md "What a session costs"), and fails
+# open on every other.
+WARNS = {"SessionStart": (" || true", ""),
+         "Stop": (" || [ $? -ne 2 ] || exit 2", "; if ($LASTEXITCODE -eq 2) { exit 2 }")}
+
+
 def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
     """SessionStart greets and starts kern, Stop holds a worker to its delivery (README "Stop
     hook"); PascalCase events, so Copilot sends Claude-shaped payloads with their `session_id`, and
@@ -152,8 +159,9 @@ def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(ch
         [hook] = hooks[event]
         assert hook["type"] == "command" and hook["cwd"] == "."
         assert hook["env"] == {"SE_HOOK_HOST": "copilot"}
-        assert hook["bash"] == f"bash {command} || true"
-        assert hook["powershell"] == f"bash {command}; exit 0"
+        bash_end, powershell_end = WARNS[event]
+        assert hook["bash"] == f"bash {command}{bash_end}"
+        assert hook["powershell"] == f"bash {command}{powershell_end}; exit 0"
         assert 30 < hook["timeoutSec"] <= 120, "an explicit timeout above Copilot's default of 30 s"
         assert (checkout / command.split()[0]).is_file()
 
@@ -179,11 +187,13 @@ def test_a_plugin_install_runs_the_plugins_own_scripts_guarded_and_fail_open(che
     for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
         [hook], [local] = data["hooks"][event], repository[event]
         script, arguments = command.split(" ", 1)
+        bash_end, powershell_end = WARNS[event]
         assert hook["bash"] == (f'if [ -n "$PLUGIN_ROOT" ] && [ ! -f .github/hooks/se.json ]; then '
-                                f'bash "$PLUGIN_ROOT/{script}" {arguments} || true; fi')
+                                f'bash "$PLUGIN_ROOT/{script}" {arguments}{bash_end}; fi')
         assert hook["powershell"] == (
             "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) "
-            f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}" {arguments} }}; exit 0')
+            f'{{ bash "$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/{script}" {arguments}{powershell_end} }}'
+            "; exit 0")
         assert "${" not in hook["bash"] + hook["powershell"]
         assert {key: hook[key] for key in ("type", "cwd", "env", "timeoutSec")} == \
             {key: local[key] for key in ("type", "cwd", "env", "timeoutSec")}

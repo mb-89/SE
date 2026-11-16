@@ -1933,6 +1933,44 @@ def test_stop_check_refuses_at_most_its_cap_in_a_row(tmp_path, monkeypatch, caps
     assert work_tickets.stop_refusals(root) == 5  # built in
 
 
+@pytest.mark.parametrize("marked", ({"se_host": "copilot"}, {"sessionId": "s1"}))
+def test_under_copilot_the_stop_check_never_refuses_and_names_what_is_undelivered(
+        tmp_path, monkeypatch, capsys, marked):
+    """docs/copilot.md "What a session costs": each refusal is a model turn the person pays for, so
+    under Copilot, by se_hook.sh's host field or a camelCase payload, the check only advises."""
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, None)
+    for _ in range(7):
+        answer = stop_hook(root, monkeypatch, capsys, **marked)
+        assert "decision" not in answer
+        note = answer["systemMessage"]
+        assert note.startswith("se Stop hook, advice only under Copilot ([copilot] refuse_stop = true refuses)")
+        assert "Branch feat/example-20261112 has no open pull request to main" in note
+    assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()
+
+
+@pytest.mark.parametrize("setting", ("true", '"yes"'))
+def test_under_copilot_refuse_stop_true_brings_the_refusal_back_and_a_bad_value_keeps_the_guard(
+        tmp_path, monkeypatch, capsys, setting):
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, None)
+    (root / "se.toml").write_text(f"[copilot]\nrefuse_stop = {setting}\n", encoding="utf-8")
+    answer = stop_hook(root, monkeypatch, capsys, se_host="copilot")
+    if setting == "true":
+        assert answer["decision"] == "block" and "(1 of 5 in a row)" in answer["reason"]
+    else:
+        assert "decision" not in answer and "advice only under Copilot" in answer["systemMessage"]
+
+
+def test_under_claude_code_the_copilot_setting_changes_nothing(tmp_path, monkeypatch, capsys):
+    root = stop_checkout(tmp_path, monkeypatch)
+    fake_pull_requests(monkeypatch, root, None)
+    for text in ("", "[copilot]\nrefuse_stop = false\n"):
+        (root / "se.toml").write_text(text, encoding="utf-8")
+        (root / ".se" / "work" / work_tickets.STOP_COUNT).unlink(missing_ok=True)
+        assert "(1 of 5 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
+
+
 def subagent_transcript(path: Path, prompt: str, *commands: str) -> Path:
     """A sub-agent's transcript: its prompt, then one Bash call per command."""
     entries = [{"type": "user", "message": {"role": "user", "content": prompt}}]

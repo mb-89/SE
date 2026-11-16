@@ -425,6 +425,24 @@ def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monk
         assert lines[lines.index(se_start.WITHOUT_KERN) - 1].startswith("kern 0.2.0: failed: ")
 
 
+@pytest.mark.parametrize("host", ("copilot", "claude"))
+def test_under_copilot_the_start_context_names_the_request_guards(setup, capsys, monkeypatch, host):
+    """docs/copilot.md "What a session costs": the session reads which guards are on; Claude Code's
+    greeting stays as it is."""
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]), "--cache",
+                          str(setup["cache"]), "status", "--hook", "--offline", "--host", host],
+                         world=setup["world"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    text = out["additionalContext"] if host == "copilot" else out["systemMessage"]
+    guards = [line for line in text.splitlines() if line.startswith("Copilot guards: ")]
+    if host == "claude":
+        assert guards == []
+    else:
+        assert len(guards) == 1 and "refuse_stop = false: on" in guards[0]
+        assert "start_sessions = false: on" in guards[0]
+
+
 def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):
     lines, asked = kern_greeting(setup, capsys, monkeypatch)
     assert not any(line.startswith("kern") for line in lines) and asked == []
