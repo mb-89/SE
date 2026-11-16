@@ -1,0 +1,12 @@
+# SE's switches, outside-text group: whether text from outside the fleet reaches a role as data
+# (scripts/se_switches.py's docstring owns this format, core.toml's header its keys).
+
+[[switch]]
+name = "[outside-text] envelope"
+kind = "se.toml"
+reader = "scripts/work_tickets.py"
+default = "off"
+layers = ["se.toml"]
+key = "outside-text.envelope"
+help = "scripts/work_tickets.py"
+note = "off: intake --outside, route, refresh, the unread-comments refusal and review.py brief hand text on as before; on: an outside author's text comes inside scripts/outside_text.py's envelope and a marker counts only from an inside author ([outside-text] inside)"

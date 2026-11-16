@@ -1628,7 +1628,8 @@ work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--jso
 
 work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
                       --routing-file ROUTING_FILE [--issue-title ISSUE_TITLE]
-                      [--issue-body ISSUE_BODY] [--repo REPO]
+                      [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION]
+                      [--repo REPO]
                       issue
     for SE: route a checked outside issue as a work issue in one edit: retitle it to its branch
     name, label it work, ready and repo:<name>, and append the routing section with the handled

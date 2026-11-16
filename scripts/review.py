@@ -148,10 +148,24 @@ def items(answer: object, key: str) -> list[dict]:
     return [item for item in answer if isinstance(item, dict)] if isinstance(answer, list) else []
 
 
-def comments(answer: object) -> list[dict]:
-    return [{"author": str((item.get("user") or {}).get("login") or ""),
-             "created": str(item.get("created_at") or ""), "body": str(item.get("body") or "")}
-            for item in items(answer, "comments")]
+def comments(answer: object, inside: tuple[str, ...] | None = None) -> list[dict]:
+    """The comments of `answer`; with `inside` (the `[outside-text]` switch on) each names its
+    author's association, and an outside author's body is inside the envelope
+    (work_tickets.enveloped), marked `outside`."""
+    found = [{"author": str((item.get("user") or {}).get("login") or ""),
+              "created": str(item.get("created_at") or ""), "body": str(item.get("body") or "")}
+             for item in items(answer, "comments")]
+    if inside is None:
+        return found
+    for item, given in zip(found, items(answer, "comments")):
+        association = work_tickets.association_of(given)
+        item["association"] = association
+        if not work_tickets.is_inside(association, inside):
+            origin = f"a comment by {item['author'] or 'someone'}" + (
+                f" on {item['created']}" if item["created"] else "")
+            item["body"], _ = work_tickets.enveloped(item["body"], origin, association)
+            item["outside"] = True
+    return found
 
 
 def plan(remote: str, number: int, claims: bool, then: str) -> Plan:
@@ -226,7 +240,10 @@ def rule_book(root: Path, sha: str) -> tuple[str, str]:
 
 
 def brief(root: Path, number: int, door, remote: str, claims: bool) -> Brief:
-    """Read pull request `number`'s brief through `door`; the diff and the rule book from git."""
+    """Read pull request `number`'s brief through `door`; the diff and the rule book from git.
+    With the `[outside-text]` switch on in `root`'s se.toml, comments by outside authors come
+    inside the envelope (`comments`)."""
+    inside = work_tickets.outside_text(root)
     pull = door.pull(number)
     head = str((pull.get("head") or {}).get("sha") or "")
     ref = str((pull.get("head") or {}).get("ref") or "")
@@ -263,11 +280,11 @@ def brief(root: Path, number: int, door, remote: str, claims: bool) -> Brief:
         issue={"number": issue_number, "repo": issue_repo, "title": str(issue.get("title") or ""),
                "state": str(issue.get("state") or ""), "url": str(issue.get("html_url") or ""),
                "body": str(issue.get("body") or "")},
-        issue_comments=comments(door.issue_comments(issue_repo, issue_number)),
+        issue_comments=comments(door.issue_comments(issue_repo, issue_number), inside),
         diff=diff, checks=checks, rule_book=book, rule_book_from=book_from)
     if claims:
         found.claims = {"description": description,
-                        "comments": comments(door.pull_comments(number))}
+                        "comments": comments(door.pull_comments(number), inside)}
     return found
 
 
@@ -303,7 +320,8 @@ def quoted_comments(found: list[dict]) -> list[str]:
     if not found:
         return ["No comments."]
     return [f"{item['author'] or 'Someone'} wrote{' on ' + item['created'] if item['created'] else ''}:"
-            f"\n\n{quote(item['body'])}" for item in found]
+            f"\n\n{item['body'].rstrip() if item.get('outside') else quote(item['body'])}"
+            for item in found]
 
 
 def text(found: Brief) -> str:
