@@ -4,6 +4,7 @@ reported as such and its run cancelled, and a first attempt cancelled so is re-r
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -107,3 +108,47 @@ def test_the_workflow_bounds_the_legs_queue_and_re_runs_from_its_own_workflow() 
     assert "workflows: [check]" in rerun and "types: [completed]" in rerun
     assert "github.event.workflow_run.conclusion == 'cancelled'" in rerun
     assert "python3 scripts/ci_queue.py rerun --jobs kern-platforms --run" in rerun
+
+
+def recorded_jobs() -> list[dict]:
+    """The jobs of the 16 Nov run's first attempt, read from the public jobs API once it completed
+    and cut to the fields ci_queue reads: the macOS leg ended `cancelled` after 15 minutes with no
+    runner and no step, and the watcher, polling then, passed."""
+    path = ROOT / "tests" / "fixtures" / "ci-queue-leg-without-runner.json"
+    return json.loads(path.read_text(encoding="utf-8"))["jobs"]
+
+
+def test_a_leg_that_ended_without_a_runner_is_never_run_not_passed(tmp_path, capsys) -> None:
+    api, clock = FakeApi([recorded_jobs()]), Clock()
+    summary = tmp_path / "summary.md"
+    assert ci_queue.watch(api, 7, 1, PREFIX, 20, 30, clock.now, clock.sleep, summary) == 1
+    out = capsys.readouterr().out
+    assert "every kern-platforms leg got a runner" not in out
+    assert ("::error title=no runner for kern-platforms::kern-platforms (macos-15) never got a runner "
+            "(it ended without one): it was not tested, which is no test failure; the run is "
+            "cancelled and re-runs once (check-rerun.yml)") in out
+    assert "kern-platforms (windows-2025)" not in out
+    assert "kern-platforms (macos-15) never got a runner" in summary.read_text(encoding="utf-8")
+    assert api.asked[-1] == ("POST", "actions/runs/7/cancel")
+    assert clock.t == 0, "a leg that ended never gets a runner: no wait for the bound"
+
+
+def test_the_recorded_run_cancelled_so_is_re_run_once(capsys) -> None:
+    api = FakeApi([recorded_jobs()], {"conclusion": "cancelled", "run_attempt": 1})
+    assert ci_queue.rerun(api, 7, PREFIX) == 0
+    assert api.asked[-1] == ("POST", "actions/runs/7/rerun")
+    assert "kern-platforms (macos-15) never got a runner: re-running it once" in capsys.readouterr().out
+    for run in ({"conclusion": "cancelled", "run_attempt": 2}, {"conclusion": "failure", "run_attempt": 1}):
+        api = FakeApi([recorded_jobs()], run)
+        assert ci_queue.rerun(api, 7, PREFIX) == 0
+        assert not any(method == "POST" for method, _ in api.asked), run
+
+
+def test_a_leg_that_ran_and_failed_is_a_test_failure_and_not_re_run(capsys) -> None:
+    jobs = recorded_jobs()
+    windows = next(j for j in jobs if j["name"] == "kern-platforms (windows-2025)")
+    windows["conclusion"] = "failure"
+    api = FakeApi([jobs], {"conclusion": "cancelled", "run_attempt": 1})
+    assert ci_queue.rerun(api, 7, PREFIX) == 0
+    assert not any(method == "POST" for method, _ in api.asked)
+    assert "kern-platforms (windows-2025) failed: a test failure stays as it ended" in capsys.readouterr().out
