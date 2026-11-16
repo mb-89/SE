@@ -28,6 +28,7 @@ named in the design's plan.
 | `mcp/` | the MCP door, `<name> mcp`: the catalog's read-only commands as tools over stdio ([The MCP door](#the-mcp-door)) | |
 | `cmd/kern/` | the bare binary: `kern start`, `kern status`, `kern stop`, `kern serve`, `kern hook`, carrying kern's shared components | |
 | `components/github/` | the GitHub component: the token and relay backends and the snapshot names ([its README](components/github/README.md)) | the design's step 7 |
+| `components/session/` | the session record, off by default: one JSON line per host event, a file per session under `.se/.runtime/sessions/` ([its README](components/session/README.md)) | |
 | `contract/` | the contract suite: the built binary held to the bus's and the host's promises, and `cases.json` held against the Go fake, the Python fake and the real core with a Python component attached | |
 | `contract/fixture/` | tally, the suite's fixture and the sample Python component (`component.toml`, `__init__.py`), and the declarations of the two peers the real leg plays | |
 | `python/kern/` | the Python SDK, standard library only: the NATS peer, `component.toml`'s reader, the component and its decorators, the fake core, the runner `python -m kern run <folder>` | |
@@ -81,6 +82,9 @@ One core runs per checkout, the nearest folder up from the working directory tha
   with its payload before the core answers it; what it refuses goes to the core's log, and the
   hook passes. One that declares `index.Inlet` is handed its instance's commit at start, so it
   writes what comes in on its own. The [GitHub component](components/github/README.md) does both.
+  - The [session record](components/session/README.md) hears every event and appends it to a
+    file per session. It runs only where the checkout's ignored overlay `.se/wiring.toml` holds
+    `[instances.session]` with `component = "session"`, after a restart of the core.
 - **Hooks a command answers.** The wiring's `[hooks]` binds a host's event to a command, such as
   `Stop = "work_tickets.py stop-check"`; the core refuses to start where no instance declares it.
   The core runs it with one argument, `--hook=` and the event's JSON, and answers the effect

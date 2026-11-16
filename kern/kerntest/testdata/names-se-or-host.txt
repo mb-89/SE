@@ -44,6 +44,10 @@ host-hook	components/github/step_test.go	mcp__github__
 host-hook	components/github/step_test.go	tool_input
 host-hook	components/github/step_test.go	tool_name
 host-hook	components/github/step_test.go	tool_response
+host-hook	components/session/session_test.go	"Bash"
+host-hook	components/session/session_test.go	PostToolUse
+host-hook	components/session/session_test.go	tool_input
+host-hook	components/session/session_test.go	tool_name
 host-hook	contract/kern_test.go	PostToolUse
 host-hook	contract/kern_test.go	PreToolUse
 host-hook	contract/kern_test.go	SessionEnd
@@ -92,10 +96,12 @@ se-doc-link	components/github/README.md	../../../docs/go-core.md
 se-doc-link	components/github/README.md	../../../docs/go-core.md#a-call-given-up
 se-doc-link	index/readme_test.go	../README.md
 se-file	README.md	.se/components
+se-file	README.md	.se/wiring
 se-file	README.md	scripts/git_door.py
 se-file	README.md	scripts/se_workflows.py
 se-file	README.md	se.toml
 se-file	cli/cli.go	.se/wiring
+se-file	components/session/README.md	.se/wiring
 se-file	contract/longstep_test.go	se.toml
 se-file	git/contract_test.go	scripts/adhoc.py
 se-file	git/contract_test.go	scripts/tracked.py

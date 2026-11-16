@@ -458,9 +458,15 @@ without its end. Either way the start spawns a core, and the core that serves wr
 | Stop, SubagentStop | the stop | the delivery component's `stop-check` answers within the hook, in its warm process: 24 to 57 ms after the first, against 434 to 586 ms through `uv` (README "Stop hook") |
 | SessionEnd | the end | returns the lease; the last one out stops the core after its grace |
 
-Every event lands in the family `session/<id>/events`, which the session I/O component also
-appends to `.se/.runtime/sessions/<id>.jsonl`, so the core reads a session's history back after a
-restart.
+The file half is built: kern's session component ([its README](../kern/components/session/README.md)),
+off by default, appends every event to `.se/.runtime/sessions/<id>.jsonl` where the ignored
+overlay `.se/wiring.toml` switches it on. The family `session/<id>/events` follows when a reader
+needs it.
+
+It has two limits. A cloud session starts from a fresh clone without the overlay, so it records
+only on a local machine, or where a session writes its overlay and restarts its core. Under
+Copilot, SE's hooks file (`.github/hooks/se.json`) posts only two events, so the file holds only
+those.
 
 From v5 carries over: the detached start, the claim file, the standing file, the post and its
 effects (`pass`, `context`, `block`, `result`), and the rule that a hook fails open. v5's hooks

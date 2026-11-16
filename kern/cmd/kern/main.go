@@ -10,6 +10,7 @@ import (
 	"kern/cli"
 	// kern's shared components, one blank import each.
 	_ "kern/components/github"
+	_ "kern/components/session"
 )
 
 func main() { os.Exit(cli.Run("kern", os.Args[1:], os.Stdout, os.Stderr)) }
