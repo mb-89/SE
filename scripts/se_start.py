@@ -678,10 +678,19 @@ def without_kern(kern: list[str], host: str) -> list[str]:
     return [WITHOUT_KERN] if host == "copilot" and kern and ": failed: " in kern[0] else []
 
 
+def detached_options(os_name: str) -> dict:
+    """The keyword arguments of a detached start on os_name. On Windows a new process group with a
+    console that has no window (CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW), so the git and gh it
+    runs share that hidden console instead of each opening one, as DETACHED_PROCESS would make
+    them; written as numbers, as subprocess names them only on Windows. Elsewhere a new session."""
+    if os_name == "nt":
+        return {"creationflags": 0x00000200 | 0x08000000}
+    return {"start_new_session": True}
+
+
 def _spawn_detached(argv: list[str]) -> None:
-    kwargs = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True, **kwargs)
+                     stderr=subprocess.DEVNULL, close_fds=True, **detached_options(os.name))
 
 
 def _claude(args: list[str]) -> subprocess.CompletedProcess:
