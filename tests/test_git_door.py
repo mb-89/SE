@@ -737,6 +737,8 @@ def test_rev_parse_names_a_bare_repository_and_a_checkout(door, tmp_path: Path) 
 CLAUDE = ("Claude", "noreply" + "@anthropic.com")
 WEB_FLOW = ("GitHub", "noreply" + "@github.com")
 OWNER = ("mb", "mb")
+ALICE = ("alice", "alice" + "@corp.example.org")
+ACCOUNT = ("alice", "1+alice" + "@users.noreply.github.com")
 
 
 def written_by(author: tuple[str, str], committer: tuple[str, str]) -> dict[str, str]:
@@ -756,8 +758,9 @@ def history_commit(root: Path, name: str, message: str, author=OWNER, committer=
 
 def se_like_history(origin: Path) -> None:
     """An se-like history: a clean root, a release by Claude with its session trailers, a commit with
-    tracker references and a co-author line, a merge GitHub committed, lightweight and annotated
-    tags, and a published commit's allow entry."""
+    tracker references, a co-author line and an address line, a merge GitHub committed for an
+    account, lightweight tags and an annotated one by another tagger, a branch only origin has,
+    and a published commit's allow entry."""
     fake_git.init(origin, "-b", "main")
     (origin / "se.toml").write_text('[project]\nidentity = "mb <mb>"\n', encoding="utf-8")
     history_commit(origin, "se.toml", "Start")
@@ -768,15 +771,18 @@ def se_like_history(origin: Path) -> None:
     git(origin, "tag", "v1.0.1")
     git(origin, "switch", "-q", "-c", "feature")
     history_commit(origin, "feature.txt", "Add the feature (#593, requirement 3)\n\nIt follows #12, as "
-                   "asked (#7).\n\nco-authored-by: Copilot <copilot@example.com>\n")
+                   "asked (#7).\n\nco-authored-by: Copilot <copilot@example.com>\n"
+                   "Signed-off-by: " + ALICE[0] + " <" + ALICE[1] + ">\n", author=ALICE)
+    git(origin, "switch", "-q", "-c", "side")
+    history_commit(origin, "side.txt", "Side work")
     git(origin, "switch", "-q", "main")
     assert git_door.run("merge", "-q", "--no-ff", "-m", "Merge feature", "feature", root=origin,
-                        env=written_by(OWNER, WEB_FLOW)).returncode == 0
+                        env=written_by(ACCOUNT, WEB_FLOW)).returncode == 0
     (origin / ".public-check-allow").write_text(
         f"commit:{released} author  # published before the identity rule\n", encoding="utf-8")
     history_commit(origin, ".public-check-allow", "Allow the published release")
     assert git_door.run("tag", "-a", "-m", "Release v1.0.2", "v1.0.2", root=origin,
-                        env=written_by(OWNER, OWNER)).returncode == 0
+                        env=written_by(OWNER, ALICE)).returncode == 0
     git(origin, "tag", "v1")
 
 
@@ -796,6 +802,7 @@ def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp
         gate = ["--repo", str(clone), "--range", "main feature"]
         assert rewrite_history.public_check.main(gate) == 1  # the history as published fails the gates
         old_head, old_tree = git(clone, "rev-parse", "main"), git(clone, "rev-parse", "main^{tree}")
+        old_side_tree = git(clone, "rev-parse", "origin/side^{tree}")
         old_tags = {name: git(clone, "rev-parse", f"{name}^{{commit}}") for name in git(clone, "tag").split()}
         capsys.readouterr()
 
@@ -806,9 +813,13 @@ def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp
         messages = [m.lstrip("\n") for m in git(clone, "log", "--format=%B%x00", "main").split("\x00")]
         assert not any("co-authored-by" in m.lower() or "claude-session" in m.lower() for m in messages)
         assert "Add the feature (requirement 3)\n\nIt follows as asked.\n" in messages
-        assert set(git(clone, "log", "--format=%an <%ae>|%cn <%ce>", "main").splitlines()) == {
-            "mb <mb>|mb <mb>", f"mb <mb>|{WEB_FLOW[0]} <{WEB_FLOW[1]}>"}
+        everyone = git(clone, "log", "--format=%an <%ae>|%cn <%ce>|%B", "--branches", "--tags")
+        everyone += git(clone, "for-each-ref", "--format=%(taggername) <%(taggeremail)>|%(contents)", "refs/tags")
+        assert "@" not in everyone
+        assert set(git(clone, "log", "--format=%an <%ae>|%cn <%ce>", "--branches").splitlines()) == {"mb <mb>|mb <mb>"}
+        assert git(clone, "for-each-ref", "--format=%(taggername) %(taggeremail)", "refs/tags/v1.0.2") == "mb <mb>"
         assert git(clone, "rev-parse", "main^{tree}") == old_tree  # same content, new history
+        assert git(clone, "rev-parse", "side^{tree}") == old_side_tree
         assert git(clone, "status", "--porcelain") == ""
         mapping = dict(line.split() for line in
                        (clone / ".git" / rewrite_history.MAP_FILE).read_text().splitlines())
@@ -819,8 +830,16 @@ def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp
         assert git(clone, "cat-file", "-t", "v1.0.2") == "tag"  # an annotated tag stays annotated
         assert git(clone, "rev-parse", "main") == mapping[old_head]
 
-    assert "5 commits rewritten, 4 with a new id; 3 trailer lines dropped from 2 commits, " \
-           "3 tracker references from 1, the identity 'mb <mb>' set on 1" in out
+    assert "1 branches of origin given a local branch: side" in out
+    assert "6 commits and 1 annotated tags rewritten, 5 commits with a new id; 3 trailer lines " \
+           "dropped from 2 commits, 3 tracker references from 1, 3 addresses from 2 messages, the " \
+           "identity 'mb <mb>' set on 4" in out
+    assert "before: 6 commits, 1 annotated tags; 9 addresses in 4 of them; 6 identities other" in out
+    assert "after: 6 commits, 1 annotated tags; 0 addresses in 0 of them; 0 identities other" in out
+    assert "before: addresses by place and kind: author github-noreply 1, author other 2, committer " \
+           "other 2, tagger other 1, commit-message other 3" in out
+    assert "after: addresses by place and kind: none" in out
+    assert ALICE[1] not in out and ACCOUNT[1] not in out
     assert f"main {old_head[:12]} -> {mapping[old_head][:12]} (same tree)" in out
     assert "3 of 4 tags moved to their rewritten commits" in out
     assert "main: .public-check-allow line 1: commit:" in out and "delete it" in out
