@@ -7171,6 +7171,39 @@ def test_the_working_trees_forms_table_changes_nothing_while_the_integration_bra
     assert "the work form refuses" in capsys.readouterr().err
 
 
+def test_a_retro_filed_from_its_template_passes_while_the_work_form_refuses(
+        worktree, monkeypatch, capsys, forms_home):
+    """SE files a retro as the template stands, its front matter dropped and its Scope filled,
+    through `file`; with `[forms] enforce = "refuse"` on the integration branch it files."""
+    fake_git.init(worktree)
+    enforce(worktree, "refuse")
+    fake_git.git("-C", str(worktree), "add", "-A")
+    fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                 "commit", "-q", "-m", "forms refuse")
+    fake_git.git("-C", str(worktree), "update-ref", "refs/remotes/origin/main", "HEAD")
+    github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
+                             "url": "https://git.example/owner/repo/issues/1", "state": "closed"}})
+    monkeypatch.setattr(work_tickets, "run_gh", github)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    template = (PROJECT / ".github" / "ISSUE_TEMPLATE" / "retro.md").read_text(encoding="utf-8")
+    text = template.split("\n---\n", 1)[1].replace(
+        "**Scope:** <!-- the window: work issues closed since the last closed retro issue closed -->",
+        "**Scope:** the work issues closed since 2026-11-01.")
+    assert "**Scope:** the work issues closed since 2026-11-01." in text
+    body = worktree / "retro.md"
+    body.write_text(text, encoding="utf-8")
+    assert run(worktree, "file", "--title", "retro-session-20261116", "--label", "retro",
+               "--body-file", str(body)) == 0
+    assert "the work form refuses" not in capsys.readouterr().err
+    filed = github.issues[2]
+    assert filed["title"] == "retro-session-20261116"
+    assert set(filed["labels"]) >= {"work", "ready", "repo:repo", "retro"}
+    assert "<!-- se:form work -->" in filed["body"]
+    assert "retro.py collect <this issue> --out <draft>" in filed["body"]
+    assert "retro.py file <this issue> --draft <draft>" in filed["body"]
+
+
 def test_a_private_term_is_refused_held_never_and_never_printed(worktree, gh, capsys, forms_home):
     (worktree / ".public-check.local").write_text("# a private term\nquuxcorp\n", encoding="utf-8")
     enforce(worktree, "refuse", refusals=1)
