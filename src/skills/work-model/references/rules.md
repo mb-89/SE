@@ -453,7 +453,23 @@ detail further down, only as far as that reader needs.
 - **Implementations:**
   - se: a `Reader:` line under the title of a skill or reference, by judgment.
   - Go line (frozen): the battery checked each prose file's `Reader:` line.
-- **Related:** doc-001
+- **Related:** doc-001, doc-003
+
+### doc-003 No inside baseball for readers
+
+Text a person reads (a page, a deck, a timeline, an issue or message to the owner) says what that
+reader needs in their words and never how it was made or how the fleet works inside: no build or
+script notes, no setting or label names as explanations, no internal ids or field names.
+
+- **Why:** the reader came for the content; machinery text costs their attention and reads as
+  noise. Text written for the fleet itself (field reports, routing sections, code comments, this
+  book) is not reader-facing in this sense and keeps its detail.
+- **Without it:** pages and messages fill with notes meant for the builders.
+- **Prevents:** build notes on reader pages; internal names shown as if they were content;
+  explanations of the fleet's mechanics where the owner only needs the result.
+- **Implementations:**
+  - se: by judgment in review, and in each role's output to the owner.
+- **Related:** doc-002
 
 ## wrk: work and fleet
 
