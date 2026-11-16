@@ -807,7 +807,7 @@ def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp
         assert not any("co-authored-by" in m.lower() or "claude-session" in m.lower() for m in messages)
         assert "Add the feature (requirement 3)\n\nIt follows as asked.\n" in messages
         assert set(git(clone, "log", "--format=%an <%ae>|%cn <%ce>", "main").splitlines()) == {
-            "mb <mb>|mb <mb>", f"mb <mb>|{WEB_FLOW[0]} <{WEB_FLOW[1]}>"}
+            "mb <mb>|mb <mb>"}
         assert git(clone, "rev-parse", "main^{tree}") == old_tree  # same content, new history
         assert git(clone, "status", "--porcelain") == ""
         mapping = dict(line.split() for line in
@@ -820,7 +820,7 @@ def test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter(tmp
         assert git(clone, "rev-parse", "main") == mapping[old_head]
 
     assert "5 commits rewritten, 4 with a new id; 3 trailer lines dropped from 2 commits, " \
-           "3 tracker references from 1, the identity 'mb <mb>' set on 1" in out
+           "3 tracker references from 1, the identity 'mb <mb>' set on 2" in out
     assert f"main {old_head[:12]} -> {mapping[old_head][:12]} (same tree)" in out
     assert "3 of 4 tags moved to their rewritten commits" in out
     assert "main: .public-check-allow line 1: commit:" in out and "delete it" in out

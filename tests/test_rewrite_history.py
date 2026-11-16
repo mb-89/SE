@@ -88,17 +88,18 @@ def test_the_stream_filter_cleans_each_commit_and_copies_everything_else_as_it_i
 
     rewrite_history.filter_stream(io.BytesIO(source), sink, OWNER, counts)
 
-    expected = (blob + clean + stream_commit(3, "b" * 40, "mb <mb>", "mb <mb>", b"Fix\n") + merged + tag)
+    expected = (blob + clean + stream_commit(3, "b" * 40, "mb <mb>", "mb <mb>", b"Fix\n")
+                + stream_commit(4, "c" * 40, "mb <mb>", "mb <mb>", b"Merge it\n") + tag)
     assert sink.getvalue() == expected
     assert (counts.commits, counts.trailers, counts.trailer_commits, counts.references,
-            counts.reference_commits, counts.identity_commits) == (3, 1, 1, 1, 1, 1)
+            counts.reference_commits, counts.identity_commits) == (3, 1, 1, 1, 1, 2)
     assert counts.originals == {":2": "a" * 40, ":3": "b" * 40, ":4": "c" * 40}
 
 
-def test_web_flow_passes_as_committer_never_as_author():
+def test_web_flow_becomes_the_project_identity_in_both_roles():
     committer = b"committer " + WEB_FLOW.encode() + b" 1700000000 +0000\n"
     author = b"author " + WEB_FLOW.encode() + b" 1700000000 +0000\n"
-    assert rewrite_history.fix_identity(committer, OWNER) == committer
+    assert rewrite_history.fix_identity(committer, OWNER) == b"committer mb <mb> 1700000000 +0000\n"
     assert rewrite_history.fix_identity(author, OWNER) == b"author mb <mb> 1700000000 +0000\n"
     with pytest.raises(rewrite_history.SetupError, match="cannot read the identity line"):
         rewrite_history.fix_identity(b"author nobody\n", OWNER)

@@ -8,7 +8,7 @@ and `git fast-import` (standard library only):
   and their tracker references, with the same detectors as the commit gates
   (scripts/public_check.py, AGENTS.md "Public safety");
 - an author or committer other than the project identity (se.toml `[project] identity`, or the
-  machine's `public_identity`) becomes it; GitHub's web-flow committer passes, as in the gates;
+  machine's `public_identity`) becomes it, GitHub's web-flow committer included, as in the gates;
 - every tag moves to its commit's rewritten commit; trees and dates stay as they are, so each
   rewritten branch carries exactly its old tree.
 
@@ -101,7 +101,7 @@ def fix_identity(line: bytes, identity: tuple[str, str]) -> bytes:
     role, name, email, when = match.groups()
     found = f"{name.decode('utf-8', 'replace')} <{email.decode('utf-8', 'replace')}>"
     wanted = f"{identity[0]} <{identity[1]}>"
-    if found == wanted or (role == b"committer" and found == public_check.WEB_FLOW):
+    if found == wanted:
         return line
     return b"%s %s <%s> %s\n" % (role, identity[0].encode(), identity[1].encode(), when)
 

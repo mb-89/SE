@@ -157,7 +157,7 @@ def test_counts_come_from_the_fixture_plugin(setup):
 
 def test_the_rules_are_the_public_checks_labels():
     labels = {pattern.label for pattern in se_start.public_check.GENERIC_PATTERNS}
-    messages = {"tracker-reference", "attribution-trailer"}
+    messages = {"tracker-reference", "attribution-trailer", "message-address"}
     assert set(se_start.public_check.RULES) == labels | messages
     assert len(se_start.public_check.RULES) == len(labels) + len(messages)
 
