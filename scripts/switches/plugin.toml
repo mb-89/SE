@@ -1,0 +1,48 @@
+# SE's switches, plugin group: the plugin build's settings (scripts/se_plugin.py) and the MCP
+# launcher's plugin-install setting (scripts/se_mcp.sh), one [[switch]] each; core.toml's header
+# owns the keys of a row, scripts/se_switches.py's docstring the format.
+
+[[switch]]
+name = "[plugin] root_mcp"
+kind = "se.toml"
+reader = "scripts/se_plugin.py"
+default = "off"
+layers = ["se.toml"]
+key = "plugin.root_mcp"
+help = "README.md#the-mcp-door"
+note = "off: the build writes no root .mcp.json; on: it writes one, which Claude Code reads too"
+
+[[switch]]
+name = "[plugin] copilot_manifest"
+kind = "se.toml"
+reader = "scripts/se_plugin.py"
+default = "off"
+layers = ["se.toml"]
+key = "plugin.copilot_manifest"
+on = ["root"]
+off = ["github"]
+help = "scripts/se_plugin.py"
+note = "off (\"github\" or unset): Copilot's one manifest is .github/plugin/plugin.json; on (\"root\"): plugin.json at the repository root, the one place VS Code reads a Copilot-format manifest"
+
+[[switch]]
+name = "[plugin] powershell_hooks"
+kind = "se.toml"
+reader = "scripts/se_plugin.py"
+default = "off"
+layers = ["se.toml"]
+key = "plugin.powershell_hooks"
+on = ["handoff"]
+off = ["bash"]
+help = "scripts/se_plugin.py"
+note = "off (\"bash\" or unset): a PowerShell hook line starts its script with a bare bash on PATH; on (\"handoff\"): through the hand-off script, which finds the bash Git for Windows ships"
+
+[[switch]]
+name = "SE_MCP_PLUGIN_PROJECT"
+kind = "environment"
+reader = "scripts/se_mcp.sh"
+default = "on"
+layers = ["environment"]
+off = ["off"]
+other = "on"
+help = "scripts/se_mcp.sh"
+note = "on: a plugin install serves the session's repository; off keeps the plugin folder as the root; it matters only where PLUGIN_ROOT is set; se_mcp.ps1 compares case-insensitively (-ne) and se_mcp.sh (line 97) does not, so the row follows se_mcp.sh"

@@ -4,8 +4,12 @@
 The table is a folder of TOML files, one per group (`core.toml` first); a later module adds a
 file of its own, so no two changes edit one table. Each `[[switch]]` row names a value that flips
 behaviour, the file that reads it, its built-in default and the layers that reader consults, in
-its order; `core.toml`'s header owns the keys of a row. Each `[[not_switch]]` names an `SE_*`
-variable that flips nothing, so the drift list leaves it out.
+its order; `core.toml`'s header owns the keys of a row. Each `[[not_switch]]` names, with its
+why, an `SE_*` variable that flips nothing, or se.toml keys that flip nothing, so the drift list
+leaves them out. Keys are named in the table's own notation, which only the drift list reads:
+`[table]` covers every key under that table, `[table] key` covers `table.key` and every key under
+it; a cover matches whole dotted parts only, so `[outside]` covers `outside.SE` but not
+`outside-text.envelope`. `parse` refuses any other not_switch name.
 
 `in_effect` is a pure function: given the table and what each layer holds, it says for each
 switch its state (on, off or set) and the layer that answered, `default` where none did. It reads
@@ -46,6 +50,10 @@ DRIFT_SUFFIXES = (".py", ".go", ".sh", ".ps1")
 QUOTED_NAME = re.compile(r"""["'`](SE_[A-Z][A-Z0-9_]*)["'`]|\$\{?(SE_[A-Z][A-Z0-9_]*)|"""
                          r"""\$env:(SE_[A-Z][A-Z0-9_]*)""")
 DEFAULT = "default"
+#: A not_switch name: an `SE_*` variable, or se.toml keys as `[table]` or `[table] key`.
+NOT_SWITCH_VARIABLE = re.compile(r"SE_[A-Z][A-Z0-9_]*")
+BARE = r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*"
+NOT_SWITCH_KEYS = re.compile(rf"\[({BARE})\](?: ({BARE}))?")
 
 
 class TableError(ValueError):
@@ -76,6 +84,20 @@ class Table:
 
     def names(self) -> set[str]:
         return {switch.name for switch in self.switches} | set(self.not_switches)
+
+    def covers(self) -> tuple[str, ...]:
+        """The dotted se.toml keys the not_switch key names cover, each with every key under it."""
+        found = []
+        for name in self.not_switches:
+            match = NOT_SWITCH_KEYS.fullmatch(name)
+            if match:
+                found.append(".".join(part for part in match.groups() if part))
+        return tuple(found)
+
+
+def covered(key: str, covers: Iterable[str]) -> bool:
+    """Whether the dotted `key` is a cover or lies under one, by whole dotted parts."""
+    return any(key == cover or key.startswith(cover + ".") for cover in covers)
 
 
 @dataclass(frozen=True)
@@ -150,6 +172,10 @@ def parse(texts: Mapping[str, str]) -> Table:
             if not (isinstance(item, dict) and isinstance(item.get("name"), str)
                     and isinstance(item.get("why"), str) and set(item) == {"name", "why"}):
                 raise TableError(f"{source}: not_switch {number} holds a name and why")
+            if not (NOT_SWITCH_VARIABLE.fullmatch(item["name"])
+                    or NOT_SWITCH_KEYS.fullmatch(item["name"])):
+                raise TableError(f"{source}: not_switch {number} ({item['name']}): a name is an "
+                                 "SE_* variable, `[table]` or `[table] key`")
             not_switches.append(item["name"])
             names.append(item["name"])
         for name in names:
@@ -251,13 +277,16 @@ def keys(document: Mapping, prefix: str = "") -> list[str]:
 
 
 def drift(table: Table, texts: Iterable[str], project: Mapping) -> dict[str, list[str]]:
-    """The `SE_*` names the code texts quote and the se.toml keys that no file of the table names."""
+    """The `SE_*` names the code texts quote and the se.toml keys that no file of the table names,
+    a key a not_switch covers counting as named."""
     named = table.names()
     quoted = {next(group for group in match.groups() if group)
               for text in texts for match in QUOTED_NAME.finditer(text)}
     project_keys = {switch.key for switch in table.switches if "se.toml" in switch.layers}
+    covers = table.covers()
     return {"environment": sorted(quoted - named),
-            "se.toml": sorted(set(keys(project)) - project_keys)}
+            "se.toml": sorted(key for key in set(keys(project)) - project_keys
+                              if not covered(key, covers))}
 
 
 # The thin wiring: read each layer, never write.
