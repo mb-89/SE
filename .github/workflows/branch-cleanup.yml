@@ -1,0 +1,122 @@
+# Deletes a closed pull request's head branch, merged or not (README "Workflows"): the commits stay
+# reachable through the closed pull request. Cloud sessions cannot delete a ref themselves (HTTP 403),
+# so the integrator's own delete (work_tickets.py delete_merged_branch) leaves the branch to this
+# workflow, which deletes it with the run's token.
+#
+# It deletes only the closed pull request's head branch, and only where
+#   - the head repository is this repository, never a fork;
+#   - the branch is none of main, the default branch, se and rehearsal, and starts with neither
+#     `ccr-` nor `claude/`;
+#   - no other open pull request has it as its head;
+#   - it still points at the pull request's head sha (the lease).
+# A guard that does not hold deletes nothing and says why in the run's summary; a branch already gone
+# (GitHub's own deletion after a merge) is a success with a note.
+#
+# Reusable: a project calls the copy SE writes into it at its pin (scripts/se_workflows.py) with the
+# short trigger file README "Workflows" shows; SE's own trigger is the `pull_request` one below,
+# which the copy drops.
+name: branch-cleanup
+
+on:
+  workflow_call:
+    inputs:
+      number:
+        description: The closed pull request's number
+        type: number
+        required: true
+      head_ref:
+        description: Its head branch
+        type: string
+        required: true
+      head_sha:
+        description: Its head commit, the sha the branch must still point at
+        type: string
+        required: true
+      head_repository:
+        description: Its head repository, owner/name
+        type: string
+        required: true
+  # SE's own trigger: the run reads the pull request from the event instead of the inputs.
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Delete the closed pull request's branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NUMBER: ${{ inputs.number || github.event.pull_request.number }}
+          HEAD_REF: ${{ inputs.head_ref || github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ inputs.head_repository || github.event.pull_request.head.repo.full_name }}
+        shell: python3 {0}
+        run: |
+          # The guards, then one delete through GitHub's REST API; every outcome is one line in the
+          # run's summary. A guard that does not hold, or a branch already gone, ends the run green.
+          import json, os, sys, urllib.error, urllib.parse, urllib.request
+
+          PROTECTED = {"main", "se", "rehearsal"}
+          PREFIXES = ("ccr-", "claude/")
+
+          def api(method, path):
+              """(status, JSON body or None) of one REST call; a 404 or 422 is an answer, not an error."""
+              request = urllib.request.Request(
+                  os.environ.get("GITHUB_API_URL", "https://api.github.com") + path, method=method,
+                  headers={"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                           "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      body = response.read()
+                      return response.status, json.loads(body) if body else None
+              except urllib.error.HTTPError as error:
+                  if error.code in (404, 422):
+                      return error.code, None
+                  raise
+
+          def say(line):
+              print(line)
+              summary = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary:
+                  with open(summary, "a", encoding="utf-8") as out:
+                      out.write(line + "\n")
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          number, branch = os.environ["NUMBER"], os.environ["HEAD_REF"]
+          sha, head = os.environ["HEAD_SHA"], os.environ["HEAD_REPOSITORY"]
+          ref = urllib.parse.quote(f"heads/{branch}", safe="/")
+
+          def why_kept():
+              if head.lower() != repository.lower():
+                  return f"its head repository {head or '(deleted)'} is not {repository}"
+              _, about = api("GET", f"/repos/{repository}")
+              default = (about or {}).get("default_branch", "main")
+              if branch in PROTECTED | {default} or branch.startswith(PREFIXES):
+                  return "it is a protected branch"
+              owner = repository.split("/")[0]
+              query = urllib.parse.urlencode({"state": "open", "head": f"{owner}:{branch}", "per_page": 100})
+              _, pulls = api("GET", f"/repos/{repository}/pulls?{query}")
+              others = sorted(pull["number"] for pull in pulls or [] if str(pull["number"]) != number)
+              if others:
+                  return "it is the head of the open pull request " + ", ".join(f"#{n}" for n in others)
+              return None
+
+          kept = why_kept()
+          if kept:
+              sys.exit(say(f"Branch cleanup: kept {branch} of #{number}: {kept}."))
+          status, found = api("GET", f"/repos/{repository}/git/ref/{ref}")
+          if status == 404:
+              sys.exit(say(f"Branch cleanup: {branch} of #{number} is already gone."))
+          tip = (found or {}).get("object", {}).get("sha", "")
+          if tip != sha:
+              sys.exit(say(f"Branch cleanup: kept {branch} of #{number}: it moved to {tip[:12]} since the "
+                           f"pull request's head {sha[:12]}."))
+          status, _ = api("DELETE", f"/repos/{repository}/git/refs/{ref}")
+          if status == 422:
+              sys.exit(say(f"Branch cleanup: {branch} of #{number} is already gone."))
+          say(f"Branch cleanup: deleted {branch} of #{number} at {sha[:12]}.")
