@@ -32,6 +32,6 @@ def test_the_docs_github_names_are_the_components() -> None:
 
 def test_the_docs_example_key_is_the_key_a_read_takes() -> None:
     doc = section((ROOT / "docs" / "go-core.md").read_text(encoding="utf-8"), "GitHub in the cloud")
-    found = re.search(r"SE's issue (\d+) stands at `github/issues/([^`]+)`", doc)
+    found = re.search(r"SE's issue (\d+), its owner `([^`]+)`, stands at\s+`github/issues/([^`]+)`", doc)
     assert found, "the doc names one issue's snapshot name as its example"
-    assert found[2] == se_relay.key("mb-89", "SE", int(found[1])), found[2]
+    assert found[3] == se_relay.key(found[2], "SE", int(found[1])), found[3]

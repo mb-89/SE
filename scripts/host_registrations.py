@@ -36,7 +36,7 @@ SEEN, SILENT, NOT_MEASURED = "seen", "silent", "not measured"
 PROBLEM, NOTE, OK = "problem", "note", "ok"
 SCRIPT_SUFFIXES = (".sh", ".py", ".ps1", ".js", ".mjs", ".cjs", ".ts")
 SPAWN_NOTE = "this probe may start the core, as a host's own spawn would"
-TOKENS = ("launcher", "launcher_ps1", "checkout")  # the placeholders of a register line
+TOKENS = ("launcher", "launcher_ps1", "checkout", "tracker")  # the placeholders of a register line
 
 
 @dataclass(frozen=True)

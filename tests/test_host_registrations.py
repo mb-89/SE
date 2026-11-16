@@ -13,7 +13,7 @@ import host_registrations as h
 
 DATA = Path(__file__).resolve().parents[1] / "scripts" / "host-limits.toml"
 FILL = {"launcher": "$HOME/se/scripts/se_mcp.sh", "launcher_ps1": "$HOME/se/scripts/se_mcp.ps1",
-        "checkout": "$HOME/se"}
+        "checkout": "$HOME/se", "tracker": "alice/SE"}
 
 
 def section() -> dict:
@@ -116,7 +116,7 @@ def test_an_answering_door_is_ok_and_carries_no_fix_line_and_a_missing_script_is
     assert row.text.endswith("bash <se>/scripts/se_mcp.sh: answered initialize (se 0.4.0); " + h.SPAWN_NOTE)
     gone = {"resolves": True, "missing": ["/opt/se/scripts/se_mcp.sh"], "unresolved": []}
     [row] = h.rows([(p, seen)], {h.key(words): gone}, "linux", FILL)
-    assert row.level == h.PROBLEM and "which does not exist" in row.text and row.fix == "copilot plugin install mb-89/SE"
+    assert row.level == h.PROBLEM and "which does not exist" in row.text and row.fix == "copilot plugin install alice/SE"
 
 
 def test_unprobed_unresolved_and_not_here_are_not_measured():
@@ -149,14 +149,14 @@ def test_the_installed_plugin_place_is_read_in_copilots_install_and_installs_thr
     assert (p.kind, p.base, p.file("linux"), p.finds, p.outside) == ("mcp", "copilot-plugin", ".github/mcp.json", "se",
                                                                       True)
     assert p.source.startswith("https://docs.github.com/en/copilot/reference/cli-plugin-reference")
-    assert p.fix("linux", FILL) == "copilot plugin marketplace add mb-89/SE && copilot plugin install se@se"
-    assert p.fix("windows", FILL) == "copilot plugin marketplace add mb-89/SE; copilot plugin install se@se"
+    assert p.fix("linux", FILL) == "copilot plugin marketplace add alice/SE && copilot plugin install se@se"
+    assert p.fix("windows", FILL) == "copilot plugin marketplace add alice/SE; copilot plugin install se@se"
 
 
 def test_the_resolver_picks_ses_folders_sorted_reading_nothing_and_skipping_a_broken_manifest(tmp_path: Path):
     home = tmp_path / "no-such-home"  # nothing exists on disk: the answer comes from the texts alone
     plugins = home / ".copilot" / "installed-plugins"
-    se, direct = plugins / "se" / "se", plugins / "_direct" / "mb-89-SE"
+    se, direct = plugins / "se" / "se", plugins / "_direct" / "alice-SE"
     other, broken = plugins / "se" / "other", plugins / "x" / "y"
     found = {se: [json.dumps({"name": "se"}), None], other: [json.dumps({"name": "other"}), None],
              broken: ["{not json", "[]"], direct: [None, json.dumps({"name": "se"})]}

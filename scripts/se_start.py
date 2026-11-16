@@ -56,6 +56,7 @@ metrics = _load("metrics")
 feedback = _load("feedback")
 kern_names = _load("kern_names")
 se_plugin = _load("se_plugin")
+se_home = _load("se_home")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -113,6 +114,17 @@ def _origin(se_root: Path) -> str | None:
     return result.stdout.strip() or None if result.returncode == 0 else None
 
 
+def _docs_url(se_root: Path) -> str:
+    """se.toml's `docs_url` where it sets one, else the docs URL of SE's home, from its origin
+    (scripts/se_home.py); "" where neither is known."""
+    explicit = _project(se_root).get("docs_url")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    origin = _origin(se_root)
+    home = se_home.parse(origin) if origin else None
+    return home.docs_url if home else ""
+
+
 @dataclass(frozen=True)
 class Item:
     """One thing SE uses: SE itself or a module of the project."""
@@ -166,7 +178,7 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
         missing, skills_error = lacking(se_root), ""
     except se_plugin.SourceError as error:
         missing, skills_error = [], str(error)
-    return Local(se_version, str(_project(se_root).get("docs_url", "")), counts(se_root), items, errors,
+    return Local(se_version, _docs_url(se_root), counts(se_root), items, errors,
                  missing, skills_error)
 
 
@@ -213,19 +225,52 @@ def _plugin_repository(se_root: Path) -> str | None:
     return repository if isinstance(repository, str) and repository else None
 
 
+def marketplace_registry() -> Path:
+    """Claude Code's record of the marketplaces it knows, each with the source it reads it from."""
+    return _claude_dir() / "plugins" / "known_marketplaces.json"
+
+
+def _marketplace_repository(se_root: Path) -> str | None:
+    """The repository Claude Code installed this copy from: the source of the marketplace whose
+    installed plugin lies at `se_root`, as Claude Code's records name it. The generated manifests
+    name no home (AGENTS.md "Neutral home"), so an installed copy's home is the host's record."""
+    def read(path: Path) -> dict:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    plugins = read(plugin_registry()).get("plugins", {})
+    marketplace = next((key.partition("@")[2] for key, entries in (plugins.items() if isinstance(plugins, dict) else [])
+                        for entry in (entries if isinstance(entries, list) else [entries])
+                        if isinstance(entry, dict) and isinstance(entry.get("installPath"), str)
+                        and Path(entry["installPath"]).expanduser().resolve() == se_root.resolve()), "")
+    source = read(marketplace_registry()).get(marketplace, {}) if marketplace else {}
+    source = source.get("source", {}) if isinstance(source, dict) else {}
+    if not isinstance(source, dict):
+        return None
+    if source.get("source") == "github" and isinstance(source.get("repo"), str) and source["repo"]:
+        return f"https://github.com/{source['repo']}"
+    url = source.get("url")
+    return url if source.get("source") == "git" and isinstance(url, str) and url else None
+
+
 def _se_item(se_root: Path, version: Version | None, local) -> Item:
     """SE itself: a local path of `se` in the machine-local configuration (never touched), a git
     checkout (a development checkout or a cloud setup-script clone), or an installed copy (a Claude
-    Code plugin or a Copilot copy), checked against the repository its plugin manifest names."""
+    Code plugin or a Copilot copy), checked against the repository its plugin manifest names or,
+    where it names none, the marketplace Claude Code installed it from."""
     path = local.paths.get("se")
     if path is not None and path == se_root.resolve():
         return Item("SE", "local", version, None, note=f"local path {se_root}")
     origin = _origin(se_root)
     if origin:
         return Item("SE", "se", version, origin)
-    repository = _plugin_repository(se_root)
+    repository = _plugin_repository(se_root) or _marketplace_repository(se_root)
     return Item("SE", "se", version, repository, note="an installed copy" if repository else
-                f"an installed copy without a repository in {PLUGIN_MANIFEST}, not checked")
+                f"an installed copy without a repository in {PLUGIN_MANIFEST} or a marketplace "
+                "record, not checked")
 
 
 def _module_item(root: Path, module, local, locked) -> Item:

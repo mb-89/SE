@@ -26,13 +26,14 @@ target = "persistent session"
 enabled = true
 prompt = "unchecked: not publishable"
 
-# The cloud environment the fleet's sessions run in, as get_environment reads it.
+# The cloud environment the fleet's sessions run in, as get_environment reads it; <se-home> is SE's
+# home, which the check fills in from origin.
 [environment]
 name = "general"
 network = "unrestricted"
 setup_script = '''
 #!/bin/bash
 rm -rf ~/.claude/skills/se
-git clone --depth 1 -b main https://github.com/mb-89/SE ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
+git clone --depth 1 -b main <se-home> ~/.claude/skills/se || echo "SE: clone failed, this session starts without SE" >&2
 exit 0
 #nov14'''

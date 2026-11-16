@@ -496,8 +496,9 @@ the list (`github/issue-lists/<key>`, `github/pull-lists/<key>`, every page), wi
 read, so the next command reads it from the core instead of asking for a file.
 
 A snapshot's key is `<owner>.<repo>.<number>` and a list's `<owner>.<repo>.<state>`, then each
-label, all in lower case: SE's issue 1036 stands at `github/issues/mb-89.se.1036`; neither
-`github/issues/1036` nor `github/issues/mb-89.SE.1036` names it
+label, all in lower case: SE's issue 1036, its owner `alice`, stands at
+`github/issues/alice.se.1036`; neither `github/issues/1036` nor `github/issues/alice.SE.1036` names
+it
 ([kern/components/github/README.md](../kern/components/github/README.md) owns the names). The core hands the agent the next
 outbox step as context on the hook that follows each tool call, and `<app> github next` prints it.
 
@@ -565,8 +566,9 @@ the most-run first, with their runs and sessions: the scripts that deserve to be
 
 The core gets a repository of its own; creating it is the owner's step, since no session here can.
 
-- **Name:** `mb-89/kern`, Go module `github.com/mb-89/kern`. The binary an application builds is
-  named after the application (`se` for SE); the bare one is `kern`.
+- **Name:** `<owner>/kern`, beside SE under the same owner (`<owner>` is the owner of the SE you
+  work from), Go module `<host>/<owner>/kern`. The binary an application builds is named after the
+  application (`se` for SE); the bare one is `kern`.
 - **What belongs in it:** what every application needs, and nothing that names an application:
   the core, the bus, the fakes, the contract suite, the Python SDK, the template, the reusable CI,
   and the generic components.
@@ -575,7 +577,7 @@ The core gets a repository of its own; creating it is the owner's step, since no
 
 ```text
 kern/
-  go.mod                  github.com/mb-89/kern
+  go.mod                  <host>/<owner>/kern
   index/                  names, store, snapshots, catalog, waves (from ff01204)
   bus/                    embedded NATS, users and permissions, standing file
   host/                   start, detach, leases, placements, idle end, hook client
@@ -588,10 +590,10 @@ kern/
   .github/workflows/      check.yml, release.yml, battery.yml (reusable)
 ```
 
-### Incubated in SE until `mb-89/kern` exists
+### Incubated in SE until `<owner>/kern` exists
 
-Until the owner creates `mb-89/kern` (step 1 of [the plan](#the-plan)), kern grows in SE under
-`kern/`, as its own Go module `github.com/mb-89/kern`, so the move changes no import path. Nothing
+Until the owner creates `<owner>/kern` (step 1 of [the plan](#the-plan)), kern grows in SE under
+`kern/`, as its own Go module (the path `kern/go.mod` names), so the move changes no import path. Nothing
 in SE outside `kern/` imports it. Meanwhile SE runs kern's tests beside its Python suite (`se.toml`
 `[tests.beside.kern]`, README [Test budget](../README.md#test-budget)), and SE's `check` job vets
 it. The move is one work issue, once the repository exists:
@@ -667,9 +669,9 @@ battery starts the bare core, and a `check.yml` that calls the core's reusable `
 `se new app <name> --path <dir>` copies the core's `template/` at its pin, fills in the name,
 initializes git with the project identity and makes the first commit. Creating the GitHub
 repository, its ruleset and its first push stay the owner's steps, which SE names as one line.
-While kern is incubated, no module `github.com/mb-89/kern` can be fetched, so the application
-carries kern's source at the pin in `kern/` and its `go.mod` replaces the module by it; the move
-drops both (README [New application](../README.md#new-application)). A
+While kern is incubated, kern's module (the path `kern/go.mod` names) cannot be fetched, so the
+application carries kern's source at the pin in `kern/` and its `go.mod` replaces the module by
+it; the move drops both (README [New application](../README.md#new-application)). A
 new application then gets components by adding instances, CI from the reusable workflow, and its
 test budget from `se.toml [tests]`, in the same shape as SE's.
 
