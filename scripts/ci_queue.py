@@ -7,12 +7,14 @@ hours fails), and `check` needs every leg, so one leg that never gets a runner h
 check that long. This script bounds that wait:
 
 - `watch`, a job of the same run beside the legs: it reads the run's jobs every `--poll-seconds`;
-  once every leg named `--jobs <prefix> (...)` has a runner it passes. A leg still queued after
-  `--queue-minutes` is reported as such, as an error and in the job's summary, never as a test
-  failure, and the run is cancelled, so it ends now instead of in 24 hours.
+  once every leg named `--jobs <prefix> (...)` has started on a runner it passes. A leg still
+  queued after `--queue-minutes`, or one that ended without a runner (GitHub cancels or fails a leg
+  it never placed), is reported as never run, as an error and in the job's summary, never as a
+  test failure, and the run is cancelled, so it ends now instead of in 24 hours and `rerun` hears
+  a cancelled run.
 - `rerun`, from the workflow `check-rerun.yml` once a run of `check` completed: a first attempt
-  cancelled while one of its legs never got a runner is re-run once; a second attempt, or a run
-  that ended any other way, is left as it ended.
+  cancelled while one of its legs never got a runner is re-run once; a second attempt, a run in
+  which a leg ran and failed, or a run that ended any other way, is left as it ended.
 
 Standard library only: it runs with the runner's `python3` (3.11 or later) and the Actions token,
 through `ci_trust.Api`; exit code 0 passed or nothing to do, 1 a leg never got a runner, 2 a setup
@@ -45,11 +47,28 @@ def waiting(jobs: list[dict], prefix: str) -> list[str]:
     return [str(j["name"]) for j in legs(jobs, prefix) if j.get("status") in WAITING]
 
 
+def unplaced(job: dict) -> bool:
+    """No runner named and no step run: no runner ever took the job."""
+    return not job.get("runner_name") and not job.get("steps")
+
+
+def ended_unrun(jobs: list[dict], prefix: str) -> list[str]:
+    """The names of the legs that ended without a runner ever taking them: never run, never
+    passed."""
+    return [str(j["name"]) for j in legs(jobs, prefix)
+            if j.get("status") == "completed" and unplaced(j)]
+
+
+def failed(jobs: list[dict], prefix: str) -> list[str]:
+    """The names of the legs that ran on a runner and failed: a test failure."""
+    return [str(j["name"]) for j in legs(jobs, prefix)
+            if j.get("conclusion") == "failure" and not unplaced(j)]
+
+
 def never_ran(jobs: list[dict], prefix: str) -> list[str]:
     """The names of the legs of a completed run that never had a runner: no runner named, no
     step run."""
-    return [str(j["name"]) for j in legs(jobs, prefix)
-            if not j.get("runner_name") and not j.get("steps")]
+    return [str(j["name"]) for j in legs(jobs, prefix) if unplaced(j)]
 
 
 def jobs_of(api: Api, run: int, attempt: int | None = None) -> list[dict]:
@@ -61,21 +80,26 @@ def jobs_of(api: Api, run: int, attempt: int | None = None) -> list[dict]:
 def watch(api: Api, run: int, attempt: int, prefix: str, queue_minutes: float, poll_seconds: float,
           now: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
           summary: Path | None = None) -> int:
-    """Pass once every leg has a runner; past the queue bound, report the waiting legs and cancel
-    the run (`rerun` re-runs a first attempt once)."""
+    """Pass once every leg has started on a runner; a leg that ended without one, or one still
+    waiting past the queue bound, is reported as never run and the run cancelled (`rerun` re-runs
+    a first attempt once)."""
     deadline = now() + queue_minutes * 60
     while True:
         jobs = jobs_of(api, run, attempt)
-        found, left = legs(jobs, prefix), waiting(jobs, prefix)
+        found, left, ended = legs(jobs, prefix), waiting(jobs, prefix), ended_unrun(jobs, prefix)
+        if ended:
+            why = "(it ended without one)"
+            break
         if found and not left:
             print(f"ci-queue: every {prefix} leg got a runner: " + ", ".join(j["name"] for j in found))
             return 0
         if now() >= deadline:
+            why = f"within {queue_minutes:g} minutes"
             break
         sleep(poll_seconds)
-    named = ", ".join(left) or f"{prefix} (none listed)"
-    line = (f"{named} never got a runner within {queue_minutes:g} minutes: it was not tested, which "
-            "is no test failure; the run is cancelled"
+    named = ", ".join(ended + left) or f"{prefix} (none listed)"
+    line = (f"{named} never got a runner {why}: it was not tested, which is no test failure; the "
+            "run is cancelled"
             + (" and re-runs once (check-rerun.yml)" if attempt == 1 else ", and this second attempt "
                "is not re-run"))
     print(f"::error title=no runner for {prefix}::{line}")
@@ -93,7 +117,12 @@ def rerun(api: Api, run: int, prefix: str) -> int:
     if found.get("conclusion") != "cancelled" or attempt != 1:
         print(f"ci-queue: run {run} attempt {attempt} ended {found.get('conclusion')}: nothing to re-run")
         return 0
-    idle = never_ran(jobs_of(api, run, attempt), prefix)
+    jobs = jobs_of(api, run, attempt)
+    broken = failed(jobs, prefix)
+    if broken:
+        print(f"ci-queue: run {run}: {', '.join(broken)} failed: a test failure stays as it ended")
+        return 0
+    idle = never_ran(jobs, prefix)
     if not idle:
         print(f"ci-queue: run {run} was cancelled with every {prefix} leg run: not re-run")
         return 0
