@@ -8009,10 +8009,10 @@ def fleet_ages(root: Path) -> bool:
 
 
 def open_for(created: str, now: datetime) -> str:
-    """How long an issue created at `created` has been open at `now`, in whole UTC calendar days,
-    as the person finding says it with `[fleet] ages` on: ", open N days", ", open 1 day" or
-    ", opened today"; "" where the creation time cannot be read. components/fleet OpenFor, rule
-    for rule."""
+    """How long an issue has been open at `now`, from its creation time `created`, in whole UTC
+    calendar days, as the person finding says it with `[fleet] ages` on: ", open N days",
+    ", open 1 day" or ", opened today"; "" where the creation time cannot be read.
+    components/fleet OpenFor, rule for rule."""
     try:
         when = datetime.fromisoformat(created.replace("Z", "+00:00"))
     except ValueError:
