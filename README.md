@@ -985,6 +985,8 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
     held to.
   - A run of the whole suite (`integrate`, a worker's `suite`) is judged against `shards` times
     each, and CI's time it reads is held to the limit per shard.
+  - It must be the `shards:` a workflow passes the `suite-time` action: `se_workflows.py check`
+    fails on another literal number, naming both files and both numbers ([Workflows](#workflows)).
 - `beside.<name>`: optional, a suite in another toolchain, such as SE's kern Go tests
   ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
   root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
@@ -1460,6 +1462,9 @@ uv run python <se>/scripts/se_workflows.py check
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
   from what the pin generates: a project adds it to its integration checks, as SE runs
   `se_plugin.py check`.
+  - `check` also fails where a workflow calls `suite-time` with a `shards:` number other than
+    `se.toml` `[tests] shards` (default 1), naming both; an expression there is the run's, not
+    compared.
 
 ## New application
 
