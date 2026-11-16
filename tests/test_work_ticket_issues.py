@@ -3710,8 +3710,8 @@ def test_a_landing_says_the_branch_deletions_origin_refuses_in_one_summary_line(
     assert "retained on origin" not in captured.err and "left on origin" not in captured.out
     lines = [line for line in captured.out.splitlines() if "refused deleting" in line]
     assert lines == ["Cleanup: origin refused deleting 2 merged branches (land/feature/worker, "
-                     "feature/worker: HTTP 403); the repository's automatic head-branch deletion "
-                     "removes them, not retried"]
+                     "feature/worker: HTTP 403); the branch-cleanup workflow removes them when "
+                     "their pull requests close, not retried"]
 
 
 def test_the_cleanup_summary_names_each_refused_branch_once():
@@ -4273,7 +4273,7 @@ def test_delete_merged_branch_leaves_a_branch_the_host_refuses_to_delete(main_ch
 
     err = capsys.readouterr().err
     assert err.count("refused deleting feature/merged") == 1
-    assert "automatic head-branch deletion, not retried" in err
+    assert "the branch-cleanup workflow removes it when its pull request closes, not retried" in err
     assert git_run(origin, "rev-parse", "--verify", "refs/heads/feature/merged").returncode == 0
 
 

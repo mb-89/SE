@@ -5855,7 +5855,7 @@ def cleanup_refusals(refused: list[tuple[str, str]]) -> str | None:
     names = ", ".join(branch for branch, _ in refused)
     return (f"Cleanup: origin refused deleting {len(refused)} merged branch"
             f"{'es' if len(refused) > 1 else ''} ({names}: {'; '.join(reasons)}); the "
-            "repository's automatic head-branch deletion removes them, not retried")
+            "branch-cleanup workflow removes them when their pull requests close, not retried")
 
 
 def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None = None,
@@ -5886,7 +5886,7 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
         detail = failure_detail(remote)
         print(
             f"warning: merged branch was retained on origin, which refused deleting {branch} "
-            f"({detail}); left to the repository's automatic head-branch deletion, not retried",
+            f"({detail}); the branch-cleanup workflow removes it when its pull request closes, not retried",
             file=sys.stderr,
         )
     else:
