@@ -2149,13 +2149,29 @@ SE keeps the shape of its issues as data: one TOML file per form under `forms/`,
 the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
 are advice beside them.
 
-- `forms/ticket.toml` is the owner's ticket: a title in plain words, then Situation, Problem, Goal,
-  Approach (with its `Not picked:` line), Steps, Check and an optional Depends on.
-- `forms/work.toml` extends it for a work issue: its title the branch name, Requirements, Acceptance
-  and Verification in place of Steps and Check, and `## Blocked by` as `block` leaves it.
-- `forms/routed.toml` checks only the routing block `route` appends after the handled marker; the
-  outside text above it is data.
-- `forms/terms.toml` lists inside terms, which only warn.
+- `forms/decision.toml`: A decision note: the situation and the problem before the options' pugh
+  fence.
+- `forms/field-report.toml`: A work pull request's description: the field report between its
+  markers.
+- `forms/housekeeping.toml`: The owner's housekeeping pull request: no field report, no field
+  required.
+- `forms/landing.toml`: A landing pull request: it names the work issue, the work pull request and
+  its report.
+- `forms/merge-message.toml`: An integration's squash commit: `Integrate <branch>` and one
+  Release-kind trailer.
+- `forms/overhaul.toml`: An overhaul's report: the verdicts, the findings and the judged block the
+  next one reads.
+- `forms/retro.toml`: A retro's report or draft: its judged block, under its marker.
+- `forms/review.toml`: A cold review's one comment: what a person reads, then the JSON block the
+  retro reads.
+- `forms/routed.toml`: The routing block SE appends to an outside issue: where it came from and
+  what it lacks.
+- `forms/terms.toml`, the term list and no form: Inside terms and the plain words to use instead.
+  They only warn.
+- `forms/ticket.toml`: An issue the owner reads: what is, what is wrong, what should be, how, and
+  how we know.
+- `forms/work.toml`: One package for one worker: the ticket's why, then numbered requirements and
+  acceptance.
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the

@@ -7,6 +7,7 @@ import ast
 import json
 import re
 import shutil
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1269,3 +1270,30 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
     assert [forms.count_refusal(one, env), forms.count_refusal(one, env)] == [1, 2]
     assert forms.refusals(other, env) == 0 and forms.refusals(one, {"SE_SESSION": "b"}) == 0
     assert forms.counts_file(env).parent == tmp_path / ".se" / "forms"
+
+
+
+def missing_from_readme(readme: str) -> list[str]:
+    """The files under `forms/` that README's "Forms" section does not name with their `says`."""
+    start = readme.index("\n### Forms\n")
+    after = re.search(r"\n#{1,3} ", readme[start + 1:])
+    section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
+    missing = []
+    for path in sorted((ROOT / "forms").glob("*.toml")):
+        says = " ".join(tomllib.loads(path.read_text(encoding="utf-8"))["says"].split())
+        if f"`forms/{path.name}`" not in section or says not in section:
+            missing.append(path.name)
+    return missing
+
+
+def test_readme_forms_names_every_file_under_forms_with_its_says():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert missing_from_readme(readme) == []
+    assert "No command checks with them yet" not in readme
+
+
+def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    start = readme.index("- `forms/retro.toml`")
+    end = readme.index("\n- `forms/review.toml`", start)
+    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
