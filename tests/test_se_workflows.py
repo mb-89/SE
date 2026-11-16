@@ -165,3 +165,61 @@ def test_an_application_without_se_pinned_keeps_the_pin_and_place_its_copies_car
     se_workflows.write(project, se_workflows.plan(project, [RELEASE], ref=first, repository=PLACE, source=se))
     plan = se_workflows.plan(project, [SHARD, RELEASE], source=se)
     assert (plan.ref, plan.repository) == (first, PLACE)
+
+
+# The shards CI runs against se.toml's `[tests] shards` (README "Test budget").
+
+CHECK = ".github/workflows/check.yml"
+
+
+def calling(shards: str, first: bool = True) -> str:
+    step = ("      - uses: ./.github/actions/suite-time\n        with:\n" if first else
+            "      - name: The suite's time\n        with:\n")
+    step += f"          shards: {shards}\n"
+    if not first:
+        step += "        uses: ./.github/actions/suite-time/\n"
+    return ("name: check\non: [push]\njobs:\n  check:\n    runs-on: x\n    steps:\n"
+            "      - uses: actions/checkout@v7\n" + step +
+            "      - name: after\n        run: echo shards: 9\n")
+
+
+def test_suite_time_s_literal_shards_are_read_from_its_step_alone() -> None:
+    assert se_workflows.suite_time_shards(calling("2")) == [(10, 2)]
+    assert se_workflows.suite_time_shards(calling('"3"', first=False)) == [(10, 3)]
+    assert se_workflows.suite_time_shards(calling("${{ strategy.job-total }}")) == []
+    assert se_workflows.suite_time_shards(calling("2").replace("suite-time", "suite-shard")) == []
+
+
+def test_check_fails_where_suite_time_s_shards_differ_from_se_toml_s(world) -> None:
+    se, project, first, _ = world
+    se_workflows.write(project, se_workflows.plan(project, [SHARD], source=se))
+    manifest = f'[modules.se]\nurl = "../SE.git"\nref = "{first}"\n'
+    write(project / CHECK, calling("2"))
+    write(project / "se.toml", manifest + "\n[tests]\nshards = 2\n")
+    assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == []
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "check"]) == 0
+    write(project / "se.toml", manifest + "\n[tests]\nshards = 3\n")
+    assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == [
+        f"{CHECK}:10: suite-time runs shards: 2, but se.toml [tests] shards = 3; make them agree, "
+        "as the budget is each shard's"]
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "check"]) == 1
+    write(project / "se.toml", manifest)
+    assert se_workflows.shard_mismatches(project) == [
+        f"{CHECK}:10: suite-time runs shards: 2, but se.toml [tests] shards is unset (1); make them "
+        "agree, as the budget is each shard's"]
+    write(project / CHECK, calling("1"))
+    assert se_workflows.shard_mismatches(project) == [], "one shard is the default"
+
+
+def test_a_project_without_suite_time_or_shards_passes_as_before(world, tmp_path) -> None:
+    se, project, first, _ = world
+    se_workflows.write(project, se_workflows.plan(project, [SHARD], source=se))
+    write(project / CHECK, calling("2").replace("suite-time", "suite-shard"))
+    write(project / "se.toml", f'[modules.se]\nurl = "../SE.git"\nref = "{first}"\n\n[tests]\nshards = 4\n')
+    assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == []
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    assert se_workflows.shard_mismatches(bare) == [], "neither se.toml nor workflows"
+    write(bare / "se.toml", "[tests]\nshards = 0\n")
+    write(bare / CHECK, calling("2"))
+    assert se_workflows.shard_mismatches(bare) == [], "an invalid setting is the budget's to refuse"

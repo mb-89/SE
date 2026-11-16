@@ -17,7 +17,9 @@ the project's own `.github/`, and the project calls them as `uses: ./.github/...
 
 `se_workflows.py write [--root <project>] [<path>...]` writes the copies (default: those the project
 holds); `se_workflows.py check [--root <project>]` fails where a copy differs from what the pin
-generates, naming the file and the remedy. `se_modules.py update se` regenerates them at the new pin.
+generates, naming the file and the remedy, and where a workflow's call of the `suite-time` action
+runs another number of shards than `se.toml` `[tests] shards` (`shard_mismatches`), naming both
+files and both numbers. `se_modules.py update se` regenerates them at the new pin.
 Exit code 0, 1 findings, 2 a refusal naming its remedy.
 """
 
@@ -247,11 +249,78 @@ def write(root: Path, plan: Plan) -> list[str]:
 
 
 def check(root: Path, plan: Plan) -> list[str]:
-    """Each copy of `plan` that differs from what its pin generates, with the remedy."""
+    """Each copy of `plan` that differs from what its pin generates, with the remedy, then each call
+    of `suite-time` whose shards differ from `se.toml`'s (`shard_mismatches`)."""
     return [f"{path}: differs from SE's file at the pin {plan.ref[:12]}; run se_workflows.py write"
             for path in plan.paths
             if not (root / path).is_file()
-            or (root / path).read_text(encoding="utf-8") != expected(plan, path)]
+            or (root / path).read_text(encoding="utf-8") != expected(plan, path)] + shard_mismatches(root)
+
+
+# The shards CI runs and the shards se.toml budgets for (README "Test budget").
+
+SUITE_TIME = "./.github/actions/suite-time"
+USES = re.compile(r"^(?P<indent> *)(?:- )?uses: *['\"]?(?P<target>[^'\"\s#]+)")
+SHARDS = re.compile(r"^ *shards: *['\"]?(?P<value>[^'\"\s#]+)")
+
+
+def budget_shards(root: Path) -> tuple[int, bool] | None:
+    """`se.toml` `[tests] shards` and whether it is set; None where it is no whole number of 1 or
+    more, which the suite's own budget refuses."""
+    manifest = root / "se.toml"
+    tests = {}
+    if manifest.is_file():
+        with manifest.open("rb") as handle:
+            tests = tomllib.load(handle).get("tests", {})
+    tests = tests if isinstance(tests, dict) else {}
+    shards = tests.get("shards", 1)
+    if isinstance(shards, bool) or not isinstance(shards, int) or shards < 1:
+        return None
+    return shards, "shards" in tests
+
+
+def suite_time_shards(text: str) -> list[tuple[int, int]]:
+    """(line, shards) of each step of a workflow that calls the `suite-time` action with a literal
+    number of shards; an expression (`${{ ... }}`) is the run's and is not compared."""
+    lines = text.splitlines()
+    found = []
+    for at, line in enumerate(lines):
+        match = USES.match(line)
+        if match is None or match["target"].rstrip("/") != SUITE_TIME:
+            continue
+        step = len(match["indent"]) if line.lstrip().startswith("- ") else len(match["indent"]) - 2
+        start = at
+        while start > 0 and not lines[start].lstrip().startswith("- ") and lines[start].strip():
+            start -= 1  # the step's own `- ` line, where `uses` is not its first key
+        end = at + 1
+        while end < len(lines) and (not lines[end].strip()
+                                    or len(lines[end]) - len(lines[end].lstrip()) > step):
+            end += 1
+        for number in range(start, end):
+            shards = SHARDS.match(lines[number])
+            if shards is not None and shards["value"].isdigit():
+                found.append((number + 1, int(shards["value"])))
+    return found
+
+
+def shard_mismatches(root: Path) -> list[str]:
+    """Each call of the `suite-time` action in the project's workflows whose `shards:` differs from
+    `se.toml` `[tests] shards` (default 1), naming both files and both numbers."""
+    budget = budget_shards(root)
+    folder = root / ".github" / "workflows"
+    if budget is None or not folder.is_dir():
+        return []
+    shards, set_here = budget
+    setting = f"se.toml [tests] shards = {shards}" if set_here else "se.toml [tests] shards is unset (1)"
+    findings = []
+    for file in sorted(folder.iterdir()):
+        if file.suffix not in (".yml", ".yaml") or not file.is_file():
+            continue
+        for line, ran in suite_time_shards(file.read_text(encoding="utf-8")):
+            if ran != shards:
+                findings.append(f".github/workflows/{file.name}:{line}: suite-time runs shards: {ran}, "
+                                f"but {setting}; make them agree, as the budget is each shard's")
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -265,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     writing = commands.add_parser("write", help="write the copies at the pin")
     writing.add_argument("paths", nargs="*", help=f"files to write (default: those held); of {', '.join(SHIPPED)}")
-    commands.add_parser("check", help="fail where a copy differs from what the pin generates")
+    commands.add_parser("check", help="fail where a copy differs from what the pin generates, or "
+                        "suite-time's shards from se.toml's")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     try:
