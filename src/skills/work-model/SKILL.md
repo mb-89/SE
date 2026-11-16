@@ -854,9 +854,17 @@ harnesses.
 - **Without kern**: where `gh` is signed in and no core runs, every step still works, through the
   scripts and `gh`, as SE's own commands do without kern; the greeting then says
   `SE runs without kern`, and so does SE in its first message.
+- **Every session costs the person**: each one is model calls they pay for, a worker's whole run
+  among them (SE's `docs/copilot.md`, "What a session costs").
+  So a role under Copilot starts no session by itself: it prints the line that starts it (the
+  session tool's call, or the CLI line below), says what it is for, and ends the turn; the person
+  runs it if they choose.
+  - The greeting's `Copilot guards:` line names the setting: only where it reads
+    `[copilot] start_sessions = true` does the role start sessions itself, as the next two points say.
+  - Where the greeting names no guards (no greeting, or an older SE), the guard is on.
 - **Starting a session, where the host has a session tool** (`create_session`): use it, as the
   catch-up skill says, and `send_message` for the one message a role sends.
-- **Where it has none**, start the worker with the Copilot CLI, detached and logged, in its
+- **Where it has none**, the worker starts with the Copilot CLI, detached and logged, in its
   worktree, its prompt the one [Without gh](#without-gh) names:
 
   ```sh
@@ -870,6 +878,7 @@ harnesses.
   - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
   - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.
   - Where the session cannot run it, give the person that one line to run, and end the turn.
+  - `--max-ai-credits <n>` (at least 30) caps that session's spend; the person may add it.
 - **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
   delivered pull requests a message would have announced; a role that would send one sends none.
 - **No ask tool** (`ask_user`): SE asks the person in the chat, its question the turn's last

@@ -361,6 +361,8 @@ exits 1 on a problem; otherwise it exits 0.
   the start's update check cached.
   - The `se` binary on `PATH`, in `~/.se/bin` and where the core started it, against its pin; the
     core's standing file, pid, boot id and last log lines.
+  - The state of each Copilot guard in the project's `se.toml` `[copilot]`, a guard that is off a
+    note ([docs/copilot.md "What a session costs"](docs/copilot.md#what-a-session-costs)).
   - Each hook and MCP server registration a host reads, and whether the scripts it names exist;
     `gh` signed in or not; the reach of the hosts SE fetches from.
 - **Read-only**: it writes nothing, starts nothing that stays, fetches nothing and calls no service
@@ -892,6 +894,9 @@ What it judges:
   missing and the commands that deliver.
 - `refusals` is how often in a row it refuses, built in 5; then it lets the turn end and says so,
   and counts afresh. A passing stop resets the count.
+- Under Copilot it never refuses unless `[copilot] refuse_stop` is true: it names what is
+  undelivered as Copilot's hook warning, as each refusal costs the person a model turn
+  ([docs/copilot.md "What a session costs"](docs/copilot.md#what-a-session-costs)).
 - A `SubagentStop` is judged only for a worker sub-agent (`worker`, `se:worker`), in the checkout
   it works in, one whose queue is for a work issue:
   - one its prompt names, else the one whose ticket queue its transcript (the event's
@@ -1670,9 +1675,10 @@ work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-descripti
     the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,
     refuse the turn's end while its branch has no open pull request whose description carries a
     field report that passes field-report --check at the branch tip, naming what is missing and the
-    commands; at most [stop] refusals times in a row (se.toml, built in 5). Anywhere else, for a
-    sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it
-    lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout
+    commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only
+    says what is undelivered unless [copilot] refuse_stop is true. Anywhere else, for a sub-agent
+    that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the
+    turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout
 
 work_tickets.py sync --worktree WORKTREE
     merge the newest integration branch (se.toml project.integration_branch, default main) from

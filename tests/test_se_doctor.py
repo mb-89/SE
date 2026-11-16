@@ -29,6 +29,9 @@ def clean_facts() -> dict:
                                                   "exists": True}]}]}],
         "gh": {"installed": True, "signed_in": True},
         "network": [{"host": "github.com", "reached": True}],
+        "copilot": {"guards": [
+            "[copilot] refuse_stop = false: on, the Stop hook never refuses a stop; it says what is undelivered",
+            "[copilot] start_sessions = false: on, SE starts no session; it prints the line that starts one"]},
     }
 
 
@@ -243,9 +246,13 @@ BASE_TEXT = (
     "  checkout [seen] SE 5.50.2 at 0daf4dc; 0 ahead, 0 behind origin/main as last fetched\n"
     "  gh       [seen] gh signed in\n"
     "  network  [seen] reached github.com\n"
+    "  copilot  [seen] under Copilot, [copilot] refuse_stop = false: on, the Stop hook never refuses a stop; it "
+    "says what is undelivered\n"
+    "  copilot  [seen] under Copilot, [copilot] start_sessions = false: on, SE starts no session; it prints the "
+    "line that starts one\n"
     "  host     [seen] claude-code, a cloud session\n"
     "reused: se_start (plugin registry, cached release check, kern status, cloud marker), se_modules (binary pin)\n")
-BASE_JSON_SHA256 = "8f6e96f36286e62e0bbb951a388647e06d15e92e498f34bfabc9f25ba55a3744"  # render_json before --probe
+BASE_JSON_SHA256 = "83cef3840af33cdbf23c93c445257aff5d5bdabfd928b7f34850aeafc074d0fb"  # render_json before --probe, with the Copilot guards' rows
 
 
 def no_probe(*_args, **_kwargs):
@@ -503,3 +510,18 @@ def test_without_a_home_the_fix_line_names_a_placeholder(tmp_path: Path):
                            start=fakes.start, copilot=d.copilot_plugins({}, home))
     [row] = [r for r in probe["rows"] if r["place"] == "installed plugin MCP"]
     assert row["fix"] == "copilot plugin marketplace add <owner>/<repository> && copilot plugin install se@se"
+
+
+def test_the_copilot_rows_name_each_guards_state_and_a_guard_off_is_a_note(tmp_path):
+    """docs/copilot.md "What a session costs": the doctor names each guard's state."""
+    project = tmp_path / "project"
+    project.mkdir()
+    assert d.gather_copilot_rows(project) == clean_facts()["copilot"]["guards"]
+    (project / "se.toml").write_text("[copilot]\nstart_sessions = true\n", encoding="utf-8")
+    facts = {**clean_facts(), "copilot": {"guards": d.gather_copilot_rows(project)}}
+    [off] = [f for f in d.diagnose(facts) if f.area == "copilot" and f.level == d.NOTE]
+    assert off.text == "under Copilot, [copilot] start_sessions = true: off, today's behaviour"
+    (project / "se.toml").write_text('[copilot]\nrefuse_stop = "yes"\n', encoding="utf-8")
+    facts = {**clean_facts(), "copilot": {"guards": d.gather_copilot_rows(project)}}
+    notes = [f for f in d.diagnose(facts) if f.area == "copilot"]
+    assert len(notes) == 2 and all(f.level == d.NOTE and "every guard stays on" in f.text for f in notes)

@@ -16,8 +16,8 @@
     "Stop": [
       {
         "type": "command",
-        "bash": "if [ -n \"$PLUGIN_ROOT\" ] && [ ! -f .github/hooks/se.json ]; then bash \"$PLUGIN_ROOT/scripts/se_hook.sh\" Stop || true; fi",
-        "powershell": "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) { bash \"$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/scripts/se_hook.sh\" Stop }; exit 0",
+        "bash": "if [ -n \"$PLUGIN_ROOT\" ] && [ ! -f .github/hooks/se.json ]; then bash \"$PLUGIN_ROOT/scripts/se_hook.sh\" Stop || [ $? -ne 2 ] || exit 2; fi",
+        "powershell": "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) { bash \"$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/scripts/se_hook.sh\" Stop; if ($LASTEXITCODE -eq 2) { exit 2 } }; exit 0",
         "cwd": ".",
         "env": {
           "SE_HOOK_HOST": "copilot"
