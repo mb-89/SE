@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ import (
 
 // stepper is another component whose command `run <tool> <input JSON>` runs
 // one tool call through the verb step and shows the input the session sent
-// and the answer; a second step follows where the input names "then".
+// and the answer; a second step follows where the input names "then". Where
+// the input names a number "step", the note opens with `step <n>`, as
+// se_relay.numbered writes it, and the second step is the next number.
 var stepper = func() *index.Component {
 	step := index.JSONRequest("step", "Runs one GitHub tool call.", github.StepShape, github.StepAnswerShape)
 	var run func(args []string) (index.Result, error)
@@ -26,7 +29,12 @@ var stepper = func() *index.Component {
 		if err := json.Unmarshal([]byte(args[1]), &in); err != nil {
 			return index.Result{}, err
 		}
-		ask := github.StepAsk{Tool: args[0], Input: in, Note: "note " + args[0], Wait: "10s"}
+		note := "note " + args[0]
+		n, numbered := in["step"].(float64)
+		if numbered {
+			note = fmt.Sprintf("step %d: %s", int(n), note)
+		}
+		ask := github.StepAsk{Tool: args[0], Input: in, Note: note, Wait: "10s"}
 		return index.Result{Requests: []index.Ask{step.Ask(ask)}, Then: func(a []any) (index.Result, error) {
 			var got github.StepAnswer
 			if err := index.Recode(step.Answer(a[0]), &got); err != nil {
@@ -36,7 +44,11 @@ var stepper = func() *index.Component {
 			data, _ := json.Marshal(got.Data)
 			r := index.Result{Text: string(sent) + " -> " + string(data)}
 			if next, ok := in["then"].(string); ok {
-				more, err := run([]string{next, `{"owner": "alice", "repo": "demo", "issue_number": 7}`})
+				then := `{"owner": "alice", "repo": "demo", "issue_number": 7}`
+				if numbered {
+					then = fmt.Sprintf(`{"owner": "alice", "repo": "demo", "issue_number": 7, "step": %d}`, int(n)+1)
+				}
+				more, err := run([]string{next, then})
 				if err != nil {
 					return r, err
 				}
@@ -313,5 +325,102 @@ func TestAGivenUpCallsStepLeavesTheOutbox(t *testing.T) {
 	}
 	if said := ix.Tell("UserPromptSubmit", nil); len(said) != 0 {
 		t.Fatalf("a session is told %q after the call was given up", said)
+	}
+}
+
+// A tool use that answers no waiting step but a numbered step already
+// answered is refused in one line on its hook, naming the old step and the
+// current one, and tells what waits below it; it answers nothing. Once no
+// numbered step waits, the line says so.
+func TestAnAnswerToAnOldStepIsRefusedInOneLine(t *testing.T) {
+	t.Parallel()
+	g, ix := startedSteps(t, github.Options{Now: (&clock{now: nine}).Now, Token: noToken}, `tell-wait = "10s"`)
+	done := call(ix, "add_issue_comment", `{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "step": 1, "then": "issue_write"}`)
+	waitOutbox(t, g, "step 1: note add_issue_comment")
+	first := toolUse("mcp__github__add_issue_comment", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 7, "body": "x", "step": 1, "then": "issue_write"}, `{}`)
+	if err := ix.Hear(github.PostToolUse, first); err != nil {
+		t.Fatal(err)
+	}
+	if said := ix.Tell(github.PostToolUse, first); len(said) != 1 || !strings.HasPrefix(said[0], "kern's GitHub relay waits") || !strings.Contains(said[0], "step 2: note issue_write") {
+		t.Fatalf("the answer to step 1 is told %q, and wants step 2", said)
+	}
+	if err := ix.Hear(github.PostToolUse, first); err != nil { // the same answer again
+		t.Fatal(err)
+	}
+	said := ix.Tell(github.PostToolUse, first)
+	if len(said) != 1 {
+		t.Fatalf("the second answer to step 1 is told %q", said)
+	}
+	lines := strings.Split(said[0], "\n")
+	if lines[0] != "step 1 is answered: the current step is 2" || !strings.Contains(said[0], "1. issue_write") {
+		t.Fatalf("the second answer to step 1 is told %q", said[0])
+	}
+	if text := g.Outbox(); !strings.Contains(text, "step 2: note issue_write") {
+		t.Fatalf("the second answer to step 1 took step 2 out of the outbox: %q", text)
+	}
+	if err := ix.Hear(github.PostToolUse, toolUse("mcp__github__issue_write", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 7, "step": 2}, `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-done; r.err != nil {
+		t.Fatal(r.err)
+	}
+	if err := ix.Hear(github.PostToolUse, first); err != nil {
+		t.Fatal(err)
+	}
+	if said := ix.Tell(github.PostToolUse, first); len(said) != 1 || said[0] != "step 1 is answered: kern's GitHub relay waits for no numbered step now" {
+		t.Fatalf("an answer to step 1 with nothing waiting is told %q", said)
+	}
+	other := toolUse("mcp__github__add_issue_comment", map[string]any{"owner": "alice", "repo": "demo", "issue_number": 8, "body": "x"}, `{}`)
+	if err := ix.Hear(github.PostToolUse, other); err != nil {
+		t.Fatal(err)
+	}
+	if said := ix.Tell(github.PostToolUse, other); len(said) != 0 {
+		t.Fatalf("a tool use that matches no step is told %q", said)
+	}
+}
+
+// Two waiting steps one tool use matches are answered oldest first, by the
+// time each was asked, whatever their outbox keys.
+func TestTwoStepsOneAnswerMatchesAreAnsweredOldestFirst(t *testing.T) {
+	t.Parallel()
+	c := &clock{now: nine}
+	g, ix := startedSteps(t, github.Options{Now: c.Now, Token: noToken}, ``)
+	asks := []map[string]any{
+		{"owner": "alice", "repo": "demo", "issue_number": 7.0, "body": "x"},
+		{"owner": "alice", "repo": "demo", "issue_number": 7.0},
+	}
+	older := 0 // the step asked first has the larger key, so the key order alone would pick the other
+	if github.StepKey(github.StepAsk{Tool: "add_issue_comment", Input: asks[0]}) < github.StepKey(github.StepAsk{Tool: "add_issue_comment", Input: asks[1]}) {
+		older = 1
+	}
+	newer := 1 - older
+	in := func(i int) string { data, _ := json.Marshal(asks[i]); return string(data) }
+	first := call(ix, "add_issue_comment", in(older))
+	waitOutbox(t, g, "1. add_issue_comment")
+	c.move(time.Second)
+	second := call(ix, "add_issue_comment", in(newer))
+	waitOutbox(t, g, "2. add_issue_comment")
+	both := toolUse("mcp__github__add_issue_comment", asks[0], `{"id": 1}`) // carries both steps' keys
+	if err := ix.Hear(github.PostToolUse, both); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-first:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+	case <-second:
+		t.Fatal("the newer step was answered first")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the older step is not answered")
+	}
+	if text := g.Outbox(); !strings.Contains(text, "1. add_issue_comment "+in(newer)) || strings.Contains(text, "2. ") {
+		t.Fatalf("the outbox tells %q, and wants the newer step alone", text)
+	}
+	if err := ix.Hear(github.PostToolUse, both); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-second; r.err != nil {
+		t.Fatal(r.err)
 	}
 }

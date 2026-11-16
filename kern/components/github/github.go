@@ -162,6 +162,8 @@ type GitHub struct {
 	tellWait time.Duration
 	answered map[string]bool         // the PostToolUse payloads that answered a step, until their tell
 	steps    map[string]*waitingStep // the steps of the verb step waiting for a tool answer, by outbox key
+	done     []answeredStep          // the numbered steps answered last, oldest first, up to keepAnswered
+	stale    map[string]string       // the PostToolUse payloads that answered an answered step, with their refusal, until their tell
 	asked    chan struct{}           // signalled each time a step is asked, which a tell waits for
 }
 
@@ -216,7 +218,7 @@ func New(o Options) *GitHub {
 		}
 	}
 	g := &GitHub{o: o, held: map[string]func(){}, waiting: map[string][]chan any{}, outbox: map[string]Step{}, pages: map[string]*pages{}, last: map[string]any{},
-		answered: map[string]bool{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
+		answered: map[string]bool{}, stale: map[string]string{}, steps: map[string]*waitingStep{}, asked: make(chan struct{}, 1)}
 	parts := []index.Part{
 		index.IO(),
 		index.Config("backend", Auto, "auto, token or relay: auto takes the relay in a cloud session, else the token where one is found, else the relay."),
