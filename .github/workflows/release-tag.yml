@@ -1,5 +1,5 @@
-# Copy this file, set branches to your integration branch and uses to se's workflow at its major tag
-# (se's README "Release tags"); se calls its own workflow at the pushed commit.
+# Copy this file and set branches to your integration branch: uses calls the copy of se's
+# release.yml that se writes into your repository at its pin (se's README "Release tags").
 name: release-tag
 
 on:

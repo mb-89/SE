@@ -1,20 +1,21 @@
 # The battery every kern application's CI calls (kern/README.md "The battery"): it sets up the Go its
 # go.mod pins and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
 # as its se.toml [tests] command declares them, held to that table's one budget: over target_seconds
-# it warns, over limit_seconds or on a failed test it fails. An application calls it with
+# it warns, over limit_seconds or on a failed test it fails. An application calls the copy SE writes
+# into it at kern's pin (scripts/se_workflows.py, SE's README "Workflows") with
 #
 #   jobs:
 #     check:
-#       uses: <owner>/<repository>/.github/workflows/kern-battery.yml@kern-v<version>
+#       uses: ./.github/workflows/kern-battery.yml
 #
 # Where the application's se.toml [tests] sets trust_integrator = true, the job trust passes it on
 # the integrator's record of exactly the tree checked out, and the battery's vet and tests do not
 # run (SE's README "Trusted landings"). Its action, integrator-pass, runs from the kern commit this
-# workflow runs at (job.workflow_sha), so always at the kern tag the application pins. The default
+# workflow runs at (job.workflow_sha), in an application's copy the pin it was written at. The default
 # is off: the battery runs in full, and the application grants nothing more than contents: read.
 #
-# While kern is incubated in SE, it lives here; it moves with kern's workflows to <owner>/kern,
-# beside it (<owner>/<repository>: the SE these workflows run in, from its origin).
+# While kern is incubated in SE, it lives here; it moves with kern's workflows to kern's own
+# repository, beside SE's.
 name: kern-battery
 
 on:

@@ -359,8 +359,27 @@ The owner: "Whatever we do, it needs to be neutral when we build it."
 - Where a file needs its repository's location, it derives it from the checkout's origin when it
   runs or builds.
 - A change is neutral when it is written, so no later pass has to neutralize it.
-- The one exception is a line the host reads literally and cannot derive, such as a `uses:` line in
-  `.github/workflows`.
+- A workflow is no exception, though the host reads its `uses:` lines literally: it calls what it
+  needs as a local copy ([Neutral workflows](#neutral-workflows)).
+
+### Neutral workflows
+
+A project calls SE's reusable workflows and actions as generated local copies, `uses:
+./.github/...`, which SE writes into it at its SE pin and keeps current (README
+[Workflows](../../../README.md#workflows)). The copies reach SE as the repository beside the
+project, `${{ github.repository_owner }}/<name>`, so no tracked line names an owner.
+
+The alternatives weighed:
+
+- **Calls of SE's own files** (`uses: <owner>/SE/...@<tag>`), the form before: one host's owner in
+  every project's tree, wrong on a second remote. Refused: it breaks the rule above.
+- **A call built at run time**: the host reads `uses:` literally, so no expression or origin can
+  name the repository, and a reusable workflow cannot be called from a checked-out path.
+- **SE as a submodule**: a reusable workflow must live in the calling repository's own
+  `.github/workflows`, so the submodule's cannot be called; its URL would name the owner too.
+- **Generated copies**, chosen: like the generated layouts, one source in SE, the copies regenerated
+  when the pin moves (`se_modules.py update se`) and held to it by a check; the cost is a copy per
+  project, which the check keeps from drifting.
 
 ### Visible sessions
 

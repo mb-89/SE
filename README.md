@@ -693,7 +693,7 @@ landing assigns the number, so branches open in parallel never claim the same on
   Where the claim conflicts with `main`'s version, the landing takes `main`'s version on top of
   the branch first and then assigns the number.
 - **The pins move with the number:** every other file that pins a component's tag as `@<tag>`
-  (kern's template calls kern's battery at `@kern-v<version>`) is on one list,
+  (none today: kern's template calls the battery's [local copy](#workflows)) is on one list,
   `scripts/component_versions.py` `PINS`, and the landing moves each pin to the assigned tag in
   the same merge, also where the branch moved it by hand.
   - `tests/test_component_versions.py` fails where a file pins a component's current tag and is
@@ -721,13 +721,14 @@ not tags (Claude's cloud sessions).
   (`missing necessary objects`) passes on one.
 - Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
 
-A repository turns it on with `release = "workflow"` and a copy of se's own
-[`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only in
-`branches` to name its integration branch (se's names `main`), so that worker branches run nothing,
-and in `uses`, which calls `<owner>/<repository>/.github/workflows/release.yml@v<major>`.
+A repository turns it on with `release = "workflow"`, the copy of se's `release.yml` that
+`se_workflows.py write .github/workflows/release.yml` writes ([Workflows](#workflows)), and a copy
+of se's own [`.github/workflows/release-tag.yml`](.github/workflows/release-tag.yml), changed only
+in `branches` to name its integration branch (se's names `main`), so that worker branches run
+nothing.
 
-Other repositories reference se's reusable workflows and actions at `@v<major>`, never at a branch,
-so a breaking change reaches them only with the major they choose.
+Other repositories run se's workflows and actions at the se pin they choose, as copies se writes at
+it ([Workflows](#workflows)), so a breaking change reaches them only when they move the pin.
 
 ### Fleet check
 
@@ -979,8 +980,8 @@ whole run's, the `suite` step of `check`. For a sharded suite, whose shards run 
 parallel jobs, it is the slowest shard's: that is the time `check` waits for, while the shards' sum
 would count work nobody waits for.
 
-A sharded project records it with SE's two actions, at the se ref it pins (the module command's
-`update se` moves the ref with the pin, [Modules](#modules)), and copies nothing:
+A sharded project records it with SE's two actions, as the copies SE writes into it at the se
+pin ([Workflows](#workflows)), which the module command's `update se` moves with the pin:
 
 ```yaml
 jobs:
@@ -991,7 +992,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: <owner>/<repository>/.github/actions/suite-shard@<se ref>
+      - uses: ./.github/actions/suite-shard
         with:
           name: ${{ matrix.shard }}
           command: uv run pytest -q tests/${{ matrix.shard }}
@@ -1001,7 +1002,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: <owner>/<repository>/.github/actions/suite-time@<se ref>
+      - uses: ./.github/actions/suite-time
         with:
           shards: 2
 ```
@@ -1137,9 +1138,9 @@ integrator = "<login>" # optional: the account that records; default the reposit
     trusted records of the landings since the last full pass, the records that let the change
     through.
 
-A project's own `check` uses the action at the se ref it pins, as the sharded suite does; its
-copy of `se-pass-record.yml` calls the same action,
-`<owner>/<repository>/.github/actions/integrator-pass@<se ref>`, with `mode: record`:
+A project's own `check` uses the action's copy at the se pin, as the sharded suite does
+([Workflows](#workflows)); its copy of `se-pass-record.yml` calls the same copy,
+`./.github/actions/integrator-pass`, with `mode: record`:
 
 ```yaml
 jobs:
@@ -1152,7 +1153,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: lookup
-        uses: <owner>/<repository>/.github/actions/integrator-pass@<se ref>
+        uses: ./.github/actions/integrator-pass
         with:
           mode: lookup
   check:
@@ -1168,12 +1169,12 @@ Its permissions are `checks: write` (the marks) and `actions: read` (the record'
 `trust_integrator` off: its `check` runs the full suite and kern-platforms on every pull request
 and push.
 
-A kern application gets the same shortcut from its battery: `kern-battery.yml`'s job `trust`
-runs the action from the kern commit the battery runs at (`job.workflow_sha`), the tag the
-application pins, and the vet and tests run only where it answers false.
+A kern application gets the same shortcut from its battery: its copy of `kern-battery.yml`'s job
+`trust` runs the action from SE at the pin the copy names ([Workflows](#workflows)), and the vet
+and tests run only where it answers false.
 
 To turn it on, the application also grants those two permissions, adds the `schedule` and copies
-`se-pass-record.yml` with the action at `@kern-v<version>`. kern's template keeps it off
+`se-pass-record.yml` with the action's copy beside the battery's. kern's template keeps it off
 ([kern's battery](kern/README.md#the-battery)).
 
 Free minutes for a private repository, which the owner sets up:
@@ -1334,15 +1335,38 @@ uv run python <se>/scripts/se_modules.py path <name>
   does not commit; commit the new pin with the commit list.
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
     there; change the range).
-  - It also moves each call of the module's actions in `.github/workflows/`, `uses:
-    <owner>/<repo>/.github/actions/<name>@<ref>` with `<owner>/<repo>` its url's last two path
-    segments, to the new pin: its highest `v<x.y.z>` tag, else its commit. So the actions (SE's
-    [shard actions](#test-budget)) run the version `se.lock` pins; a reusable workflow stays at
-    its major tag.
+  - `update se` also regenerates the project's copies of SE's workflows and actions at the new
+    pin ([Workflows](#workflows)), so they run the version `se.toml` or `se.lock` pins.
 - `path`: prints the directory a module is used from (its `path` included), for tools that load it.
 - `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>`
   reads another machine-local file than `~/.se/local.toml`.
 - Git runs without prompts; credentials come from the machine's git setup.
+
+### Workflows
+
+A project calls SE's reusable workflows and actions as local copies, `uses: ./.github/...`, which
+SE writes into it at its SE pin. A call of SE's own files would name SE's home, which differs on
+each remote ([Neutral workflows](src/skills/work-model/SKILL.md#neutral-workflows)).
+
+```sh
+uv run python <se>/scripts/se_workflows.py write [<path>...]
+uv run python <se>/scripts/se_workflows.py check
+```
+
+- What SE ships: `.github/workflows/` `kern-battery.yml`, `kern-release.yml` and `release.yml`,
+  and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
+  `scripts/se_workflows.py`). `write` writes the files it names, or regenerates those the project
+  holds; each is a generated file whose first line names its source path, the pin and SE's place.
+- The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
+  application `se new app` made, or `--ref`.
+- SE's place, how CI reaches it: a module URL `../<name>.git` is `${{ github.repository_owner
+  }}/<name>`, the repository beside the project on its host, so the copies name no owner; an
+  absolute URL names its own. SE is public, so the run's token reads it.
+- Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
+  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
+- `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
+  from what the pin generates: a project adds it to its integration checks, as SE runs
+  `se_plugin.py check`.
 
 ## New application
 
@@ -1357,13 +1381,14 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **kern beside it:** kern's module (the path `kern/go.mod` names) cannot be fetched yet, so the application holds
   kern's source at the pin in `kern/`, and its `go.mod` replaces the module by it.
 - **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
-  where `enabled = false` switches a component off, CI through kern's battery, the `[tests]` budget
-  and the `[modules.kern]` pin.
+  where `enabled = false` switches a component off, CI through kern's battery (its copy at the pin,
+  [Workflows](#workflows)), the `[tests]` budget and the `[modules.kern]` pin.
 - **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
   components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
   release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable
   `kern-release.yml` with its folder — the way SE builds `se` (`components/release.toml`,
   `se-release.yml`).
+  - It calls that workflow's copy, which `se_workflows.py write` adds ([Workflows](#workflows)).
 - **GitHub stays the owner's:** the last line names the owner's step, creating the repository with
   its ruleset and the first push. The command does nothing on GitHub.
 
