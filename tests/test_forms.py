@@ -906,3 +906,287 @@ def test_the_decision_adapter_gives_the_section_rule_of_deck_py(catalog, name):
         assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
     form, _ = forms.verdict(catalog, "deck.build", next(iter(notes.values())))
     assert form.name == "decision"
+
+
+# Contract over every body SE sends: each sending function, the bodies its command sends
+
+
+FREE, NO_BODY = None, "no body"
+SENDING_TOOLS = {"issue_write", "add_issue_comment", "create_pull_request", "update_pull_request",
+                 "merge_pull_request"}
+
+
+def senders(folder: Path) -> set[str]:
+    """`<module>:<function>` of each function in `folder`'s scripts that sends a body: a call of
+    run_gh_with_body, or a Step or an `ask` of a sending tool."""
+    found: set[str] = set()
+    for path in sorted(folder.glob("*.py")):
+        stack: list[str] = []
+
+        class Visitor(ast.NodeVisitor):
+            def scope(self, node) -> None:
+                stack.append(node.name)
+                self.generic_visit(node)
+                stack.pop()
+
+            visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = scope
+
+            def visit_Call(self, node: ast.Call) -> None:
+                name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(
+                    node.func, "id", "")
+                tool = {"Step": 1, "ask": 0}.get(name)
+                sends = name == "run_gh_with_body" or (
+                    tool is not None and len(node.args) > tool and isinstance(
+                        node.args[tool], ast.Constant) and node.args[tool].value in SENDING_TOOLS)
+                if sends and stack:
+                    found.add(f"{path.stem}:{'.'.join(stack)}")
+                self.generic_visit(node)
+
+        Visitor().visit(ast.parse(path.read_text(encoding="utf-8")))
+    return found
+
+
+@dataclass
+class Case:
+    """One body a command sends: its action, the form it selects (FREE, or NO_BODY for a write
+    without one), the body and where it goes."""
+    action: str
+    form: str | None
+    body: str | None = None
+    title: str | None = None
+    base: str | None = None
+    labels: tuple[str, ...] = ()
+
+
+def step_cases(plan, forms_by_step: dict[str, str | None], base: str = "main") -> list[Case]:
+    """The cases of `plan`'s sending steps, each step's form named in `forms_by_step`."""
+    cases = []
+    for step in plan.steps:
+        if step.tool not in SENDING_TOOLS:
+            continue
+        arguments = step.arguments
+        if step.action not in forms_by_step:  # `comment_duplicate:<twin>` and its kin
+            forms_by_step = {**forms_by_step, step.action: forms_by_step.get(
+                step.action.split(":", 1)[0], NO_BODY if "body" not in arguments else "unnamed")}
+        if step.tool == "merge_pull_request":
+            cases.append(Case("pr.merge", forms_by_step[step.action], arguments["commit_message"],
+                              arguments["commit_title"], base))
+        elif "body" not in arguments:
+            cases.append(Case("issue.edit", NO_BODY))
+        elif step.tool == "add_issue_comment":
+            cases.append(Case("comment.create", forms_by_step[step.action], arguments["body"]))
+        elif step.tool == "create_pull_request":
+            cases.append(Case("pr.create", forms_by_step[step.action], arguments["body"],
+                              arguments["title"], arguments["base"]))
+        elif step.tool == "update_pull_request":
+            cases.append(Case("pr.edit", forms_by_step[step.action], arguments["body"],
+                              arguments.get("title"), base))
+        else:
+            action = "issue.create" if arguments.get("method") == "create" else "issue.edit"
+            cases.append(Case(action, forms_by_step[step.action], arguments["body"],
+                              arguments.get("title")))
+    return cases
+
+
+WORK_TITLE = "feat/forms-20261116"
+
+
+def work_issue(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.create", "work", WORK_BODY, WORK_TITLE)]
+
+
+def backlog_issue(catalog, monkeypatch) -> list[Case]:
+    ticket = catalog["ticket"]
+    fields = ticket_fields(catalog)
+    return [Case("issue.create", "ticket", work_tickets.fleet_marked(forms.render(ticket, fields)),
+                 fields["title"])]
+
+
+def routed_issue(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.edit", "routed", work_tickets.routed_body(
+        OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
+
+
+def comment(text: str):
+    return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
+
+
+def no_body(action: str = "issue.edit"):
+    return lambda catalog, monkeypatch: [Case(action, NO_BODY)]
+
+
+def delivered(catalog, monkeypatch) -> list[Case]:
+    report = work_tickets.report_in(issue_tests.reported_at(issue_tests.TIP), "the report")
+    body = work_tickets.pull_request_body({"url": ISSUE_URL, "body": WORK_BODY}, report)
+    return [Case(action, "field-report", body, WORK_TITLE, "main") for action in
+            ("pr.create", "pr.edit")]
+
+
+def merge_title() -> str:
+    return work_tickets.integration_merge_message(WORK_TITLE, 7, 5, True, WORK_BODY)
+
+
+def landing(catalog, monkeypatch) -> list[Case]:
+    plan = work_tickets.landing_plan(
+        REPO, f"land/{WORK_TITLE}", "main", "a" * 40, "b" * 40, merge_title(), "Release-kind: minor",
+        work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1}), "then", REPO)
+    return step_cases(plan, {"open_pull": "landing", "squash": "merge-message"})
+
+
+def landing_door(catalog, monkeypatch, action: str) -> list[Case]:
+    if action == "pr.merge":
+        return [Case(action, "merge-message", "Release-kind: minor", merge_title(), "main")]
+    return [Case(action, "landing", work_tickets.landing_description(PULL_URL, 5, ISSUE_URL),
+                 merge_title(), "main")]
+
+
+def review_report() -> review.Report:
+    return review.checked_report(test_review.report(
+        verdict="pass with open points", findings=[test_review.finding("Name the field")]))
+
+
+def open_points_body() -> str:
+    found = review_report()
+    return work_tickets.with_open_points(WORK_BODY, found.head,
+                                         [item.point(5, found.head) for item in found.findings])
+
+
+def review_steps(catalog, monkeypatch) -> list[Case]:
+    plan = review.file_steps(REPO, REPO, 5, 7, review.verdict_comment(5, review_report(), False),
+                             open_points_body(), True)
+    cases = step_cases(plan, {"comment_pull": "review", "edit_body": "work", "comment_issue": FREE})
+    for case in cases:
+        case.title = WORK_TITLE if case.form == "work" else case.title
+    return cases
+
+
+def review_run(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", "review", review.verdict_comment(5, review_report(), False)),
+            Case("issue.edit", "work", open_points_body(), WORK_TITLE)]
+
+
+def retro_report() -> str:
+    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
+    return retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
+                        "a" * 40)
+
+
+def overhaul_report() -> str:
+    text = marked_block(overhaul.BLOCK_MARKER, overhaul_block())
+    return overhaul.report(text, overhaul.judged(text, 50), 50)
+
+
+def retro_steps(catalog, monkeypatch) -> list[Case]:
+    cases = []
+    for text, form in ((retro_report(), "retro"), (overhaul_report(), "overhaul")):
+        cases += step_cases(retro.file_steps(REPO, 30, [text]), {"comment_issue": form})
+    parts = retro.parts(retro_report(), 30, limit=400)
+    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": "retro"})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[1:2]), {"comment_issue": FREE})
+    return cases
+
+
+def tracker_comment(catalog, monkeypatch) -> list[Case]:
+    return [Case("comment.create", "retro", retro_report()),
+            Case("comment.create", "overhaul", overhaul_report()),
+            Case("comment.create", FREE, "Integration stopped: the suite failed.\n")]
+
+
+def blocker_link(catalog, monkeypatch) -> list[Case]:
+    return [Case("issue.edit", "work", blocked(monkeypatch, WORK_BODY, 12), WORK_TITLE)]
+
+
+def plan_of(make, forms_by_step: dict[str, str | None]):
+    return lambda catalog, monkeypatch: step_cases(make(), forms_by_step)
+
+
+def filing(catalog, monkeypatch) -> list[Case]:
+    step = work_tickets.work_issue_filing(REPO, WORK_TITLE, WORK_BODY, ["work", "ready"])
+    plan = work_tickets.filing_plan(REPO, "file", WORK_TITLE, WORK_BODY, step)
+    return step_cases(plan, {"create": "work", "comment_twin": FREE, "comment_duplicate": FREE})
+
+
+def duplicates(catalog, monkeypatch) -> list[Case]:
+    steps = work_tickets.close_duplicate_steps(REPO, 9, work_tickets.Later("twin", 1), "a twin",
+                                               "where it has one")
+    return step_cases(work_tickets.Plan("close", steps), {
+        step.action: FREE for step in steps})
+
+
+#: Each function in scripts/ that sends a body, and what the command it serves sends.
+CONTRACT = {
+    "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:filing_plan": ("file, backlog file and route", filing),
+    "work_tickets:filed_once.create": ("file and backlog file",
+                                       lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
+    "work_tickets:filed_once.route": ("route", routed_issue),
+    "work_tickets:filed_once.comment_twin": ("file", comment("A twin of this would be filed.\n")),
+    "work_tickets:filed_once.comment_duplicate": ("file", comment("Duplicate of #3.\n")),
+    "work_tickets:filed_once.close_duplicate": ("file", no_body()),
+    "work_tickets:close_duplicate_steps": ("file", duplicates),
+    "work_tickets:backlog_file": ("backlog file", backlog_issue),
+    "work_tickets:route_outside_issue": ("route", routed_issue),
+    "work_tickets:block": ("the blocker linker", blocker_link),
+    "work_tickets:delivered_pull_request": ("deliver", delivered),
+    "work_tickets:start_plan": ("start", plan_of(
+        lambda: work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False),
+        {"assign": NO_BODY, "comment_issue": FREE})),
+    "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:escalate": ("escalate", comment("Which of the two forms wins here?\n")),
+    "work_tickets:escalation_plan": ("integrate", plan_of(
+        lambda: work_tickets.escalation_plan(REPO, 7, "the suite failed"), {"comment_issue": FREE})),
+    "work_tickets:label_step": ("start and integrate", no_body()),
+    "work_tickets:tracker_actions.comment": ("retro.py, overhaul.py and escalations", tracker_comment),
+    "work_tickets:landing_plan": ("integrate", landing),
+    "work_tickets:closeout_plan": ("integrate", plan_of(
+        lambda: work_tickets.closeout_plan(REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n",
+                                           []),
+        {"comment_pull": FREE, "comment_issue": FREE})),
+    "work_tickets:RelayDoor.create_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.create")),
+    "work_tickets:RelayDoor.update_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.edit")),
+    "work_tickets:RelayDoor.squash": ("integrate", lambda c, m: landing_door(c, m, "pr.merge")),
+    "work_tickets:RelayDoor.comment": ("integrate", comment("Integrated in abc1234.\n")),
+    "work_tickets:RelayDoor.close_pull": ("integrate", no_body("pr.edit")),
+    "work_tickets:RelayDoor.set_labels": ("integrate and start", no_body()),
+    "work_tickets:RelayDoor.edit_issue": ("route", routed_issue),
+    "work_tickets:RelayDoor.close_issue": ("integrate", no_body()),
+    "work_tickets:refs_request": ("refs request", comment(
+        work_tickets.REFS_REQUEST_MARKER + "\nOne-way ref change for `ref-maintenance`.\n")),
+    "work_tickets:refs_request_read_back": ("refs request", comment(
+        work_tickets.REFS_DRY_RUN_MARKER + "\n<!-- se:refs-request-id 1 -->\nThe dry run.\n")),
+    "work_tickets:refs_apply_read_back": ("refs apply", comment(
+        work_tickets.REFS_APPLIED_MARKER + "\n<!-- se:refs-request-id 1 -->\nApplied.\n")),
+    "review:file_steps": ("review.py file", review_steps),
+    "review:run_file": ("review.py file", review_run),
+    "retro:file_steps": ("retro.py file and overhaul.py file", retro_steps),
+}
+
+
+def test_every_function_that_sends_a_body_has_a_row():
+    assert sorted(senders(ROOT / "scripts")) == sorted(CONTRACT)
+
+
+def test_a_new_sender_without_a_row_fails_the_contract_naming_its_function(tmp_path):
+    copy = tmp_path / "scripts"
+    shutil.copytree(ROOT / "scripts", copy, ignore=shutil.ignore_patterns("__pycache__"))
+    with (copy / "work_tickets.py").open("a", encoding="utf-8") as handle:
+        handle.write("\n\ndef announce(root, number, text):\n"
+                     "    run_gh_with_body(root, ['issue', 'comment', str(number)], text)\n")
+    missing = sorted(senders(copy) - set(CONTRACT))
+    assert missing == ["work_tickets:announce"]
+
+
+@pytest.mark.parametrize("sender", list(CONTRACT))
+def test_each_body_se_sends_selects_its_form_and_passes(catalog, monkeypatch, sender):
+    command, cases = CONTRACT[sender]
+    made = cases(catalog, monkeypatch)
+    assert made, f"{sender} ({command}) has no case"
+    for case in made:
+        if case.form == NO_BODY:
+            assert case.body is None
+            continue
+        form, found = forms.verdict(catalog, case.action, case.body, case.title, base=case.base,
+                                    labels=case.labels, repo=REPO, home=HOME)
+        assert (form.name if form else FREE) == case.form, (sender, case.action)
+        refused = [str(finding) for finding in found if finding.severity == forms.REFUSE]
+        assert refused == [], (sender, case.action, refused)
