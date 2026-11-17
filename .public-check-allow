@@ -3,7 +3,12 @@
 # checked out; the index with --staged; else the working tree.
 # One entry per line, each with its reason after '#':
 #   <path glob>   # reason     covers every hit in the matching files
-#   <path>:<line> # reason     covers the hits on that line only
+#   <path>:<line> # reason     covers the hits on that line only; it stops covering them when a
+#                              line is inserted above, and the hit it no longer covers names it
+#   <path> <label> sha256:<digest>  # reason
+#                              covers every content hit of that public label in that one file
+#                              whose text has that digest, on any line, so it keeps covering its
+#                              hit when lines move; never a file-name hit, a message or an identity
 #   commit:<full sha> author|committer  # reason
 #                              covers the identity hits of that role on that commit only, for
 #                              history already published; the same identity elsewhere still fails
@@ -11,8 +16,23 @@
 #                              covers the message hits (tracker references included) of that
 #                              commit only, for history already published; the same text in any
 #                              other commit still fails
-# File entries never cover commit messages. An entry that matches no hit fails a check that has the
-# source's local list (.public-check.local), naming its line and form, so stale exceptions cannot
-# hide a later leak; without the list it is only warned about as unverifiable, as it may cover a
-# local-term hit the run cannot see. A commit entry counts only in the gate of a range that holds
-# its commit, which alone sees its hits.
+# The digest is the first 16 lowercase hex digits of SHA-256 over the UTF-8 bytes of the hit's
+# whole match; --digests prints it for every public-label hit, and nothing else prints one. The
+# path is a repository path, spaces allowed; the label and the digest are the last two words.
+# What a committed entry reveals: its path, its label and, for a digest entry, a digest of text
+# the file already shows. No committed entry keys a local term (a local-term hit of
+# .public-check.local): a digest of one is refused, as a word list would reverse it, and a glob or
+# path:line entry that covers only local-term hits is warned about, as it tells readers where a
+# private term sits. The local list allows its own term by the term's line <n>, in a line of its
+# own that is never committed: 'allow:<path> local-term:<n>  # reason', which covers that term's
+# content hits in that file, on any line.
+# File entries never cover commit messages. An unused entry, one that matches no hit:
+# - a glob or path:line entry fails a check that has the local list, naming its line and form, so
+#   stale exceptions cannot hide a later leak; without the list it is only warned about as
+#   unverifiable, as it may cover a local-term hit the run cannot see;
+# - a digest entry fails with or without the local list, as it covers no local term; where that
+#   list switches its label off it is warned about as unverifiable, as its hits are not looked for;
+# - a local list's 'allow:' entry is only warned about, as one clone's list serves every branch it
+#   checks;
+# - a commit entry counts only in the gate of a range that holds its commit, which alone sees its
+#   hits.

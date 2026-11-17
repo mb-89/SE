@@ -171,7 +171,9 @@ pass it; they refuse:
 - The local list: without it the check warns and runs the public list only, as on a public CI
   host. `#` starts a comment line; every other line is one of
   - a case-insensitive regex, a term this source keeps private; hits name only its line number;
-  - `off:<label>  # reason`, which switches the public entries of that label off for this source.
+  - `off:<label>  # reason`, which switches the public entries of that label off for this source;
+  - `allow:<path> local-term:<n>  # reason`, which allows this list's term of line `<n>` in that
+    file, on any line, as no committed entry may say where a private term sits.
   - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
 - One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that
@@ -179,9 +181,12 @@ pass it; they refuse:
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version
   outside its `version` range or none readable, naming both; `scripts/se_modules.py sync` brings
   the clone there.
-- False positives: a reasoned entry in `.public-check-allow`, whose header owns their format and
-  rules, for one harmless finding (a line, a file, a commit); an `off:` line in the local list for a
-  public entry this source never treats as private.
+- False positives, each with its reason:
+  - an entry in `.public-check-allow`, whose header owns their format and rules, for one harmless
+    finding: a line, a file, a commit, or a text keyed by its digest,
+    `<path> <label> sha256:<digest>`, which `--digests` prints;
+  - an `allow:<path> local-term:<n>` line in the local list, for one of its own terms;
+  - an `off:` line in the local list, for a public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
   every pushed commit no remote holds yet. A repository that uses se as a module runs

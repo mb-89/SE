@@ -48,9 +48,21 @@ The allow list (.public-check-allow) is read from the source the files are read 
 of --rev, whatever is checked out; the index with --staged; else the working tree. A source
 without one has no entries.
 
+An allow entry `<path> <label> sha256:<digest>` keys a public label's content hit by its text, so
+it covers that hit on any line of its file: the digest is the first 16 hex digits of SHA-256 over
+the UTF-8 bytes of the hit's whole match, as the check decodes the file, and only --digests prints
+it. A local-term hit gets no digest, as a word list would reverse it, and no committed entry keys
+one: the local list allows its own term by the term's line <n>, `allow:<path> local-term:<n>`,
+covering that term's content hits in that file, and output names such an entry only by its line
+there. A content hit no entry covers, in a file an unused `<path>:<line>` entry names, names that
+entry, as its line may have moved.
+
 Allow entries are reported by kind: used ones are counted in the verdict; an unused one is a hit
 where the source has a local list, and without it a warning that it is unverifiable, as it may
-cover a local-term hit the run cannot see.
+cover a local-term hit the run cannot see. An unused digest entry is a hit with or without the
+local list, unless that list switches its label off; an unused local entry is only a warning. With
+the local list, a committed glob or path:line entry that covers only local-term hits is warned
+about, as it tells readers where a private term sits.
 
 Exit codes: 0 passed, 1 hits (or unused allow entries in a full check), 2 usage or setup error.
 """
@@ -63,6 +75,7 @@ import binascii
 import bisect
 import fnmatch
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -244,31 +257,67 @@ class AllowEntry:
     path_line: int | None = None
     commit: str | None = None
     role: str | None = None
+    label: str | None = None  # a digest entry's public label, a local entry's local-term:<n>
+    digest: str | None = None  # a digest entry's 16 hex digits
+    local: bool = False  # an `allow:` line of the local list, named only as LOCAL_FILE:<line>
     used: bool = False
     seen: bool = False  # a commit entry's commit was gated, so every hit it covers was looked for
+    covered: list[str] = field(default_factory=list)  # a file entry's hits, '<path> <label>'
+    public: bool = False  # a file entry covers a public-label hit
 
     @property
     def form(self) -> str:
         """The entry's form as the header of the allow file writes it."""
         if self.commit is not None:
             return f"commit:<full sha> {self.role}"
+        if self.local:
+            return LOCAL_ALLOW_FORM
+        if self.digest is not None:
+            return DIGEST_FORM
         return "<path glob>" if self.glob is not None else "<path>:<line>"
 
-    def matches(self, path: str, line: int | None) -> bool:
+    @property
+    def where(self) -> str:
+        """The entry's place: its list and line."""
+        return f"{LOCAL_FILE if self.local else ALLOW_FILE}:{self.line}"
+
+    def matches(self, path: str, line: int | None, label: str = "",
+                digest: str | None = None) -> bool:
+        """Whether the entry covers a hit of `label` in `path`: on `line`, None for its name;
+        `digest` that of a public label's content hit."""
         if self.glob is not None:
             return fnmatch.fnmatchcase(path, self.glob)
-        return self.path is not None and path == self.path and line == self.path_line
+        if self.path != path:
+            return False
+        if self.label is not None:  # a digest or local entry: content hits on any line
+            return (line is not None and label == self.label
+                    and (self.local or digest == self.digest))
+        return line == self.path_line
 
 
 COMMIT_ENTRY = re.compile(r"commit:(\S*)(?:\s+(\S+))?")
 ROLES = ("author", "committer", "message")
 COMMIT_FORM = "commit:<full sha> author|committer|message"
+DIGEST_FORM = "<path> <label> sha256:<digest>"
+DIGEST_PREFIX = "sha256:"
+DIGEST_DIGITS = 16
+LOCAL_ALLOW_FORM = "allow:<path> local-term:<n>"
+LOCAL_TERM = re.compile(r"local-term(?::(\d+))?")
+MOVE_TO_LOCAL = (f"move it to {LOCAL_FILE} as '{LOCAL_ALLOW_FORM}  # reason', <n> the term's line "
+                 "there")
+
+
+def digest(text: str) -> str:
+    """A public label's hit keyed by its text: the first 16 hex digits of SHA-256 over the UTF-8
+    bytes of its whole match. A local term gets none, as a word list would reverse it."""
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:DIGEST_DIGITS]
 
 
 @dataclass
 class Report:
     hits: list[Hit] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    digests: list[str] = field(default_factory=list)  # with --digests, one per public content hit
     files: int = 0
     commits: int = 0
     allow_used: int = 0
@@ -277,13 +326,16 @@ class Report:
 
 @dataclass
 class LocalList:
-    """A source's local list: its own terms, and the public labels it switches off."""
+    """A source's local list: its own terms, the public labels it switches off, and its allow
+    entries for its own terms."""
     terms: list[Pattern] = field(default_factory=list)
     off: set[str] = field(default_factory=set)
+    allow: list[AllowEntry] = field(default_factory=list)
 
 
 LOCAL_OFF = re.compile(r"off:(\S+)")
-LOCAL_FORMS = "'<regex>' or 'off:<public label>  # reason'"
+LOCAL_ALLOW = "allow:"
+LOCAL_FORMS = (f"'<regex>', 'off:<public label>  # reason' or '{LOCAL_ALLOW_FORM}  # reason'")
 UNTRACK_REMEDY = (
     f"run git rm --cached {LOCAL_FILE}, then ignore it (scripts/setup.sh or setup.ps1 adds it to "
     ".gitignore)"
@@ -339,6 +391,9 @@ def load_local(root: Path) -> LocalList | None:
                                  f"{off.group(1)!r}; the labels are {', '.join(sorted(public))}")
             local.off.add(off.group(1))
             continue
+        if text.startswith(LOCAL_ALLOW):
+            local.allow.append(local_allow(number, text[len(LOCAL_ALLOW):], public))
+            continue
         try:
             regex = re.compile(text, re.IGNORECASE)
         except re.error as error:
@@ -346,7 +401,51 @@ def load_local(root: Path) -> LocalList | None:
                 f"{LOCAL_FILE}:{number} is not a valid regex ({error.msg})"
             ) from None
         local.terms.append(Pattern(f"local-term:{number}", regex))
+    terms = {pattern.label for pattern in local.terms}
+    for entry in local.allow:
+        if entry.label not in terms:
+            raise SetupError(f"{LOCAL_FILE}:{entry.line}: {entry.label.split(':')[1]} is no term's "
+                             f"line; write '{LOCAL_ALLOW_FORM}  # reason', <n> the line of one of "
+                             "this list's terms")
     return local
+
+
+def local_allow(number: int, body: str, public: set[str]) -> AllowEntry:
+    """The local list's `allow:<path> local-term:<n>  # reason` line `number`, past `allow:`. Its
+    term's line is checked once every term is read."""
+    entry, _, reason = body.partition("#")
+    words = entry.split()
+    committed = (f"{LOCAL_FILE}:{number}: a public label is allowed by the committed form "
+                 f"'{DIGEST_FORM}  # reason' in {ALLOW_FILE}, never in the local list")
+    if words and (words[-1].startswith(DIGEST_PREFIX) or words[-1] in public
+                  or (len(words) > 1 and words[-2] in public)):
+        raise SetupError(committed)
+    form = f"{LOCAL_FILE}:{number}: write '{LOCAL_ALLOW_FORM}  # reason'"
+    path, _, label = entry.strip().rpartition(" ")
+    term = LOCAL_TERM.fullmatch(label)
+    if not path.strip() or term is None or term.group(1) is None or not reason.strip():
+        raise SetupError(form)
+    return AllowEntry(number, path=path.strip(), label=label, local=True)
+
+
+def digest_entry(number: int, entry: str) -> AllowEntry:
+    """The committed entry `<path> <label> sha256:<digest>` of line `number`, its last word
+    `sha256:…`."""
+    form = (f"{ALLOW_FILE}:{number}: write '{DIGEST_FORM}  # reason', <digest> the first "
+            f"{DIGEST_DIGITS} lowercase hex digits --digests prints")
+    words = entry.rsplit(None, 2)
+    if len(words) < 3 or not re.fullmatch(rf"[0-9a-f]{{{DIGEST_DIGITS}}}",
+                                          words[2][len(DIGEST_PREFIX):]):
+        raise SetupError(form)
+    path, label, value = words
+    if LOCAL_TERM.fullmatch(label):
+        raise SetupError(f"{ALLOW_FILE}:{number}: no committed entry keys a local term: "
+                         f"{MOVE_TO_LOCAL}")
+    public = sorted({pattern.label for pattern in GENERIC_PATTERNS})
+    if label not in public:
+        raise SetupError(f"{ALLOW_FILE}:{number}: no public entry is labelled {label!r}; the "
+                         f"labels are {', '.join(public)}")
+    return AllowEntry(number, path=path, label=label, digest=value[len(DIGEST_PREFIX):])
 
 
 def load_allow(root: Path, files: list[tuple[str, bytes]] | None = None) -> list[AllowEntry]:
@@ -369,8 +468,11 @@ def load_allow(root: Path, files: list[tuple[str, bytes]] | None = None) -> list
         entry, _, reason = text.partition("#")
         entry = entry.strip()
         if not entry or not reason.strip():
-            raise SetupError(f"{ALLOW_FILE}:{number}: write '<path glob or file:line>  # reason' "
-                             f"or '{COMMIT_FORM}  # reason'")
+            raise SetupError(f"{ALLOW_FILE}:{number}: write '<path glob or file:line>  # reason', "
+                             f"'{DIGEST_FORM}  # reason' or '{COMMIT_FORM}  # reason'")
+        if entry.split()[-1].startswith(DIGEST_PREFIX):
+            entries.append(digest_entry(number, entry))
+            continue
         commit = COMMIT_ENTRY.fullmatch(entry)
         if commit:
             sha, role = commit.group(1).lower(), commit.group(2)
@@ -390,14 +492,21 @@ def load_allow(root: Path, files: list[tuple[str, bytes]] | None = None) -> list
 
 def find(text: str, patterns: Iterable[Pattern]) -> list[tuple[int, int, str]]:
     """Return sorted (line, column, label) for every accepted match."""
+    return [(line, column, label) for line, column, label, _ in matches(text, patterns)]
+
+
+def matches(text: str, patterns: Iterable[Pattern]) -> list[tuple[int, int, str, str]]:
+    """Return sorted (line, column, label, matched text) for every accepted match, one per place
+    and label."""
     line_starts = [0] + [match.end() for match in re.finditer("\n", text)]
-    found = set()
+    found: dict[tuple[int, int, str], str] = {}
     for pattern in patterns:
         for match in pattern.regex.finditer(text):
             if pattern.accept(match):
                 line = bisect.bisect_right(line_starts, match.start())
-                found.add((line, match.start() - line_starts[line - 1] + 1, pattern.label))
-    return sorted(found)
+                place = (line, match.start() - line_starts[line - 1] + 1, pattern.label)
+                found.setdefault(place, match.group())
+    return sorted((*place, matched) for place, matched in found.items())
 
 
 def redact(text: str, patterns: Iterable[Pattern]) -> str:
@@ -484,25 +593,64 @@ def worktree_files(root: Path) -> Iterable[tuple[str, bytes]]:
             yield path, full.read_bytes()
 
 
+def is_local_term(label: str) -> bool:
+    return label.startswith("local-term:")
+
+
 def scan_files(files: Iterable[tuple[str, bytes]], patterns: list[Pattern],
-               allow: list[AllowEntry], report: Report) -> None:
-    def allowed(path: str, line: int | None) -> bool:
-        hit = False
-        for entry in allow:
-            if entry.matches(path, line):
-                entry.used = hit = True
-        return hit
+               allow: list[AllowEntry], report: Report, digests: bool = False) -> None:
+    """Hits in tracked files, without those an entry of `allow` covers. With `digests`, each
+    public-label content hit's digest is printed (report.digests), and an uncovered one's hit
+    ends with it; a local-term hit never gets one."""
+    def covering(path: str, shown: str, line: int | None, label: str,
+                 value: str | None) -> list[AllowEntry]:
+        found = [entry for entry in allow if entry.matches(path, line, label, value)]
+        for entry in found:
+            entry.used = True
+            if entry.label is None:  # a glob or path:line entry
+                entry.public = entry.public or not is_local_term(label)
+                entry.covered.append(f"{shown} {label}")
+        return found
 
     for path, data in files:
         report.files += 1
         shown = redact(path, patterns)
         for _, _, label in find(path, patterns):
-            if not allowed(path, None):
+            if not covering(path, shown, None, label, None):
                 report.hits.append(Hit(f"{shown} (file name)", label))
         binary = " (binary)" if is_binary(data) else ""
-        for line, column, label in find(decode(data), patterns):
-            if not allowed(path, line):
-                report.hits.append(Hit(f"{shown}:{line}:{column}{binary}", label))
+        uncovered = []
+        for line, column, label, text in matches(decode(data), patterns):
+            value = None if is_local_term(label) else digest(text)
+            place = f"{shown}:{line}:{column}"
+            found = covering(path, shown, line, label, value)
+            if digests and value is not None:
+                named = ", ".join(entry.where for entry in found)
+                report.digests.append(f"digest {place} {label} sha256:{value}"
+                                      + (f" ({named})" if named else ""))
+            if not found:
+                uncovered.append((Hit(f"{place}{binary}", label), value))
+        moved = [entry for entry in allow if entry.path == path and entry.path_line is not None
+                 and not entry.used]
+        for hit, value in uncovered:
+            hit.detail = moved_entries(moved, shown, hit.label)
+            if digests and value is not None:
+                hit.detail += f" sha256:{value}"
+            report.hits.append(hit)
+
+
+def moved_entries(moved: list[AllowEntry], shown: str, label: str) -> str:
+    """The end of a content hit no entry covers, in a file `moved` path:line entries name and
+    cover no hit of: each names itself, then how to key the hit by its text."""
+    if not moved:
+        return ""
+    named = "".join(f"; {entry.where} names {shown}:{entry.path_line} and covers no hit"
+                    for entry in moved)
+    if is_local_term(label):
+        key = f"key it in {LOCAL_FILE} by its term's line ('{LOCAL_ALLOW_FORM}  # reason')"
+    else:
+        key = f"key it by its text ('{DIGEST_FORM}', which --digests prints)"
+    return f"{named}: if it was for this one, its line moved; {key}"
 
 
 # obs's data island, as obs's artifact_data.py finds it: the first script element whose opening tag
@@ -900,6 +1048,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="gate the commits a push of --rev to --branch brings, BEFORE its "
                              "old tip (empty or all zeros where unknown); a work branch's range "
                              "leaves out what the integration branch holds (push_range)")
+    parser.add_argument("--digests", action="store_true",
+                        help="print the digest of every public-label hit in a tracked file, for "
+                             f"a '{DIGEST_FORM}' entry in {ALLOW_FILE}; never of a local term")
     parser.add_argument("--branch", help="with --push: the branch pushed")
     parser.add_argument("--default-branch", help="with --push: the repository's default branch")
     return parser.parse_args(argv)
@@ -940,7 +1091,8 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     else:
         allow = load_allow(root)
         files = worktree_files(root)
-    scan_files(files, patterns, allow, report)
+    allow += local.allow
+    scan_files(files, patterns, allow, report, args.digests)
     if args.revisions and args.history:
         raise SetupError("--range and --history exclude each other: a gate or a full check")
     revisions = args.revisions or args.history or ("" if args.staged else args.rev or "HEAD")
@@ -949,7 +1101,7 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
             check_fetched(root, args.revisions)
         scan_history(root, revisions.split(), patterns, report, gate=bool(args.revisions),
                      allow=allow)
-    report_unused(allow, has_local, report)
+    report_unused(allow, has_local, local.off, report)
     return report
 
 
@@ -971,17 +1123,32 @@ def check_push_options(args: argparse.Namespace) -> None:
                              "the push brings")
 
 
-def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
+def report_unused(allow: list[AllowEntry], full: bool, off: set[str], report: Report) -> None:
     """Each entry this run could judge, by kind: used (counted in the verdict); unused, a hit
     where the check is full; unverifiable, a warning without the local list, as the entry may
     cover a local-term hit this run cannot see. A commit entry is judged only where its
-    commit was gated, as a gate's hit is not seen by every check."""
+    commit was gated, as a gate's hit is not seen by every check. A digest entry covers no local
+    term, so unused it is a hit with or without the local list, unless that list switches its
+    label off; an unused local entry is only warned about, as one clone's list serves every
+    branch it checks. With the local list, a committed file entry that covers only local-term
+    hits is warned about, as it tells readers where a private term sits."""
     for entry in allow:
         if entry.used:
             report.allow_used += 1
+            if full and entry.covered and not entry.public:
+                report.warnings.append(
+                    f"allow entry {entry.where} covers only local-term hits, so it tells readers "
+                    f"where a private term sits: move it to {LOCAL_FILE} as "
+                    f"'{LOCAL_ALLOW_FORM}  # reason' lines, <n> the term's line there: "
+                    f"{', '.join(dict.fromkeys(entry.covered))}")
         elif entry.commit is not None and not entry.seen:
             continue
-        elif full:
+        elif entry.local:
+            report.warnings.append(f"allow entry {entry.where} covers no hit in this tree")
+        elif entry.digest is not None and entry.label in off:
+            report.warnings.append(f"allow entry {entry.where} ('{entry.form}' entry) is "
+                                   f"unverifiable: the local list switches {entry.label} off")
+        elif full or entry.digest is not None:
             report.hits.append(Hit(f"{ALLOW_FILE}:{entry.line}", "unused-allow-entry",
                                    f" ('{entry.form}' entry; unused: remove it or correct it in "
                                    "place)"))
@@ -1030,6 +1197,8 @@ def main(argv: list[str] | None = None) -> int:
     record_verdict(args, not report.hits)
     for warning in report.warnings:
         print(f"public-check: warning: {warning}")
+    for line in report.digests:
+        print(f"public-check: {line}")
     for hit in report.hits:
         print(hit)
     used = f"{report.allow_used} allow entries used, " if report.allow_used else ""
