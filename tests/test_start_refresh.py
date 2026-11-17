@@ -76,6 +76,7 @@ def behind(tmp_path, shared_fake_git):
     release(origin, "5.0.1", "0.2.0")
     project = tmp_path / "project"
     project.mkdir()
+    (project / ".git").mkdir()  # a checkout: the start's core step runs only inside one
     (project / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8", newline="\n")
     for binary in ("0.1.0", "0.2.0"):
         fake = home / ".se" / "bin" / f"se-{binary}{'.exe' if WINDOWS else ''}"
