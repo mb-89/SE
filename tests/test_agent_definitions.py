@@ -956,7 +956,7 @@ def test_every_session_start_titles_it_by_session_title_and_tags_it_se_alone(sta
     text = between(path, begin, end)
     assert "session-title" in text
     if start != "Copilot start lines":
-        tags = re.findall(r"\btag(?:ged)? `([^`]+)`", text)
+        tags = re.findall(r"\btag(?:ged| it)? `([^`]+)`", text)
         assert tags and set(tags) == {"SE"}, tags
     assert not re.search(r"`se:(?:worker|issue|integrator):|se-track-b", text)
 
