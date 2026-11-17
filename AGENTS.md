@@ -83,7 +83,7 @@
   components' declarations (`work_tickets.py docs --check`); SE runs no code formatter or linter,
   and its other checks have no fix to apply.
 - Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
-  `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, `SE_PUBLIC_CHECK_TERMS`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
+  `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
 ## Neutral home
@@ -154,6 +154,10 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
     `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
     into `main`. Every other account stays foreign.
   - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
+- Two layers, and no third: the public list is committed and holds every term that may be
+  public; the local list is never committed, holds what is private and may switch a public entry
+  off. Nothing committed refers to the local list's content, since knowing it says what is meant
+  to stay hidden; in doubt, a term stays local. No setting, variable or secret holds terms.
 - The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
   against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,
   `/home/<name>`, `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and
@@ -168,7 +172,6 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
   - `off:<label>  # reason`, which switches the public entries of that label off for this source.
   - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
-- The cloud list, `SE_PUBLIC_CHECK_TERMS`, for private terms that may live in the cloud: one term per line, as the local list's, in CI's repository secret of that name (the gate step only) and a cloud environment's settings; it only adds terms, and hits name only its line number (`cloud-term:<n>`).
 - The machine-level list (`~/.se/private-terms.txt`, `SE_PRIVATE_TERMS`) is retired: while one is
   configured, the check stops and names where its terms go, `<source>/.public-check.local`.
 - One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that

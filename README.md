@@ -2241,7 +2241,8 @@ always rendered through the form.
   - The way back: fix the title or body on the issue itself, since filing it again only comments
     on it, then run `work_tickets.py unhold` with its number, which checks it against its form
     and lifts the hold where it passes.
-- The check also runs the term lists `scripts/public_check.py` reads over the title and the body:
-  the public list, `.public-check.local` where the checkout holds one, and the cloud list where
-  `SE_PUBLIC_CHECK_TERMS` is set; without a local or cloud list only the public list runs. A hit names the field and the list, never the term: stop and ask the
-  owner. `--hold` never files such a text.
+- The check also runs the two layers of `scripts/public_check.py` over the title and the body
+  ([Public safety](AGENTS.md#public-safety)): the committed public list, and the checkout's
+  private `.public-check.local`, which nothing committed refers to, where it holds one.
+  - A hit names the field and the list, never the term: stop and ask the owner. `--hold` never
+    files such a text.

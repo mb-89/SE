@@ -33,9 +33,8 @@ os.environ["SE_KERN"] = "off"
 
 # What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
 # which switch commands to their runner behaviour (`start` a cloud start, `capacity` none), the
-# environment's default agent, which adds a sentence to the start's hand-over, and the public check's
-# cloud list, which adds terms to every check.
-RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT", "SE_DEFAULT_AGENT", "SE_PUBLIC_CHECK_TERMS")
+# and the environment's default agent, which adds a sentence to the start's hand-over.
+RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT", "SE_DEFAULT_AGENT")
 RUNNER_PREFIX = "GITHUB_"
 
 
