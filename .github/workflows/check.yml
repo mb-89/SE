@@ -217,7 +217,7 @@ jobs:
         working-directory: kern
         run: go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/
       - uses: astral-sh/setup-uv@v7
-      # Git's bash on Windows, as a session runs these scripts there.
+      # Git's bash on Windows, as a session runs these scripts there, and RUNME.sh as a person runs it.
       - name: SE's start and hook scripts on this platform
         shell: bash
         run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py tests/test_runme.py
