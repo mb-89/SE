@@ -705,14 +705,14 @@ An adapter is a command that writes to an external system (a tracker, a wiki, a 
 Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](../../../scripts/adapter_sync.py)
 is its reusable part, imported from the project's se module.
 
-| Part | What every adapter does | Its reusable part |
+| Part | Its reusable part | What every adapter does |
 |---|---|---|
-| One command, dry run by default | it reads the external state, computes the plan and the merge, prints a complete change and conflict report, and writes nothing | — |
-| An explicit `--apply` | performs the writes | `add_apply_argument` |
-| Preflight on apply | the apply repeats the reads; an object whose external revision changed since the plan was computed is not written, and the report names it | `preflight` |
-| One logged write path | every external request goes through one transport, whose verb guard refuses any non-read request outside apply mode, naming its method and path, and whose log (method, path, status, time; never headers or bodies) is the audit. No side scripts, no second client. | `Transport` |
-| Secrets | read from the environment at run time; never printed, logged, committed or stored, and scrubbed from every recorded response | `secret_from_env`, `Transport.recorded` |
-| Artifacts | the dry run's plan and the apply's result are written as machine-readable files (sorted JSON), so reviews and tests compare them | `write_artifact` |
+| One command, dry run by default | — | it reads the external state, computes the plan and the merge, prints a complete change and conflict report, and writes nothing |
+| An explicit `--apply` | `add_apply_argument` | performs the writes |
+| Preflight on apply | `preflight` | the apply repeats the reads; an object whose external revision changed since the plan was computed is not written, and the report names it |
+| One logged write path | `Transport` | every external request goes through one transport, whose verb guard refuses any non-read request outside apply mode, naming its method and path, and whose log (method, path, status, time; never headers or bodies) is the audit. No side scripts, no second client. |
+| Secrets | `secret_from_env`, `Transport.recorded` | read from the environment at run time; never printed, logged, committed or stored, and scrubbed from every recorded response |
+| Artifacts | `write_artifact` | the dry run's plan and the apply's result are written as machine-readable files (sorted JSON), so reviews and tests compare them |
 
 ## Commands and shell
 
