@@ -49,6 +49,8 @@ def test_documentation_builds_without_warnings(tmp_path, obs):
     page = destination.read_text(encoding="utf-8")
     assert 'id="canary-bless"' not in page
     assert 'id="canary-answers"' not in page
+    # It opens in the reader's system theme: System is obs's default, so docs.md declares none.
+    assert '<html lang="en" data-theme="system"' in page
     # It was the copy that changed: the worked example still asks, for the decks built from it.
     assert WORKED_EXAMPLE.read_text(encoding="utf-8").startswith("---\nobs: {bless: pending}\n---\n")
     # The rule book shows as one table of its rules, each rule its own note that rule links open.
