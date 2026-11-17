@@ -2157,6 +2157,9 @@ SE keeps the shape of its issues as data: one TOML file per form under `forms/`,
 the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
 are advice beside them.
 
+The overhaul and retro templates are filed as they stand and pass the work form, and the work
+template has a section for every part the form requires; the tests check both.
+
 - `forms/decision.toml`: A decision note: the situation and the problem before the options' pugh
   fence.
 - `forms/field-report.toml`: A work pull request's description: the field report between its

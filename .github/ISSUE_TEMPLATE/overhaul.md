@@ -6,18 +6,34 @@ labels: discovery
 ---
 <!-- se:fleet -->
 
+## Situation
+
+The rule book, the code and the retros change with every landing, and each retro judges only its
+own window.
+
+## Problem
+
+So nobody asks whether the design as a whole still holds.
+
 ## Goal
 
 Is the design still right? This overhaul judges se against every rule of its rule book, the
 retros' trend since the last overhaul and the code's pruning facts, and posts one report here.
 
+## Approach
+
+Two commands of se (its README "Work commands") run it, and a judge fills the block between them.
+Not picked: an issue per finding, because only SE files issues, once it has read the report.
+
 ## Package kind
 
 Discovery: the overhaul writes a report, not code, and files no issue.
 
-## How this overhaul runs
+## Blocked by
 
-Two commands of se (its README "Work commands"):
+None.
+
+## Requirements
 
 1. `uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>` writes the draft:
    every rule with what checks it, the retros since the last overhaul, the previous overhaul's
@@ -34,3 +50,10 @@ Two commands of se (its README "Work commands"):
 ## Acceptance
 
 - [ ] The report is posted here and this issue is closed.
+
+## Verification
+
+```sh
+uv run python <se>/scripts/overhaul.py read <this issue> --out <draft>
+uv run python <se>/scripts/overhaul.py file <this issue> --draft <draft>
+```

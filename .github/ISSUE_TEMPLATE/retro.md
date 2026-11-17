@@ -8,9 +8,28 @@ labels: retro
 
 **Scope:** <!-- the window: work issues closed since the last closed retro issue closed -->
 
-## How this retro runs
+## Situation
 
-Two commands of se (its README "Work commands"):
+Each package ends in its own field report, so what went wrong in one is seen only there.
+
+## Problem
+
+What went wrong in one package comes back in the next.
+
+## Goal
+
+The agents, templates and rules improve from what the window's packages show.
+
+## Approach
+
+Two commands of se (its README "Work commands") run it, and a judge fills the block between them.
+Not picked: an issue per finding, because only SE files issues, once it has read the report.
+
+## Blocked by
+
+None.
+
+## Requirements
 
 1. `uv run python <se>/scripts/retro.py collect <this issue> --out <draft>` writes the draft: the
    window's sizes, the rule checks, the field reports' Retro and "Not delivered" sections, and the
@@ -27,3 +46,14 @@ Two commands of se (its README "Work commands"):
    and closes it. It files no issue: SE reads the report, bundles the `work` findings into work
    issues (each naming `retro #<n> finding <k>`) and puts the `decision` findings on the owner's
    decision list.
+
+## Acceptance
+
+- [ ] The report is posted here, linking the retro doc, and this issue is closed.
+
+## Verification
+
+```sh
+uv run python <se>/scripts/retro.py collect <this issue> --out <draft>
+uv run python <se>/scripts/retro.py file <this issue> --draft <draft>
+```
