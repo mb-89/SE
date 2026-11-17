@@ -1,4 +1,6 @@
 # Exceptions for scripts/public_check.py (rule: AGENTS.md "Public safety").
+# The list is read from the source the files are read from: the commit of --rev, whatever is
+# checked out; the index with --staged; else the working tree.
 # One entry per line, each with its reason after '#':
 #   <path glob>   # reason     covers every hit in the matching files
 #   <path>:<line> # reason     covers the hits on that line only

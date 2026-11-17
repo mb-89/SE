@@ -1280,13 +1280,19 @@ def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
 
 def run_ci(tmp_path: Path, before: str, after: str, base_ref: str = "", branch: str = "main",
            default: str = "main") -> subprocess.CompletedProcess[str]:
-    """The workflow's gate step as its runner runs it, in a fresh full clone detached at `after`:
-    on a push to `branch` of a repository whose default branch is `default`, or with `base_ref`
-    on a pull request into that branch, whose head is `after`."""
+    """The workflow's gate step as its runner runs it, in a fresh full clone: on a push to `branch`
+    of a repository whose default branch is `default`, detached at `after`; or with `base_ref` on
+    a pull request into that branch, whose head is `after`, detached at the merge of `after` into
+    refs/remotes/origin/<base_ref>, as the runner checks out refs/pull/<n>/merge."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
     fake_git.clone(tmp_path / "remote.git", runner, "-b", "main")
-    git(runner, "checkout", "-q", "--detach", after)
+    if base_ref:
+        git(runner, "checkout", "-q", "--detach", f"refs/remotes/origin/{base_ref}")
+        git(runner, "-c", "user.name=runner", "-c", "user.email=runner", "merge", "-q",
+            "--no-ff", "--no-edit", after)
+    else:
+        git(runner, "checkout", "-q", "--detach", after)
     env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or branch,
            "DEFAULT": default, "BASE_REF": base_ref}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
@@ -1454,6 +1460,76 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
     assert [hit.split(": ", 1)[0] for hit in hits] == ([f"commit {head[:12]} message:3"] if refused else [])
     assert result.returncode == (1 if refused else 0), result.stdout
 
+
+
+def test_ci_pull_request_gate_scans_the_merge_it_lands(repo: Path, tmp_path: Path) -> None:
+    """Three heads cut before main moved one entry and narrowed a glob: the gate judges the merge
+    each would land, by the merge's own allow list."""
+    leak = "/" + "home/alice"
+    owner_push(repo, tmp_path, "On main")
+    commit(repo, {"t.txt": f"one\n{leak}\n", "docs/a.md": f"{leak}\n",
+                  public_check.ALLOW_FILE: "# made-up paths\nt.txt:2  # in t\n"
+                                           "docs/*  # in the docs\n# end\n"}, "Start")
+    git(repo, "push", "-q", "origin", "main")
+    start = git(repo, "rev-parse", "HEAD").stdout.strip()
+    heads = {}
+    for name, files in (
+            ("moved", {"b.txt": "b\n"}),
+            ("own", {"n.txt": f"{leak}\n", public_check.ALLOW_FILE:
+                     "# made-up paths\nt.txt:2  # in t\ndocs/*  # in the docs\n# end\n"
+                     "n.txt:1  # its own new path\n"}),
+            ("narrowed", {"docs/b.md": "new /" + "home/bob\n"})):
+        git(repo, "checkout", "-q", "-b", name, start)
+        commit(repo, files, f"Add {name}")
+        git(repo, "push", "-q", "origin", name)
+        heads[name] = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "checkout", "-q", "main")
+    commit(repo, {"t.txt": f"zero\none\n{leak}\n", public_check.ALLOW_FILE:
+                  "# made-up paths\nt.txt:3  # in t\ndocs/a.md:1  # in the docs\n# end\n"},
+           "Move the line, narrow the docs entry")
+    git(repo, "push", "-q", "origin", "main")
+    for name in ("moved", "own"):
+        result = run_ci(tmp_path, "", heads[name], base_ref="main")
+        assert result.returncode == 0, f"{name}: {result.stdout}"
+    result = run_ci(tmp_path, "", heads["narrowed"], base_ref="main")
+    assert result.returncode == 1, result.stdout
+    hits = [line for line in result.stdout.splitlines() if not line.startswith(("public-check", "::"))]
+    assert hits == ["docs/b.md:1:5: user-profile-path"]
+
+
+def test_a_rev_check_applies_that_commits_allow_list(repo: Path) -> None:
+    commit(repo, {"u.txt": "/" + "home/alice\n"})
+    (repo / public_check.ALLOW_FILE).write_text("u.txt:1  # a made-up path\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--rev", "HEAD", "--no-history")
+    assert result.returncode == 1
+    assert "u.txt:1:1: user-profile-path" in result.stdout
+    commit(repo, {}, "Allow the path")
+    result = run_check("--repo", str(repo), "--rev", "HEAD", "--no-history")
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout
+
+
+def test_a_staged_check_applies_the_staged_allow_list(repo: Path) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    (repo / "v.txt").write_text("/" + "home/alice\n", encoding="utf-8")
+    git(repo, "add", "v.txt")
+    (repo / public_check.ALLOW_FILE).write_text("v.txt:1  # a made-up path\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--staged")
+    assert result.returncode == 1
+    assert "v.txt:1:1: user-profile-path" in result.stdout
+    git(repo, "add", public_check.ALLOW_FILE)
+    result = run_check("--repo", str(repo), "--staged")
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout
+
+
+def test_a_working_tree_check_applies_the_working_tree_allow_list(repo: Path) -> None:
+    commit(repo, {"w.txt": "/" + "home/alice\n"})
+    assert run_check("--repo", str(repo), "--no-history").returncode == 1
+    (repo / public_check.ALLOW_FILE).write_text("w.txt:1  # a made-up path\n", encoding="utf-8")
+    result = run_check("--repo", str(repo), "--no-history")
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout
 
 
 # A push's range (push_range): a work branch is gated on what it brings past the integration

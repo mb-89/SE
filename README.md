@@ -1566,11 +1566,19 @@ jobs:
       head_repository: ${{ github.event.pull_request.head.repo.full_name }}
 ```
 
-- A project's own commit gate gates a push with the call below: the commits after the branch's
-  old tip (where it is unknown, those no other branch holds), and a work branch's without those
-  the integration branch holds, which are not gated again ([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
+- A project's own commit gate gates a pull request with the first call below, in the
+  checked-out merge of its head into its base, the tree its landing lands, judged by that tree's
+  allow list; its range is the commits its head holds and its base does not.
+- It gates a push with the second call, by branch ([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
+  To the integration branch: the commits after its old tip, or where that tip is unknown those no
+  other branch holds, gated whole.
+- To a work branch, where the integration branch is the default branch and origin's ref for it
+  exists: the commits after its old tip, or all its commits where that tip is unknown, without
+  those the integration branch holds, which are not gated again; otherwise as to the integration
+  branch.
 
 ```sh
+python3 <se>/scripts/public_check.py --rev HEAD --range "refs/remotes/origin/$BASE_REF..$AFTER"
 python3 <se>/scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$BRANCH" --default-branch "$DEFAULT"
 ```
 
