@@ -2,8 +2,10 @@
 
 The warning refusal, the answers summary and the bundle's ways out run on fakes; one end-to-end test
 builds a deck with the real obs, serves it with `deck serve --wait`, sends from a browser and reads the
-answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, for the drafts
-obs-html keeps over a reload (a comment with no verdict among them) and the notice beside Send.
+answers, and one opens a real deck on a fake of the Claude app's runtime that appears late, at phone width,
+for the drafts obs-html keeps over a reload (a comment with no verdict among them) and how obs's notice
+center tells the reader what Send did: its passing line under the top band, the bundle's entry for a
+partial send, and obs's entry with the answers to copy where nothing was sent.
 Every deck the tests build with the real obs is built once per session, all at once (`decks`), and the
 browser tests share one page per worker (`page`).
 """
@@ -175,7 +177,8 @@ const actions = {
             .notes.filter(note => obsArtifact.isDocument(note) && note.slug !== "home")
             .map(note => [note.slug, note.bless?.version ?? null]));
     },
-    // A served deck whose `chapters` are blessed one by one (a verdict never walks on), then sent.
+    // A served deck whose `chapters` are blessed one by one (a verdict never walks on), then sent: the
+    // passing line it shows.
     send: async (page, {url, chapters}) => {
         await page.setViewportSize({width: 1280, height: 720});
         await page.goto(url);
@@ -188,14 +191,14 @@ const actions = {
         await page.waitForFunction(() => /^Send (\\d+)\\/\\1$/.test(document.querySelector("[data-bless-send]").textContent));
         await send.click();
         await page.locator("[data-bless-pill]", {hasText: "sent"}).waitFor({timeout: 10000});
-        return null;
+        return await page.locator("[data-brief-notice]:not([hidden])").innerText({timeout: 3000});
     },
     // A deck opened in a fresh tab of its own, where the Claude app's runtime is a fake that appears
     // only after the page loaded (`claude` is set on load): `files` and `comment` are what
     // artifact.publish and comments.sendToClaude do, ok or a rejection code. The page's own title
     // reads "Fallback", so a comment that names the deck's title took it from the deck.
     claude: async (page, {path, files, comment}) => {
-        const context = await page.context().browser().newContext();
+        const context = await page.context().browser().newContext({viewport: {width: 390, height: 844}});
         try {
             const tab = await context.newPage();
             const warnings = [];
@@ -228,14 +231,26 @@ const actions = {
             await tab.waitForFunction(() => obsBless.verdicts().cache?.comment === "Too slow." &&
                 obsBless.verdicts().queue?.comment === "Later.", null, {timeout: 10000});
             const restored = await tab.evaluate(() => obsBless.verdicts());
+            const after = () => document.querySelector("[data-bless-send]").nextElementSibling?.outerHTML ?? null;
+            const beforeSend = await tab.evaluate(after);
             await tab.locator("[data-bless-send]").click();
-            await tab.locator("[data-se-answers-notice]").waitFor();
-            return {restored, warnings, pill: await tab.locator("[data-bless-pill]").innerText(),
-                    notice: await tab.evaluate(() => {
-                        const box = document.querySelector("[data-se-answers-notice]");
-                        return {state: box.dataset.seAnswersNotice, besideSend: box.previousElementSibling?.matches("[data-bless-send]"),
-                                message: box.querySelector("p").textContent, text: box.querySelector("textarea")?.value ?? null};
-                    }),
+            // Read while the passing line shows (it fades after seconds), or once obs's error entry is there.
+            await tab.waitForFunction(() => document.querySelector("[data-brief-notice]:not([hidden])") ||
+                document.querySelector('[data-notice="answers"]'), null, {timeout: 10000});
+            const shown = await tab.evaluate(after => {
+                const line = document.querySelector("[data-brief-notice]:not([hidden])");
+                const box = line?.getBoundingClientRect(), band = document.querySelector("[data-top-band]").getBoundingClientRect();
+                const entry = id => {
+                    const item = document.querySelector(`[data-notice="${id}"]`);
+                    return item && {severity: item.dataset.noticeSeverity, text: item.textContent};
+                };
+                return {line: line && {text: line.textContent, under: box.top >= band.bottom - 0.5,
+                                       inside: box.left >= 0 && box.right <= innerWidth},
+                        afterSend: eval(after)(), sideways: document.documentElement.scrollWidth > innerWidth,
+                        seNotice: document.querySelector("[data-se-answers-notice]") !== null,
+                        partly: entry("se-answers-partly"), answers: entry("answers")};
+            }, after.toString());
+            return {restored, warnings, beforeSend, shown, pill: await tab.locator("[data-bless-pill]").innerText(),
                     calls: await tab.evaluate(() => seCalls)};
         } finally {
             await context.close();
@@ -468,11 +483,15 @@ const element = () => {
     return node;
 };
 const body = element();
-const calls = {application: null, sink: null, published: [], comments: [], warnings: []};
+const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0};
 globalThis.console = {...console, warn: message => calls.warnings.push(message)};
 if (mode.deck) globalThis.seDeck = mode.deck;
 globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
-                       createElement: element};
+                       createElement: () => { calls.created += 1; return element(); }};
+if (!mode.noNotices) globalThis.obsNotices = {post: entry => calls.notices.push(["post", entry]),
+                                              reveal: id => calls.notices.push(["reveal", id]),
+                                              remove: id => calls.notices.push(["remove", id])};
+if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
 globalThis.obsArtifact = {
     registerApplication: application => { calls.application = [application.id, application.actions]; },
     trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
@@ -502,10 +521,10 @@ eval(bundle);
     let result = null, error = null;
     try { result = await calls.sink.send(payload); }
     catch (failure) { error = {message: failure.message, code: failure.code, failed: failure.failed}; }
-    const shown = body.children.map(box => ({state: box.dataset.seAnswersNotice,
-        text: box.children.map(child => child.textContent ?? child.value)}));
     console.log(JSON.stringify({registered, application: calls.application, namespace: calls.sink.namespace,
-                                id: calls.sink.id, result, error, shown, published: calls.published,
+                                id: calls.sink.id, name: calls.sink.name ?? null, result, error,
+                                elements: calls.created + body.children.length, notices: calls.notices,
+                                published: calls.published,
                                 comments: calls.comments, warnings: calls.warnings}));
 })();
 """
@@ -518,6 +537,11 @@ def _bundle(**mode: object) -> dict:
                              json.dumps(mode)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def _send_warnings(calls: dict) -> list[str]:
+    """The console warnings of the send itself, without the one of a double that carries no deck data."""
+    return [warning for warning in calls["warnings"] if "readable deck data" not in warning]
 
 
 def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
@@ -534,7 +558,13 @@ def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
                                                  "- keep: bless: Fine as it is.", "- later: comment: Only a thought."]
     assert json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
     assert len(comment["text"].encode()) <= 4096
-    assert calls["shown"] == [{"state": "sent", "text": ["Sent: answers.json saved and comment sent to Claude."]}]
+    assert calls["name"] == "Claude"
+    assert (calls["elements"], calls["notices"], _send_warnings(calls)) == (0, [["remove", "se-answers-partly"]], [])
+
+
+def test_where_obs_html_serve_served_the_page_the_sink_names_no_reader():
+    calls = _bundle(files="ok", comment="ok", served=True)
+    assert calls["id"] == "claude-artifact" and calls["name"] is None
 
 
 def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data():
@@ -559,25 +589,48 @@ def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(data
     assert "no answer" not in comment["text"]
 
 
-def test_a_refused_files_form_still_reaches_claude_through_the_comment():
-    calls = _bundle(files="capability_disabled", comment="ok")
+PARTLY = {
+    "comment": {"id": "se-answers-partly", "severity": "warning", "title": "No message to Claude",
+                "details": ["Your answers are saved with this page, where Claude reads them, but the message to "
+                            "Claude did not go through. If Claude does not answer, say in the chat that you sent them."]},
+    "answers.json": {"id": "se-answers-partly", "severity": "warning", "title": "Not saved with the page",
+                     "details": ["Claude got your answers as a message, but they could not be saved with this page."]},
+}
+
+
+@pytest.mark.parametrize(("files", "comment", "failed"), [("capability_disabled", "ok", "answers.json"),
+                                                          ("ok", "claude_unavailable", "comment")])
+def test_a_send_where_one_way_failed_posts_one_plain_warning(files, comment, failed):
+    calls = _bundle(files=files, comment=comment)
     assert calls["error"] is None
-    assert calls["result"] == {"ways": ["comment"], "failed": {"answers.json": "capability_disabled"},
-                               "comment": {"threadId": "t1"}}
-    assert calls["shown"][0]["text"] == ["Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."]
+    code = files if failed == "answers.json" else comment
+    assert calls["result"]["failed"] == {failed: code}
+    assert calls["result"]["ways"] == [way for way in ("answers.json", "comment") if way != failed]
+    revealed = [["reveal", "se-answers-partly"]] if failed == "comment" else []
+    assert calls["notices"] == [["post", PARTLY[failed]], *revealed]
+    text = json.dumps(PARTLY[failed])
+    assert "answers.json" not in text and code not in text
+    [warning] = _send_warnings(calls)
+    assert warning.startswith("se-answers: ") and code in warning
+    assert calls["elements"] == 0
 
 
-def test_when_both_ways_fail_the_notice_says_so_with_the_codes_and_the_answers_to_copy():
+def test_a_partial_send_without_a_notice_center_still_resolves():
+    calls = _bundle(files="ok", comment="claude_unavailable", noNotices=True)
+    assert calls["error"] is None and calls["result"]["ways"] == ["answers.json"]
+
+
+def test_when_both_ways_fail_it_rejects_in_plain_words_and_the_codes_go_to_the_console():
     calls = _bundle(files="capability_disabled", comment="claude_unavailable")
     assert calls["result"] is None
     assert calls["error"]["code"] == "not_sent"
     assert calls["error"]["failed"] == {"answers.json": "capability_disabled", "comment": "claude_unavailable"}
-    [shown] = calls["shown"]
-    message, text = shown["text"]
-    assert shown["state"] == "failed"
-    assert message.startswith("Not sent: saving answers.json failed with capability_disabled")
-    assert "claude_unavailable" in message and "Sent:" not in message
-    assert json.loads(text) == PAYLOAD
+    message = calls["error"]["message"]
+    assert message == "nothing reached Claude; copy your answers and paste them into the chat"
+    [warning] = _send_warnings(calls)
+    assert warning.startswith("se-answers: ") and "capability_disabled" in warning and "claude_unavailable" in warning
+    assert calls["notices"] == [["remove", "se-answers-partly"]]
+    assert calls["elements"] == 0
 
 
 def test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers():
@@ -592,29 +645,37 @@ def test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows():
     assert "sending is not available here" in calls["error"]["message"]
 
 
-@pytest.mark.parametrize("files, comment", [("capability_disabled", "ok"), ("capability_disabled", "claude_unavailable")])
+@pytest.mark.parametrize("files, comment", [("ok", "ok"), ("ok", "claude_unavailable"), ("capability_disabled", "ok"),
+                                           ("capability_disabled", "claude_unavailable")])
 def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(decks, page, files, comment):
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
-    shown = page("claude", path=str(artifact), files=files, comment=comment)
-    assert shown["warnings"] == []  # The bundle read the deck's data.
-    assert shown["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}, "queue": {"comment": "Later."}}
+    result = page("claude", path=str(artifact), files=files, comment=comment)
+    # The bundle read the deck's data; a partial or failed send warns of its own.
+    assert not [warning for warning in result["warnings"] if "readable deck data" in warning]
+    assert result["restored"] == {"cache": {"verdict": "decline", "comment": "Too slow."}, "queue": {"comment": "Later."}}
+    shown = result["shown"]
+    # The bundle draws nothing on the page: nothing after Send, before or after it, and no page scrolls sideways.
+    assert (shown["afterSend"], shown["seNotice"], shown["sideways"]) == (result["beforeSend"], False, False)
+    if "ok" in (files, comment):
+        assert shown["line"] == {"text": "Sent to Claude.", "under": True, "inside": True}
+        assert "sent" in result["pill"].lower()
+        if (files, comment) == ("ok", "ok"):
+            assert shown["partly"] is None
+        else:
+            assert shown["partly"]["severity"] == "warning"
+            assert "answers.json" not in shown["partly"]["text"]
+    else:
+        assert shown["line"] is None and shown["partly"] is None
+        version = {slug: request["version"] for slug, request in _requests(artifact).items()}
+        assert "paste them into the chat" in shown["answers"]["text"]
+        assert json.dumps({"chapter": "cache", "version": version["cache"], "verdict": "decline",
+                           "comment": "Too slow."}, indent=2).splitlines()[1] in shown["answers"]["text"]
+        assert "sent" not in result["pill"].lower()
     if comment == "ok":
-        assert shown["notice"] == {"state": "sent", "besideSend": True, "text": None,
-                                   "message": "Sent: comment sent to Claude. Not saved as answers.json (capability_disabled)."}
-        assert "sent" in shown["pill"].lower()
-        [sent] = shown["calls"]["comments"]
+        [sent] = result["calls"]["comments"]
         assert sent["text"].splitlines()[0] == 'Answers from the decision deck "Decisions" (se-answers):'
         assert {"- cache: decline: Too slow.", "- queue: comment: Later."} <= set(sent["text"].splitlines())
-    else:
-        notice = shown["notice"]
-        assert (notice["state"], notice["besideSend"]) == ("failed", True)
-        assert "capability_disabled" in notice["message"] and "claude_unavailable" in notice["message"]
-        version = {slug: request["version"] for slug, request in _requests(artifact).items()}
-        assert json.loads(notice["text"])["verdicts"] == [
-            {"chapter": "cache", "version": version["cache"], "verdict": "decline", "comment": "Too slow."},
-            {"chapter": "queue", "version": version["queue"], "comment": "Later."}]
-        assert "sent" not in shown["pill"].lower()
 
 
 def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, page):
@@ -625,7 +686,7 @@ def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, pag
     try:
         url = served.stdout.readline().strip()
         assert url.startswith("http://127.0.0.1:"), served.stderr.read()
-        page("send", url=url, chapters=["cache", "queue"])
+        assert page("send", url=url, chapters=["cache", "queue"]) == "Sent."
         out, err = served.communicate(timeout=30)
     finally:
         served.kill()
