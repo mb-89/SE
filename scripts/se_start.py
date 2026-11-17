@@ -672,10 +672,12 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
 WITHOUT_KERN = "SE runs without kern: every step goes through SE's scripts and gh."
 
 
-def without_kern(kern: list[str], host: str) -> list[str]:
-    """The line that says SE runs without kern: under Copilot, after a kern line that failed; none
-    elsewhere, so Claude Code's greeting stays as it is."""
-    return [WITHOUT_KERN] if host == "copilot" and kern and ": failed: " in kern[0] else []
+def without_kern(kern: list[str], host: str, none: bool = False) -> list[str]:
+    """The line that says SE runs without kern: under Copilot, after a kern line that failed or
+    where bootstrap.sh started no core, the project being inside no git checkout; none elsewhere, so
+    Claude Code's greeting stays as it is."""
+    failed = bool(kern) and ": failed: " in kern[0]
+    return [WITHOUT_KERN] if host == "copilot" and (failed or none) else []
 
 
 def detached_options(os_name: str) -> dict:
@@ -1133,6 +1135,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--kern-bin", type=Path, help="bootstrap.sh: the kern binary it started for the project")
     status_parser.add_argument("--kern-starting", default="", help="bootstrap.sh: why kern is still starting")
     status_parser.add_argument("--kern-failed", default="", help="bootstrap.sh: why kern failed to start")
+    status_parser.add_argument("--kern-none", action="store_true",
+                               help="bootstrap.sh: no core starts, the project being inside no git checkout")
     commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
                         "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
@@ -1191,7 +1195,7 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
                      world.kern)
     lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
-    lines = (lines[:1] + kern + without_kern(kern, args.host) + lines[1:]
+    lines = (lines[:1] + kern + without_kern(kern, args.host, args.kern_none) + lines[1:]
              + (_load("copilot_guards").greeting(root, args.host) if args.host == "copilot" else []))
     if args.hook:
         print(hook_output(lines, args.note, SE_ROOT, args.host))

@@ -102,6 +102,9 @@ What a cloud session meets, whatever state its container comes up in.
   `se.toml` after its start, SessionStart ran before the clone existed. The first hook whose working
   directory is inside the clone starts its core in the background, as SessionStart would have, and
   the hooks there then post to it ([scripts/se_hook.sh](scripts/se_hook.sh)).
+  - A session whose folder is inside no git checkout, as one started without sources is, starts no
+    core and says nothing of one; a checkout with an se.toml cloned into it then gets its core from
+    its first hook there.
 - **`setup.sh` in a spawned session.** Claude Code's auto-mode permission check judges `bash
   scripts/setup.sh` as one command, before any of its steps runs.
   - In a session another session started without sources, which then cloned SE by hand, it refused
@@ -200,10 +203,11 @@ released as `se-v<version>` that `components/release.toml` owns. `scripts/se_mod
 is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
 no Go components. The plugin's hooks start the binary and post every session event to it:
 
-- **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: where
-  `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the project, which
-  returns at once, and hands the core the session's start, which takes the session's lease. It names
-  the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+- **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: for a project inside a
+  git checkout, where `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the
+  project, which returns at once, and hands the core the session's start, which takes the session's
+  lease. It names the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
+  - For a project inside no git checkout it runs none.
   - `~/.se/bin/<name>` links to the version in place (a copy where the file system makes no link),
     and Claude Code's env file puts `~/.se/bin` on the session's PATH, so `se status` works there.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names

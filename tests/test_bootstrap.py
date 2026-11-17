@@ -120,6 +120,7 @@ def machine(tmp_path):
     project = tmp_path / "project"
     home.mkdir()
     project.mkdir()
+    (project / ".git").mkdir()  # a checkout: the start's core step runs only inside one
     # se_modules.py app-binary: name, version, download base, build folder, package.
     (home / "app-binary").write_text(f"{NAME} {APP_VERSION} {APP_BASE} {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
                                      newline="\n")
@@ -589,6 +590,38 @@ def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_it
     assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release to fetch: the origin of "
                                         f"{sh(ROOT)} names no home, and no go to build it from {sh(ROOT)}/{BUILD_DIR}")
     assert not any(line.startswith("curl") for line in calls(home))
+
+
+def test_a_start_outside_a_git_checkout_starts_no_core(machine):
+    """A session started without sources (README "Cloud sessions"): no core, no read of the binary,
+    no fetch and nothing said of the core; the session's shells still find `se` for a late checkout."""
+    (machine[1] / ".git").rmdir()
+    home, project, path = kern_in_place(machine)
+    env_file = machine[2] / "claude-env"
+    result = run(home, path, project, "--hook", stdin=START, CLAUDE_ENV_FILE=sh(env_file))
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert not any(line.startswith(("kern ", "curl")) or " app-binary " in line for line in calls(home))
+    runtime = project / ".se" / ".runtime"
+    assert not (runtime / "kern.path").exists() and not (runtime / "kern-session-start.json").exists()
+    greeting = greeting_call(home)
+    assert "--kern-starting" not in greeting and "--kern-failed" not in greeting and "--kern-bin" not in greeting
+    assert greeting.endswith("--kern-none")
+    assert f'export PATH="{sh(home)}/.se/bin:$PATH"' in env_file.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.parametrize("worktree", (False, True), ids=("subfolder", "linked-worktree"))
+def test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_core(machine, worktree):
+    home, project, path = kern_in_place(machine)
+    if worktree:  # a linked worktree's .git is a file naming its git directory
+        (project / ".git").rmdir()
+        (project / ".git").write_text("gitdir: /elsewhere/.git/worktrees/project\n", encoding="utf-8")
+    else:
+        project = project / "docs"
+        project.mkdir()
+    result = run(home, path, project, "--hook", stdin=START)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [line for line in calls(home) if line.startswith("kern ")][0] == f"kern start --root {sh(project)} --home {SE_ROOT}"
+    assert "--kern-none" not in greeting_call(home)
 
 
 def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
