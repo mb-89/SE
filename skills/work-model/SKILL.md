@@ -423,6 +423,38 @@ session list."
 - Where a host has no way to start a session, the role files or queues the work, or gives the
   person the line that starts it; it never runs the work in-chat.
 
+Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
+sidebar shows one SE section, each role's sessions nested under the session that started them.
+`work_tickets.py session-title <role> [<project>] [<topic>]` prints the title, its one owner.
+
+- **The scheme**: the SE agent's own session is `SE`; a project's integrator
+  `SE/<project>/integrator`, `<project>` being the repository's name as GitHub spells it (`SE`,
+  `obs`).
+  - Below the integrator, started by it: a worker `SE/<project>/worker/<ticket name>`, its work
+    issue's title exactly as the [name rule](#issues) accepts it (the old form included), never
+    shortened, as fleet-check finds a worker's session by its branch in the title; a
+    sub-integrator `SE/<project>/integrator/<area>`.
+  - Beside the integrator, started by the SE agent: `SE/<project>/reviewer/<pull request
+    number>`, `SE/<project>/researcher/<topic>` and `SE/<project>/spike/<topic>`.
+  - A topic and an area follow the name rule. No role starts researchers, spikes or
+    sub-integrators yet; one started at the person's request takes its title by the scheme.
+- **Starting a session**: a role starts it itself with the host's session tool, so it is the
+  role's child; it gives the title where the tool takes one and the tag `SE` where it takes tags,
+  and no other tag of its own. Under Copilot, the start line's `-n` is the same title.
+- **Its own name**: where the session has `set_session_title` and `set_session_tags`, the SE
+  agent at its first turn reads its own session (`get_session` without an id), sets its title to
+  `SE` unless it is so, and adds the tag `SE` (`set_session_tags` with `add: ["SE"]`) unless it
+  has it. It removes no tag.
+- **Finding sessions**: a role finds the sessions it started with `list_sessions` and
+  `children: true`; one it did not start, such as an earlier SE session's integrator, by its exact
+  title (`SE/<project>/integrator`, `SE/<project>/worker/<ticket name>`). Never by tag:
+  `list_sessions` refuses a tag filter from inside a session.
+- **Reorganizing**: on the person's request, the SE agent renames existing sessions of SE's work
+  to the scheme and adds the tag `SE`, and tells the person which it renamed.
+  - It removes only the tags SE's earlier prompts gave (`se:worker:*`, `se:issue:*`,
+    `se:integrator:*`, `se-track-b`), never another, such as the host's `config:*` or `cowork-*`.
+  - It cannot move a session under another parent, and says so where the person asks for that.
+
 ### Suite at a moved pin
 
 When the acceptance names the complete suite and a dependency pin moves, the suite runs at the new
@@ -735,7 +767,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
-  `pr-body`, `docs`, `format`, `metrics` and `field-report --check`.
+  `pr-body`, `docs`, `format`, `metrics`, `session-title` and `field-report --check`.
   - Where `[tests] ci = false` ([Land without CI](#land-without-ci)), `push` and `verified`
     read the integrator's status through gh alone; without it they accept none, and the
     local verdicts decide.
@@ -804,7 +836,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
       description in place.
     - A refused report is fixed and checked again, never delivered.
   - `start`: start the worker session with the host's session tool, on an outcome branch named
-    like the work issue and based on the integration branch.
+    like the work issue and based on the integration branch, titled by `session-title` (the
+    `title=` of `start`'s `Launch worker:` line) and tagged `SE` ([Visible sessions](#visible-sessions)).
   - `integrate`, `refs request` and `refs apply`: [Land](#land).
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.

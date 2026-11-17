@@ -542,7 +542,7 @@ def test_the_host_procedure_branches_on_the_tools_the_session_has():
     assert ("**Starting a session, where the host has a session tool** (`create_session`): use it" in section
             and "`send_message` for the one message a role sends" in section)
     assert ("nohup copilot -C <worktree> --agent worker --trust-folder --no-ask-user --allow-tool=<list> "
-            "\\ -n <branch> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &") in section
+            "\\ -n <title> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &") in section
     assert "Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker'," in section
     assert "-RedirectStandardOutput <worktree>\\.se\\worker.log -WindowStyle Hidden`" in section
     assert "give the person that one line to run" in section
@@ -926,3 +926,58 @@ def test_the_work_model_states_the_pause_switch_once_and_the_roles_link_it():
         assert "work-model/SKILL.md#pause)" in text
     integrator = normalized(AGENTS / "integrator.md")
     assert integrator.index("`work_tickets.py paused`") < integrator.index("`work_tickets.py queue`")
+
+
+def between(path: Path, start: str, end: str) -> str:
+    """The normalized text of `path` from `start` up to `end`."""
+    text = normalized(path)
+    assert start in text, start
+    return text.split(start, 1)[1].split(end, 1)[0]
+
+
+SESSION_STARTS = {
+    "se.md Sessions": (AGENTS / "se.md", "- **Sessions**:", "- **Escalations**"),
+    "se.md Reviews": (AGENTS / "se.md", "- **Reviews**:", "- It is advisory"),
+    "integrator.md step 7": (AGENTS / "integrator.md", "7. **Start what is unblocked**",
+                             "## Escalate and improve"),
+    "catch-up step 6": (SKILL, "6. **Dispatch repositories**", "7. **Present decisions**"),
+    "integrator prompt": (SKILL.parent / "references" / "integrator-prompt.md", "# Integrator",
+                          "```text"),
+    "Without gh start": (WORK_MODEL, "- `start`: start the worker session", "- `integrate`,"),
+    "Copilot session tool": (WORK_MODEL, "- **Starting a session, where the host has a session tool**",
+                             "- **Where it has none**"),
+    "Copilot start lines": (WORK_MODEL, "- **Where it has none**", "- `<list>` holds"),
+}
+
+
+@pytest.mark.parametrize("start", SESSION_STARTS)
+def test_every_session_start_titles_it_by_session_title_and_tags_it_se_alone(start):
+    path, begin, end = SESSION_STARTS[start]
+    text = between(path, begin, end)
+    assert "session-title" in text
+    if start != "Copilot start lines":
+        tags = re.findall(r"\btag(?:ged| it)? `([^`]+)`", text)
+        assert tags and set(tags) == {"SE"}, tags
+    assert not re.search(r"`se:(?:worker|issue|integrator):|se-track-b", text)
+
+
+def test_both_copilot_start_lines_name_the_session_by_its_title():
+    text = between(WORK_MODEL, "- **Where it has none**", "- `<list>` holds")
+    assert "-n <title> -p '<prompt>'" in text
+    assert "'-n','<title>','-p','<prompt>'" in text
+    assert "`<title>` is the worker's title, `session-title worker <project> <branch>`" in text
+
+
+def test_visible_sessions_states_the_scheme_and_how_sessions_are_named_found_and_renamed():
+    text = between(WORK_MODEL, "### Visible sessions", "### Suite at a moved pin")
+    for rule in ("`work_tickets.py session-title <role> [<project>] [<topic>]`",
+                 "the SE agent's own session is `SE`", "`SE/<project>/integrator`",
+                 "`SE/<project>/worker/<ticket name>`", "`SE/<project>/integrator/<area>`",
+                 "`SE/<project>/reviewer/<pull request number>`", "`SE/<project>/researcher/<topic>`",
+                 "`SE/<project>/spike/<topic>`", "no other tag of its own",
+                 "`set_session_tags` with `add: [\"SE\"]`", "It removes no tag.",
+                 "`children: true`", "Never by tag", "never another, such as the host's `config:*`",
+                 "It cannot move a session under another parent"):
+        assert rule in text, rule
+    assert "`session-title`" in between(WORK_MODEL, "- **Commands that still run**",
+                                        "- **Commands that hand off**")
