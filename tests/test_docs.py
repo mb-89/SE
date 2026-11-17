@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "build_docs.py"
@@ -20,8 +26,71 @@ import build_docs  # noqa: E402
 # once at a time.
 
 
-def build(*arguments: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True)
+def build(*arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True, env=env)
+
+
+# The fake se's help, as the build's command-line chapter must show it; no tracked file outside
+# tests/ holds its first line.
+FAKE_HELP = "fake se help, the stand-in of the suite for the help of se\nusage: fake\n"
+RUNTIME = ROOT / ".se" / ".runtime" / "runme-se"
+CONF = ROOT / "RUNME.conf"
+
+
+def fakes(folder: Path, log: Path) -> None:
+    """Fill ``folder``, put first on PATH, with a fake for every need of SE's RUNME.conf, so the build's
+    RUNME installs nothing and reaches no network: ``se`` prints FAKE_HELP; each other command need
+    that PATH lacks exits 0; ``bash``, called as RUNME's ``get se`` line, writes RUNME's se need in its
+    working folder and records that folder in ``log``, and hands every other call to the real bash."""
+    folder.mkdir()
+    conf = CONF.read_text(encoding="utf-8")
+    home = Path(os.environ.get("HOME", str(Path.home())))
+    extra = [str(home / line.split()[1][2:]) for line in conf.splitlines() if line.startswith("path ~/")]
+    lookup = os.pathsep.join([os.environ.get("PATH", ""), *extra])
+    real_bash = shutil.which("bash", path=lookup)
+    assert real_bash, "the build's RUNME needs a bash on PATH"
+
+    def write(name: str, body: str) -> None:
+        (folder / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+        (folder / name).chmod(0o755)
+
+    write("se", f"printf '%s' '{FAKE_HELP}'\n")
+    for name in sorted({line.split()[3] for line in conf.splitlines()
+                        if line.startswith("need ") and line.split()[2] == "command"} - {"se", "bash"}):
+        if not shutil.which(name, path=lookup):
+            write(name, "exit 0\n")
+    write("bash", 'if [ "$*" = "scripts/bootstrap.sh --binary" ]; then\n'
+                  f'  pwd >>"{log}"\n'
+                  '  mkdir -p .se/.runtime && echo fake >.se/.runtime/runme-se\n'
+                  '  exit 0\nfi\n'
+                  f'exec "{real_bash}" "$@"\n')
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory, obs):
+    """The suite's one build of SE's manifest, with the fakes first on PATH: its result, its folder (the
+    page index.html, the Document docs.json, the fake bash's log bash.log), and the checkout's notes
+    and RUNME need as they were before it."""
+    folder = tmp_path_factory.mktemp("docs")
+    log = folder / "bash.log"
+    fakes(folder / "bin", log)
+    env = dict(os.environ, PATH=os.pathsep.join([str(folder / "bin"), os.environ.get("PATH", "")]))
+    before = snapshot()
+    runtime = RUNTIME.read_bytes() if RUNTIME.exists() else None
+    result = build("--destination", str(folder / "index.html"), "--document", str(folder / "docs.json"), env=env)
+    return result, folder, before, runtime
+
+
+def artifact_text(page: str) -> str:
+    """The text of obs-html's artifact data island, decoded from its gzip and base64."""
+    found = re.search(r'<script id="artifact-data"[^>]*data-encoding="gzip"[^>]*>([^<]*)</script>', page)
+    return gzip.decompress(base64.b64decode(found[1])).decode("utf-8") if found else page
+
+
+def files(pattern: str) -> list[Path]:
+    """The checkout's files matching ``pattern``, outside .git and .se."""
+    return [path for path in ROOT.rglob(pattern) if path.is_file()
+            and path.relative_to(ROOT).parts[0] not in (".git", ".se")]
 
 
 def nodes(items):
@@ -37,10 +106,9 @@ def snapshot() -> dict[Path, bytes]:
             if path.is_file()}
 
 
-def test_documentation_builds_without_warnings(tmp_path, obs):
+def test_documentation_builds_without_warnings(built):
+    result, tmp_path, before, _ = built
     destination = tmp_path / "index.html"
-    before = snapshot()
-    result = build("--destination", str(destination), "--document", str(tmp_path / "docs.json"))
     assert result.returncode == 0, result.stderr + result.stdout
     assert snapshot() == before
     assert destination.stat().st_size > 0
@@ -149,3 +217,51 @@ def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs):
     result = build("--source", str(vault / "docs.md"), "--destination", str(tmp_path / "out.html"))
     assert result.returncode == 1, result.stderr + result.stdout
     assert "long paragraph" in result.stderr
+
+
+def test_the_command_line_chapter_is_runmes_help_at_build_time(built):
+    result, folder, _, runtime = built
+    assert result.returncode == 0, result.stderr + result.stdout
+    first = FAKE_HELP.splitlines()[0]
+    assert first in artifact_text((folder / "index.html").read_text(encoding="utf-8"))
+    holders = []
+    for path in files("*"):
+        if path.relative_to(ROOT).parts[0] == "tests":
+            continue
+        try:
+            if first in path.read_text(encoding="utf-8"):
+                holders.append(path)
+        except (UnicodeDecodeError, OSError):
+            continue
+    assert holders == []
+    # RUNME ran its get se line once, in the build's copy, never in the checkout.
+    ran = (folder / "bash.log").read_text(encoding="utf-8").splitlines()
+    assert len(ran) == 1
+    assert not Path(ran[0]).resolve().is_relative_to(ROOT.resolve())
+    assert (RUNTIME.read_bytes() if RUNTIME.exists() else None) == runtime
+
+
+def test_the_readme_and_the_command_line_are_the_first_chapters():
+    entries = re.findall(r"^- \[\[([^|\]]+)", (ROOT / "docs.md").read_text(encoding="utf-8"), re.MULTILINE)
+    assert entries[:2] == ["README", "docs/command-line"]
+
+
+def test_the_command_line_note_holds_the_one_command_fence():
+    fence = re.compile(r"^\s*(`{3,}|~{3,})\s*cmd(\s+silent)?\s*$", re.MULTILINE)
+    holders = sorted(path.relative_to(ROOT).as_posix() for path in files("*.md")
+                     if fence.search(path.read_text(encoding="utf-8")))
+    assert holders == ["docs/command-line.md"]
+
+
+def test_the_docs_workflow_places_se_from_its_checkout_before_the_build():
+    workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
+    job = re.search(r"(?ms)^  build:\n(.*?)(?=^  \w|\Z)", workflow)[1]
+    steps = re.split(r"(?m)^      - ", job)[1:]
+
+    def first(text: str) -> int:
+        return next(index for index, step in enumerate(steps) if text in step)
+
+    place = first("bash scripts/bootstrap.sh --binary")
+    assert "working-directory" not in steps[place]
+    assert first("actions/setup-go") < place and first("actions/cache") < place
+    assert place < first("scripts/build_docs.py")
