@@ -1844,6 +1844,11 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
 
+work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]
+                              [topic]
+    print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or
+    `SE/<project>/<role>/<topic>` (work model, Visible sessions)
+
 work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]
                                [--scheduled-tasks FILE] [--environment FILE] [--strict]
     compare the fleet's settings the repository records (fleet/settings.toml) with the live ones,

@@ -3804,13 +3804,13 @@ def refuse_held_start(number: int, issue: dict[str, object], door: object | None
 def start_handed_off(
     root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
     cloud_agent: str | None, issue_file: Path | None, blockers_file: Path | None = None,
-) -> tuple[Path | None, str]:
+) -> tuple[Path | None, str, str]:
     """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
     GitHub tools answered it (`issue_file`); held while a blocker holds it (`refuse_held_start`,
     its states from `blockers_file` off the relay); the worktree as with gh; then the label change
     and the Started comment sent through kern's relay where it serves the checkout, else printed as
-    steps for the session's GitHub tools. The worktree (None for a cloud worker) and the issue's
-    URL."""
+    steps for the session's GitHub tools. The worktree (None for a cloud worker), the issue's
+    URL and its branch."""
     door = relay_door(root, repo)
     if door is not None:
         refuse_while_paused("start", door.paused(repo))
@@ -3848,7 +3848,7 @@ def start_handed_off(
                                      if key not in ("owner", "repo")})
 
         run_plan(plan, {**workflow_actions(door), "assign": assign})
-    return path, web_url(issue) or issue_url(repo, number)
+    return path, web_url(issue) or issue_url(repo, number), branch
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
@@ -4428,6 +4428,59 @@ def name_refusal(name: str) -> str:
         + f": a name is 1 to {NAME_WORDS} words of lowercase letters and digits joined by single "
         f"dashes, such as `{NAME_EXAMPLE}`; keep the words that matter, "
         f"for example `{hint}` (work model, Issues)")
+
+# Visible sessions (work model, "Visible sessions"): every session SE's roles start carries the tag
+# SESSION_TAG and a title by this scheme, so the host's sidebar shows one SE section. The SE agent's
+# own session is `SE`; a project's integrator `SE/<project>/integrator`, a sub-integrator
+# `SE/<project>/integrator/<area>`; every other role `SE/<project>/<role>/<topic>`, a worker's topic
+# being its ticket name exactly as the name rule accepts it (fleet-check finds it by its branch).
+SESSION_TAG = "SE"
+#: Each role a session title names, and whether its topic is refused, optional or required.
+SESSION_ROLES = {"se": "refused", "integrator": "optional", "worker": "required",
+                 "reviewer": "required", "researcher": "required", "spike": "required"}
+SESSION_TOPICS = {"integrator": "an area", "worker": "its ticket name",
+                  "reviewer": "the pull request's number", "researcher": "a topic",
+                  "spike": "a topic"}
+
+
+def session_title(role: str, project: str | None = None, topic: str | None = None) -> str:
+    """The title of a session SE's `role` starts for `project` (the repository's name as GitHub
+    spells it) and `topic`; refused, naming the remedy, for an unknown role, a missing or extra
+    project or topic, or a topic outside the name rule."""
+    if role not in SESSION_ROLES:
+        raise QueueError(f"session-title: unknown role {role!r}: give one of "
+                         f"{', '.join(SESSION_ROLES)} (work model, Visible sessions)")
+    rule = SESSION_ROLES[role]
+    if rule == "refused":
+        if project is not None or topic is not None:
+            raise QueueError("session-title: the SE agent's own session is `SE` and takes no "
+                             "project or topic: give the role alone (work model, Visible sessions)")
+        return SESSION_TAG
+    if not project:
+        raise QueueError(f"session-title: a {role}'s title names its project: give the "
+                         "repository's name as GitHub spells it, such as `SE` or `obs` "
+                         "(work model, Visible sessions)")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", project):
+        raise QueueError(f"session-title: {project!r} is not a repository's name: give the name "
+                         "without its owner, such as `SE` or `obs` (work model, Visible sessions)")
+    if topic is None:
+        if rule == "required":
+            raise QueueError(f"session-title: a {role}'s title names {SESSION_TOPICS[role]}: give "
+                             "it after the project (work model, Visible sessions)")
+        return f"{SESSION_TAG}/{project}/{role}"
+    if role == "reviewer":
+        if not re.fullmatch(r"[1-9][0-9]*", topic):
+            raise QueueError(f"session-title: a reviewer's topic is the pull request's number, "
+                             f"not {topic!r}: give the number alone, such as `1447` "
+                             "(work model, Visible sessions)")
+    else:
+        refusal = name_refusal(topic)
+        if refusal or topic != topic.strip():
+            raise QueueError(f"session-title: a {role}'s topic is {SESSION_TOPICS[role]}, and "
+                             + (refusal or f"{topic!r} has surrounding spaces; drop them"))
+    return f"{SESSION_TAG}/{project}/{role}/{topic}"
+
+
 ROUTED_FROM_PATTERN = re.compile(r"^Routed from: (.+?)[ \t]*$", re.MULTILINE)
 
 
@@ -10076,21 +10129,35 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
                   "as one JSON list; start refuses while one is open or closed as not planned, "
                   "or its state is not known"))
 def run_start(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
     if hand_off():
-        path, url = start_handed_off(root, args.issue, resolve_repo(root, args.repo),
-                                     args.worktree_root, args.create, args.cloud_agent,
-                                     args.issue_body, args.blockers)
-        sent = relay_door(root, resolve_repo(root, args.repo)) is not None
+        path, url, branch = start_handed_off(root, args.issue, repo, args.worktree_root,
+                                             args.create, args.cloud_agent, args.issue_body,
+                                             args.blockers)
+        sent = relay_door(root, repo) is not None
     else:
         path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
-        url = None if path is None else str(
-            fetch_issue(root, args.issue, resolve_repo(root, args.repo))["url"])
+        issue = {} if path is None else fetch_issue(root, args.issue, repo)
+        url, branch = str(issue.get("url")), str(issue.get("title", ""))
         sent = True
     if path is not None:
-        print(f"Launch worker: agent=worker issue={url} worktree={path}")
+        title = session_title("worker", repo.rsplit("/", 1)[-1], branch)
+        print(f"Launch worker: agent=worker issue={url} worktree={path} title={title}")
     print(f"Started #{args.issue}" if sent else
           f"Started #{args.issue} here; run the GitHub steps above to label it and post its "
           "Started comment")
+    return 0
+
+
+@command("session-title", "print the title of a session a role starts: `SE`, "
+                         "`SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` "
+                         "(work model, Visible sessions)",
+         arg("role", choices=tuple(SESSION_ROLES)),
+         arg("project", nargs="?", help="the repository's name as GitHub spells it, such as SE"),
+         arg("topic", nargs="?", help="a worker's ticket name, a reviewer's pull request number, "
+                                      "an integrator's area or a topic"))
+def run_session_title(root: None, args: argparse.Namespace) -> int:
+    print(session_title(args.role, args.project, args.topic))
     return 0
 
 
@@ -10379,7 +10446,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "metrics", "config", "start", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
@@ -10396,6 +10463,9 @@ READ_ONLY_COMMANDS = {
               "todo, held and done. Use it before and after each ticket to see what remains.",
     "config": "Shows the repository's and the machine-local settings in effect for a worktree. Use "
               "it when a command does not behave as expected, to see which settings it read.",
+    "session-title": "Prints the title of a session a role starts, by the scheme SE/<project>/"
+                     "<role>/<topic>. Use it before starting a session, to give the host's "
+                     "session tool its title.",
     "ready": "Lists the ready work issues a session may start now. Use it to choose the next "
              "package to start.",
     "capacity": "Shows how many workers may run now: the local slots, or unlimited in the cloud. "

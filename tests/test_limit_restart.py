@@ -93,6 +93,13 @@ def test_only_an_undelivered_in_progress_issue_a_session_names_is_reported():
     assert "session_b" in one.what  # one finding per issue, its newest stopped session
 
 
+@pytest.mark.parametrize("branch", [BRANCH, "limited-worker"])
+def test_a_stopped_session_titled_by_the_session_scheme_is_found_by_its_branch(branch):
+    title = work_tickets.session_title("worker", "obs", branch)
+    one, = found([session(result("Usage limit reached"), title=title)], in_progress={7: branch})
+    assert one.branch == branch and "session_a" in one.what
+
+
 def test_the_setting_is_off_unless_set_true():
     assert limits.restart({}) is False
     assert limits.restart({"restart_after_limit": True}) is True

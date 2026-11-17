@@ -91,6 +91,13 @@ its tools.
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
   Start exactly one integrator session for each repository you dispatch into; its prompt names the
   main checkout and your session (for escalations).
+  - Every session you start is titled by `work_tickets.py session-title` and tagged `SE`, as the
+    work model's [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says: an integrator
+    `session-title integrator <project>`, so `SE/<project>/integrator`.
+  - Find a running integrator by that exact title, or among the sessions you started
+    (`list_sessions` with `children: true`), never by tag.
+  - At your first turn, title your own session `SE` and add the tag `SE`; on the person's request,
+    rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
   [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) says, then answer with a
   comment on the escalated issue or a request to the session that escalated.
@@ -105,6 +112,8 @@ its tools.
     the issue yourself, or take it to the person as a decision.
 - **Reviews**: on the person's request "review PR #n", start one [reviewer](reviewer.md) session
   for it, as an independent session on the model the workers run or a stronger one, never a weaker.
+  - Its title is `session-title reviewer <project> <pull request number>`, its tag `SE`
+    ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)).
   - Its prompt names only the reviewer agent, the pull request, its repository and your session
     (in the cloud, the prompt the README's [Claude Code cloud](../../README.md#claude-code-cloud)
     names).

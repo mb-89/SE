@@ -157,7 +157,10 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
    (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
    It also gets a worker session whose `workspace` is that worktree folder; local workers only
-   within capacity. Its prompt contains only:
+   within capacity. You start it yourself, so it is your child, titled
+   `work_tickets.py session-title worker <project> <branch>` (the `title=` of `start`'s
+   `Launch worker:` line) and tagged `SE`, no other tag
+   ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)). Its prompt contains only:
 
    ```text
    Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).

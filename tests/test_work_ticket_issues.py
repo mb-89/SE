@@ -2101,7 +2101,8 @@ def test_start_creates_a_worktree_from_the_newest_main_and_marks_the_issue(
 
     assert run(main_checkout, "start", "5") == 0
     worktree = trees / "feature-example-20261104"
-    assert f"Launch worker: agent=worker issue={URL} worktree={worktree}" in capsys.readouterr().out
+    assert (f"Launch worker: agent=worker issue={URL} worktree={worktree} "
+            f"title=SE/repo/worker/{BRANCH}") in capsys.readouterr().out
     branch = git_run(worktree, "branch", "--show-current").stdout.strip()
     assert branch == BRANCH
     subject = git_run(worktree, "log", "-1", "--format=%s").stdout.strip()
@@ -2246,7 +2247,8 @@ def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_ste
     assert '"labels": "<the issue\'s labels without ready>"' in steps[1]
     assert '"labels": "<the issue\'s labels with in-progress>"' in steps[2]
     assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[3]
-    assert f"Launch worker: agent=worker issue={URL} worktree={worktree}" in out
+    assert (f"Launch worker: agent=worker issue={URL} worktree={worktree} "
+            f"title=SE/repo/worker/{BRANCH}") in out
     assert "Started #5 here; run the GitHub steps above" in out
 
 
@@ -7661,3 +7663,44 @@ def test_without_a_local_list_only_the_public_list_runs(worktree, gh, capsys, fo
     error = capsys.readouterr().err
     assert "Goal: holds a term of the public list" in error and "local list" not in error
     assert "alice" not in error
+
+
+@pytest.mark.parametrize(("arguments", "title"), [
+    (("se",), "SE"),
+    (("integrator", "SE"), "SE/SE/integrator"),
+    (("integrator", "obs", "docs"), "SE/obs/integrator/docs"),
+    (("worker", "obs", "compare-two-builds"), "SE/obs/worker/compare-two-builds"),
+    (("worker", "obs", "feat/table-live-source-20261116"),
+     "SE/obs/worker/feat/table-live-source-20261116"),
+    (("reviewer", "SE", "1447"), "SE/SE/reviewer/1447"),
+    (("researcher", "obs", "graph-layouts"), "SE/obs/researcher/graph-layouts"),
+    (("spike", "SE", "kern-relay"), "SE/SE/spike/kern-relay"),
+])
+def test_session_title_names_each_role_by_the_scheme(arguments, title, capsys):
+    assert work_tickets.session_title(*arguments) == title
+    assert work_tickets.main(["session-title", *arguments]) == 0
+    assert capsys.readouterr().out == f"{title}\n"
+
+
+@pytest.mark.parametrize(("arguments", "remedy"), [
+    (("captain", "SE"), "give one of se, integrator, worker"),
+    (("se", "SE"), "give the role alone"),
+    (("se", None, "topic"), "give the role alone"),
+    (("integrator",), "give the repository's name as GitHub spells it"),
+    (("worker", "owner/obs", "topic"), "give the name without its owner"),
+    (("worker", "obs"), "names its ticket name: give it after the project"),
+    (("reviewer", "SE"), "names the pull request's number"),
+    (("spike", "SE"), "names a topic"),
+    (("reviewer", "SE", "pr-12"), "give the number alone"),
+    (("worker", "obs", "Compare_Builds"), "keep the words that matter"),
+    (("integrator", "obs", "one-two-three-four-five-six"), "it has 6 words"),
+])
+def test_session_title_refuses_what_breaks_the_scheme_naming_the_remedy(arguments, remedy):
+    with pytest.raises(work_tickets.QueueError, match="session-title") as refused:
+        work_tickets.session_title(*arguments)
+    assert remedy in str(refused.value)
+
+
+def test_the_session_title_command_reports_a_refusal(capsys):
+    assert work_tickets.main(["session-title", "worker", "obs"]) == 1
+    assert "names its ticket name" in capsys.readouterr().err

@@ -84,6 +84,15 @@ group = "Integration"
 help = "start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout"
 class = "batch"
 
+[commands."work_tickets.py session-title"]
+usage = "work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]\n                              [topic]"
+summary = "print the title of a session a role starts: `SE`, ..."
+group = "Integration"
+help = "print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions)"
+class = "batch"
+read-only = true
+mcp = "Prints the title of a session a role starts, by the scheme SE/<project>/<role>/<topic>. Use it before starting a session, to give the host's session tool its title."
+
 [commands."work_tickets.py ready"]
 usage = "work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]"
 summary = "list startable ready work issues"
