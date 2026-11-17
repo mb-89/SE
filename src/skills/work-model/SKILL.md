@@ -426,15 +426,22 @@ Every session SE's roles start carries the tag `SE` and a title by one scheme, s
 sidebar shows one SE section, each role's sessions nested under the session that started them.
 `work_tickets.py session-title <role> [<project>] [<topic>]` prints the title, its one owner.
 
-- **The scheme**: the SE agent's own session is `SE`; a project's integrator
-  `SE/<project>/integrator`, `<project>` being the repository's name as GitHub spells it (`SE`,
-  `obs`).
-  - Below the integrator, started by it: a worker `SE/<project>/worker/<ticket name>`, its work
-    issue's title exactly as the [name rule](#issues) accepts it (the old form included), never
-    shortened, as fleet-check finds a worker's session by its branch in the title; a
-    sub-integrator `SE/<project>/integrator/<area>`.
-  - Beside the integrator, started by the SE agent: `SE/<project>/reviewer/<pull request
-    number>`, `SE/<project>/researcher/<topic>` and `SE/<project>/spike/<topic>`.
+- **The scheme**: the SE agent's own session is `SE`; `<project>` is the repository's name as
+  GitHub spells it (`SE`, `obs`).
+
+  | Session | Where it sits | Title |
+  |---|---|---|
+  | The SE agent's own | — | `SE` |
+  | A project's integrator | — | `SE/<project>/integrator` |
+  | A worker | below the integrator, started by it | `SE/<project>/worker/<ticket name>` |
+  | A sub-integrator | below the integrator, started by it | `SE/<project>/integrator/<area>` |
+  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<pull request number>` |
+  | A researcher | beside the integrator, started by the SE agent | `SE/<project>/researcher/<topic>` |
+  | A spike | beside the integrator, started by the SE agent | `SE/<project>/spike/<topic>` |
+
+  - A worker's `<ticket name>` is its work issue's title exactly as the [name rule](#issues)
+    accepts it (the old form included), never shortened, as fleet-check finds a worker's session
+    by its branch in the title.
   - A topic and an area follow the name rule. No role starts researchers, spikes or
     sub-integrators yet; one started at the person's request takes its title by the scheme.
 - **Starting a session**: a role starts it itself with the host's session tool, so it is the
@@ -697,19 +704,14 @@ An adapter is a command that writes to an external system (a tracker, a wiki, a 
 Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](../../../scripts/adapter_sync.py)
 is its reusable part, imported from the project's se module.
 
-- **One command, dry run by default**: it reads the external state, computes the plan and the
-  merge, prints a complete change and conflict report, and writes nothing.
-- **An explicit `--apply`** performs the writes (`add_apply_argument`).
-- **Preflight on apply**: the apply repeats the reads; an object whose external revision changed
-  since the plan was computed is not written, and the report names it (`preflight`).
-- **One logged write path**: every external request goes through one transport (`Transport`),
-  whose verb guard refuses any non-read request outside apply mode, naming its method and path,
-  and whose log (method, path, status, time; never headers or bodies) is the audit. No side
-  scripts, no second client.
-- **Secrets**: read from the environment at run time (`secret_from_env`); never printed, logged,
-  committed or stored, and scrubbed from every recorded response (`Transport.recorded`).
-- **Artifacts**: the dry run's plan and the apply's result are written as machine-readable files
-  (sorted JSON, `write_artifact`), so reviews and tests compare them.
+| Part | Its reusable part | What every adapter does |
+|---|---|---|
+| One command, dry run by default | — | it reads the external state, computes the plan and the merge, prints a complete change and conflict report, and writes nothing |
+| An explicit `--apply` | `add_apply_argument` | performs the writes |
+| Preflight on apply | `preflight` | the apply repeats the reads; an object whose external revision changed since the plan was computed is not written, and the report names it |
+| One logged write path | `Transport` | every external request goes through one transport, whose verb guard refuses any non-read request outside apply mode, naming its method and path, and whose log (method, path, status, time; never headers or bodies) is the audit. No side scripts, no second client. |
+| Secrets | `secret_from_env`, `Transport.recorded` | read from the environment at run time; never printed, logged, committed or stored, and scrubbed from every recorded response |
+| Artifacts | `write_artifact` | the dry run's plan and the apply's result are written as machine-readable files (sorted JSON), so reviews and tests compare them |
 
 ## Commands and shell
 
@@ -795,49 +797,44 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
     line.
 - **Every other command** fails, naming itself, the missing `gh` and this section.
-- **Every other step by hand**, as that command's `--help` and its role's procedure document it,
-  for example:
-  - `intake`: `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`,
-    method `get`) and its comments (method `get_comments`) as the tools answered them; it writes
-    the tickets, the snapshot and both read records as `intake --issue` does. Where kern's relay
-    serves the checkout, `intake --issue <n>` reads both from the relay instead (no file).
-    - The first `move --to held` after it reads the issue again: `move --issue-body <file>`, the
-      issue as the tools answer it then. An `updated_at` later than intake's with a changed body
-      refuses the hold until `intake` has read the new answer; with the body unchanged it passes,
-      naming the update. A body edited after the session started is caught before any work.
-  - `refresh`: read the issue and its comments; apply what changed to the tickets; record the
-    comments read with `comments-read --count <n> --newest <id>` and the body read with
-    `body-read --body-file <file>`, from what the GitHub tools read. Where kern's relay serves
-    the checkout, `refresh` reads the issue and its comments from the relay instead.
-  - `intake --outside`: read each `[outside]` repository's open issues and their comments, and
-    keep those [Outside issues](#outside-issues) leaves.
-  - `deliver`: `sync`; `push`; open the pull request to the integration branch, titled like the
-    work issue, with the description `pr-body --issue-body <file> --issue-url <url>
-    --field-report .se/work/field-report.md` prints (the closing line, then the report between
-    its markers); send the notification. No issue is filed.
-    - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
-      <file>` (its description as the GitHub tools read it) records it for the Stop hook
-      ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
-    - The field report comes from `field-report.md`, which `field-report --draft
-      .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
-      the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
-      without `--worktree`.
-    - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
-      <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
-      the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
-    - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
-      branch.
-    - Its warning on platform code ([worker](../../agents/worker.md#procedure), "Platform code")
-      reads the work pull request's check runs from kern's relay, for the pull request `stop-check
-      --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
-      `get_check_runs`.
-    - A commit after delivery changes the tip: run the check again and update the pull request's
-      description in place.
-    - A refused report is fixed and checked again, never delivered.
-  - `start`: start the worker session with the host's session tool, on an outcome branch named
-    like the work issue and based on the integration branch, titled by `session-title` (the
-    `title=` of `start`'s `Launch worker:` line) and tagged `SE` ([Visible sessions](#visible-sessions)).
-  - `integrate`, `refs request` and `refs apply`: [Land](#land).
+
+Every other step is done by hand, as that command's `--help` and its role's procedure document it,
+for example:
+
+| Step | By hand |
+|---|---|
+| `intake` | `intake --issue-body <file> --comments-file <file>`, the issue (`issue_read`, method `get`) and its comments (method `get_comments`) as the tools answered them; it writes the tickets, the snapshot and both read records as `intake --issue` does. Where kern's relay serves the checkout, `intake --issue <n>` reads both from the relay instead (no file). |
+| `refresh` | read the issue and its comments; apply what changed to the tickets; record the comments read with `comments-read --count <n> --newest <id>` and the body read with `body-read --body-file <file>`, from what the GitHub tools read. Where kern's relay serves the checkout, `refresh` reads the issue and its comments from the relay instead. |
+| `intake --outside` | read each `[outside]` repository's open issues and their comments, and keep those [Outside issues](#outside-issues) leaves. |
+| `deliver` | `sync`; `push`; open the pull request to the integration branch, titled like the work issue, with the description `pr-body --issue-body <file> --issue-url <url> --field-report .se/work/field-report.md` prints (the closing line, then the report between its markers); send the notification. No issue is filed. |
+| `start` | start the worker session with the host's session tool, on an outcome branch named like the work issue and based on the integration branch, titled by `session-title` (the `title=` of `start`'s `Launch worker:` line) and tagged `SE` ([Visible sessions](#visible-sessions)). |
+| `integrate`, `refs request` and `refs apply` | [Land](#land). |
+
+- `intake`: the first `move --to held` after it reads the issue again: `move --issue-body
+  <file>`, the issue as the tools answer it then. An `updated_at` later than intake's with a
+  changed body refuses the hold until `intake` has read the new answer; with the body unchanged it
+  passes, naming the update. A body edited after the session started is caught before any work.
+- `deliver`:
+  - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
+    <file>` (its description as the GitHub tools read it) records it for the Stop hook
+    ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
+  - The field report comes from `field-report.md`, which `field-report --draft
+    .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
+    the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
+    without `--worktree`.
+  - It passes `field-report --check .se/work/field-report.md --worktree <worktree> --issue-body
+    <file> --comment-count <n> --newest-comment <id>` (the work issue's body, or the issue as
+    the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
+  - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
+    branch.
+  - Its warning on platform code ([worker](../../agents/worker.md#procedure), "Platform code")
+    reads the work pull request's check runs from kern's relay, for the pull request `stop-check
+    --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
+    `get_check_runs`.
+  - A commit after delivery changes the tip: run the check again and update the pull request's
+    description in place.
+  - A refused report is fixed and checked again, never delivered.
+
 - **Never `add_repo`**: the host's tool that attaches a repository stops the session at an
   approval prompt no one answers; a role works with the repositories its session started with.
 - **Commit trailers**: the project's [`commit_trailer`](#what-the-project-provides) wins over a

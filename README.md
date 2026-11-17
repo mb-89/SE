@@ -487,23 +487,15 @@ url = "https://github.com/<owner>/style.git"
 version = "^1.4"                             # in place of ref: a semver range of the module's tags
 ```
 
-- `url`: the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in
-  the machine-local file below, never here. A URL starting `../` or `./` is relative to the
-  checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository
-  `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin
-  refuses it.
-- `ref`: the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only
-  releases; `update` moves it.
-- `version`: in place of `ref`, a semantic version range of the module's release tags
-  `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases):
-  `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly).
-  A module pins one of `ref` and `version`.
-- `se.lock`: next to `se.toml`, it records the highest tag matching each `version` range, with its
-  version and commit; `sync` and `update` write it and the repository commits it.
-- `path`: optional relative directory inside the module; without it the whole module is used.
-- Module names use letters, digits, `.`, `_` and `-`. Other keys are errors.
-- The module named `se` is se itself; its pin is the se the [public check](AGENTS.md#public-safety)
-  must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits.
+| Key | Meaning |
+|---|---|
+| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin refuses it. |
+| `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
+| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
+| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
+| `path` | optional relative directory inside the module; without it the whole module is used. |
+| Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
+| The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
@@ -1041,32 +1033,24 @@ limit_seconds = 60
 paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touches one
 ```
 
-- `command`: the project's complete suite, an argument array run without a shell from the project
-  root. `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs
-  it the same way for a worker's before-and-after times.
-- `setup`: optional and of the same form; it installs the test dependencies (packages, browsers)
-  and runs first. The gate prints its time and its last lines apart, and that time does not count
-  against the budget. A failing setup stops the run before the suite, naming the command and its
-  output.
-- `target_seconds` (default 60): above it the gate warns.
-- `limit_seconds` (default 120): the budget, judged on one reference run, CI's (below).
-- `over_limit` (default `"fail"`): what a run over the limit does. One rule holds for every
-  project: an overrun fails, as below. A project that declares `"warn"` takes the other side of
-  the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but
-  nothing stops the suite from creeping past its budget; each overrun only warns, naming the
-  setting.
-- `shards` (default 1): how many shards CI's `check` runs the suite in, side by side (below).
-  SE's own suite, unsharded, keeps the default: its limit is the whole suite's.
+| Key | Default | Meaning |
+|---|---|---|
+| `command` | — | the project's complete suite, an argument array run without a shell from the project root. `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it the same way for a worker's before-and-after times. |
+| `setup` | optional | of the same form as `command`; it installs the test dependencies (packages, browsers) and runs first. The gate prints its time and its last lines apart, and that time does not count against the budget. A failing setup stops the run before the suite, naming the command and its output. |
+| `target_seconds` | 60 | above it the gate warns. |
+| `limit_seconds` | 120 | the budget, judged on one reference run, CI's (below). |
+| `over_limit` | `"fail"` | what a run over the limit does. One rule holds for every project: an overrun fails, as below. A project that declares `"warn"` takes the other side of the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but nothing stops the suite from creeping past its budget; each overrun only warns, naming the setting. |
+| `shards` | 1 | how many shards CI's `check` runs the suite in, side by side (below). SE's own suite, unsharded, keeps the default: its limit is the whole suite's. |
+| `beside.<name>` | optional | a suite in another toolchain, such as SE's kern Go tests ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the root, default `.`) after the complete suite, wherever the suite runs: `integrate`, `work_tickets.py suite` and CI's `check`. |
+
+- `shards`:
   - Over 1, `target_seconds` and `limit_seconds` are each shard's, which CI's slowest shard is
     held to.
   - A run of the whole suite (`integrate`, a worker's `suite`) is judged against `shards` times
     each, and CI's time it reads is held to the limit per shard.
   - It must be the `shards:` a workflow passes the `suite-time` action: `se_workflows.py check`
     fails on another literal number, naming both files and both numbers ([Workflows](#workflows)).
-- `beside.<name>`: optional, a suite in another toolchain, such as SE's kern Go tests
-  ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
-  root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
-  `work_tickets.py suite` and CI's `check`.
+- `beside.<name>`:
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
@@ -1469,22 +1453,19 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 "https://github.com/" = "https://mirror.example.com/github/"   # prefix rewrite, longest wins
 ```
 
-- `[paths]`: a local checkout per module name. If the directory exists, the module comes from it as
-  it is (working tree, any commit, no git step) and is never updated. If the directory is missing,
-  the pin is used. Relative paths are relative to the file, `~` is expanded.
-- A local checkout's version: `sync` and `status` report the version its `se.toml` sets, and
-  whether the module's `version` range admits it. A malformed version, or none where the module pins
-  a range, is an error naming that file.
-- `[urls]`: prefix rewrites applied to `url` before any git step, for example a private mirror of a
-  public host. The longest matching prefix wins.
-- `[hooks] core = "off"`, or `SE_HOOK_CORE=off` in the environment, which answers first: SE's
-  session hooks then start no core and post to none, and nothing is uninstalled. The start still
-  refreshes, syncs and greets, and the Stop check still answers.
-  - Set in the file, it takes effect at the next session start.
-  - It does not reach the MCP server, which can start the core by itself: a host switches its own
-    MCP server off. `SE_KERN=off` is another switch, which keeps commands direct.
-- `[paths] se = "<the installed SE's folder>"`: this machine's SE stays at its version, because the
-  start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)).
+| Setting | Meaning |
+|---|---|
+| `[paths]` | a local checkout per module name. If the directory exists, the module comes from it as it is (working tree, any commit, no git step) and is never updated. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
+| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the module's `version` range admits it. A malformed version, or none where the module pins a range, is an error naming that file. |
+| `[urls]` | prefix rewrites applied to `url` before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
+| `[hooks] core = "off"` | or `SE_HOOK_CORE=off` in the environment, which answers first: SE's session hooks then start no core and post to none, and nothing is uninstalled. The start still refreshes, syncs and greets, and the Stop check still answers. |
+| `[paths] se = "<the installed SE's folder>"` | this machine's SE stays at its version, because the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)). |
+
+`[hooks] core = "off"`:
+
+- Set in the file, it takes effect at the next session start.
+- It does not reach the MCP server, which can start the core by itself: a host switches its own
+  MCP server off. `SE_KERN=off` is another switch, which keeps commands direct.
 
 Work queue tracker, worktree and mirror settings are documented in the
 [work model](src/skills/work-model/SKILL.md#what-the-project-provides), the `[outside]` table in its
@@ -1503,27 +1484,24 @@ uv run python <se>/scripts/se_modules.py update --all
 uv run python <se>/scripts/se_modules.py path <name>
 ```
 
-- `sync`: a module with an existing local path is used from there; any other is cloned or fetched into
-  `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry
-  that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never
-  overwritten. Consuming repositories ignore `.se/`.
-- `status`: one line per module with its source (`local` or `pinned`), the directory it is used from,
-  the pin and the drift. It never fetches. The drift is:
+| Command | What it does |
+|---|---|
+| `sync` | a module with an existing local path is used from there; any other is cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Consuming repositories ignore `.se/`. |
+| `status` | one line per module with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
+| `update` | fetches the module (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
+| `path` | prints the directory a module is used from (its `path` included), for tools that load it. |
+| `--root` and `--local` | `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>` reads another machine-local file than `~/.se/local.toml`. |
+
+- `status`'s drift is:
   - for a local path, the commits ahead of and behind the pin, uncommitted changes, or a pin the
     checkout does not have yet;
   - for a pinned module, whether the clone is at the pin and, for a `version` range, a newer
     matching tag the clone knows ("run update").
-- `update`: fetches the module (through `.se/modules/<name>`, also when a local path is used),
-  resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that
-  `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It
-  does not commit; commit the new pin with the commit list.
+- `update`:
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
     there; change the range).
   - `update se` also regenerates the project's copies of SE's workflows and actions at the new
     pin ([Workflows](#workflows)), so they run the version `se.toml` or `se.lock` pins.
-- `path`: prints the directory a module is used from (its `path` included), for tools that load it.
-- `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>`
-  reads another machine-local file than `~/.se/local.toml`.
 - Git runs without prompts; credentials come from the machine's git setup.
 
 ### Workflows
@@ -1669,151 +1647,52 @@ tickets hold it to the work model's [name rule](src/skills/work-model/SKILL.md#i
 `components/tickets`: The worker's local ticket queue under .se/work: tickets, notes, discovery
 evidence and the worktree's close.
 
-```text
-work_tickets.py close --worktree WORKTREE [--integration-target INTEGRATION_TARGET]
-                      [--remove] [--json]
-    check or close an integrated worktree
-
-work_tickets.py create --worktree WORKTREE --id ID --title TITLE [--acceptance ACCEPTANCE]
-    create a ticket in todo
-
-work_tickets.py init --worktree WORKTREE
-    initialize the ticket queue
-
-work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done} [--issue-body FILE]
-    move a ticket between states
-
-work_tickets.py probe --worktree WORKTREE --command PROBE_COMMAND --output OUTPUT
-    append a command and output path to the discovery evidence index
-
-work_tickets.py review-note --worktree WORKTREE --note NOTE --disposition DISPOSITION
-                            [--backlog-ref BACKLOG_REF]
-    append a local note disposition
-
-work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGRATION_TARGET]
-    report queue status
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `work_tickets.py close` | `work_tickets.py close --worktree WORKTREE [--integration-target INTEGRATION_TARGET] [--remove] [--json]` | check or close an integrated worktree |
+| `work_tickets.py create` | `work_tickets.py create --worktree WORKTREE --id ID --title TITLE [--acceptance ACCEPTANCE]` | create a ticket in todo |
+| `work_tickets.py init` | `work_tickets.py init --worktree WORKTREE` | initialize the ticket queue |
+| `work_tickets.py move` | `work_tickets.py move --worktree WORKTREE --id ID --to {todo,held,done} [--issue-body FILE]` | move a ticket between states |
+| `work_tickets.py probe` | `work_tickets.py probe --worktree WORKTREE --command PROBE_COMMAND --output OUTPUT` | append a command and output path to the discovery evidence index |
+| `work_tickets.py review-note` | `work_tickets.py review-note --worktree WORKTREE --note NOTE --disposition DISPOSITION [--backlog-ref BACKLOG_REF]` | append a local note disposition |
+| `work_tickets.py status` | `work_tickets.py status --worktree WORKTREE [--json] [--integration-target INTEGRATION_TARGET]` | report queue status |
 
 #### Issues
 
 `components/issues`: Work issues and their comments as a role reads and files them: intake, refresh,
 escalation, filing, routing, the backlog, blockers and the fleet's pause.
 
-```text
-work_tickets.py backlog file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
-                             --fields FILE) [--hold] [--repo REPO]
-    file one backlog issue with both labels, creating backlogged where missing
-
-work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]
-    list the open backlog issues, or those whose title or body matches --search
-
-work_tickets.py block --worktree WORKTREE --by BLOCKER [--repo REPO] issue
-    link an issue to a native blocker
-
-work_tickets.py body-read --worktree WORKTREE [--body-file FILE]
-    record the work issue's body as read (intake records it; field-report --check and deliver refuse
-    a body changed after it)
-
-work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST
-    record the work issue's comments as read: their count and the newest one's id (intake records
-    them; field-report --check and deliver refuse comments after it)
-
-work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]
-    comment a question on an issue and label it escalated
-
-work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE |
-                     --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]
-    for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only
-    once its blockers are linked
-
-work_tickets.py intake --worktree WORKTREE (--issue ISSUE | --issue-body FILE | --outside)
-                       [--comments-file FILE] [--repo REPO] [--discovery]
-                       [--probe-root PROBE_ROOT]
-    read the work issue with gh, or from the files your GitHub tools' answers were saved to, and
-    write its tickets into todo; it lists the comments, each with its author, a line ending [not the
-    repository owner] where the repository's owner account did not write it
-    (scripts/comment_authors.py)
-
-work_tickets.py paused [--worktree WORKTREE] [--repo REPO]
-    whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in
-    the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue,
-    start, integrate and route refuse while paused. Without gh it prints the search as a plan for
-    the session's GitHub tools, exit code 2
-
-work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]
-    re-read the work issue and its comments and report changes; each new or edited comment with its
-    author, marked as intake marks it (--json: byOwner)
-
-work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
-                      (--routing-file ROUTING_FILE | --fields FILE) [--hold]
-                      [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY]
-                      [--issue-association ISSUE_ASSOCIATION] [--repo REPO]
-                      issue
-    for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label
-    it work, ready and repo:<name>, and append the routing section with the handled record to its
-    body
-
-work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue
-    for SE: check an issue filed with --hold against its form again and, where it passes, remove
-    off-form and give a work issue ready back
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `work_tickets.py backlog file` | `work_tickets.py backlog file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--repo REPO]` | file one backlog issue with both labels, creating backlogged where missing |
+| `work_tickets.py backlog list` | `work_tickets.py backlog list --worktree WORKTREE [--search SEARCH] [--repo REPO]` | list the open backlog issues, or those whose title or body matches --search |
+| `work_tickets.py block` | `work_tickets.py block --worktree WORKTREE --by BLOCKER [--repo REPO] issue` | link an issue to a native blocker |
+| `work_tickets.py body-read` | `work_tickets.py body-read --worktree WORKTREE [--body-file FILE]` | record the work issue's body as read (intake records it; field-report --check and deliver refuse a body changed after it) |
+| `work_tickets.py comments-read` | `work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST` | record the work issue's comments as read: their count and the newest one's id (intake records them; field-report --check and deliver refuse comments after it) |
+| `work_tickets.py escalate` | `work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]` | comment a question on an issue and label it escalated |
+| `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
+| `work_tickets.py intake` | `work_tickets.py intake --worktree WORKTREE (--issue ISSUE \| --issue-body FILE \| --outside) [--comments-file FILE] [--repo REPO] [--discovery] [--probe-root PROBE_ROOT]` | read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo; it lists the comments, each with its author, a line ending [not the repository owner] where the repository's owner account did not write it (scripts/comment_authors.py) |
+| `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
+| `work_tickets.py refresh` | `work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]` | re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner) |
+| `work_tickets.py route` | `work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE] (--routing-file ROUTING_FILE \| --fields FILE) [--hold] [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION] [--repo REPO] issue` | for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label it work, ready and repo:<name>, and append the routing section with the handled record to its body |
+| `work_tickets.py unhold` | `work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue` | for SE: check an issue filed with --hold against its form again and, where it passes, remove off-form and give a work issue ready back |
 
 #### Delivery
 
 `components/delivery`: A worker's delivery: the field report and its guard, sync and identity, the
 gated push and the pull request, and the Stop hook's check.
 
-```text
-work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]
-    sync, check the field report, push, and create or update the pull request whose description
-    carries it; files no issue
-
-work_tickets.py field-report [--worktree WORKTREE] (--draft FILE | --check FILE)
-                             [--issue-body FILE] [--comment-count N] [--newest-comment ID]
-                             [--check-runs FILE] [--component-kinds-to FILE]
-    draft or check the field report a pull request description carries, in the form of
-    .github/pull_request_template.md
-
-work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE
-    require the field report to name removed protected content, against origin/<integration branch>
-    as sync fetched it (the local branch without origin)
-
-work_tickets.py identity --worktree WORKTREE
-    set the checkout's commit identity (machine-local public_identity, else se.toml
-    project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the
-    session's start (bootstrap.sh --hook) run it
-
-work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL
-                        --field-report FILE
-    print the pull request description deliver writes: Fixes <issue> where all its acceptance shows
-    before the merge, else Refs <issue>, then the field report between its markers
-
-work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]
-    public check's push gate, then git push -u origin <branch>; retries a transient refusal once a
-    minute, ten attempts; the integration branch needs a passing suite and public check recorded on
-    the tree pushed
-
-work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE]
-                           [--hook JSON]
-    the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue,
-    refuse the turn's end while its branch has no open pull request whose description carries a
-    field report that passes field-report --check at the branch tip, naming what is missing and the
-    commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only
-    says what is undelivered unless [copilot] refuse_stop is true. Anywhere else, for a sub-agent
-    that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the
-    turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout
-
-work_tickets.py sync --worktree WORKTREE
-    merge the newest integration branch (se.toml project.integration_branch, default main) from
-    origin, or locally without origin
-
-work_tickets.py verified [--worktree WORKTREE] remote_ref commit
-    the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the
-    integration branch and no passing suite and public check are recorded on its tree; push runs the
-    same check. A push of the delivered work branch at another commit than its delivered tip prints
-    the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late
-    push")
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue |
+| `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, in the form of .github/pull_request_template.md |
+| `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
+| `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
+| `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where all its acceptance shows before the merge, else Refs <issue>, then the field report between its markers |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
+| `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin |
+| `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
 
 #### Integration
 
@@ -1821,213 +1700,81 @@ work_tickets.py verified [--worktree WORKTREE] remote_ref commit
 maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and
 settings checks and the generated docs.
 
-```text
-work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]
-    show local worker capacity or cloud unlimited capacity
-
-work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
-                       [--integrator-session INTEGRATOR_SESSION]
-    show the repository and the machine-local settings in effect
-
-work_tickets.py docs [--check]
-    write the command groups' component declarations (components/<group>/component.toml) from this
-    registry and the README's command reference from them; with --check, only refuse a declaration
-    or a README that differs
-
-work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json]
-                            [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES]
-                            [--pulls PULLS] [--sessions FILE]
-    list every stuck or stray piece of work, each with its issue, pull request and remedy: in-
-    progress work without a branch once the lease has passed since its Started comment (listed as
-    starting before) or without a push within the lease, a delivered pull request whose check failed
-    or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by
-    itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on
-    a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1
-    otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files
-
-work_tickets.py format [--root ROOT]
-    apply the fix of every check the check job runs that a fix can satisfy: write the generated
-    layouts (se_plugin.py build) and the command reference with its declarations (docs); a second
-    run writes nothing
-
-work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE]
-                          [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE]
-                          [--read-back BRANCH] [--record-fix BRANCH]
-                          [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL]
-                          [--check-run CHECK_RUN] [--landing-description FILE]
-                          [--build-command BUILD_COMMAND] [--include-late REASON]
-                          [--check-command JSON] [--check-command-temporary-directory]
-                          [pull_request]
-    validate the field report a pull request's description carries, merge it on land/<branch>, test,
-    land it through a squash pull request once check passes, and close the work issue. Where gh is
-    not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's
-    GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-
-    out
-
-work_tickets.py metrics [--since DATE] [--file FILE]
-    print what the commands cost, from the line every run of a command appends (README Metrics): top
-    spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the
-    suite's [tests] limit_seconds in se.toml)
-
-work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]
-    list delivered pull requests (open, to the integration branch, with a complete field report),
-    escalations and startable work issues
-
-work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]
-    list startable ready work issues
-
-work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE]
-                           [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION]
-                           issue
-    for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest
-    request posted, read the refs back and post the result; prints the line for the integrator.
-    Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools;
-    --read-back then checks the refs and finishes
-
-work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO]
-                             [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL]
-                             [--conclusion CONCLUSION] [--log-file LOG_FILE]
-                             issue
-    for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its
-    output and label the issue escalated; prints the line for SE. Where gh is not signed in it
-    prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the
-    refs and finishes
-
-work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]
-    rehearse a whole landing through kern's relay against a scratch branch, never the integration
-    branch: a relay read, a local phase (--gap makes it slow on purpose), the push of
-    rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-
-    back. It releases and tags nothing and touches no issue; it runs only as one call through kern's
-    relay
-
-work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
-                                [--pr-description FILE] [--include-late REASON]
-                                branch
-    print the Release-kind trailer an integration merge of <branch> carries, from its field report's
-    Release kind (a re-integration's from its Re-integration kind); push requires it
-
-work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]
-                              [topic]
-    print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or
-    `SE/<project>/<role>/<topic>` (work model, Visible sessions)
-
-work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]
-                               [--scheduled-tasks FILE] [--environment FILE] [--strict]
-    compare the fleet's settings the repository records (fleet/settings.toml) with the live ones,
-    each difference in one line: main's ruleset through gh where it is signed in or from --ruleset,
-    the scheduled tasks and the cloud environment from the answers of the session's list_triggers
-    and get_environment tools; a part whose door is missing and a value recorded as unchecked are
-    reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a
-    difference only with --strict. It only reads
-
-work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
-                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]
-                      [--blockers FILE]
-                      issue
-    start a ready work issue: worktree from the newest main, label in-progress; without gh, the
-    label change and the Started comment as GitHub steps, or through kern's relay where it serves
-    the checkout
-
-work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]
-    run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1
-    when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test
-    budget")
-
-work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...
-    on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and
-    write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget")
-
-work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]
-    in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records
-    suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a
-    shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or
-    is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget")
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show local worker capacity or cloud unlimited capacity |
+| `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
+| `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
+| `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
+| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build) and the command reference with its declarations (docs); a second run writes nothing |
+| `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
+| `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
+| `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues |
+| `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list startable ready work issues |
+| `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
+| `work_tickets.py refs request` | `work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO] [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL] [--conclusion CONCLUSION] [--log-file LOG_FILE] issue` | for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its output and label the issue escalated; prints the line for SE. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
+| `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
+| `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
+| `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
+| `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
+| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
+| `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
+| `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
+| `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
 
 #### Review
 
 `components/review`: A cold review of a delivered pull request: the brief a reviewer starts from,
 and the report it files as one comment.
 
-```text
-review.py brief [--claims] [--json] [--worktree WORKTREE] [--repo REPO] [--pull FILE]
-                [--issue FILE] [--issue-comments FILE] [--checks FILE] [--pull-comments FILE]
-                pull_request
-    what a cold reviewer of a delivered pull request starts from
-
-review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] [--repo REPO]
-               pull_request
-    check a review report and post it as one comment on the pull request
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `review.py brief` | `review.py brief [--claims] [--json] [--worktree WORKTREE] [--repo REPO] [--pull FILE] [--issue FILE] [--issue-comments FILE] [--checks FILE] [--pull-comments FILE] pull_request` | what a cold reviewer of a delivered pull request starts from |
+| `review.py file` | `review.py file --report FILE [--pull FILE] [--issue FILE] [--worktree WORKTREE] [--repo REPO] pull_request` | check a review report and post it as one comment on the pull request |
 
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, file checks
 the judged draft and closes the retro issue with its report.
 
-```text
-retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json]
-                 [--signals FILE [FILE ...]] [--refusals] [--answers DIR]
-                 [--worktree WORKTREE] [--repo REPO]
-                 retro
-    read a retro's window from GitHub and write its draft
-
-retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro
-    check a judged retro draft and close the retro issue with its report
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul
 
 `components/overhaul`: An overhaul: new files its issue, read writes its draft, file checks the
 judged draft and closes the issue with its report, and facts lists a checkout's pruning facts.
 
-```text
-overhaul.py facts [--repo REPO] [--json]
-    list the pruning facts of a checkout
-
-overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul
-    check a judged overhaul draft and close the overhaul issue with its report
-
-overhaul.py new [--worktree WORKTREE] [--repo REPO]
-    file the overhaul issue through work_tickets.py file
-
-overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]
-                 overhaul
-    write an overhaul's draft
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
+| `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
+| `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
+| `overhaul.py read` | `overhaul.py read [--out FILE] [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO] overhaul` | write an overhaul's draft |
 
 #### Render
 
 `components/render`: The pages SE renders: timeline.py builds the Timeline from GitHub, deck.py
 builds a deck of decisions, serves it and reads its answers.
 
-```text
-deck.py answers [--record FOLDER] [--destination DESTINATION] answers
-    print what the answers ask the agent to act on
-
-deck.py build --destination DESTINATION folder
-    build a folder of decision notes into one deck
-
-deck.py serve [--wait] [--timeout S] artifact
-    serve a deck locally and print the answers it is sent
-
-timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT]
-            [--config CONFIG]
-    Build the Timeline: one static HTML page of the repositories in se.toml `[timeline]`.
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
+| `deck.py build` | `deck.py build --destination DESTINATION folder` | build a folder of decision notes into one deck |
+| `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
+| `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one static HTML page of the repositories in se.toml `[timeline]`. |
 
 #### Scaffold
 
 `components/scaffold`: What SE scaffolds: a new application on kern, and an ad hoc component in a
 checkout.
 
-```text
-se.py component add [--root ROOT] name
-    scaffold an ad hoc component under the ignored .se/components/
-
-se.py new app --path PATH name
-    create an application on kern from kern's template at SE's kern pin
-```
+| Command | Usage | What it does |
+|---|---|---|
+| `se.py component add` | `se.py component add [--root ROOT] name` | scaffold an ad hoc component under the ignored .se/components/ |
+| `se.py new app` | `se.py new app --path PATH name` | create an application on kern from kern's template at SE's kern pin |
 <!-- generated by `work_tickets.py docs`: end -->
 
 `scripts/review.py` holds the review commands, which load `work_tickets.py` for its GitHub door.
@@ -2048,12 +1795,13 @@ review as one comment on the reviewed pull request and files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 It reads the review report as JSON:
 
-- `verdict`: `pass`, `pass with open points` or `decline`;
-- `head`: the commit reviewed, the head the brief named;
-- `acceptance`: each acceptance item of the work issue, `{"item", "evidence"}`;
-- `findings`: each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty
-  where none was found; only damage blocks: the product made worse, or against what it is about;
-- `clean`: the "checked and clean" list, what was examined and found sound.
+| Field | Meaning |
+|---|---|
+| `verdict` | `pass`, `pass with open points` or `decline` |
+| `head` | the commit reviewed, the head the brief named |
+| `acceptance` | each acceptance item of the work issue, `{"item", "evidence"}` |
+| `findings` | each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty where none was found; only damage blocks: the product made worse, or against what it is about |
+| `clean` | the "checked and clean" list, what was examined and found sound |
 
 There is no quota: a review without findings is a pass. What it refuses, writing nothing, is a
 verdict without its evidence or one its findings contradict:
@@ -2237,29 +1985,20 @@ are advice beside them.
 The overhaul and retro templates are filed as they stand and pass the work form, and the work
 template has a section for every part the form requires; the tests check both.
 
-- `forms/decision.toml`: A decision note: the situation and the problem before the options' pugh
-  fence.
-- `forms/field-report.toml`: A work pull request's description: the field report between its
-  markers.
-- `forms/housekeeping.toml`: The owner's housekeeping pull request: no field report, no field
-  required.
-- `forms/landing.toml`: A landing pull request: it names the work issue, the work pull request and
-  its report.
-- `forms/merge-message.toml`: An integration's squash commit: `Integrate <branch>` and one
-  Release-kind trailer.
-- `forms/overhaul.toml`: An overhaul's report: the verdicts, the findings and the judged block the
-  next one reads.
-- `forms/retro.toml`: A retro's report or draft: its judged block, under its marker.
-- `forms/review.toml`: A cold review's one comment: what a person reads, then the JSON block the
-  retro reads.
-- `forms/routed.toml`: The routing block SE appends to an outside issue: where it came from and
-  what it lacks.
-- `forms/terms.toml`, the term list and no form: Inside terms and the plain words to use instead.
-  They only warn.
-- `forms/ticket.toml`: An issue the owner reads: what is, what is wrong, what should be, how, and
-  how we know.
-- `forms/work.toml`: One package for one worker: the ticket's why, then numbered requirements and
-  acceptance.
+| Form | What it shapes |
+|---|---|
+| `forms/decision.toml` | A decision note: the situation and the problem before the options' pugh fence. |
+| `forms/field-report.toml` | A work pull request's description: the field report between its markers. |
+| `forms/housekeeping.toml` | The owner's housekeeping pull request: no field report, no field required. |
+| `forms/landing.toml` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `forms/merge-message.toml` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
+| `forms/overhaul.toml` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
+| `forms/retro.toml` | A retro's report or draft: its judged block, under its marker. |
+| `forms/review.toml` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
+| `forms/routed.toml` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `forms/terms.toml`, the term list and no form | Inside terms and the plain words to use instead. They only warn. |
+| `forms/ticket.toml` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
+| `forms/work.toml` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the
