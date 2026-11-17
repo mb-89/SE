@@ -22,6 +22,9 @@ NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 # The template names its application `app`: every word `app` in a path or a text file is the name,
 # except in the command's own name, `se new app`.
 TEMPLATE_NAME = re.compile(r"(?<!se new )\bapp\b")
+# The generic installer every application has (des-016): executable wherever it is unpacked, even
+# where the archive lost its mode.
+RUNME = "RUNME.sh"
 TEMPLATE_IDENTITY = 'identity = "<name> <name>"'
 # go.mod's replace of kern, with the comment lines above it, as the template writes it: the one
 # replace of the template, by kern's source one folder up.
@@ -93,7 +96,7 @@ def unpack(se_root: Path, ref: str, path: Path, name: str) -> None:
             target = path.joinpath(*relative)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-            if member.mode & 0o111:
+            if member.mode & 0o111 or relative[-1:] == [RUNME]:
                 target.chmod(0o755)
 
 
