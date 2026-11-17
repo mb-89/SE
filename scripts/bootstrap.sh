@@ -14,9 +14,9 @@
 #            its major is moved to it first (se_start.py start-refresh), and the start then runs again
 #            from the moved tree, so the core starts from its pins; a refresh that fails starts with
 #            the SE in place and says so in one line
-#   kern     in --hook mode: the application binary (se_modules.py app-binary) — kern's core plus the
-#            application's Go components where it has any (the `se` binary for SE), else the bare kern
-#            — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
+#   kern     in --hook mode, for a project inside a git checkout: the application binary
+#            (se_modules.py app-binary) — kern's core plus the application's Go components where it
+#            has any (the `se` binary for SE), else the bare kern — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
 #            from its folder where no release matches), started detached for the project, and handed
 #            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
 #            skips this step (below)
@@ -145,9 +145,30 @@ kern_background() { # <mode> <bin> <args>...
   command -v setsid >/dev/null 2>&1 && detach=(setsid)
   ${detach[@]+"${detach[@]}"} bash "$se_root/scripts/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1 &
 }
+# Whether the project is inside a git checkout: it or a folder above it holds a .git, the folder or
+# the file a linked worktree has; the same walk up as the late checkout's in scripts/se_hook.sh.
+kern_checkout() {
+  local dir="$project" up
+  while [ -n "$dir" ]; do
+    [ -e "$dir/.git" ] && return 0
+    up="${dir%[/\\]*}"
+    [ "$up" = "$dir" ] && return 1
+    dir="$up"
+  done
+  return 1
+}
 kern_step() {
   local spec name version base builddir package platform exe suffix asset bin sums cause start
   local pins
+  # A project inside no git checkout, as a session started without sources is: no core starts and
+  # the greeting says nothing of one (README "Cloud sessions"); under Copilot it says SE runs
+  # without kern. The session's shells still find as `se` the core a late checkout's first hook
+  # starts (scripts/se_hook.sh).
+  if ! kern_checkout; then
+    [ -n "${CLAUDE_ENV_FILE:-}" ] && printf 'export PATH="%s:$PATH"\n' "$HOME/.se/bin" >>"$CLAUDE_ENV_FILE"
+    kern_args+=(--kern-none)
+    return 0
+  fi
   # One reader of the application binary: se_modules.py app-binary, which answers kern's core plus
   # the application's Go components where it has any, else the bare kern (SE's docs/go-core.md "How
   # the binary arrives"), from the project where it is SE's own checkout. One line: "<name>
