@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import bisect
 import importlib
 import io
 import json
@@ -345,8 +346,10 @@ def near_duplicates(scripts: dict[str, str], trees: dict[str, ast.Module]) -> li
     shingles: dict[str, set[int]] = {}
     for path, source in scripts.items():
         tokens = shape_tokens(source)
+        lines = [line for line, _ in tokens]
         for name, node in functions(path, trees[path]):
-            body = [text for line, text in tokens if node.lineno <= line <= node.end_lineno]
+            body = [text for _, text in tokens[bisect.bisect_left(lines, node.lineno):
+                                               bisect.bisect_right(lines, node.end_lineno)]]
             if len(body) >= MIN_TOKENS:
                 shingles[f"{path}:{node.lineno} {name}"] = {
                     hash(tuple(body[start:start + SHINGLE])) for start in range(len(body) - SHINGLE + 1)}

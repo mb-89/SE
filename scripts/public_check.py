@@ -769,6 +769,8 @@ def sibling(name: str):
     """The script `<name>.py` beside this one, loaded under its own name."""
     import importlib.util
     qualified = f"public_check_{name}"
+    if qualified in sys.modules:
+        return sys.modules[qualified]
     spec = importlib.util.spec_from_file_location(qualified, Path(__file__).with_name(f"{name}.py"))
     module = importlib.util.module_from_spec(spec)
     sys.modules[qualified] = module

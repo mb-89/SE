@@ -39,7 +39,7 @@ def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     deck = Item(TESTS / "test_deck.py", ["decks", "obs", "tmp_path"])
     kern = Item(TESTS.parent / "kern" / "python" / "tests" / "test_example.py")
     time_bound.mark([plain, deck, kern], obs_wait=600)
-    assert plain.bound == time_bound.BOUND == 40
+    assert plain.bound == time_bound.BOUND == 30
     assert deck.bound == time_bound.BOUND + 600
     assert kern.bound == time_bound.BOUND
 
