@@ -1763,12 +1763,13 @@ review as one comment on the reviewed pull request and files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 It reads the review report as JSON:
 
-- `verdict`: `pass`, `pass with open points` or `decline`;
-- `head`: the commit reviewed, the head the brief named;
-- `acceptance`: each acceptance item of the work issue, `{"item", "evidence"}`;
-- `findings`: each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty
-  where none was found; only damage blocks: the product made worse, or against what it is about;
-- `clean`: the "checked and clean" list, what was examined and found sound.
+| Field | Meaning |
+|---|---|
+| `verdict` | `pass`, `pass with open points` or `decline` |
+| `head` | the commit reviewed, the head the brief named |
+| `acceptance` | each acceptance item of the work issue, `{"item", "evidence"}` |
+| `findings` | each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty where none was found; only damage blocks: the product made worse, or against what it is about |
+| `clean` | the "checked and clean" list, what was examined and found sound |
 
 There is no quota: a review without findings is a pass. What it refuses, writing nothing, is a
 verdict without its evidence or one its findings contradict:

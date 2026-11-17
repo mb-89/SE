@@ -426,15 +426,22 @@ Every session SE's roles start carries the tag `SE` and a title by one scheme, s
 sidebar shows one SE section, each role's sessions nested under the session that started them.
 `work_tickets.py session-title <role> [<project>] [<topic>]` prints the title, its one owner.
 
-- **The scheme**: the SE agent's own session is `SE`; a project's integrator
-  `SE/<project>/integrator`, `<project>` being the repository's name as GitHub spells it (`SE`,
-  `obs`).
-  - Below the integrator, started by it: a worker `SE/<project>/worker/<ticket name>`, its work
-    issue's title exactly as the [name rule](#issues) accepts it (the old form included), never
-    shortened, as fleet-check finds a worker's session by its branch in the title; a
-    sub-integrator `SE/<project>/integrator/<area>`.
-  - Beside the integrator, started by the SE agent: `SE/<project>/reviewer/<pull request
-    number>`, `SE/<project>/researcher/<topic>` and `SE/<project>/spike/<topic>`.
+- **The scheme**: the SE agent's own session is `SE`; `<project>` is the repository's name as
+  GitHub spells it (`SE`, `obs`).
+
+  | Session | Where it sits | Title |
+  |---|---|---|
+  | The SE agent's own | — | `SE` |
+  | A project's integrator | — | `SE/<project>/integrator` |
+  | A worker | below the integrator, started by it | `SE/<project>/worker/<ticket name>` |
+  | A sub-integrator | below the integrator, started by it | `SE/<project>/integrator/<area>` |
+  | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<pull request number>` |
+  | A researcher | beside the integrator, started by the SE agent | `SE/<project>/researcher/<topic>` |
+  | A spike | beside the integrator, started by the SE agent | `SE/<project>/spike/<topic>` |
+
+  - A worker's `<ticket name>` is its work issue's title exactly as the [name rule](#issues)
+    accepts it (the old form included), never shortened, as fleet-check finds a worker's session
+    by its branch in the title.
   - A topic and an area follow the name rule. No role starts researchers, spikes or
     sub-integrators yet; one started at the person's request takes its title by the scheme.
 - **Starting a session**: a role starts it itself with the host's session tool, so it is the
@@ -697,19 +704,14 @@ An adapter is a command that writes to an external system (a tracker, a wiki, a 
 Every adapter follows this contract; [`<se>/scripts/adapter_sync.py`](../../../scripts/adapter_sync.py)
 is its reusable part, imported from the project's se module.
 
-- **One command, dry run by default**: it reads the external state, computes the plan and the
-  merge, prints a complete change and conflict report, and writes nothing.
-- **An explicit `--apply`** performs the writes (`add_apply_argument`).
-- **Preflight on apply**: the apply repeats the reads; an object whose external revision changed
-  since the plan was computed is not written, and the report names it (`preflight`).
-- **One logged write path**: every external request goes through one transport (`Transport`),
-  whose verb guard refuses any non-read request outside apply mode, naming its method and path,
-  and whose log (method, path, status, time; never headers or bodies) is the audit. No side
-  scripts, no second client.
-- **Secrets**: read from the environment at run time (`secret_from_env`); never printed, logged,
-  committed or stored, and scrubbed from every recorded response (`Transport.recorded`).
-- **Artifacts**: the dry run's plan and the apply's result are written as machine-readable files
-  (sorted JSON, `write_artifact`), so reviews and tests compare them.
+| Part | What every adapter does | Its reusable part |
+|---|---|---|
+| One command, dry run by default | it reads the external state, computes the plan and the merge, prints a complete change and conflict report, and writes nothing | — |
+| An explicit `--apply` | performs the writes | `add_apply_argument` |
+| Preflight on apply | the apply repeats the reads; an object whose external revision changed since the plan was computed is not written, and the report names it | `preflight` |
+| One logged write path | every external request goes through one transport, whose verb guard refuses any non-read request outside apply mode, naming its method and path, and whose log (method, path, status, time; never headers or bodies) is the audit. No side scripts, no second client. | `Transport` |
+| Secrets | read from the environment at run time; never printed, logged, committed or stored, and scrubbed from every recorded response | `secret_from_env`, `Transport.recorded` |
+| Artifacts | the dry run's plan and the apply's result are written as machine-readable files (sorted JSON), so reviews and tests compare them | `write_artifact` |
 
 ## Commands and shell
 
