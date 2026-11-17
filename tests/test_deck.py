@@ -7,11 +7,13 @@ for the drafts obs-html keeps over a reload (a comment with no verdict among the
 center tells the reader what Send did: its passing line under the top band, the bundle's entry for a
 partial send, and obs's entry with the answers to copy where nothing was sent.
 Every deck the tests build with the real obs is built once per session, all at once (`decks`), and the
-browser tests share one page per worker (`page`).
+browser tests share one page per worker (`page`); `deck_look.py look` reads the worked example's build and
+finds nothing in it.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 import subprocess
@@ -73,7 +75,6 @@ PROFILES = {
 }
 # Every deck a test builds with the real obs: its notes and, where it sets one, its manifest.
 DECKS = {
-    "record": ({"one": NOTE % ("One", "one"), "two": NOTE % ("Two", "two"), "done": RECORD % "Done"}, None),
     "only-records": ({"done": RECORD % "Done", "tasks": RECORD % "Tasks"}, None),
     "decision-without-bless": ({"one": NOTE % ("One", "one"), "silent": RECORD % "Silent" + PUGH}, None),
     # A record chapter beside the decision: obs alone would open such a deck paged.
@@ -113,7 +114,8 @@ def decks(tmp_path_factory, obs) -> dict[str, tuple[subprocess.CompletedProcess,
 
 
 def test_build_takes_record_chapters_beside_the_decisions(decks):
-    result, destination = decks["record"]
+    # screens-no-profile builds its record chapter, done, beside the decision it builds, pick.
+    result, destination = decks["screens-no-profile"]
     assert result.returncode == 0, result.stderr
     assert destination.exists()
 
@@ -144,6 +146,19 @@ def test_the_worked_example_builds_without_a_warning(decks):
     assert result.returncode == 0, result.stderr
     assert destination.exists()
     assert "warning" not in result.stderr
+
+
+def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks):
+    if not _playwright():
+        pytest.skip("node with playwright is not installed")
+    built, deck_page = decks["worked-example"]
+    assert built.returncode == 0, built.stderr
+    before = sorted(path.name for path in deck_page.parent.iterdir())
+    result = subprocess.run([sys.executable, str(SCRIPTS / "deck_look.py"), "look", str(deck_page),
+                             "--capabilities", "artifact,comments,downloads"], capture_output=True, text=True)
+    assert (result.returncode, result.stdout) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
+                                                     "phone-dark, desktop-light, desktop-dark\n"), result.stderr
+    assert sorted(path.name for path in deck_page.parent.iterdir()) == before
 
 
 def test_build_warns_of_an_option_without_success_or_a_mark_without_its_reason(decks):
@@ -281,7 +296,9 @@ const actions = {
 """
 
 
+@functools.cache
 def _playwright() -> bool:
+    """Whether node has Playwright: probed once per worker, on the first browser test."""
     return shutil.which("node") is not None and not subprocess.run(
         ["node", "-e", "require('playwright')"], capture_output=True).returncode
 

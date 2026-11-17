@@ -160,8 +160,8 @@ const measure = async ({name, obs, index}) => {
     }
     const path = require("path");
     try {
-        const views = [];
-        for (const view of request.views) {
+        // The views open at once: a chapter's wait for a quiet DOM is idle time, which the others fill.
+        const views = await Promise.all(request.views.map(async view => {
             const context = await browser.newContext({
                 viewport: {width: view.width, height: view.height}, colorScheme: view.theme,
             });
@@ -193,9 +193,9 @@ const measure = async ({name, obs, index}) => {
                 }
             }
             const requests = await page.evaluate(() => globalThis.__deckLook.requests);
-            views.push({...view, chapters: visited, errors, requests});
             await context.close();
-        }
+            return {...view, chapters: visited, errors, requests};
+        }));
         console.log(JSON.stringify({views}));
     } finally {
         await browser.close();
