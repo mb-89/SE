@@ -132,7 +132,7 @@ limit_seconds = 90
 # obs builds the documentation (README "Documentation").
 [modules.obs]
 url = "../obs.git"
-version = "^3.0"
+version = "^4.0"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
