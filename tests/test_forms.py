@@ -265,8 +265,11 @@ def test_an_object_field_reads_and_writes_key_value_lines(tmp_path):
 def test_select_takes_the_marker_then_the_conditions_then_the_plain_form(catalog):
     routed = "Outside text\n\n<!-- se:handled -->\n## Routing\n\nRouted from: X\n"
     assert forms.select(catalog, "issue.create", routed, "feat/x-20261116").name == "routed"
-    assert forms.select(catalog, "issue.edit", WORK_BODY, "feat/x-20261116").name == "work"
-    assert forms.select(catalog, "issue.create", "## Situation\n", "Plain words").name == "ticket"
+    for title in ("forms-match-names-and-kinds", "feat/x-20261116"):
+        assert forms.select(catalog, "issue.edit", WORK_BODY, title, labels=["work"]).name == "work"
+    assert forms.select(catalog, "issue.create", WORK_BODY, "forms-match-names-and-kinds").name == \
+        "ticket"
+    assert forms.select(catalog, "issue.create", "## Situation\n", "plain-words").name == "ticket"
     named = "<!-- se:form ticket -->\n" + WORK_BODY
     assert forms.select(catalog, "issue.create", named, "feat/x-20261116").name == "ticket"
     with pytest.raises(forms.FormError, match="issue.delete"):
@@ -337,7 +340,7 @@ WARNS = [
     ("board", {"situation": "Status: open\nIssues are titled by branch."}, {}),
     ("terms", {"goal": "Every worktree title is plain."}, {}),
     ("unnamed-entry", {"depends_on": ["#12"]}, {"depends_on": ["#12 the forms engine"]}),
-    ("title-shape", {"title": "feat/plain-titles-20261116"}, {}),
+    ("title-shape", {"title": "Forms-Match"}, {}),
 ]
 
 
@@ -357,9 +360,111 @@ def test_the_work_title_warns_where_it_is_no_branch_name(catalog):
 
 
 def test_the_ticket_title_warns_where_the_body_repeats_it(catalog):
-    fields = ticket_fields(catalog)
-    repeated = {**fields, "situation": fields["title"] + " is the ask."}
-    assert "title-shape" in rules(findings(catalog["ticket"], repeated), "warn")
+    title = "Say in plain words what each issue is about"
+    repeated = {**ticket_fields(catalog), "title": title, "situation": title + " is the ask."}
+    found = findings(catalog["ticket"], repeated)
+    assert any(finding.rule == "title-shape" and finding.severity == forms.WARN
+               and "the body repeats the title" in finding.fix for finding in found), found
+
+
+#: Titles under the name rule, of its old form, and breaking it, as `checked_name` judges them.
+TITLES = ["forms-match-names-and-kinds", "plain", "123", "a1-b2", "feat/plain-titles-20261116",
+          "fix/routed-20261116", "one-two-three-four-five-six", "Forms-Match", "double--dash",
+          "-leading", "scripts/forms.py", "docs/a/b-20261116", "Plain words", ""]
+
+
+def test_the_forms_accept_exactly_the_titles_checked_name_accepts(catalog):
+    def accepted(title: str) -> bool:
+        try:
+            work_tickets.checked_name("file", title)
+        except work_tickets.QueueError:
+            return False
+        return True
+
+    def warns(form: forms.Form, title: str) -> list[forms.Finding]:
+        fields = {**form.example["fields"], "title": title}
+        document = forms.parse(form, forms.render(form, fields), title)
+        return [finding for finding in forms.check(form, document) if finding.rule == "title-shape"]
+
+    expected = {title for title in TITLES if accepted(title)}
+    assert expected >= {"forms-match-names-and-kinds", "123", "feat/plain-titles-20261116"}
+    for name in ("work", "ticket"):
+        assert {title for title in TITLES if title and not warns(catalog[name], title)} == \
+            expected - {""}, name
+    for title in ("Forms-Match", "one-two-three-four-five-six"):
+        for name in ("work", "ticket"):
+            found = warns(catalog[name], title)
+            assert [finding.severity for finding in found] == [forms.WARN]
+            assert found[0].fix == work_tickets.name_refusal(title)
+            assert "yyyymmdd" not in found[0].fix
+
+
+@pytest.mark.parametrize("kind, refused", [("fix", False), ("feat", False), ("standard", False),
+                                           ("banana", True)])
+def test_the_package_kind_takes_every_kind_of_work(catalog, kind, refused):
+    found = findings(catalog["work"], {**work_fields(catalog), "package_kind": kind})
+    assert ("choice" in rules(found, "refuse")) == refused
+    assert set(work_tickets.RELEASE_KINDS) <= set(catalog["work"].field("package_kind").choices)
+    assert catalog["routed"].field("package_kind").choices == \
+        catalog["work"].field("package_kind").choices
+
+
+def test_a_body_route_writes_with_its_default_type_passes_the_routed_form(tmp_path, capsys):
+    routing = "## Requirements\n\n1. A routed requirement.\n"
+    body = tmp_path / "body.md"
+    body.write_text(work_tickets.routed_body(OUTSIDE, "Proposal: make it work", routing, "feat"),
+                    encoding="utf-8")
+    assert "### Package kind\n\nfeat" in body.read_text(encoding="utf-8")
+    assert forms.main(["check", "routed", "--tree", "--body-file", str(body)]) == 0
+    assert "choice" not in capsys.readouterr().out
+
+
+NAMED = """name = "one"
+reader = "owner"
+says = "A form."
+[applies]
+actions = ["issue.create"]
+[rules]
+title-shape = "warn"
+[[fields]]
+name = "title"
+kind = "line"
+source = "title"
+{title}
+[[fields]]
+name = "kind"
+kind = "choice"
+heading = "Kind"
+{kind}
+"""
+
+
+@pytest.mark.parametrize("title, kind, error", [
+    ('shape = "work_tickets:NO_SUCH_RULE"', 'choices = ["a"]',
+     "forms/one.toml: field title shape: work_tickets:NO_SUCH_RULE does not resolve"),
+    ('shape = "no_such_script:RULE"', 'choices = ["a"]',
+     "forms/one.toml: field title shape: no_such_script:RULE does not resolve"),
+    ('shape = "work_tickets:NAME_WORDS"', 'choices = ["a"]', "is no pattern or function"),
+    ("", 'choices = ["a", "work_tickets:NO_SUCH_KINDS"]',
+     "forms/one.toml: field kind choices: work_tickets:NO_SUCH_KINDS does not resolve"),
+    ("", 'choices = ["work_tickets:NAME_EXAMPLE"]', "is no list or mapping"),
+])
+def test_a_field_that_names_code_that_does_not_exist_does_not_load(tmp_path, title, kind, error):
+    write_form(tmp_path, "one", NAMED.format(title=title, kind=kind))
+    with pytest.raises(forms.FormError, match=re.escape(error)):
+        forms.load(tmp_path, tree=True)
+
+
+def test_a_field_names_a_pattern_a_function_a_list_and_a_mapping(tmp_path):
+    write_form(tmp_path, "one", NAMED.format(title='shape = "work_tickets:NAME_PATTERN"',
+                                             kind='choices = ["x", "work_tickets:RELEASE_ORDER", '
+                                                  '"work_tickets:RELEASE_KINDS"]'))
+    one = forms.load(tmp_path, tree=True)["one"]
+    assert one.field("kind").choices[:4] == ("x", "patch", "minor", "major")
+    assert "feat" in one.field("kind").choices
+    document = forms.parse(one, "## Kind\n\nfeat\n", "Not A Name")
+    assert [finding.rule for finding in forms.check(one, document)] == ["title-shape"]
+    assert forms.check(one, forms.parse(one, "## Kind\n\nfeat\n", "a-name")) == []
 
 
 # Contracts with SE's own writers
@@ -523,7 +628,8 @@ def test_check_takes_fields_from_a_draft(tmp_path, capsys, catalog):
     fields.write_text(json.dumps(drafted), encoding="utf-8")
     assert forms.main(["check", "ticket", "--tree", "--fields", str(fields)]) == 0
     capsys.readouterr()
-    assert forms.main(["check", "ticket", "--tree", "--fields", str(fields), "--title", "42"]) == 0
+    assert forms.main(["check", "ticket", "--tree", "--fields", str(fields), "--title",
+                       "Not A Name"]) == 0
     assert "title-shape" in capsys.readouterr().out
 
 
@@ -693,7 +799,8 @@ def test_the_landing_needs_each_line_landing_description_writes(catalog, change,
 
 def test_a_work_issue_carrying_the_decision_marker_is_refused(catalog):
     body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n<!-- se:form decision -->")
-    form, found = forms.verdict(catalog, "issue.create", body, "feat/forms-20261116")
+    form, found = forms.verdict(catalog, "issue.create", body, "feat/forms-20261116",
+                                labels=["work"])
     assert form.name == "work"
     refused = [finding for finding in found if finding.rule == "form"]
     assert len(refused) == 1 and refused[0].severity == forms.REFUSE
@@ -736,7 +843,7 @@ def test_free_texts_select_no_form(catalog, action, body, where):
 
 def test_an_adapter_marker_outside_the_allowed_set_is_refused(catalog):
     body = WORK_BODY.replace(forms.FLEET_MARKER, forms.FLEET_MARKER + "\n" + review.VERDICT_MARKER)
-    chosen = forms.select(catalog, "issue.create", body, "feat/forms-20261116")
+    chosen = forms.select(catalog, "issue.create", body, "feat/forms-20261116", labels=["work"])
     assert chosen.name == "work"
     assert [finding.fix for finding in chosen.findings] == [
         "the review form does not apply to issue.create: it shapes comment.create, comment.edit, "
@@ -751,9 +858,9 @@ def test_home_is_origin_and_the_outside_repositories(tmp_path, fake_git_door):
     assert home == {"github.com/o/r", "github.com/other/side"}
     catalog = forms.load(ROOT, tree=True)
     assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116", repo="o/r",
-                        home=home).name == "work"
+                        home=home, labels=["work"]).name == "work"
     assert forms.select(catalog, "issue.create", WORK_BODY, "feat/x-20261116",
-                        repo="github.com/other/side", home=home).name == "work"
+                        repo="github.com/other/side", home=home, labels=["work"]).name == "work"
 
 
 # Same verdicts: each adapter answers as the check it names, on that check's own fixtures
@@ -984,16 +1091,19 @@ def step_cases(plan, forms_by_step: dict[str, str | None], base: str = "main") -
                               arguments.get("title"), base))
         else:
             action = "issue.create" if arguments.get("method") == "create" else "issue.edit"
+            labels = arguments.get("labels")
             cases.append(Case(action, forms_by_step[step.action], arguments["body"],
-                              arguments.get("title")))
+                              arguments.get("title"),
+                              labels=tuple(labels) if isinstance(labels, list) else ()))
     return cases
 
 
 WORK_TITLE = "feat/forms-20261116"
+WORK_LABELS = ("work", "ready")
 
 
 def work_issue(catalog, monkeypatch) -> list[Case]:
-    return [Case("issue.create", "work", WORK_BODY, WORK_TITLE)]
+    return [Case("issue.create", "work", WORK_BODY, WORK_TITLE, labels=WORK_LABELS)]
 
 
 def backlog_issue(catalog, monkeypatch) -> list[Case]:
@@ -1058,12 +1168,13 @@ def review_steps(catalog, monkeypatch) -> list[Case]:
     cases = step_cases(plan, {"comment_pull": "review", "edit_body": "work", "comment_issue": FREE})
     for case in cases:
         case.title = WORK_TITLE if case.form == "work" else case.title
+        case.labels = WORK_LABELS if case.form == "work" else case.labels
     return cases
 
 
 def review_run(catalog, monkeypatch) -> list[Case]:
     return [Case("comment.create", "review", review.verdict_comment(5, review_report(), False)),
-            Case("issue.edit", "work", open_points_body(), WORK_TITLE)]
+            Case("issue.edit", "work", open_points_body(), WORK_TITLE, labels=WORK_LABELS)]
 
 
 def retro_report() -> str:
@@ -1094,7 +1205,8 @@ def tracker_comment(catalog, monkeypatch) -> list[Case]:
 
 
 def blocker_link(catalog, monkeypatch) -> list[Case]:
-    return [Case("issue.edit", "work", blocked(monkeypatch, WORK_BODY, 12), WORK_TITLE)]
+    return [Case("issue.edit", "work", blocked(monkeypatch, WORK_BODY, 12), WORK_TITLE,
+                 labels=WORK_LABELS)]
 
 
 def plan_of(make, forms_by_step: dict[str, str | None]):

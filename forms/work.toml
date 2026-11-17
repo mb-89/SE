@@ -1,5 +1,5 @@
-# A work issue: one package for one worker, its title its branch name. It extends the ticket form;
-# scripts/forms.py's docstring owns this file's format.
+# A work issue: one package for one worker, its title a name under the name rule and its branch
+# that name. It extends the ticket form; scripts/forms.py's docstring owns this file's format.
 name = "work"
 reader = "fleet"
 extends = "ticket"
@@ -12,7 +12,7 @@ order = ["title", "situation", "problem", "goal", "approach", "base_branch", "re
 [applies]
 actions = ["issue.create", "issue.edit"]
 order = 20
-title = '^[a-z][a-z0-9]*/[a-z0-9][a-z0-9.-]*-\d{8}$'
+labels = ["work"]
 
 [rules]
 terms = "off"
@@ -23,8 +23,8 @@ name = "title"
 kind = "line"
 source = "title"
 required = true
-shape = "branch"
-says = "The branch name, `<kind>/<topic>-<yyyymmdd>`; a plain-words first line may open the body."
+shape = "work_tickets:name_refusal"
+says = "The name, its branch too: 1 to 5 lowercase words joined by dashes, such as `branch-cleanup-on-pr-close`."
 
 [[fields]]
 name = "base_branch"
@@ -42,8 +42,9 @@ says = "For a finding from a field report: the report linked, the command and it
 name = "package_kind"
 kind = "choice"
 heading = "Package kind"
-choices = ["standard", "discovery", "breaking", "patch", "minor", "major"]
-says = "standard, discovery (read-only research) or breaking (a major release)."
+choices = ["standard", "discovery", "breaking", "patch", "minor", "major",
+           "work_tickets:RELEASE_KINDS"]
+says = "standard, discovery (read-only research), breaking (a major release), or a kind of work, as `route --type` takes it."
 
 [[fields]]
 name = "blocked_by"
@@ -112,10 +113,10 @@ required = true
 says = "The focused tests and real commands to run."
 
 [example]
-title = "feat/plain-titles-20261116"
+title = "plain-titles"
 
 [example.fields]
-title = "feat/plain-titles-20261116"
+title = "plain-titles"
 situation = "Issues are titled by their branch name."
 problem = "The owner cannot tell from the list what an issue changes."
 goal = "Every issue title says in plain words what changes."

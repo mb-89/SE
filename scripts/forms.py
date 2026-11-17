@@ -56,7 +56,14 @@ fills it), `says` (what belongs there, the fix's wording and the draft's comment
 back as it stands). Besides: `source = "title"` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
 `numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
-`actor`, `one_sentence`, `not_picked` and `shape` (`words` or `branch`, a title's).
+`actor`, `one_sentence`, `not_picked` and `shape`, a title's (rule `title-shape`).
+
+A field may name code as `"<module>:<NAME>"`, a script beside this one, as an adapter's keys do;
+`load` resolves it and refuses one that does not resolve, naming the form file and the key.
+`shape` is `words` (plain words: no path, branch name or number) or such a reference: a pattern
+the whole title matches, or a function of the title whose answer, where not empty, is the warning.
+An entry of `choices` may be such a reference too: it stands for the items of that list or the
+keys of that mapping.
 
 **Field kinds** and their values: `line` and `choice` a string, its first line; `text` a string;
 `list` a list of strings, its items without their numbers or bullets (with `markers`, a line that
@@ -107,8 +114,9 @@ blocker without a name) and `title-shape`.
 tree; `parse(form, body, title)` gives a `Document`; `render(form, document_or_fields)`;
 `check(form, document)` gives `Finding`s; `select(...)` gives a `Selection`, its form (None: free)
 and its findings; `verdict(forms, action, body, title, ...)` both at once; `draft(form)`;
-`list_forms(forms)` (named so beside Python's `list`). All but `load` and `home_repositories` are
-pure, but for the checkers an adapter names.
+`list_forms(forms)` (named so beside Python's `list`). All but `load` (which also imports the scripts
+a field names) and `home_repositories` are pure, but for the checkers an adapter names and the
+functions a field's shape names.
 
 **Command.** `forms.py check <form> (--body-file FILE | --fields FILE) [--title TEXT] [--tree]`
 prints at most 10 lines of findings and exits 0 when nothing refuses, 1 when something does, 2 on a
@@ -176,8 +184,6 @@ BOARD = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(status|labels?|priority|assignee
 BARE_NUMBER = re.compile(r"(?<![\w/&#\[])#\d+\b")
 CODE_SPAN = re.compile(r"`[^`\n]*`")
 LINK = re.compile(r"\[[^\]]*\]\([^)]*\)|https?://\S+")
-BRANCH = re.compile(r"^[a-z][a-z0-9]*/[a-z0-9][a-z0-9.-]*-\d{8}$")
-BRANCH_LIKE = re.compile(r"^[\w.-]+/[\w./-]+$")
 PATH_LIKE = re.compile(r"^\S*[/\\]\S*$|^\S+\.(py|md|toml|go|json|yml|yaml|sh|ps1)$")
 BARE_ISSUE = re.compile(r"^(?:[\w.-]+/[\w.-]+)?#\d+$|^<?https?://\S+>?$")
 SENTENCE_END = re.compile(r"[.!?](?=[ \t]+[A-Z(\"'`])")
@@ -211,6 +217,8 @@ class Field:
     one_sentence: bool = False
     not_picked: bool = False
     shape: str = ""
+    #: What `shape` names, loaded: a pattern or a function (the module docstring: Fields).
+    rule: object = dataclass_field(default=None, compare=False, repr=False)
 
     @property
     def in_body(self) -> bool:
@@ -511,12 +519,42 @@ def _field(entry: dict, where: str) -> Field:
     if entry.get("kind") not in KINDS:
         raise FormError(f"{where}: field {name} has kind {entry.get('kind')!r}; one of "
                         f"{', '.join(KINDS)}")
-    made = Field(**{**entry, "choices": tuple(entry.get("choices", ()))})
+    choices: list[str] = []
+    for choice in entry.get("choices", ()):
+        if REFERENCE.match(str(choice)):
+            named = _named(str(choice), where, f"field {name} choices")
+            if isinstance(named, dict):
+                named = list(named)
+            if not isinstance(named, (list, tuple, set, frozenset)):
+                raise FormError(f"{where}: field {name} choices: {choice} is no list or mapping; "
+                                "name one whose items or keys are the choices")
+            choices += [str(item) for item in named]
+        else:
+            choices.append(str(choice))
+    shape = str(entry.get("shape", ""))
+    rule = None
+    if REFERENCE.match(shape):
+        rule = _named(shape, where, f"field {name} shape")
+        if not isinstance(rule, re.Pattern) and not callable(rule):
+            raise FormError(f"{where}: field {name} shape: {shape} is no pattern or function; "
+                            "name a compiled pattern or a function that gives the warning")
+    made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices))}, rule=rule)
     if made.in_body and not made.heading:
         raise FormError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
     if made.kind == "choice" and not made.choices:
         raise FormError(f"{where}: field {name} is a choice without choices")
     return made
+
+
+def _named(reference: str, where: str, key: str):
+    """What `"<module>:<NAME>"` names in a script beside this one, refused where it does not
+    resolve, naming the form file and the key."""
+    module, name = reference.split(":", 1)
+    try:
+        return getattr(_sibling(module), name)
+    except (ImportError, AttributeError, OSError) as error:
+        raise FormError(f"{where}: {key}: {reference} does not resolve ({error}); name a script "
+                        "beside scripts/forms.py and what it defines") from error
 
 
 # Reading
@@ -1353,12 +1391,15 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
 
 def _title(form: Form, item: Field, title: str, document: Document, add) -> None:
     text = title.strip()
-    if item.shape == "branch":
-        if not BRANCH.match(text):
-            add("title-shape", item.name, f"the title {text!r} is no branch name: write "
-                "`<kind>/<topic>-<yyyymmdd>`")
-        return
-    if BRANCH_LIKE.match(text) or PATH_LIKE.match(text) or re.fullmatch(r"#?\d+", text):
+    if isinstance(item.rule, re.Pattern):
+        if not item.rule.fullmatch(text):
+            add("title-shape", item.name, f"the title {text!r} does not match {item.shape}: "
+                f"{item.says}")
+    elif item.rule is not None:
+        problem = str(item.rule(text) or "")
+        if problem:
+            add("title-shape", item.name, problem)
+    elif PATH_LIKE.match(text) or re.fullmatch(r"#?\d+", text):
         add("title-shape", item.name, f"the title {text!r} is a branch name, a path or a number: "
             "say in plain words what changes")
     body = _squash("\n".join(part.raw for part in document.parts if part.kind == "preamble")
