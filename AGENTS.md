@@ -29,7 +29,8 @@
     ([README "Start and refresh"](README.md#start-and-refresh)).
 - Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
   tests stale layouts and nobody runs the build by hand before it; commit what it wrote.
-- Installing SE is the README's [Install](README.md#install).
+- Installing SE on a clean machine is the README's [Getting it running](README.md#getting-it-running);
+  on a host, its [Install](README.md#install).
 
 ## Tests
 

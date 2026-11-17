@@ -752,3 +752,73 @@ def test_a_local_file_that_does_not_say_off_leaves_the_hooks_on(machine, text):
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert any("hooks-core" in line for line in calls(home))
     assert core_started(home) and "no core at this start" not in greeting_call(home)
+
+
+# --binary (RUNME.conf's `get se` line): the binary placed and linked, nothing started. It writes
+# into the SE it runs from (.se/.runtime/runme-se), so these run a copy of the script in a folder
+# of their own, never in this checkout.
+def binary_root(base: Path) -> Path:
+    root = base / "se"
+    (root / "scripts").mkdir(parents=True)
+    for name in ("bootstrap.sh", "hosts.sh"):
+        shutil.copy2(SCRIPT.parent / name, root / "scripts" / name)
+    return root
+
+
+def run_binary(home: Path, path: Path, root: Path) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": sh(path)}
+    return subprocess.run([BASH, sh(root / "scripts" / "bootstrap.sh"), "--binary"], env=env,
+                          capture_output=True, text=True, timeout=60, cwd=root)
+
+
+def placed(home: Path, root: Path) -> None:
+    """The binary in place and linked as its stable name, RUNME's record written, nothing started."""
+    assert os.access(kern_bin(home), os.X_OK)
+    stable = home / ".se" / "bin" / (NAME + (".exe" if WINDOWS else ""))
+    assert stable.exists()
+    assert (root / ".se" / ".runtime" / "runme-se").read_text(encoding="utf-8") == f"{APP_VERSION}\n"
+    assert not (root / ".se" / ".runtime" / "kern.path").exists()
+    assert not any(line.startswith("kern ") for line in calls(home)), "--binary starts nothing"
+    assert not any(" sync" in line or " identity " in line or "start-hooks" in line for line in calls(home))
+
+
+@needs_platform
+def test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothing(machine):
+    home, _, base = machine
+    root = binary_root(base)
+    release(home)
+    result = run_binary(home, fake_bin(base), root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    placed(home, root)
+    assert any(ASSET in line for line in calls(home))
+
+
+def test_binary_builds_with_go_where_no_release_matches(machine):
+    home, _, base = machine
+    root = binary_root(base)
+    path = fake_bin(base)
+    (path / "go").write_text(f"""#!/bin/sh
+echo "go $* in $PWD" >> "$HOME/calls"
+cat > "$3" <<'KERN'
+{FAKE_KERN}KERN
+chmod +x "$3"
+""", encoding="utf-8", newline="\n")
+    (path / "go").chmod(0o755)
+    (root / BUILD_DIR).mkdir()
+    (root / BUILD_DIR / "go.mod").write_text("module se/components\n", encoding="utf-8")
+    result = run_binary(home, path, root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    placed(home, root)
+    assert any(line.startswith("go build -o ") and line.endswith(f"{PACKAGE} in {sh(root)}/{BUILD_DIR}")
+               for line in calls(home))
+
+
+def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machine):
+    home, _, base = machine
+    root = binary_root(base)
+    result = run_binary(home, fake_bin(base), root)
+    assert result.returncode == 1
+    lines = [line for line in result.stdout.splitlines() if " release at " in line]
+    assert lines == [f"se bootstrap: no {NAME} {APP_VERSION} release at {APP_BASE}, and no go to build it "
+                     f"from {sh(root)}/{BUILD_DIR}"], result.stdout
+    assert not (root / ".se" / ".runtime" / "runme-se").exists()

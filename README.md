@@ -9,6 +9,36 @@ Status: being bootstrapped. Everything in this repository must be publishable; s
 
 License: MIT, see [LICENSE](LICENSE).
 
+## Getting it running
+
+On a machine with only its package manager: install Git, clone SE, run RUNME once. RUNME installs
+what is missing (Claude Code, uv, SE's binary) and starts the SE agent in the folder it runs from;
+a second run installs nothing. `<owner>/<repository>` is explained under [Install](#install).
+
+- Windows: `winget install --id Git.Git -e --source winget`, then in a new terminal `git clone
+  https://github.com/<owner>/<repository>`, then right-click `RUNME.ps1` > Run with PowerShell, or
+  `powershell -ExecutionPolicy Bypass -File RUNME.ps1` in the clone. PowerShell drops a bare `--`
+  before the script sees it, so a PowerShell line writes it as '--'.
+- Linux: `sudo apt-get install -y git` (Debian, Ubuntu) or `sudo dnf install -y git` (Fedora), the
+  same clone, then `./RUNME.sh`.
+- macOS: `brew install git`, the same clone, then `./RUNME.sh`.
+
+`./RUNME.sh --help` prints SE's command line; afterwards `claude --agent se:se` starts the agent in
+any folder. A failed run from Explorer closes its window: run the second Windows line in a terminal
+to read why. Where Claude Code already has SE from GitHub, RUNME stops with the one command to run;
+read it the same way.
+
+- **The Claude app:** a cloud session started in an environment set up for SE starts as the SE
+  agent. Its repositories are the ones the session works on (SE needs none); its network access
+  the default, Limited with Allow package managers ticked, which reaches `github.com` and
+  `release-assets.githubusercontent.com` (SE's clone and its binary's release).
+  - Its setup script is the one under [Claude Code cloud](#claude-code-cloud), which clones SE into
+    `~/.claude/skills/se`, and its variable `SE_DEFAULT_AGENT=se`.
+  - Elsewhere, the first message picks the agent: `Act as the se agent defined in
+    <se>/.github/agents/se.agent.md.`, which works in Copilot too.
+- **Cowork, untested:** give the Cowork session the folder that holds SE's clone, and send the
+  first message above with that folder as `<se>`. Nobody has tried it yet.
+
 ## Install
 
 One step per place. What each agent does is in its own file in [src/agents/](src/agents/).
@@ -17,7 +47,7 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | `claude plugin install se --marketplace <owner>/<repository>` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
+| Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
 | GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
@@ -228,6 +258,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
     greeting names both causes.
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
+- **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
+  fetches or builds `~/.se/bin/<name>-<version>` in the foreground, links it and starts nothing.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
   and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
   JSON to the named binary's `kern hook <event>`.

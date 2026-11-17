@@ -7,6 +7,7 @@ directory. The application's own test run, which builds the core, is the suite b
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tomllib
 
@@ -29,6 +30,8 @@ TEMPLATE = {
     "se.toml": '[project]\nidentity = "<name> <name>"\n\n[modules.kern]\ngo = true\n',
     "cmd/app/main.go": 'package main\n\nfunc main() { run("app") } // happy apps stay\n',
     ".github/workflows/check.yml": "jobs:\n  check:\n    uses: ./.github/workflows/kern-battery.yml\n",
+    # The generic pair, as SE's root holds it (des-016).
+    **{name: (PROJECT / name).read_text(encoding="utf-8") for name in ("RUNME.sh", "RUNME.ps1")},
 }
 # The battery the template's CI calls, as SE ships it (scripts/se_workflows.py).
 BATTERY = ("name: kern-battery\non:\n  workflow_call:\njobs:\n  trust:\n    steps:\n"
@@ -100,6 +103,10 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     assert (app / "kern" / "index" / "index.go").is_file() and (app / "kern" / "release.toml").is_file()
     assert not (app / "kern" / "template").exists(), "kern's source at the pin, without its template"
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
+    # The generic pair, byte for byte SE's, RUNME.sh executable.
+    for name in ("RUNME.sh", "RUNME.ps1"):
+        assert (app / name).read_bytes() == (PROJECT / name).read_bytes(), name
+    assert os.access(app / "RUNME.sh", os.X_OK) or os.name == "nt"
     # Its CI calls the battery's copy beside it, at the pin, reaching SE beside the application.
     assert "uses: ./.github/workflows/kern-battery.yml" in (app / ".github" / "workflows" / "check.yml").read_text()
     pin = git(source, "rev-parse", "kern-v0.1.0^{commit}")

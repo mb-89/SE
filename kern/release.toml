@@ -1,6 +1,6 @@
 # kern's release (kern/README.md "Release"): the version the next release carries, and where its
 # assets are published. tools/release reads both; a push to main that changes the version cuts it.
-version = "0.13.0"
+version = "0.14.0"
 # The release's download base, `{version}` filled in: a path under the home the checkout's origin
 # names (kern/home), so it names no repository and moves with the checkout. Its tag is the last
 # path part; the release workflow publishes only into the repository origin names.

@@ -92,7 +92,11 @@ def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows() -
                     "go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/"):
         assert f"        working-directory: kern\n        run: {command}\n" in platforms
     # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash.
-    assert "        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py\n" in platforms
+    assert ("        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py "
+            "tests/test_se_mcp.py tests/test_runme.py\n") in platforms
+    # RUNME.ps1 runs from PowerShell itself, Windows only; `-k powershell` selects its cases.
+    assert ("      - name: RUNME from PowerShell\n        if: runner.os == 'Windows'\n        shell: powershell\n"
+            "        run: uv run pytest -q tests/test_runme.py -k powershell\n") in platforms
     # The worktree clean-up's links (tests/test_worktree_removal.py), junctions among them, there too.
     assert "        shell: bash\n        run: uv run pytest -q -rs tests/test_worktree_removal.py\n" in platforms
     # setup.ps1 runs where PowerShell is, Windows only; `-k powershell` selects its SETUPS cases.
