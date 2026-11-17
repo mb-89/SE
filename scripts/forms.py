@@ -1574,7 +1574,8 @@ def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
     tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
     if hold:
         tail.append("Or run it again with --hold: it files the text as given, labelled "
-                    f"{hold} and not ready, and nobody starts it until it is fixed")
+                    f"{hold} and not ready; then fix its text on the issue itself and run "
+                    "work_tickets.py unhold <issue>")
     return "\n".join(_fit(head, lines, tail))
 
 

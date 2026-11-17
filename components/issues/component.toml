@@ -73,6 +73,13 @@ group = "Issues"
 help = "link an issue to a native blocker"
 class = "batch"
 
+[commands."work_tickets.py unhold"]
+usage = "work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue"
+summary = "for SE: check an issue filed with --hold against its form again and, ..."
+group = "Issues"
+help = "for SE: check an issue filed with --hold against its form again and, where it passes, remove off-form and give a work issue ready back"
+class = "batch"
+
 [commands."work_tickets.py paused"]
 usage = "work_tickets.py paused [--worktree WORKTREE] [--repo REPO]"
 summary = "whether the fleet is paused: exit code 1 and the issue while an ..."

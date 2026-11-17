@@ -5480,7 +5480,11 @@ class LabelledGh:
                 return ""
             if "--jq" in arguments:
                 return f"{number}\n"
-            return json.dumps({"issue_dependencies_summary": {"blocked_by": len(self.blocked_by.get(number, []))}})
+            issue = self.issues.get(number, {})  # the REST API's issue: labels as objects
+            return json.dumps({
+                **issue, "labels": [{"name": name} for name in issue.get("labels", [])],
+                **({"html_url": issue["url"]} if "url" in issue else {}),
+                "issue_dependencies_summary": {"blocked_by": len(self.blocked_by.get(number, []))}})
         raise AssertionError(f"unexpected gh call {arguments}")
 
 
@@ -7119,6 +7123,165 @@ def test_hold_on_backlog_file_and_route_drops_ready_and_adds_off_form(
     assert github.issues[2]["body"] == "<!-- se:fleet -->\nA line.\n"
     assert github.issues[1]["labels"] == ["work", "repo:repo", "off-form"]
     assert github.issues[1]["body"].endswith("### Package kind\n\nnone of them\n")
+
+
+def held_work_issue(worktree: Path, monkeypatch, capsys) -> tuple[LabelledGh, list[list[str]]]:
+    """A work issue #2 filed with --hold as in
+    `test_hold_files_as_given_after_two_refusals_off_form_and_never_started`, and the gh calls
+    made after it."""
+    github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
+                             "url": "https://git.example/owner/repo/issues/1", "state": "closed"}})
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
+        calls.append(list(arguments)) or github(root, arguments)))
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    enforce(worktree, "refuse", refusals=1)
+    body = worktree / "body.md"
+    body.write_text("Only a line, no form.\n", encoding="utf-8")
+    command = ["file", "--title", WORK_TITLE, "--body-file", str(body)]
+    assert run(worktree, *command) == 1
+    assert "work_tickets.py unhold <issue>" in capsys.readouterr().err  # the refusal offering --hold
+    assert run(worktree, *command, "--hold") == 0
+    out = capsys.readouterr().out
+    assert "held: labelled off-form and not ready; fix its title or body on the issue itself, " \
+           "then run work_tickets.py unhold 2" in out
+    assert github.issues[2]["labels"] == ["work", "repo:repo", "off-form"]
+    calls.clear()
+    return github, calls
+
+
+def edits(calls: list[list[str]]) -> list[list[str]]:
+    return [call for call in calls if call[:2] == ["issue", "edit"]]
+
+
+def test_unhold_refuses_an_unfixed_held_issue_and_lifts_the_hold_once_it_passes(
+        worktree, monkeypatch, capsys, forms_home):
+    github, calls = held_work_issue(worktree, monkeypatch, capsys)
+    assert run(worktree, "unhold", "2") == 1
+    error = capsys.readouterr().err
+    assert "unhold: the work form refuses" in error and "Problem" in error
+    assert "forms.py draft work" in error and "--hold" not in error
+    assert edits(calls) == [] and github.issues[2]["labels"] == ["work", "repo:repo", "off-form"]
+
+    github.issues[2]["body"] = FORMS.render(WORK_FORM, WORK_FIELDS)
+    enforce(worktree, "off")  # unhold checks whatever [forms] enforce says
+    assert run(worktree, "unhold", "2") == 0
+    assert capsys.readouterr().out == (
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed, ready added\n")
+    assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
+    assert [call[3:5] for call in edits(calls)] == [["--add-label", "ready"],
+                                                   ["--remove-label", "off-form"]]
+    assert github.issues[2]["body"] == FORMS.render(WORK_FORM, WORK_FIELDS)
+    assert run(worktree, "ready") == 0
+    assert "#2" in capsys.readouterr().out
+
+    calls.clear()
+    assert run(worktree, "unhold", "2") == 1
+    assert "not held (off-form): nothing to unhold" in capsys.readouterr().err
+    github.issues[1]["labels"] = ["work", "off-form"]
+    assert run(worktree, "unhold", "1") == 1
+    assert "#1 is closed" in capsys.readouterr().err
+    github.issues[1].update(state="open", labels=["off-form"])
+    assert run(worktree, "unhold", "1") == 1
+    assert "neither backlogged nor work" in capsys.readouterr().err
+    assert edits(calls) == []
+
+
+def test_unhold_refuses_a_private_term_in_the_fixed_text(worktree, monkeypatch, capsys, forms_home):
+    github, calls = held_work_issue(worktree, monkeypatch, capsys)
+    address = "alice" + "@" + "corp.test"  # a term of the public list, never written down whole
+    github.issues[2]["body"] = FORMS.render(WORK_FORM, dict(WORK_FIELDS, goal=f"Mail {address}."))
+    assert run(worktree, "unhold", "2") == 1
+    error = capsys.readouterr().err
+    assert "Goal: holds a term of the public list" in error and "ask the owner" in error
+    assert address not in error and "--hold" not in error
+    assert edits(calls) == []
+
+
+def test_unhold_gives_a_blocked_issue_ready_and_ready_still_skips_it(
+        worktree, monkeypatch, capsys, forms_home):
+    github, calls = held_work_issue(worktree, monkeypatch, capsys)
+    github.issues[2]["body"] = FORMS.render(WORK_FORM, WORK_FIELDS)
+    github.blocked_by[2] = [3]
+    assert run(worktree, "unhold", "2") == 0
+    assert capsys.readouterr().out == (
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed, ready added; ready "
+        "and start skip it while its open blockers stay open\n")
+    assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
+    assert run(worktree, "ready") == 0
+    assert "#2" not in capsys.readouterr().out
+
+
+def test_unhold_lifts_a_fixed_routed_and_backlog_issue(worktree, monkeypatch, capsys, forms_home):
+    github = LabelledGh({1: {"number": 1, "title": "Outside", "body": "Please fix it.",
+                             "url": "https://git.example/owner/repo/issues/1", "labels": []}})
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
+        calls.append(list(arguments)) or github(root, arguments)))
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    enforce(worktree, "refuse", refusals=1)
+    body = worktree / "body.md"
+    body.write_text("A line.\n", encoding="utf-8")
+    routing = worktree / "routing.md"
+    routing.write_text("## Package kind\n\nnone of them\n", encoding="utf-8")
+    backlog = ["backlog", "file", "--title", "held-idea", "--body-file", str(body)]
+    route = ["route", "1", "--title", "fix/held-20261116", "--routing-file", str(routing)]
+    for command, number in ((backlog, 2), (route, 1)):
+        assert run(worktree, *command) == 1
+        capsys.readouterr()
+        assert run(worktree, *command, "--hold") == 0
+        assert f"work_tickets.py unhold {number}" in capsys.readouterr().out
+    calls.clear()
+
+    assert run(worktree, "unhold", "1") == 1
+    error = capsys.readouterr().err
+    assert "the routed form refuses" in error and "Package kind" in error
+    assert edits(calls) == []
+    github.issues[1]["body"] = github.issues[1]["body"].replace("none of them", "standard")
+    assert run(worktree, "unhold", "1") == 0
+    capsys.readouterr()
+    assert github.issues[1]["labels"] == ["work", "repo:repo", "ready"]
+
+    ticket = FORMS.load(PROJECT, tree=True)["ticket"]
+    github.issues[2]["body"] = FORMS.render(ticket, dict(ticket.example["fields"]))
+    assert run(worktree, "unhold", "2") == 0
+    assert capsys.readouterr().out == (
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed\n")
+    assert github.issues[2]["labels"] == ["backlogged", "se-person"]
+
+
+def test_unhold_without_gh_reads_the_issue_file_and_prints_the_label_change(
+        worktree, monkeypatch, capsys, forms_home):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: pytest.fail(
+        f"gh called: {arguments}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    assert run(worktree, "unhold", "2") == 1
+    assert "--issue-body <file>" in capsys.readouterr().err
+    answer = worktree / "issue.json"
+    answer.write_text(json.dumps({
+        "number": 2, "title": WORK_TITLE, "body": FORMS.render(WORK_FORM, WORK_FIELDS),
+        "state": "open", "labels": ["work", "repo:repo", "off-form"],
+        "html_url": "https://git.example/owner/repo/issues/2"}), encoding="utf-8")
+    assert run(worktree, "unhold", "2", "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "GitHub plan: unhold #2"
+    steps = [line for line in out if line[:3] in ("1. ", "2. ")]
+    assert "with ready" in steps[0] and "without off-form" in steps[1]
+    assert "Then: #2 is unheld: off-form removed, ready added" in out
+    assert out[-1] == "Run the GitHub plan above to unhold #2"
+
+
+def test_every_held_line_and_the_off_form_label_name_unhold():
+    assert "work_tickets.py unhold" in work_tickets.LABEL_DESCRIPTIONS["off-form"]
+    assert len(work_tickets.LABEL_DESCRIPTIONS["off-form"]) <= 100
+    filed = work_tickets.Filed(held=True)
+    assert "work_tickets.py unhold <its number>" in filed.line("owner/repo", "work issue")
+    assert "work_tickets.py unhold 7" in work_tickets.Filed(
+        number=7, url="u", held=True).line("owner/repo", "work issue")
 
 
 def test_warn_and_refuse_check_backlog_file_against_ticket_and_route_against_routed(

@@ -1369,6 +1369,8 @@ def test_report_fits_ten_lines_names_every_finding_and_counts_no_tries(catalog):
     assert any(line.startswith(f"{forms.ALSO} Goal: has 99 words") for line in lines)
     assert "forms.py draft work" in text and "--hold" in text and "off-form" in text
     assert "--hold" not in forms.report("file", work, found, refused=True)
+    assert "fix its text on the issue itself and run work_tickets.py unhold <issue>" in text
+    assert "unhold" not in forms.report("file", work, found, refused=True)
 
 
 def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkeypatch):
