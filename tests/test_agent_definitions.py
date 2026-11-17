@@ -944,7 +944,7 @@ SESSION_STARTS = {
     "catch-up step 6": (SKILL, "6. **Dispatch repositories**", "7. **Present decisions**"),
     "integrator prompt": (SKILL.parent / "references" / "integrator-prompt.md", "# Integrator",
                           "```text"),
-    "Without gh start": (WORK_MODEL, "- `start`: start the worker session", "- **Never `add_repo`**"),
+    "Without gh start": (WORK_MODEL, "| `start` | start the worker session", "| `integrate`,"),
     "Copilot session tool": (WORK_MODEL, "- **Starting a session, where the host has a session tool**",
                              "- **Where it has none**"),
     "Copilot start lines": (WORK_MODEL, "- **Where it has none**", "- `<list>` holds"),
