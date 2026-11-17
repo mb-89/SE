@@ -1278,15 +1278,17 @@ def owner_push(repo: Path, tmp_path: Path, message: str) -> tuple[str, str]:
     return before, git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def run_ci(tmp_path: Path, before: str, after: str,
-           base_ref: str = "") -> subprocess.CompletedProcess[str]:
-    """The workflow's gate step as its runner runs it, in a fresh full clone: on a push to main,
-    or with `base_ref` on a pull request into that branch, whose head is `after`."""
+def run_ci(tmp_path: Path, before: str, after: str, base_ref: str = "", branch: str = "main",
+           default: str = "main") -> subprocess.CompletedProcess[str]:
+    """The workflow's gate step as its runner runs it, in a fresh full clone detached at `after`:
+    on a push to `branch` of a repository whose default branch is `default`, or with `base_ref`
+    on a pull request into that branch, whose head is `after`."""
     runner = tmp_path / "runner"
     shutil.rmtree(runner, ignore_errors=True)
     fake_git.clone(tmp_path / "remote.git", runner, "-b", "main")
-    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or "main",
-           "BASE_REF": base_ref}
+    git(runner, "checkout", "-q", "--detach", after)
+    env = {**os.environ, "BEFORE": before, "AFTER": after, "BRANCH": base_ref or branch,
+           "DEFAULT": default, "BASE_REF": base_ref}
     return subprocess.run(["bash", "-e", "-c", ci_script()], cwd=runner, env=env,
                           capture_output=True, text=True, check=False)
 
@@ -1452,6 +1454,195 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
     assert [hit.split(": ", 1)[0] for hit in hits] == ([f"commit {head[:12]} message:3"] if refused else [])
     assert result.returncode == (1 if refused else 0), result.stdout
 
+
+
+# A push's range (push_range): a work branch is gated on what it brings past the integration
+# branch, whose commits were gated where they reached it; the integration branch's push is whole.
+
+GITHUB_ACCOUNT = {"GIT_AUTHOR_NAME": "acct", "GIT_AUTHOR_EMAIL": "1+acct" + AT + NOREPLY, **WEB_FLOW}
+
+
+def github_commit(repo: Path, files: dict[str, str], message: str) -> str:
+    """A commit GitHub made for the account (a squash landing): its noreply author, web-flow
+    committer; returns its sha."""
+    for name, content in files.items():
+        (repo / name).write_text(content, encoding="utf-8", newline="\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", message, env={**os.environ, **GITHUB_ACCOUNT})
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def head(repo: Path) -> str:
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+@pytest.fixture
+def landed(repo: Path, tmp_path: Path) -> dict[str, str]:
+    """A strict project whose main holds a GitHub squash landing made after the branch `work`
+    left it: main's first commit (`main0`), work's pushed tip (`before`) and the landing."""
+    git(repo, "config", "user.name", "mb")
+    git(repo, "config", "user.email", "mb")
+    commit(repo, {"se.toml": PROJECT_IDENTITY + FAST_FORWARD}, "Start the project")
+    remote = tmp_path / "remote.git"
+    fake_git.init(remote, "--bare")
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "main")
+    main0 = head(repo)
+    git(repo, "switch", "-q", "-c", "work")
+    commit(repo, {"a.txt": "a\n"}, "Add a")
+    git(repo, "push", "-q", "origin", "work")
+    before = head(repo)
+    git(repo, "switch", "-q", "main")
+    landing = github_commit(repo, {"l.txt": "l\n"}, "Integrate old-landing: a squash landing")
+    git(repo, "push", "-q", "origin", "main")
+    return {"main0": main0, "before": before, "landing": landing}
+
+
+def merged_work(repo: Path) -> str:
+    """`work` merges main and adds one commit, pushed; returns its tip."""
+    git(repo, "switch", "-q", "work")
+    git(repo, "merge", "-q", "--no-edit", "main")
+    commit(repo, {"b.txt": "b\n"}, "Add b")
+    git(repo, "push", "-q", "origin", "work")
+    return head(repo)
+
+
+def foreign_hits(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return sorted({line.split(" ", 2)[1] for line in result.stdout.splitlines()
+                   if "foreign-identity" in line})
+
+
+def test_ci_gates_only_the_commits_a_work_branch_brings_past_main(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    after = merged_work(repo)
+    result = run_ci(tmp_path, landed["before"], after, branch="work")
+    assert f"gating {landed['before']}..{after} --not refs/remotes/origin/main, the commits " \
+           "pushed to work" in result.stdout
+    assert " files, 2 commits, se " in result.stdout  # the merge and b, not main's landing
+    assert result.returncode == 0, result.stdout
+
+
+def test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    after = merged_work(repo)
+    foreign = github_commit(repo, {"c.txt": "c\n"}, "Add c")
+    git(repo, "push", "-q", "origin", "work")
+    result = run_ci(tmp_path, after, foreign, branch="work")
+    assert result.returncode == 1, result.stdout
+    assert foreign_hits(result) == [foreign[:12]]
+    assert landed["landing"][:12] not in result.stdout
+    assert "::error::public-check (scripts/public_check.py" in result.stdout
+
+
+def test_ci_refuses_a_foreign_landing_pushed_to_main(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    result = run_ci(tmp_path, landed["main0"], landed["landing"])
+    assert f"gating {landed['main0']}..{landed['landing']}, the commits pushed to main" in result.stdout
+    assert result.returncode == 1, result.stdout
+    assert foreign_hits(result) == [landed["landing"][:12]]
+
+
+def test_ci_gates_a_new_branch_on_what_main_does_not_hold(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    git(repo, "switch", "-q", "-c", "work2", landed["before"])
+    git(repo, "merge", "-q", "--no-edit", "main")
+    git(repo, "push", "-q", "origin", "work2")
+    result = run_ci(tmp_path, "0" * 40, head(repo), branch="work2")
+    assert f"gating {head(repo)} --not refs/remotes/origin/main, " in result.stdout
+    assert result.returncode == 0, result.stdout
+
+
+def test_ci_refuses_a_new_branch_made_from_a_foreign_commit_another_branch_holds(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    git(repo, "switch", "-q", "-c", "held", landed["main0"])
+    held = github_commit(repo, {}, "Held elsewhere")
+    git(repo, "push", "-q", "origin", "held")
+    git(repo, "switch", "-q", "-c", "work3", held)
+    commit(repo, {"d.txt": "d\n"}, "Add d")
+    git(repo, "push", "-q", "origin", "work3")
+    result = run_ci(tmp_path, "0" * 40, head(repo), branch="work3")
+    assert result.returncode == 1, result.stdout
+    assert foreign_hits(result) == [held[:12]]
+
+
+def push_clone(tmp_path: Path) -> Path:
+    """A fresh full clone of the project's origin, on main."""
+    runner = tmp_path / "runner"
+    shutil.rmtree(runner, ignore_errors=True)
+    fake_git.clone(tmp_path / "remote.git", runner, "-b", "main")
+    return runner
+
+
+@pytest.mark.parametrize("pushed, known, expected", [
+    # A work branch leaves out what the integration branch holds, its old tip known or not.
+    ("work", True, "{before}..{after} --not refs/remotes/origin/main"),
+    ("work", False, "{after} --not refs/remotes/origin/main"),
+    # The integration branch is gated whole, or on what no other branch holds.
+    ("main", True, "{before}..{after}"),
+    ("main", False, "{after} --not refs/remotes/origin/work"),
+])
+def test_push_range(repo: Path, tmp_path: Path, landed: dict[str, str], pushed: str, known: bool,
+                    expected: str) -> None:
+    after = merged_work(repo) if pushed == "work" else landed["landing"]
+    before = landed["before"] if pushed == "work" else landed["main0"]
+    clone = push_clone(tmp_path)
+    found = public_check.push_range(clone, before if known else "0" * 40, after, pushed, "main")
+    assert found == expected.format(before=before, after=after)
+
+
+@pytest.mark.parametrize("before", ["", "0" * 40, "1" * 40])
+def test_push_range_takes_an_old_tip_this_clone_lacks_as_unknown(
+        repo: Path, tmp_path: Path, landed: dict[str, str], before: str) -> None:
+    after = merged_work(repo)
+    found = public_check.push_range(push_clone(tmp_path), before, after, "work", "main")
+    assert found == f"{after} --not refs/remotes/origin/main"
+
+
+def test_push_range_without_the_integration_ref(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    after = merged_work(repo)
+    clone = push_clone(tmp_path)
+    git(clone, "update-ref", "-d", "refs/remotes/origin/main")
+    assert public_check.push_range(clone, landed["before"], after, "work", "main") \
+        == f"{landed['before']}..{after}"
+    assert public_check.push_range(clone, "", after, "work", "main") == f"{after} --not"
+
+
+def test_push_range_gates_whole_where_se_toml_names_another_branch(
+        repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
+    git(repo, "switch", "-q", "work")
+    commit(repo, {"se.toml": PROJECT_IDENTITY.replace("[project]\n", "[project]\nintegration_branch = \"trunk\"\n")
+                  + FAST_FORWARD}, "Name trunk")
+    git(repo, "merge", "-q", "--no-edit", "main")
+    git(repo, "push", "-q", "origin", "work")
+    after = head(repo)
+    clone = push_clone(tmp_path)
+    git(clone, "checkout", "-q", "--detach", after)
+    assert public_check.push_range(clone, landed["before"], after, "work", "main") \
+        == f"{landed['before']}..{after}"
+    result = run_ci(tmp_path, landed["before"], after, branch="work")
+    assert result.returncode == 1, result.stdout  # main's landing is gated again, and refused
+    assert foreign_hits(result) == [landed["landing"][:12]]
+
+
+@pytest.mark.parametrize("args, named", [
+    (["--push", "x", "--branch", "b", "--default-branch", "main"], "--push needs --rev"),
+    (["--rev", "HEAD", "--push", "x", "--default-branch", "main"], "--push needs --branch"),
+    (["--rev", "HEAD", "--push", "x", "--branch", "b"], "--push needs --default-branch"),
+    (["--rev", "HEAD", "--push", "x", "--branch", "b", "--default-branch", "main", "--range", "HEAD"],
+     "--push and --range exclude each other"),
+    (["--rev", "HEAD", "--push", "x", "--branch", "b", "--default-branch", "main", "--history", "HEAD"],
+     "--push and --history exclude each other"),
+    (["--rev", "HEAD", "--push", "x", "--branch", "b", "--default-branch", "main", "--no-history"],
+     "--push and --no-history exclude each other"),
+    (["--rev", "HEAD", "--branch", "b"], "--branch needs --push"),
+])
+def test_push_options_missing_or_clashing_are_a_setup_error(repo: Path, args: list[str],
+                                                            named: str) -> None:
+    commit(repo, {"README.md": "clean\n"})
+    result = run_check("--repo", str(repo), *args)
+    assert result.returncode == 2, result.stdout
+    assert named in result.stdout
 
 # --built: a built page, or a folder of them, checked as a source of its own. Pages are written
 # here from fragments, so no tracked file holds the value a test plants.
