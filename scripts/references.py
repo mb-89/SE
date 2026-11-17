@@ -13,6 +13,9 @@ skills, README.md, AGENTS.md and the rule book) and the issue-filing commands `w
 - Commands: `<x>.py <subcommand> [<subcommand>]` in a code span or a fenced block, where
   `scripts/<x>.py` is one of the repository's scripts whose argument parser defines subcommands.
   That parser is the command registry while SE is Python: read in process, never run.
+- Options: `command_options` gives the option names of the parser a script's leading subcommand
+  words reach, from the same capture as `command_tree`. `tests/test_remedy_strings.py` holds the
+  messages in `scripts/*.py` (docstrings aside) to the same parsers, subcommands and options alike.
 """
 
 from __future__ import annotations
@@ -249,23 +252,57 @@ def capturing():
 @cache
 def command_tree(script: Path) -> Tree:
     """The subcommands `script`'s argument parser defines, nested; empty where it defines none or
-    is no script with a `main`. Its `main` runs only until it parses its arguments, its output
-    swallowed, and never in a script without argparse (git_door.py's main runs git)."""
+    is no script with a `main` (its parser as `captured_parser` reads it)."""
+    parser = captured_parser(script)
+    return parser_tree(parser) if parser is not None else {}
+
+
+def command_options(script: Path, words: list[str] | tuple[str, ...] = ()) -> frozenset[str]:
+    """The option names (`--name`, `-n`) of the parser `script`'s leading `words` reach, empty
+    for a script without argparse: each word that is a subcommand of the parser reached so far
+    leads into it, one that is a choice of a positional (`se_plugin.py build`) leaves it where it
+    is, and the first word that is neither stops the walk."""
+    parser = captured_parser(script)
+    if parser is None:
+        return frozenset()
+    for word in words:
+        reached = subcommand(parser, word)
+        if reached is not None:
+            parser = reached
+        elif not any(not action.option_strings and action.choices and word in map(str, action.choices)
+                     for action in parser._actions):
+            break
+    return frozenset(option for action in parser._actions for option in action.option_strings)
+
+
+def subcommand(parser: argparse.ArgumentParser, word: str) -> argparse.ArgumentParser | None:
+    """The subparser `word` names under `parser`, or None."""
+    for action in parser._actions:  # argparse has no public accessor for them
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices.get(word)
+    return None
+
+
+@cache
+def captured_parser(script: Path) -> argparse.ArgumentParser | None:
+    """`script`'s argument parser, captured once per process: its `main` runs only until it parses
+    its arguments, its output swallowed, and never in a script without argparse (git_door.py's
+    main runs git); None where there is no script with a `main` that parses."""
     if not script.is_file() or script.suffix != ".py" or "argparse" not in script.read_text(encoding="utf-8"):
-        return {}
+        return None
     module = load(script)
     main = getattr(module, "main", None)
     if main is None:
-        return {}
+        return None
     sink = io.TextIOWrapper(io.BytesIO())
     with capturing(), redirect_stdout(sink), redirect_stderr(sink):
         try:
             main([])
         except _Captured as captured:
-            return parser_tree(captured.parser)
+            return captured.parser
         except (Exception, SystemExit):
-            return {}
-    return {}
+            return None
+    return None
 
 
 def load(script: Path):
