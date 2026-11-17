@@ -439,9 +439,11 @@ Pull requests built on an old `main` cause most integration trouble.
 - A worktree and its branch are created when work starts, from the newest `main`. The worker
   syncs first, before each ticket and before the pull request; the field report names the `main`
   commit it was tested against.
-- Dependencies are native GitHub "blocked by" links, set by SE. Blocked state is
-  computed (`issue_dependencies_summary.blocked_by`), never a label. `ready` is only
-  [SE's approval](#issues); startable = `ready` and zero open blockers.
+- A blocker is an open issue that a native GitHub "blocked by" link or the body's Blocked by
+  names (`#n`), both set by SE; blocked state is computed, never a label. One closed as not
+  planned still holds until SE takes it out; another repository's, or one named by a link, holds
+  only through a native link. `ready` is only [SE's approval](#issues); startable = `ready` and
+  zero open blockers.
 - Labels change only in these steps: SE's `file` and `route` ([Issues](#issues)); `start` changes
   `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
   `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
@@ -747,9 +749,15 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
+  - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
+    Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
+    `issue_read` (method `get`) answers saved as one JSON list, and refuses until it knows them.
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
     conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
-    <title> --issue-body <file>`; `file --blocked-by` needs gh.
+    <title> --issue-body <file>`.
+  - `file --blocked-by` and `block` need gh; there the body's Blocked by alone holds the issue.
+    `block` is done by hand: add the blocker's line to the issue's Blocked by with the GitHub
+    tools (`issue_write`, method `update`).
   - A held issue's text is fixed on the issue; `unhold --issue-body <file>`, the issue as
     `issue_read` answered it, checks it against its form and prints the label change as its plan.
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`

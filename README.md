@@ -1850,6 +1850,7 @@ work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FI
 
 work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]
                       [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]
+                      [--blockers FILE]
                       issue
     start a ready work issue: worktree from the newest main, label in-progress; without gh, the
     label change and the Started comment as GitHub steps, or through kern's relay where it serves

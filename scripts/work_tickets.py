@@ -23,7 +23,7 @@ import tomllib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import NoReturn
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -3740,14 +3740,60 @@ def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: b
     ), f"#{number} is started: in-progress, with its Started comment")
 
 
+def blocker_answers(file: Path) -> dict[int, dict[str, object]]:
+    """The blockers' states from `file`: the GitHub tools' `issue_read` (method `get`) answers of
+    them, or the REST API's, saved unchanged as one JSON list; each as `fleet_issue` reads it."""
+    items = unlisted(json_answer(file, "blockers"), "issues")
+    return {issue["number"]: issue for issue in map(fleet_issue, (
+        item for item in items if "number" in item))}
+
+
+def refuse_held_start(number: int, issue: dict[str, object], door: object | None,
+                      blockers_file: Path | None) -> None:
+    """Refuse `start` without gh while `issue` is held: by a native link its answer counts, or by
+    an issue its Blocked by names that is open, closed as not planned, or whose state is not known.
+    Through kern's relay each blocker is read with `issue_read` (method `get`); otherwise from
+    `blockers_file`. An issue whose Blocked by names nothing reads nothing more."""
+    summary = issue.get("issue_dependencies_summary")
+    linked = int(summary.get("blocked_by") or 0) if isinstance(summary, dict) else 0
+    if linked > 0:
+        raise QueueError(f"Issue #{number} is not startable: {linked} issue(s) linked as blocking "
+                         "it are still open")
+    record = fleet_issue(issue)
+    numbers = blockers_of(record)
+    if not numbers:
+        return
+    if door is not None:
+        states: dict[int, dict[str, object] | None] = {}
+        for blocker in numbers:
+            answer = door.ask("issue_read", {"method": "get", "issue_number": blocker})
+            states[blocker] = (fleet_issue(answer) if isinstance(answer, dict) and "number" in answer
+                               else None)
+    elif blockers_file is not None:
+        states = dict(blocker_answers(blockers_file))
+    else:
+        states = {}
+    held = holding_blockers(record, states)
+    if not held:
+        return
+    unread = [blocker for blocker, why in held if why == "not read"]
+    remedy = (f"; read {', '.join(f'#{blocker}' for blocker in unread)} with your GitHub tools "
+              "(issue_read, method get), save the answers unchanged as one JSON list and pass "
+              f"--blockers <file> ({WITHOUT_GH})" if unread else "")
+    raise QueueError(f"Issue #{number} is not startable: its Blocked by holds it: "
+                     f"{held_by(held)}{remedy}")
+
+
 def start_handed_off(
     root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
-    cloud_agent: str | None, issue_file: Path | None,
+    cloud_agent: str | None, issue_file: Path | None, blockers_file: Path | None = None,
 ) -> tuple[Path | None, str]:
     """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
-    GitHub tools answered it (`issue_file`); the worktree as with gh; then the label change and the
-    Started comment sent through kern's relay where it serves the checkout, else printed as steps
-    for the session's GitHub tools. The worktree (None for a cloud worker) and the issue's URL."""
+    GitHub tools answered it (`issue_file`); held while a blocker holds it (`refuse_held_start`,
+    its states from `blockers_file` off the relay); the worktree as with gh; then the label change
+    and the Started comment sent through kern's relay where it serves the checkout, else printed as
+    steps for the session's GitHub tools. The worktree (None for a cloud worker) and the issue's
+    URL."""
     door = relay_door(root, repo)
     if door is not None:
         refuse_while_paused("start", door.paused(repo))
@@ -3769,6 +3815,7 @@ def start_handed_off(
     if labels & NOT_STARTABLE_LABELS:
         raise QueueError(f"Issue #{number} is not startable: it is labelled "
                          f"{', '.join(sorted(labels & NOT_STARTABLE_LABELS))}")
+    refuse_held_start(number, issue, door, blockers_file)
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
     if cloud and not agent:
@@ -3863,9 +3910,28 @@ def ready_issues(
         return blockers == 0 and (allow_existing_branch
                                   or not branch_exists(root, str(candidate["title"])))
 
-    verdicts = concurrently(*(lambda candidate=candidate: ready(candidate)
-                              for candidate in startable))
-    return [candidate for candidate, verdict in zip(startable, verdicts) if verdict]
+    def state(number: int) -> dict[str, object] | None:
+        try:
+            return fleet_issue({**issue_api(root, repo, f"issues/{number}"), "number": number})
+        except (QueueError, KeyError, TypeError, ValueError):
+            return None  # not read: it holds its candidates (rule gen-003)
+
+    listed = {int(item["number"]): {"state": "open", "reason": ""} for item in [*candidates, *active]}
+    named = sorted({number for candidate in startable for number in blockers_of(fleet_issue(candidate))}
+                   - set(listed))
+    results = concurrently(*(lambda candidate=candidate: ready(candidate) for candidate in startable),
+                           *(lambda number=number: state(number) for number in named))
+    verdicts, states = results[:len(startable)], {**listed, **dict(zip(named, results[len(startable):]))}
+    found = []
+    for candidate, verdict in zip(startable, verdicts):
+        held = holding_blockers(fleet_issue(candidate), states)
+        for number, why in held:
+            if why == "not read":
+                print(f"ready: #{candidate['number']} is held: its blocker #{number} could not be "
+                      "read", file=sys.stderr)
+        if verdict and not held:
+            found.append(candidate)
+    return found
 
 
 def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | None:
@@ -4912,7 +4978,9 @@ def file_work_issue(
     if hand_off() and blockers:
         raise QueueError(
             "file --blocked-by links blockers through gh, which is not signed in here; file "
-            "without --blocked-by and link the blockers on GitHub, or run it where gh is signed in")
+            "without --blocked-by and name the blockers as #<n> in the body's Blocked by, which "
+            "holds the issue back from ready and start with no link, or run it where gh is "
+            "signed in")
     outcome = filed_once(root, repo, "file", title.strip(), body,
                          work_issue_filing(repo, title.strip(), body, first), form="work",
                          hold=hold, given=given)
@@ -8651,6 +8719,31 @@ def blockers_of(issue: dict[str, object]) -> list[int]:
     return sorted({int(number) for number in BLOCKER_PATTERN.findall(blocked)})
 
 
+def holding_blockers(
+    issue: dict[str, object], states: Mapping[int, Mapping[str, object] | None],
+) -> list[tuple[int, str]]:
+    """The blockers its Blocked by names (`blockers_of`) that still hold `issue`, each with why:
+    `open`, `closed as not planned` (the fleet check's impossible block, held until SE takes it
+    out), or `not read` where `states` (number to the blocker as `fleet_issue` reads it, its
+    state and state reason) has none. A blocker closed for any other reason does not hold. It
+    reads nothing itself."""
+    held = []
+    for number in blockers_of(issue):
+        state = states.get(number)
+        if state is None:
+            held.append((number, "not read"))
+        elif state.get("state") != "closed":
+            held.append((number, "open"))
+        elif state.get("reason") == "not_planned":
+            held.append((number, "closed as not planned"))
+    return held
+
+
+def held_by(held: list[tuple[int, str]]) -> str:
+    """The blockers `holding_blockers` found, as one line: `#4 (open), #9 (not read)`."""
+    return ", ".join(f"#{number} ({why})" for number, why in held)
+
+
 def fleet_branches(root: Path) -> dict[str, datetime]:
     """Origin's branches, each with the committer time of its tip, fetched with git."""
     checked_git(root, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
@@ -9953,12 +10046,17 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
                   "it; start then prints the label change and the Started comment as steps for "
-                  "them, or sends them through kern's relay where it serves the checkout"))
+                  "them, or sends them through kern's relay where it serves the checkout"),
+         arg("--blockers", type=Path, metavar="FILE",
+             help="without gh, off kern's relay: the issues the work issue's Blocked by names, "
+                  "as your GitHub tools' issue_read (method get) answered each, saved unchanged "
+                  "as one JSON list; start refuses while one is open or closed as not planned, "
+                  "or its state is not known"))
 def run_start(root: Path, args: argparse.Namespace) -> int:
     if hand_off():
         path, url = start_handed_off(root, args.issue, resolve_repo(root, args.repo),
                                      args.worktree_root, args.create, args.cloud_agent,
-                                     args.issue_body)
+                                     args.issue_body, args.blockers)
         sent = relay_door(root, resolve_repo(root, args.repo)) is not None
     else:
         path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)

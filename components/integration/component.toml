@@ -78,7 +78,7 @@ read-only = true
 mcp = "Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read."
 
 [commands."work_tickets.py start"]
-usage = "work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]\n                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]\n                      issue"
+usage = "work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]\n                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]\n                      [--blockers FILE]\n                      issue"
 summary = "start a ready work issue: worktree from the newest main, label in- ..."
 group = "Integration"
 help = "start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout"
