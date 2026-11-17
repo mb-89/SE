@@ -17,6 +17,11 @@ import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
+import network_guard  # noqa: E402
+import time_bound  # noqa: E402
+
+# The test process reaches nothing beyond this machine, its collection included (tests/network_guard.py).
+network_guard.install()
 
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
@@ -94,9 +99,31 @@ def door_variable(item: pytest.Item) -> str:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
-    with git_door.use(door_backend(item)), pytest.MonkeyPatch.context() as patch:
+    with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
+            pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
+
+
+class GuardReports:
+    """Fails each test phase that tried to reach beyond this machine (tests/network_guard.py
+    `fail`) and explains a test past its time bound (tests/time_bound.py `explain`). A plugin
+    `pytest_configure` registers, not a hook of this conftest's own: pytest calls a conftest's
+    `pytest_runtest_makereport` only for the tests under its folder, and the complete run also
+    collects kern/python/tests."""
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(self, item: pytest.Item, call):
+        outcome = yield
+        report = outcome.get_result()
+        network_guard.fail(report)
+        time_bound.explain(item, report)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Every collected test gets its time bound (tests/time_bound.py), those of kern/python/tests
+    in the complete run too."""
+    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
 
 
 @pytest.fixture
@@ -118,6 +145,11 @@ def shared_fake_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
         yield state
 
 
+# How long the obs fixture waits for another worker's clone and build of obs (its lock); a test that
+# takes it gets this on top of its time bound (tests/time_bound.py).
+OBS_LOCK_WAIT_SECONDS = 600
+
+
 @pytest.fixture(scope="session")
 def obs() -> Path:
     """The obs module at its pin with its environment built, once per checkout at a time.
@@ -128,14 +160,14 @@ def obs() -> Path:
     """
     lock = ROOT / ".se" / "obs-setup.lock"
     lock.parent.mkdir(exist_ok=True)
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + OBS_LOCK_WAIT_SECONDS
     while True:
         try:
             lock.mkdir()
             break
         except FileExistsError:
             if time.monotonic() > deadline:
-                pytest.fail(f"{lock} is still held after 600 s; remove it if no suite runs")
+                pytest.fail(f"{lock} is still held after {OBS_LOCK_WAIT_SECONDS} s; remove it if no suite runs")
             time.sleep(0.2)
     try:
         with pytest.MonkeyPatch.context() as patch:
@@ -180,6 +212,7 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
+    config.pluginmanager.register(GuardReports(), "se-guard-reports")
     order_by_file_seconds(config)
     reports = os.environ.get(REPORTS_VARIABLE)
     if reports and not config.option.xmlpath and not hasattr(config, "workerinput"):

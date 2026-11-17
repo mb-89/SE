@@ -1115,6 +1115,9 @@ and the ten slowest tests (`suite --slowest N` lists N). Failed tests exit with 
 suite the budget refuses with code 3. How tests are written is owned by the
 [work model](src/skills/work-model/SKILL.md#tests).
 
+SE's own suite also bounds each test's time (`tests/time_bound.py`) and refuses its own process the
+network beyond this machine (`tests/network_guard.py`), each failure naming the test and the remedy.
+
 A runner of any kind may write JUnit XML reports into the directory named by the environment
 variable `SE_TEST_REPORTS`, one file per part. The gate then lists the slowest tests across all
 reports, each with its part (the file's name), and prints one line per part, so a speed issue names

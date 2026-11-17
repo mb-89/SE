@@ -19,6 +19,7 @@ addopts = "-n auto --dist loadfile"
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "pyyaml>=6.0.3",
 ]
