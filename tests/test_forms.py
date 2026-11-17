@@ -1409,6 +1409,8 @@ def test_readme_forms_names_every_file_under_forms_with_its_says():
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    start = readme.index("| `forms/retro.toml` |")
-    end = readme.index("\n| `forms/review.toml` |", start)
-    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
+    for marker, after in (("| `forms/retro.toml` |", "\n| `forms/review.toml` |"),
+                          ("- `forms/retro.toml`:", "\n- `forms/review.toml`:")):
+        start = readme.index(marker)
+        readme = readme[:start] + readme[readme.index(after, start) + 1:]
+    assert missing_from_readme(readme) == ["retro.toml"]

@@ -457,13 +457,29 @@ version = "^1.4"                             # in place of ref: a semver range o
 
 | Key | Meaning |
 |---|---|
-| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin refuses it. |
-| `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
-| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
-| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
-| `path` | optional relative directory inside the module; without it the whole module is used. |
-| Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
-| The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
+| `url` | the clone URL, public form |
+| `ref` | the pin, a full commit SHA |
+| `version` | a semver range of release tags |
+| `se.lock` | the tag each range resolved to |
+| `path` | optional directory inside the module |
+| Module names | letters, digits, `.`, `_`, `-` |
+| The module `se` | se itself, the check's pin |
+
+- `url`: machine-specific forms (mirrors, credentials) belong in the machine-local file below,
+  never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a
+  relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host
+  (`scripts/se_home.py`); a checkout without an origin refuses it.
+- `ref`: any commit on the module's `main` can be pinned, not only releases; `update` moves it.
+- `version`: in place of `ref`, a semantic version range of the module's release tags
+  `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases):
+  `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly).
+  A module pins one of `ref` and `version`.
+- `se.lock`: next to `se.toml`, it records the highest tag matching each `version` range, with its
+  version and commit; `sync` and `update` write it and the repository commits it.
+- `path`: a relative directory; without it the whole module is used.
+- Module names: other keys are errors.
+- The module `se`: its pin is the se the [public check](AGENTS.md#public-safety) must run:
+  exactly its `ref`, or any se whose `se.toml` version its `version` range admits.
 
 A common repository declares only modules that are public. Work-only modules on private hosts are
 declared the same way, in a work repository that consumes the common ones; a common repository never
@@ -1003,22 +1019,37 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
 
 | Key | Default | Meaning |
 |---|---|---|
-| `command` | — | the project's complete suite, an argument array run without a shell from the project root. `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it the same way for a worker's before-and-after times. |
-| `setup` | optional | of the same form as `command`; it installs the test dependencies (packages, browsers) and runs first. The gate prints its time and its last lines apart, and that time does not count against the budget. A failing setup stops the run before the suite, naming the command and its output. |
-| `target_seconds` | 60 | above it the gate warns. |
-| `limit_seconds` | 120 | the budget, judged on one reference run, CI's (below). |
-| `over_limit` | `"fail"` | what a run over the limit does. One rule holds for every project: an overrun fails, as below. A project that declares `"warn"` takes the other side of the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but nothing stops the suite from creeping past its budget; each overrun only warns, naming the setting. |
-| `shards` | 1 | how many shards CI's `check` runs the suite in, side by side (below). SE's own suite, unsharded, keeps the default: its limit is the whole suite's. |
-| `beside.<name>` | optional | a suite in another toolchain, such as SE's kern Go tests ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the root, default `.`) after the complete suite, wherever the suite runs: `integrate`, `work_tickets.py suite` and CI's `check`. |
+| `command` | — | the complete suite |
+| `setup` | optional | installs the test dependencies |
+| `target_seconds` | 60 | above it the gate warns |
+| `limit_seconds` | 120 | the budget |
+| `over_limit` | `"fail"` | what an overrun does |
+| `shards` | 1 | CI's shards of the suite |
+| `beside.<name>` | optional | a suite in another toolchain |
 
-- `shards`:
+- `command`: an argument array run without a shell from the project root.
+  `work_tickets.py integrate` runs it at every integration, and `work_tickets.py suite` runs it
+  the same way for a worker's before-and-after times.
+- `setup`: of the same form; it installs the test dependencies (packages, browsers) and runs
+  first. The gate prints its time and its last lines apart, and that time does not count against
+  the budget. A failing setup stops the run before the suite, naming the command and its output.
+- `limit_seconds`: the budget, judged on one reference run, CI's (below).
+- `over_limit`: what a run over the limit does. One rule holds for every project: an overrun
+  fails, as below. A project that declares `"warn"` takes the other side of the trade-off: no run
+  is refused for its time, so a slow runner never blocks a landing, but nothing stops the suite
+  from creeping past its budget; each overrun only warns, naming the setting.
+- `shards`: how many shards CI's `check` runs the suite in, side by side (below). SE's own suite,
+  unsharded, keeps the default: its limit is the whole suite's.
   - Over 1, `target_seconds` and `limit_seconds` are each shard's, which CI's slowest shard is
     held to.
   - A run of the whole suite (`integrate`, a worker's `suite`) is judged against `shards` times
     each, and CI's time it reads is held to the limit per shard.
   - It must be the `shards:` a workflow passes the `suite-time` action: `se_workflows.py check`
     fails on another literal number, naming both files and both numbers ([Workflows](#workflows)).
-- `beside.<name>`:
+- `beside.<name>`: a suite in another toolchain, such as SE's kern Go tests
+  ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the
+  root, default `.`) after the complete suite, wherever the suite runs: `integrate`,
+  `work_tickets.py suite` and CI's `check`.
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
     (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
@@ -1423,17 +1454,28 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 
 | Setting | Meaning |
 |---|---|
-| `[paths]` | a local checkout per module name. If the directory exists, the module comes from it as it is (working tree, any commit, no git step) and is never updated. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
-| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the module's `version` range admits it. A malformed version, or none where the module pins a range, is an error naming that file. |
-| `[urls]` | prefix rewrites applied to `url` before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
-| `[hooks] core = "off"` | or `SE_HOOK_CORE=off` in the environment, which answers first: SE's session hooks then start no core and post to none, and nothing is uninstalled. The start still refreshes, syncs and greets, and the Stop check still answers. |
-| `[paths] se = "<the installed SE's folder>"` | this machine's SE stays at its version, because the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)). |
+| `[paths]` | a local checkout per module |
+| A local checkout's version | reported, checked against the range |
+| `[urls]` | prefix rewrites of `url` |
+| `[hooks] core = "off"` | SE's hooks start no core |
+| `[paths] se` | this machine's SE stays put |
 
-`[hooks] core = "off"`:
-
-- Set in the file, it takes effect at the next session start.
-- It does not reach the MCP server, which can start the core by itself: a host switches its own
-  MCP server off. `SE_KERN=off` is another switch, which keeps commands direct.
+- `[paths]`: a local checkout per module name. If the directory exists, the module comes from it
+  as it is (working tree, any commit, no git step) and is never updated. If the directory is
+  missing, the pin is used. Relative paths are relative to the file, `~` is expanded.
+- A local checkout's version: `sync` and `status` report the version its `se.toml` sets, and
+  whether the module's `version` range admits it. A malformed version, or none where the module
+  pins a range, is an error naming that file.
+- `[urls]`: prefix rewrites applied to `url` before any git step, for example a private mirror of
+  a public host. The longest matching prefix wins.
+- `[paths] se = "<the installed SE's folder>"`: this machine's SE stays at its version, because
+  the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)).
+- `[hooks] core = "off"`, or `SE_HOOK_CORE=off` in the environment, which answers first: SE's
+  session hooks then start no core and post to none, and nothing is uninstalled. The start still
+  refreshes, syncs and greets, and the Stop check still answers.
+  - Set in the file, it takes effect at the next session start.
+  - It does not reach the MCP server, which can start the core by itself: a host switches its own
+    MCP server off. `SE_KERN=off` is another switch, which keeps commands direct.
 
 Work queue tracker, worktree and mirror settings are documented in the
 [work model](src/skills/work-model/SKILL.md#what-the-project-provides), the `[outside]` table in its
@@ -1454,22 +1496,32 @@ uv run python <se>/scripts/se_modules.py path <name>
 
 | Command | What it does |
 |---|---|
-| `sync` | a module with an existing local path is used from there; any other is cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Consuming repositories ignore `.se/`. |
-| `status` | one line per module with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
-| `update` | fetches the module (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
-| `path` | prints the directory a module is used from (its `path` included), for tools that load it. |
-| `--root` and `--local` | `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>` reads another machine-local file than `~/.se/local.toml`. |
+| `sync` | brings each module to its pin |
+| `status` | a line per module, its drift |
+| `update` | moves a pin to the newest commit |
+| `path` | prints a module's directory |
+| `--root` and `--local` | name the repository, the local file |
 
-- `status`'s drift is:
-  - for a local path, the commits ahead of and behind the pin, uncommitted changes, or a pin the
-    checkout does not have yet;
-  - for a pinned module, whether the clone is at the pin and, for a `version` range, a newer
-    matching tag the clone knows ("run update").
-- `update`:
+- `sync`: a module with an existing local path is used from there; any other is cloned or fetched
+  into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock
+  entry that admits it is resolved and locked first; a locked one stays where it is until
+  `update`. A clone with local changes is never overwritten. Consuming repositories ignore `.se/`.
+- `status`: one line per module with its source (`local` or `pinned`), the directory it is used
+  from, the pin and the drift. It never fetches.
+  - The drift is, for a local path, the commits ahead of and behind the pin, uncommitted changes,
+    or a pin the checkout does not have yet; for a pinned module, whether the clone is at the pin
+    and, for a `version` range, a newer matching tag the clone knows ("run update").
+- `update`: fetches the module (through `.se/modules/<name>`, also when a local path is used),
+  resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that
+  `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It
+  does not commit; commit the new pin with the commit list.
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
     there; change the range).
   - `update se` also regenerates the project's copies of SE's workflows and actions at the new
     pin ([Workflows](#workflows)), so they run the version `se.toml` or `se.lock` pins.
+- `path`: prints the directory a module is used from (its `path` included), for tools that load it.
+- `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local
+  <file>` reads another machine-local file than `~/.se/local.toml`.
 - Git runs without prompts; credentials come from the machine's git setup.
 
 ### Workflows
@@ -1765,11 +1817,17 @@ It reads the review report as JSON:
 
 | Field | Meaning |
 |---|---|
-| `verdict` | `pass`, `pass with open points` or `decline` |
-| `head` | the commit reviewed, the head the brief named |
-| `acceptance` | each acceptance item of the work issue, `{"item", "evidence"}` |
-| `findings` | each verified finding, `{"title", "evidence", "place", "blocking", "why"}`, empty where none was found; only damage blocks: the product made worse, or against what it is about |
-| `clean` | the "checked and clean" list, what was examined and found sound |
+| `verdict` | `pass`, `pass with open points`, `decline` |
+| `head` | the commit reviewed |
+| `acceptance` | each acceptance item, with evidence |
+| `findings` | each verified finding |
+| `clean` | the "checked and clean" list |
+
+- `head`: the head the brief named.
+- `acceptance`: each acceptance item of the work issue, `{"item", "evidence"}`.
+- `findings`: `{"title", "evidence", "place", "blocking", "why"}`, empty where none was found; only
+  damage blocks: the product made worse, or against what it is about.
+- `clean`: what was examined and found sound.
 
 There is no quota: a review without findings is a pass. What it refuses, writing nothing, is a
 verdict without its evidence or one its findings contradict:
@@ -1955,18 +2013,31 @@ template has a section for every part the form requires; the tests check both.
 
 | Form | What it shapes |
 |---|---|
-| `forms/decision.toml` | A decision note: the situation and the problem before the options' pugh fence. |
-| `forms/field-report.toml` | A work pull request's description: the field report between its markers. |
-| `forms/housekeeping.toml` | The owner's housekeeping pull request: no field report, no field required. |
-| `forms/landing.toml` | A landing pull request: it names the work issue, the work pull request and its report. |
-| `forms/merge-message.toml` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
-| `forms/overhaul.toml` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
-| `forms/retro.toml` | A retro's report or draft: its judged block, under its marker. |
-| `forms/review.toml` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
-| `forms/routed.toml` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
-| `forms/terms.toml`, the term list and no form | Inside terms and the plain words to use instead. They only warn. |
-| `forms/ticket.toml` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
-| `forms/work.toml` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
+| `forms/decision.toml` | a decision note |
+| `forms/field-report.toml` | a work pull request's description |
+| `forms/housekeeping.toml` | the owner's housekeeping pull request |
+| `forms/landing.toml` | a landing pull request |
+| `forms/merge-message.toml` | an integration's squash commit |
+| `forms/overhaul.toml` | an overhaul's report |
+| `forms/retro.toml` | a retro's report or draft |
+| `forms/review.toml` | a cold review's one comment |
+| `forms/routed.toml` | the routing block of an outside issue |
+| `forms/terms.toml` | no form: the term list |
+| `forms/ticket.toml` | an issue the owner reads |
+| `forms/work.toml` | one package for one worker |
+
+- `forms/decision.toml`: A decision note: the situation and the problem before the options' pugh fence.
+- `forms/field-report.toml`: A work pull request's description: the field report between its markers.
+- `forms/housekeeping.toml`: The owner's housekeeping pull request: no field report, no field required.
+- `forms/landing.toml`: A landing pull request: it names the work issue, the work pull request and its report.
+- `forms/merge-message.toml`: An integration's squash commit: `Integrate <branch>` and one Release-kind trailer.
+- `forms/overhaul.toml`: An overhaul's report: the verdicts, the findings and the judged block the next one reads.
+- `forms/retro.toml`: A retro's report or draft: its judged block, under its marker.
+- `forms/review.toml`: A cold review's one comment: what a person reads, then the JSON block the retro reads.
+- `forms/routed.toml`: The routing block SE appends to an outside issue: where it came from and what it lacks.
+- `forms/terms.toml`, the term list and no form: Inside terms and the plain words to use instead. They only warn.
+- `forms/ticket.toml`: An issue the owner reads: what is, what is wrong, what should be, how, and how we know.
+- `forms/work.toml`: One package for one worker: the ticket's why, then numbered requirements and acceptance.
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the

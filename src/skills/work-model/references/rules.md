@@ -37,13 +37,19 @@ section, followed by these fields:
 
 | Field | What it holds |
 |---|---|
-| the rule's sentence | one sentence stating the rule |
+| the rule's sentence | the rule, in one sentence |
 | **Why:** | the reason |
-| **Without it:** | what we lose if the rule is dropped |
-| **Prevents:** | the kinds of defects it prevents, named as defect classes, not single incidents |
-| **Implementations:** | one item per language or project, each linking the check, script or skill passage that does it, or saying "by judgment"; an item labelled `Go line (frozen):` records how the frozen Go line did it and does not count as a live implementation |
-| **Related:** | the ids of related rules, or "none" |
-| **Retired:** | only on a retired rule, the reason |
+| **Without it:** | what dropping it loses |
+| **Prevents:** | the defect classes it prevents |
+| **Implementations:** | one item per language or project |
+| **Related:** | related rule ids, or "none" |
+| **Retired:** | the reason, on a retired rule only |
+
+- **Without it:** what we lose if the rule is dropped.
+- **Prevents:** the kinds of defects it prevents, named as defect classes, not single incidents.
+- **Implementations:** each item links the check, script or skill passage that does it, or says
+  "by judgment"; an item labelled `Go line (frozen):` records how the frozen Go line did it and
+  does not count as a live implementation.
 
 The check refuses a malformed id, a project id without `p-`, a duplicate or reused retired id, a
 rule outside its section and a rule missing any of these fields; it lists, without failing, every
