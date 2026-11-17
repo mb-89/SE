@@ -5,6 +5,19 @@ SE's shape (kern's design, SE's `docs/go-core.md` "A bare application, and `se n
 SE's `se new app <name> --path <dir>` (SE's README "New application") copies this folder at kern's
 pin, fills in the name and makes the first commit.
 
+## Getting it running
+
+Install Git, clone this repository and run RUNME once in the clone: it installs what `RUNME.conf`
+declares and this machine lacks (Go), builds `app` and runs it with every argument.
+
+- Windows: `winget install --id Git.Git -e --source winget`, then in a new terminal `git clone
+  <repository URL>`, then `powershell -ExecutionPolicy Bypass -File RUNME.ps1` in the clone.
+- Linux: `sudo apt-get install -y git` or `sudo dnf install -y git`, the same clone, then
+  `./RUNME.sh`; macOS: `brew install git`, the same clone, then `./RUNME.sh`.
+
+The apt or dnf Go must be 1.21 or newer, which fetches go.mod's toolchain itself. After a pull,
+delete `app` (or `app.exe`) and run RUNME again.
+
 | path | what |
 |---|---|
 | `go.mod` | the module, its Go version, and kern as a requirement |
@@ -17,6 +30,8 @@ pin, fills in the name and makes the first commit.
 | `.github/workflows/check.yml` | CI: kern's battery, through the copy beside it |
 | `.github/workflows/kern-battery.yml` | the battery's copy `se new app` writes at kern's pin (SE's README "Workflows") |
 | `AGENTS.md` | the agent guide |
+| `RUNME.sh`, `RUNME.ps1` | the generic installer every tool has, the same as SE's: installs what `RUNME.conf` declares, then runs the tool |
+| `RUNME.conf` | this application's declaration: what it needs, how each is installed, and its run command |
 
 ## The pin
 

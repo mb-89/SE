@@ -370,6 +370,8 @@ darwin is built, not tested. The binary is fetched into
   sessions"](../README.md#cloud-sessions)).
 - **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background; that
   session works without the core until it lands, and the greeting says so.
+- **RUNME:** `bootstrap.sh --binary` places SE's pinned binary in the foreground, from its release
+  (built with `go` only where none matches), links it and starts nothing (README ["Kern"](../README.md#kern)).
 - **Which pins:** the installed SE's `release.toml`, after the refresh at start moved it to its
   latest release (README ["Start and refresh"](../README.md#start-and-refresh)); where the
   session's working tree is SE's own checkout, that checkout's, so a session on `main` tests `main`.
@@ -755,7 +757,10 @@ Not coming back, and no issue brings them back without the owner:
   push gate's verdicts replace them;
 - the queue estimate of `issue tree`, and the session panel's pane;
 - the Go line's other `se rules` and its `golangci-lint`, `biome` and `deadcode` steps;
-- `RUNME.sh` and `build.sh`: the binary arrives as a release ([How the binary arrives](#how-the-binary-arrives)).
+- `build.sh`: the binary arrives as a release ([How the binary arrives](#how-the-binary-arrives)).
+  `RUNME.sh` came back on 17 Nov, when the owner made it the generic installer every tool has
+  (`des-016`): it installs what RUNME.conf declares and starts no core, and SE's binary still
+  arrives as a release, built only where none matches.
 
 ## Measurements
 

@@ -238,7 +238,10 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
     readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
     plugin = marketplace["plugins"][0]["name"]
-    assert f"`claude plugin install {plugin} --marketplace <owner>/<repository>`" in readme
+    # Claude Code installs from the clone, through RUNME's agent start (README "Getting it running").
+    row = next(line for line in readme.splitlines() if line.startswith("| Claude Code |"))
+    assert "[RUNME](#getting-it-running)" in row
+    assert f"`claude plugin install {plugin} --marketplace <clone>`" in row
     assert f"`{plugin}@{marketplace['name']}`" in readme
     for agent in sorted(path.stem for path in (ROOT / "src" / "agents").glob("*.md")):
         assert f"`{plugin}:{agent}`" in readme

@@ -3055,7 +3055,7 @@ PLATFORM_FILE = re.compile(r"_(?:windows|darwin)(?:_test)?\.go$|\.ps1$")
 #: SE's start and hook scripts with their tests, which kern-platforms runs on each platform
 #: (CHECK_WORKFLOW, its step "SE's start and hook scripts on this platform").
 PLATFORM_SCRIPTS = ("scripts/bootstrap.sh", "scripts/se_hook.sh", "tests/test_bootstrap.py",
-                    "tests/test_se_hook.py")
+                    "tests/test_se_hook.py", "RUNME.sh", "RUNME.ps1", "tests/test_runme.py")
 #: Code that branches on the platform, in a changed hunk: build tags, Go's and Python's tests of it.
 PLATFORM_BRANCH = re.compile(
     r"//go:build|// \+build|runtime\.GOOS|sys\.platform|\bos\.name\b|platform\.system\(")
