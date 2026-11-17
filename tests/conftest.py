@@ -17,6 +17,10 @@ import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
+import network_guard  # noqa: E402
+
+# The test process reaches nothing beyond this machine, its collection included (tests/network_guard.py).
+network_guard.install()
 
 # The suite's runs of work_tickets.py and se_start.py measure themselves (scripts/metrics.py); their
 # lines go nowhere, never into the machine's ~/.se/metrics.jsonl. A test of the lines sets its own.
@@ -94,9 +98,24 @@ def door_variable(item: pytest.Item) -> str:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
-    with git_door.use(door_backend(item)), pytest.MonkeyPatch.context() as patch:
+    with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
+            pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
+
+
+class GuardReports:
+    """Fails each test phase that tried to reach beyond this machine (tests/network_guard.py
+    `fail`). A plugin
+    `pytest_configure` registers, not a hook of this conftest's own: pytest calls a conftest's
+    `pytest_runtest_makereport` only for the tests under its folder, and the complete run also
+    collects kern/python/tests."""
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(self, item: pytest.Item, call):
+        outcome = yield
+        report = outcome.get_result()
+        network_guard.fail(report)
 
 
 @pytest.fixture
@@ -180,6 +199,7 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
+    config.pluginmanager.register(GuardReports(), "se-guard-reports")
     order_by_file_seconds(config)
     reports = os.environ.get(REPORTS_VARIABLE)
     if reports and not config.option.xmlpath and not hasattr(config, "workerinput"):
