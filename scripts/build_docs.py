@@ -16,9 +16,13 @@ import tempfile
 import sys
 from pathlib import Path
 
+import rule_book
+
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs.md"
 MODULES = ROOT / "scripts" / "se_modules.py"
+# The rule book's place in the manifest's folder; the build shows it as one table of its rules.
+BOOK = Path("src", "skills", "work-model", "references", "rules.md")
 # obs's core configuration for this build. Its lints run at obs's defaults; every obs warning,
 # long paragraphs, broken links and missing notes included, fails the build.
 CORE_CONFIG = {
@@ -87,8 +91,9 @@ def _inside(path: Path, folder: Path) -> bool:
     return path == folder or folder in path.parents
 
 
-def build(source: Path, destination: Path) -> int:
-    """Build the manifest ``source`` into ``destination`` from a copy of its folder (``reading_copy``)."""
+def build(source: Path, destination: Path, document: Path | None = None) -> int:
+    """Build the manifest ``source`` into ``destination`` from a copy of its folder (``reading_copy``),
+    and, with ``document``, write there the obs Document the page was built from."""
     source, destination = source.resolve(), destination.resolve()
     folder = source.parent
     if _inside(destination, folder):
@@ -99,9 +104,15 @@ def build(source: Path, destination: Path) -> int:
     obs = obs_dir()
     with tempfile.TemporaryDirectory() as scratch:
         vault = reading_copy(folder, Path(scratch) / folder.name)
+        try:
+            rule_table(vault)
+        except FileExistsError as error:
+            print(f"build_docs: {error}", file=sys.stderr)
+            return 1
         config = Path(scratch) / "obs-config.json"
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
-        code = obs_document(obs, ["--config", str(config), "--source", str(vault / source.name),
+        written = ["--document", str(document.resolve())] if document else []
+        code = obs_document(obs, ["--config", str(config), "--source", str(vault / source.name), *written,
                                   "--destination", str(destination)], "build_docs", renamed=(vault, folder))
     if code == 0:
         print(f"build_docs: built {destination}")
@@ -121,6 +132,42 @@ def reading_copy(folder: Path, copy: Path) -> Path:
         if changed != text:
             note.write_text(changed, encoding="utf-8")
     return copy
+
+
+# A Markdown link's target: its path and its anchor.
+LINK = re.compile(r"(\]\()([^)\s#]*rules\.md)#([^)\s]+)(\))")
+
+
+def rule_table(vault: Path) -> None:
+    """Show the copy's rule book as one table of its rules: its page and a note per rule beside it
+    (``rule_book.documentation``), and every link to a rule's heading pointed at that rule's note by
+    its path from the copy's root, the one form obs-html opens a note by. A vault without the book is
+    left as it is; a rule note that would overwrite a file raises ``FileExistsError``, naming it."""
+    book = vault / BOOK
+    if not book.is_file():
+        return
+    shown = rule_book.documentation(book.read_text(encoding="utf-8"))
+    for name in shown.notes:
+        if (book.parent / name).exists():
+            raise FileExistsError(f"the rule note {BOOK.parent / name} would overwrite the file of that "
+                                  "name beside the rule book; rename that file")
+    book.write_text(shown.page, encoding="utf-8")
+    for name, text in shown.notes.items():
+        (book.parent / name).write_text(text, encoding="utf-8")
+
+    def pointed(match: re.Match) -> str:
+        rule = shown.anchors.get(match[3])
+        if rule is None:
+            return match[0]
+        return f"{match[1]}{(BOOK.parent / f'{rule}.md').as_posix()}{match[4]}"
+
+    for note in vault.rglob("*.md"):
+        if note.is_symlink() or not note.is_file():
+            continue
+        text = note.read_text(encoding="utf-8")
+        changed = LINK.sub(pointed, text)
+        if changed != text:
+            note.write_text(changed, encoding="utf-8")
 
 
 def without_verdict(text: str) -> str:
@@ -211,8 +258,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="the manifest note to build (default: docs.md); its folder is the vault")
     parser.add_argument("--destination", type=Path, required=True,
                         help="the HTML file to write, outside the vault")
+    parser.add_argument("--document", type=Path,
+                        help="also write the obs Document the page was built from to this JSON file")
     arguments = parser.parse_args(argv)
-    return build(arguments.source, arguments.destination)
+    return build(arguments.source, arguments.destination, arguments.document)
 
 
 if __name__ == "__main__":
