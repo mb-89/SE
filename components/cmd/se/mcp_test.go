@@ -50,8 +50,8 @@ func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(names, " "); got != "status greeting integration overhaul tickets" || len(tools) < 3 || len(tools) > 8 {
-		t.Fatalf("SE's door offers the tools %q, and wants status, greeting, integration, overhaul and tickets", got)
+	if got := strings.Join(names, " "); got != "status greeting forms integration overhaul tickets" || len(tools) < 3 || len(tools) > 8 {
+		t.Fatalf("SE's door offers the tools %q, and wants status, greeting, forms, integration, overhaul and tickets", got)
 	}
 }
 
