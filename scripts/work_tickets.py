@@ -5986,6 +5986,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     the suite's, and refuses a failed one; over its limit it is refused on the reference run alone.
     A suite beside with `paths` runs only where the change touches one, or where `full`; a skip
     is one line in the output and the result (beside_to_skip).
+    A suite beside that passed without running a test, as its output reads (suite_runs.py), is
+    named in one line after its time; its verdict stands.
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
     push reads it before the integration branch is pushed."""
     budget = suite_budget(root)
@@ -6088,6 +6090,10 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
                  else f"; its setup {run.setup_seconds:.1f} s (not budgeted)")
         print(f"{run.suite.name} time: {run.timing()}, beside the suite ({run.suite.where()})"
               f"{setup}")
+        reading = sibling("suite_runs").ran(run.output)
+        if reading.verdict == "none":
+            print(f"{run.suite.name} passed without running a test: {reading.reason} "
+                  f"({run.suite.where()})")
     for line in skipped.values():
         print(line)
     if parts:

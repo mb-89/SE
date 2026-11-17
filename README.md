@@ -1028,6 +1028,8 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
   - A key the running scripts do not know is refused on the reference run (CI's `check`, which
     runs the merged tree's scripts) and elsewhere warns and is ignored. `integrate` runs the
     integration branch's scripts, so a branch can add a key and use it in one landing.
+  - A suite beside that passed without running a test is named in one line after its time, and
+    its verdict stands; `scripts/suite_runs.py` says which output counts as no test run.
 
 The two budgets are apart, and neither spends the other's time:
 
