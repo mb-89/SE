@@ -7378,6 +7378,29 @@ def test_a_retro_filed_from_its_template_passes_while_the_work_form_refuses(
     assert "retro.py file <this issue> --draft <draft>" in filed["body"]
 
 
+def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, monkeypatch, capsys,
+                                                               forms_home):
+    """SE's own se.toml, read from the checkout, on the integration branch: `file` refuses a body
+    that lacks its Problem before any gh call, relay call or printed plan (README "Forms")."""
+    fake_git.init(worktree)
+    (worktree / "se.toml").write_text((PROJECT / "se.toml").read_text(encoding="utf-8"),
+                                      encoding="utf-8")
+    fake_git.git("-C", str(worktree), "add", "-A")
+    fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                 "commit", "-q", "-m", "SE's own settings")
+    fake_git.git("-C", str(worktree), "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert FORMS.enforcement(worktree).enforce == "refuse"
+    relayed = []
+    monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: relayed.append(repo))
+    body = without_problem(worktree)
+    for hand_off in (False, True):
+        monkeypatch.setattr(work_tickets, "hand_off", lambda hand_off=hand_off: hand_off)
+        assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 1
+        captured = capsys.readouterr()
+        assert gh.calls == [] and relayed == [] and captured.out == ""
+        assert "the work form refuses" in captured.err and "Problem: missing" in captured.err
+
+
 def test_a_private_term_is_refused_held_never_and_never_printed(worktree, gh, capsys, forms_home):
     (worktree / ".public-check.local").write_text("# a private term\nquuxcorp\n", encoding="utf-8")
     enforce(worktree, "refuse", refusals=1)
