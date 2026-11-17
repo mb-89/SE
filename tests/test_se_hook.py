@@ -214,8 +214,12 @@ echo "$CLAUDE_PROJECT_DIR $* <<$(cat)" >> "$HOME/starts"
 """
 
 
-def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse",
+def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse", settle: bool = False,
               **variables: str) -> subprocess.CompletedProcess:
+    """Run the hook in a late checkout's setting. With `settle`, off Windows, return only once the
+    hook and every process it started have exited: each inherits the write end of a pipe, the
+    detached start of bootstrap.sh among them, so the read end's end of file means all are gone.
+    Windows cannot pass that descriptor; there `settle` changes nothing."""
     scripts = home / "plugin" / "scripts"
     if not scripts.is_dir():
         scripts.mkdir(parents=True)
@@ -224,8 +228,18 @@ def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse",
         (scripts / "bootstrap.sh").write_text(FAKE_BOOTSTRAP, encoding="utf-8", newline="\n")
     payload = f'{{"session_id":"s1","hook_event_name":"{event}","cwd":"{sh(cwd)}"}}'
     env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project), **variables}
-    return subprocess.run([BASH, sh(scripts / "se_hook.sh"), event], env=env, input=payload,
-                          capture_output=True, text=True, timeout=30)
+    command = [BASH, sh(scripts / "se_hook.sh"), event]
+    if not settle or os.name == "nt":
+        return subprocess.run(command, env=env, input=payload, capture_output=True, text=True, timeout=30)
+    read, write = os.pipe()
+    with os.fdopen(read, "rb") as settled:
+        try:
+            result = subprocess.run(command, env=env, input=payload, capture_output=True, text=True,
+                                    timeout=30, pass_fds=(write,))
+        finally:
+            os.close(write)
+        settled.read()
+    return result
 
 
 def starts(home: Path, count: int) -> list[str]:
@@ -251,10 +265,12 @@ def test_the_first_hook_in_a_late_checkout_starts_its_core_once_and_then_posts_t
     home, project = machine
     install(home, project)
     late = clone(home.parent / "SE")
-    result = late_hook(home, project, late / "src")
+    result = late_hook(home, project, late / "src", settle=True)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     payload = f'{{"session_id":"s1","hook_event_name":"PostToolUse","cwd":"{sh(late / "src")}"}}'
-    assert starts(home, 1) == [f"{sh(late)} --hook <<{payload}"]
+    # The positive control of the settle: once settled, the detached start is in the log, read once.
+    logged = (home / "starts").read_text(encoding="utf-8").splitlines() if os.name != "nt" else starts(home, 1)
+    assert logged == [f"{sh(late)} --hook <<{payload}"]
     # The session's own core still takes the hook while the late one comes up; the claim, taken
     # anew only once ten minutes have passed, holds: a start would have written it again.
     claim = late / ".se" / ".runtime" / "late-start.claim"
@@ -371,10 +387,13 @@ def test_hook_core_off_starts_no_late_checkout_and_claims_none(machine):
     late = clone(home.parent / "SE")
     install(home, late)  # even a late checkout that named its binary is not posted to
     (late / ".se" / ".runtime" / "kern.path").unlink()
-    result = late_hook(home, project, late / "src", SE_HOOK_CORE="off")
+    result = late_hook(home, project, late / "src", settle=True, SE_HOOK_CORE="off")
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (late / ".se" / ".runtime" / "late-start.claim").exists()
-    assert starts(home, 1) == [] and not (home / "calls").exists()
+    # Settled, every process the hook started has exited, so a start would be in the log by now;
+    # Windows cannot settle and waits out starts()'s deadline instead.
+    no_start = not (home / "starts").exists() if os.name != "nt" else starts(home, 1) == []
+    assert no_start and not (home / "calls").exists()
 
 
 # A Copilot plugin install's hooks (.github/plugin/hooks.json, scripts/se_plugin.py
