@@ -979,21 +979,18 @@ def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.Co
 
 
 @pytest.mark.parametrize("kind", SETUPS)
-def test_setup_points_core_hooks_path_at_se_hooks(kind: str, repo: Path) -> None:
-    result = setup_hooks(kind, repo)
-    assert result.returncode == 0, result.stdout + result.stderr
-    hooks = git(repo, "config", "core.hooksPath").stdout.strip()
-    assert Path(hooks).resolve() == (SE_ROOT / ".githooks").resolve()
-
-
-@pytest.mark.parametrize("kind", SETUPS)
-def test_setup_names_the_checkouts_own_hooks_that_stop_running_before_it_sets_core_hooks_path(
+def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_identity(
         kind: str, repo: Path) -> None:
+    """Three preconditions that do not interfere share one repository and its two setup runs: the
+    checkout's own hooks in core.hooksPath, a .gitignore without a trailing newline, and the
+    project's commit identity."""
     folder = repo.parent / "own-hooks"  # the checkout's own hook set, which core.hooksPath names now
     folder.mkdir()
     git(repo, "config", "core.hooksPath", str(folder))
     (folder / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
     (folder / "commit-msg.sample").write_text("#!/bin/sh\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("build/", encoding="utf-8")
+    (repo / "se.toml").write_text('[project]\nidentity = "alice <alice>"\n', encoding="utf-8")
     result = setup_hooks(kind, repo)
     assert result.returncode == 0, result.stdout + result.stderr
     named = next(line for line in result.stdout.splitlines() if "no longer run" in line)
@@ -1001,27 +998,13 @@ def test_setup_names_the_checkouts_own_hooks_that_stop_running_before_it_sets_co
     assert f"config core.hooksPath {folder.as_posix()}" in named
     lines = result.stdout.splitlines()
     assert lines.index(named) < next(i for i, line in enumerate(lines) if line.startswith("core.hooksPath of "))
-    again = setup_hooks(kind, repo)  # se's hooks in place: nothing else stops
-    assert "no longer run" not in again.stdout
-
-
-@pytest.mark.parametrize("kind", SETUPS)
-def test_setup_ignores_the_local_list_once(kind: str, repo: Path) -> None:
-    (repo / ".gitignore").write_text("build/", encoding="utf-8")
-    for _ in range(2):
-        result = setup_hooks(kind, repo)
-        assert result.returncode == 0, result.stdout + result.stderr
-    text = (repo / ".gitignore").read_text(encoding="utf-8")
-    assert text == f"build/\n{public_check.LOCAL_FILE}\n"
-
-
-@pytest.mark.parametrize("kind", SETUPS)
-def test_setup_sets_the_project_commit_identity_as_sync_does(kind: str, repo: Path) -> None:
-    (repo / "se.toml").write_text('[project]\nidentity = "alice <alice>"\n', encoding="utf-8")
-    result = setup_hooks(kind, repo)
-    assert result.returncode == 0, result.stdout + result.stderr
     assert git(repo, "config", "user.name").stdout.strip() == "alice"
     assert git(repo, "config", "user.email").stdout.strip() == "alice"
+    again = setup_hooks(kind, repo)  # se's hooks in place: nothing else stops
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "no longer run" not in again.stdout
+    text = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert text == f"build/\n{public_check.LOCAL_FILE}\n"
 
 
 def se_as_a_local_module(repo: Path) -> None:
@@ -1053,16 +1036,6 @@ def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(k
     assert "se: local" in result.stdout, result.stdout
 
 
-@pytest.mark.parametrize("kind", SETUPS)
-def test_setup_without_copilot_writes_no_copilot_settings_pin_or_ignore(kind: str, repo: Path) -> None:
-    result = setup_hooks(kind, repo)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (repo / ".github").exists()
-    assert not (repo / "se.toml").exists()
-    assert (repo / ".gitignore").read_text(encoding="utf-8") == f"{public_check.LOCAL_FILE}\n"
-    assert "copilot install:" not in result.stdout
-
-
 def test_se_ignores_its_local_list() -> None:
     lines = (SE_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert public_check.LOCAL_FILE in lines
@@ -1073,24 +1046,55 @@ def repository_config(state: fake_git.StateFile, repo: Path) -> dict[str, str]:
     return dict(state.load().repositories[repo.resolve()].config)
 
 
+def repository_files(repo: Path) -> dict[str, bytes]:
+    """Every file under `repo`, its .git included, by its path relative to `repo`."""
+    return {path.relative_to(repo).as_posix(): path.read_bytes()
+            for path in sorted(repo.rglob("*")) if path.is_file()}
+
+
 # What each setup kind did to a fresh `repo` (its config and its .gitignore), recorded by its first
-# hook test: the hook tests test the hooks, the setup tests above test setup itself, so a later hook
-# test gets setup's result without paying for its five script processes again.
+# run, `first_setup`: the fresh setup test asserts that run, and a hook test after it replays the
+# record instead of paying for setup's script processes again.
 SETUP_RESULTS: dict[str, tuple[dict[str, str], bytes]] = {}
+
+
+def first_setup(kind: str, repo: Path,
+                state: fake_git.StateFile) -> subprocess.CompletedProcess[str]:
+    """Run setup of `kind` on the fresh `repo` and record what it changed in SETUP_RESULTS."""
+    before = repository_config(state, repo)
+    files = repository_files(repo)
+    result = setup_hooks(kind, repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    after = repository_config(state, repo)
+    changed = {key: value for key, value in after.items() if before.get(key) != value}
+    assert not set(before) - set(after), "setup removed config"
+    assert not any(str(repo.parent) in value for value in changed.values()), changed
+    now = repository_files(repo)
+    now.pop(".gitignore", None)
+    files.pop(".gitignore", None)
+    assert now == files, "setup changed a file other than .gitignore"
+    SETUP_RESULTS[kind] = changed, (repo / ".gitignore").read_bytes()
+    return result
+
+
+@pytest.mark.parametrize("kind", SETUPS)
+def test_setup_points_core_hooks_path_at_se_hooks_and_writes_nothing_for_copilot_without_it(
+        kind: str, repo: Path, shared_fake_git: fake_git.StateFile) -> None:
+    result = first_setup(kind, repo, shared_fake_git)
+    assert result.returncode == 0, result.stdout + result.stderr
+    hooks = git(repo, "config", "core.hooksPath").stdout.strip()
+    assert Path(hooks).resolve() == (SE_ROOT / ".githooks").resolve()
+    assert not (repo / ".github").exists()
+    assert not (repo / "se.toml").exists()
+    assert (repo / ".gitignore").read_text(encoding="utf-8") == f"{public_check.LOCAL_FILE}\n"
+    assert "copilot install:" not in result.stdout
 
 
 @pytest.fixture(params=SETUPS)
 def hooked(request: pytest.FixtureRequest, repo: Path, shared_fake_git: fake_git.StateFile) -> Path:
     kind = request.param
     if kind not in SETUP_RESULTS:
-        before = repository_config(shared_fake_git, repo)
-        result = setup_hooks(kind, repo)
-        assert result.returncode == 0, result.stdout + result.stderr
-        after = repository_config(shared_fake_git, repo)
-        changed = {key: value for key, value in after.items() if before.get(key) != value}
-        assert not set(before) - set(after), "setup removed config"
-        assert not any(str(repo.parent) in value for value in changed.values()), changed
-        SETUP_RESULTS[kind] = changed, (repo / ".gitignore").read_bytes()
+        first_setup(kind, repo, shared_fake_git)
         return repo
     changed, ignore = SETUP_RESULTS[kind]
     with shared_fake_git.edit() as fake:
