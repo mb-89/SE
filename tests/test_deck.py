@@ -201,8 +201,11 @@ const actions = {
         const context = await page.context().browser().newContext({viewport: {width: 390, height: 844}});
         try {
             const tab = await context.newPage();
-            const warnings = [];
-            tab.on("console", message => { if (message.text().startsWith("se-answers:")) warnings.push(message.text()); });
+            const warnings = [], obsWarnings = [];
+            tab.on("console", message => {
+                if (message.text().startsWith("se-answers:")) warnings.push(message.text());
+                if (message.text().startsWith("obsHtml.answers: ")) obsWarnings.push(message.text());
+            });
             await tab.addInitScript(({files, comment}) => {
                 Object.defineProperty(Document.prototype, "title", {get: () => "Fallback", configurable: true});
                 const refusal = code => Object.assign(new Error(code), {code});
@@ -248,9 +251,9 @@ const actions = {
                                        inside: box.left >= 0 && box.right <= innerWidth},
                         afterSend: eval(after)(), sideways: document.documentElement.scrollWidth > innerWidth,
                         seNotice: document.querySelector("[data-se-answers-notice]") !== null,
-                        partly: entry("se-answers-partly"), answers: entry("answers")};
+                        partly: entry("se-answers-partly"), answers: entry("answers"), send: entry("bless-send")};
             }, after.toString());
-            return {restored, warnings, beforeSend, shown, pill: await tab.locator("[data-bless-pill]").innerText(),
+            return {restored, warnings, obsWarnings, beforeSend, shown, pill: await tab.locator("[data-bless-pill]").innerText(),
                     calls: await tab.evaluate(() => seCalls)};
         } finally {
             await context.close();
@@ -668,10 +671,21 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
     else:
         assert shown["line"] is None and shown["partly"] is None
         version = {slug: request["version"] for slug, request in _requests(artifact).items()}
-        assert "paste them into the chat" in shown["answers"]["text"]
+        assert "They did not reach Claude. Copy the answers and give them to Claude." in shown["answers"]["text"]
+        assert shown["send"]["severity"] == "error"
+        assert ("1 verdict and 2 comments were not sent. Your verdicts and comments are kept in the deck; send again."
+                in shown["send"]["text"])
+        for text in (shown["answers"]["text"], shown["send"]["text"]):
+            assert not [word for word in ("claude-artifact", "obsHtml", "sink", "paste them into the chat") if word in text]
+        # The add-on's own message reaches the console, in obs's one warning.
+        [warning] = result["obsWarnings"]
+        assert warning.startswith("obsHtml.answers: registered sink claude-artifact: send failed (nothing reached "
+                                  "Claude; copy your answers and paste them into the chat)")
         assert json.dumps({"chapter": "cache", "version": version["cache"], "verdict": "decline",
                            "comment": "Too slow."}, indent=2).splitlines()[1] in shown["answers"]["text"]
         assert "sent" not in result["pill"].lower()
+    if "ok" in (files, comment):
+        assert result["obsWarnings"] == []
     if comment == "ok":
         [sent] = result["calls"]["comments"]
         assert sent["text"].splitlines()[0] == 'Answers from the decision deck "Decisions" (se-answers):'
