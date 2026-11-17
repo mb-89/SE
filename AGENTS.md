@@ -83,7 +83,7 @@
   components' declarations (`work_tickets.py docs --check`); SE runs no code formatter or linter,
   and its other checks have no fix to apply.
 - Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
-  `SE_CLOUD_AGENT`, `SE_PUBLIC_CHECK_TERMS`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
+  `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, `SE_PUBLIC_CHECK_TERMS`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
 
 ## Neutral home

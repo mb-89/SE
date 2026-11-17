@@ -1,0 +1,13 @@
+# SE's switches, start group: what SE's session start hands the session (scripts/se_start.py),
+# one [[switch]] each; core.toml's header owns the keys of a row, scripts/se_switches.py's
+# docstring the format.
+
+[[switch]]
+name = "SE_DEFAULT_AGENT"
+kind = "environment"
+reader = "scripts/se_start.py"
+default = "off"
+layers = ["environment"]
+off = [""]
+help = "README.md#claude-code-cloud"
+note = "off (unset or empty): the start hands over the greeting and SE's root only; se: the hand-over ends with the sentence that the session acts as the se agent unless it was started as or names another; any other value hands over nothing and the greeting names it"

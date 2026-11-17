@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -170,8 +171,9 @@ SE_PARTS = ("scripts", "tests", "src", "docs", "README.md", "AGENTS.md", "se.tom
 
 def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_door):
     """The promise is facts' own work on SE in 10 s, judged by CPU time: facts reads no network,
-    and a loaded runner stretches the wall clock (10.7 s here with 16 busy processes on 4 cores,
-    for 2.5 s of work), not the work. SE's files are committed once in the fake git."""
+    and a loaded runner stretches the wall clock (11.1 s with 16 busy processes on 4 cores, for
+    2.2 s of work, both on a 4-CPU Linux container, Intel Xeon at 2.30 GHz), not the work. SE's
+    files are committed once in the fake git."""
     root = tmp_path / "se"
     fake_git.init(root)
     for part in SE_PARTS:
@@ -185,6 +187,53 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     found = facts(root, capsys)
     assert cpu_seconds() - started < 10
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
+
+
+# Methods, decorators, a string over several lines and a body ending on a closing bracket's line:
+# where a function's first and last lines hold tokens of its neighbours.
+EDGES = f'''\
+import functools
+
+
+@functools.cache
+def decorated(values, weight, places):
+{COPIED}
+class Holder:
+    def method(self, values, weight, places):
+        text = """one
+        two"""
+{COPIED}
+    async def waits(self, values, weight, places):
+{COPIED.replace("    ", "        ")}
+
+def last(values, weight, places): return [value for value in values
+                                          if value is not None and value * weight > places
+                                          and len(values) > places + weight + 1 or not values]
+'''
+
+
+def test_near_duplicates_takes_each_functions_tokens_as_its_lines_did(monkeypatch):
+    """Each function's shingles are the windows of the tokens on its lines, as the filter over all
+    of a file's tokens took them, on the fixture's edges and on two of SE's scripts; so its pairs
+    are those the filter gave."""
+    scripts = {"edges.py": EDGES, "app.py": APP}
+    for path in ("scripts/overhaul.py", "scripts/public_check.py"):
+        scripts[path] = (ROOT / path).read_text(encoding="utf-8")
+    trees = {path: ast.parse(source) for path, source in scripts.items()}
+    expected = []
+    for path, source in scripts.items():
+        tokens = overhaul.shape_tokens(source)
+        for _, node in overhaul.functions(path, trees[path]):
+            body = [text for line, text in tokens if node.lineno <= line <= node.end_lineno]
+            if len(body) >= overhaul.MIN_TOKENS:
+                expected += [tuple(body[start:start + overhaul.SHINGLE])
+                             for start in range(len(body) - overhaul.SHINGLE + 1)]
+    seen = []
+    monkeypatch.setattr(overhaul, "hash", lambda shingle: seen.append(shingle) or hash(shingle),
+                        raising=False)
+    found = overhaul.near_duplicates(scripts, trees)
+    assert len(expected) > 10_000 and seen == expected
+    assert ("Holder.waits", "decorated") in {(pair["a"].split()[1], pair["b"].split()[1]) for pair in found}
 
 
 # The overhaul issue: new, read and file, on a fake door.

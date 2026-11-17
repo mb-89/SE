@@ -18,7 +18,7 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
 | Claude Code | `claude plugin install se --marketplace <owner>/<repository>` | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
 | GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
 | GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
@@ -77,6 +77,11 @@ workers included. So each session's first prompt names its role's file, `<se>` b
 - Reviewer, started by SE on "review PR #n": the line
   `Act as the reviewer agent defined in <se>/.github/agents/reviewer.agent.md.`, then the pull
   request, its repository and SE's session, one per line.
+
+An environment made for SE can set `SE_DEFAULT_AGENT=se` beside its setup script, in its
+environment variables; a session started there then needs no first line: SE's start hands it the
+se agent. Sessions that SE or an integrator starts keep naming their role in their first message,
+which wins. Any other value hands over nothing and the greeting names it.
 
 The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its
 first message with it. A session whose permission mode asks before commands, and that no one
