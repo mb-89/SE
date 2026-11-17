@@ -124,7 +124,8 @@ LABEL_DESCRIPTIONS = {
     "work": "A work issue: one package for one worker",
     "ready": "Checked by SE and may be worked",
     BACKLOG_LABEL: "A far-out idea for the person; not work until SE re-files it",
-    OFF_FORM_LABEL: "Filed with --hold outside its form; nobody starts it until it is fixed",
+    OFF_FORM_LABEL: "Filed with --hold outside its form; fix the text on the issue, then "
+                    "work_tickets.py unhold <issue>",
 }
 OUTSIDE_PAGE = 100
 DISCOVERY_DIRECTORY = Path(".se") / "work" / "probe"
@@ -4519,12 +4520,20 @@ class Filed:
             return (f"Not filed: #{self.twin} {issue_url(repo, self.twin)} has the same purpose; "
                     "commented on it instead")
         if self.number is None:
-            return f"Run the GitHub plan above to file the {what} once"
+            return f"Run the GitHub plan above to file the {what} once" + (
+                f"; it is held: {unhold_hint(None)}" if self.held else "")
         url = self.url or issue_url(repo, self.number)
         return f"Filed {what} {url}" + (
             f", closed as a duplicate of #{self.lower}" if self.lower is not None else "") + (
-            f", held: labelled {OFF_FORM_LABEL} and not ready until it is fixed" if self.held
-            else "")
+            f", held: labelled {OFF_FORM_LABEL} and not ready; {unhold_hint(self.number)}"
+            if self.held else "")
+
+
+def unhold_hint(number: int | None) -> str:
+    """The way back of a held issue (README "Forms"): its text fixed on the issue itself, since
+    filing it again only comments on it, then `unhold`."""
+    return ("fix its title or body on the issue itself, then run work_tickets.py unhold "
+            + (str(number) if number is not None else "<its number>"))
 
 
 def open_issues(root: Path, repo: str) -> list[dict[str, object]]:
@@ -4603,6 +4612,97 @@ def held_labels(labels: list[str]) -> list[str]:
     return [*(label for label in labels if label != "ready"), OFF_FORM_LABEL]
 
 
+def form_findings(root: Path, repo: str, chosen, title: str, body: str,
+                  given: str | None = None) -> tuple[list, list]:
+    """The checks a filing runs against the form `chosen` (README "Forms"), one owner for
+    `form_check` and `unhold`: the private terms of the title and the body (and of the text as
+    `given`, where it is another), then the form's own checks of the body. Gives the private
+    findings and every finding."""
+    forms = sibling("forms")
+    try:
+        private = forms.private_findings(chosen, title, body, root)
+        if given is not None:
+            private += [finding for finding in forms.private_findings(chosen, title, given, root)
+                        if finding not in private]
+        return private, private + forms.check(chosen, forms.parse(chosen, body, title),
+                                              root=SE_ROOT, bare_scripts=own_scripts(repo))
+    except forms.FormError as error:
+        raise QueueError(str(error)) from error
+
+
+# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the Routing heading;
+# a body that names the marker in prose (in a code span, say) is not routed.
+ROUTED_PATTERN = re.compile(
+    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
+
+
+def held_form(number: int, issue: dict[str, object]) -> str:
+    """The form the command that filed held issue `number` checked, by its labels: `ticket` for
+    a backlog issue (`backlog file`), else for a work issue `routed` where its body holds the
+    routing `route` writes (ROUTED_PATTERN) and `work` otherwise (`file`)."""
+    labels = issue_labels(issue)
+    if BACKLOG_LABEL in labels:
+        return "ticket"
+    if "work" in labels:
+        return "routed" if ROUTED_PATTERN.search(str(issue.get("body") or "")) else "work"
+    raise QueueError(f"unhold: #{number} is labelled {', '.join(sorted(labels)) or 'nothing'}, "
+                     f"neither {BACKLOG_LABEL} nor work, so no filing command's form fits it")
+
+
+def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -> str:
+    """Check held issue `number` as it stands on GitHub against the form that filed it, with the
+    checks a filing runs, whatever `[forms] enforce` says; where it passes, give a work issue
+    `ready` back and then remove OFF_FORM_LABEL, so a run cut short leaves it held. Without gh,
+    the issue is `issue_file` as the GitHub tools read it and the label change is printed as a
+    plan. Title and body are never changed. Gives the line naming the result."""
+    repo = resolve_repo(root, repo)
+    handing_off = hand_off()
+    if not handing_off:
+        issue = issue_api(root, repo, f"issues/{number}")
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"unhold: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if int(issue.get("number") or 0) != number:
+        raise QueueError(f"unhold: the issue read is not #{number}: give issue_read's answer of it")
+    if str(issue.get("state") or "open").lower() != "open":
+        raise QueueError(f"unhold: #{number} is closed: nothing to unhold")
+    labels = issue_labels(issue)
+    if OFF_FORM_LABEL not in labels:
+        raise QueueError(f"unhold: #{number} is not held ({OFF_FORM_LABEL}): nothing to unhold")
+    form = held_form(number, issue)
+    title, body = str(issue.get("title") or ""), str(issue.get("body") or "")
+    checked_name("unhold", title)
+    refuse_dangling(repo, "unhold", body)
+    forms = sibling("forms")
+    chosen = form_of(form)
+    _, found = form_findings(root, repo, chosen, title, body)
+    if any(finding.severity == forms.REFUSE for finding in found):
+        raise QueueError(forms.report("unhold", chosen, found, refused=True))
+    if found:
+        print(forms.report("unhold", chosen, found, refused=False).replace(
+            "([forms] enforce = warn); filed anyway", "(none refuses); unheld"), file=sys.stderr)
+    work = "work" in labels
+    done = f"{OFF_FORM_LABEL} removed" + (", ready added" if work else "")
+    plan = Plan(f"unhold #{number}", (
+        *((label_step(repo, number, "ready", add=True),) if work else ()),
+        label_step(repo, number, OFF_FORM_LABEL, add=False),
+    ), f"#{number} is unheld: {done}")
+    if handing_off:
+        print(plan.text())
+        return f"Run the GitHub plan above to unhold #{number}"
+    if work:
+        ensure_labels(root, repo, ["ready"])
+    run_plan(plan, tracker_actions(root, repo))
+    summary = issue.get("issue_dependencies_summary")
+    blocked = isinstance(summary, dict) and int(summary.get("blocked_by") or 0) > 0
+    return f"Unheld #{number} {web_url(issue) or issue_url(repo, number)}: {done}" + (
+        "; ready and start skip it while its open blockers stay open" if blocked and work else "")
+
+
 def form_check(root: Path, repo: str, command: str, title: str, body: str, form: str,
                existing: int | None = None, hold: bool = False, given: str | None = None) -> bool:
     """The form check of a filing (README "Forms"), before anything is written: with `[forms]
@@ -4617,15 +4717,8 @@ def form_check(root: Path, repo: str, command: str, title: str, body: str, form:
                              "nothing refuses; run it without --hold")
         return False
     chosen = form_of(form)
-    try:
-        private = forms.private_findings(chosen, title, body, root)
-        if hold and given is not None and given != body:
-            private += [finding for finding in forms.private_findings(chosen, title, given, root)
-                        if finding not in private]
-        found = private + forms.check(chosen, forms.parse(chosen, body, title), root=SE_ROOT,
-                                      bare_scripts=own_scripts(repo))
-    except forms.FormError as error:
-        raise QueueError(str(error)) from error
+    private, found = form_findings(root, repo, chosen, title, body,
+                                   given if hold and given != body else None)
     refused = [finding for finding in found if finding.severity == forms.REFUSE]
     if gate.enforce == forms.WARN:
         if found:
@@ -4955,10 +5048,11 @@ def route_outside_issue(
     if outcome.twin is not None:
         return outcome.line(repo, branch)
     if outcome.number is None:
-        return f"Run the GitHub plan above to route #{number} as {branch} once"
+        return f"Run the GitHub plan above to route #{number} as {branch} once" + (
+            f"; it is held: {unhold_hint(number)}" if outcome.held else "")
     return f"Routed issue #{number} as {branch}" + (
         f"; closed as a duplicate of #{outcome.lower}" if outcome.duplicate else "") + (
-        f"; held: labelled {OFF_FORM_LABEL} and not ready until it is fixed" if outcome.held
+        f"; held: labelled {OFF_FORM_LABEL} and not ready; {unhold_hint(number)}" if outcome.held
         else "")
 
 
@@ -9888,6 +9982,18 @@ def run_block(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+@command("unhold", "for SE: check an issue filed with --hold against its form again and, where "
+                   "it passes, remove off-form and give a work issue ready back",
+         WORKTREE,
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
+                  "it; unhold then prints the label change as steps for them"),
+         REPO, arg("issue", type=int))
+def run_unhold(root: Path, args: argparse.Namespace) -> int:
+    print(unhold(root, args.issue, args.repo, args.issue_body))
+    return 0
+
+
 TRACKER_QUERY = (OPTIONAL_WORKTREE, REPO,
                  arg("--all-repos", action="store_true",
                      help="include tracker issues for every repository"))
@@ -10141,7 +10247,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "Work issues and their comments as a role reads and files them: intake, refresh, escalation, "
      "filing, routing, the backlog, blockers and the fleet's pause.",
      ("intake", "refresh", "comments-read", "body-read", "escalate", "file", "route",
-      "backlog file", "backlog list", "block", "paused")),
+      "backlog file", "backlog list", "block", "unhold", "paused")),
     ("delivery", "Delivery",
      "A worker's delivery: the field report and its guard, sync and identity, the gated push and "
      "the pull request, and the Stop hook's check.",

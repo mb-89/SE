@@ -750,6 +750,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `file`, `backlog file` and `route` print their [dedupe](#issues) plan: the search, the
     conditions and the filing step. `route` takes the issue as the tools read it, `--issue-title
     <title> --issue-body <file>`; `file --blocked-by` needs gh.
+  - A held issue's text is fixed on the issue; `unhold --issue-body <file>`, the issue as
+    `issue_read` answered it, checks it against its form and prints the label change as its plan.
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
     line.
 - **Every other command** fails, naming itself, the missing `gh` and this section.

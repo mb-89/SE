@@ -1685,6 +1685,10 @@ work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE]
     for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label
     it work, ready and repo:<name>, and append the routing section with the handled record to its
     body
+
+work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue
+    for SE: check an issue filed with --hold against its form again and, where it passes, remove
+    off-form and give a work issue ready back
 ```
 
 #### Delivery
@@ -2207,8 +2211,11 @@ always rendered through the form.
   where that ref does not exist, so a branch cannot switch its own check off.
 - `refusals` (default 2) caps the retries: refusals are counted per session, form and issue in
   `~/.se/forms/`. From that count on each refusal names `--hold`, which files the text as given,
-  labelled `off-form` and not `ready`; `ready` and `start` take no such issue until someone fixes
-  it and removes the label. Before that count `--hold` is refused.
+  labelled `off-form` and not `ready`; `ready` and `start` take no such issue. Before that count
+  `--hold` is refused.
+  - The way back: fix the title or body on the issue itself, since filing it again only comments
+    on it, then run `work_tickets.py unhold` with its number, which checks it against its form
+    and lifts the hold where it passes.
 - The check also runs the term lists `scripts/public_check.py` reads over the title and the body:
   the public list, `.public-check.local` where the checkout holds one, and the cloud list where
   `SE_PUBLIC_CHECK_TERMS` is set; without a local or cloud list only the public list runs. A hit names the field and the list, never the term: stop and ask the
