@@ -352,6 +352,27 @@ another place holds.
   - Go line (frozen): the battery's `deadcode -test`; `se overhaul read`'s pruning facts.
 - **Related:** des-006, gen-002
 
+### des-016 Every tool has a README and a RUNME
+
+Every tool's root holds a README.md, which opens with what the tool is and whose first section,
+`## Getting it running`, says how to get it running, and the same RUNME.sh and RUNME.ps1 as every
+other tool, which install what the tool's RUNME.conf declares and then hand every argument to the
+tool, with no option, no help and no service of their own.
+
+- **Why:** one door per tool that a person and an agent both know; the tool's own help is the
+  only description of its command line, so the RUNMEs cannot drift from it or from each other.
+- **Without it:** each tool invents its install steps and its entry point, and a second help in
+  the launcher drifts from the tool's.
+- **Prevents:** setup that only prose knows; install steps or help written twice, once per
+  shell; a launcher that grows into a program; arguments rewritten on the way.
+- **Implementations:**
+  - se: the pair at its root reads each project's RUNME.conf; `tests/test_runme.py` holds kern's
+    template's copies byte-identical and the pair free of project names; kern's template gives
+    every new application the pair.
+  - obs: adopts the pair in its own ticket; until then its own RUNME, by judgment.
+  - Pieces shipped on their own inside a repository: by judgment.
+- **Related:** doc-001, des-003, des-005, gen-002
+
 ## tst: testing and quality
 
 ### tst-001 Fakes that behave
