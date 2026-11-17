@@ -136,9 +136,16 @@ pass it; they refuse:
 - CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
   the commits of every pull request and of every push to `main`, so a push the hooks did not see
   fails there; `check` is the check `main`'s ruleset requires.
-  - A push's range is `public_check.py --push`'s: the commits after the branch's old tip (where it
-    is unknown, those no other branch holds), and a work branch's without those the integration
-    branch holds, which are not gated again; the integration branch's own push is gated whole.
+  - A pull request's gate scans the checked-out merge of its head into its base, the tree its
+    landing lands, by that tree's allow list (`--rev HEAD`); its range is the commits its head
+    holds and its base does not.
+  - A push's range is `public_check.py --push`'s, by branch. To the integration branch: the
+    commits after its old tip, or where that tip is unknown those no other branch holds, gated
+    whole.
+  - To a work branch, where the integration branch is the default branch and origin's ref for it
+    exists: the commits after its old tip, or all its commits where that tip is unknown, without
+    those the integration branch holds, which are not gated again; otherwise as to the
+    integration branch.
   - The same job runs every other check an integration runs: `se_plugin.py check`,
     `work_tickets.py docs --check`, `hygiene.py`, `field-report --check` of a pull request's
     description against its work issue where it carries a report (a landing pull request's, from

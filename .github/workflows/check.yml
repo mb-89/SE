@@ -47,15 +47,20 @@ jobs:
           BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
           DEFAULT: ${{ github.event.repository.default_branch }}
         run: |
-          # A pull request: its commits, those its head holds and its base branch does not. A push:
-          # the commits public_check.py's push_range takes, those after the branch's old tip (where
-          # it is unknown, those no other branch holds), a work branch's without what the
-          # integration branch holds. Its git goes through se's git door (scripts/git_door.py).
+          # A pull request: its commits, those its head holds and its base branch does not, and the
+          # tree of the checked-out merge of its head into its base, the tree its landing lands,
+          # judged by that tree's allow list. A push: the pushed tree and the commits
+          # public_check.py's push_range takes. To the integration branch, those after its old tip,
+          # or where that tip is unknown those no other branch holds, gated whole. To a work branch,
+          # where the integration branch is the default branch and origin's ref for it exists,
+          # those after its old tip, or all its commits where that tip is unknown, without those
+          # the integration branch holds; otherwise as to the integration branch. Its git goes
+          # through se's git door (scripts/git_door.py).
           refused="::error::public-check (scripts/public_check.py, AGENTS.md 'Public safety') refused the commits it names: amend each named commit as its line says (for a Co-authored-by line, without the line, and turn off the editor's co-author setting, README 'Install'), then push again"
           if [ -n "$BASE_REF" ]; then
             range="refs/remotes/origin/$BASE_REF..$AFTER"
             echo "public-check: gating $range, the commits of the pull request into $BRANCH"
-            if ! python3 scripts/public_check.py --rev "$AFTER" --range "$range"; then
+            if ! python3 scripts/public_check.py --rev HEAD --range "$range"; then
               echo "$refused"; exit 1
             fi
           elif ! python3 scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$BRANCH" --default-branch "$DEFAULT"; then

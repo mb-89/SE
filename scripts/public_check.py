@@ -13,11 +13,15 @@ The commit gates (a message file, the commits of a --range) also refuse tracker 
 attribution trailers (`Co-Authored-By:`, `Claude-Session:`) and any e-mail address, whatever the
 address, in messages, from every author, naming the reference, trailer or line and the remedy; a
 full check leaves old history to them. CI runs
-the --range gate on every pull request and every push (.github/workflows/check.yml). A push's
-range (--push, push_range) is the commits after the branch's old tip, or where that tip is unknown
-those no other branch holds, and a work branch's leaves out what the integration branch holds, so
-commits it holds are not gated again. The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
-machine sets public_identity), where one is set. Strict, where se.toml [integrate] landing is
+the --range gate on every pull request, in the checked-out merge of its head into its base
+(--rev HEAD), and on every push (.github/workflows/check.yml). A push's range (--push,
+push_range) goes by branch. To the integration branch: the commits after its old tip, or where
+that tip is unknown those no other branch holds, gated whole. To a work branch, where the
+integration branch is the default branch and origin's ref for it exists: the commits after its old
+tip, or all its commits where that tip is unknown, without those the integration branch holds,
+which are not gated again; otherwise as to the integration branch. The commits of a --range must
+also carry the project identity (se.toml [project] identity, unless the machine sets
+public_identity), where one is set. Strict, where se.toml [integrate] landing is
 "fast-forward" (landings are the integrator's own commits): a commit GitHub made is foreign like
 any other. Otherwise, while GitHub squash-merges the landings, its web-flow identity passes as
 committer, and on such a commit the author may be the GitHub noreply address of the account
@@ -39,6 +43,10 @@ Every verdict names the se commit that ran it. A checked repository that pins se
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
 se.toml sets lies outside that `version` range, so a stale clone never gives another verdict
 silently.
+
+The allow list (.public-check-allow) is read from the source the files are read from: the commit
+of --rev, whatever is checked out; the index with --staged; else the working tree. A source
+without one has no entries.
 
 Allow entries are reported by kind: used ones are counted in the verdict; an unused one is a hit
 where the source has a local list, and without it a warning that it is unverifiable, as it may
@@ -341,12 +349,20 @@ def load_local(root: Path) -> LocalList | None:
     return local
 
 
-def load_allow(root: Path) -> list[AllowEntry]:
-    path = root / ALLOW_FILE
-    if not path.is_file():
+def load_allow(root: Path, files: list[tuple[str, bytes]] | None = None) -> list[AllowEntry]:
+    """The allow list of the source the files are read from: its blob among `files` (a commit's
+    tree or the index, object_files' answer), none where they hold none; without `files`, the
+    working tree's file."""
+    if files is not None:
+        blob = next((data for path, data in files if path == ALLOW_FILE), None)
+        text = None if blob is None else blob.decode("utf-8")
+    else:
+        path = root / ALLOW_FILE
+        text = path.read_text(encoding="utf-8") if path.is_file() else None
+    if text is None:
         return []
     entries = []
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, raw in enumerate(text.splitlines(), 1):
         text = raw.strip()
         if not text or text.startswith("#"):
             continue
@@ -713,12 +729,14 @@ def remote_refs(root: Path) -> list[str]:
 
 
 def push_range(root: Path, before: str, after: str, branch: str, default_branch: str) -> str:
-    """The revisions a push of `after` to `branch` gates, its old tip `before`: the commits after
-    that tip, or where it is unknown (empty, all zeros, no commit here) those no other branch of
-    origin holds. A work branch's range leaves out the integration branch (se.toml [project]
-    integration_branch), whose commits were gated where they reached it, where that branch is
-    `default_branch` and its ref refs/remotes/origin/<branch> exists; the integration branch's
-    own push is gated whole."""
+    """The revisions a push of `after` to `branch` gates, its old tip `before` (unknown where it
+    is empty, all zeros or no commit here), by branch. To the integration branch (se.toml
+    [project] integration_branch): the commits after its old tip, or where that tip is unknown
+    those no other branch of origin holds, gated whole. To a work branch, where the integration
+    branch is the default branch (`default_branch`) and origin's ref for it
+    (refs/remotes/origin/<integration branch>) exists: the commits after its old tip, or all its
+    commits where that tip is unknown, without those the integration branch holds, which were
+    gated where they reached it; otherwise as to the integration branch."""
     try:
         integration = sibling("work_tickets").integration_branch(root)
     except sibling("work_tickets").QueueError as error:
@@ -916,10 +934,11 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     if args.built is not None:
         scan_built(built_files(args.built.resolve()), patterns, report)
         return report
-    allow = load_allow(root)
     if args.staged or args.rev:
         files: Iterable[tuple[str, bytes]] = object_files(root, args.staged, args.rev)
+        allow = load_allow(root, files)
     else:
+        allow = load_allow(root)
         files = worktree_files(root)
     scan_files(files, patterns, allow, report)
     if args.revisions and args.history:
