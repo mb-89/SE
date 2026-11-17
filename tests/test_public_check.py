@@ -373,7 +373,8 @@ def test_a_local_override_silences_a_public_term(repo: Path, local: Path) -> Non
 
 
 @pytest.mark.parametrize(("line", "error"), [
-    ("off:email-address\n", ".public-check.local:1: write '<regex>' or 'off:<public label>  # reason'"),
+    ("off:email-address\n", ".public-check.local:1: write '<regex>', 'off:<public label>  # "
+                            "reason' or 'allow:<path> local-term:<n>  # reason'"),
     ("off:no-such-label  # why\n", ".public-check.local:1: no public entry is labelled 'no-such-label'"),
     ("example-secret(\n", ".public-check.local:1 is not a valid regex"),
 ])
@@ -727,6 +728,242 @@ def test_without_local_list_an_unused_commit_entry_in_a_gate_is_unverifiable(
     assert result.returncode == 0, result.stdout
     assert ("allow entry .public-check-allow:1 ('commit:<full sha> message' entry) is "
             "unverifiable without the local list") in result.stdout
+
+
+LEAK = "/" + "home/alice"
+
+
+def text_digest(text: str) -> str:
+    """A digest as the issue defines it, computed apart from public_check's own."""
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def digest_entry(path: str = "t.txt", label: str = "user-profile-path",
+                 text: str = LEAK) -> str:
+    return f"{path} {label} sha256:{text_digest(text)}  # a made-up home-folder path\n"
+
+
+def hit_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return [line for line in result.stdout.splitlines() if not line.startswith("public-check")]
+
+
+def test_a_digest_entry_covers_its_text_on_any_line(repo: Path) -> None:
+    commit(repo, {"t.txt": f"one\n{LEAK}\n", public_check.ALLOW_FILE: digest_entry()})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout.splitlines()[-1]
+    commit(repo, {"t.txt": f"zero\none\n{LEAK}\n"}, "Insert a line")
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert "1 allow entries used" in result.stdout.splitlines()[-1]
+
+
+def test_a_digest_entry_covers_only_its_label_and_text(repo: Path) -> None:
+    other = "/" + "home/bob"
+    mail = "alice" + AT + "corp.test"
+    allow = digest_entry() + digest_entry(label="email-address", text=other)
+    commit(repo, {"t.txt": f"{LEAK}\n{other}\n", "u.txt": f"{LEAK}\n", "m.txt": f"{mail}\n",
+                  public_check.ALLOW_FILE: allow + digest_entry("m.txt", "user-profile-path", mail)})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 1
+    assert sorted(hit_lines(result)) == sorted([
+        "t.txt:2:1: user-profile-path",
+        "u.txt:1:1: user-profile-path",
+        "m.txt:1:1: email-address",
+        ".public-check-allow:2: unused-allow-entry ('<path> <label> sha256:<digest>' entry; "
+        "unused: remove it or correct it in place)",
+        ".public-check-allow:3: unused-allow-entry ('<path> <label> sha256:<digest>' entry; "
+        "unused: remove it or correct it in place)",
+    ])
+
+
+def test_an_unused_digest_entry_is_a_hit_without_the_local_list(repo: Path, local: Path) -> None:
+    local.unlink()
+    commit(repo, {"t.txt": "/" + "home/carol\n", public_check.ALLOW_FILE: digest_entry()})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 1
+    assert (".public-check-allow:1: unused-allow-entry ('<path> <label> sha256:<digest>' entry; "
+            "unused: remove it or correct it in place)") in result.stdout
+    assert "unverifiable" not in result.stdout
+
+
+def test_a_digest_entry_for_a_label_switched_off_is_unverifiable(repo: Path, local: Path) -> None:
+    local.write_text("off:user-profile-path  # never private here\n", encoding="utf-8")
+    commit(repo, {"t.txt": f"{LEAK}\n", public_check.ALLOW_FILE: digest_entry()})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert ("public-check: warning: allow entry .public-check-allow:1 ('<path> <label> "
+            "sha256:<digest>' entry) is unverifiable: the local list switches user-profile-path "
+            "off") in result.stdout
+
+
+@pytest.mark.parametrize("label", ["local-term", "local-term:1"])
+def test_a_committed_local_term_digest_entry_is_refused(repo: Path, local: Path,
+                                                        label: str) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\n", encoding="utf-8")
+    commit(repo, {"z.txt": f"a {term} here\n",
+                  public_check.ALLOW_FILE: digest_entry() + digest_entry("z.txt", label, term)})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert (".public-check-allow:2: no committed entry keys a local term: move it to "
+            ".public-check.local as 'allow:<path> local-term:<n>  # reason', <n> the term's line "
+            "there") in result.stdout
+    assert term not in result.stdout
+
+
+@pytest.mark.parametrize("value", [
+    "a" * 64, "A" * 16, "a" * 15, "",
+])
+def test_a_malformed_digest_entry_is_refused(repo: Path, value: str) -> None:
+    commit(repo, {"t.txt": f"{LEAK}\n",
+                  public_check.ALLOW_FILE: f"t.txt user-profile-path sha256:{value}  # why\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert ".public-check-allow:1: write '<path> <label> sha256:<digest>  # reason'" in result.stdout
+
+
+@pytest.mark.parametrize("entry, error", [
+    (f"t.txt sha256:{'a' * 16}  # no label\n", "write '<path> <label> sha256:<digest>  # reason'"),
+    (f"t.txt no-such-label sha256:{'a' * 16}  # why\n",
+     "no public entry is labelled 'no-such-label'; the labels are email-address"),
+])
+def test_a_digest_entry_without_a_public_label_is_refused(repo: Path, entry: str,
+                                                         error: str) -> None:
+    commit(repo, {"t.txt": "clean\n", public_check.ALLOW_FILE: entry})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert f".public-check-allow:1: {error}" in result.stdout
+
+
+def test_a_digest_entry_path_may_hold_spaces(repo: Path) -> None:
+    commit(repo, {"a dir/t t.txt": f"{LEAK}\n",
+                  public_check.ALLOW_FILE: digest_entry("a dir/t t.txt")})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_local_allow_entry_covers_a_local_term_hit(repo: Path, local: Path) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\nallow:z.txt local-term:1  # a generic word in this file\n",
+                     encoding="utf-8")
+    commit(repo, {"z.txt": f"one\na {term} here\n", "t.txt": f"{LEAK}\n",
+                  public_check.ALLOW_FILE: digest_entry()})
+    for args in ([], ["--digests"]):
+        result = run_check("--repo", str(repo), "--rev", "HEAD", *args)
+        assert result.returncode == 0, result.stdout
+        assert "2 allow entries used" in result.stdout.splitlines()[-1]
+        assert term not in result.stdout
+        assert text_digest(term) not in result.stdout
+        assert not re.search(r"local-term.*sha256:", result.stdout)
+    commit(repo, {"z.txt": f"zero\none\na {term} here\n"}, "Insert a line")
+    assert run_check("--repo", str(repo), "--rev", "HEAD").returncode == 0
+
+
+@pytest.mark.parametrize("entry", [
+    f"allow:t.txt user-profile-path sha256:{'a' * 16}  # why",
+    "allow:t.txt user-profile-path  # why",
+    f"allow:t.txt local-term:1 sha256:{'a' * 16}  # why",
+])
+def test_a_local_allow_entry_with_a_public_label_is_refused(repo: Path, local: Path,
+                                                            entry: str) -> None:
+    local.write_text(f"{'zorbl' + 'quux'}\n{entry}\n", encoding="utf-8")
+    commit(repo, {"t.txt": f"{LEAK}\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert (".public-check.local:2: a public label is allowed by the committed form '<path> "
+            "<label> sha256:<digest>  # reason' in .public-check-allow") in result.stdout
+
+
+@pytest.mark.parametrize("entry, error", [
+    ("allow:z.txt local-term:2  # why", "2 is no term's line"),
+    ("allow:z.txt local-term:3  # why", "3 is no term's line"),
+    ("allow:z.txt local-term:1", "write 'allow:<path> local-term:<n>  # reason'"),
+    ("allow:local-term:1  # why", "write 'allow:<path> local-term:<n>  # reason'"),
+    ("allow:z.txt something  # why", "write 'allow:<path> local-term:<n>  # reason'"),
+])
+def test_a_malformed_local_allow_entry_is_refused(repo: Path, local: Path, entry: str,
+                                                  error: str) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\n{entry}\n", encoding="utf-8")
+    commit(repo, {"z.txt": "clean\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 2
+    assert f".public-check.local:2: {error}" in result.stdout
+    assert term not in result.stdout
+
+
+def test_an_unused_local_allow_entry_is_only_warned_about(repo: Path, local: Path) -> None:
+    local.write_text(f"{'zorbl' + 'quux'}\nallow:z.txt local-term:1  # a generic word\n",
+                     encoding="utf-8")
+    commit(repo, {"o.txt": "other\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert ("public-check: warning: allow entry .public-check.local:2 covers no hit in this tree"
+            in result.stdout)
+
+
+def test_a_hit_names_the_unused_line_entry_of_its_file(repo: Path, local: Path) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\n", encoding="utf-8")
+    commit(repo, {"g.txt": f"new\n{LEAK}\n", "z.txt": f"new\n{term}\n",
+                  public_check.ALLOW_FILE: "g.txt:1  # a made-up path\nz.txt:1  # a word\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 1
+    lines = hit_lines(result)
+    assert ("g.txt:2:1: user-profile-path; .public-check-allow:1 names g.txt:1 and covers no hit: "
+            "if it was for this one, its line moved; key it by its text ('<path> <label> "
+            "sha256:<digest>', which --digests prints)") in lines
+    assert ("z.txt:2:1: local-term:1; .public-check-allow:2 names z.txt:1 and covers no hit: if "
+            "it was for this one, its line moved; key it in .public-check.local by its term's "
+            "line ('allow:<path> local-term:<n>  # reason')") in lines
+    assert term not in result.stdout
+
+
+def test_digests_are_printed_only_when_asked(repo: Path) -> None:
+    other = "/" + "home/bob"
+    commit(repo, {"t.txt": f"{LEAK}\n{other}\n", public_check.ALLOW_FILE: digest_entry()})
+    plain = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert plain.returncode == 1
+    assert not re.search(r"[0-9a-f]{16}", plain.stdout.replace(SE_HEAD[:7], ""))
+    asked = run_check("--repo", str(repo), "--rev", "HEAD", "--digests")
+    assert asked.returncode == 1
+    lines = asked.stdout.splitlines()
+    assert f"t.txt:2:1: user-profile-path sha256:{text_digest(other)}" in lines
+    assert (f"public-check: digest t.txt:1:1 user-profile-path sha256:{text_digest(LEAK)} "
+            "(.public-check-allow:1)") in lines
+    assert f"public-check: digest t.txt:2:1 user-profile-path sha256:{text_digest(other)}" in lines
+
+
+def test_no_digest_is_printed_for_a_local_term(repo: Path, local: Path) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\n", encoding="utf-8")
+    commit(repo, {"z.txt": f"a {term} here\n", "t.txt": f"{LEAK}\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD", "--digests")
+    assert result.returncode == 1
+    lines = result.stdout.splitlines()
+    assert "z.txt:1:3: local-term:1" in lines
+    assert f"t.txt:1:1: user-profile-path sha256:{text_digest(LEAK)}" in lines
+    assert text_digest(term) not in result.stdout and term not in result.stdout
+    assert [line for line in lines if "sha256:" in line and "local-term" in line] == []
+    assert len([line for line in lines if line.startswith("public-check: digest")]) == 1
+
+
+def test_a_committed_entry_covering_only_local_term_hits_is_warned(repo: Path,
+                                                                   local: Path) -> None:
+    term = "zorbl" + "quux"
+    local.write_text(f"{term}\n", encoding="utf-8")
+    commit(repo, {"z.txt": f"a {term} here\n", "g.txt": f"{LEAK} {term}\n",
+                  public_check.ALLOW_FILE: "z.txt:1  # a word\ng.txt  # a fixture\n"})
+    result = run_check("--repo", str(repo), "--rev", "HEAD")
+    assert result.returncode == 0, result.stdout
+    assert ("public-check: warning: allow entry .public-check-allow:1 covers only local-term "
+            "hits, so it tells readers where a private term sits: move it to .public-check.local "
+            "as 'allow:<path> local-term:<n>  # reason' lines, <n> the term's line there: z.txt "
+            "local-term:1") in result.stdout
+    assert ".public-check-allow:2 covers only" not in result.stdout
+    assert term not in result.stdout
 
 
 def test_allow_entry_needs_a_reason(repo: Path) -> None:
