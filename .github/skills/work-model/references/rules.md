@@ -509,6 +509,23 @@ rows, and those parts are its columns.
   - se: by judgment in review, in documentation, decks, issues and messages to the owner.
 - **Related:** doc-002, doc-003
 
+### doc-005 A tool's documentation opens with its README and its command line
+
+Where a tool publishes documentation, it opens with its abstract, then its README as the first
+chapter, then its command line as the second, generated at each build from `RUNME --help`.
+
+- **Why:** the reader meets the tool as its root presents it: what it is, how to get it running,
+  then every command, from the help the tool itself owns.
+- **Without it:** each tool orders its documentation its own way, and a command reference
+  written by hand drifts from the tool's help.
+- **Prevents:** a command-line chapter that disagrees with the tool; a README buried behind
+  design notes.
+- **Implementations:**
+  - se: docs.md's first two chapters and the command fence of docs/command-line.md, held by
+    `tests/test_docs.py`.
+  - Other repositories: by judgment.
+- **Related:** des-016, doc-001, doc-002
+
 ## wrk: work and fleet
 
 ### wrk-001 GitHub is the only shared state
