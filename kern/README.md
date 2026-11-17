@@ -44,9 +44,12 @@ The NATS server is a Go dependency, `github.com/nats-io/nats-server/v2` v2.11.9 
 
 One core runs per checkout, the nearest folder up from the working directory that holds `.git`
 (or `--root`). Nobody needs to start it by hand: a hook runs `kern start`, which returns at once.
+The verbs are one table in `cli/verbs.go`; an application adds its own with `cli.Add` and its
+bare run with `cli.Bare`, and the help renders them all.
 
 | command | what |
 |---|---|
+| `kern help [<verb>]` | prints the whole help on stdout and exits 0, as `--help` and `-h` do: every verb with its arguments, those hosts and hooks call under their own heading, and the exit codes; `kern <verb> -h` prints that verb's options; a bare `kern` prints the usage line on stderr and exits 2, unless the application sets a bare run (`cli.Bare`, as `se` does) |
 | `kern start [--grace D] [--idle D]` | where no core runs and no other caller's claim stands, claims the start (`.se/.runtime/start.claim`) and spawns `kern serve` detached; says `started`, `starting` or `running` |
 | `kern status [--wait D] [--json]` | `running` with the health (`get.core.health`, 200 ms wait), `starting`, or `not running` (exit 1) |
 | `kern stop` | asks `call.core.stop` and waits until the process has exited |

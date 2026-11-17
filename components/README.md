@@ -26,8 +26,12 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 - **No comments.** The names carry no issue comments, so the lease of in-progress work without a
   branch is never counted from its `Started:` comment: it is `no branch` at once, as the Python check
   answers where it read no comments ([README "Fleet check"](../README.md#fleet-check)).
-- **The binary.** `cmd/se` is the `se` binary: kern's command line (`se start`, `status`, `stop`,
-  `serve`, `hook`) carrying kern's GitHub component and these three. `bootstrap.sh` builds or fetches
+- **The binary.** `cmd/se` is the `se` binary: kern's command line carrying kern's GitHub
+  component and these three, and SE's start, `se agent`: it starts the SE agent in the caller's
+  folder with SE loaded from its clone, Claude Code's directory marketplace `se` (`--host copilot`:
+  Copilot CLI with `--plugin-dir`, for that run only). A bare `se` is `se agent` at a terminal and
+  prints the help with no terminal, inside Claude Code or on a cloud box; `se help` lists every
+  verb. `bootstrap.sh` builds or fetches
   it for SE's checkout (SE's [docs/go-core.md](../docs/go-core.md) "How the binary arrives"), so the
   checkout's root `wiring.toml` names these components beside SE's four Python command groups, and
   the core starts them. [`release.toml`](release.toml) owns the binary's version and its release,
