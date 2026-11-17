@@ -324,6 +324,32 @@ PAYLOAD = {"verdicts": [
     {"chapter": "later", "version": "3" * 64, "comment": "Only a thought."}]}
 
 
+@pytest.mark.parametrize(("text", "settings"), [
+    (None, {"artifact": {"reading": {"briefNoticeMilliseconds": deck.BRIEF_NOTICE_MILLISECONDS}}}),
+    ('{"input": {"manifestFilename": "index.md"}, "artifact": {"reading": {"other": 1}}}',
+     {"input": {"manifestFilename": "index.md"},
+      "artifact": {"reading": {"other": 1, "briefNoticeMilliseconds": deck.BRIEF_NOTICE_MILLISECONDS}}}),
+    ('{"artifact": {"reading": {"briefNoticeMilliseconds": 0}}, "x": true}',
+     {"artifact": {"reading": {"briefNoticeMilliseconds": 0}}, "x": True}),
+], ids=["no-file", "other-keys", "turned-off"])
+def test_the_passing_line_merges_into_the_folders_settings_and_its_own_value_wins(text, settings):
+    assert deck.BRIEF_NOTICE_MILLISECONDS == 4000
+    assert json.loads(deck.brief_notice(text)) == settings
+
+
+@pytest.mark.parametrize("text", ["{not json", "[]", '{"artifact": 1}', '{"artifact": {"reading": []}}'],
+                         ids=["not-json", "no-object", "artifact", "reading"])
+def test_settings_obs_would_refuse_are_left_for_obs_to_name(text):
+    assert deck.brief_notice(text) == text
+
+
+def test_the_send_decks_document_turns_the_passing_line_on(decks):
+    built, artifact = decks["send"]
+    assert built.returncode == 0, built.stderr
+    document = json.loads(deck.document_path(artifact).read_text(encoding="utf-8"))
+    assert document["projectConfig"]["settings"]["artifact"]["reading"]["briefNoticeMilliseconds"] == 4000
+
+
 def test_answers_parse_into_the_summary():
     assert deck.summary(PAYLOAD) == (
         "record: pick C (figure record--figure-1)\n"

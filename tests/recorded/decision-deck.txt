@@ -523,5 +523,15 @@
     "profiles",
     "pugh-decisions"
   ],
-  "cssSnippets": []
+  "cssSnippets": [],
+  "projectConfig": {
+    "path": "cfg.json",
+    "settings": {
+      "artifact": {
+        "reading": {
+          "briefNoticeMilliseconds": 4000
+        }
+      }
+    }
+  }
 }
