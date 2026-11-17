@@ -32,6 +32,11 @@ release = "components/release.toml"
 [integrate]
 landing = "fast-forward"
 
+# The filing commands check each ticket against its form (README "Forms"): `refuse` files none that
+# lacks a part its form requires. Read from the integration branch, so a branch cannot switch it off.
+[forms]
+enforce = "refuse"
+
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
 # (README "Test budget").
 [tests]
