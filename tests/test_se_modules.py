@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 import fake_git
 
-# Its git, and that of every script and binary it starts, is the fake behind one state file.
-pytestmark = pytest.mark.usefixtures("shared_fake_git")
+# Its git is the fake in memory; a test whose scripts or binaries run git as child processes takes
+# the fake behind one state file, `shared_fake_git` (tests/conftest.py `door_fake`).
+pytestmark = pytest.mark.usefixtures("door_fake")
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_modules.py"
@@ -518,6 +519,7 @@ def test_network_transports_are_blocked(world, capsys):
     assert not (world.cache / ".git" / "index").exists()
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_script_runs_as_a_command(world):
     args = [sys.executable, str(SCRIPT), "--root", str(world.root), "--local", str(world.local)]
     synced = subprocess.run([*args, "sync"], capture_output=True, text=True)

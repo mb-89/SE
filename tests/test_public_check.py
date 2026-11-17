@@ -1,9 +1,10 @@
 """Tests for scripts/public_check.py and se's hooks that run it. Leaky sample values are assembled
 at runtime from fragments, so this file itself passes the check.
 
-git is the door's fake behind a state file (`shared_fake_git`, tests/conftest.py), which the check,
-the hooks and the setup scripts reach as child processes; the fake holds an se checkout at this
-one's root at SE_HEAD, so a verdict names that commit. SE's own checkout is checked by
+git is the door's fake (`door_fake`, tests/conftest.py): in memory for a test that runs the check in
+its own process, behind a state file (`shared_fake_git`) for one whose hooks, setup scripts or CI
+gate run as child processes; the fake holds an se checkout at this one's root at SE_HEAD, so a
+verdict names that commit. SE's own checkout is checked by
 scripts/hygiene.py, a step of CI's `check` job."""
 
 from __future__ import annotations
@@ -127,9 +128,14 @@ def git(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess
     return result
 
 
-def se_checkout(state: fake_git.StateFile) -> None:
+def edited(door: fake_git.FakeGit | fake_git.StateFile) -> contextlib.AbstractContextManager[fake_git.FakeGit]:
+    """The fake to change directly: the one in memory as it is, a state file's written back after."""
+    return door.edit() if isinstance(door, fake_git.StateFile) else contextlib.nullcontext(door)
+
+
+def se_checkout(door: fake_git.FakeGit | fake_git.StateFile) -> None:
     """The se checkout the check runs from, as the fake holds it: SE_ROOT at commit SE_HEAD."""
-    with state.edit() as fake:
+    with edited(door) as fake:
         moment = datetime.now(timezone.utc)
         fake.commits[SE_HEAD] = fake_git.Commit(fake.store_tree({}), (), "se\n", ("alice", "alice"),
                                                 ("alice", "alice"), moment, moment)
@@ -138,13 +144,15 @@ def se_checkout(state: fake_git.StateFile) -> None:
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shared_fake_git: fake_git.StateFile) -> Path:
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, door_fake: fake_git.FakeGit | fake_git.StateFile) -> Path:
     """A repository with a generic identity and an empty, ignored local list, so a run is a full
-    check; checked without the machine's ~/.se/local.toml or a machine-level list."""
+    check; checked without the machine's ~/.se/local.toml or a machine-level list. Its git is the
+    fake in memory, or the state file where the test takes `shared_fake_git` (tests/conftest.py
+    `door_fake`), as its child processes run git."""
     for variable in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(variable, str(tmp_path / "home"))
     monkeypatch.delenv(public_check.MACHINE_ENV, raising=False)
-    se_checkout(shared_fake_git)
+    se_checkout(door_fake)
     path = tmp_path / "repo"
     path.mkdir()
     fake_git.init(path, "-b", "main")
@@ -205,6 +213,7 @@ def run_check(*args: str, cwd: Path | None = None) -> subprocess.CompletedProces
     return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_check_answers_alike_in_its_own_process(repo: Path) -> None:
     """run_check answers as `python scripts/public_check.py` run as a process does, clean and with
     a hit: the same exit code and stdout. stderr is not compared: argparse names the program after
@@ -1146,6 +1155,7 @@ def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.Co
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_identity(
         kind: str, repo: Path) -> None:
@@ -1183,6 +1193,7 @@ def se_as_a_local_module(repo: Path) -> None:
     local.write_text(f"[paths]\nse = '{SE_ROOT.as_posix()}'\n", encoding="utf-8")
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(kind: str, repo: Path) -> None:
     se_as_a_local_module(repo)
@@ -1536,6 +1547,7 @@ def run_ci(tmp_path: Path, before: str, after: str, base_ref: str = "", branch: 
                           capture_output=True, text=True, check=False)
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("known_before", [True, False])
 def test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remedy(
         repo: Path, tmp_path: Path, known_before: bool) -> None:
@@ -1549,6 +1561,7 @@ def test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remed
     assert "turn off the editor's co-author setting" in result.stdout
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) -> None:
     before, listed = owner_push(repo, tmp_path, f"Old work\n\n{CO_AUTHOR}")
     commit(repo, {public_check.ALLOW_FILE: f"commit:{listed} message  # published before the rule\n"})
@@ -1558,6 +1571,7 @@ def test_ci_passes_an_allow_listed_co_author_commit(repo: Path, tmp_path: Path) 
     assert "1 allow entries used" in result.stdout
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_passes_a_clean_push(repo: Path, tmp_path: Path) -> None:
     before, after = owner_push(repo, tmp_path, "Fix the build")
     assert run_ci(tmp_path, before, after).returncode == 0
@@ -1682,6 +1696,7 @@ def test_ci_refuses_a_field_report_that_names_no_work_issue(tmp_path: Path, firs
 
 @pytest.mark.parametrize("message, refused", [("Fix the build", False),
                                               ("Fix the build\n\nco-authored-by: Copilot", True)])
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, message: str,
                                                 refused: bool) -> None:
     owner_push(repo, tmp_path, "On main")
@@ -1699,6 +1714,7 @@ def test_ci_gates_the_commits_of_a_pull_request(repo: Path, tmp_path: Path, mess
 
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_pull_request_gate_scans_the_merge_it_lands(repo: Path, tmp_path: Path) -> None:
     """Three heads cut before main moved one entry and narrowed a glob: the gate judges the merge
     each would land, by the merge's own allow list."""
@@ -1825,6 +1841,7 @@ def foreign_hits(result: subprocess.CompletedProcess[str]) -> list[str]:
                    if "foreign-identity" in line})
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_gates_only_the_commits_a_work_branch_brings_past_main(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     after = merged_work(repo)
@@ -1835,6 +1852,7 @@ def test_ci_gates_only_the_commits_a_work_branch_brings_past_main(
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     after = merged_work(repo)
@@ -1847,6 +1865,7 @@ def test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it(
     assert "::error::public-check (scripts/public_check.py" in result.stdout
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_refuses_a_foreign_landing_pushed_to_main(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     result = run_ci(tmp_path, landed["main0"], landed["landing"])
@@ -1855,6 +1874,7 @@ def test_ci_refuses_a_foreign_landing_pushed_to_main(
     assert foreign_hits(result) == [landed["landing"][:12]]
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_gates_a_new_branch_on_what_main_does_not_hold(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     git(repo, "switch", "-q", "-c", "work2", landed["before"])
@@ -1865,6 +1885,7 @@ def test_ci_gates_a_new_branch_on_what_main_does_not_hold(
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_ci_refuses_a_new_branch_made_from_a_foreign_commit_another_branch_holds(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     git(repo, "switch", "-q", "-c", "held", landed["main0"])
@@ -1921,6 +1942,7 @@ def test_push_range_without_the_integration_ref(
     assert public_check.push_range(clone, "", after, "work", "main") == f"{after} --not"
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_push_range_gates_whole_where_se_toml_names_another_branch(
         repo: Path, tmp_path: Path, landed: dict[str, str]) -> None:
     git(repo, "switch", "-q", "work")

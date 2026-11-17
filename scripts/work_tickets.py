@@ -5533,6 +5533,16 @@ def with_durations(command: list[str], count: int) -> list[str]:
     return [*command, f"--durations={count}"]
 
 
+def with_file_seconds(command: list[str], path: Path | None) -> list[str]:
+    """Ask pytest to write each test file's seconds to `path` (tests/conftest.py
+    `--record-file-seconds`), as CI's suite step does for `file-seconds`; other runners, or no
+    `path`, are run as declared."""
+    is_pytest = any(Path(argument).stem == "pytest" for argument in command)
+    if path is None or not is_pytest:
+        return command
+    return [*command, f"--record-file-seconds={path}"]
+
+
 SLOW_SETUP_SECONDS = 2.0
 
 
@@ -6035,7 +6045,7 @@ CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside ke
 
 
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
-              full: bool = False, ci_skipped: str = "") -> str:
+              full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -6043,7 +6053,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     stdout (without progress lines, banners and durations), its time, one line per JUnit report
     (SuitePart.line) with its slow setups under it (SuitePart.setup_lines), its `slowest_count` slowest tests
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
-    warns above the target; refuses failed tests.
+    warns above the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
+    its seconds per file there (with_file_seconds), and its `file seconds:` lines follow the Parts.
 
     The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
     refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
@@ -6068,7 +6079,8 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     commit = clean_commit(root)
     limit, target = budget.whole_limit, budget.whole_target  # the whole suite's (`[tests] shards`)
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {limit:g} s)")
-    result = time_suite(root, with_durations(budget.command, slowest_count))
+    result = time_suite(root, with_file_seconds(with_durations(budget.command, slowest_count),
+                                                record_file_seconds))
     seconds, output, parts = result.seconds, result.output, result.parts
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
@@ -6171,6 +6183,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
             "\n".join([f"  {part.line()}", *(f"    {line}" for line in part.setup_lines())])
             for part in parts
         ))
+    for line in result.stdout.splitlines():
+        if line.startswith(FILE_SECONDS_LINE):
+            print(line)
     print(f"Slowest tests:\n{listing}")
     if tier_of and parts:
         print("Slowest per tier:\n" + "\n".join(f"  {line}" for line in tier_lines(parts, tier_of)))
@@ -9713,13 +9728,146 @@ def stated_component_kinds(root: Path) -> None:
              help=f"with --compare: timed runs of each state (default {COMPARE_RUNS})"),
          arg("--full", action="store_true",
              help="run every suite beside, also one whose paths the change does not touch "
-                  "(CI's nightly run)"))
+                  "(CI's nightly run)"),
+         arg("--record-file-seconds", type=Path, metavar="PATH",
+             help="have a pytest suite write each test file's seconds to PATH, as CI's suite step "
+                  "does for its artifact file-seconds, which file-seconds reads"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
     stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
-    print(f"Suite: {run_suite(root, args.slowest, full=args.full)}")
+    record = args.record_file_seconds.resolve() if args.record_file_seconds else None
+    print(f"Suite: {run_suite(root, args.slowest, full=args.full, record_file_seconds=record)}")
+    return 0
+
+
+# The file-seconds table (tests/conftest.py, "The order the workers take the test files in"): CI's
+# suite step records each test file's seconds into its run's artifact file-seconds, and
+# `file-seconds` writes the tracked table from it, so the order weighs each file by what CI runs.
+FILE_SECONDS_LINE = "file seconds:"
+FILE_SECONDS_ARTIFACT = "file-seconds"
+FILE_SECONDS_TABLE = Path("tests") / "file-seconds.json"
+FILE_SECONDS_RUNS = 20  # the newest passing pushes searched for one that kept the artifact
+FILE_SECONDS_MOVED = 1.0
+
+
+def read_file_seconds(path: Path, where: str) -> dict[str, float]:
+    """A file-seconds table, a JSON object of test files to non-negative seconds; refuses another,
+    naming `where` it came from."""
+    try:
+        table = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise QueueError(f"file-seconds: {where} holds no file-seconds table ({error})") from error
+    if not isinstance(table, dict) or not all(
+            isinstance(name, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value >= 0 for name, value in table.items()):
+        raise QueueError(f"file-seconds: {where} is not a JSON object of test files to seconds")
+    return {name: float(value) for name, value in table.items()}
+
+
+def file_seconds_text(table: Mapping[str, float]) -> str:
+    """The table as tests/conftest.py `write_table` writes it: files sorted, one per line, seconds
+    rounded to 0.1 s."""
+    rounded = {name: round(seconds, 1) for name, seconds in sorted(table.items())}
+    return json.dumps(rounded, indent=2) + "\n"
+
+
+def merged_file_seconds(root: Path, run: Mapping[str, float], table: Mapping[str, float]
+                        ) -> dict[str, float]:
+    """The run's seconds for its files, the table's for a file the run lacks that exists in
+    `root`, none for a file that is gone."""
+    kept = {name: seconds for name, seconds in table.items() if name not in run and (root / name).exists()}
+    return {name: seconds for name, seconds in {**kept, **run}.items() if (root / name).exists()}
+
+
+def moved_file_seconds(old: Mapping[str, float], new: Mapping[str, float]) -> list[str]:
+    """One line per file whose seconds moved by FILE_SECONDS_MOVED or more, a new or gone one
+    counting from or to none."""
+    def shown(value: float | None) -> str:
+        return "none" if value is None else f"{value:.1f} s"
+
+    return [f"  {name}: {shown(old.get(name))} -> {shown(new.get(name))}"
+            for name in sorted(old.keys() | new.keys())
+            if abs(new.get(name, 0.0) - old.get(name, 0.0)) >= FILE_SECONDS_MOVED]
+
+
+def run_has_file_seconds(root: Path, repo: str, run: str) -> bool:
+    """Whether CI's run `run` kept the artifact file-seconds, unexpired."""
+    listed = json.loads(run_gh(root, ["api", f"repos/{api_repo(repo)}/actions/runs/{run}/artifacts"])
+                        or "{}")
+    return any(artifact.get("name") == FILE_SECONDS_ARTIFACT and not artifact.get("expired")
+               for artifact in listed.get("artifacts") or [])
+
+
+def newest_file_seconds_run(root: Path, repo: str) -> str:
+    """The newest passing `check` run of a push to the integration branch that kept file-seconds."""
+    branch = integration_branch(root)
+    listed = json.loads(run_gh(root, [
+        "run", "list", "--repo", api_repo(repo), "--workflow", CHECK_WORKFLOW.name, "--branch", branch,
+        "--event", "push", "--status", "success", "--limit", str(FILE_SECONDS_RUNS),
+        "--json", "databaseId"]) or "[]")
+    for entry in listed:
+        run = str(entry.get("databaseId"))
+        if run_has_file_seconds(root, repo, run):
+            return run
+    raise QueueError(f"file-seconds: none of the last {len(listed)} passing {CHECK_NAME} runs of a push "
+                     f"to {branch} kept the artifact {FILE_SECONDS_ARTIFACT}; name a run with --run")
+
+
+def download_file_seconds(root: Path, run: str | None, directory: Path) -> tuple[Path, str]:
+    """CI's file-seconds of `run`, else of the newest run that has them, downloaded into
+    `directory` through gh; the file and the run it came from."""
+    repo = remote_repo(root)
+    if repo is None:
+        raise QueueError("file-seconds: the checkout's origin names no repository, so no CI run is known")
+    if run is None:
+        run = newest_file_seconds_run(root, repo)
+    elif not run_has_file_seconds(root, repo, run):
+        raise QueueError(f"file-seconds: run {run} has no artifact {FILE_SECONDS_ARTIFACT}; name a passing "
+                         f"{CHECK_NAME} run whose suite step ran (its step \"Keep the suite's file seconds\")")
+    run_gh(root, ["run", "download", run, "--repo", api_repo(repo), "--name", FILE_SECONDS_ARTIFACT,
+                  "--dir", str(directory)])
+    found = sorted(directory.rglob("*.json"))
+    if not found:
+        raise QueueError(f"file-seconds: run {run}'s artifact {FILE_SECONDS_ARTIFACT} holds no JSON file")
+    return found[0], f"run {run}"
+
+
+def write_file_seconds(root: Path, source: Path, where: str) -> list[str]:
+    """Write tests/file-seconds.json from CI's seconds in `source` (merged_file_seconds); the
+    lines saying what it wrote and each file that moved."""
+    run = read_file_seconds(source, where)
+    path = root / FILE_SECONDS_TABLE
+    old = read_file_seconds(path, str(path)) if path.exists() else {}
+    new = merged_file_seconds(root, run, old)
+    path.write_text(file_seconds_text(new), encoding="utf-8")
+    rounded = {name: round(seconds, 1) for name, seconds in new.items()}
+    moved = moved_file_seconds(old, rounded)
+    kept = len(new.keys() - run.keys())
+    return [f"file-seconds: wrote {FILE_SECONDS_TABLE.as_posix()} from {where} ({len(new) - kept} files "
+            f"of the run, {kept} kept from the table); {len(moved)} moved by {FILE_SECONDS_MOVED:g} s or more",
+            *moved]
+
+
+@command("file-seconds", "write tests/file-seconds.json, the order the suite's workers take its test "
+                         "files in, from CI's seconds: the artifact file-seconds of a check run, by "
+                         "default the newest passing one of a push to the integration branch that "
+                         "kept it; prints each file that moved by 1 s or more",
+         OPTIONAL_WORKTREE,
+         arg("--run", metavar="ID", help="the check run to read; default: the newest that kept it"),
+         arg("--artifact", type=Path, metavar="FILE",
+             help="the artifact's file-seconds.json, already downloaded (without gh, through the "
+                  "host's GitHub tools); --run names the run it came from"))
+def run_file_seconds(root: Path, args: argparse.Namespace) -> int:
+    if args.artifact is not None:
+        where = f"run {args.run}" if args.run else str(args.artifact)
+        lines = write_file_seconds(root, args.artifact, where)
+    else:
+        with tempfile.TemporaryDirectory(prefix="se-file-seconds-") as directory:
+            source, where = download_file_seconds(root, args.run, Path(directory))
+            lines = write_file_seconds(root, source, where)
+    print("\n".join(lines))
     return 0
 
 
@@ -10446,7 +10594,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "file-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.

@@ -157,7 +157,16 @@ jobs:
         run: |
           full=()
           if [ "$EVENT" = schedule ]; then full=(--full); fi
-          uv run python scripts/work_tickets.py suite --worktree . "${full[@]}"
+          uv run python scripts/work_tickets.py suite --worktree . "${full[@]}" --record-file-seconds "$RUNNER_TEMP/file-seconds.json"
+      # The seconds each test file took in this run, the PowerShell cases among them: the run's
+      # artifact file-seconds, from which `work_tickets.py file-seconds` writes tests/file-seconds.json.
+      - name: Keep the suite's file seconds
+        if: success() && needs.trust.outputs.trusted != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: file-seconds
+          path: ${{ runner.temp }}/file-seconds.json
+          if-no-files-found: error
       - name: kern and SE's start and hook passed on Windows
         env:
           PLATFORMS: ${{ needs.kern-platforms.result }}

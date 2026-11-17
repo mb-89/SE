@@ -14,8 +14,9 @@ from pathlib import Path
 import pytest
 import fake_git
 
-# Its git, and that of every script and binary it starts, is the fake behind one state file.
-pytestmark = pytest.mark.usefixtures("shared_fake_git")
+# Its git is the fake in memory; a test whose scripts or binaries run git as child processes takes
+# the fake behind one state file, `shared_fake_git` (tests/conftest.py `door_fake`).
+pytestmark = pytest.mark.usefixtures("door_fake")
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("se_start", ROOT / "scripts" / "se_start.py")
@@ -785,6 +786,7 @@ def refresh(r):
 # The refresh at the session's start (start_refresh): SE alone, in place, failing open.
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_start_refresh_moves_se_to_the_latest_release_of_its_major(repos):
     line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
     assert moved and line == f"SE: 1.0.0 -> 1.1.0, refreshed at this start ({repos['se'].as_posix()})"
@@ -824,6 +826,7 @@ def test_start_refresh_leaves_a_development_checkout_and_the_sessions_own_tree(r
     assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     lock_before = se_modules.read_lock(repos["project"])
     assert lock_before["lib"][0] == "1.0.0" and lock_before["tool"][0] == "1.0.0"
@@ -853,6 +856,7 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert cache["checked_at"] is not None  # the greeting after a refresh shows the new state
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use(repos):
     release(repos["remotes"]["lib"], "1.2.0", says="1.0.0")  # its se.toml names another version
     before = se_modules.read_lock(repos["project"])["lib"]
@@ -867,6 +871,7 @@ def test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use(repos):
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)  # the rest moves
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_se_version_that_does_not_start_is_not_switched_to(repos):
     release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
     head = git(repos["se"], "rev-parse", "HEAD")
@@ -932,6 +937,7 @@ def as_plugin(repos, tmp_path, monkeypatch, serves: str) -> FakeClaude:
     return fake
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_installed_plugin_is_updated_through_claude_code(repos, tmp_path, monkeypatch):
     fake = as_plugin(repos, tmp_path, monkeypatch, "v1.1.0")
     lines, failed = refresh(repos)
@@ -942,6 +948,7 @@ def test_an_installed_plugin_is_updated_through_claude_code(repos, tmp_path, mon
     assert entry["version"] == "1.1.0" and se_modules.checkout_version(Path(entry["installPath"])) == (1, 1, 0)
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(repos, tmp_path, monkeypatch):
     release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
     fake = as_plugin(repos, tmp_path, monkeypatch, "v1.2.0")
@@ -953,6 +960,7 @@ def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(rep
     assert fake.record.read_bytes() == record
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
     git(repos["upstream"], "branch", "release", "v1.0.0")
     git(repos["upstream"], "symbolic-ref", "HEAD", "refs/heads/release")  # the clone takes the default
