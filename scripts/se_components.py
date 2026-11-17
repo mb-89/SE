@@ -305,16 +305,18 @@ def catalog(root: Path, names: Iterable[str]):
 
 
 def reference(declarations) -> str:
-    """The README's command reference: per component, its help and each command's usage and help."""
+    """The README's command reference: per component, its help and a table of its commands, each
+    with its usage in a code span and its help (a `|` in a cell escaped as `\\|`)."""
+    def cell(text: str) -> str:
+        return " ".join(text.split()).replace("|", "\\|")
+
     parts = []
     for d in declarations:
         group = next(iter(d.commands.values())).group if d.commands else d.name
-        entries = [c.usage + "\n" + textwrap.fill(c.help, REFERENCE_WIDTH, initial_indent="    ",
-                                                  subsequent_indent="    ")
-                   for c in d.commands.values()]
+        rows = [f"| `{cell(c.name)}` | `{cell(c.usage)}` | {cell(c.help)} |" for c in d.commands.values()]
         about = textwrap.fill(f"`{COMPONENTS}/{d.name}`: {d.help}", REFERENCE_WIDTH)
-        parts.append(f"#### {group}\n\n{about}\n\n```text\n"
-                     + "\n\n".join(entries) + "\n```")
+        parts.append(f"#### {group}\n\n{about}\n\n| Command | Usage | What it does |\n|---|---|---|\n"
+                     + "\n".join(rows))
     return "\n\n".join(parts)
 
 
