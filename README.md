@@ -83,6 +83,11 @@ environment variables; a session started there then needs no first line: SE's st
 se agent. Sessions that SE or an integrator starts keep naming their role in their first message,
 which wins. Any other value hands over nothing and the greeting names it.
 
+A running fleet shows in the sidebar as one section, the tag `SE`: SE's own session `SE`, each
+project's integrator `SE/<project>/integrator` with its workers `SE/<project>/worker/<ticket name>`
+under it, and SE's reviewers `SE/<project>/reviewer/<pull request number>` beside it, each title
+printed by `work_tickets.py session-title` ([Visible sessions](src/skills/work-model/SKILL.md#visible-sessions)).
+
 The greeting needs no permission rule: the plugin's start hook hands it over, and SE opens its
 first message with it. A session whose permission mode asks before commands, and that no one
 watches, needs SE's scripts and files allowed in the repository's `.claude/settings.json`:
@@ -1852,6 +1857,11 @@ work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY
                                 branch
     print the Release-kind trailer an integration merge of <branch> carries, from its field report's
     Release kind (a re-integration's from its Re-integration kind); push requires it
+
+work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]
+                              [topic]
+    print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or
+    `SE/<project>/<role>/<topic>` (work model, Visible sessions)
 
 work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE]
                                [--scheduled-tasks FILE] [--environment FILE] [--strict]

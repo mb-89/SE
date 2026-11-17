@@ -98,10 +98,14 @@ project's commands and hot files by the project's `AGENTS.md`.
      next merges `main` before touching it.
    Put the off-limits files and the owner of each shared file into every affected issue.
 6. **Dispatch repositories**, all at once, before presenting decisions:
-   - In each repository receiving work, make sure exactly one integrator session runs
-     (`list_sessions`). If none runs, start one with the prompt from
-     [integrator-prompt.md](references/integrator-prompt.md), naming the integrator agent, the
-     repository and this SE session. Never start workers directly.
+   - In each repository receiving work, make sure exactly one integrator session runs: the one
+     titled exactly `SE/<project>/integrator` (`list_sessions`, with `children: true` for the ones
+     this session started; never by tag). Never start workers directly.
+     - If none runs, start one with the prompt from
+       [integrator-prompt.md](references/integrator-prompt.md), naming the integrator agent, the
+       repository and this SE session.
+     - Title it `work_tickets.py session-title integrator <project>` and tag it `SE`
+       ([Visible sessions](../work-model/SKILL.md#visible-sessions)).
    - Work issues quote the user's requirement word for word; work follows the user's priority.
    - Apply the [capability-preservation rule](../work-model/SKILL.md#rules-for-all-roles) before
      writing a work issue, and ask for a change that is
