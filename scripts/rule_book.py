@@ -243,7 +243,7 @@ def _table(sections: list[str]) -> list[str]:
         "views:",
         "  - type: table",
         "    name: Rules",
-        "    order: [file.name, name, why]",
+        "    order: [file.name, name]",
         "    groupBy: {property: section, direction: ASC}",
         "    sort:",
         "      - {property: file.name, direction: ASC}",

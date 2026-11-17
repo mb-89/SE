@@ -505,16 +505,25 @@ script notes, no setting or label names as explanations, no internal ids or fiel
 ### doc-004 A table, not a long list
 
 Where a table makes sense, use a table, not a long list: items that share the same parts are its
-rows, and those parts are its columns.
+rows and those parts its columns, and each row stays one line where that is reasonably possible,
+its long text in the row's expansion where the table opens its rows and after its short columns
+where it cannot.
 
 - **Why:** a reader compares items across a row and finds one down a column at a glance; the same
-  facts in a long list must be read item by item.
+  facts in a long list must be read item by item; a row of one line keeps the whole table in
+  view, on a phone too.
 - **Without it:** pages grow long lists whose items repeat the same labels, and a reader reads all
-  of them to compare two or to find one.
+  of them to compare two or to find one; a column of prose wraps every row into a block of text,
+  and the table reads like a long list again.
 - **Prevents:** a table in disguise, a list whose items each repeat the same labelled parts; a long
   list read in full to find or compare one item; an item that silently lacks a part its
-  neighbours have.
+  neighbours have; a row many lines tall because one column holds prose; a table wider than the
+  screen.
 - **Implementations:**
+  - se: the rule book's table in the documentation
+    ([`<se>/scripts/rule_book.py`](../../../../scripts/rule_book.py)): a row per rule, its id and
+    name, its sentence and fields in the row's expansion; `tests/test_docs.py` measures each row
+    at 390 px.
   - se: by judgment in review, in documentation, decks, issues and messages to the owner.
 - **Related:** doc-002, doc-003
 

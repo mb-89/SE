@@ -167,6 +167,8 @@ def test_the_documentation_shows_the_book_as_one_table_and_a_note_per_rule():
     assert page.count("```base") == 1
     assert '      groupOrder: ["gen: everything we do", "pub: publishing"]' in page
     assert "      detailFields: []" in page
+    # Two columns, the rule's id and name; Why stays each note's property, no column.
+    assert "    order: [file.name, name]\n" in page
     assert not re.search(r"^#+ (gen|pub)-\d{3}", page, re.MULTILINE)
     # Only the section with prose before its first rule keeps a heading, one level lower.
     assert "## Sections\n\n### pub: publishing\n\nThe public check enforces these.\n" in page

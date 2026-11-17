@@ -243,6 +243,95 @@ def test_the_command_line_chapter_is_runmes_help_at_build_time(built):
     assert (RUNTIME.read_bytes() if RUNTIME.exists() else None) == runtime
 
 
+# The rule book's chapter at 390 × 844, shown as pages as the documentation opens, then in the
+# continuous view: per view its table's header labels, its scroller's widths, each rule row's and
+# section caption's height with its one-line bound, and the text gen-001's row opens to.
+RULE_BOOK_AT_PHONE = r"""
+const {chromium} = require("playwright");
+const measure = async (page, expected) => {
+    await page.waitForFunction(count => {
+        const rows = document.querySelectorAll("table tbody tr[data-row-key]");
+        return rows.length === count && [...rows].every(row => row.getClientRects().length);
+    }, expected);
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+    return await page.evaluate(() => {
+        const table = document.querySelector("table:has(tbody tr[data-row-key])");
+        const scroller = table.closest(".data-table-scroll");
+        // One line: the larger of the first cell's line height and its disclosure's height, plus that
+        // cell's vertical padding and borders, plus 1 px.
+        const line = row => {
+            const cell = row.cells[0], style = getComputedStyle(cell);
+            const toggle = cell.querySelector(".disclosure-toggle");
+            const px = name => parseFloat(style[name]) || 0;
+            return {key: row.dataset.rowKey || row.innerText.trim(), height: row.getBoundingClientRect().height,
+                    bound: Math.max(px("lineHeight"), toggle ? toggle.getBoundingClientRect().height : 0) +
+                        px("paddingTop") + px("paddingBottom") + px("borderTopWidth") + px("borderBottomWidth") + 1};
+        };
+        return {labels: [...table.querySelectorAll("thead th")].map(th => th.querySelector("span").textContent.trim()),
+                scrollWidth: scroller.scrollWidth, clientWidth: scroller.clientWidth,
+                rows: [...table.querySelectorAll("tbody tr[data-row-key]")].map(line),
+                captions: [...table.querySelectorAll("tr.data-table-group-row")].map(line)};
+    });
+};
+const opened = async (page, rule) => {
+    const row = page.locator("table tbody tr[data-row-key]").filter({hasText: rule}).first();
+    await row.locator(".disclosure-toggle").first().click();
+    const key = await row.getAttribute("data-row-key");
+    const detail = page.locator(`tr.data-table-detail-row[data-detail-owner="${key}"]`);
+    await detail.waitFor();
+    const text = await detail.innerText();
+    await row.locator(".disclosure-toggle").first().click();
+    await detail.waitFor({state: "detached"});
+    return text;
+};
+(async () => {
+    const [path, title, rule, expected] = process.argv.slice(1);
+    const browser = await chromium.launch();
+    try {
+        const page = await browser.newPage({viewport: {width: 390, height: 844}});
+        await page.goto(`file://${path}`);
+        await page.waitForFunction(() => document.documentElement.dataset.artifactStatus === "ready");
+        const slug = await page.evaluate(title => JSON.parse(document.querySelector("[data-artifact-data]").textContent)
+            .notes.find(note => note.title === title).slug, title);
+        await page.evaluate(slug => obsArtifact.activateChapter(slug), slug);
+        const views = {};
+        views.pages = {paged: await page.evaluate(() => document.documentElement.classList.contains("paged-mode")),
+                       ...await measure(page, +expected), opened: await opened(page, rule)};
+        await page.locator("[data-pages-toggle]").evaluate(toggle => toggle.click());
+        await page.waitForFunction(() => !document.documentElement.classList.contains("paged-mode"));
+        views.continuous = {paged: false, ...await measure(page, +expected), opened: await opened(page, rule)};
+        console.log(JSON.stringify(views));
+    } finally {
+        await browser.close();
+    }
+})();
+"""
+
+
+def test_each_rule_book_row_is_one_line_on_a_phone_in_both_views(built):
+    """doc-004: at 390 px the rule book's table shows Rule and Name only, never scrolls sideways, keeps
+    every rule row and section caption to one line, and opens a rule's row to its sentence."""
+    if shutil.which("node") is None or subprocess.run(["node", "-e", "require('playwright')"],
+                                                      capture_output=True).returncode:
+        pytest.skip("node with playwright is not installed")
+    result, folder, _, _ = built
+    assert result.returncode == 0, result.stderr + result.stdout
+    text = BOOK.read_text(encoding="utf-8")
+    rules = re.findall(r"^### (\S+) ", text, re.MULTILINE)
+    sentence = " ".join(text.split("\n### gen-001 ", 1)[1].split("\n\n", 2)[1].split())
+    shown = subprocess.run(["node", "-e", RULE_BOOK_AT_PHONE, str(folder / "index.html"), "Rule book", "gen-001",
+                            str(len(rules))], capture_output=True, text=True, timeout=120)
+    assert shown.returncode == 0, shown.stderr
+    views = json.loads(shown.stdout)
+    assert views["pages"]["paged"] is True
+    for name, view in views.items():
+        assert view["labels"] == ["Rule", "Name"], name
+        assert view["scrollWidth"] <= view["clientWidth"], name
+        assert len(view["rows"]) == len(rules), name
+        assert [row for row in view["rows"] + view["captions"] if row["height"] > row["bound"]] == [], name
+        assert sentence in " ".join(view["opened"].split()), name
+
+
 def test_the_readme_and_the_command_line_are_the_first_chapters():
     entries = re.findall(r"^- \[\[([^|\]]+)", (ROOT / "docs.md").read_text(encoding="utf-8"), re.MULTILINE)
     assert entries[:2] == ["README", "docs/command-line"]
