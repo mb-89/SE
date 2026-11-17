@@ -342,6 +342,60 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
     assert "SE's start greeting. As SE, open your first message" in copilot["additionalContext"]
 
 
+def _agent_root(tmp_path: Path) -> Path:
+    agents = tmp_path / "se" / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "se.agent.md").write_text("# se\n", encoding="utf-8")
+    return tmp_path / "se"
+
+
+def _contexts(root: Path) -> dict[str, dict]:
+    return {host: json.loads(se_start.hook_output(["SE 1.2.0 started: ..."], ["n"], root, host))
+            for host in ("claude", "copilot")}
+
+
+def _context(data: dict) -> str:
+    return data.get("additionalContext") or data["hookSpecificOutput"]["additionalContext"]
+
+
+def test_default_agent_se_ends_the_hand_over_with_the_sentence_for_both_hosts(tmp_path, monkeypatch):
+    root = _agent_root(tmp_path)
+    monkeypatch.setenv("SE_DEFAULT_AGENT", "se")
+    sentence = ("This session acts as the se agent unless it was started as another agent (--agent, an agent "
+                "picker) or its first message names another agent file, also where a compaction summarized "
+                f"that message: read {root}/.github/agents/se.agent.md first and act as it defines.")
+    for host, data in _contexts(root).items():
+        assert _context(data).endswith("\n\n" + sentence), host
+        assert _context(data).count(sentence) == 1
+    assert "acts as the se agent" not in _contexts(root)["claude"]["systemMessage"]
+
+
+@pytest.mark.parametrize("value", ["worker", "se"])
+def test_default_agent_that_names_no_agent_gives_the_note_and_no_sentence(tmp_path, monkeypatch, value):
+    """`worker` is no agent a session starts as; `se` without its agent file names none either."""
+    root = tmp_path / "se" if value == "se" else _agent_root(tmp_path)
+    monkeypatch.setenv("SE_DEFAULT_AGENT", value)
+    note = f"SE: SE_DEFAULT_AGENT names no agent a session starts as: {value}"
+    for host, data in _contexts(root).items():
+        assert _context(data).startswith(note + "\nn\nSE 1.2.0 started: ..."), host
+        assert "acts as the se agent" not in _context(data)
+    assert _contexts(root)["claude"]["systemMessage"].splitlines()[0] == note
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_default_agent_unset_or_empty_leaves_the_output_byte_identical(tmp_path, monkeypatch, value):
+    root = _agent_root(tmp_path)
+    monkeypatch.delenv("SE_DEFAULT_AGENT", raising=False)
+    before = {host: se_start.hook_output(["SE 1.2.0 started: ..."], ["n"], root, host)
+              for host in ("claude", "copilot")}
+    if value is not None:
+        monkeypatch.setenv("SE_DEFAULT_AGENT", value)
+    for host, output in before.items():
+        assert se_start.hook_output(["SE 1.2.0 started: ..."], ["n"], root, host) == output
+        assert "acts as the se agent" not in output
+        assert "SE_DEFAULT_AGENT" not in output
+
+
 def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, monkeypatch):
     """The session finds SE's scripts at the root the hook names, not by searching for the plugin."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])

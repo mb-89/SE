@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 ROOT_NAME = "SE root"  # the hook's context names SE_ROOT under this name
@@ -1089,16 +1089,42 @@ def root_line(se_root: Path) -> str:
     return f"{ROOT_NAME}: {se_root}"
 
 
-def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude") -> str:
+#: The environment variable that names the agent a session starts as (README "Claude Code cloud").
+DEFAULT_AGENT_ENV = "SE_DEFAULT_AGENT"
+#: The one agent it may name: the one a person talks to.
+DEFAULT_AGENT = "se"
+
+
+def default_agent(se_root: Path, environment: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """What `SE_DEFAULT_AGENT` hands the session: (the sentence, "") where it is `se` and SE's agent
+    file exists; ("", the note line) where it is set to anything else; ("", "") where unset or empty."""
+    value = (os.environ if environment is None else environment).get(DEFAULT_AGENT_ENV, "")
+    if not value:
+        return "", ""
+    agent = se_root / ".github" / "agents" / f"{DEFAULT_AGENT}.agent.md"
+    if value != DEFAULT_AGENT or not agent.is_file():
+        return "", f"SE: {DEFAULT_AGENT_ENV} names no agent a session starts as: {value}"
+    return ("This session acts as the se agent unless it was started as another agent (--agent, an agent "
+            "picker) or its first message names another agent file, also where a compaction summarized "
+            f"that message: read {se_root}/.github/agents/{DEFAULT_AGENT}.agent.md first and act as it defines."), ""
+
+
+def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude",
+                environment: Mapping[str, str] | None = None) -> str:
     """The SessionStart hook output of `host` (scripts/hosts.sh): the greeting handed to the session,
     which opens its first message with it, and SE's root for the session. Claude Code also shows it
-    to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`."""
-    text = "\n".join(notes + lines)
+    to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`. Where
+    `SE_DEFAULT_AGENT` counts, the hand-over ends with the agent the session acts as
+    (`default_agent`)."""
+    sentence, note = default_agent(se_root, environment)
+    text = "\n".join(([note] if note else []) + notes + lines)
     shown = "" if host == "copilot" else ", already shown to the person"
     context = (f"{text}\n\nSE's start greeting{shown}. As SE, open your first "
                "message with it as it is; pass on any line that names a command to run.\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
+    if sentence:
+        context += f"\n\n{sentence}"
     if host == "copilot":
         return json.dumps({"additionalContext": context})
     return json.dumps({"systemMessage": text,
