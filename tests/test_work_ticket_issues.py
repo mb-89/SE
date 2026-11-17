@@ -5171,6 +5171,57 @@ def test_a_failing_suite_beside_on_ci_is_an_annotation_naming_its_failed_test(
     assert "kern failed (2.0 s) running " in captured.err
 
 
+NO_TESTS_LINE = ("kern passed without running a test: every package reads [no tests to run] "
+                 "([tests.beside.kern] in se.toml)")
+
+
+def beside_prints(worktree: Path, script: str, text: str, exit_code: int = 0) -> None:
+    """The fake kern suite's `script` (kern.py, its command, or build.py) prints `text`."""
+    (worktree / "kern" / script).write_text(
+        f"import sys\nprint({text!r})\nsys.exit({exit_code})\n", encoding="utf-8")
+
+
+def test_a_suite_beside_that_passed_without_running_a_test_is_named_after_its_time(
+        worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    beside_prints(worktree, "kern.py", "ok  \tx\t0.01s [no tests to run]")
+    verdicts = []
+    monkeypatch.setattr(work_tickets, "record_suite_verdict",
+                        lambda root, commit, passed, seconds: verdicts.append(passed))
+
+    assert run(worktree, "suite") == 0
+    lines = capsys.readouterr().out.splitlines()
+    time_line = next(i for i, line in enumerate(lines) if line.startswith("kern time:"))
+    assert lines[time_line + 1] == NO_TESTS_LINE
+    assert lines[-1] == ("Suite: 3 passed; 5.0 s (target 60 s, limit 120 s); kern passed in 2.0 s "
+                         "(target 30 s, limit 60 s)")
+    assert verdicts == [True]
+
+
+def test_a_suite_beside_whose_setup_alone_ran_no_test_is_not_named(worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    beside_prints(worktree, "build.py", "ok  \tx\t0.01s [no tests to run]")
+    beside_prints(worktree, "kern.py", "ok  \tx\t0.2s")
+    with (worktree / "se.toml").open("a", encoding="utf-8") as config:
+        config.write(f"setup = {json.dumps([sys.executable, 'build.py'])}\n")
+    readings = iter([0.0, 5.0, 100.0, 150.0, 200.0, 202.0])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+    assert run(worktree, "suite") == 0
+    assert "passed without running a test" not in capsys.readouterr().out
+
+
+def test_a_failing_suite_beside_that_ran_no_test_is_refused_and_not_named(
+        worktree, monkeypatch, capsys):
+    beside_suite(worktree, monkeypatch, [5.0, 2.0])
+    beside_prints(worktree, "kern.py", "ok  \tx\t0.01s [no tests to run]", exit_code=1)
+
+    assert run(worktree, "suite") == 1
+    captured = capsys.readouterr()
+    assert "Complete suite passed (3 passed), but kern failed (2.0 s) running " in captured.err
+    assert "passed without running a test" not in captured.out + captured.err
+
+
 @pytest.mark.parametrize("paths", ['"kern/bus/"', "[]", '["/kern/bus/"]', '["../kern/"]', "[3]"])
 def test_suite_budget_refuses_paths_that_are_no_paths_in_the_project(worktree, paths):
     (worktree / "se.toml").write_text(f'[tests]\ncommand = ["pytest"]\n[tests.beside.kern]\n'

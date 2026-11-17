@@ -3,7 +3,7 @@
 # the public check's commit gate, the generated layouts, the README's command reference, the
 # hygiene of SE's own checkout, a pull request's field report and the complete suite within its
 # budget, kern's tests on Linux and, through the job kern-platforms, on Windows with SE's start,
-# hook and setup scripts (darwin is built by the release, not tested); on a pull request also the work model's issue rule.
+# hook and setup scripts and its worktree removal tests (darwin is built by the release, not tested); on a pull request also the work model's issue rule.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, kern's checks and kern-platforms do not run;
@@ -230,6 +230,10 @@ jobs:
       - name: SE's start and hook scripts on this platform
         shell: bash
         run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py
+      # The worktree clean-up leaves links alone, junctions only Windows has among them; -rs names each skip.
+      - name: SE's worktree clean-up on this platform
+        shell: bash
+        run: uv run pytest -q -rs tests/test_worktree_removal.py
       # setup.ps1, the hook setup in PowerShell (tests/test_public_check.py SETUPS), with the hooks it
       # installs: only Windows has PowerShell, so only this leg runs it; none selected fails.
       - name: SE's hook setup in PowerShell
