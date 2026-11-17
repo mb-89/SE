@@ -124,6 +124,26 @@ def test_no_command_is_hand_listed_outside_the_reference() -> None:
     assert not found, "\n".join(found)
 
 
+def test_the_reference_is_a_table_of_commands_per_component() -> None:
+    """Each component's help, then a row per command: its name, its usage in a code span on one line
+    (a `|` escaped as `\\|`, so the row keeps its three cells) and what it does."""
+    declarations = se_components.catalog(ROOT, GROUPS)
+    text = se_components.reference(declarations)
+    assert "```" not in text
+    groups = re.split(r"^#### .+$", text, flags=re.MULTILINE)[1:]
+    assert len(groups) == len(declarations)
+    for d, group in zip(declarations, groups):
+        assert f"`components/{d.name}`:" in group
+        rows = [line for line in group.splitlines() if line.startswith("| `")]
+        assert group.count("| Command | Usage | What it does |\n|---|---|---|\n") == 1
+        assert len(rows) == len(d.commands)
+        for row, command in zip(rows, d.commands.values()):
+            usage = " ".join(command.usage.split()).replace("|", "\\|")
+            assert row.startswith(f"| `{command.name}` | `{usage}` | ")
+            assert len(re.split(r"(?<!\\)\|", row)) == 5, row
+    assert "(--body-file BODY_FILE \\| --fields FILE)" in text
+
+
 @pytest.fixture(scope="module")
 def components() -> dict[str, Fake]:
     """Each group's component as its process loads it, on the fake core."""
