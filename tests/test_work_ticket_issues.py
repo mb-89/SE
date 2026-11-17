@@ -7189,6 +7189,17 @@ def test_unhold_refuses_an_unfixed_held_issue_and_lifts_the_hold_once_it_passes(
     assert edits(calls) == []
 
 
+def test_unhold_checks_a_work_body_naming_the_handled_marker_in_prose_against_work(
+        worktree, monkeypatch, capsys, forms_home):
+    github, calls = held_work_issue(worktree, monkeypatch, capsys)
+    prose = dict(WORK_FIELDS, goal="Route writes `<!-- se:handled -->` before its section.")
+    github.issues[2]["body"] = FORMS.render(WORK_FORM, prose)
+    assert work_tickets.held_form(2, {**github.issues[2]}) == "work"
+    assert run(worktree, "unhold", "2") == 0
+    capsys.readouterr()
+    assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
+
+
 def test_unhold_refuses_a_private_term_in_the_fixed_text(worktree, monkeypatch, capsys, forms_home):
     github, calls = held_work_issue(worktree, monkeypatch, capsys)
     address = "alice" + "@" + "corp.test"  # a term of the public list, never written down whole

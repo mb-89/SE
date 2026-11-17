@@ -4630,15 +4630,21 @@ def form_findings(root: Path, repo: str, chosen, title: str, body: str,
         raise QueueError(str(error)) from error
 
 
+# The routing `routed_body` writes: HANDLED_MARKER on a line of its own, then the Routing heading;
+# a body that names the marker in prose (in a code span, say) is not routed.
+ROUTED_PATTERN = re.compile(
+    rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
+
+
 def held_form(number: int, issue: dict[str, object]) -> str:
     """The form the command that filed held issue `number` checked, by its labels: `ticket` for
-    a backlog issue (`backlog file`), else for a work issue `routed` where its body carries the
-    handled record (`route`) and `work` otherwise (`file`)."""
+    a backlog issue (`backlog file`), else for a work issue `routed` where its body holds the
+    routing `route` writes (ROUTED_PATTERN) and `work` otherwise (`file`)."""
     labels = issue_labels(issue)
     if BACKLOG_LABEL in labels:
         return "ticket"
     if "work" in labels:
-        return "routed" if HANDLED_MARKER in str(issue.get("body") or "") else "work"
+        return "routed" if ROUTED_PATTERN.search(str(issue.get("body") or "")) else "work"
     raise QueueError(f"unhold: #{number} is labelled {', '.join(sorted(labels)) or 'nothing'}, "
                      f"neither {BACKLOG_LABEL} nor work, so no filing command's form fits it")
 
