@@ -86,9 +86,7 @@ class RefusedGit:
 def door_backend(item: pytest.Item) -> git_door.Backend:
     """What the door runs for `item`, its setup and teardown included: real git for a file in
     REAL_GIT, otherwise RefusedGit."""
-    path = Path(item.path).resolve()
-    name = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
-    return git_door.RealGit() if name in REAL_GIT else RefusedGit(item.nodeid)
+    return git_door.RealGit() if item_file(item) in REAL_GIT else RefusedGit(item.nodeid)
 
 
 def door_variable(item: pytest.Item) -> str:
@@ -103,7 +101,57 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem):
     with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
             pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
+        count_children(item, patch)
         yield
+
+
+# The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git: it
+# costs about 3 ms a git call, the fake in memory (`fake_git_door`) about 0.15 ms. So a test that ran
+# git through the state file and started no child process (`subprocess.Popen` in the test's process,
+# its setup and teardown included, a hook the state file runs among them) fails at its teardown,
+# naming the remedy, unless its file is named here with its reason. The list may only shrink.
+IN_PROCESS_STATE_FILE: dict[str, str] = {
+}
+children_started = pytest.StashKey[list[int]]()
+
+
+def count_children(item: pytest.Item, patch: pytest.MonkeyPatch) -> None:
+    """Counts the child processes `item` starts, its setup and teardown included, in its stash."""
+    started = item.stash[children_started] = [0]
+    execute = subprocess.Popen._execute_child
+
+    def counted(self, *arguments, **options):
+        started[0] += 1
+        return execute(self, *arguments, **options)
+
+    patch.setattr(subprocess.Popen, "_execute_child", counted)
+
+
+def item_file(item: pytest.Item) -> str:
+    """`item`'s file, relative to se's root where it lies inside it."""
+    path = Path(item.path).resolve()
+    return path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+
+
+class WatchedStateFile(fake_git.StateFile):
+    """The state file of `shared_fake_git`, counting the git commands this process runs through it."""
+
+    runs = 0
+
+    def run(self, argv: list[str], **options) -> subprocess.CompletedProcess[bytes]:
+        self.runs += 1
+        return super().run(argv, **options)
+
+
+def state_file_refusal(item: pytest.Item, state: WatchedStateFile) -> str:
+    """Why `item` may not have taken the state file, or "" where it may: it ran git through it and
+    started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
+    started = item.stash.get(children_started, [0])[0]
+    if not state.runs or started or item_file(item) in IN_PROCESS_STATE_FILE:
+        return ""
+    return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git) and "
+            "started no child process; take the fake_git_door fixture, the fake in memory, or name the "
+            "file in tests/conftest.py IN_PROCESS_STATE_FILE with its reason")
 
 
 class GuardReports:
@@ -136,14 +184,28 @@ def fake_git_door() -> Iterator[fake_git.FakeGit]:
 
 
 @pytest.fixture
-def shared_fake_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[fake_git.StateFile]:
+def shared_fake_git(request: pytest.FixtureRequest, tmp_path: Path,
+                    monkeypatch: pytest.MonkeyPatch) -> Iterator[fake_git.StateFile]:
     """The fake for this test and every child process it starts: its state in a file that the
     door's variable names (`SE_GIT_DOOR=fake:<file>`, read by scripts/git_door.py and kern's
-    kern/git alike), so a script run as a process or a kern binary reaches the same fake."""
-    state = fake_git.StateFile(tmp_path / "git-door.json")
+    kern/git alike), so a script run as a process or a kern binary reaches the same fake. A test
+    that starts no child process takes `fake_git_door` instead (IN_PROCESS_STATE_FILE)."""
+    state = WatchedStateFile(tmp_path / "git-door.json")
     monkeypatch.setenv(git_door.VARIABLE, f"fake:{state.path}")
     with git_door.use(state):
         yield state
+    refusal = state_file_refusal(request.node, state)
+    if refusal:
+        pytest.fail(refusal, pytrace=False)
+
+
+@pytest.fixture
+def door_fake(request: pytest.FixtureRequest) -> fake_git.FakeGit | fake_git.StateFile:
+    """The fake a fixture builds a test's repositories on: the state file where the test or one of
+    its fixtures takes `shared_fake_git`, as its child processes run git, else the fake in memory
+    (`fake_git_door`)."""
+    shared = "shared_fake_git" in request.fixturenames
+    return request.getfixturevalue("shared_fake_git" if shared else "fake_git_door")
 
 
 # How long the obs fixture waits for another worker's clone and build of obs (its lock); a test that
@@ -252,19 +314,25 @@ class SetupTimes:
 # seconds for a file (all of them in CI, a fresh clone or a new worktree), the tracked table
 # tests/file-seconds.json seeds them; the cache wins file by file, and the cache's record holds
 # only the checkout's own runs. A file in neither counts its tests at the known files' mean seconds
-# per test. `uv run pytest -q --record-file-seconds` refreshes the table from a passing parallel run
-# of whole files; `-o file_seconds=<path>` reads another table.
+# per test. `-o file_seconds=<path>` reads another table.
+# The table holds CI's seconds: CI's runner runs the PowerShell cases and skips the Playwright ones,
+# so a fleet host weighs files otherwise, and CI's order is the one the budget judges. CI's suite
+# step records them (`--record-file-seconds=PATH`, a passing parallel run of whole files) into its
+# artifact file-seconds, and RECORD_COMMAND writes the table from it; that run also names each file
+# that took more than DRIFT_SECONDS and more than DRIFT_SHARE over the table it read (drift_lines).
 FILE_SECONDS_KEY = "se/file-seconds"
 FILE_SECONDS_INPUT = "se_file_seconds"
 FILE_SECONDS_TABLE = ROOT / "tests" / "file-seconds.json"
-RECORD_COMMAND = "uv run pytest -q --record-file-seconds"
+RECORD_COMMAND = "uv run python scripts/work_tickets.py file-seconds"
+DRIFT_SECONDS, DRIFT_SHARE = 5.0, 0.5
 file_seconds_read = pytest.StashKey[dict[str, float]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--record-file-seconds", nargs="?", const="", default=None, metavar="PATH",
-                     help="write the file-seconds table (tests/file-seconds.json, or PATH) at the end "
-                          "of a passing parallel run of whole files")
+                     help="write this run's seconds per file to PATH at the end of a passing parallel "
+                          "run of whole files, as CI's suite step does; the tracked table is CI's, "
+                          f"written with `{RECORD_COMMAND}`")
     parser.addini("file_seconds", "the file-seconds table the order reads where the cache records none",
                   default="")
 
@@ -282,6 +350,31 @@ def file_order(counts: Mapping[str, int], seconds: Mapping[str, float]) -> list[
     per_test = sum(seconds[name] for name in known) / tests if tests else 1.0
     weight = {name: seconds[name] if name in seconds else counts[name] * per_test for name in counts}
     return sorted(counts, key=lambda name: -weight[name])
+
+
+def record_target(config: pytest.Config) -> Path | None:
+    """Where --record-file-seconds writes, or None without it; the option without a PATH is refused,
+    as the tracked table holds CI's seconds, not this host's."""
+    target = config.getoption("record_file_seconds")
+    if target is None:
+        return None
+    if not target:
+        raise pytest.UsageError(
+            "--record-file-seconds needs a PATH: the tracked table tests/file-seconds.json holds CI's "
+            "seconds, whose runner runs the PowerShell cases and skips the Playwright ones; write it "
+            f"from CI's run with `{RECORD_COMMAND}`")
+    return Path(target).resolve()
+
+
+def drift_lines(run: Mapping[str, float], table: Mapping[str, float]) -> list[str]:
+    """One line per file whose seconds in `run` exceed `table`'s by more than DRIFT_SECONDS and by
+    more than DRIFT_SHARE of them: the share keeps a runner slower all over from naming its heavy
+    files. A file the table lacks is none."""
+    return [f"file seconds: {name} took {seconds:.1f} s here, the table says {table[name]:.1f} s; "
+            f"refresh it with {RECORD_COMMAND}"
+            for name, seconds in sorted(run.items())
+            if name in table and seconds > table[name] + DRIFT_SECONDS
+            and seconds > table[name] * (1 + DRIFT_SHARE)]
 
 
 def merged_seconds(recorded: Mapping[str, float], table: Mapping[str, float]) -> dict[str, float]:
@@ -378,10 +471,9 @@ class FileSeconds:
         if not reason and cache is not None:
             kept = {name: seconds for name, seconds in self.read.items() if (self.config.rootpath / name).exists()}
             cache.set(FILE_SECONDS_KEY, {**kept, **{name: round(seconds, 3) for name, seconds in self.run.items()}})
-        target = self.config.getoption("record_file_seconds")
-        if target is None:
+        path = record_target(self.config)
+        if path is None:
             return
-        path = Path(target).resolve() if target else table_path(self.config)
         if not reason and exitstatus != 0:
             reason = f"the run ended with exit status {int(exitstatus)}"
         if reason:
@@ -394,11 +486,13 @@ class FileSeconds:
             return
         kept = {name: seconds for name, seconds in earlier.items() if (self.config.rootpath / name).exists()}
         write_table(path, {**kept, **self.run})
-        self.summary = f"file seconds: wrote {path} ({len(self.run)} files of this run, {len(kept.keys() - self.run.keys())} kept)"
+        self.summary = "\n".join([
+            f"file seconds: wrote {path} ({len(self.run)} files of this run, {len(kept.keys() - self.run.keys())} kept)",
+            *drift_lines(self.run, self.table)])
 
     def pytest_terminal_summary(self, terminalreporter) -> None:
-        if self.summary:
-            terminalreporter.write_line(self.summary)
+        for line in self.summary.splitlines():
+            terminalreporter.write_line(line)
 
 
 def whole_files(config: pytest.Config) -> bool:
@@ -414,6 +508,7 @@ def order_by_file_seconds(config: pytest.Config) -> None:
         seconds = dict(config.workerinput.get(FILE_SECONDS_INPUT, {}))
         config.pluginmanager.register(WorkerFileOrder(seconds), "se-file-order")
         return
+    record_target(config)  # refuses the option without a PATH before any test runs
     config.pluginmanager.register(FileSeconds(config), "se-file-seconds")
     if parallel(config):
         config.option.loadscopereorder = False  # the workers' collection order is the order

@@ -23,8 +23,9 @@ import work_tickets  # noqa: E402
 from kern import KernError, runner  # noqa: E402
 from kern.fake import Fake  # noqa: E402
 
-# Its git, and that of every script and binary it starts, is the fake behind one state file.
-pytestmark = pytest.mark.usefixtures("shared_fake_git")
+# Its git is the fake in memory; a test whose scripts or binaries run git as child processes takes
+# the fake behind one state file, `shared_fake_git` (tests/conftest.py `door_fake`).
+pytestmark = pytest.mark.usefixtures("door_fake")
 
 GROUPS = se_components.component_names()
 
@@ -448,6 +449,7 @@ class RecordingPeer:
             return next(b for s, b in self.sent if s == reply)
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_two_overlapping_calls_of_one_component_each_answer_only_their_own_output(
         tmp_path, monkeypatch) -> None:
     """Calls side by side: two calls of one command run at once in the component's process (each

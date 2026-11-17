@@ -39,7 +39,7 @@ help = "for SE, on the person's yes: run ref-maintenance for real with the tripl
 class = "batch"
 
 [commands."work_tickets.py suite"]
-usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]"
+usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]\n                      [--record-file-seconds PATH]"
 summary = "run se.toml's complete suite against its [tests] time budget, as ..."
 group = "Integration"
 help = "run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README \"Test budget\")"
@@ -57,6 +57,13 @@ usage = "work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N
 summary = "in CI's check job, judge a sharded suite: its time is its slowest ..."
 group = "Integration"
 help = "in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README \"Test budget\")"
+class = "batch"
+
+[commands."work_tickets.py file-seconds"]
+usage = "work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]"
+summary = "write tests/file-seconds.json, the order the suite's workers take ..."
+group = "Integration"
+help = "write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more"
 class = "batch"
 
 [commands."work_tickets.py metrics"]

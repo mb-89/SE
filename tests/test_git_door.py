@@ -1098,3 +1098,40 @@ def test_a_state_file_load_is_a_fresh_copy_and_sees_another_process(tmp_path: Pa
         child("remote", "add", "beta", "https://example.com/beta.git")
         assert sorted(git(root, "remote").splitlines()) == ["alpha", "beta", "zeta"]
         assert state.load().repositories[key].config["remote.beta.url"] == "https://example.com/beta.git"
+
+
+PLANTED_STATE_FILE_TESTS = """\
+import subprocess
+import sys
+
+import git_door
+
+
+def test_runs_git_in_process(shared_fake_git, tmp_path):
+    assert git_door.run("init", "-q", str(tmp_path / "r"), root=tmp_path).returncode == 0
+
+
+def test_runs_git_and_a_child(shared_fake_git, tmp_path):
+    assert git_door.run("init", "-q", str(tmp_path / "r"), root=tmp_path).returncode == 0
+    subprocess.run([sys.executable, "-c", "pass"], check=True)
+"""
+
+
+def test_a_test_that_runs_git_through_the_state_file_and_starts_no_child_is_refused(tmp_path: Path) -> None:
+    """tests/conftest.py `shared_fake_git`: the state file is for a test whose child processes run
+    git; one that ran git through it and started none fails at its teardown, naming the test and
+    the fake in memory, while one that also starts a child passes."""
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (tmp_path / "test_planted.py").write_text(PLANTED_STATE_FILE_TESTS, encoding="utf-8")
+    tests = ROOT / "tests"
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join([str(tests), os.environ.get("PYTHONPATH", "")])}
+    result = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "conftest",
+                             "test_planted.py"], cwd=tmp_path, env=environment, capture_output=True,
+                            text=True, check=False, timeout=60)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert "2 passed, 1 error" in output, output
+    refused = [line for line in output.splitlines() if line.startswith("ERROR ")]
+    assert len(refused) == 1 and "test_planted.py::test_runs_git_in_process" in refused[0], output
+    assert "fake_git_door" in output and "IN_PROCESS_STATE_FILE" in output
+    assert "test_runs_git_and_a_child" not in output

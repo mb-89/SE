@@ -1,8 +1,9 @@
 """Nothing reaches the integration branch without a passing suite and public check recorded on
 exactly the tree pushed: `work_tickets.py push` and the pre-push hook refuse alike.
 
-git is the door's fake behind a state file (`shared_fake_git`, tests/conftest.py), which runs se's
-pre-push hook as git does and which the hook's scripts reach as child processes."""
+git is the door's fake (`door_fake`, tests/conftest.py): in memory for a test that runs the guard in
+its own process, behind a state file (`shared_fake_git`) for one whose suite or pre-push hook runs
+as a child process, as git runs it, and whose scripts reach the fake from there."""
 import importlib.util
 import json
 import os
@@ -56,9 +57,10 @@ def build_checkout(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch, shared_fake_git) -> Path:
+def checkout(tmp_path: Path, monkeypatch, door_fake) -> Path:
     """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
-    where verdict.txt says pass."""
+    where verdict.txt says pass. Its git is the fake in memory, or the state file where the test
+    takes `shared_fake_git` (tests/conftest.py `door_fake`)."""
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
     monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     build_checkout(tmp_path)
@@ -107,6 +109,7 @@ CASES = {
 }
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("pusher", ["push", "hook"])
 @pytest.mark.parametrize("case", CASES)
 def test_push_and_the_hook_agree_on_the_suite_verdict(checkout, capfd, pusher, case):
@@ -124,6 +127,7 @@ def test_push_and_the_hook_agree_on_the_suite_verdict(checkout, capfd, pusher, c
     assert "Remedy: check out" in output and "work_tickets.py suite" in output
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, capfd):
     git(checkout, "switch", "-q", "-c", "topic")
     commit(checkout)
@@ -133,6 +137,7 @@ def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, c
     assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode == 0
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("landing", ["squash", "fast-forward"])
 def test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not(
         checkout, tmp_path, capfd, landing):
@@ -206,6 +211,7 @@ def test_without_a_public_check_the_guard_needs_the_suite_only(checkout):
     assert verified(checkout, "refs/heads/topic") == 0
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_records_pass_and_fail_on_the_tree_of_its_commit(checkout, capsys):
     head = commit(checkout)
     run_suite(checkout)
@@ -219,6 +225,7 @@ def test_the_suite_records_pass_and_fail_on_the_tree_of_its_commit(checkout, cap
     assert "Suite verdict recorded: failed" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_on_a_changed_checkout_records_nothing(checkout, capsys):
     commit(checkout)
     (checkout / "untracked.txt").write_text("x", encoding="utf-8")
@@ -227,6 +234,7 @@ def test_the_suite_on_a_changed_checkout_records_nothing(checkout, capsys):
     assert "Suite verdict not recorded" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_suite_over_its_limit_records_a_failure(checkout, monkeypatch):
     commit(checkout)
     ticks = iter([0.0, 500.0])
@@ -251,6 +259,7 @@ def test_the_public_check_of_a_rev_records_its_verdict(checkout, content, passed
     assert recorded["passed"] is passed
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
     (checkout / "se.toml").write_text(
         f'{IDENTITY}version = "1.0.0"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
@@ -271,6 +280,7 @@ def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
     assert recorded["passed"] is True and recorded["carried_from"] == merge_tree
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_path, monkeypatch,
                                                                  capsys):
     """README "Metrics": the suite's wall time and its [tests] limit, which the report flags."""
@@ -305,6 +315,7 @@ def delivered_work_branch(root: Path) -> str:
     return tip
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_push_before_any_delivery_names_no_late_push(checkout, capfd):
     git(checkout, "switch", "-q", "-c", WORK_BRANCH)
     commit(checkout, name="fix.txt")
@@ -314,6 +325,7 @@ def test_a_push_before_any_delivery_names_no_late_push(checkout, capfd):
     assert "late push" not in output
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through(checkout, capfd):
     tip = delivered_work_branch(checkout)
     later = commit(checkout, name="late.txt")
@@ -328,6 +340,7 @@ def test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through(che
                      "push"]
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push(checkout, capsys):
     delivered_work_branch(checkout)
     assert verified(checkout, f"refs/heads/{WORK_BRANCH}") == 0
@@ -336,6 +349,7 @@ def test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push(che
     assert "late push" not in "".join(capsys.readouterr())
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_with_the_setting_on_a_push_after_the_delivery_is_refused(checkout, capfd):
     (checkout / "se.toml").write_text(
         f'{IDENTITY}[deliver]\nlate_push = "refuse"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
@@ -349,6 +363,7 @@ def test_with_the_setting_on_a_push_after_the_delivery_is_refused(checkout, capf
     assert "work_tickets.py push --redeliver" in output
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_it_through(
         checkout, capfd):
     (checkout / "se.toml").write_text(
@@ -361,6 +376,7 @@ def test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_
     assert late_push.load(checkout / ".se" / "work") == {"branch": WORK_BRANCH, "tip": later}
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_failed_redelivery_push_puts_the_record_back(checkout, monkeypatch):
     tip = delivered_work_branch(checkout)
     commit(checkout, name="late.txt")
@@ -454,6 +470,7 @@ def test_without_ci_the_guard_accepts_the_status_on_the_landing_head_that_landed
     assert f"(on {landing[:12]})" in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_without_ci_push_accepts_the_status_as_the_hook_does(checkout, host, capfd):
     head = without_ci(checkout)
     host.write(checkout, head)

@@ -2,7 +2,9 @@
 workers take the test files in"): the heaviest file first, by the seconds the checkout's last
 parallel run recorded in pytest's cache, else by the tracked table tests/file-seconds.json, which
 seeds the order where the cache records nothing (CI, a fresh clone, a new worktree), else by its
-tests. The cache wins file by file; `uv run pytest -q --record-file-seconds` refreshes the table."""
+tests. The cache wins file by file. The table holds CI's seconds, as CI's runner runs the
+PowerShell cases and skips the Playwright ones: CI's suite step records them into its artifact
+file-seconds, and `uv run python scripts/work_tickets.py file-seconds` writes the table from it."""
 from __future__ import annotations
 
 import json
@@ -15,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import conftest
+import work_tickets
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -167,3 +170,138 @@ def test_a_table_out_of_form_is_refused_naming_the_entry(tmp_path):
 
 def test_the_committed_table_is_sorted_rounded_and_names_existing_files():
     assert table_problems(conftest.FILE_SECONDS_TABLE, ROOT) == []
+
+
+
+# CI records its seconds and the table is written from them (work_tickets.py `suite
+# --record-file-seconds`, `file-seconds`).
+
+
+def test_the_suites_pytest_command_carries_the_record_and_another_runner_runs_as_declared():
+    record = Path("/tmp/run/file-seconds.json")
+    command = work_tickets.with_file_seconds(work_tickets.with_durations(["uv", "run", "pytest", "-q"], 10), record)
+    assert command == ["uv", "run", "pytest", "-q", "--durations=10", f"--record-file-seconds={record}"]
+    assert work_tickets.with_file_seconds(["go", "test", "./..."], record) == ["go", "test", "./..."]
+    assert work_tickets.with_file_seconds(["uv", "run", "pytest"], None) == ["uv", "run", "pytest"]
+
+
+class FakeCi:
+    """CI's runs as gh answers them: `runs` the passing pushes newest first, `artifacts` the runs
+    that kept file-seconds with the seconds it holds."""
+
+    def __init__(self, runs: list[int], artifacts: dict[str, dict[str, float]]) -> None:
+        self.runs, self.artifacts, self.calls = runs, artifacts, []
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        self.calls.append(arguments)
+        if arguments[:2] == ["run", "list"]:
+            return json.dumps([{"databaseId": run} for run in self.runs])
+        if arguments[0] == "api":
+            run = arguments[1].split("/")[-2]
+            kept = [{"name": "file-seconds", "expired": False}] if run in self.artifacts else []
+            return json.dumps({"artifacts": [{"name": "other", "expired": False}, *kept]})
+        if arguments[:2] == ["run", "download"]:
+            directory = Path(arguments[arguments.index("--dir") + 1])
+            (directory / "file-seconds.json").write_text(json.dumps(self.artifacts[arguments[2]]), encoding="utf-8")
+            return ""
+        raise AssertionError(f"unexpected gh {arguments}")
+
+
+@pytest.fixture
+def checkout(tmp_path, monkeypatch):
+    """A checkout of three test files and a table that also names a gone one."""
+    for name in ("test_a.py", "test_b.py", "test_kept.py"):
+        (tmp_path / "tests").mkdir(exist_ok=True)
+        (tmp_path / "tests" / name).write_text("", encoding="utf-8")
+    table = {"tests/test_a.py": 1.0, "tests/test_kept.py": 4.0, "tests/test_gone.py": 3.0}
+    conftest.write_table(tmp_path / "tests" / "file-seconds.json", table)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "github.com/alice/example")
+    return tmp_path
+
+
+def test_file_seconds_writes_the_table_from_ci_keeping_a_file_the_run_lacks_and_dropping_a_gone_one(
+        checkout, monkeypatch, capsys):
+    ci = FakeCi([9, 7], {"7": {"tests/test_a.py": 6.04, "tests/test_b.py": 0.5}})
+    monkeypatch.setattr(work_tickets, "run_gh", ci)
+    assert work_tickets.main(["file-seconds", "--worktree", str(checkout)]) == 0
+    table = checkout / "tests" / "file-seconds.json"
+    expected = {"tests/test_a.py": 6.0, "tests/test_b.py": 0.5, "tests/test_kept.py": 4.0}
+    assert json.loads(table.read_text(encoding="utf-8")) == expected
+    conftest.write_table(checkout / "form.json", expected)
+    assert table.read_text(encoding="utf-8") == (checkout / "form.json").read_text(encoding="utf-8")
+    assert table_problems(table, checkout) == []
+    out = capsys.readouterr().out
+    assert "from run 7 (2 files of the run, 1 kept from the table); 2 moved by 1 s or more" in out
+    assert "  tests/test_a.py: 1.0 s -> 6.0 s" in out and "  tests/test_gone.py: 3.0 s -> none" in out
+    assert "test_b.py" not in out and "test_kept.py" not in out  # moved by less than 1 s, or not at all
+    listed = ci.calls[0]
+    assert listed[:2] == ["run", "list"] and listed[listed.index("--event") + 1] == "push"
+    assert listed[listed.index("--branch") + 1] == "main" and listed[listed.index("--status") + 1] == "success"
+
+
+def test_file_seconds_refuses_a_run_without_the_artifact_in_one_line_naming_it(checkout, monkeypatch, capsys):
+    before = (checkout / "tests" / "file-seconds.json").read_text(encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "run_gh", FakeCi([], {}))
+    assert work_tickets.main(["file-seconds", "--worktree", str(checkout), "--run", "8"]) == 1
+    error = capsys.readouterr().err.strip()
+    assert len(error.splitlines()) == 1 and "run 8 has no artifact file-seconds" in error
+    assert (checkout / "tests" / "file-seconds.json").read_text(encoding="utf-8") == before
+
+
+def test_file_seconds_reads_an_artifact_the_host_downloaded(checkout, capsys):
+    artifact = checkout / "artifact.json"
+    artifact.write_text(json.dumps({"tests/test_b.py": 9.0}), encoding="utf-8")
+    assert work_tickets.main(["file-seconds", "--worktree", str(checkout), "--artifact", str(artifact),
+                              "--run", "12"]) == 0
+    assert json.loads((checkout / "tests" / "file-seconds.json").read_text(encoding="utf-8")) == {
+        "tests/test_a.py": 1.0, "tests/test_b.py": 9.0, "tests/test_kept.py": 4.0}
+    assert "from run 12" in capsys.readouterr().out
+
+
+def test_record_file_seconds_without_a_path_is_refused_naming_the_refresh_from_ci():
+    before = conftest.FILE_SECONDS_TABLE.read_bytes()
+    ran = run_pytest("-q", "-n", "2", "-p", "no:cacheprovider", *QUICK, "--record-file-seconds")
+    assert ran.returncode == pytest.ExitCode.USAGE_ERROR, ran.stdout + ran.stderr
+    assert conftest.RECORD_COMMAND in ran.stdout + ran.stderr and "PowerShell" in ran.stdout + ran.stderr
+    assert conftest.RECORD_COMMAND == "uv run python scripts/work_tickets.py file-seconds"
+    assert conftest.FILE_SECONDS_TABLE.read_bytes() == before
+
+
+def test_drift_names_a_file_more_than_5_s_and_more_than_half_over_the_table_and_no_other():
+    table = {"far.py": 4.0, "slow.py": 20.0, "near.py": 4.0, "new.py": 0.0, "gone.py": 9.0}
+    run = {"far.py": 9.5, "slow.py": 29.0, "near.py": 8.9, "unknown.py": 50.0, "new.py": 5.1}
+    # far: 5.5 s over and 138 % over; slow: 9 s over but 45 %; near: 4.9 s over; unknown: no entry.
+    assert conftest.drift_lines(run, table) == [
+        "file seconds: far.py took 9.5 s here, the table says 4.0 s; refresh it with " + conftest.RECORD_COMMAND,
+        "file seconds: new.py took 5.1 s here, the table says 0.0 s; refresh it with " + conftest.RECORD_COMMAND,
+    ]
+    assert conftest.drift_lines({"a.py": 1.0}, {"a.py": 1.0}) == []
+
+
+SLOWER = """\
+import pytest
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report):
+    if report.nodeid.startswith("tests/test_se_home.py"):
+        report.duration += 1.0  # the file takes over 5 s more than its table entry, slept nowhere
+"""
+
+
+def test_a_run_that_writes_a_table_names_a_file_that_drifted_and_one_that_writes_none_names_none(tmp_path):
+    (tmp_path / "slower.py").write_text(SLOWER, encoding="utf-8")
+    table = tmp_path / "table.json"
+    table.write_text(json.dumps({QUICK[0]: 0.5, QUICK[1]: 60.0}), encoding="utf-8")
+    env = {name: value for name, value in os.environ.items() if name != conftest.REPORTS_VARIABLE}
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), env.get("PYTHONPATH", "")])
+    base = [sys.executable, "-m", "pytest", "--rootdir", str(ROOT), "-q", "-n", "2", "-p", "no:cacheprovider",
+            "-p", "slower", "-o", f"file_seconds={table}", *QUICK]
+    for record, named in ((["--record-file-seconds", str(tmp_path / "out.json")], True), ([], False)):
+        ran = subprocess.run([*base, *record], cwd=ROOT, env=env, capture_output=True, text=True, check=False)
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        lines = [line for line in ran.stdout.splitlines() if " took " in line]
+        assert len(lines) == int(named), ran.stdout
+        if named:
+            assert lines[0].startswith(f"file seconds: {QUICK[0]} took ")
+            assert lines[0].endswith(f"s here, the table says 0.5 s; refresh it with {conftest.RECORD_COMMAND}")

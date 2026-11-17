@@ -49,8 +49,10 @@
   - on a change to `.github/workflows/check.yml`, `tests/test_public_check.py`, which holds the
     workflow's jobs and their order, beside the tests of the steps it changed (such as
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
-- File order: a change that moves a test file's time by several seconds refreshes
-  `tests/file-seconds.json` with `uv run pytest -q --record-file-seconds`.
+- File order: `tests/file-seconds.json` holds CI's seconds per test file, as CI's runner runs the
+  PowerShell cases and skips the Playwright ones; a change that moves a test file's time by
+  several seconds refreshes it from its pull request's `check` run with
+  `uv run python scripts/work_tickets.py file-seconds`, and that run names each file that drifted.
 - kern: the `check` job vets kern in its own step and fails where `gofmt -l` lists one of its
   files; the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook
   scripts, on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`);
@@ -68,6 +70,9 @@
   - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the
     fake behind a state file that `SE_GIT_DOOR=fake:<file>` names to both doors
     (`scripts/git_door.py`, `kern/git`).
+  - A test that starts none takes `fake_git_door`, in memory: `shared_fake_git` fails one that
+    ran git through it and started no child, unless `tests/conftest.py` `IN_PROCESS_STATE_FILE`
+    names its file.
   - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
     list, and to the child processes it starts: only the contract suite, `tests/test_git_door.py`.
     A test that reaches real git without the fake fails, naming the command.
