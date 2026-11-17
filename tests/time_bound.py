@@ -25,12 +25,13 @@ OWNER = "tests/time_bound.py"
 
 # BOUND is 3 times the slowest test of the complete suite (setup, call and teardown, as pytest's
 # JUnit report times a test), rounded up to whole tens of seconds. Measured with
-# `work_tickets.py suite --slowest 10` on 17 Nov 2026 at main 739811f, on a 4-CPU Linux container
-# (Intel Xeon at 2.10 GHz): the slowest was
-# tests/test_se_hook.py::test_hook_core_off_starts_no_late_checkout_and_claims_none, 10.05 s, which
-# gives 40 s (3 x 10.05 = 30.15). Measure again the same way where a test rightly takes longer.
-SLOWEST_SECONDS = 10.05
-BOUND = 40
+# `work_tickets.py suite --slowest 10`, twice, on 17 Nov 2026 at main c99b701, on a 4-CPU Linux
+# container (Intel Xeon at 2.30 GHz): the slower of the two runs' slowest was
+# tests/test_start_refresh.py::test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins,
+# 7.59 s, which gives 30 s (3 x 7.59 = 22.77). Measure again the same way where a test rightly
+# takes longer.
+SLOWEST_SECONDS = 7.59
+BOUND = 30
 
 
 def beside(item: pytest.Item) -> bool:

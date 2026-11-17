@@ -25,7 +25,6 @@ import subprocess
 import tarfile
 import time
 import urllib.parse
-import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -196,6 +195,7 @@ class FakeGit:
     def remote(self, repository: Repository, name: str) -> Repository:
         url = repository.config.get(f"remote.{name}.url", name)
         if url.startswith("file:"):
+            import urllib.request
             url = urllib.request.url2pathname(urllib.parse.urlparse(url).path)
         return self.find(Path(url))
 
