@@ -1542,6 +1542,14 @@ jobs:
       head_repository: ${{ github.event.pull_request.head.repo.full_name }}
 ```
 
+- A project's own commit gate gates a push with the call below: the commits after the branch's
+  old tip (where it is unknown, those no other branch holds), and a work branch's without those
+  the integration branch holds, which are not gated again ([AGENTS.md "Public safety"](AGENTS.md#public-safety)).
+
+```sh
+python3 <se>/scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$BRANCH" --default-branch "$DEFAULT"
+```
+
 ## New application
 
 `se.py new app` ([its usage](#scaffold)) creates an application on kern, the core SE builds on
