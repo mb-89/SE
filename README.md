@@ -457,6 +457,16 @@ In the same copy the rule book shows as one table of its rules, grouped by secti
 opening to its rule; `scripts/rule_book.py` makes the table and a note per rule from `rules.md`.
 `--document <file>` also writes the obs Document the page was built from.
 
+The README is the first chapter and the command line the second: `docs/command-line.md` holds one
+`cmd` fence, `sh RUNME.sh --help`, so the chapter is SE's help as each build prints it. The build
+passes obs `--execute-commands`, which lets obs run every `cmd` fence of the chapters and every
+`cmd silent` fence of any Markdown file in the copy it reads; a failing one fails the build.
+
+The build first runs RUNME once in that copy, so what RUNME installs lands in the home and in the
+copy, never in the checkout. RUNME there takes the pinned `se` from `~/.se/bin`, as the copy holds
+no `.git` to fetch it by and no modules to build it from: on a machine that lacks it,
+`bash scripts/bootstrap.sh --binary` in the checkout places it first, as the docs workflow does.
+
 Any obs warning fails the build, so a broken link, a missing note or a paragraph longer than obs's
 default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
