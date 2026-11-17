@@ -131,6 +131,9 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
 - CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
   the commits of every pull request and of every push to `main`, so a push the hooks did not see
   fails there; `check` is the check `main`'s ruleset requires.
+  - A push's range is `public_check.py --push`'s: the commits after the branch's old tip (where it
+    is unknown, those no other branch holds), and a work branch's without those the integration
+    branch holds, which are not gated again; the integration branch's own push is gated whole.
   - The same job runs every other check an integration runs: `se_plugin.py check`,
     `work_tickets.py docs --check`, `hygiene.py`, `field-report --check` of a pull request's
     description against its work issue where it carries a report (a landing pull request's, from
