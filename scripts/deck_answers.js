@@ -22,9 +22,9 @@
 // and both say "sent." alone. A send where only one way worked posts one warning entry of its own,
 // `se-answers-partly`, in plain words, revealed where the message to Claude failed, as the reader may have
 // a step to take; a later send where both work, or where both fail, removes it. Where both fail it rejects
-// with code `not_sent` and `failed`, and a plain message to copy the answers and paste them into the chat,
-// which obs's error entry shows with the answers to copy. The codes go to the console, as one `se-answers:`
-// warning.
+// with code `not_sent` and `failed`, and a message to copy the answers and paste them into the chat, which
+// reaches the browser console in obs's warning, while obs's error entries tell the reader in their own
+// words, with the answers to copy. The codes go to the console, as one `se-answers:` warning.
 //
 // The deck's title and decisions come from `globalThis.seDeck`, which deck.py writes in front of this file
 // (scripts/deck.py's `_bundle` owns its fields), never from obs-html's embedded page data.
