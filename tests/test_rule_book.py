@@ -153,3 +153,34 @@ def test_se_rule_book_passes_and_lists_its_judgment_rules(capsys):
     listed = [line for line in out.splitlines() if line.startswith("by judgment only:")]
     if listed:
         warnings.warn("rules followed by judgment only:\n" + "\n".join(listed), stacklevel=1)
+
+
+def test_the_documentation_shows_the_book_as_one_table_and_a_note_per_rule():
+    retired = rule("pub-001", "An old rule", extra="- **Retired:** its intent no longer holds.\n")
+    text = ("# Rules\n\nReader: anyone.\n\n## Ids\n\nAn id is short.\n\n"
+            "## gen: everything we do\n\n" + rule() + "\n"
+            "## pub: publishing\n\nThe public check enforces these.\n\n" + retired + "\n"
+            "## Old principle numbers\n\n| Principle | Rule |\n|---|---|\n| 1 | gen-001 |\n")
+    shown = rule_book.documentation(text)
+    page = shown.page
+    assert page.startswith("# Rules\n\nReader: anyone.\n\n## Ids\n\nAn id is short.\n\n## Rules\n\n")
+    assert page.count("```base") == 1
+    assert '      groupOrder: ["gen: everything we do", "pub: publishing"]' in page
+    assert "      detailFields: []" in page
+    assert not re.search(r"^#+ (gen|pub)-\d{3}", page, re.MULTILINE)
+    # Only the section with prose before its first rule keeps a heading, one level lower.
+    assert "## Sections\n\n### pub: publishing\n\nThe public check enforces these.\n" in page
+    assert "gen: everything we do\n\n" not in page.split("## Sections")[1]
+    assert page.endswith("## Old principle numbers\n\n| Principle | Rule |\n|---|---|\n| 1 | gen-001 |\n")
+    assert sorted(shown.notes) == ["gen-001.md", "pub-001.md"]
+    assert shown.notes["gen-001.md"] == (
+        '---\ntitle: "gen-001 A rule"\nkind: rule\nname: "A rule"\nsection: "gen: everything we do"\n'
+        'why: "a reason."\n---\n\n' + rule().rstrip("\n").split("\n", 2)[2] + "\n")
+    assert shown.notes["pub-001.md"].endswith("- **Retired:** its intent no longer holds.\n")
+    assert 'section: "pub: publishing"' in shown.notes["pub-001.md"]
+    assert shown.anchors == {"gen-001-a-rule": "gen-001", "pub-001-an-old-rule": "pub-001"}
+
+
+def test_a_heading_anchor_is_the_one_github_gives():
+    assert rule_book.anchor("wrk-007 One piece of work, one issue; no command files issues on its own") == (
+        "wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own")
