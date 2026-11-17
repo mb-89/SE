@@ -2029,6 +2029,9 @@ prints at most ten findings and exits 1 where one refuses; `forms.py draft <form
 form and `forms.py list` names every form with its actions. They read `forms/` at `origin/main`
 where it holds them, else the working tree (`--tree` always).
 
+`draft --json` also gives each field's shape (its kind, heading, whether it is required, its
+choices) and the form's JSON Schema, which a model's strict tool use takes as it stands.
+
 The commands that file issues check with them where se.toml `[forms] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
 `--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,

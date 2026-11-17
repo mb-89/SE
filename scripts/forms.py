@@ -118,11 +118,26 @@ and its findings; `verdict(forms, action, body, title, ...)` both at once; `draf
 a field names) and `home_repositories` are pure, but for the checkers an adapter names and the
 functions a field's shape names.
 
-**Command.** `forms.py check <form> (--body-file FILE | --fields FILE) [--title TEXT] [--tree]`
-prints at most 10 lines of findings and exits 0 when nothing refuses, 1 when something does, 2 on a
-usage error; `forms.py draft <form> [--json]` prints the empty form; `forms.py list` names every
-form with its actions and, for an adapter, its checker. `--tree` reads the working tree's `forms/`.
-None writes a file, calls GitHub or starts a model.
+**Command.** `forms.py check <form> (--body-file FILE | --fields FILE | --body TEXT |
+--fields-json TEXT) [--title TEXT] [--render] [--tree]` prints at most 10 lines of findings and
+exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
+
+- `--fields-json` takes the object `--fields` reads (or `draft --json`'s answer) as text; both take
+  an object field as a mapping or as the schema's list of `{"key", "value"}` pairs (`answer`).
+- `--render`: where nothing refuses, stdout is only the Markdown `render` writes, its markers
+  included, and the warnings go to stderr.
+- Without `<form>`, `--action <action>` with `--repo`, `--labels` (comma-separated), `--base` and
+  `--title` checks against the form `select` picks; where it picks none it prints
+  `free: no form applies (<action>)` and exits 0 (with `--render`, that line on stderr and the
+  body as given on stdout). A form and `--action` together are a usage error.
+
+`forms.py draft <form> [--json]` prints the empty form. Its JSON holds `form`, `says`, `fields`
+(each field's empty value) and `field_says`, then `field_shape`, each field's `kind` and, where
+the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
+`numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
+fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
+(`schema`). `forms.py list` names every form with its actions and, for an adapter, its checker.
+`--tree` reads the working tree's `forms/`. None writes a file, calls GitHub or starts a model.
 """
 
 from __future__ import annotations
@@ -837,7 +852,7 @@ def render(form: Form, document: Document | dict) -> str:
                             "command that writes it writes its body")
         return document.source  # never marked: the adapter's own writer owns its text
     if not isinstance(document, Document):
-        document = Document(form=form.name, fields=dict(document))
+        document = Document(form=form.name, fields=answer(form, document))
     values = document.fields
     marker = FORM_MARKER.format(name=form.name)
     hashes = "#" * form.level
@@ -954,11 +969,80 @@ def draft(form: Form) -> str:
 
 
 def draft_fields(form: Form) -> dict[str, object]:
-    """The empty form as data: each field's empty value and its `says`."""
+    """The empty form as data: each field's empty value and its `says`, then each field's shape
+    (`field_shape`) and the form's JSON Schema (`schema`)."""
     empty = {"list": [], "issue": [], "checklist": [], "object": {}}
     return {"form": form.name, "says": form.says,
             "fields": {item.name: empty.get(item.kind, "") for item in form.fields},
-            "field_says": {item.name: item.says for item in form.fields}}
+            "field_says": {item.name: item.says for item in form.fields},
+            "field_shape": {item.name: field_shape(item) for item in form.fields},
+            "schema": schema(form)}
+
+
+#: The keys `field_shape` gives, each where the field sets it.
+SHAPE_KEYS = ("kind", "heading", "required", "none_ok", "choices", "max_words", "numbered",
+              "label", "source")
+#: The only keywords `schema` writes: none that strict tool use on the Claude API refuses.
+SCHEMA_KEYWORDS = ("$schema", "type", "properties", "required", "additionalProperties", "items",
+                   "enum", "description")
+SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+
+def field_shape(item: Field) -> dict[str, object]:
+    """A field's shape as `draft --json` gives it: its kind, and each other key of SHAPE_KEYS
+    where the field sets it (choices resolved as `load` resolved them, in their order)."""
+    shape: dict[str, object] = {}
+    for key in SHAPE_KEYS:
+        value = getattr(item, key)
+        if key == "kind" or value:
+            shape[key] = list(value) if key == "choices" else value
+    return shape
+
+
+def _pairs(keys: tuple[str, ...]) -> dict[str, object]:
+    """A closed object of string properties, every one required."""
+    return {"type": "object", "properties": {key: {"type": "string"} for key in keys},
+            "required": list(keys), "additionalProperties": False}
+
+
+def _property(item: Field) -> dict[str, object]:
+    """One field's property of `schema`, by its kind."""
+    strings = {"type": "array", "items": {"type": "string"}}
+    if item.kind == "choice":
+        made: dict[str, object] = {"type": "string", "enum": list(item.choices)}
+    elif item.kind in ("list", "issue"):
+        made = strings
+    elif item.kind == "checklist":
+        made = {"type": "array", "items": {
+            "type": "object", "properties": {"done": {"type": "boolean"},
+                                             "text": {"type": "string"}},
+            "required": ["done", "text"], "additionalProperties": False}}
+    elif item.kind == "object":  # pairs, as strict mode takes no open mapping
+        made = {"type": "array", "items": _pairs(("key", "value"))}
+    else:  # line, text and code
+        made = {"type": "string"}
+    return {**made, "description": item.says}
+
+
+def schema(form: Form) -> dict[str, object]:
+    """A JSON Schema 2020-12 of `form`'s fields, written with SCHEMA_KEYWORDS alone, so it can be
+    handed to a model as it is; an adapter's has no property."""
+    return {"$schema": SCHEMA_DIALECT, "type": "object",
+            "properties": {item.name: _property(item) for item in form.fields},
+            "required": [item.name for item in form.fields if item.required],
+            "additionalProperties": False}
+
+
+def answer(form: Form, values: dict[str, object]) -> dict[str, object]:
+    """Field values as `render` takes them: an object field given as the schema's list of
+    `{"key", "value"}` pairs becomes the mapping of today."""
+    given = dict(values)
+    for item in form.fields:
+        value = given.get(item.name)
+        if item.kind == "object" and isinstance(value, list) and all(
+                isinstance(pair, dict) and set(pair) == {"key", "value"} for pair in value):
+            given[item.name] = {str(pair["key"]): str(pair["value"]) for pair in value}
+    return given
 
 
 def _checked_by(form: Form) -> str:
@@ -1623,13 +1707,23 @@ def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
 def fields_file(path: Path, command: str = "forms.py check") -> dict[str, object]:
     """The field values of a `--fields` file: an object of them, or `draft --json`'s answer."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
         raise FormError(f"{command}: --fields {path} is no JSON file ({error})") from error
+    return fields_data(text, f"--fields {path}", command)
+
+
+def fields_data(text: str, given: str, command: str = "forms.py check") -> dict[str, object]:
+    """The field values of JSON `text` (`given` names where it came from): an object of them, or
+    `draft --json`'s answer."""
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        raise FormError(f"{command}: {given} is no JSON ({error})") from error
     if isinstance(data, dict) and isinstance(data.get("fields"), dict):
         data = data["fields"]
     if not isinstance(data, dict):
-        raise FormError(f"{command}: --fields {path} must hold an object of field values")
+        raise FormError(f"{command}: {given} must hold an object of field values")
     return data
 
 
@@ -1639,15 +1733,91 @@ def _form(forms: dict[str, Form], name: str) -> Form:
     return forms[name]
 
 
+def _given(options: argparse.Namespace) -> tuple[str | None, dict[str, object] | None]:
+    """The body or the field values `check` was given, by whichever of its four options."""
+    if options.body is not None:
+        return options.body, None
+    if options.body_file is not None:
+        try:
+            return options.body_file.read_text(encoding="utf-8"), None
+        except OSError as error:
+            raise FormError(f"forms.py check: cannot read --body-file {options.body_file} "
+                            f"({error})") from error
+    if options.fields_json is not None:
+        return None, fields_data(options.fields_json, "--fields-json")
+    return None, fields_file(options.fields)
+
+
+def _selected(forms: dict[str, Form], options: argparse.Namespace,
+              body: str) -> Selection:
+    """The form `select` picks for `check --action`, as a write would."""
+    labels = [label.strip() for label in (options.labels or "").split(",") if label.strip()]
+    where: dict[str, object] = {"labels": labels, "base": options.base,
+                                "integration": _integration_branch(ROOT)}
+    if options.repo is not None:
+        where.update(repo=options.repo, home=home_repositories(ROOT))
+    return select(forms, options.action, body, options.title, **where)
+
+
+def _check(forms: dict[str, Form], options: argparse.Namespace):
+    """What `check` checks: the form (None: free), the Markdown it would file, the document and
+    the refused markers selection met."""
+    if options.form is None and options.action is None:
+        raise FormError("forms.py check: name a form, or give --action to select one as a write "
+                        "would")
+    if options.form is not None and options.action is not None:
+        raise FormError("forms.py check: give a form or --action, not both")
+    if options.action is None and any(value is not None for value in
+                                      (options.repo, options.labels, options.base)):
+        raise FormError("forms.py check: --repo, --labels and --base select a form; give them "
+                        "with --action")
+    named = _form(forms, options.form) if options.form is not None else None
+    body, values = _given(options)
+    met: tuple[Finding, ...] = ()
+    if named is not None:
+        form: Form | None = named
+    else:
+        chosen = _selected(forms, options, body or "")
+        form, met = chosen.form, chosen.findings
+    if form is None:
+        return None, body or "", None, met
+    if values is None:
+        document = parse(form, body, options.title)
+        return form, render(form, document), document, met
+    values = answer(form, values)
+    title = next((item.name for item in form.fields if item.source == "title"), None)
+    if options.title is not None and title:
+        values[title] = options.title
+    rendered = render(form, values)
+    return form, rendered, parse(form, rendered, values.get(title) if title else None), met
+
+
+def _capped(findings: list[Finding]) -> list[str]:
+    lines = [str(finding) for finding in findings]
+    if len(lines) > 10:
+        rest = len(lines) - 9
+        lines = lines[:9] + [f"... and {rest} more findings"]
+    return lines
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="forms.py", description="SE's forms: check, draft, list")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a form")
-    checking.add_argument("form")
+    checking.add_argument("form", nargs="?", help="the form; without it, --action selects one")
     given = checking.add_mutually_exclusive_group(required=True)
     given.add_argument("--body-file", type=Path)
     given.add_argument("--fields", type=Path)
+    given.add_argument("--body", help="the body as text")
+    given.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
     checking.add_argument("--title")
+    checking.add_argument("--render", action="store_true",
+                          help="print the Markdown to file where nothing refuses")
+    checking.add_argument("--action", choices=ACTIONS,
+                          help="select the form as a write of this action would")
+    checking.add_argument("--repo", help="with --action: the repository written to")
+    checking.add_argument("--labels", help="with --action: the labels, comma-separated")
+    checking.add_argument("--base", help="with --action: a pull request's base branch")
     checking.add_argument("--tree", action="store_true", help="read the working tree's forms/")
     drafting = commands.add_parser("draft", help="print the empty form")
     drafting.add_argument("form")
@@ -1661,33 +1831,31 @@ def main(arguments: list[str] | None = None) -> int:
         if options.command == "list":
             print("\n".join(list_forms(forms)))
             return 0
-        form = _form(forms, options.form)
         if options.command == "draft":
+            form = _form(forms, options.form)
             print(json.dumps(draft_fields(form), indent=2) if options.json else draft(form), end=""
                   if not options.json else "\n")
             return 0
-        if options.body_file is not None:
-            try:
-                body = options.body_file.read_text(encoding="utf-8")
-            except OSError as error:
-                raise FormError(f"forms.py check: cannot read --body-file {options.body_file} "
-                                f"({error})") from error
-            document = parse(form, body, options.title)
-        else:
-            values = fields_file(options.fields)
-            title = next((item.name for item in form.fields if item.source == "title"), None)
-            if options.title is not None and title:
-                values[title] = options.title
-            document = parse(form, render(form, values), values.get(title) if title else None)
+        form, rendered, document, met = _check(forms, options)
     except FormError as error:
         print(error, file=sys.stderr)
         return 2
-    findings = check(form, document)
-    lines = [str(finding) for finding in findings]
-    if len(lines) > 10:
-        rest = len(lines) - 9
-        lines = lines[:9] + [f"... and {rest} more findings"]
+    findings = [*met, *(check(form, document) if form is not None else ())]
     refused = sum(finding.severity == REFUSE for finding in findings)
+    lines = _capped(findings)
+    if form is None and not findings:
+        free = f"free: no form applies ({options.action})"
+        if options.render:
+            print(free, file=sys.stderr)
+            print(rendered, end="")
+        else:
+            print(free)
+        return 0
+    if options.render and not refused:
+        if lines:
+            print("\n".join(lines), file=sys.stderr)
+        print(rendered, end="")
+        return 0
     print("\n".join(lines) if lines else f"{form.name}: no findings")
     return 1 if refused else 0
 
