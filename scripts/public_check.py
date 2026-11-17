@@ -13,8 +13,10 @@ The commit gates (a message file, the commits of a --range) also refuse tracker 
 attribution trailers (`Co-Authored-By:`, `Claude-Session:`) and any e-mail address, whatever the
 address, in messages, from every author, naming the reference, trailer or line and the remedy; a
 full check leaves old history to them. CI runs
-the --range gate on every pull request and every push to the integration branch
-(.github/workflows/check.yml). The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
+the --range gate on every pull request and every push (.github/workflows/check.yml). A push's
+range (--push, push_range) is the commits after the branch's old tip, or where that tip is unknown
+those no other branch holds, and a work branch's leaves out what the integration branch holds, so
+commits it holds are not gated again. The commits of a --range must also carry the project identity (se.toml [project] identity, unless the
 machine sets public_identity), where one is set. Strict, where se.toml [integrate] landing is
 "fast-forward" (landings are the integrator's own commits): a commit GitHub made is foreign like
 any other. Otherwise, while GitHub squash-merges the landings, its web-flow identity passes as
@@ -699,6 +701,40 @@ def scan_history(root: Path, revisions: list[str], patterns: list[Pattern], repo
                 entry.seen = True
 
 
+def has_commit(root: Path, rev: str) -> bool:
+    """Whether `rev` names a commit this clone holds; an empty or all-zeros tip names none."""
+    if not rev or set(rev) == {"0"}:
+        return False
+    return git_door.run("cat-file", "-e", f"{rev}^{{commit}}", root=root).returncode == 0
+
+
+def remote_refs(root: Path) -> list[str]:
+    return git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin").decode().split()
+
+
+def push_range(root: Path, before: str, after: str, branch: str, default_branch: str) -> str:
+    """The revisions a push of `after` to `branch` gates, its old tip `before`: the commits after
+    that tip, or where it is unknown (empty, all zeros, no commit here) those no other branch of
+    origin holds. A work branch's range leaves out the integration branch (se.toml [project]
+    integration_branch), whose commits were gated where they reached it, where that branch is
+    `default_branch` and its ref refs/remotes/origin/<branch> exists; the integration branch's
+    own push is gated whole."""
+    try:
+        integration = sibling("work_tickets").integration_branch(root)
+    except sibling("work_tickets").QueueError as error:
+        raise SetupError(str(error)) from error
+    held = f"refs/remotes/origin/{integration}"
+    refs = remote_refs(root)
+    narrow = branch != integration and integration == default_branch and held in refs
+    if has_commit(root, before):
+        return f"{before}..{after}" + (f" --not {held}" if narrow else "")
+    if narrow:
+        return f"{after} --not {held}"
+    others = [ref for ref in refs if ref not in (f"refs/remotes/origin/{branch}",
+                                                 "refs/remotes/origin/HEAD")]
+    return " ".join([after, "--not", *others])
+
+
 def scan_message_file(root: Path, path: Path, patterns: list[Pattern], report: Report) -> None:
     report.commits += 1
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -842,6 +878,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                               "(for example 'HEAD --not A'); default: HEAD")
     history.add_argument("--no-history", action="store_true",
                          help="skip commit messages and identities")
+    parser.add_argument("--push", metavar="BEFORE",
+                        help="gate the commits a push of --rev to --branch brings, BEFORE its "
+                             "old tip (empty or all zeros where unknown); a work branch's range "
+                             "leaves out what the integration branch holds (push_range)")
+    parser.add_argument("--branch", help="with --push: the branch pushed")
+    parser.add_argument("--default-branch", help="with --push: the repository's default branch")
     return parser.parse_args(argv)
 
 
@@ -851,8 +893,12 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
             if value:
                 raise SetupError(f"--built and {option} exclude each other: a built page has no "
                                  "commits")
+    check_push_options(args)
     root = Path(git(Path(args.repo).resolve(), "rev-parse", "--show-toplevel").decode().strip())
     check_se_version(root, commit)
+    if args.push is not None:
+        args.revisions = push_range(root, args.push, args.rev, args.branch, args.default_branch)
+        print(f"public-check: gating {args.revisions}, the commits pushed to {args.branch}")
     check_machine_list()
     check_untracked(root, args.rev)
     report = Report()
@@ -886,6 +932,24 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
                      allow=allow)
     report_unused(allow, has_local, report)
     return report
+
+
+def check_push_options(args: argparse.Namespace) -> None:
+    """--push needs --rev, --branch and --default-branch, and takes no other history."""
+    if args.push is None:
+        for option, value in (("--branch", args.branch), ("--default-branch", args.default_branch)):
+            if value is not None:
+                raise SetupError(f"{option} needs --push: it names the branch a push gates")
+        return
+    for option, value in (("--rev", args.rev), ("--branch", args.branch),
+                          ("--default-branch", args.default_branch)):
+        if not value:
+            raise SetupError(f"--push needs {option}: a push's range is computed from it")
+    for option, value in (("--range", args.revisions), ("--history", args.history),
+                          ("--no-history", args.no_history)):
+        if value:
+            raise SetupError(f"--push and {option} exclude each other: --push gates the commits "
+                             "the push brings")
 
 
 def report_unused(allow: list[AllowEntry], full: bool, report: Report) -> None:
