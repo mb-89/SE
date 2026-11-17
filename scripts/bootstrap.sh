@@ -2,7 +2,7 @@
 # Bring what se's tools need onto this machine; safe to run again after an interruption.
 #
 # Run at every session start by the Claude Code plugin and by Copilot's hooks (.github/hooks/se.json),
-# and by SE on its first start elsewhere.
+# by SE on its first start elsewhere, and with --binary by RUNME (RUNME.conf), which places `se` once.
 # Quiet when nothing is missing. What it does, per dependency, is the README section "Install".
 #   git      required; cannot be installed without admin rights, so it names the one line to run
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
@@ -20,6 +20,11 @@
 #            from its folder where no release matches), started detached for the project, and handed
 #            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
 #            skips this step (below)
+# --binary (RUNME.conf's `get se` line, run by SE's RUNME): the plain run's git, uv and Python steps,
+# then the binary SE's own checkout pins, fetched from its release in the foreground (built with go
+# where none matches), linked as ~/.se/bin/<name>, and its version written to
+# <se root>/.se/.runtime/runme-se, RUNME's need; it syncs no module, sets no identity or hooks,
+# writes no kern.path and starts nothing.
 # Exit code 0 when everything is in place, 1 when a step needs the person: the line on stdout says
 # what to run and why (the plugin's hook passes it on to the session).
 #
@@ -44,6 +49,8 @@ esac
 
 hook=false
 [ "${1:-}" = "--hook" ] && hook=true
+binary=false
+[ "${1:-}" = "--binary" ] && binary=true
 notes=()
 # The lines the start before a refresh said (se_start.py start-refresh), carried into this one.
 if [ -n "${SE_START_REFRESHED:-}" ]; then
@@ -157,9 +164,66 @@ kern_checkout() {
   done
   return 1
 }
+# The application binary this start places (README "Kern"): one reader, se_modules.py app-binary,
+# which answers kern's core plus the application's Go components where it has any, else the bare
+# kern (SE's docs/go-core.md "How the binary arrives"), from the project where it is SE's own
+# checkout. One line: "<name> <version> <download base> <build folder> <package> <the checkout it
+# read>". The download base lies under the home the checkout's origin names (scripts/se_home.py), so
+# no file names where SE lives; it is `-` where origin names none, and the binary is built from its
+# folder. Sets name, version, base, builddir, package, pins, platform, exe, suffix and bin; fails
+# where there is none.
+kern_locate() {
+  local spec
+  spec="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
+    --root "$se_root" app-binary --project "$project" 2>/dev/null)" || return 1
+  read -r name version base builddir package pins <<<"$spec"
+  [ -n "$pins" ] || pins="$se_root"
+  [ -n "$name" ] && [ -n "$version" ] && [ -n "$base" ] && [ -n "$builddir" ] && [ -n "$package" ] || return 1
+  platform="$(kern_platform)"
+  exe="$name"
+  suffix=""
+  case "$platform" in windows-*) exe="$name.exe"; suffix=".exe" ;; esac
+  bin="$HOME/.se/bin/$name-$version$suffix"
+  mkdir -p "$HOME/.se/bin" 2>/dev/null
+}
+# Whether a release of the binary matches this platform: one small read. Sets asset and sums, and
+# cause to why none does (empty where one does).
+kern_release() {
+  asset="$name-$version-$platform.tar.gz"
+  [ -n "$suffix" ] && asset="$name-$version-$platform.zip"
+  sums="$HOME/.se/bin/$name-$version.SHA256SUMS"
+  cause=""
+  if [ "$base" = - ]; then
+    cause="no $name $version release to fetch: the origin of $pins names no home"
+  elif [ -z "$platform" ]; then
+    cause="no $name release for $(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
+  elif ! command -v curl >/dev/null 2>&1; then
+    cause="no curl to fetch the $name $version release"
+  elif ! curl -fsSL --max-time 2 -o "$sums" "$base/SHA256SUMS" >/dev/null 2>&1; then
+    cause="no $name $version release at $base"
+  elif ! grep -q "  $asset\$" "$sums" 2>/dev/null; then
+    cause="the $name $version release has no $asset"
+  fi
+}
+# Fetch the release archive, check it against SHA256SUMS and put its binary at <bin>.
+kern_fetch() { # <bin> <archive url> <SHA256SUMS file> <binary in it>
+  local part="$1.part$$" ok=1
+  mkdir -p "$part" && curl -fsSL --max-time 120 -o "$part/${2##*/}" "$2" &&
+    grep -q "^$(kern_sha256 "$part/${2##*/}")  ${2##*/}\$" "$3" &&
+    case "$2" in
+      *.zip) (cd "$part" && { unzip -q "${2##*/}" || tar -xf "${2##*/}"; }) ;;
+      *) tar -xzf "$part/${2##*/}" -C "$part" ;;
+    esac && mv -f "$part/$4" "$1" && ok=0
+  rm -rf "$part"
+  return "$ok"
+}
+# Build the binary with go from its folder into <bin>.
+kern_build() { # <bin> <build folder> <package>
+  local part="$1.part$$"
+  (cd "${2:-$se_root/kern}" && go build -o "$part" "${3:-./cmd/kern}") && mv -f "$part" "$1"
+}
 kern_step() {
-  local spec name version base builddir package platform exe suffix asset bin sums cause start
-  local pins
+  local start
   # A project inside no git checkout, as a session started without sources is: no core starts and
   # the greeting says nothing of one (README "Cloud sessions"); under Copilot it says SE runs
   # without kern. The session's shells still find as `se` the core a late checkout's first hook
@@ -169,23 +233,8 @@ kern_step() {
     kern_args+=(--kern-none)
     return 0
   fi
-  # One reader of the application binary: se_modules.py app-binary, which answers kern's core plus
-  # the application's Go components where it has any, else the bare kern (SE's docs/go-core.md "How
-  # the binary arrives"), from the project where it is SE's own checkout. One line: "<name>
-  # <version> <download base> <build folder> <package> <the checkout it read>". The download base
-  # lies under the home the checkout's origin names (scripts/se_home.py), so no file names where SE
-  # lives; it is `-` where origin names none, and the binary is built from its folder.
-  spec="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
-    --root "$se_root" app-binary --project "$project" 2>/dev/null)" || return 0
-  read -r name version base builddir package pins <<<"$spec"
-  [ -n "$pins" ] || pins="$se_root"
-  [ -n "$name" ] && [ -n "$version" ] && [ -n "$base" ] && [ -n "$builddir" ] && [ -n "$package" ] || return 0
-  platform="$(kern_platform)"
-  exe="$name"
-  suffix=""
-  case "$platform" in windows-*) exe="$name.exe"; suffix=".exe" ;; esac
-  bin="$HOME/.se/bin/$name-$version$suffix"
-  mkdir -p "$HOME/.se/bin" "$project/.se/.runtime" 2>/dev/null
+  kern_locate || return 0
+  mkdir -p "$project/.se/.runtime" 2>/dev/null
   # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place; the
   # session's shells find it as `se` (kern_link).
   printf '%s\n' "$bin" >"$project/.se/.runtime/kern.path"
@@ -198,21 +247,9 @@ kern_step() {
     kern_args+=(--kern-bin "$bin")
     return 0
   fi
-  # The first start of this version: one small read says whether a release matches this platform.
-  asset="$name-$version-$platform.tar.gz"
-  [ -n "$suffix" ] && asset="$name-$version-$platform.zip"
-  sums="$HOME/.se/bin/$name-$version.SHA256SUMS"
-  if [ "$base" = - ]; then
-    cause="no $name $version release to fetch: the origin of $pins names no home"
-  elif [ -z "$platform" ]; then
-    cause="no $name release for $(uname -s 2>/dev/null) $(uname -m 2>/dev/null)"
-  elif ! command -v curl >/dev/null 2>&1; then
-    cause="no curl to fetch the $name $version release"
-  elif ! curl -fsSL --max-time 2 -o "$sums" "$base/SHA256SUMS" >/dev/null 2>&1; then
-    cause="no $name $version release at $base"
-  elif ! grep -q "  $asset\$" "$sums" 2>/dev/null; then
-    cause="the $name $version release has no $asset"
-  else
+  # The first start of this version: fetched where a release matches this platform, else built.
+  kern_release
+  if [ -z "$cause" ]; then
     kern_background --kern-fetch "$bin" "$base/$asset" "$sums" "$exe" "$project" "$start"
     kern_args+=(--kern-starting "fetching the $name $version release for $platform in the background")
     return 0
@@ -224,25 +261,41 @@ kern_step() {
     kern_args+=(--kern-failed "$cause, and no go to build it from $pins/$builddir")
   fi
 }
+# --binary: the binary SE's own checkout pins, placed in the foreground and started never (RUNME's
+# `get se` line): fetched from its release, else built with go, then linked as ~/.se/bin/<name>;
+# its last step writes <se root>/.se/.runtime/runme-se, the version it linked, RUNME's need.
+binary_step() {
+  project="$se_root"
+  kern_locate || need "SE's checkout $se_root names no application binary (se_modules.py app-binary)"
+  if [ ! -x "$bin" ]; then
+    kern_release
+    if [ -z "$cause" ]; then
+      kern_fetch "$bin" "$base/$asset" "$sums" "$exe" || cause="fetching $base/$asset failed"
+    fi
+    if [ -n "$cause" ] && [ ! -x "$bin" ]; then
+      if command -v go >/dev/null 2>&1 && [ -f "$pins/$builddir/go.mod" ]; then
+        kern_build "$bin" "$pins/$builddir" "$package" ||
+          need "$cause, and building it from $pins/$builddir with go failed"
+      else
+        need "$cause, and no go to build it from $pins/$builddir"
+      fi
+    fi
+  fi
+  kern_link "$bin"
+  mkdir -p "$se_root/.se/.runtime" && printf '%s\n' "$version" >"$se_root/.se/.runtime/runme-se"
+}
 if [ -n "$kern_mode" ]; then
   # <bin> then, for --kern-fetch, <archive url> <SHA256SUMS file> <binary in it> <project> <start>;
   # for --kern-build, <project> <start> <build folder> <package>. The core is handed <start> once
   # it runs.
   bin="$2"
-  part="$bin.part$$"
   if [ "$kern_mode" = --kern-fetch ]; then
     project="$6"
-    mkdir -p "$part" && curl -fsSL --max-time 120 -o "$part/${3##*/}" "$3" &&
-      grep -q "^$(kern_sha256 "$part/${3##*/}")  ${3##*/}\$" "$4" &&
-      case "$3" in
-        *.zip) (cd "$part" && { unzip -q "${3##*/}" || tar -xf "${3##*/}"; }) ;;
-        *) tar -xzf "$part/${3##*/}" -C "$part" ;;
-      esac && mv -f "$part/$5" "$bin"
-    rm -rf "$part"
+    kern_fetch "$bin" "$3" "$4" "$5"
     start="$7"
   else
     project="$3"
-    (cd "${5:-$se_root/kern}" && go build -o "$part" "${6:-./cmd/kern}") && mv -f "$part" "$bin"
+    kern_build "$bin" "$5" "$6"
     start="$4"
   fi
   [ -x "$bin" ] && kern_run "$bin" "$start"
@@ -303,6 +356,12 @@ if $hook && ! $compact && [ -z "${SE_START_REFRESHED:-}" ]; then
     SE_START_REFRESHED="$carried$line" exec bash "$se_root/scripts/bootstrap.sh" --hook <<<"$payload"
   fi
   [ -n "$line" ] && notes+=("$line")
+fi
+
+# --binary (RUNME): the binary, placed and linked; no module, identity, hooks or core.
+if $binary; then
+  binary_step
+  finish 0
 fi
 
 # Modules: the project's se.toml modules, fetched at their pins.

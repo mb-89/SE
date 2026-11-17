@@ -228,6 +228,8 @@ no Go components. The plugin's hooks start the binary and post every session eve
     greeting names both causes.
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
+- **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
+  fetches or builds `~/.se/bin/<name>-<version>` in the foreground, links it and starts nothing.
 - **Every other event** (SessionEnd, SubagentStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
   and SubagentStop) runs [scripts/se_hook.sh](scripts/se_hook.sh) `<event>`, which hands the host's
   JSON to the named binary's `kern hook <event>`.
