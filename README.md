@@ -1307,9 +1307,9 @@ ci = false # default true: CI's check is the verdict, wherever the host has runn
 
 ### Platform legs and their queue
 
-kern-platforms runs kern's tests and SE's start and hook tests on a Windows runner, and `check`
-needs every leg. kern is built for darwin; neither it nor the start and hook scripts are tested
-there.
+kern-platforms runs kern's tests, SE's start and hook tests and its worktree removal tests on a
+Windows runner, and `check` needs every leg. kern is built for darwin; neither it nor the start
+and hook scripts are tested there.
 
 A job's `timeout-minutes` counts only from when a runner takes it, so it
 bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
