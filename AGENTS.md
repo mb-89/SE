@@ -33,28 +33,26 @@
 
 ## Tests
 
-- Focused: `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test), the tests of what changed.
-  - A change to Markdown the docs build publishes (`docs.md` and every note it lists) also runs
-    `tests/test_docs.py`, whose build fails on obs's lints, a paragraph over five lines among them.
-  - A change to `.github/workflows/check.yml` also runs `tests/test_public_check.py`, which holds
-    the workflow's jobs and their order, beside the tests of the steps it changed (such as
+| Suite | Command | When it runs |
+|---|---|---|
+| Focused | `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test) | the tests of what changed |
+| kern, the Go core under `kern/` | `cd kern && go vet ./... && go test ./...` | its tests are declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too ([kern/README.md "Tests"](kern/README.md#tests)) |
+| SE's Go components under `components/` | `cd components && go vet ./... && go test ./...` | declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)) |
+| Complete | `uv run pytest -q` and kern's tests | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([README "Test budget"](README.md#test-budget)) |
+| Repository hygiene | `uv run python scripts/hygiene.py` | a step of the `check` job, not a test: it checks SE's own checkout through git's real door; its logic is unit-tested on the fake, each check failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`) |
+| Dangling references | the same command | it fails where the agents, the skills (the rule book among them), README.md or AGENTS.md name what the repository lacks |
+
+- Focused, also run:
+  - on a change to Markdown the docs build publishes (`docs.md` and every note it lists),
+    `tests/test_docs.py`, whose build fails on obs's lints, a paragraph over five lines among them;
+  - on a change to `.github/workflows/check.yml`, `tests/test_public_check.py`, which holds the
+    workflow's jobs and their order, beside the tests of the steps it changed (such as
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
-- kern, the Go core under `kern/`: `cd kern && go vet ./... && go test ./...`. Its tests are
-  declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too
-  ([kern/README.md "Tests"](kern/README.md#tests)).
-  - The `check` job vets kern in its own step and fails where `gofmt -l` lists one of its files;
-    the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook scripts,
-    on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`); darwin is
-    built, not tested.
-- SE's Go components under `components/`: `cd components && go vet ./... && go test ./...`, declared
-  beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet
-  and retro-due components to the Python paths ([components/README.md](components/README.md#tests)).
-- Complete: `uv run pytest -q` and kern's tests, declared with their time budgets in `se.toml`
-  `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>`
-  runs them the same way ([README "Test budget"](README.md#test-budget)).
-- Repository hygiene: `uv run python scripts/hygiene.py` checks SE's own checkout through git's real
-  door, a step of the `check` job, not a test; its logic is unit-tested on the fake, each check
-  failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`).
+- kern: the `check` job vets kern in its own step and fails where `gofmt -l` lists one of its
+  files; the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook
+  scripts, on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`);
+  darwin is built, not tested.
+- Repository hygiene:
   - It fails on a tracked binary file, a tracked file over 200 KB, or a `TODO`/`FIXME` in
     `scripts/` or `tests/` naming no issue; a file that must break the first two goes in its allow
     list there, with its reason.
@@ -72,8 +70,7 @@
     A test that reaches real git without the fake fails, naming the command.
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
-- Dangling references: the same command fails where the agents, the skills (the rule book among
-  them), README.md or AGENTS.md name what the repository lacks.
+- Dangling references:
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
     `.github/…`), or a script subcommand its argument parser does not define.
   - `scripts/references.py` owns what counts; the issue-filing commands call it too
@@ -114,20 +111,27 @@ section owns the check that enforces them.
 commit messages and author and committer identities. It prints locations and pattern labels, never the
 matched text; exit code 0 passed, 1 hits, 2 setup error.
 
-- Tracker references in commit messages,
-  [pub-004](src/skills/work-model/references/rules.md#pub-004-no-tracker-references-in-commit-messages): the commit
-  gates (`--message-file`, and the commits of a `--range`, as the hooks and `integrate` pass it)
-  refuse them and, as they name nothing private, print the reference with its remedy. A full check
-  leaves history already pushed alone; a commit already published passes by its reasoned message
-  entry in `.public-check-allow`.
-- Attribution trailers in commit messages,
-  [pub-003](src/skills/work-model/references/rules.md#pub-003-no-attribution-trailers): the commit gates refuse a `Co-Authored-By:` or `Claude-Session:` line in any case, naming the commit and
-  the remedy, reword before pushing. A full check leaves history already pushed alone.
-  - Every author is refused, the owner included; a co-author line's hit also names the editor
-    setting that writes it ([README "Install"](README.md#install)).
-- E-mail addresses in commit messages: the commit gates refuse a message line that holds one,
-  whatever the address (a service's `noreply`, `example.*` included), naming the commit and the
-  line, never the address; reword before pushing. A full check leaves history already pushed alone.
+The commit gates are `--message-file` and the commits of a `--range`, as the hooks and `integrate`
+pass it; they refuse:
+
+| Check | Rule | What it refuses | Remedy | History already pushed |
+|---|---|---|---|---|
+| Tracker references in commit messages | [pub-004](src/skills/work-model/references/rules.md#pub-004-no-tracker-references-in-commit-messages) | a tracker reference; as it names nothing private, the gate prints the reference | printed with the reference | a full check leaves it alone; a commit already published passes by its reasoned message entry in `.public-check-allow` |
+| Attribution trailers in commit messages | [pub-003](src/skills/work-model/references/rules.md#pub-003-no-attribution-trailers) | a `Co-Authored-By:` or `Claude-Session:` line in any case, naming the commit and the remedy | reword before pushing | a full check leaves it alone |
+| E-mail addresses in commit messages | — | a message line that holds one, whatever the address (a service's `noreply`, `example.*` included), naming the commit and the line, never the address | reword before pushing | a full check leaves it alone |
+| The project identity, in the commit gates of a `--range` only | [pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity) | where the project sets an `identity` (or the machine a `public_identity`, which wins), a commit whose author or committer differs, naming the commit, the identity found (redacted) and the remedy | named in the refusal | a full check leaves it alone; a commit already published passes by its reasoned commit entry in `.public-check-allow` |
+
+- Attribution trailers: every author is refused, the owner included; a co-author line's hit also
+  names the editor setting that writes it ([README "Install"](README.md#install)).
+- The project identity:
+  - Where `se.toml` `[integrate] landing` is `"fast-forward"`, the gate is strict: a commit
+    GitHub made is foreign like any other, its web-flow committer (`GitHub`, `noreply` at
+    `github.com`) and a squash merge's account author alike, as every landing is the
+    integrator's own commit ([README "Landing on main"](README.md#landing-on-main)).
+  - While it is `"squash"`, the built-in, GitHub's web-flow identity passes as committer, never
+    as author. On such a commit the author may be the account that owns `origin` on
+    `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
+    into `main`. Every other account stays foreign.
 - CI: the job `check` of `.github/workflows/check.yml` runs the commit gates of a `--range` over
   the commits of every pull request and of every push to `main`, so a push the hooks did not see
   fails there; `check` is the check `main`'s ruleset requires.
@@ -143,40 +147,25 @@ matched text; exit code 0 passed, 1 hits, 2 setup error.
     names an open work issue ([Integration branch](src/skills/work-model/SKILL.md#integration-branch)).
 - A `--range` on a shallow clone that reaches beyond the fetched history is refused with exit code
   2, naming `git fetch --unshallow`, so a gate never passes over commits it cannot see.
-- The project identity ([pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity)) in the commit
-  gates of a `--range`: where the project sets an `identity`
-  (or the machine a `public_identity`, which wins), a commit whose author or committer differs is
-  refused, naming the commit, the identity found (redacted) and the remedy. A full check leaves
-  history already pushed alone.
-  - Where `se.toml` `[integrate] landing` is `"fast-forward"`, the gate is strict: a commit
-    GitHub made is foreign like any other, its web-flow committer (`GitHub`, `noreply` at
-    `github.com`) and a squash merge's account author alike, as every landing is the
-    integrator's own commit ([README "Landing on main"](README.md#landing-on-main)).
-  - While it is `"squash"`, the built-in, GitHub's web-flow identity passes as committer, never
-    as author. On such a commit the author may be the account that owns `origin` on
-    `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
-    into `main`. Every other account stays foreign.
-  - A commit already published passes by its reasoned commit entry in `.public-check-allow`.
 - Two layers, and no third: the public list is committed and holds every term that may be
   public; the local list is never committed, holds what is private and may switch a public entry
   off. Nothing committed refers to the local list's content, since knowing it says what is meant
   to stay hidden; in doubt, a term stays local. No setting, variable or secret holds terms.
-- The public list, `scripts/public-check-terms.toml`: the generic patterns every source is checked
-  against, read from the se module the check runs from: user profile paths (`X:\Users\<name>`,
-  `/home/<name>`, `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and
-  `example.*`, enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC
-  paths.
-  - The fixed addresses services write into commits themselves, `noreply` at `github.com` and at
-    `anthropic.com`, name no person and pass.
-- The local list, `.public-check.local` at the root of each source (a repository or a vault), for
-  terms that must never be written down here. Without it the check warns and runs the public list
-  only, as on a public CI host. `#` starts a comment line; every other line is one of
+
+| List | Where it lives | What it holds |
+|---|---|---|
+| The public list | `scripts/public-check-terms.toml`, read from the se module the check runs from | the generic patterns every source is checked against: user profile paths (`X:\Users\<name>`, `/home/<name>`, `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`, enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths |
+| The local list | `.public-check.local` at the root of each source (a repository or a vault) | terms that must never be written down here |
+| The machine-level list (retired) | `~/.se/private-terms.txt`, `SE_PRIVATE_TERMS` | while one is configured, the check stops and names where its terms go, `<source>/.public-check.local` |
+
+- The public list: the fixed addresses services write into commits themselves, `noreply` at
+  `github.com` and at `anthropic.com`, name no person and pass.
+- The local list: without it the check warns and runs the public list only, as on a public CI
+  host. `#` starts a comment line; every other line is one of
   - a case-insensitive regex, a term this source keeps private; hits name only its line number;
   - `off:<label>  # reason`, which switches the public entries of that label off for this source.
   - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
-- The machine-level list (`~/.se/private-terms.txt`, `SE_PRIVATE_TERMS`) is retired: while one is
-  configured, the check stops and names where its terms go, `<source>/.public-check.local`.
 - One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that
   pins se (`[modules.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version

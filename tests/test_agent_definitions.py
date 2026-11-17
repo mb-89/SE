@@ -563,8 +563,9 @@ def test_the_host_procedure_uses_the_se_tools_where_present_and_the_scripts_othe
 def test_agents_md_names_the_focused_and_complete_test_commands():
     text = normalized(ROOT / "AGENTS.md")
     tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
-    assert "Focused: `uv run pytest -q tests/<file>.py`" in tests
-    assert "Complete: `uv run pytest -q`" in tests
+    assert "| Suite | Command | When it runs |" in tests
+    assert "| Focused | `uv run pytest -q tests/<file>.py`" in tests
+    assert "| Complete | `uv run pytest -q` and kern's tests |" in tests
 
 
 def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():
