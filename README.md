@@ -417,6 +417,10 @@ module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
+The build reads a copy of the repository in which no note asks for a verdict, so the worked
+decision note shows as a page to read, with no Send; the note itself still asks, for the decks
+built from it.
+
 Any obs warning fails the build, so a broken link, a missing note or a paragraph longer than obs's
 default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
