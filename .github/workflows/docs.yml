@@ -29,6 +29,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      # The build runs RUNME in its copy of the repository, which takes the pinned se from ~/.se/bin
+      # (README "Documentation"): placed here from the checkout, fetched from its release, or built
+      # with go where that release is not out yet. The cache keeps each se version and the claude
+      # RUNME installs, so each is fetched or built once.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: components/go.mod
+          cache-dependency-path: components/go.sum
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.local/bin/claude
+            ~/.local/share/claude
+            ~/.se/bin
+          key: se-${{ runner.os }}-${{ hashFiles('components/release.toml') }}
+      - name: Place the pinned se
+        run: |
+          python3 scripts/se_modules.py sync
+          bash scripts/bootstrap.sh --binary
       - name: Build the documentation
         run: |
           mkdir -p "$RUNNER_TEMP/site"
