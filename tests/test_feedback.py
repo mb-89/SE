@@ -139,13 +139,17 @@ log({"event": "end", "pid": os.getpid()})
 a = sys.argv[1:]
 if a[:2] == ["issue", "list"]:
     labels = [a[i + 1] for i, x in enumerate(a) if x == "--label"]
-    print(json.dumps([{"number": n, "title": f"feat/candidate-{n}", "body": "",
+    blocked = os.environ.get("FAKE_GH_BLOCKERS")  # each candidate n names #1n and #20
+    print(json.dumps([{"number": n, "title": f"feat/candidate-{n}",
+                       "body": f"## Blocked by\\n\\n- #{10 + n}\\n- #20\\n" if blocked else "",
                        "labels": [{"name": "work"}, {"name": "ready"}]} for n in range(1, 6)]
                      if "ready" in labels else []))
 elif a[:2] == ["pr", "list"]:
     print("[]")
 elif a[:1] == ["api"]:
-    print(json.dumps({"issue_dependencies_summary": {"blocked_by": 0}}))
+    number = a[1].rsplit("/", 1)[-1]
+    print(json.dumps({"number": int(number) if number.isdigit() else 0, "state": "closed",
+                      "state_reason": "completed", "issue_dependencies_summary": {"blocked_by": 0}}))
 elif a[:2] == ["issue", "view"]:
     print(json.dumps({"number": 5, "title": "feat/x", "url": "https://github.com/owner/repo/issues/5",
                       "body": "## Requirements\\n\\n1. one\\n", "updatedAt": "", "labels": [],
@@ -337,6 +341,27 @@ def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_pat
     assert door_depth(door_events(log)) == 3
     assert line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
     assert line["wall_seconds"] < line["gh_calls"] * BUDGET_DOOR_DELAY
+
+
+def test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads(
+        slow_door, tmp_path, fake_git_door, monkeypatch):
+    """Candidates whose Blocked by names issues outside the listings: each blocker is read once,
+    at once with the candidates' own reads, so the queue still waits for the door in three
+    rounds."""
+    log = tmp_path / "door.jsonl"
+    environment = {**slow_door["env"], "FAKE_GH_DELAY": str(BUDGET_DOOR_DELAY),
+                   DOOR_LOG: str(log), "FAKE_GH_BLOCKERS": "1"}
+    checkout = queue_checkout(tmp_path)
+    result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
+                            environment, monkeypatch)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("ready #") == 5
+    reads = [event["argv"][1] for event in door_events(log)
+             if event["event"] == "start" and event["argv"][:1] == ["api"]]
+    blockers = [path.rsplit("/", 1)[-1] for path in reads if path.rsplit("/", 1)[-1] in
+                {"11", "12", "13", "14", "15", "20"}]
+    assert sorted(blockers) == ["11", "12", "13", "14", "15", "20"]
+    assert door_depth(door_events(log)) == 3
 
 
 def test_paused_reads_the_door_once_and_declares_its_budget(slow_door, tmp_path):

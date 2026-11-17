@@ -39,9 +39,9 @@ prefix sets the bump. -->
 ## Blocked by
 
 <!-- Issues that must be closed first, linked as native "blocked by" dependencies by SE
-     (scripts/work_tickets.py block <this> --by <n>). Blocked state is computed from those links,
-     never a label; nobody edits labels by hand. Label `ready` = approved; startable = ready and no
-     open blockers. The worktree and branch are created when work starts, from the newest main.
+     (scripts/work_tickets.py block <this> --by <n>). Blocked state is computed from those links
+     and from this section, never a label; nobody edits labels by hand. Label `ready` = approved;
+     startable = ready and no open blockers. The worktree and branch are created when work starts, from the newest main.
      "None" otherwise. -->
 
 None

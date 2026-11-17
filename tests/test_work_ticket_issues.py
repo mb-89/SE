@@ -1732,6 +1732,85 @@ def test_ready_filters_blocked_existing_and_clashing_work(worktree, monkeypatch,
     assert [issue["number"] for issue in work_tickets.ready_issues(worktree, "git.example/owner/repo")] == [1]
 
 
+def blocked_by(*names: str) -> str:
+    return "## Blocked by\n\n" + ("\n".join(f"- {name}" for name in names) or "None.") + "\n"
+
+
+class BlockedReady:
+    """gh for `ready_issues`: the two listings, each candidate's native count, and each other
+    issue's state; a number in `unreadable` fails its read. Every call is recorded."""
+
+    def __init__(self, candidates, active=(), native=None, states=None, unreadable=()):
+        self.candidates, self.active = list(candidates), list(active)
+        self.native, self.states, self.unreadable = native or {}, states or {}, set(unreadable)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, root, args):
+        self.calls.append(args)
+        if args[:2] == ["issue", "list"]:
+            return json.dumps(self.candidates if "ready" in args else self.active)
+        number = int(args[1].split("/")[-1])
+        if number in self.unreadable:
+            raise work_tickets.QueueError(f"gh api issues/{number} failed")
+        if number in self.states:
+            state, reason = self.states[number]
+            return json.dumps({"number": number, "state": state, "state_reason": reason})
+        return json.dumps({"issue_dependencies_summary": {"blocked_by": self.native.get(number, 0)}})
+
+    def reads(self, number: int) -> int:
+        return sum(1 for call in self.calls if call[:1] == ["api"]
+                   and call[1].endswith(f"/issues/{number}"))
+
+
+def test_holding_blockers_reads_only_the_lists_same_repository_numbers():
+    body = ("## Blocked by\n\n- #4\n- #5 <!-- #6 -->\n- owner/other#3\n"
+            "- https://example.com/owner/repo/issues/7\n- #8\n- #9\n")
+    issue = work_tickets.fleet_issue({"number": 1, "body": body})
+    states = {4: {"state": "open", "reason": ""}, 5: {"state": "closed", "reason": "completed"},
+              8: {"state": "closed", "reason": "not_planned"}}
+    assert work_tickets.holding_blockers(issue, states) == [
+        (4, "open"), (8, "closed as not planned"), (9, "not read")]
+    assert work_tickets.holding_blockers(work_tickets.fleet_issue({"number": 1}), {}) == []
+
+
+def test_ready_holds_a_candidate_whose_blocked_by_names_an_open_or_not_planned_issue(
+        worktree, monkeypatch, scripted_git):
+    candidates = [
+        {"number": 1, "title": "feature/one", "body": blocked_by("#20")},
+        {"number": 2, "title": "feature/two", "body": blocked_by("owner/other#3")},
+        {"number": 3, "title": "feature/three", "body": blocked_by("#21")},
+        {"number": 4, "title": "feature/four", "body": blocked_by("#22")},
+        {"number": 5, "title": "feature/five", "body": blocked_by()},
+    ]
+    gh = BlockedReady(candidates, native={5: 1}, states={
+        20: ("closed", "completed"), 21: ("open", None), 22: ("closed", "not_planned")})
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    scripted_git.answer = lambda argv: (1, "")
+    assert [issue["number"] for issue in work_tickets.ready_issues(
+        worktree, "git.example/owner/repo")] == [1, 2]
+    assert gh.reads(3) == 1 and not any("other" in call[1] for call in gh.calls if call[0] == "api")
+
+
+def test_ready_reads_each_blocker_once_and_an_unread_one_holds_only_its_candidate(
+        worktree, monkeypatch, scripted_git, capsys):
+    candidates = [
+        {"number": 1, "title": "feature/one", "body": blocked_by("#30", "#2")},
+        {"number": 2, "title": "feature/two", "body": blocked_by("#30")},
+        {"number": 3, "title": "feature/three", "body": blocked_by("#31")},
+        {"number": 4, "title": "feature/four", "body": blocked_by("#9")},
+    ]
+    active = [{"number": 9, "title": "active", "body": ""}]
+    gh = BlockedReady(candidates, active, states={30: ("closed", "completed")}, unreadable={31})
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    scripted_git.answer = lambda argv: (1, "")
+    assert [issue["number"] for issue in work_tickets.ready_issues(
+        worktree, "git.example/owner/repo")] == [2]
+    assert "#3 is held: its blocker #31 could not be read" in capsys.readouterr().err
+    assert gh.reads(30) == 1 and gh.reads(31) == 1
+    assert gh.reads(9) == 0  # an in-progress issue: open, not read
+    assert sum(1 for call in gh.calls if call[0] == "api" and call[1].endswith("/issues/2")) == 1
+
+
 def test_ready_uses_local_branches_without_an_origin(worktree, monkeypatch, scripted_git):
     candidate = {"number": 1, "title": "feature/one", "body": "## File ownership\n\none.py\n"}
     monkeypatch.setattr(
@@ -2192,6 +2271,89 @@ def test_start_without_gh_refuses_an_unstartable_or_unread_issue(
     arguments = ("--issue-body", str(answer)) if given else ()
     assert run(main_checkout, "start", "5", *arguments) == 1
     assert message in capsys.readouterr().err
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+def blocked_answer(tmp_path: Path, body: str, summary: int | None = None) -> Path:
+    answer = tmp_path / "blocked-issue.json"
+    issue = {"number": 5, "title": BRANCH, "body": body, "html_url": URL, "labels": ["work", "ready"]}
+    if summary is not None:
+        issue["issue_dependencies_summary"] = {"blocked_by": summary, "total_blocked_by": summary}
+    answer.write_text(json.dumps(issue), encoding="utf-8")
+    return answer
+
+
+def blockers_file(tmp_path: Path, state: str, reason: str | None) -> Path:
+    saved = tmp_path / "blockers.json"
+    saved.write_text(json.dumps([{"number": 4, "title": "groundwork", "state": state,
+                                  "state_reason": reason, "labels": ["work"]}]), encoding="utf-8")
+    return saved
+
+
+def test_start_without_gh_holds_an_issue_whose_blocked_by_names_an_open_or_unread_issue(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    started_without_gh(monkeypatch, tmp_path)
+    answer = blocked_answer(tmp_path, blocked_by("#4"))
+    worktrees = main_checkout.parent / f"{main_checkout.name}.worktrees"
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    err = capsys.readouterr().err
+    assert "#4 (not read)" in err and "--blockers <file>" in err
+    assert not worktrees.exists()
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--blockers", str(blockers_file(tmp_path, "open", None))) == 1
+    assert "#4 (open)" in capsys.readouterr().err
+    assert not worktrees.exists()
+
+
+def test_start_without_gh_starts_once_its_blocker_is_closed_as_completed(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    started_without_gh(monkeypatch, tmp_path)
+    plain = started_without_gh(monkeypatch, tmp_path)
+    assert run(main_checkout, "start", "5", "--issue-body", str(plain)) == 0
+    expected = capsys.readouterr().out
+    git_ok("-C", str(main_checkout), "worktree", "remove", "--force",
+           str(main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"))
+    git_ok("-C", str(main_checkout), "branch", "-D", BRANCH)
+
+    answer = blocked_answer(tmp_path, blocked_by("#4"))
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--blockers", str(blockers_file(tmp_path, "closed", "completed"))) == 0
+    assert capsys.readouterr().out == expected
+
+
+def test_start_without_gh_holds_an_issue_its_answer_counts_a_link_for(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    started_without_gh(monkeypatch, tmp_path)
+    answer = blocked_answer(tmp_path, blocked_by(), summary=1)
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    assert "linked as blocking it" in capsys.readouterr().err
+    assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+def test_start_through_kerns_relay_reads_the_named_blocker_before_any_label_change(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    started_without_gh(monkeypatch, tmp_path)
+    asked: list[tuple[str, dict]] = []
+
+    def session(tool: str, input_: dict, note: str, wait: str) -> object:
+        asked.append((tool, input_))
+        if tool == "list_issues":
+            return {"issues": []}
+        if tool == "issue_read" and input_.get("issue_number") == 5:
+            return {"number": 5, "title": BRANCH, "html_url": URL, "body": blocked_by("#4"),
+                    "labels": ["work", "ready"]}
+        if tool == "issue_read" and input_.get("issue_number") == 4:
+            return {"number": 4, "title": "groundwork", "state": "open", "labels": ["work"]}
+        raise AssertionError(f"start asked an unexpected step: {tool} {input_}")
+
+    with work_tickets.sibling("se_relay").stepping(session):
+        assert run(main_checkout, "start", "5") == 1
+
+    assert [(tool, input_.get("method"), input_.get("issue_number")) for tool, input_ in asked] == [
+        ("list_issues", None, None), ("issue_read", "get", 5), ("issue_read", "get", 4)]
+    assert "#4 (open)" in capsys.readouterr().err
     assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
 
 
@@ -7047,6 +7209,21 @@ def test_file_fields_without_gh_prints_the_rendered_body_that_the_form_passes(
     checked.write_text(planned, encoding="utf-8")
     assert FORMS.main(["check", "work", "--body-file", str(checked), "--title", WORK_TITLE,
                        "--tree"]) == 0
+
+
+def test_file_blocked_by_without_gh_names_the_bodys_blocked_by_instead_of_a_link(
+        worktree, monkeypatch, capsys, forms_home):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    fields = worktree / "fields.json"
+    fields.write_text(json.dumps(WORK_FIELDS), encoding="utf-8")
+    assert run(worktree, "file", "--title", WORK_TITLE, "--fields", str(fields),
+               "--blocked-by", "4") == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "in the body's Blocked by" in captured.err and "ready and start" in captured.err
+    assert "link the blockers on GitHub" not in captured.err
 
 
 def test_each_filing_command_takes_exactly_one_body(worktree, gh, capsys, forms_home):
