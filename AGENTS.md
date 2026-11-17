@@ -49,6 +49,8 @@
   - on a change to `.github/workflows/check.yml`, `tests/test_public_check.py`, which holds the
     workflow's jobs and their order, beside the tests of the steps it changed (such as
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
+- File order: a change that moves a test file's time by several seconds refreshes
+  `tests/file-seconds.json` with `uv run pytest -q --record-file-seconds`.
 - kern: the `check` job vets kern in its own step and fails where `gofmt -l` lists one of its
   files; the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook
   scripts, on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`);
