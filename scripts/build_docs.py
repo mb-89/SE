@@ -109,14 +109,36 @@ def build(source: Path, destination: Path, document: Path | None = None) -> int:
         except FileExistsError as error:
             print(f"build_docs: {error}", file=sys.stderr)
             return 1
+        if runme(vault, folder):
+            return 2
         config = Path(scratch) / "obs-config.json"
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
         written = ["--document", str(document.resolve())] if document else []
         code = obs_document(obs, ["--config", str(config), "--source", str(vault / source.name), *written,
-                                  "--destination", str(destination)], "build_docs", renamed=(vault, folder))
+                                  "--destination", str(destination), "--execute-commands"], "build_docs",
+                            renamed=(vault, folder))
     if code == 0:
         print(f"build_docs: built {destination}")
     return code
+
+
+def runme(vault: Path, folder: Path) -> int:
+    """Run ``sh RUNME.sh --help`` once in the copy's root, where it holds a RUNME.sh, so what RUNME
+    installs lands in the home and in the copy before obs, and the command fence's run of it there
+    only hands ``--help`` on, within obs's command timeout. Its stdout is discarded, its stderr passed
+    on with the copy's folder named as ``folder``; no timeout. 1 where it fails, else 0."""
+    if not (vault / "RUNME.sh").is_file():
+        return 0
+    result = subprocess.run(["sh", "RUNME.sh", "--help"], cwd=vault, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True, env=child_environment())
+    if result.stderr:
+        print(result.stderr.replace(str(vault), str(folder)), end="", file=sys.stderr)
+    if result.returncode:
+        print(f"build_docs: sh RUNME.sh --help in the build's copy of {folder} failed with exit code "
+              f"{result.returncode}; the pinned se must be in ~/.se/bin: run bash scripts/bootstrap.sh "
+              "--binary in the checkout first (README \"Documentation\")", file=sys.stderr)
+        return 1
+    return 0
 
 
 def reading_copy(folder: Path, copy: Path) -> Path:
