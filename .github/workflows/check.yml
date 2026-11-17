@@ -220,7 +220,7 @@ jobs:
       # Git's bash on Windows, as a session runs these scripts there.
       - name: SE's start and hook scripts on this platform
         shell: bash
-        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py
+        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py tests/test_se_mcp.py tests/test_runme.py
       # The worktree clean-up leaves links alone, junctions only Windows has among them; -rs names each skip.
       - name: SE's worktree clean-up on this platform
         shell: bash
@@ -231,6 +231,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: uv run pytest -q tests/test_public_check.py -k powershell
+      # RUNME.ps1, the generic pair's PowerShell half, started from PowerShell as a person starts it:
+      # only Windows has PowerShell, so only this leg runs it; none selected fails.
+      - name: RUNME from PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: uv run pytest -q tests/test_runme.py -k powershell
       # scripts/bash.ps1, the hand-off to Git's bash, started from PowerShell, not from Git's bash, as a
       # PowerShell hook line starts it: only Windows has PowerShell, so only this leg runs it.
       - name: The hand-off from PowerShell to Git's bash
