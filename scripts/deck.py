@@ -15,11 +15,15 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       (its chapters, their versions and answers): read that, never the built page. It warns, building all
       the same, of each option without `success` and each mark off the datum without `because` (the
       decision skill's fence fields), naming the note and the option.
+      It builds with obs-html's passing line after Send on for four seconds (`BRIEF_NOTICE_MILLISECONDS`,
+      obs's `artifact.reading.briefNoticeMilliseconds`), set in the vault copy's cfg.json beside the
+      folder's own keys (`brief_notice`); a value the folder's cfg.json sets wins, so 0 turns it off there.
       In the Claude app, publish the deck with the Artifact tool and `capabilities: {artifact: {},
       comments: {}}`: `artifact` lets Send save answers.json (the record the session reads), and the
       full-form `comments` lets it also send the answers to Claude as a comment, which wakes the
       watching session where answers.json is refused. Send succeeds when either works; a deck published
-      without them shows the answers as text to copy. The bundle's header owns how Send uses them.
+      without them shows the answers as text to copy. The bundle's header owns how Send uses them and
+      how the reader is told.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser.
@@ -53,6 +57,9 @@ from build_docs import child_environment, obs_dir, obs_document  # noqa: E402
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
 BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
 BUNDLE_FILE = f"{BUNDLE_ID}.js"
+# How long obs-html's passing line after Send ("Sent to Claude.") shows on SE's decks, in ms (obs's
+# adapters/html/spec/artifact-ui.md, Dock menu: `artifact.reading.briefNoticeMilliseconds`, default 0, off).
+BRIEF_NOTICE_MILLISECONDS = 4000
 
 
 def document_path(destination: Path) -> Path:
@@ -79,6 +86,7 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
         vault = Path(scratch) / folder.name
         shutil.copytree(folder, vault, ignore=shutil.ignore_patterns(".*"))
         _screens(vault)
+        _settings(vault)
         parsed = Path(scratch) / "document.json"
         code = obs_document(obs, ["--source", str(vault), "--document", str(parsed), *recorded], "deck",
                             adapter=False)
@@ -114,6 +122,39 @@ def _bundle(document: dict) -> str:
     # JSON in a script: "<" escaped, so no "</script" or "<!--" ends or changes it.
     text = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     return f"globalThis.seDeck = Object.freeze({text});\n" + BUNDLE.read_text(encoding="utf-8")
+
+
+def brief_notice(text: str | None) -> str | None:
+    """A deck folder's ``cfg.json`` text with ``artifact.reading.briefNoticeMilliseconds`` set to
+    ``BRIEF_NOTICE_MILLISECONDS``; ``None`` (no file) gives a file holding that key alone.
+
+    Every other key is kept, and a value the folder sets itself wins (0 turns the line off for that deck).
+    Text that is not JSON, not an object, or holds no object at ``artifact`` or ``artifact.reading`` comes
+    back as it is, so obs names what is wrong with it."""
+    try:
+        config = {} if text is None else json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(config, dict):
+        return text
+    artifact = config.setdefault("artifact", {})
+    if not isinstance(artifact, dict):
+        return text
+    reading = artifact.setdefault("reading", {})
+    if not isinstance(reading, dict):
+        return text
+    reading.setdefault("briefNoticeMilliseconds", BRIEF_NOTICE_MILLISECONDS)
+    return json.dumps(config, ensure_ascii=False, indent=2) + "\n"
+
+
+def _settings(vault: Path) -> None:
+    """Give the vault copy's ``cfg.json`` the passing line's time (``brief_notice``): obs-document carries
+    that file in the Document (``projectConfig``), which is how obs-html's settings reach a deck."""
+    path = vault / "cfg.json"
+    text = path.read_text(encoding="utf-8") if path.is_file() else None
+    merged = brief_notice(text)
+    if merged != text:
+        path.write_text(merged, encoding="utf-8")
 
 
 def _screens(vault: Path) -> None:

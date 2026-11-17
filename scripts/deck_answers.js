@@ -10,10 +10,21 @@
 //       each decision's verdict (or "comment" where it has none) and comment, which wakes the watching
 //       session even where (a) is refused.
 // (b) starts without waiting for (a), since sendToClaude needs the person's recent gesture. Send succeeds
-// when either way does; the result names each way and the error code of each that failed. Where neither
-// does, it rejects, so obs-html shows the answers as text, and a notice beside Send says so with the codes.
-// Without the Claude app it posts to obs-html serve where that served the page, else it rejects with
-// "sending is not available here" and obs-html shows the text to copy.
+// when either way does; the result names each way and the error code of each that failed. Without the
+// Claude app it posts to obs-html serve where that served the page, else it rejects with "sending is not
+// available here" and obs-html shows the text to copy.
+//
+// Telling the reader is obs-html's notice center's (obs's adapters/html/spec/capabilities/answers.md,
+// Contract): this bundle draws nothing on the page. The sink's name is "Claude", so on a confirmed send
+// obs's entry says "1 verdict and 2 comments sent to Claude." and its passing line, which deck.py turns on,
+// "Sent to Claude."; where obs-html serve served the page (`ObsHtmlAnswers.server()` gives its address when
+// this bundle first runs) the sink gives no name, as the answers go to whichever session serves the deck,
+// and both say "sent." alone. A send where only one way worked posts one warning entry of its own,
+// `se-answers-partly`, in plain words, revealed where the message to Claude failed, as the reader may have
+// a step to take; a later send where both work, or where both fail, removes it. Where both fail it rejects
+// with code `not_sent` and `failed`, and a plain message to copy the answers and paste them into the chat,
+// which obs's error entry shows with the answers to copy. The codes go to the console, as one `se-answers:`
+// warning.
 //
 // The deck's title and decisions come from `globalThis.seDeck`, which deck.py writes in front of this file
 // (scripts/deck.py's `_bundle` owns its fields), never from obs-html's embedded page data.
@@ -105,36 +116,27 @@
         return {ways: ["server"], written: body.written};
     };
 
-    // The notice beside Send: what happened, in plain words; on a failure the answers to copy.
-    const notice = (message, text) => {
-        const send = document.querySelector("[data-bless-send]");
-        let box = document.querySelector("[data-se-answers-notice]");
-        if (!box) {
-            box = document.createElement("div");
-            box.dataset.seAnswersNotice = "";
-            box.setAttribute("role", "status");
-            box.style.cssText = "flex-basis:100%;max-width:100%;font-size:.85em;white-space:normal";
-            if (send) send.after(box); else document.body.prepend(box);
+    // The partial send's entry in obs-html's notice center, in plain words (no file, command, code or id).
+    const PARTLY = "se-answers-partly";
+    const notices = () => root.obsNotices;
+    const partly = failedWay => {
+        if (failedWay === "comment") {
+            notices()?.post({id: PARTLY, severity: "warning", title: "No message to Claude",
+                details: ["Your answers are saved with this page, where Claude reads them, but the message to " +
+                    "Claude did not go through. If Claude does not answer, say in the chat that you sent them."]});
+            notices()?.reveal(PARTLY);
+        } else {
+            notices()?.post({id: PARTLY, severity: "warning", title: "Not saved with the page",
+                details: ["Claude got your answers as a message, but they could not be saved with this page."]});
         }
-        const line = document.createElement("p");
-        line.textContent = message;
-        const parts = [line];
-        if (text) {
-            const answers = document.createElement("textarea");
-            answers.readOnly = true;
-            answers.rows = 4;
-            answers.style.cssText = "width:100%;box-sizing:border-box;font:inherit";
-            answers.value = text;
-            answers.dataset.seAnswersText = "";
-            answers.addEventListener("focus", () => answers.select());
-            parts.push(answers);
-        }
-        box.dataset.seAnswersNotice = text ? "failed" : "sent";
-        box.replaceChildren(...parts);
     };
 
+    // Where obs-html serve served the page, the answers go to whichever session serves it, so the sink
+    // names no reader; obs-html gives the server's address from the bundle's first run.
+    const served = Boolean(root.ObsHtmlAnswers?.server?.());
     artifact.trustedExtension("obsHtml.answers").register({
         id: "claude-artifact",
+        ...(served ? {} : {name: "Claude"}),
         send: async payload => {
             const runtime = claude();
             if (!runtime) {
@@ -151,16 +153,20 @@
             const failed = {...(saved.status === "rejected" ? {"answers.json": code(saved.reason)} : {}),
                 ...(sent.status === "rejected" ? {comment: code(sent.reason)} : {})};
             if (!ways.length) {
-                const why = `saving answers.json failed with ${describe(saved.reason)}; ` +
-                    `the comment to Claude failed with ${describe(sent.reason)}`;
-                notice(`Not sent: ${why}. Your answers are kept on this page. Copy them below and paste them ` +
-                    "into the chat.", JSON.stringify(payload, null, 2));
-                throw Object.assign(new Error(`not sent: ${why}`), {code: "not_sent", failed});
+                notices()?.remove(PARTLY);
+                root.console?.warn(`se-answers: nothing was sent: saving answers.json failed with ${describe(saved.reason)}; ` +
+                    `the comment to Claude failed with ${describe(sent.reason)}`);
+                throw Object.assign(new Error("nothing reached Claude; copy your answers and paste them into the chat"),
+                    {code: "not_sent", failed});
             }
-            notice(`Sent: ${ways.map(way => (way === "answers.json" ? "answers.json saved" : "comment sent to Claude"))
-                .join(" and ")}.${Object.keys(failed).length
-                ? ` Not ${Object.keys(failed)[0] === "comment" ? "sent as a comment" : "saved as answers.json"} ` +
-                  `(${Object.values(failed)[0]}).` : ""}`);
+            const [failedWay] = Object.keys(failed);
+            if (failedWay) {
+                root.console?.warn(`se-answers: sent, but ${failedWay === "comment" ? "the comment to Claude" : "saving answers.json"} ` +
+                    `failed with ${describe(failedWay === "comment" ? sent.reason : saved.reason)}`);
+                partly(failedWay);
+            } else {
+                notices()?.remove(PARTLY);
+            }
             return {ways, failed, ...(saved.status === "fulfilled" ? {written: "answers.json", version: saved.value.version} : {}),
                 ...(sent.status === "fulfilled" ? {comment: sent.value} : {})};
         },
