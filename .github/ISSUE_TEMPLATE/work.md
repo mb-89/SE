@@ -6,9 +6,21 @@ labels: work
 ---
 <!-- se:fleet -->
 
+## Situation
+
+<!-- What is true today, in plain words, as someone who has not followed the work would see it. -->
+
+## Problem
+
+<!-- What goes wrong because of it, and for whom. -->
+
 ## Goal
 
 <!-- The user-visible outcome and why it matters, in two to four sentences. -->
+
+## Approach
+
+<!-- How it is done, then a closing line `Not picked:` naming the alternative and why not. -->
 
 ## Reproduction
 

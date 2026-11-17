@@ -601,7 +601,8 @@ def test_a_work_issue_rendered_from_fields_reads_as_the_hand_written_one(catalog
 def test_check_of_the_work_template_names_the_missing_situation_and_empty_requirements(capsys):
     assert forms.main(["check", "work", "--tree", "--body-file", str(TEMPLATE)]) == 1
     out = capsys.readouterr().out
-    assert "Situation is missing" in out and "Requirements is empty" in out
+    assert "Situation is empty" in out and "Requirements is empty" in out
+    assert "is missing" not in out
     assert len(out.splitlines()) <= 10
 
 
