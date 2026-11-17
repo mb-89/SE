@@ -817,6 +817,149 @@ def test_a_missing_argument_exits_2():
     assert stopped.value.code == 2
 
 
+# Forms for files: a form claims files by their path (file.write)
+
+
+STEP_FORM = """name = "{name}"
+reader = "owner"
+says = "Risks: what could go wrong."
+
+[applies]
+actions = ["file.write"]
+paths = [{paths}]
+{extra}
+[rules]
+required = "refuse"
+
+[[fields]]
+name = "risks"
+kind = "list"
+heading = "Risks"
+required = true
+none_ok = true
+says = "One item per risk, or None."
+"""
+
+STEP = "---\nid: S5B\nname: Risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
+
+
+def step_forms(root: Path, **forms_by_name: str) -> dict[str, forms.Form]:
+    for name, extra in forms_by_name.items():
+        write_form(root, name, STEP_FORM.format(name=name, paths='"book/*/steps/*.md"',
+                                                extra=extra))
+    return forms.load(root, folder=root / "forms")
+
+
+@pytest.mark.parametrize("applies, error", [
+    ('actions = ["issue.create"]\npaths = ["*.md"]', "goes only with"),
+    ('actions = ["file.write", "issue.create"]\npaths = ["*.md"]', "goes only with"),
+    ('actions = ["file.write"]', "needs [applies] paths"),
+    ('actions = ["file.write"]\npaths = "*.md"', "list of globs"),
+])
+def test_a_file_form_needs_its_paths_and_its_paths_need_file_write(tmp_path, applies, error):
+    write_form(tmp_path, "one", MINIMAL.format(name="one", extra=f"[applies]\n{applies}\n"))
+    with pytest.raises(forms.FormError) as refused:
+        forms.load(tmp_path, folder=tmp_path / "forms")
+    assert error in str(refused.value) and str(tmp_path / "forms" / "one.toml") in str(refused.value)
+
+
+def test_a_file_form_loads_with_its_paths_and_its_globs_match_by_folder(tmp_path):
+    write_form(tmp_path, "deep", STEP_FORM.format(name="deep", paths='"book/**/*.md"', extra=""))
+    catalog = step_forms(tmp_path, step="")
+    assert catalog["step"].actions == ("file.write",) and catalog["step"].is_file
+    assert catalog["step"].claims("book/m1/steps/51-S5B.md")
+    assert not catalog["step"].claims("book/m1/steps/deeper/51-S5B.md")
+    assert not catalog["step"].claims("book/m1/notes.md")
+    assert all(catalog["deep"].claims(path) for path in ("book/a.md", "book/a/b/c.md"))
+    assert not catalog["deep"].claims("notes/a.md")
+
+
+def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
+    catalog = step_forms(tmp_path, risks="marker_pattern = 'id: S5B'", goals="order = 1\n"
+                         "marker_pattern = 'id: S1'")
+    pick = lambda body, path="book/m1/steps/x.md": forms.select(catalog, "file.write", body,
+                                                                 path=path)
+    free = pick(STEP, "notes/x.md")
+    assert free.form is None and not free.findings
+    assert pick("---\nid: S5B\nform: goals\n---\n").name == "goals"
+    assert pick("---\nid: S5B\n---\n").name == "risks"
+    outside = pick("---\nid: S5B\nform: work\n---\n")
+    assert outside.name == "risks" and rules(list(outside.findings), "refuse") == {"form"}
+    none = pick("---\nid: S9\n---\n\n# Other\n")
+    assert none.form is None
+    assert [finding.fix for finding in none.findings] == [
+        "book/m1/steps/x.md: no form takes this file; name its form in the front matter, "
+        "form: <name> (one of goals, risks)"]
+    with pytest.raises(forms.FormError, match="give path"):
+        forms.select(catalog, "file.write", STEP)
+
+
+def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_form(tmp_path):
+    form = step_forms(tmp_path, risks="")["risks"]
+    document = forms.parse(form, STEP)
+    assert document.fields == {"risks": ["The scan misses a tool."]}
+    rendered = forms.render(form, document)
+    assert rendered == STEP.replace("name: Risks\n", "name: Risks\nform: risks\n")
+    assert forms.FLEET_MARKER not in rendered and "se:form" not in rendered
+    assert forms.parse(form, rendered).fields == document.fields
+    assert forms.render(form, forms.parse(form, rendered)) == rendered
+    bare = forms.render(form, forms.parse(form, "# Risks\n\n## Risks\n\nNone\n"))
+    assert bare == "---\nform: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    fresh = forms.render(form, {"risks": ["One."]})
+    assert fresh == "---\nform: risks\n---\n\n## Risks\n\n- One.\n"
+    assert forms.parse(form, fresh).fields == {"risks": ["One."]}
+
+
+def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
+    form = step_forms(tmp_path, risks="")["risks"]
+    document = forms.parse(form, "---\nid: S5B\n---\n\n# Risks\n\n- The scan misses a tool.\n")
+    assert document.fields == {}
+    assert rules(forms.check(form, document), "refuse") == {"required"}
+
+
+def test_check_and_draft_take_a_file_against_forms_outside_se(tmp_path, capsys):
+    step_forms(tmp_path, risks="marker_pattern = 'id: S5B'")
+    steps = tmp_path / "book" / "m1" / "steps"
+    steps.mkdir(parents=True)
+    (steps / "51-S5B.md").write_text(STEP, encoding="utf-8")
+    (steps / "90-S9.md").write_text("---\nid: S9\n---\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("# Notes\n", encoding="utf-8")
+    where = ["--forms", str(tmp_path / "forms"), "--root", str(tmp_path)]
+    run = lambda *arguments: (forms.main([*arguments, *where]), capsys.readouterr())
+    code, out = run("check", "--path", str(steps / "51-S5B.md"), "--render")
+    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\nform: risks\n")
+    code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
+    assert code == 1 and "[required]" in out.out
+    code, out = run("check", "--path", str(steps / "90-S9.md"))
+    assert code == 1 and "form: <name>" in out.out
+    assert run("check", "--path", str(tmp_path / "notes.md"))[1].out == \
+        "free: no form claims notes.md\n"
+    code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
+    assert code == 0 and json.loads(out.out)["form"] == "risks"
+    code, out = run("draft", "--path", str(steps / "51-S5B.md"))
+    assert out.out.startswith("---\nform: risks\n---\n\n## Risks\n") and "se:fleet" not in out.out
+    assert run("draft", "--path", str(tmp_path / "notes.md"))[1].out == \
+        "free: no form claims notes.md\n"
+    assert forms.main(["list", "--forms", str(tmp_path / "forms")]) == 0
+    assert capsys.readouterr().out.startswith(
+        "risks (owner): file.write: book/*/steps/*.md: Risks:")
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["check", "--action", "file.write", "--body", "x"], "give --path"),
+    (["check", "--action", "issue.create", "--path", "x.md"], "without --action"),
+    (["check", "work", "--root", ".", "--body", "x"], "give --path"),
+    (["draft"], "not both"),
+    (["draft", "work", "--path", "x.md"], "not both"),
+    (["check", "--path", "/elsewhere/x.md", "--root", "/nowhere", "--body", "x"],
+     "not under the project root"),
+    (["list", "--forms", "/nowhere"], "is no folder"),
+])
+def test_the_file_options_refuse_what_does_not_fit(capsys, arguments, error):
+    assert forms.main([*arguments, "--tree"]) == 2
+    assert error in capsys.readouterr().err
+
+
 # Adapters: the texts SE already writes and checks, registered as they are
 
 

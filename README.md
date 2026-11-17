@@ -2032,6 +2032,11 @@ where it holds them, else the working tree (`--tree` always).
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
 choices) and the form's JSON Schema, which a model's strict tool use takes as it stands.
 
+A `file.write` form claims files by its `[applies] paths` globs, such as a milestone's steps.
+`forms.py check --path <file>` checks one against the form its front matter's `form:` line names
+or the conditions pick, refuses one none picks and leaves unclaimed files free; the front matter
+and `#` title stay as they are. `--forms <folder>` reads the forms from another folder.
+
 The commands that file issues check with them where se.toml `[forms] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
 `--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
