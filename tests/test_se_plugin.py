@@ -43,7 +43,7 @@ def suite_run(checkout: Path) -> subprocess.CompletedProcess:
     shutil.copytree(ROOT / "tests", checkout / "tests", dirs_exist_ok=True,
                     ignore=lambda folder, names: [name for name in names
                                                   if name not in ("conftest.py", "fake_git.py",
-                                                                  "network_guard.py")])
+                                                                  "network_guard.py", "time_bound.py")])
     (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (checkout / "tests" / "test_probe.py").write_text(
         "from pathlib import Path\n"

@@ -18,6 +18,7 @@ import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
 import network_guard  # noqa: E402
+import time_bound  # noqa: E402
 
 # The test process reaches nothing beyond this machine, its collection included (tests/network_guard.py).
 network_guard.install()
@@ -106,7 +107,7 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem):
 
 class GuardReports:
     """Fails each test phase that tried to reach beyond this machine (tests/network_guard.py
-    `fail`). A plugin
+    `fail`) and explains a test past its time bound (tests/time_bound.py `explain`). A plugin
     `pytest_configure` registers, not a hook of this conftest's own: pytest calls a conftest's
     `pytest_runtest_makereport` only for the tests under its folder, and the complete run also
     collects kern/python/tests."""
@@ -116,6 +117,13 @@ class GuardReports:
         outcome = yield
         report = outcome.get_result()
         network_guard.fail(report)
+        time_bound.explain(item, report)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Every collected test gets its time bound (tests/time_bound.py), those of kern/python/tests
+    in the complete run too."""
+    time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
 
 
 @pytest.fixture
@@ -137,6 +145,11 @@ def shared_fake_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
         yield state
 
 
+# How long the obs fixture waits for another worker's clone and build of obs (its lock); a test that
+# takes it gets this on top of its time bound (tests/time_bound.py).
+OBS_LOCK_WAIT_SECONDS = 600
+
+
 @pytest.fixture(scope="session")
 def obs() -> Path:
     """The obs module at its pin with its environment built, once per checkout at a time.
@@ -147,14 +160,14 @@ def obs() -> Path:
     """
     lock = ROOT / ".se" / "obs-setup.lock"
     lock.parent.mkdir(exist_ok=True)
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + OBS_LOCK_WAIT_SECONDS
     while True:
         try:
             lock.mkdir()
             break
         except FileExistsError:
             if time.monotonic() > deadline:
-                pytest.fail(f"{lock} is still held after 600 s; remove it if no suite runs")
+                pytest.fail(f"{lock} is still held after {OBS_LOCK_WAIT_SECONDS} s; remove it if no suite runs")
             time.sleep(0.2)
     try:
         with pytest.MonkeyPatch.context() as patch:
