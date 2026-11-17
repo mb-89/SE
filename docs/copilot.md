@@ -333,6 +333,13 @@ Each is an expected result with its one-line remedy.
   naming what is undelivered; the turn ends. With `[copilot] refuse_stop = true` it refuses
   instead, `se Stop hook (1 of 5 in a row): ...`, and lets the turn end after five.
 
+## The default agent
+
+Where the environment sets `SE_DEFAULT_AGENT=se`, Copilot's session start hands over the same
+sentence as Claude Code's, in `additionalContext`: the session acts as the se agent
+([README "Claude Code cloud"](../README.md#claude-code-cloud)). A session that picks its agent
+with `--agent` or its agent list keeps that agent, as does one whose first message names another.
+
 ## Cloud agent, optional and untested
 
 The docs disagree on whether Copilot's cloud agent loads plugins; they agree on where it takes its
