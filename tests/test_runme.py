@@ -267,7 +267,7 @@ def needs(text: str) -> list[str]:
 
 def test_ses_conf_declares_what_se_needs_in_order_and_runs_se():
     text = (ROOT / "RUNME.conf").read_text(encoding="utf-8")
-    assert needs(text) == ["git", "curl", "bash", "claude", "uv", "se"]
+    assert needs(text) == "git curl bash claude uv se".split()
     assert [line for line in text.splitlines() if line.startswith("run ")] == ["run se"]
     assert "need se file .se/.runtime/runme-se" in text.splitlines()
     assert "get se any bash scripts/bootstrap.sh --binary" in text.splitlines()
@@ -276,7 +276,7 @@ def test_ses_conf_declares_what_se_needs_in_order_and_runs_se():
 def test_with_an_older_se_in_the_home_runme_places_the_pinned_one_once_then_runs_it(box):
     project, home, fakes = box
     shutil.copy2(ROOT / "RUNME.conf", project / "RUNME.conf")
-    for name in ("git", "curl", "claude", "uv"):
+    for name in "git curl claude uv".split():
         script(fakes / name, "#!/bin/sh\n")
     script(fakes / "bash", f'#!/bin/sh\nexec "{sh(Path(BASH))}" "$@"\n')
     (home / ".se" / "bin").mkdir(parents=True)
