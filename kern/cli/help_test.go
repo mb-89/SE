@@ -105,12 +105,14 @@ func TestTheReadmesHostTableNamesTheVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, _ := strings.Cut(string(data), "\n## The host\n")
+	// Each line read without a trailing \r: the Windows leg checks the README out with CRLF.
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	_, section, _ := strings.Cut(text, "\n## The host\n")
 	section, _, _ = strings.Cut(section, "\n## ")
 	row := regexp.MustCompile("^\\| `kern ([a-z]+)")
 	named := map[string]bool{}
 	for _, line := range strings.Split(section, "\n") {
-		if m := row.FindStringSubmatch(strings.TrimSuffix(line, "\r")); m != nil {
+		if m := row.FindStringSubmatch(line); m != nil {
 			named[m[1]] = true
 		}
 	}
