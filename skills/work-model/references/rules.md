@@ -378,7 +378,8 @@ tool, with no option, no help and no service of their own.
   - se: the pair at its root reads each project's RUNME.conf; `tests/test_runme.py` holds kern's
     template's copies byte-identical and the pair free of project names; kern's template gives
     every new application the pair.
-  - obs: adopts the pair in its own ticket; until then its own RUNME, by judgment.
+  - obs: the same pair at its root from obs 4.0.0, reading obs's RUNME.conf; obs's gate job holds
+    the pair byte-identical to se's at obs's se pin.
   - Pieces shipped on their own inside a repository: by judgment.
 - **Related:** doc-001, des-003, des-005, gen-002
 
