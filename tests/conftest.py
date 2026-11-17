@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -247,11 +248,25 @@ class SetupTimes:
 # last and runs alone while the other workers idle. pytest-xdist's own order is by test count,
 # which sends a file of three slow tests out among the last. The controller records each file's
 # setup, call and teardown seconds in pytest's cache at the end of a parallel run and hands what it
-# read at the start to every worker, so all of them collect one order; a file the cache does not
-# know (all of them in a fresh checkout) counts its tests at the known files' mean seconds per test.
+# read at the start to every worker, so all of them collect one order. Where the cache records no
+# seconds for a file (all of them in CI, a fresh clone or a new worktree), the tracked table
+# tests/file-seconds.json seeds them; the cache wins file by file, and the cache's record holds
+# only the checkout's own runs. A file in neither counts its tests at the known files' mean seconds
+# per test. `uv run pytest -q --record-file-seconds` refreshes the table from a passing parallel run
+# of whole files; `-o file_seconds=<path>` reads another table.
 FILE_SECONDS_KEY = "se/file-seconds"
 FILE_SECONDS_INPUT = "se_file_seconds"
+FILE_SECONDS_TABLE = ROOT / "tests" / "file-seconds.json"
+RECORD_COMMAND = "uv run pytest -q --record-file-seconds"
 file_seconds_read = pytest.StashKey[dict[str, float]]()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption("--record-file-seconds", nargs="?", const="", default=None, metavar="PATH",
+                     help="write the file-seconds table (tests/file-seconds.json, or PATH) at the end "
+                          "of a passing parallel run of whole files")
+    parser.addini("file_seconds", "the file-seconds table the order reads where the cache records none",
+                  default="")
 
 
 def file_of(nodeid: str) -> str:
@@ -269,19 +284,56 @@ def file_order(counts: Mapping[str, int], seconds: Mapping[str, float]) -> list[
     return sorted(counts, key=lambda name: -weight[name])
 
 
+def merged_seconds(recorded: Mapping[str, float], table: Mapping[str, float]) -> dict[str, float]:
+    """The seconds the order weighs by: the cache's `recorded` seconds, else the table's."""
+    return {**table, **recorded}
+
+
+def table_path(config: pytest.Config) -> Path:
+    """The file-seconds table the order reads: `-o file_seconds=<path>`, else the one beside this file."""
+    named = config.getini("file_seconds")
+    return config.rootpath / named if named else FILE_SECONDS_TABLE
+
+
+def read_table(path: Path) -> dict[str, float]:
+    """The table at `path`, a JSON object of file paths to non-negative seconds; none where it is missing."""
+    if not path.exists():
+        return {}
+    try:
+        table = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise pytest.UsageError(f"{path}: not a JSON object of file paths to seconds ({error}); "
+                                f"write it with `{RECORD_COMMAND}`") from error
+    if not isinstance(table, dict) or not all(
+            isinstance(name, str) and isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+            for name, value in table.items()):
+        raise pytest.UsageError(f"{path}: not a JSON object of file paths to non-negative seconds; "
+                                f"write it with `{RECORD_COMMAND}`")
+    return {name: float(value) for name, value in table.items()}
+
+
+def write_table(path: Path, table: Mapping[str, float]) -> None:
+    """`table` at `path`: keys sorted, one per line, seconds rounded to 0.1 s."""
+    rounded = {name: round(seconds, 1) for name, seconds in sorted(table.items())}
+    path.write_text(json.dumps(rounded, indent=2) + "\n", encoding="utf-8")
+
+
 def parallel(config: pytest.Config) -> bool:
     """Whether this run's tests are spread over pytest-xdist's workers."""
     return bool(getattr(config.option, "numprocesses", None)) and getattr(config.option, "dist", "no") != "no"
 
 
 class FileSeconds:
-    """On the controller: reads the recorded seconds at the start, hands them to every worker,
-    adds up this run's seconds per file and records them at the end of a parallel run that passed
-    and took whole files, dropping a file that is gone."""
+    """On the controller: reads the recorded seconds at the start, hands them, the table filling
+    what the cache lacks, to every worker, adds up this run's seconds per file and records them at
+    the end of a parallel run that passed and took whole files, dropping a file that is gone; with
+    --record-file-seconds, it also writes the table then."""
 
     def __init__(self, config: pytest.Config) -> None:
         self.config = config
+        self.table = read_table(table_path(config))
         self.run: dict[str, float] = {}
+        self.summary = ""
 
     @property
     def read(self) -> dict[str, float]:
@@ -292,23 +344,61 @@ class FileSeconds:
             self.config.stash[file_seconds_read] = recorded if isinstance(recorded, dict) else {}
         return self.config.stash[file_seconds_read]
 
+    @property
+    def seconds(self) -> dict[str, float]:
+        """The seconds the order weighs by, the cache's and the table's."""
+        return merged_seconds(self.read, self.table)
+
     @pytest.hookimpl(optionalhook=True)
     def pytest_configure_node(self, node) -> None:
-        node.workerinput[FILE_SECONDS_INPUT] = self.read
+        node.workerinput[FILE_SECONDS_INPUT] = self.seconds
 
     def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
-        order_items(items, self.read)  # a run without workers collects here
+        order_items(items, self.seconds)  # a run without workers collects here
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         name = file_of(report.nodeid)
         self.run[name] = self.run.get(name, 0.0) + report.duration  # setup, call and teardown
 
-    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+    def unrecordable(self, session: pytest.Session) -> str:
+        """Why this run's seconds are not all of its files' seconds, or "" where they are."""
+        if not self.run:
+            return "no test ran"
+        if session.testsfailed:
+            return "a test failed"
+        if not parallel(self.config):
+            return "the run was not parallel"
+        if not whole_files(self.config):
+            return "the run did not take whole files (-k, -m or a test id)"
+        return ""
+
+    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
+        reason = self.unrecordable(session)
         cache = getattr(self.config, "cache", None)
-        if self.run and cache is not None and parallel(self.config) and whole_files(self.config) \
-                and session.testsfailed == 0:
+        if not reason and cache is not None:
             kept = {name: seconds for name, seconds in self.read.items() if (self.config.rootpath / name).exists()}
             cache.set(FILE_SECONDS_KEY, {**kept, **{name: round(seconds, 3) for name, seconds in self.run.items()}})
+        target = self.config.getoption("record_file_seconds")
+        if target is None:
+            return
+        path = Path(target).resolve() if target else table_path(self.config)
+        if not reason and exitstatus != 0:
+            reason = f"the run ended with exit status {int(exitstatus)}"
+        if reason:
+            self.summary = f"file seconds: wrote nothing to {path}: {reason}"
+            return
+        try:
+            earlier = read_table(path)
+        except pytest.UsageError as error:
+            self.summary = f"file seconds: wrote nothing: {error}"
+            return
+        kept = {name: seconds for name, seconds in earlier.items() if (self.config.rootpath / name).exists()}
+        write_table(path, {**kept, **self.run})
+        self.summary = f"file seconds: wrote {path} ({len(self.run)} files of this run, {len(kept.keys() - self.run.keys())} kept)"
+
+    def pytest_terminal_summary(self, terminalreporter) -> None:
+        if self.summary:
+            terminalreporter.write_line(self.summary)
 
 
 def whole_files(config: pytest.Config) -> bool:
