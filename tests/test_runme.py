@@ -84,10 +84,18 @@ def fake(fakes: Path, *names: str) -> None:
         script(fakes / name, FAKE.replace("@NAME@", name))
 
 
+# The arguments cross into bash in variables, never on a Windows command line, which quotes them
+# differently from the MSYS runtime (as RUNME.ps1 hands them over): this rebuilds them and runs RUNME.sh.
+REBUILD = ('i=0; set --; while [ "$i" -lt "$ARGC" ]; do eval "set -- \\"\\$@\\" \\"\\${ARG_$i}\\""; '
+           'i=$((i + 1)); done; exec "$RUNME" "$@"')
+
+
 def runme(box, *args: str, cwd: Path | None = None, **variables: str) -> subprocess.CompletedProcess:
     project, home, fakes = box
-    env = {"HOME": sh(home), "PATH": f"{sh(fakes)}:{sh(home / 'installed')}", **variables}
-    return subprocess.run([BASH, sh(project / "RUNME.sh"), *args], env=env, capture_output=True, text=True,
+    env = {"HOME": sh(home), "PATH": f"{sh(fakes)}:{sh(home / 'installed')}", **variables,
+           "RUNME": sh(project / "RUNME.sh"), "REBUILD": REBUILD, "ARGC": str(len(args)),
+           **{f"ARG_{i}": arg for i, arg in enumerate(args)}}
+    return subprocess.run([BASH, "-c", "eval $REBUILD"], env=env, capture_output=True, text=True,
                           timeout=60, cwd=cwd or project, stdin=subprocess.DEVNULL)
 
 
@@ -325,7 +333,8 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
         assert (TEMPLATE / name).read_bytes() == data, f"kern/template/{name} differs from {name}"
         text = data.decode("ascii")  # ASCII, for Windows PowerShell 5.1
         assert len(text.splitlines()) <= CEILINGS[name]
-        assert b"\r" not in data
+        if name == "RUNME.sh":  # sh reads LF only (.gitattributes); PowerShell reads either
+            assert b"\r" not in data
         for word in (r"\bse\b", r"\bSE\b", r"\bapp\b"):
             assert not re.search(word, text), f"{name} holds {word}"
         for term in named:
