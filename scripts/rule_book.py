@@ -6,11 +6,15 @@ book that breaks them and lists, without failing, every rule followed only by ju
 
 Exit code 0: the book passed; 1: it has problems (each printed as `<book>:<line>: <problem>`);
 2: setup error (the book is missing).
+
+`documentation` makes the documentation's page of the book from the same parse: one table of its
+rules and one note per rule (README "Documentation").
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -193,6 +197,116 @@ def check(text: str) -> tuple[list[tuple[int, str]], list[Rule]]:
             problems.append((line, f"principle {number} maps to {rule_id!r}, which is no rule in the book"))
     judgment = [rule for rule in rules if rule.retired is None and rule.judgment_only]
     return sorted(problems), judgment
+
+
+def anchor(heading: str) -> str:
+    """The anchor GitHub gives a heading's text: lowercase, every character but letters, digits,
+    hyphens, underscores and spaces dropped, each space a hyphen."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+@dataclass
+class Documentation:
+    """The documentation's page of the book, its note per rule (``<id>.md`` to its text) and, for
+    each rule, the anchor GitHub gives its heading (anchor to id)."""
+
+    page: str
+    notes: dict[str, str]
+    anchors: dict[str, str]
+
+
+def _quoted(value: str) -> str:
+    """``value`` as a YAML double-quoted scalar (a JSON string is one)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _trimmed(lines: list[str]) -> list[str]:
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def _table(sections: list[str]) -> list[str]:
+    """The ``base`` fence of the rule notes, grouped by section in book order."""
+    order = ", ".join(_quoted(section) for section in sections)
+    return [
+        "```base",
+        "filters: 'kind == \"rule\"'",
+        "properties:",
+        "  file.name: {displayName: Rule}",
+        "  name: {displayName: Name}",
+        "  why: {displayName: Why}",
+        "  section: {displayName: \"\"}",
+        "views:",
+        "  - type: table",
+        "    name: Rules",
+        "    order: [file.name, name, why]",
+        "    groupBy: {property: section, direction: ASC}",
+        "    sort:",
+        "      - {property: file.name, direction: ASC}",
+        "    obsHtml:",
+        f"      groupOrder: [{order}]",
+        "      pagination: false",
+        "      detailFields: []",
+        "```",
+    ]
+
+
+def documentation(text: str) -> Documentation:
+    """The book ``text`` as the documentation shows it, from ``parse``.
+
+    The page keeps what stands before the first section and after the last as written; between
+    them it holds a heading ``Rules`` with one table of the rules, and a heading ``Sections`` with
+    the prose a section has before its first rule, under that section's heading one level lower.
+    Each rule becomes a note whose frontmatter holds its name, section and Why, and whose body is
+    the rule's sentence and fields as the book has them.
+    """
+    rules = {rule.line: rule for rule in parse(text)[0]}
+    lines = text.split("\n")
+    headings = [n for n, line in enumerate(lines) if line.startswith("## ")]
+    sections = [n for n in headings if SECTION.match(lines[n])]
+    if not sections:
+        return Documentation(text, {}, {})
+    after = next((n for n in headings if n > sections[-1] and n not in sections), len(lines))
+    names: list[str] = []
+    prose: list[str] = []
+    notes: dict[str, str] = {}
+    anchors: dict[str, str] = {}
+    for index, start in enumerate(sections):
+        stop = sections[index + 1] if index + 1 < len(sections) else after
+        title = lines[start][3:].strip()
+        names.append(title)
+        body = lines[start + 1:stop]
+        first = next((n for n, line in enumerate(body) if line.startswith("### ")), len(body))
+        intro = _trimmed(body[:first])
+        if intro:
+            prose += [f"### {title}", "", *intro, ""]
+        marks = [n for n, line in enumerate(body) if line.startswith("### ")] + [len(body)]
+        for here, there in zip(marks, marks[1:]):
+            rule = rules.get(start + 2 + here)
+            if rule is None:
+                continue
+            anchors[anchor(f"{rule.id} {rule.name}")] = rule.id
+            notes[f"{rule.id}.md"] = "\n".join([
+                "---",
+                f"title: {_quoted(f'{rule.id} {rule.name}')}",
+                "kind: rule",
+                f"name: {_quoted(rule.name)}",
+                f"section: {_quoted(title)}",
+                f"why: {_quoted(rule.fields.get('Why', ''))}",
+                "---",
+                "",
+                *_trimmed(body[here + 1:there]),
+                "",
+            ])
+    page = [*lines[:sections[0]], "## Rules", "", *_table(names), ""]
+    if prose:
+        page += ["## Sections", "", *prose]
+    page += lines[after:]
+    return Documentation("\n".join(page), notes, anchors)
 
 
 def main(argv: list[str] | None = None) -> int:

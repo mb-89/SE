@@ -471,6 +471,22 @@ script notes, no setting or label names as explanations, no internal ids or fiel
   - se: by judgment in review, and in each role's output to the owner.
 - **Related:** doc-002
 
+### doc-004 A table, not a long list
+
+Where a table makes sense, use a table, not a long list: items that share the same parts are its
+rows, and those parts are its columns.
+
+- **Why:** a reader compares items across a row and finds one down a column at a glance; the same
+  facts in a long list must be read item by item.
+- **Without it:** pages grow long lists whose items repeat the same labels, and a reader reads all
+  of them to compare two or to find one.
+- **Prevents:** a table in disguise, a list whose items each repeat the same labelled parts; a long
+  list read in full to find or compare one item; an item that silently lacks a part its
+  neighbours have.
+- **Implementations:**
+  - se: by judgment in review, in documentation, decks, issues and messages to the owner.
+- **Related:** doc-002, doc-003
+
 ## wrk: work and fleet
 
 ### wrk-001 GitHub is the only shared state

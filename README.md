@@ -421,6 +421,10 @@ The build reads a copy of the repository in which no note asks for a verdict, so
 decision note shows as a page to read, with no Send; the note itself still asks, for the decks
 built from it.
 
+In the same copy the rule book shows as one table of its rules, grouped by section, each row
+opening to its rule; `scripts/rule_book.py` makes the table and a note per rule from `rules.md`.
+`--document <file>` also writes the obs Document the page was built from.
+
 Any obs warning fails the build, so a broken link, a missing note or a paragraph longer than obs's
 default limit fails it. The suite runs the build (`tests/test_docs.py`),
 and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub Pages on each push
