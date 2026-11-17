@@ -634,6 +634,156 @@ def test_check_takes_fields_from_a_draft(tmp_path, capsys, catalog):
     assert "title-shape" in capsys.readouterr().out
 
 
+def schema_errors(schema: dict, value: object, where: str = "$") -> list[str]:
+    """What `value` breaks of `schema`, read with the eight keywords `forms.schema` writes: SE
+    adds no validator dependency."""
+    kind = schema.get("type")
+    types = {"object": dict, "array": list, "string": str, "boolean": bool}
+    if kind and not isinstance(value, types[kind]):
+        return [f"{where}: {type(value).__name__} is no {kind}"]
+    errors = []
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{where}: {value!r} is none of the enum")
+    if kind == "array":
+        for index, item in enumerate(value):
+            errors += schema_errors(schema.get("items", {}), item, f"{where}[{index}]")
+    if kind == "object":
+        properties = schema.get("properties", {})
+        errors += [f"{where}: {name} is required" for name in schema.get("required", [])
+                   if name not in value]
+        if schema.get("additionalProperties") is False:
+            errors += [f"{where}: {name} is no property" for name in value if name not in properties]
+        for name, item in value.items():
+            if name in properties:
+                errors += schema_errors(properties[name], item, f"{where}.{name}")
+    return errors
+
+
+def keywords(schema: object) -> set[str]:
+    """Every keyword `schema` uses, at every depth; the names under `properties` are none."""
+    if not isinstance(schema, dict):
+        return set()
+    inner = [keywords(item) for item in schema.get("properties", {}).values()]
+    return set(schema).union(*inner) | keywords(schema.get("items"))
+
+
+def drafted(capsys, name: str) -> tuple[str, dict]:
+    assert forms.main(["draft", name, "--json", "--tree"]) == 0
+    out = capsys.readouterr().out
+    return out, json.loads(out)
+
+
+@pytest.mark.parametrize("name", ISSUE_FORMS)
+def test_draft_json_gives_each_shape_and_a_schema_its_example_passes(capsys, catalog, name):
+    form = catalog[name]
+    _, answer = drafted(capsys, name)
+    shapes, schema = answer["field_shape"], answer["schema"]
+    assert list(shapes) == [item.name for item in form.fields]
+    for item in form.fields:
+        assert shapes[item.name]["kind"] == item.kind
+        assert shapes[item.name].get("required", False) is item.required
+        assert shapes[item.name].get("choices", []) == list(item.choices)
+        assert schema["properties"][item.name]["description"] == item.says
+    assert schema["required"] == [item.name for item in form.fields if item.required]
+    assert schema_errors(schema, form.example["fields"]) == []
+    assert schema_errors(schema, {"title": 1, "nope": ""})  # the validator does refuse
+
+
+def test_the_work_shape_names_its_choices_and_its_flags(capsys, catalog):
+    _, answer = drafted(capsys, "work")
+    kind = answer["field_shape"]["package_kind"]
+    assert kind == {"kind": "choice", "heading": "Package kind",
+                    "choices": list(catalog["work"].field("package_kind").choices)}
+    assert "feat" in kind["choices"] and len(kind["choices"]) == 13
+    assert answer["field_shape"]["title"] == {"kind": "line", "required": True, "source": "title"}
+    assert answer["schema"]["properties"]["acceptance"]["items"]["required"] == ["done", "text"]
+
+
+def test_the_schema_uses_only_the_keywords_strict_tool_use_takes(catalog):
+    for form in catalog.values():
+        assert keywords(forms.schema(form)) <= set(forms.SCHEMA_KEYWORDS), form.name
+
+
+def test_an_adapter_drafts_no_shape_and_an_empty_schema(capsys):
+    _, answer = drafted(capsys, "review")
+    assert answer["field_shape"] == {} and answer["schema"]["properties"] == {}
+
+
+def test_draft_json_keeps_its_old_keys_byte_for_byte(capsys, catalog):
+    out, _ = drafted(capsys, "work")
+    form = catalog["work"]
+    empty = {"list": [], "issue": [], "checklist": [], "object": {}}
+    old = json.dumps({"form": form.name, "says": form.says,
+                      "fields": {item.name: empty.get(item.kind, "") for item in form.fields},
+                      "field_says": {item.name: item.says for item in form.fields}}, indent=2)
+    assert out.startswith(old.removesuffix("\n}") + ",\n  \"field_shape\": {")
+
+
+def test_an_object_field_takes_the_schemas_key_value_pairs(tmp_path):
+    write_form(tmp_path, "obj", 'name = "obj"\nreader = "fleet"\nsays = "x"\n[applies]\n'
+               'actions = ["issue.create"]\n[[fields]]\nname = "meta"\nkind = "object"\n'
+               'heading = "Meta"\nsays = "keys"\n')
+    form = forms.load(tmp_path, tree=True)["obj"]
+    pairs = {"meta": [{"key": "Owner", "value": "SE"}, {"key": "Size", "value": "small"}]}
+    assert schema_errors(forms.schema(form), pairs) == []
+    assert forms.render(form, pairs) == forms.render(form, {"meta": {"Owner": "SE",
+                                                                    "Size": "small"}})
+
+
+def test_check_takes_fields_and_bodies_as_text_and_renders_what_it_would_file(tmp_path, capsys,
+                                                                             catalog):
+    form = catalog["work"]
+    for values in (work_fields(catalog), {"title": "plain-titles"}):
+        text = json.dumps(values)
+        (tmp_path / "f.json").write_text(text, encoding="utf-8")
+        code = forms.main(["check", "work", "--tree", "--fields", str(tmp_path / "f.json")])
+        by_file = capsys.readouterr().out
+        assert forms.main(["check", "work", "--tree", "--fields-json", text]) == code
+        assert capsys.readouterr().out == by_file
+    assert code == 1 and "refuse: " in by_file
+    values = work_fields(catalog)
+    assert forms.main(["check", "work", "--tree", "--fields-json", json.dumps(values),
+                       "--render"]) == 0
+    rendered = capsys.readouterr()
+    assert rendered.out == forms.render(form, values)
+    assert rendered.out.startswith(f"{forms.FLEET_MARKER}\n<!-- se:form work -->\n")
+    assert forms.main(["check", "work", "--tree", "--title", "Not A Name", "--body",
+                       rendered.out, "--render"]) == 0
+    warned = capsys.readouterr()
+    assert warned.out == rendered.out and "title-shape" in warned.err
+    assert forms.main(["check", "work", "--tree", "--fields-json", "{\"title\": \"x\"}",
+                       "--render"]) == 1
+    assert capsys.readouterr().out.startswith("refuse: ")
+
+
+def test_check_selects_the_form_by_action_as_a_write_would(capsys, catalog):
+    body = forms.render(catalog["work"], work_fields(catalog)).replace(
+        "<!-- se:form work -->\n", "")
+    assert forms.main(["check", "--tree", "--action", "issue.create", "--labels", "work",
+                       "--title", "plain-titles", "--body", body]) == 0
+    assert capsys.readouterr().out == "work: no findings\n"
+    assert forms.main(["check", "--tree", "--action", "issue.create", "--title", "plain-titles",
+                       "--body", body]) == 1
+    assert "steps [required]" in capsys.readouterr().out  # the ticket form's own field
+    assert forms.main(["check", "--tree", "--action", "comment.create", "--body", "Thanks."]) == 0
+    assert capsys.readouterr().out == "free: no form applies (comment.create)\n"
+    marked = "<!-- se:form work -->\nThanks.\n"
+    assert forms.main(["check", "--tree", "--action", "comment.create", "--body", marked]) == 1
+    assert "[form]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["check", "work", "--action", "issue.create", "--body", "x"], "not both"),
+    (["check", "--body", "x"], "give --action"),
+    (["check", "work", "--labels", "work", "--body", "x"], "with --action"),
+    (["check", "work", "--fields-json", "[1]"], "must hold an object"),
+    (["check", "work", "--fields-json", "{"], "--fields-json is no JSON"),
+])
+def test_check_usage_errors_of_the_new_options_exit_2(capsys, arguments, error):
+    assert forms.main([*arguments, "--tree"]) == 2
+    assert error in capsys.readouterr().err
+
+
 def test_draft_prints_the_empty_form_with_its_says(capsys, catalog):
     assert forms.main(["draft", "work", "--tree"]) == 0
     out = capsys.readouterr().out
