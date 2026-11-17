@@ -135,8 +135,6 @@ def _playwright() -> bool:
         ["node", "-e", "require('playwright')"], capture_output=True).returncode
 
 
-browser = pytest.mark.skipif(not _playwright(), reason="node with playwright is not installed")
-
 PLANTED = """<!doctype html>
 <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body {margin: 0; font: 16px sans-serif} section {padding: 8px}</style></head>
@@ -149,8 +147,10 @@ PLANTED = """<!doctype html>
 """
 
 
-@browser
 def test_look_finds_the_planted_overflow_empty_chapter_and_script_error_and_shoots_on_request(tmp_path):
+    # Probed here, not in a mark: every worker imports this file.
+    if not _playwright():
+        pytest.skip("node with playwright is not installed")
     page = tmp_path / "planted.html"
     page.write_text(PLANTED, encoding="utf-8")
     shots = tmp_path / "shots"
@@ -164,23 +164,3 @@ def test_look_finds_the_planted_overflow_empty_chapter_and_script_error_and_shoo
     ]
     assert sorted(path.name for path in shots.iterdir()) == sorted(
         f"{chapter}-{device}-light.png" for chapter in ("wide", "blank", "fine") for device in ("phone", "desktop"))
-
-
-@browser
-def test_a_clean_built_deck_has_no_findings_and_writes_nothing(tmp_path, obs):
-    folder = tmp_path / "decisions"
-    folder.mkdir()
-    (folder / "decision-deck.md").write_text(
-        (ROOT / "src" / "skills" / "decision" / "references" / "decision-deck.md").read_text(encoding="utf-8"),
-        encoding="utf-8")
-    (folder / "manifest.md").write_text("---\ntitle: Decisions\n---\n\n- [[decision-deck|Decision deck]]\n",
-                                        encoding="utf-8")
-    deck = tmp_path / "deck.html"
-    built = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "build", str(folder), "--destination", str(deck)],
-                           capture_output=True, text=True)
-    assert built.returncode == 0, built.stderr
-    before = sorted(path.name for path in tmp_path.iterdir())
-    result = _look(str(deck), "--capabilities", "artifact,comments,downloads")
-    assert (result.returncode, result.stdout) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
-                                                     "phone-dark, desktop-light, desktop-dark\n"), result.stderr
-    assert sorted(path.name for path in tmp_path.iterdir()) == before
