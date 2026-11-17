@@ -1,25 +1,14 @@
 // Package cli is the core's command line, the same for the bare core and for
 // every application built on it: an application's main registers its
-// components (index.Register) and calls Run with its own name.
-//
-//	<name> start  [--root DIR] [--home DIR] [--grace D] [--idle D]   start the core in the background, return at once
-//	<name> status [--root DIR] [--wait D] [--json]      say whether a core runs, and its health
-//	<name> stop   [--root DIR]                          stop the core and wait until it has exited
-//	<name> serve  [--root DIR] [--home DIR] [--grace D] [--idle D]   run the core in the foreground (what start spawns)
-//	<name> hook <event> [--root DIR] [--wait D] [--unanswered N]  post the host's hook JSON on stdin to the core
-//	<name> mcp    [--root DIR] [--home DIR] [--grace D] [--idle D]   the MCP door over stdio, starting the core or attaching to it (package mcp)
-//	<name> mcp --tools [--root DIR] [--home DIR]          print the tools the door would serve, as JSON in served order, and exit
+// components (index.Register), may add verbs of its own (Add) and a bare run
+// (Bare), and calls Run with its own name. Its verbs are one table (verbs.go),
+// which renders the usage, the help (`<name> help`) with every verb and the
+// exit codes, and each verb's options (`<name> <verb> -h`).
 //
 // The root is the checkout the core serves: by default the nearest folder up
 // from the working directory that holds .git, else the working directory.
 // The home is the application's own folder, where it is installed: a root
 // with no wiring of its own is served the home's (Source).
-// Exit codes: 0 done, 1 no core runs (status), 2 a usage or start error.
-// hook exits 0 and prints nothing where the core does not answer: a hook
-// fails open, and a host reads a hook's exit code 2 as a block. With
-// --unanswered N it exits N instead where no command answered the event (no
-// core, none bound to it, or the bound one failed), so its caller can answer
-// it another way.
 package cli
 
 import (
@@ -69,111 +58,131 @@ const StepWaitEnv = "KERN_STEP_WAIT"
 // to show that an answer the bus refuses fails the step at once.
 const ReplyWaitEnv = "KERN_REPLY_WAIT"
 
-const usage = "usage: %s <start|status|stop|serve|mcp|hook <event>> [--root DIR] [--home DIR] [--grace D] [--idle D] [--wait D] [--json] [--unanswered N] [--tools]"
+func rootFlag(fs *flag.FlagSet) {
+	fs.String("root", "", "the checkout the core serves")
+}
 
-// Run is the command named name: it serves the components registered with
-// index.Register before it is called, and answers the exit code.
-func Run(name string, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintf(stderr, usage+"\n", name)
-		return 2
-	}
-	verb := args[0]
-	if verb == "hook" {
-		return hook(name, args[1:], os.Stdin, stdout, stderr)
-	}
-	fs := flag.NewFlagSet(name+" "+verb, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	root := fs.String("root", "", "the checkout the core serves")
-	var grace, idle, wait *time.Duration
-	var asJSON *bool
-	home, tools := new(string), new(bool)
-	switch verb {
-	case "start", "serve", "mcp":
-		home = fs.String("home", "", "the application's own folder, whose wiring a root without one is served")
-		grace = fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
-		idle = fs.Duration("idle", host.Idle, "how long the core runs without any event")
-		if verb == "mcp" {
-			tools = fs.Bool("tools", false, "print the tools the door would serve, as JSON in served order, and exit: starts no core, reads no input")
-		}
-	case "status":
-		wait = fs.Duration("wait", 0, "how long to wait for a starting core to answer")
-		asJSON = fs.Bool("json", false, "print the health as JSON")
-	case "stop":
-	default:
-		fmt.Fprintf(stderr, "%s: no command %q\n"+usage+"\n", name, verb, name)
-		return 2
-	}
-	if err := fs.Parse(args[1:]); err != nil {
-		return 2
-	}
-	dir, err := rootOf(*root)
-	if verb == "mcp" && *tools {
-		return listTools(name, dir, *home, err, stdout, stderr)
-	}
-	if verb == "mcp" {
-		// The door a host spawns never exits early: what keeps it from a core
-		// is every call's answer instead.
-		return door(name, dir, *home, err, *grace, *idle, stderr)
-	}
+func coreFlags(fs *flag.FlagSet) {
+	rootFlag(fs)
+	fs.String("home", "", "the application's own folder, whose wiring a root without one is served")
+	fs.Duration("grace", host.Grace, "how long the core runs on once no session holds a lease")
+	fs.Duration("idle", host.Idle, "how long the core runs without any event")
+}
+
+func mcpFlags(fs *flag.FlagSet) {
+	coreFlags(fs)
+	fs.Bool("tools", false, "print the tools the door would serve, as JSON in served order, and exit: starts no core, reads no input")
+}
+
+func statusFlags(fs *flag.FlagSet) {
+	rootFlag(fs)
+	fs.Duration("wait", 0, "how long to wait for a starting core to answer")
+	fs.Bool("json", false, "print the health as JSON")
+}
+
+func hookFlags(fs *flag.FlagSet) {
+	rootFlag(fs)
+	fs.Duration("wait", host.HookWait, "how long to wait for the core's answer, a start included")
+	fs.Int("unanswered", 0, "the exit code where no command answered the event")
+}
+
+// rooted is the checkout c names; where it finds none it says so and
+// answers false.
+func rooted(c *Call) (string, bool) {
+	dir, err := rootOf(c.String("root"))
 	if err != nil {
-		fmt.Fprintf(stderr, "%s %s: %v\n", name, verb, err)
+		fmt.Fprintf(c.Stderr, "%s %s: %v\n", c.Name, c.Verb, err)
+		return "", false
+	}
+	return dir, true
+}
+
+func runStart(c *Call) int {
+	dir, ok := rooted(c)
+	if !ok {
 		return 2
 	}
-	switch verb {
-	case "start":
-		bin, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(stderr, "%s start: no path to this binary: %v\n", name, err)
-			return 2
-		}
-		got, err := host.Start(host.Wall{}, dir, bin, serveArgs(*home, *grace, *idle)...)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		fmt.Fprintf(stdout, "%s: %s in %s\n", name, got, dir)
-		return 0
-	case "status":
-		st, err := host.WaitRunning(host.Wall{}, dir, *wait)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s status: %v\n", name, err)
-			return 2
-		}
-		if *asJSON {
-			answer := map[string]any{"state": st.State, "health": st.Health}
-			if st.Died != "" {
-				answer["died"] = st.Died
-			}
-			data, _ := json.Marshal(answer)
-			fmt.Fprintln(stdout, string(data))
-		} else if st.Died != "" {
-			fmt.Fprintf(stdout, "%s: %s in %s; %s\n", name, st.State, dir, DiedReport(dir, st.Died))
-		} else if st.State == host.StateRunning {
-			h := st.Health
-			fmt.Fprintf(stdout, "%s: running in %s, pid %d, bus %s, %d session(s), %d instance(s), %d placed\n",
-				name, dir, h.Pid, h.Bus, len(h.Sessions), len(h.Instances), len(h.Placements))
-		} else {
-			fmt.Fprintf(stdout, "%s: %s in %s\n", name, st.State, dir)
-		}
-		if st.State == host.StateStopped {
-			return 1
-		}
-		return 0
-	case "stop":
-		pid, err := host.AskStop(dir)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		if pid == 0 {
-			fmt.Fprintf(stdout, "%s: not running in %s\n", name, dir)
-		} else {
-			fmt.Fprintf(stdout, "%s: stopped pid %d in %s\n", name, pid, dir)
-		}
-		return 0
+	bin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(c.Stderr, "%s start: no path to this binary: %v\n", c.Name, err)
+		return 2
 	}
-	return serve(name, dir, *home, *grace, *idle, stdout, stderr)
+	got, err := host.Start(host.Wall{}, dir, bin, serveArgs(c.String("home"), c.Duration("grace"), c.Duration("idle"))...)
+	if err != nil {
+		fmt.Fprintln(c.Stderr, err)
+		return 2
+	}
+	fmt.Fprintf(c.Stdout, "%s: %s in %s\n", c.Name, got, dir)
+	return 0
+}
+
+func runStatus(c *Call) int {
+	dir, ok := rooted(c)
+	if !ok {
+		return 2
+	}
+	name, stdout := c.Name, c.Stdout
+	st, err := host.WaitRunning(host.Wall{}, dir, c.Duration("wait"))
+	if err != nil {
+		fmt.Fprintf(c.Stderr, "%s status: %v\n", name, err)
+		return 2
+	}
+	if c.Bool("json") {
+		answer := map[string]any{"state": st.State, "health": st.Health}
+		if st.Died != "" {
+			answer["died"] = st.Died
+		}
+		data, _ := json.Marshal(answer)
+		fmt.Fprintln(stdout, string(data))
+	} else if st.Died != "" {
+		fmt.Fprintf(stdout, "%s: %s in %s; %s\n", name, st.State, dir, DiedReport(dir, st.Died))
+	} else if st.State == host.StateRunning {
+		h := st.Health
+		fmt.Fprintf(stdout, "%s: running in %s, pid %d, bus %s, %d session(s), %d instance(s), %d placed\n",
+			name, dir, h.Pid, h.Bus, len(h.Sessions), len(h.Instances), len(h.Placements))
+	} else {
+		fmt.Fprintf(stdout, "%s: %s in %s\n", name, st.State, dir)
+	}
+	if st.State == host.StateStopped {
+		return 1
+	}
+	return 0
+}
+
+func runStop(c *Call) int {
+	dir, ok := rooted(c)
+	if !ok {
+		return 2
+	}
+	pid, err := host.AskStop(dir)
+	if err != nil {
+		fmt.Fprintln(c.Stderr, err)
+		return 2
+	}
+	if pid == 0 {
+		fmt.Fprintf(c.Stdout, "%s: not running in %s\n", c.Name, dir)
+	} else {
+		fmt.Fprintf(c.Stdout, "%s: stopped pid %d in %s\n", c.Name, pid, dir)
+	}
+	return 0
+}
+
+func runServe(c *Call) int {
+	dir, ok := rooted(c)
+	if !ok {
+		return 2
+	}
+	return serve(c.Name, dir, c.String("home"), c.Duration("grace"), c.Duration("idle"), c.Stdout, c.Stderr)
+}
+
+func runMCP(c *Call) int {
+	dir, err := rootOf(c.String("root"))
+	if c.Bool("tools") {
+		return listTools(c.Name, dir, c.String("home"), err, c.Stdout, c.Stderr)
+	}
+	// The door a host spawns never exits early: what keeps it from a core
+	// is every call's answer instead.
+	return door(c.Name, dir, c.String("home"), err, c.Duration("grace"), c.Duration("idle"), c.Stderr)
 }
 
 // serveArgs are the arguments after `serve --root <root>` that start and the
@@ -186,29 +195,20 @@ func serveArgs(home string, grace, idle time.Duration) []string {
 	return args
 }
 
-// hook posts the host's hook JSON, read from stdin, on hook.<event> and
+// runHook posts the host's hook JSON, read from stdin, on hook.<event> and
 // prints the answer as the host's hook JSON: the output of the command bound
 // to the event, else the context the components told, on an event that
 // carries context (HookOutput). A pass with nothing told prints nothing; so
 // does every failure, which goes to stderr alone, with the exit code
 // --unanswered names, 0 by default.
-func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet(name+" hook", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	root := fs.String("root", "", "the checkout the core serves")
-	wait := fs.Duration("wait", host.HookWait, "how long to wait for the core's answer, a start included")
-	unanswered := fs.Int("unanswered", 0, "the exit code where no command answered the event")
-	event := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		event, args = args[0], args[1:]
+func runHook(c *Call) int {
+	name, stdin, stdout, stderr := c.Name, c.Stdin, c.Stdout, c.Stderr
+	unanswered := c.Int("unanswered")
+	event := c.Lead
+	if event == "" && c.Flags.NArg() > 0 {
+		event = c.Flags.Arg(0)
 	}
-	if err := fs.Parse(args); err != nil {
-		return 0
-	}
-	if event == "" && fs.NArg() > 0 {
-		event = fs.Arg(0)
-	}
-	dir, err := rootOf(*root)
+	dir, err := rootOf(c.String("root"))
 	if err != nil {
 		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
 		return 0
@@ -218,7 +218,7 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 		fmt.Fprintf(stderr, "%s hook: stdin: %v\n", name, err)
 		return 0
 	}
-	a, err := host.Post(host.Wall{}, dir, event, payload, *wait)
+	a, err := host.Post(host.Wall{}, dir, event, payload, c.Duration("wait"))
 	switch {
 	case err != nil:
 		fmt.Fprintf(stderr, "%s hook: %v\n", name, err)
@@ -255,7 +255,7 @@ func hook(name string, args []string, stdin io.Reader, stdout, stderr io.Writer)
 			return 0
 		}
 	}
-	return *unanswered
+	return unanswered
 }
 
 // ContextEvents are the host's events whose hook output hands the agent
