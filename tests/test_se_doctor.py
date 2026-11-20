@@ -516,11 +516,15 @@ def test_the_copilot_rows_name_each_guards_state_and_a_guard_off_is_a_note(tmp_p
     """docs/copilot.md "What a session costs": the doctor names each guard's state."""
     project = tmp_path / "project"
     project.mkdir()
-    assert d.gather_copilot_rows(project) == clean_facts()["copilot"]["guards"]
-    (project / "se.toml").write_text("[copilot]\nstart_sessions = true\n", encoding="utf-8")
+    assert d.gather_copilot_rows(project) == [
+        clean_facts()["copilot"]["guards"][0],
+        "[copilot] start_sessions = true: off, today's behaviour",
+    ]
     facts = {**clean_facts(), "copilot": {"guards": d.gather_copilot_rows(project)}}
     [off] = [f for f in d.diagnose(facts) if f.area == "copilot" and f.level == d.NOTE]
     assert off.text == "under Copilot, [copilot] start_sessions = true: off, today's behaviour"
+    (project / "se.toml").write_text("[copilot]\nstart_sessions = false\n", encoding="utf-8")
+    assert d.gather_copilot_rows(project) == clean_facts()["copilot"]["guards"]
     (project / "se.toml").write_text('[copilot]\nrefuse_stop = "yes"\n', encoding="utf-8")
     facts = {**clean_facts(), "copilot": {"guards": d.gather_copilot_rows(project)}}
     notes = [f for f in d.diagnose(facts) if f.area == "copilot"]
