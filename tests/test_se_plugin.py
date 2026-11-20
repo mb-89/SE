@@ -531,6 +531,21 @@ def test_a_layout_link_out_of_its_folder_stays_relative(tmp_path):
     assert "See [the README](../README.md#install) and [x](../skills/x/SKILL.md)." in claude
 
 
+@pytest.mark.parametrize("layout, readme, agent", (
+    (se_plugin.LAYOUTS[0], "../../../README.md", "../../agents/se.agent.md"),
+    (se_plugin.LAYOUTS[1], "../../README.md", "../../agents/se.md"),
+))
+def test_layout_links_use_url_separators(layout, readme, agent):
+    source = PurePosixPath("src/skills/x/SKILL.md")
+    text = ("[readme](../../../README.md#install) [agent](../../agents/se.md) "
+            "[sibling](../y/SKILL.md) [local](references/rules.md#rule) "
+            "[folder](references/) [web](https://example.com/a/b#c) [anchor](#local)")
+    assert se_plugin._rewrite_links(text, source, se_plugin._target(source, layout), layout) == (
+        f"[readme]({readme}#install) [agent]({agent}) "
+        "[sibling](../y/SKILL.md) [local](references/rules.md#rule) "
+        "[folder](references/) [web](https://example.com/a/b#c) [anchor](#local)")
+
+
 def test_the_manifests_name_no_home(checkout):
     for path in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".github/plugin/plugin.json"):
         data = json.loads((checkout / path).read_text(encoding="utf-8"))
