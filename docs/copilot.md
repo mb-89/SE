@@ -58,8 +58,9 @@ start_sessions = true   # built in: SE dispatches sessions automatically
 
 - **Where they show**: the greeting under Copilot ends with a `Copilot guards:` line naming each
   setting; `uv run python <se>/scripts/se_doctor.py` has a `copilot` row for each.
-- **Invalid configuration**: an unreadable se.toml or a non-boolean guard setting keeps both
-  guards on and says so; SE starts no session until it is fixed.
+- **Invalid configuration**: an unreadable se.toml, a `copilot` value that is not a table or a
+  non-boolean guard setting keeps both guards on and says so; SE starts no session until it is
+  fixed.
 - **To cap a session yourself**: `--max-ai-credits <n>` (at least 30) on a `copilot -p` line, or
   `/limits set max-ai-credits <n>` in a session; sub-agents share it ([limits][limits]).
 - **To measure one**: `--usage-output-file <file>` writes a session's credits, premium requests and
