@@ -204,12 +204,16 @@ def _cut_from_the_other_host(checkout: Path, tmp_path: Path, tagged: bool) -> No
 
 
 @pytest.mark.usefixtures("shared_fake_git")  # the clean push's public check runs git in a child
+@pytest.mark.parametrize("public_check", [True, False], ids=["checked", "unchecked"])
 @pytest.mark.parametrize("tagged", [False, True], ids=["untagged", "tagged"])
 def test_push_refuses_a_branch_carrying_history_only_another_remote_holds(checkout, tmp_path, capsys,
-                                                                          tagged):
+                                                                          tagged, public_check):
     """A project on two hosts shares trees, not histories: a branch cut from the other host's main
-    must not copy that host's commits to origin, however its own commits look; a local tag on that
-    history proves nothing about origin."""
+    must not copy that host's commits to origin, however its own commits look and whether or not
+    the public check is on; a local tag on that history proves nothing about origin."""
+    if not public_check:
+        (checkout / "se.toml").write_text(f"{IDENTITY}public_check = false\n[tests]\ncommand = {SUITE}\n",
+                                          encoding="utf-8")
     _cut_from_the_other_host(checkout, tmp_path, tagged)
 
     assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 1
