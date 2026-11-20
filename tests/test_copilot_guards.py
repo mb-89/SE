@@ -39,7 +39,8 @@ def test_each_explicit_setting_overrides_only_its_default(tmp_path, name, value)
     assert f"= {str(value).lower()}: {'off' if value else 'on'}," in line
 
 
-@pytest.mark.parametrize("text", ('[copilot]\nstart_sessions = "yes"\n', "[copilot\n"))
+@pytest.mark.parametrize("text", ('[copilot]\nstart_sessions = "yes"\n', "[copilot\n", "copilot = false\n",
+                                  'copilot = "start_sessions"\n', "copilot = [true]\n"))
 def test_an_unreadable_setting_keeps_every_guard_on_and_says_so(tmp_path, text):
     root = project(tmp_path, text)
     with pytest.raises(ValueError):
