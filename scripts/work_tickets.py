@@ -2544,8 +2544,29 @@ def git_push(root: Path, arguments: list[str]) -> None:
     )
 
 
+def guard_foreign_history(root: Path, branch: str) -> None:
+    """Refuse to push `branch` to origin where it carries commits only another remote holds: a
+    project kept on two hosts shares trees, not histories, so such a branch (cut from the other
+    host's main, or one that merged it) would copy that host's history and identities to origin."""
+    if run_git(root, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}").returncode != 0:
+        return  # no such commit here: git push itself refuses it
+    foreign = run_git(root, "rev-list", "--count", branch, "--not", "--remotes=origin", "--tags")
+    own = run_git(root, "rev-list", "--count", branch, "--not", "--remotes", "--tags")
+    if foreign.returncode != 0 or own.returncode != 0:
+        raise QueueError(f"Cannot count the commits {branch} would push to origin; nothing was pushed: {(foreign.stderr + own.stderr).strip()}")
+    extra = int(foreign.stdout.strip() or 0) - int(own.stdout.strip() or 0)
+    if extra > 0:
+        raise QueueError(
+            f"{branch} carries {extra} commit(s) that another remote holds but origin does not; "
+            f"nothing was pushed. Cut the branch from origin's main (git switch -c <branch> "
+            f"origin/main) and carry the change over as new commits (cherry-pick or a squash "
+            f"of the tree), never the other host's history"
+        )
+
+
 def push_gate(root: Path, branch: str) -> None:
     """The public check's push gate on `branch`, as the pre-push hook runs it, unless se.toml turns it off."""
+    guard_foreign_history(root, branch)
     if not public_check_enabled(root):
         print(
             f"Public check off: project.public_check = false in {root / 'se.toml'}; "

@@ -185,6 +185,33 @@ def verified(root: Path, ref: str = "refs/heads/main") -> int:
     return work_tickets.main(["verified", ref, "HEAD", "--worktree", str(root)])
 
 
+@pytest.mark.usefixtures("shared_fake_git")  # the clean push's public check runs git in a child
+@pytest.mark.usefixtures("shared_fake_git")  # the clean push's public check runs git as a child
+def test_push_refuses_a_branch_carrying_history_only_another_remote_holds(checkout, tmp_path, capsys):
+    """A project on two hosts shares trees, not histories: a branch cut from the other host's main
+    must not copy that host's commits to origin, however its own commits look."""
+    other = tmp_path / "other.git"
+    fake_git.init(other, "--bare", "-b", "main")
+    git(checkout, "remote", "add", "other", str(other))
+    settings = (checkout / "se.toml").read_text(encoding="utf-8")
+    git(checkout, "switch", "-q", "--orphan", "elsewhere")
+    (checkout / "se.toml").write_text(settings, encoding="utf-8")
+    commit(checkout, name="elsewhere.txt")
+    git(checkout, "push", "-q", "other", "elsewhere:main")
+    git(checkout, "fetch", "-q", "other")
+    git(checkout, "switch", "-q", "-c", "topic", "other/main")
+    commit(checkout, name="topic.txt")
+
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 1
+
+    assert "carries 1 commit(s) that another remote holds but origin does not" in capsys.readouterr().err
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/topic",
+                        root=tmp_path / "origin.git").returncode != 0
+    git(checkout, "switch", "-q", "-c", "clean", "origin/main")
+    commit(checkout, name="clean.txt")
+    assert work_tickets.main(["push", "clean", "--worktree", str(checkout)]) == 0
+
+
 @pytest.mark.parametrize(("public_check", "passes"), [
     (None, False), (False, False), ("other tree", False), (True, True),
 ])
