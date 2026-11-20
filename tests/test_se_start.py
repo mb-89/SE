@@ -503,7 +503,7 @@ def test_under_copilot_the_start_context_names_the_request_guards(setup, capsys,
         assert guards == []
     else:
         assert len(guards) == 1 and "refuse_stop = false: on" in guards[0]
-        assert "start_sessions = false: on" in guards[0]
+        assert "start_sessions = true: off" in guards[0]
 
 
 def test_without_word_of_kern_the_greeting_names_none(setup, capsys, monkeypatch):

@@ -24,13 +24,14 @@ def empty_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_the_copilot_guards_are_off_without_se_toml(tmp_path):
+def test_the_copilot_switch_defaults_match_the_reader_without_se_toml(tmp_path):
     import copilot_guards
 
-    assert copilot_guards.settings(tmp_path) == {"refuse_stop": False, "start_sessions": False}
-    for name in ("[copilot] refuse_stop", "[copilot] start_sessions"):
-        switch = row(name)
-        assert switch.default == "off" and se_switches.state(switch, False) == "off"
+    settings = copilot_guards.settings(tmp_path)
+    assert settings == {"refuse_stop": False, "start_sessions": True}
+    for name, value in settings.items():
+        switch = row(f"[copilot] {name}")
+        assert switch.default == se_switches.state(switch, value) == ("on" if value else "off")
 
 
 def test_the_plugin_build_settings_are_off_on_an_empty_se_toml(empty_project):
