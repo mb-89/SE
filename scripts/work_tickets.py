@@ -2547,11 +2547,17 @@ def git_push(root: Path, arguments: list[str]) -> None:
 def guard_foreign_history(root: Path, branch: str) -> None:
     """Refuse to push `branch` to origin where it carries commits only another remote holds: a
     project kept on two hosts shares trees, not histories, so such a branch (cut from the other
-    host's main, or one that merged it) would copy that host's history and identities to origin."""
-    if run_git(root, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}").returncode != 0:
-        return  # no such commit here: git push itself refuses it
-    foreign = run_git(root, "rev-list", "--count", branch, "--not", "--remotes=origin", "--tags")
-    own = run_git(root, "rev-list", "--count", branch, "--not", "--remotes", "--tags")
+    host's main, or one that merged it) would copy that host's history and identities to origin.
+    Local tags prove nothing about origin (one fetched from the other host names its history), so
+    only origin's remote-tracking branches count as held by origin."""
+    ref = f"refs/heads/{branch}"
+    if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+        raise QueueError(
+            f"{branch!r} is no local branch; nothing was pushed. Push names a branch "
+            f"(refs/heads/<branch>), never a refspec, tag or commit"
+        )
+    foreign = run_git(root, "rev-list", "--count", ref, "--not", "--remotes=origin")
+    own = run_git(root, "rev-list", "--count", ref, "--not", "--remotes")
     if foreign.returncode != 0 or own.returncode != 0:
         raise QueueError(f"Cannot count the commits {branch} would push to origin; nothing was pushed: {(foreign.stderr + own.stderr).strip()}")
     extra = int(foreign.stdout.strip() or 0) - int(own.stdout.strip() or 0)
