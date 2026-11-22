@@ -1586,12 +1586,13 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
     steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
              "scripts/hygiene.py", "scripts/work_tickets.py field-report --check",
-             "scripts/se_forms.py check-files --changed", "scripts/work_tickets.py suite --worktree ."]
+             "scripts/se_forms.py check-files --changed", "scripts/se_modules.py sync kern",
+             "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
     assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"
     # The nightly run alone is full: it runs every suite beside, also one its paths skip.
-    suite = check[check.index("- name: The complete suite and kern's tests"):]
+    suite = check[check.index("- name: The complete suite and the suites beside it"):]
     suite = suite[:suite.index("\n      - ")]
     assert "EVENT: ${{ github.event_name }}" in suite
     assert 'if [ "$EVENT" = schedule ]; then full=(--full); fi' in suite

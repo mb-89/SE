@@ -1,8 +1,11 @@
-"""kern, the Go core incubated under kern/ (kern/README.md "Tests"): the check main requires runs it."""
+"""kern, the Go core, as SE uses it from kern's repository at the pin se.toml [modules.kern] reads
+from components/go.mod: the check main requires, the release of `se` on it, the battery every
+application calls, and kern's application template in the pinned clone."""
 
+import os
 import re
-import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -10,6 +13,7 @@ import pytest
 import yaml
 
 import ci_trust  # scripts/ is on the path (tests/conftest.py)
+import se_modules
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -19,34 +23,36 @@ WORKFLOW = PROJECT / ".github" / "workflows" / "check.yml"
 SETUP_GO_NODE_24 = 6
 
 
-def test_the_required_check_runs_kerns_vet_and_tests_on_the_go_its_go_mod_pins() -> None:
+def test_the_required_check_vets_ses_go_components_on_kern_at_the_pin_their_go_mod_requires() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
     assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["check", "kern-platforms", "kern-platforms-queue",
                                                          "trust"], (
-        "kern runs in the required job check, and on Windows in kern-platforms, which check "
-        "needs and kern-platforms-queue bounds the queue of; trust decides whether either runs "
-        "(README \"Trusted landings\")"
+        "the Go components run in the required job check, SE's start and hook on Windows in "
+        "kern-platforms, which check needs and kern-platforms-queue bounds the queue of; trust "
+        "decides whether either runs (README \"Trusted landings\")"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
-    assert len(setups) == 2, "kern's steps set up Go on Linux and on the other platforms"
-    for major, inputs in setups:
-        assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
-        assert "go-version-file: kern/go.mod" in inputs and "cache-dependency-path: kern/go.sum" in inputs
-    assert re.search(r"(?m)^go \d+\.\d+\.\d+$", (PROJECT / "kern" / "go.mod").read_text(encoding="utf-8"))
-    # Go is set up before the suite step, which runs kern's tests as se.toml declares them.
+    assert len(setups) == 1, "Go is set up on Linux only, for SE's Go components"
+    [(major, inputs)] = setups
+    assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
+    assert "go-version-file: components/go.mod" in inputs and "cache-dependency-path: components/go.sum" in inputs
+    # Go is set up, kern placed at its pin and the lock held to the require before the vet, and
+    # the suite step runs the components' tests as se.toml declares them.
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
-    steps = ["actions/setup-go", "time go vet ./...", "scripts/work_tickets.py suite --worktree .",
-             "needs.kern-platforms.result"]
+    steps = ["actions/setup-go", "uv run python scripts/se_modules.py sync kern",
+             "git diff --exit-code -- se.lock", "time go vet ./...",
+             "scripts/work_tickets.py suite --worktree .", "needs.kern-platforms.result"]
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
-    assert "        working-directory: kern\n        run: time go vet ./...\n" in check
-    assert "go test" not in check, "kern's tests have one declaration, se.toml [tests.beside.kern]"
+    assert "        working-directory: components\n        run: time go vet ./...\n" in check
+    assert "working-directory: kern" not in workflow and "gofmt" not in workflow, "kern's own CI is kern's"
+    assert "go test" not in check, "the components' tests have one declaration, se.toml [tests.beside.go-components]"
 
 
-def gofmt_step() -> str:
-    """The shell of the check job's step "kern is formatted"."""
+def lock_step() -> str:
+    """The shell of the check job's step that places kern and holds se.lock to the require."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    step = workflow[workflow.index("      - name: kern is formatted\n"):]
+    step = workflow[workflow.index("      - name: kern at the pin components/go.mod requires\n"):]
     lines = step.splitlines()
     lines = lines[lines.index("        run: |") + 1:]
     block = []
@@ -57,40 +63,30 @@ def gofmt_step() -> str:
     return "\n".join(block)
 
 
-def test_the_required_check_fails_where_gofmt_lists_a_file_of_kern() -> None:
-    """The check job's step after kern's vet runs gofmt -l in kern/ and fails on any file it
-    lists, naming it; a formatted tree passes."""
+def test_a_committed_lock_that_lags_the_require_fails_the_check_naming_the_sync() -> None:
+    """The step runs before the components' vet, where trust is on too (it takes a second): it
+    syncs kern and fails where se.lock then differs from what was committed."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow[workflow.index("\njobs:\n"):])[1]
-    assert check.index("run: time go vet ./...") < check.index(
-        "- name: kern is formatted\n        if: needs.trust.outputs.trusted != 'true'\n"
-        "        working-directory: kern\n        run: |\n")
-    assert "gofmt -l ." in gofmt_step()
+    shell = lock_step()
+    assert shell.splitlines()[:2] == ["uv run python scripts/se_modules.py sync kern",
+                                      "if ! git diff --exit-code -- se.lock; then"]
+    assert ("::error::se.lock does not lock the kern components/go.mod requires: run uv run python "
+            "scripts/se_modules.py sync kern and commit se.lock") in shell
+    assert "      - name: kern at the pin components/go.mod requires\n        run: |\n" in workflow
+    replace = (PROJECT / "components" / "go.mod").read_text(encoding="utf-8")
+    assert re.search(r"(?m)^replace kern => \.\./\.se/modules/kern$", replace)
 
 
-@pytest.mark.skipif(shutil.which("gofmt") is None, reason="gofmt is not installed")
-def test_the_gofmt_step_refuses_an_unformatted_file_and_passes_a_formatted_one(tmp_path) -> None:
-    (tmp_path / "ok.go").write_text("package x\n\nfunc A() {}\n", encoding="utf-8")
-    run = lambda: subprocess.run(["bash", "-c", gofmt_step()], cwd=tmp_path, capture_output=True, text=True)
-    assert run().returncode == 0
-    (tmp_path / "bad.go").write_text("package x\nfunc  B( ) {}\n", encoding="utf-8")
-    result = run()
-    assert result.returncode == 1
-    assert "::error::gofmt -l lists files of kern not formatted: bad.go; run gofmt -w . in kern" in result.stdout
-
-
-def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows() -> None:
+def test_the_required_check_fails_unless_ses_start_and_hook_passed_on_windows() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow[workflow.index("\njobs:\n"):]
-    platforms = jobs[jobs.index("\n  kern-platforms:\n"):]
+    platforms = jobs[jobs.index("\n  kern-platforms:\n"):jobs.index("\n  kern-platforms-queue:\n")]
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
     assert "    runs-on: ${{ matrix.os }}\n" in platforms
     [matrix] = re.findall(r"(?m)^        os: \[(.*)\]$", platforms)
     assert matrix == "windows-2025", "the one leg is Windows; darwin is built by the release, not tested"
     assert "      fail-fast: false\n" in platforms, "each platform answers, whichever fails first"
-    for command in ("go vet ./...", "go test ./...",
-                    "go test -count=200 -run 'TestAHookWithNoCoreFailsOpenAtOnce$' ./host/"):
-        assert f"        working-directory: kern\n        run: {command}\n" in platforms
+    assert "go " not in platforms and "setup-go" not in platforms, "kern's Go tests on Windows are kern's"
     # SE's start and hook scripts, whose paths differ off Linux, run there in Git's bash.
     assert ("        shell: bash\n        run: uv run pytest -q tests/test_bootstrap.py tests/test_se_hook.py "
             "tests/test_se_mcp.py tests/test_runme.py\n") in platforms
@@ -110,11 +106,12 @@ def test_the_required_check_fails_unless_kern_and_ses_hook_passed_on_windows() -
     # A required check that is skipped counts as passed: check runs whatever kern-platforms answered.
     assert "    if: ${{ !cancelled() }}\n" in check
     assert re.search(r'if \[ "\$PLATFORMS" != success \]; then\n.*\n\s+exit 1', check), "check fails unless kern-platforms passed"
+    assert "      - name: SE's start, hook and setup scripts passed on Windows\n" in check
 
 
 RELEASE = PROJECT / ".github" / "workflows" / "kern-release.yml"
 BATTERY = PROJECT / ".github" / "workflows" / "kern-battery.yml"
-TEMPLATE = PROJECT / "kern" / "template"
+TEMPLATE = se_modules.kern_dir(PROJECT) / "template"  # kern at its pin (tests/conftest.py)
 # The first major of each action kern's workflows use that runs on Node 24.
 NODE_24 = {"actions/checkout": 5, "actions/setup-go": SETUP_GO_NODE_24, "actions/upload-artifact": 6,
            "actions/download-artifact": 7, "astral-sh/setup-uv": 7}
@@ -250,33 +247,69 @@ def test_kerns_workflows_use_only_node_24_actions() -> None:
             assert int(major) >= NODE_24[action], f"{path.name}: {action}@v{major} runs on Node 20"
 
 def test_the_release_is_reusable_built_on_every_change_and_published_only_from_main() -> None:
-    """kern/README.md "Release": a reusable workflow any application calls for its own binary; a
-    pull request proves the build without publishing."""
-    text = RELEASE.read_text(encoding="utf-8")
-    # Reusable, with the folder it builds; it also self-triggers for the bare core.
-    assert "  workflow_call:\n    inputs:\n      directory:\n" in text
-    assert "        default: kern\n" in text
-    paths = '["kern/**", ".github/workflows/kern-release.yml", ".github/workflows/kern-battery.yml"]'
-    assert text.count(f"    paths: {paths}\n") == 2, "pull requests and pushes to main that touch kern"
-    jobs = text[text.index("\njobs:\n"):]
-    assert re.findall(r"(?m)^  (\w[\w-]*):\n", jobs) == ["build", "template", "publish"]
-    build = re.search(r"(?ms)^  build:\n(.*?)(?=^  \w)", jobs)[1]
-    folder = '"$GITHUB_WORKSPACE/${{ inputs.directory || \'kern\' }}"'
-    assert f'go run ./tools/release plan --dir {folder} --repository "$GITHUB_REPOSITORY"' in build
-    assert f'go run ./tools/release build --dir {folder} --out "$RUNNER_TEMP/dist"' in build
-    assert "sha256sum -c SHA256SUMS" in build
-    assert "binary: ${{ steps.plan.outputs.binary }}\n" in build, "the artifact and title carry the binary's name"
-    # kern's own template battery runs for the bare core's release only.
-    assert "    if: ${{ (inputs.directory || 'kern') == 'kern' }}\n" in jobs
-    assert "    uses: ./.github/workflows/kern-battery.yml\n    with:\n      directory: kern/template\n" in jobs
-    publish = jobs[jobs.index("\n  publish:\n"):]
-    assert "    needs: [build, template]\n" in publish
-    # A skipped template (an application's release) must not skip publish; a failed one must.
-    assert "needs.build.result == 'success' && needs.template.result != 'failure'" in publish
-    assert "github.ref == 'refs/heads/main' && github.event_name != 'pull_request'" in publish
-    assert "      contents: write\n" in publish and "contents: write" not in jobs[:jobs.index("\n  publish:\n")]
+    """kern's README "Release": a reusable workflow any application calls for its own binary; a
+    pull request proves the build without publishing. kern's own release is kern's repository's."""
+    release = workflow(RELEASE)
+    assert set(release["on"]) == {"workflow_call"}, "kern's own triggers are kern's repository's"
+    assert release["on"]["workflow_call"]["inputs"]["directory"]["default"] == "."
+    assert list(release["jobs"]) == ["build", "publish"], "no template job: kern's battery runs in kern's CI"
+    build = release["jobs"]["build"]
+    names = [s.get("name") or s.get("uses") for s in build["steps"]]
+    kern = step(build, "kern at the commit se.lock locks")
+    assert kern["if"] == "steps.kern.outputs.ref != ''"
+    assert kern["with"] == {"repository": "${{ github.repository_owner }}/kern",
+                            "ref": "${{ steps.kern.outputs.ref }}", "path": ".se/modules/kern"}
+    go = step(build, "actions/setup-go")
+    assert go["with"]["go-version-file"] == "${{ inputs.directory }}/go.mod"
+    assert names.index("The kern se.lock locks") < names.index(kern["name"]) < names.index(go["uses"])
+    plan, archives = step(build, "The release the folder names"), step(build, "Six binaries and SHA256SUMS")
+    for each in (plan, archives):
+        assert each["working-directory"] == "${{ inputs.directory }}", "kern's tool runs from the binary's module"
+    assert plan["run"].startswith('go run kern/tools/release plan --dir . --repository "$GITHUB_REPOSITORY"')
+    assert 'go run kern/tools/release build --dir . --out "$RUNNER_TEMP/dist"' in archives["run"]
+    assert "sha256sum -c SHA256SUMS" in archives["run"]
+    assert build["outputs"]["binary"] == "${{ steps.plan.outputs.binary }}", "the artifact and title carry the binary's name"
+    publish = release["jobs"]["publish"]
+    assert publish["needs"] == "build"
+    assert "needs.build.result == 'success'" in publish["if"]
+    assert "github.ref == 'refs/heads/main' && github.event_name != 'pull_request'" in publish["if"]
+    assert publish["permissions"] == {"contents": "write"} and "permissions" not in build
     # A release that exists is never changed.
-    assert publish.index('gh release view "$TAG"') < publish.index('gh release create "$TAG"')
+    run = step(publish, "Publish the release where it is missing")["run"]
+    assert run.index('gh release view "$TAG"') < run.index('gh release create "$TAG"')
+
+
+def lock_check(folder: Path, lock: str | None, gomod: str) -> tuple[subprocess.CompletedProcess, str]:
+    """Run the release's step "The kern se.lock locks" in `folder` for the binary folder `app`."""
+    (folder / "app").mkdir(parents=True)
+    (folder / "app" / "go.mod").write_text(gomod, encoding="utf-8")
+    if lock is not None:
+        (folder / "se.lock").write_text(lock, encoding="utf-8")
+    output = folder / "output"
+    output.write_text("", encoding="utf-8")
+    script = step(workflow(RELEASE)["jobs"]["build"], "The kern se.lock locks")
+    assert script["shell"] == "python3 {0}" and script["env"] == {"DIRECTORY": "${{ inputs.directory }}"}
+    result = subprocess.run([sys.executable, "-c", script["run"]], cwd=folder, capture_output=True, text=True,
+                            env={**os.environ, "DIRECTORY": "app", "GITHUB_OUTPUT": str(output)})
+    return result, output.read_text(encoding="utf-8")
+
+
+LOCKED = '[modules.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
+REQUIRES = "module se/components\n\nrequire (\n\tgolang.org/x/sys v0.41.0\n\tkern v{}\n)\n\nreplace kern => ../.se/modules/kern\n"
+
+
+def test_the_release_places_the_kern_se_lock_locks_and_refuses_a_lock_off_the_require(tmp_path) -> None:
+    result, output = lock_check(tmp_path / "at", LOCKED, REQUIRES.format("0.14.1"))
+    assert result.returncode == 0 and output == f"ref={'a' * 40}\n", result.stdout + result.stderr
+    result, output = lock_check(tmp_path / "off", LOCKED, REQUIRES.format("0.15.0"))
+    assert result.returncode == 1 and output == ""
+    assert ('se.lock [modules.kern] version = "0.14.1" but app/go.mod says require kern v0.15.0: run uv run '
+            "python scripts/se_modules.py sync kern and commit se.lock") in result.stdout
+    # An application's copy whose se.lock locks no kern carries kern's source and builds as before.
+    for name, lock in (("none", None), ("other", '[modules.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n')):
+        result, output = lock_check(tmp_path / name, lock, "module app\n\nrequire kern v0.0.0\n\nreplace kern => ./kern\n")
+        assert result.returncode == 0 and output == "", result.stdout + result.stderr
+        assert "se.lock locks no kern" in result.stdout
 
 
 SE_RELEASE = PROJECT / ".github" / "workflows" / "se-release.yml"
@@ -292,19 +325,12 @@ def test_se_builds_its_own_binary_through_kerns_reusable_release() -> None:
     # It builds on a change to the binary's inputs, and proves the build on a pull request.
     for event in ("  pull_request:\n", "  push:\n"):
         assert event in text
-    for path in ('- "kern/**"', '- "components/**"', '- ".github/workflows/se-release.yml"'):
-        assert path in text
+    paths = ["components/**", "se.lock", "se.toml", ".github/workflows/se-release.yml",
+             ".github/workflows/kern-release.yml"]
+    release = workflow(SE_RELEASE)
+    for event in ("pull_request", "push"):
+        assert release["on"][event]["paths"] == paths, "the binary's inputs: its folder, the kern pin, the workflows"
     release = tomllib.loads((PROJECT / "components" / "release.toml").read_text(encoding="utf-8"))
     assert release["binary"] == "se" and release["package"] == "./cmd/se"
     assert release["download"] == "releases/download/se-v{version}", (
-        "the se-v<version> tag scheme, distinct from v<version> and kern-v<version>, under the home "
-        "origin names")
-
-def test_the_release_toml_names_one_url_with_the_tag_while_kern_is_incubated() -> None:
-    settings = tomllib.loads((PROJECT / "kern" / "release.toml").read_text(encoding="utf-8"))
-    assert set(settings) == {"version", "download"}
-    assert re.fullmatch(r"\d+\.\d+\.\d+", settings["version"])
-    # A path under the home the checkout's origin names (kern/home): no host, owner or repository.
-    assert settings["download"] == "releases/download/kern-v{version}"
-    readme = (PROJECT / "kern" / "README.md").read_text(encoding="utf-8")
-    assert "**The move to kern's own repository changes one line:** `release.toml`'s `download`" in readme
+        "the se-v<version> tag scheme, distinct from SE's v<version>, under the home origin names")
