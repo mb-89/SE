@@ -16,6 +16,18 @@ A chat table dies with the session that showed it: answers had to be copied into
 And the person wants one page per decision, in their words: "fundamentally, one decision in the
 end should be a one-pager".
 
+## What others do
+
+- **Architecture decision records** (Michael Nygard's ADRs): one short Markdown file per decision,
+  with its context, the decision and its status, kept beside the code; no matrix, no answer form.
+- **RFC processes** (Rust's RFCs, Python's PEPs): one document per proposal, discussed in a pull
+  request or a thread, and accepted by a named team; a thread per decision.
+- **Approval reviews** (GitHub's required reviews): the approver answers on the change itself, one
+  change at a time.
+
+ADRs' one note per decision is reused as it is (option A); the thread per decision of RFCs is
+option C. None of them gives one person every open decision in one pass.
+
 ```pugh
 context: a person who blesses SE's decisions
 concern: how a decision reaches the person and is kept
@@ -28,7 +40,7 @@ candidates:
   - key: deck
     label: Decision deck
     short: Deck
-    what: Each decision is one note rendered as a one-pager; the notes go to the person as one deck, answered in one pass.
+    what: Each decision is one note rendered as a one-pager, an ADR's one file per decision; the notes go to the person as one deck, answered in one pass.
     marks:
       record: {mark: 1, because: the answered artifact is a file that outlives the session}
       effort: {mark: 1, because: one page per decision answered with one key}
@@ -47,7 +59,7 @@ candidates:
   - key: issue
     label: An issue per decision
     short: Issues
-    what: Each decision is a GitHub issue minted for the person, answered in a comment.
+    what: Each decision is a GitHub issue minted for the person, answered in a comment, as an RFC is discussed in its own thread.
     marks:
       record: {mark: 1, because: the question and its answer stay on GitHub}
       effort: {mark: -1, because: the person reads an issue thread instead of one page}
@@ -60,7 +72,7 @@ checklist:
     answer: A case of how any decision reaches the person; decided for every decision.
     pass: true
   - item: Is the problem real
-    answer: The person's words ("one decision in the end should be a one-pager") and chat answers that had to be copied into issues by hand.
+    answer: The person's words ("one decision in the end should be a one-pager") and chat answers that had to be copied into issues by hand; ADRs, RFC processes and approval reviews solve parts of it, and A reuses the ADR's one file per decision.
     pass: true
   - item: Keep what we have
     answer: B is what we have, so it is the datum, and every option is marked against it, never against one not yet built.

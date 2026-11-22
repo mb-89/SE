@@ -1,6 +1,6 @@
 ---
 name: decision
-description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision, a Pugh matrix in obs''s `pugh` fence with the nine-item checklist, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
+description: 'How every decision is made, the agent''s own and those it brings to the person: one Obsidian Markdown note per decision that says how others solve its problem, a Pugh matrix in obs''s `pugh` fence with the nine-item checklist, asked about the general mechanism rather than the single instance; its output is the answered artifact. Load it whenever you decide something that is not mechanical, or present a decision, an escalation or an open point to the person.'
 ---
 
 # Decision
@@ -18,7 +18,7 @@ SE's hard rules in [catch-up](../catch-up/SKILL.md#hard-rules).
 
 One Obsidian Markdown note per decision. Its reader must understand the problem before they see
 any option, so every note answers, in this order: what is the situation today, what is wrong with
-it, and which solutions there are.
+it, how others solve it, and which solutions there are.
 
 - **Frontmatter:** `obs: {bless: pending}` when a person must bless the decision; no frontmatter
   when the note is only a record of a decision the agent took itself.
@@ -27,6 +27,11 @@ it, and which solutions there are.
   sentence names the class the case belongs to ([one level up](#one-level-up)).
 - **`## The problem`:** what is wrong with it, and what shows it: a failure, a measurement, the
   person's words.
+- **`## What others do`:** how the rest of the world solves the same problem: at least two outside
+  tools, products or conventions, each named with how it solves it, and whether one of them can be
+  reused as it is. An option taken from one of them says so where it says what it is.
+  - The person asks for it in every design decision: "Again, check the outside world. Is there
+    something similar like this already present? Can we reuse something?"
 - **The `pugh` fence**, the matrix and its checklist. Its fields, marks and letters are obs's
   contract, owned by obs's capability note `spec/capabilities/pugh-decisions.md` and its input
   model's section "Pugh decision figures" in `spec/design_input/input-model.md`, both in obs, the
@@ -54,8 +59,9 @@ it, and which solutions there are.
 
 Nothing else goes before the fence: its options are the list of solutions the reader expands.
 Any longer material goes in `##` sections after it, which obs shows as tabs. `<se>/scripts/deck.py
-build` refuses a decision note without both sections before its fence, and warns of an option
-without `success` or a mark without `because`.
+build` refuses a decision note without the three sections, in order, before its fence, so the deck
+shows them above the options, and warns of an option without `success` or a mark without
+`because`.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
@@ -66,7 +72,8 @@ The decider answers every item before it decides or asks; each is a rule of the
 [rule book](../work-model/references/rules.md#dec-decisions):
 
 1. **Class or case:** [dec-001](../work-model/references/rules.md#dec-001-class-or-case)
-2. **Is the problem real:** [dec-002](../work-model/references/rules.md#dec-002-is-the-problem-real)
+2. **Is the problem real:** [dec-002](../work-model/references/rules.md#dec-002-is-the-problem-real);
+   its answer also names the outside solutions of `## What others do`.
 3. **Keep what we have:** [dec-003](../work-model/references/rules.md#dec-003-keep-what-we-have)
 4. **A named loser:** [dec-004](../work-model/references/rules.md#dec-004-a-named-loser)
 5. **Fair criteria:** [dec-005](../work-model/references/rules.md#dec-005-fair-criteria)

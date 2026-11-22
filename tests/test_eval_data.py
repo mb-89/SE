@@ -88,7 +88,8 @@ SAMPLES = {
             stringify({
                 "file_path": "decisions/settings-source.md",
                 "content": "# Settings source\n\n## Current situation\n\nOne file, app.toml.\n\n"
-                "## The problem\n\nCI runners cannot edit it.\n\n```pugh\noptions: [file, both]\n```\n",
+                "## The problem\n\nCI runners cannot edit it.\n\n## What others do\n\nGit reads the "
+                "environment over its files.\n\n```pugh\noptions: [file, both]\n```\n",
             }),
             stringify({
                 "file_path": "decisions/settings-source.md",
