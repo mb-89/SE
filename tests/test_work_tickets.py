@@ -2986,7 +2986,6 @@ def pushed(root: Path, monkeypatch) -> str:
         raise Gated
 
     monkeypatch.setattr(work_tickets, "push_gate", gate)
-    monkeypatch.setattr(work_tickets, "release", lambda *_: None)
     try:
         work_tickets.push(root, "feat/example-20261112")
     except Gated:

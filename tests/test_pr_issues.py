@@ -83,12 +83,12 @@ def github() -> Iterator[FakeGitHub]:
 
 def run(github: FakeGitHub, tmp_path: Path, body: str, *, base: str = "main",
         author: str = "alice", labels: tuple[str, ...] = (), token: str = TOKEN,
-        capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
+        head: str = "topic", capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
     """The job's step: the event file, the token and the repository as Actions passes them."""
     event = tmp_path / "event.json"
     event.write_text(json.dumps({
         "pull_request": {"number": 900, "body": body, "base": {"ref": base},
-                         "user": {"login": author},
+                         "head": {"ref": head}, "user": {"login": author},
                          "labels": [{"name": label} for label in labels]},
         "repository": {"full_name": REPO, "owner": {"login": "carol"}},
     }), encoding="utf-8")
@@ -158,6 +158,22 @@ def test_the_owners_housekeeping_pull_request_is_exempt_and_no_one_elses(
     assert run(github, tmp_path, "Tidy up.", author="alice", labels=("housekeeping",),
                capsys=capsys)[0] == 1
     assert run(github, tmp_path, "Tidy up.", author="carol", capsys=capsys)[0] == 1
+
+
+def test_the_owners_release_landing_is_exempt_and_no_one_elses_nor_another_branch(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """README "Project settings": `work_tickets.py release` lands `land/release-v<version>`,
+    which names no work issue."""
+    code, out = run(github, tmp_path, "Release v1.2.4", author="carol",
+                    head="land/release-v1.2.4", capsys=capsys)
+    assert (code, out.strip()) == (
+        0, "pr-issues: pull request #900 is the owner's release landing land/release-v1.2.4: exempt")
+    assert github.requests == []
+    assert run(github, tmp_path, "Release v1.2.4", author="alice", head="land/release-v1.2.4",
+               capsys=capsys)[0] == 1
+    for head in ("land/release-v1.2", "land/release-v1.2.4-x", "land/topic", "release-v1.2.4"):
+        assert run(github, tmp_path, "Release v1.2.4", author="carol", head=head,
+                   capsys=capsys)[0] == 1, head
 
 
 def test_a_pull_request_into_another_branch_is_not_checked(

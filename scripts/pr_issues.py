@@ -11,7 +11,10 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
 - one reference names an issue of this repository that is open and labelled `work`; or
 - one `Lands` reference names a pull request (a landing's work pull request) whose description
   names such an issue; or
-- it was opened by the repository owner's account and carries the label `housekeeping`.
+- it was opened by the repository owner's account and carries the label `housekeeping`; or
+- it was opened by the repository owner's account from `land/release-v<version>`, the release
+  landing `work_tickets.py release` opens when SE asks for a release: it does no work, it raises
+  the version by what the landed work recorded.
 
 The event carries the pull request as it was opened; where that refuses, the pull request is read
 again as it is now (the issues API), as `gh pr create --label` sets its labels, and an edit its
@@ -44,6 +47,7 @@ from pathlib import Path
 
 WORK_LABEL = "work"
 HOUSEKEEPING_LABEL = "housekeeping"
+RELEASE_LANDING = re.compile(r"land/release-v\d+\.\d+\.\d+")  # work_tickets.py RELEASE_LANDING
 KEYWORDS = ("refs", "closes", "fixes", "lands")
 RETRY_SECONDS = 5  # the wait before the one read again after a server error
 REMEDY = ("name the work issue in the description's first line, `Refs <issue url>` (work_tickets.py "
@@ -165,6 +169,10 @@ def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
         return 0, [f"pr-issues: pull request #{number} targets {base}, not {branch}: not checked"]
     author = str((pull.get("user") or {}).get("login", ""))
     owner = str(((event.get("repository") or {}).get("owner") or {}).get("login", ""))
+    head = str((pull.get("head") or {}).get("ref", ""))
+    if author and author.lower() == owner.lower() and RELEASE_LANDING.fullmatch(head):
+        return 0, [f"pr-issues: pull request #{number} is the owner's release landing {head}: "
+                   "exempt"]
     lines: list[str] = []
     for reading in ("event", "live"):
         if reading == "live":

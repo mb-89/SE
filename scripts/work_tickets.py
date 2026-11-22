@@ -2993,8 +2993,10 @@ def merge_release_kind(commit: str, subject: str, message: str) -> str:
     stated = f"states {', '.join(map(repr, kinds))}" if kinds else "states no kind"
     raise QueueError(
         f"Cannot release merge {commit[:7]} ({one_line(subject)}): it {stated}; nothing was "
-        f"written. Reword the merge to end with one trailer {RELEASE_TRAILER}: "
-        f"{'|'.join(reversed(RELEASE_ORDER))}, as {RELEASE_TRAILER_HELP}, then push again"
+        f"written. Before it lands, reword the merge to end with one trailer {RELEASE_TRAILER}: "
+        f"{'|'.join(reversed(RELEASE_ORDER))}, as {RELEASE_TRAILER_HELP}; one already on the "
+        "integration branch stays as it is: set project.version by hand in a pull request, which "
+        "the release then tags as it is"
     )
 
 
@@ -3045,22 +3047,17 @@ def remote_tags(root: Path) -> dict[str, str]:
     return tags | peeled
 
 
-def integrated_packages(root: Path, branch: str, released: str,
-                        upstream_ref: str | None = None) -> list[tuple[str, str]]:
-    """(branch, release kind) of each integration on `branch` since `upstream_ref` (default:
-    origin's `branch`) and the commit `released`, the last release's.
+def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, str]]:
+    """(branch, release kind) of each integration on `tip`'s first-parent history since the
+    commit `released`, the last release's, oldest first: what the next release raises the version
+    by (README "Project settings").
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
-    integrate writes: the merge it builds, or the squash commit that merge landed as; its kind is
-    its Release-kind trailer, and one without it is refused. Other merges release nothing and are
+    integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
+    Release-kind trailer, and one without it is refused. Other merges release nothing and are
     named."""
-    upstream = run_git(root, "rev-parse", "--verify", "--quiet",
-                       upstream_ref or f"refs/remotes/origin/{branch}")
-    revisions = [f"^{upstream.stdout.strip()}"] if upstream.returncode == 0 else ["--not", "--remotes", "--not"]
-    log = checked_git(
-        root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e",
-        branch, f"^{released}", *revisions,
-    )
+    log = checked_git(root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e", tip,
+                      f"^{released}")
     packages = []
     for record in filter(str.strip, log.split("\x1e")):
         commit, _, rest = record.strip().partition("\x00")
@@ -3140,39 +3137,46 @@ def build_release(root: Path, tag: str) -> list[str]:
     return sorted({"se.toml"} | (changed_paths(root) - before))
 
 
-def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | None:
-    """Release what was integrated into `branch` since `upstream_ref` (default: origin's
-    `branch`): bump project.version by the packages' highest kind, commit it with what
-    `project.release_build` regenerates and tag `v<version>`; the tag to push, or None where
-    nothing is released.
-    Where the release workflow tags, the released versions are origin's tags, and a version without
-    its tag there is left for the workflow to tag."""
-    by_workflow = release_by_workflow(root)
+def release_tags(root: Path) -> dict[str, str]:
+    """The released versions' tags and their commits: origin's where the release workflow tags
+    (`git ls-remote --tags`, never the local ones, which may be stale), else the local ones."""
+    if release_by_workflow(root):
+        return remote_tags(root)
+    listed = checked_git(root, "for-each-ref", "--format=%(refname:strip=2) %(objectname) "
+                         "%(*objectname)", "refs/tags")
+    tags = {}
+    for line in listed.splitlines():
+        name, commit, *peeled = line.split()
+        tags[name] = peeled[0] if peeled else commit
+    return tags
+
+
+def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None:
+    """Release `branch`, checked out in `root`: raise project.version by the highest Release-kind
+    of the integrations on its first-parent history since the last release, the commit the tag of
+    the current version names, and commit `Release v<version>` with what `project.release_build`
+    regenerates, carrying its parent's suite verdict. Returns the release's tag and the
+    (branch, kind) of each integration it releases, none where no release commit was written: an
+    untagged version is released as it is, the first tag of a project. None where nothing was
+    integrated since the last release, or no version is set."""
     version = project_version(root)
     if version is None:
-        print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to tag each integration")
+        print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to release")
         return None
-    origin = remote_tags(root) if by_workflow else None
-
-    def tagged(tag: str) -> str | None:
-        return origin.get(tag) if origin is not None else local_tag(root, tag)
-
+    tags = release_tags(root)
     current = f"v{version_text(version)}"
-    released = tagged(current)
+    released = tags.get(current)
     if released is None:
-        if by_workflow:
-            return current
-        checked_git(root, "tag", current, branch)
-        print(f"Release: {current} tagged, the first tag of project.version")
-        return current
-    packages = integrated_packages(root, branch, released, upstream_ref)
+        print(f"Release: {current} carries no tag yet; it is released as it is, the first tag of "
+              "project.version")
+        return current, []
+    packages = integrated_packages(root, branch, released)
     if not packages:
-        pushed = run_git(root, "merge-base", "--is-ancestor", released,
-                         upstream_ref or f"refs/remotes/origin/{branch}")
-        return None if pushed.returncode == 0 else current
+        print(f"Release: nothing was integrated since {current}; the version stays")
+        return None
     kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
     tag = f"v{version_text(released_version(version, kind))}"
-    if tagged(tag) is not None:
+    if tag in tags:
         raise QueueError(
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
             f"and check project.version in {root / 'se.toml'}"
@@ -3181,13 +3185,12 @@ def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | N
     paths = build_release(root, tag)
     trailer = config_value("commit_trailer", remote_repo(root), None)
     checked_git(root, "add", "--", *paths)
-    checked_git(root, "commit", "-q", "-m", f"Release {tag}", *(("-m", trailer) if trailer else ()),
-                env=environment)
+    checked_git(root, "commit", "-q", "-m", f"Release {tag}",
+                "-m", "\n".join(f"{name}: {kind}" for name, kind in packages),
+                *(("-m", trailer) if trailer else ()), env=environment)
     sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
-    if not by_workflow:
-        checked_git(root, "tag", tag)
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
-    return tag
+    return tag, packages
 
 
 def origin_repository_name(root: Path) -> str | None:
@@ -3259,16 +3262,14 @@ def guard_work_publication(root: Path, branch: str) -> None:
             f"<url>), or correct the work issue's repo: label, then push again")
 
 
-def push(root: Path, branch: str | None = None) -> str | None:
-    """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
-    integration branch is released first and its new tag pushed with it, unless the release
-    workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
-    (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the landed commit. A changed file a
-    template claims that breaks it refuses the push before anything else runs
-    (claimed_files_problem). Any other branch is a work branch, pushed only where origin is the
-    repository its recorded work issue is for (guard_work_publication).
-    Returns the release's tag, None where nothing is released."""
+def push(root: Path, branch: str | None = None) -> None:
+    """Gate `branch` (default: the current one), then push it to origin with its upstream set. It
+    releases nothing: only `work_tickets.py release` raises the version (README "Project
+    settings"). The integration branch and a landing branch `land/<branch>` (README "Landing on
+    main") need the verdicts on their tree. A changed file a template claims that breaks it
+    refuses the push before anything else runs (claimed_files_problem). Any other branch is a work
+    branch, pushed only where origin is the repository its recorded work issue is for
+    (guard_work_publication)."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
     target = integration_branch(root)
@@ -3279,15 +3280,6 @@ def push(root: Path, branch: str | None = None) -> str | None:
     if files is not None:
         raise QueueError(f"push: {files}")
     landing = branch.startswith(LANDING_PREFIX)
-    released = tag = (release(root, branch) if branch == target
-                      else release(root, branch, f"refs/remotes/origin/{target}") if landing
-                      else None)
-    if tag and release_by_workflow(root):
-        workflow_tags(tag)
-        tag = None
-    if tag and landing:
-        print(f"Release: tag {tag} once the landing is on {target}; it is not pushed now")
-        tag = None
     push_gate(root, branch)
     if branch != target and not landing:
         guard_work_publication(root, branch)
@@ -3295,8 +3287,7 @@ def push(root: Path, branch: str | None = None) -> str | None:
         print(accepted)
     elif landing:
         guard_pushed_tree(root, branch)
-    git_push(root, ["-u", "origin", branch, *((f"refs/tags/{tag}",) if tag else ())])
-    return released
+    git_push(root, ["-u", "origin", branch])
 
 
 # Acceptance that can only be seen after the merge: a run, release or deployment on the integration
@@ -6927,16 +6918,17 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
         print("Cleanup: origin merged branch deleted")
 
 
-def release_line(pull_url: str, tag: str | None, component_tags: list[str] | None = None) -> str:
-    """The closing comment's release: the release page of `tag`, the project's release, and of
-    each of `component_tags`, the component releases the landing cut (a kern release), beside the
-    pull request at `pull_url`; each tag alone without its URL, or none."""
-    tags = [*((tag,) if tag else ()), *(component_tags or ())]
-    if not tags:
-        return "Release: none."
+def release_line(pull_url: str, kind: str, component_tags: list[str] | None = None) -> str:
+    """The closing comment's release: the release kind the landing recorded, which the release SE
+    asks for counts (README "Project settings"), and the release page of each of
+    `component_tags`, the component releases the landing cut (a kern release), beside the pull
+    request at `pull_url`; each tag alone without its URL."""
+    line = f"Release kind: {kind}, recorded; the version moves when SE asks for a release"
+    if not component_tags:
+        return line + "."
     project, separator, _ = pull_url.rpartition("/pull/")
-    return "Release: " + ", ".join(
-        f"{project}/releases/tag/{name}" if separator else name for name in tags) + "."
+    return line + "; component releases: " + ", ".join(
+        f"{project}/releases/tag/{name}" if separator else name for name in component_tags) + "."
 
 
 GOAL_SECTION = "goal"
@@ -7208,6 +7200,7 @@ CHECK_NAME = "check"
 CHECK_POLL_SECONDS = 30
 CHECK_POLLS = 120  # an hour: the suite's limit is minutes, a queued runner may add some
 LANDING_PREFIX = "land/"
+RELEASE_LANDING = f"{LANDING_PREFIX}release-"  # land/release-v<version>, pr_issues.py's exemption
 HANDOFF_DIRECTORY = "handoff"
 # se.toml [integrate] landing (README "Landing on main"): how a landing reaches the integration
 # branch. "squash", built in: GitHub squash-merges the landing pull request and writes its own
@@ -7266,8 +7259,8 @@ def addressless(message: str) -> str:
 
 
 def write_landing_commit(root: Path, base: str, title: str, message: str) -> str:
-    """The fast-forward landing's one commit: the landing branch's tree (the merge, its
-    regeneration and its release) on `base`, as the project identity in both roles, titled
+    """The fast-forward landing's one commit: the landing branch's tree (the merge and its
+    regeneration) on `base`, as the project identity in both roles, titled
     `title` with `message`, no line holding an e-mail address. The checkout's branch moves to it,
     index and worktree unchanged (the same tree); its sha."""
     identity = required_identity(root, "integrate")
@@ -8181,9 +8174,7 @@ def integrate(
         if public_check_enabled(root):
             feedback.phase("public check")
             run_public_check(root, base)
-        feedback.phase("release")
-        tag = release(root, landing, f"refs/remotes/origin/{target}")
-        took = checked_git(root, "rev-parse", "HEAD").strip()  # the merge and its release
+        took = checked_git(root, "rev-parse", "HEAD").strip()  # the merge: it records its kind, releases nothing
         if mode == FAST_FORWARD:
             feedback.phase("the landing commit")
             write_landing_commit(root, base, title, message)
@@ -8199,7 +8190,8 @@ def integrate(
               file=sys.stderr, flush=True)
         state = {
             "branch": branch, "landing": landing, "target": target, "base": base,
-            "landed": landed, "head": head, "tag": tag, "component_tags": component_tags,
+            "landed": landed, "head": head, "component_tags": component_tags,
+            "release_kind": kind.partition(":")[2].strip(),
             "tracker": tracker, "remote": remote,
             "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
             "work_number": work_number, "suite": suite_result, "late": late,
@@ -8528,25 +8520,19 @@ def record_fix(root: Path, branch: str) -> str:
 
 def finish_integration(root: Path, state: dict[str, object], commit: str, landing_url: str,
                        run_url: str, door: GitHub | None) -> str:
-    """After the read-back: the checkout at the landed commit, the release tag, the landing branch
+    """After the read-back: the checkout at the landed commit, the landing branch
     gone, the mirrors pushed, the close-out plan run through `door` (or, without one, printed for
     the session), the worker's worktree and branch removed and, with a door, what is unblocked
     started."""
-    target, landing, tag = str(state["target"]), str(state["landing"]), state["tag"]
+    target, landing = str(state["target"]), str(state["landing"])
     tracker, remote = str(state["tracker"]), str(state["remote"])
     pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
     check_commands = state.get("check_commands")
     temporary = bool(state.get("check_temporary_working_directory"))
-    feedback.phase(f"close out: {target} at the landed commit, the release tag, the mirrors, "
-                   "the work issue")
+    feedback.phase(f"close out: {target} at the landed commit, the mirrors, the work issue")
     checked_git(root, "switch", "-q", target)
     checked_git(root, "merge", "-q", "--ff-only", commit)
     run_git(root, "branch", "-D", landing)
-    if tag and release_by_workflow(root):
-        workflow_tags(str(tag))
-    elif tag:
-        checked_git(root, "tag", "-f", str(tag), commit)
-        git_push(root, ["origin", f"refs/tags/{tag}"])
     deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
     refused = [(landing, failure_detail(deleted))] if deleted.returncode != 0 else []
     for mirror in configured_mirrors(root):
@@ -8557,7 +8543,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         git_push(root, [mirror.remote, f"{target}:{mirror.branch}"])
     branch, landed = str(state["branch"]), str(state["landed"])
     # A fast-forward landing's one commit holds none of the branch's history: the merge it was
-    # written from (its tree, its release) holds what it took.
+    # written from (its tree) holds what it took.
     took = str(state.get("took") or landed)
     unlanded = left_out(root, branch, took)
     if unlanded:
@@ -8593,7 +8579,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                   + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
-        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag, list(state.get("component_tags") or []))} "
+        f"{landing_url} (check: {run_url}). {release_line(landing_url, str(state.get("release_kind") or "patch"), list(state.get("component_tags") or []))} "
         f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
@@ -10954,6 +10940,191 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
             f"{given['check run url']}" + (f", after a local phase of {gap:g} s" if gap else ""))
 
 
+RELEASE_HANDOFF = "release"  # the hand-off's state, handoff_path's name for a release landing
+
+
+def release_description(tag: str, packages: str) -> str:
+    """The release landing pull request's description: what the release raises the version by,
+    the integrations since the last release with their kinds. It names no work issue: pr_issues.py
+    exempts the owner's `land/release-v<version>` (README "Project settings")."""
+    return (f"Release {tag}: `work_tickets.py release` raises the version by the highest "
+            "Release-kind recorded since the last release, as SE asked (README \"Project "
+            f"settings\").\n\nIntegrated since the last release:\n\n"
+            + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
+
+
+def land_release(root: Path, repo: str | None) -> str | None:
+    """Release what was integrated since the last release, when SE asks (README "Project
+    settings"): on `land/release-v<version>` at origin's newest integration branch, the release
+    commit release() writes, with its suite verdict (carried from its parent's tree, else the
+    complete suite) and the public check; push it and land it through a landing pull request as
+    integrate lands (landing_plan), then tag it, or leave the tag to the release workflow. Where gh
+    is not signed in and kern's relay serves no door, the plan is printed for the session and None
+    returned: `release --read-back <tag>` finishes. A version without its tag is tagged as it is;
+    nothing integrated since the last release releases nothing."""
+    if project_version(root) is None:
+        return (f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to "
+                "release")
+    release_by_workflow(root)  # a malformed setting is refused before anything moves
+    tracker = resolve_repo(root, repo)
+    remote = remote_repo(root)
+    if remote is None:
+        raise QueueError(f"work_tickets.py release: {root} has no origin remote to release on; add "
+                         "it with git remote add origin <url>")
+    handing_off = hand_off()
+    if not handing_off:
+        refuse_while_paused("release", pause_issues(root, tracker))
+    required_identity(root, "release")
+    target = integration_branch(root)
+    if checked_git(root, "status", "--porcelain", "--untracked-files=no").strip():
+        raise QueueError(f"work_tickets.py release: {root} has uncommitted changes; commit or "
+                         "stash them first, as the release switches branches there")
+    mode = landing_mode(root)
+    onto_integration_branch(root, target, "release")
+    feedback.phase(f"sync {target}")
+    sync(root)
+    base = checked_git(root, "rev-parse", "HEAD").strip()
+    if base != remote_head(root, target):
+        raise QueueError(
+            f"work_tickets.py release: {target} in {root} is not origin's {target}; a release "
+            f"starts from origin's newest {target}, so reset the checkout to it "
+            f"(git -C {root} reset --keep origin/{target}) and release again")
+    without_ci = landing_without_ci(root, base)
+    if without_ci and handing_off:
+        raise QueueError(
+            f"work_tickets.py release: se.toml [tests] ci = false on {target} lands on the "
+            f"integrator's commit status {trust.STATUS_CONTEXT}, which only gh writes; nothing was "
+            "released. Sign gh in as the integrator and release again (README \"Landing without "
+            "CI\")")
+    feedback.phase(f"release what was integrated on {target}")
+    checked_git(root, "checkout", "-q", "--detach", base)
+    try:
+        released = release(root, "HEAD")
+    except Exception:
+        checked_git(root, "switch", "-q", "--discard-changes", target)
+        raise
+    if released is None or not released[1]:  # nothing integrated, or released as it is
+        checked_git(root, "switch", "-q", target)
+        if released is None:
+            return f"Nothing to release: {target} at {base[:12]} holds no integration since the last release"
+        tag = released[0]
+        if release_by_workflow(root):
+            workflow_tags(tag)
+            return (f"{tag} is on {target} without its tag: the release workflow tags it on its "
+                    f"next run ({RELEASE_WORKFLOW}); rerun its last run on {target} where it failed")
+        checked_git(root, "tag", tag, base)
+        git_push(root, ["origin", f"refs/tags/{tag}"])
+        return f"Released {tag} as it is: tagged {base[:12]}, the first tag of project.version"
+    tag = released[0]
+    landing = f"{RELEASE_LANDING}{tag}"
+    checked_git(root, "switch", "-q", "-C", landing)
+    try:
+        if sibling("verdicts").refusal(root, SUITE_VERDICT, "HEAD", "") is not None:
+            feedback.phase("the complete suite: no suite verdict on the base to carry")
+            run_suite(root, read_ci=True)
+        if public_check_enabled(root):
+            feedback.phase("public check")
+            run_public_check(root, base)
+        landed = checked_git(root, "rev-parse", "HEAD").strip()
+        feedback.phase(f"push {landing}")
+        push_gate(root, landing)
+        guard_pushed_tree(root, landing)
+        git_push(root, ["--force", "origin", f"{landing}:refs/heads/{landing}"])
+    except Exception:
+        abandon_landing(root, target, landing)
+        raise
+    title = f"Release {tag}"
+    packages = "\n".join(f"{name}: {kind}" for name, kind in released[1])
+    verdict = status_verdict(root, remote, base, landed) if without_ci else None
+    state = {"tag": tag, "landing": landing, "target": target, "base": base, "landed": landed,
+             "remote": remote, "landing_mode": mode}
+    then = (f"work_tickets.py release --read-back {tag} --worktree {root}")
+    plan = landing_plan(remote, landing, target, base, landed, title, packages,
+                        release_description(tag, packages), then, tracker, None, mode,
+                        verdict=verdict)
+    door = relay_door(root, remote) if handing_off else None
+    if handing_off and door is None:
+        path = handoff_path(root, RELEASE_HANDOFF)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**state, "plan": plan.data()}, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8")
+        checked_git(root, "switch", "-q", target)
+        print(f"Pushed {landing} at {landed[:12]}; gh is not signed in, so the session runs these "
+              f"GitHub steps with its GitHub tools (kept in {path}):")
+        print(plan.text())
+        return None
+    door = door or GitHub(root, remote)
+    try:
+        feedback.phase(f"landing plan: the release pull request, its check, the "
+                       f"{'squash merge' if mode == SQUASH else 'fast-forward'}")
+        given = run_plan(plan, landing_actions(root, door, landing, target, base, tracker, verdict))
+        if mode == FAST_FORWARD:
+            given["merge commit sha"] = push_landing(root, door, target, base, landed,
+                                                     int(given["pull number"]))
+        commit = landing_read_back(root, target, base, landed, str(given["merge commit sha"]))
+    except Exception:
+        abandon_landing(root, target, landing)
+        raise
+    return finish_release(root, state, commit)
+
+
+def read_back_release(root: Path, tag: str) -> str:
+    """The release hand-off's second half: fast-forward where the landing does, read the landed
+    release commit back through git and finish (finish_release)."""
+    path = handoff_path(root, RELEASE_HANDOFF)
+    if not path.is_file():
+        raise QueueError(f"No release hand-off in {root} ({path} is missing); run work_tickets.py "
+                         "release first, which writes it")
+    state = json.loads(path.read_text(encoding="utf-8"))
+    if state["tag"] != tag:
+        raise QueueError(f"The release hand-off in {path} is for {state['tag']}, not {tag}; read "
+                         f"back {state['tag']}, or run work_tickets.py release again")
+    merged = None
+    if state.get("landing_mode") == FAST_FORWARD:
+        feedback.phase(f"fast-forward {state['target']} to the release commit")
+        fast_forward(root, str(state["target"]), str(state["base"]), str(state["landed"]))
+        merged = str(state["landed"])
+    commit = landing_read_back(root, str(state["target"]), str(state["base"]),
+                               str(state["landed"]), merged)
+    short = finish_release(root, state, commit)
+    path.unlink()
+    return short
+
+
+def finish_release(root: Path, state: dict[str, object], commit: str) -> str:
+    """After the read-back: the checkout at the landed release commit, its tag pushed or left to
+    the release workflow, the landing branch gone."""
+    target, landing, tag = str(state["target"]), str(state["landing"]), str(state["tag"])
+    checked_git(root, "switch", "-q", target)
+    checked_git(root, "merge", "-q", "--ff-only", commit)
+    run_git(root, "branch", "-D", landing)
+    if release_by_workflow(root):
+        workflow_tags(tag)
+    else:
+        checked_git(root, "tag", "-f", tag, commit)
+        git_push(root, ["origin", f"refs/tags/{tag}"])
+    deleted = run_git(root, "push", "origin", f":refs/heads/{landing}")
+    if deleted.returncode != 0:
+        print(f"{landing} stays on origin: {failure_detail(deleted)}")
+    return f"Released {tag} in {commit[:12]} on {target}"
+
+
+@command("release", "release when SE asks: raise project.version by the highest Release-kind "
+                    "integrated since the last release, land the release commit through a landing "
+                    "pull request and tag it, or leave the tag to the release workflow (README "
+                    "\"Project settings\"); with nothing integrated since, it releases nothing",
+         WORKTREE, REPO,
+         arg("--read-back", metavar="TAG",
+             help="without gh: once the plan's steps ran, read the landed release TAG back and "
+                  "finish"))
+def run_release(root: Path, args: argparse.Namespace) -> int:
+    result = (read_back_release(root, args.read_back) if args.read_back
+              else land_release(root, args.repo))
+    if result:
+        print(result)
+    return 0
+
+
 @command("rehearse", "rehearse a whole landing through kern's relay against a scratch branch, "
                      "never the integration branch: a relay read, a local phase (--gap makes it "
                      "slow on purpose), the push of rehearse/<base>, the landing pull request into "
@@ -11441,10 +11612,10 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      ("field-report", "guard", "sync", "identity", "deliver", "push", "verified", "pr-body",
       "stop-check")),
     ("integration", "Integration",
-     "The integrator's and SE's work: integrate and its release, ref maintenance, the suite and "
+     "The integrator's and SE's work: integrate, the release SE asks for, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
-     ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
+     ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
