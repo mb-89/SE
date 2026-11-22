@@ -47,6 +47,28 @@ def test_a_clean_box_has_no_problem_and_every_area_is_seen():
     assert d.render_text(findings).startswith("SE doctor: 0 problems, 0 notes")
 
 
+@pytest.mark.parametrize("door, text", [
+    (True, "SE plugin at ~/.claude/skills/se: .claude-plugin/plugin.json declares the MCP door for Claude Code"),
+    (False, "SE plugin at ~/.claude/skills/se: .claude-plugin/plugin.json declares no MCP door for Claude Code "
+            "(se.toml [plugin] claude_mcp off)")])
+def test_the_plugin_line_names_whether_its_manifest_declares_the_door(door, text):
+    facts = clean_facts()
+    facts["plugins"][0]["door"] = door
+    lines = [f.text for f in d.diagnose(facts) if f.area == "plugin"]
+    assert lines.count(text) == 1 and len(lines) == 2
+    assert problems(facts) == []
+
+
+def test_the_plugin_gatherer_reads_the_door_from_the_manifest(tmp_path: Path):
+    home = tmp_path / "home"
+    on, off = home / "on", home / "off"
+    for root, manifest in ((on, {"name": "se", "version": "1.0.0", "mcpServers": {"se": {"command": "bash"}}}),
+                           (off, {"name": "se", "version": "1.0.0", "hooks": {}})):
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert [p["door"] for p in d.gather_plugins([on, off], tmp_path / "checkout", home)] == [True, False]
+
+
 def test_a_stale_plugin_is_a_problem_named_first():
     facts = clean_facts()
     facts["plugins"][0]["version"] = "5.49.13"

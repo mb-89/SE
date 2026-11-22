@@ -6,8 +6,9 @@
 # Standard output carries MCP alone; everything else goes to <project>\.se\.runtime\mcp.log (the
 # binary's own stderr to mcp-door.log beside it), else the system's temporary folder; in a plugin
 # install whose session folder has no .git in it or above it, to ~\.se\.runtime instead. A plugin
-# install chooses its root as se_mcp.sh does, from SE_SESSION_CWD, else COPILOT_SESSION_CWD, with
-# no parent-cwd backstop.
+# install chooses its root as se_mcp.sh does: the plugin's root is PLUGIN_ROOT, else CLAUDE_PLUGIN_ROOT,
+# and the root SE_SESSION_CWD, else that host's session folder (COPILOT_SESSION_CWD, CLAUDE_PROJECT_DIR),
+# with no parent-cwd backstop.
 $ErrorActionPreference = 'Stop'
 $seRoot = Split-Path -Parent $PSScriptRoot
 $root = ''
@@ -51,11 +52,11 @@ function Inside([string]$path, [string]$folder) { # whether path is folder or li
     $how = if ($windows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
     return ($path.TrimEnd($sep) + $sep).StartsWith($folder.TrimEnd($sep) + $sep, $how)
 }
-function PluginProject([string]$plugin) { # the root a plugin install serves; $script:pluginFound where a source counts
+function PluginProject([string]$plugin, [string[]]$names) { # the root a plugin install serves; $script:pluginFound where a source counts
     $script:pluginFound = $false
     $dir = ''
     $source = ''
-    foreach ($name in @('SE_SESSION_CWD', 'COPILOT_SESSION_CWD')) {
+    foreach ($name in $names) {
         $value = [Environment]::GetEnvironmentVariable($name)
         if ($value -and [IO.Path]::IsPathRooted($value)) {
             $dir = Folder $value
@@ -71,7 +72,7 @@ function PluginProject([string]$plugin) { # the root a plugin install serves; $s
             if (-not $chosen) { $chosen = $dir }
         }
     } else {
-        $source = 'no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD)'
+        $source = "no variable set ($($names -join ', '))"
     }
     $script:log = Join-Path (Runtime $chosen (SessionFolder $chosen $plugin)) 'mcp.log'
     Note "plugin ${plugin}: root $chosen from $source"
@@ -79,11 +80,17 @@ function PluginProject([string]$plugin) { # the root a plugin install serves; $s
 }
 
 $session = $false
-if ($env:PLUGIN_ROOT -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
-    $plugin = Folder $env:PLUGIN_ROOT
+$pluginRoot = $env:PLUGIN_ROOT
+$sessionNames = @('SE_SESSION_CWD', 'COPILOT_SESSION_CWD')
+if (-not $pluginRoot -and $env:CLAUDE_PLUGIN_ROOT) {
+    $pluginRoot = $env:CLAUDE_PLUGIN_ROOT
+    $sessionNames = @('SE_SESSION_CWD', 'CLAUDE_PROJECT_DIR')
+}
+if ($pluginRoot -and $env:SE_MCP_PLUGIN_PROJECT -ne 'off') {
+    $plugin = Folder $pluginRoot
     if ($plugin -and (Same $plugin (Folder $seRoot)) -and (Same $plugin (Folder $root))) {
         Remove-Item Env:SE_MCP_PLUGIN_FOLDER -ErrorAction SilentlyContinue
-        $chosen = PluginProject $plugin
+        $chosen = PluginProject $plugin $sessionNames
         if ($script:pluginFound) {
             if (-not (Same $chosen $plugin)) {
                 $root = $chosen

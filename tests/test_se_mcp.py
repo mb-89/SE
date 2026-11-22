@@ -30,7 +30,7 @@ needs_bash = pytest.mark.skipif(BASH is None, reason="se_mcp.sh runs in bash")
 
 # The host variables a plugin install reads or must ignore; launch() passes none of the runner's on.
 PLUGIN_VARIABLES = ("CLAUDE_PROJECT_DIR", "COPILOT_PROJECT_DIR", "COPILOT_SESSION_CWD", "SE_SESSION_CWD",
-                    "PLUGIN_ROOT", "SE_MCP_PLUGIN_PROJECT", "SE_MCP_PLUGIN_FOLDER")
+                    "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT", "SE_MCP_PLUGIN_PROJECT", "SE_MCP_PLUGIN_FOLDER")
 
 
 def launch(kind: str, home: Path | None, project: Path, stdin: str, se: Path = ROOT, parent: Path | None = None,
@@ -462,3 +462,68 @@ def test_a_parent_folder_that_is_no_checkout_gets_no_se(tmp_path):
     assert got == ["mcp", "--root", sh(session), "--home", sh(plugin), "folder=unset"]
     assert not (session / ".se").exists()
     assert "from parent cwd" in home_log(tmp_path).read_text(encoding="utf-8")
+
+
+# Claude Code's plugin install (README "The MCP door"): .claude-plugin/plugin.json runs the launcher
+# from ${CLAUDE_PLUGIN_ROOT} with --root .; Claude Code sets CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR
+# in the server's environment and starts it in the project (scripts/host-limits.toml).
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_a_claude_plugin_run_from_its_folder_serves_the_project_dir(tmp_path, kind):
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    result = plugin_run(kind, tmp_path, plugin, PLUGIN_ROOT="", CLAUDE_PLUGIN_ROOT=str(plugin),
+                        CLAUDE_PROJECT_DIR=named(kind, repo / "sub"), COPILOT_SESSION_CWD=named(kind, tmp_path))
+    assert door_root(kind, result) == named(kind, repo)
+    log = (repo / ".se" / ".runtime" / "mcp.log").read_text(encoding="utf-8")
+    assert f"from CLAUDE_PROJECT_DIR={named(kind, repo / 'sub')}" in log
+
+
+@pytest.mark.parametrize("kind", LAUNCHERS)
+def test_under_claude_code_the_se_session_folder_still_wins_and_copilots_is_no_source(tmp_path, kind):
+    plugin = se_copy(tmp_path / "plugin")
+    first, second = repository(tmp_path / "first"), repository(tmp_path / "second")
+    result = plugin_run(kind, tmp_path, plugin, PLUGIN_ROOT="", CLAUDE_PLUGIN_ROOT=str(plugin),
+                        SE_SESSION_CWD=named(kind, first), CLAUDE_PROJECT_DIR=named(kind, second))
+    assert door_root(kind, result) == named(kind, first)
+    alone = plugin_run(kind, tmp_path, se_copy(tmp_path / "plain"), PLUGIN_ROOT="",
+                       CLAUDE_PLUGIN_ROOT=str(tmp_path / "plain"), COPILOT_SESSION_CWD=named(kind, second))
+    assert door_root(kind, alone) == named(kind, tmp_path / "plain")
+
+
+@needs_bash
+def test_the_claude_manifests_door_as_claude_code_starts_it_serves_the_project(tmp_path):
+    """The server as a build with [plugin] claude_mcp on declares it, started as Claude Code 2.1.330
+    starts it: cwd the project, CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set; the gate stays shut."""
+    server = se_plugin_server(tmp_path)
+    plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
+    host = {"CLAUDE_PLUGIN_ROOT": sh(plugin)}
+    assert server == {"type": "stdio", "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."]}
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = {key: value for key, value in os.environ.items() if key not in {"SE_MCP_BIN", *PLUGIN_VARIABLES}}
+    environment.update(HOME=str(home), USERPROFILE=str(home), SE_MCP_BIN=sh(stub(tmp_path)),
+                       CLAUDE_PLUGIN_ROOT=str(plugin), CLAUDE_PROJECT_DIR=str(repo))
+    for cwd in (repo, plugin):  # where Claude Code starts it, and a host that starts it in the plugin
+        result = subprocess.run([BASH, "-c", '"$BASH" "$@"; :', "host", expand(server["args"][0], host),
+                                 *server["args"][1:]], capture_output=True, text=True, encoding="utf-8",
+                                env=environment, cwd=cwd, timeout=60, check=False)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == ["mcp", "--root", sh(repo), "--home", sh(plugin), "folder=unset"]
+
+
+def se_plugin_server(tmp_path: Path) -> dict:
+    """The se server of .claude-plugin/plugin.json, built from SE's sources with claude_mcp on."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("se_plugin_for_mcp", ROOT / "scripts" / "se_plugin.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    root = tmp_path / "built"
+    shutil.copytree(ROOT / "src", root / "src")
+    (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nclaude_mcp = true\n', encoding="utf-8")
+    return declared_server_of(module.expected(root, copilot=False))
+
+
+def declared_server_of(files: dict) -> dict:
+    return json.loads(files[next(path for path in files if str(path) == ".claude-plugin/plugin.json")])["mcpServers"]["se"]
