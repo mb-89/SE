@@ -26,8 +26,8 @@ import fake_git
 import git_door
 
 ROOT = Path(__file__).resolve().parents[1]
-GROUPS = ["delivery", "forms", "guidance", "integration", "issues", "overhaul", "render", "retro",
-          "review", "scaffold", "tickets"]  # SE's Python command groups, each placed
+GROUPS = ["delivery", "guidance", "templates", "integration", "issues", "overhaul", "render",
+          "retro", "review", "scaffold", "tickets"]  # SE's Python command groups, each placed
 GO = ["fleet", "github", "origin", "retro-due"]  # SE's Go components, in the se binary (components/README.md)
 
 

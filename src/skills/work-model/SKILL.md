@@ -31,7 +31,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 - **Out**: a pushed branch, a pull request to the integration branch whose description is the
   field report, and one notification to the integrator. No field-report issue is filed: one piece
   of work is one issue, the work issue, which the integrator closes once the work is integrated.
-  - The report's one form is the pull request template,
+  - The report's one template is the pull request template,
     [`.github/pull_request_template.md`](../../../.github/pull_request_template.md). The report
     sits between its `<!-- se:field-report -->` and `<!-- se:field-report:end -->` lines.
   - `field-report --draft` writes it there, and every reader (`field-report --check`, `guard`,
@@ -428,7 +428,7 @@ The checks that hold it:
 | Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([README "Modules"](../../../README.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
-| No issue or comment text names another remote | a filing's form check (`<se>/scripts/work_tickets.py` `form_findings`) refuses each private term in the title and body, at the filing commands and the form gate ([README "Forms"](../../../README.md#forms)) |
+| No issue or comment text names another remote | a filing's template check (`<se>/scripts/work_tickets.py` `template_findings`) refuses each private term in the title and body, at the filing commands and the template gate ([README "Templates"](../../../README.md#templates)) |
 | Trees compare equal apart from lock files | `<se>/scripts/work_tickets.py parity` names every path two commits' trees differ in apart from `se.lock` and `uv.lock` at any depth ([README "Source parity"](../../../README.md#source-parity), `tests/test_parity.py`) |
 | Every change lands through SE's landing step | with `[integrate] landing = "fast-forward"`, the public check's identity gate refuses a commit the host made, so a merge-button commit turns `check` red ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | A generic commit identity on every remote | the commit gates of the hooks and of `check` ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)) |
@@ -545,7 +545,7 @@ Pull requests built on an old `main` cause most integration trouble.
   SE turn, so a missed notification is handled as soon as either session is talked to; in the
   cloud only, the scheduled task of the [dispatcher](../../../README.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
-  description carries a complete field report (one that follows its form); `queue` lists them.
+  description carries a complete field report (one that follows its template); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
   pieces left ([integrator](../../agents/integrator.md)), the issue stays open and the comment names
@@ -857,7 +857,7 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     `block` is done by hand: add the blocker's line to the issue's Blocked by with the GitHub
     tools (`issue_write`, method `update`).
   - A held issue's text is fixed on the issue; `unhold --issue-body <file>`, the issue as
-    `issue_read` answered it, checks it against its form and prints the label change as its plan.
+    `issue_read` answered it, checks it against its template and prints the label change as its plan.
   - The session runs each plan's steps in order with its GitHub tools, then the plan's `Then:`
     line.
 - **Every other command** fails, naming itself, the missing `gh` and this section.

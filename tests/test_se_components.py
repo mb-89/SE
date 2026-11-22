@@ -40,8 +40,8 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
         "review.py brief", "review.py file", "retro.py collect", "retro.py file", "overhaul.py new",
         "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
         "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add",
-        "se_forms.py list", "se_forms.py draft", "se_forms.py check", "se_forms.py gate",
-        "se_forms.py check-files", "se_forms.py backstop", "se_guidance.py collect",
+        "se_templates.py list", "se_templates.py draft", "se_templates.py check", "se_templates.py gate",
+        "se_templates.py check-files", "se_templates.py backstop", "se_guidance.py collect",
         "se_guidance.py check", "se_guidance.py project"])
     wiring = (ROOT / "wiring.toml").read_text(encoding="utf-8")
     for group in GROUPS:
@@ -205,13 +205,13 @@ def test_each_group_answers_its_commands_with_the_scripts_code(components, tmp_p
             components[component].run(command, cwd, *args)
         assert said in json.loads(str(refused.value).split("\n", 1)[1])["stderr"], command
 
-    # forms: se_forms.py's own code, its verdict on the first line and exit code 0 for a refusal,
-    # and exit code 2 for a form it does not have, answered with the list of forms.
-    answer = components["forms"].run("se_forms.py check", cwd, "work", "--body", "B.", "--tree")
-    assert answer.splitlines()[0].startswith("refused: ") and "se_forms.py draft work" in answer
+    # templates: se_templates.py's own code, its verdict on the first line and exit code 0 for a refusal,
+    # and exit code 2 for a template it does not have, answered with the list of templates.
+    answer = components["templates"].run("se_templates.py check", cwd, "work", "--body", "B.", "--tree")
+    assert answer.splitlines()[0].startswith("refused: ") and "se_templates.py draft work" in answer
     with pytest.raises(KernError, match=r"\Aexit code 2\n") as refused:
-        components["forms"].run("se_forms.py draft", cwd, "nope", "--tree")
-    assert "the forms are:" in json.loads(str(refused.value).split("\n", 1)[1])["stdout"]
+        components["templates"].run("se_templates.py draft", cwd, "nope", "--tree")
+    assert "the templates are:" in json.loads(str(refused.value).split("\n", 1)[1])["stdout"]
 
     # guidance: se_guidance.py's own code, its check of this checkout's trees and exit code 2 for
     # a template it does not have, answered with the list of templates.
@@ -270,7 +270,7 @@ def test_a_command_runs_directly_where_kern_does_not_serve_it(tmp_path, monkeypa
     monkeypatch.setenv(se_components.SWITCH, "")
     for name, words in (("overhaul", ["facts"]), ("retro", ["collect"]), ("timeline", []),
                         ("deck", ["build"]), ("se", ["component", "add"]),
-                        ("se_forms", ["check"]), ("se_guidance", ["check"])):
+                        ("se_templates", ["check"]), ("se_guidance", ["check"])):
         interactive = " ".join(words) in se_components.script(name).INTERACTIVE_COMMANDS
         assert se_components.routed(ROOT / "scripts" / f"{name}.py", words, [], interactive) is None
     monkeypatch.setenv(se_components.SWITCH, "on")

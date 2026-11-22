@@ -43,9 +43,9 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 component = "scaffold"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
 
-[instances.forms]
-component = "forms"
-command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "forms"]
+[instances.templates]
+component = "templates"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "templates"]
 
 [instances.guidance]
 component = "guidance"

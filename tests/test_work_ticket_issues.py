@@ -4100,9 +4100,9 @@ def test_a_long_goal_summary_ends_at_a_sentence_or_clause_boundary(goal, summary
 
 
 GATE_SENTENCE = (
-    "Where SE's forms are switched on, a GitHub write through the GitHub MCP tools whose body "
-    "breaks its form is refused before it runs, and the refusal names the form, every finding "
-    "and the tool call that gets the form.")
+    "Where SE's templates are switched on, a GitHub write through the GitHub MCP tools whose body "
+    "breaks its template is refused before it runs, and the refusal names the template, every finding "
+    "and the tool call that gets the template.")
 GUARD_SENTENCE = (
     "A test that connects beyond this machine from its own process, or runs far longer than the "
     "slowest test, fails with its name and what to do.")
@@ -4122,13 +4122,13 @@ BRACKETS_SENTENCE = (
     "skips the files its lists name (the committed base list, the local list, and the vendored "
     "folders) before it reads any of them.")
 DEFAULT_SENTENCE = (
-    "By default the gate only warns about a write whose body breaks its form, and with `refuse` "
+    "By default the gate only warns about a write whose body breaks its template, and with `refuse` "
     "set in the project's settings it refuses that write before it reaches GitHub through the "
     "GitHub MCP tools or through gh on any machine.")
 WHERE_SENTENCE = (
     "Where a project sets the gate to refuse in its settings, every write that the GitHub MCP "
     "tools send to an issue or a pull request in one of its home repositories is checked against "
-    "its form before it is sent to GitHub at all.")
+    "its template before it is sent to GitHub at all.")
 
 
 def before(sentence: str, mark: str) -> str:
@@ -4136,7 +4136,7 @@ def before(sentence: str, mark: str) -> str:
 
 
 @pytest.mark.parametrize(("goal", "summary"), [
-    # form-gate-github-writes landed as "Where SE's forms are switched on": it keeps its main
+    # template-gate-github-writes landed as "Where SE's templates are switched on": it keeps its main
     # clause, up to "is refused before it runs".
     (GATE_SENTENCE + "\n- A write that passes runs as today.\n- With the switch off, as on main.",
      before(GATE_SENTENCE, ", and the refusal")),
@@ -4144,16 +4144,16 @@ def before(sentence: str, mark: str) -> str:
     (HOOKS_SENTENCE, before(HOOKS_SENTENCE, ", while")),
     # feat/session-cost-from-transcripts-20261116: the last clause end within 200, after "output)".
     (COST_SENTENCE, before(COST_SENTENCE, ", their price")),
-    # feat/forms-filing-commands-20261116, test-network-guard-and-timeout and
-    # feat/forms-adapters-20261116: within 200, each stays whole.
+    # feat/templates-filing-commands-20261116, test-network-guard-and-timeout and
+    # feat/templates-adapters-20261116: within 200, each stays whole.
     ("With the new switch on, the three filing commands check the title and the body against "
-     "their form before anything is written.",
+     "their template before anything is written.",
      "With the new switch on, the three filing commands check the title and the body against "
-     "their form before anything is written."),
+     "their template before anything is written."),
     (GUARD_SENTENCE, GUARD_SENTENCE),
-    ("Every text that SE's own commands send to GitHub either selects exactly one registered form "
+    ("Every text that SE's own commands send to GitHub either selects exactly one registered template "
      "and passes it, or is free by a stated rule.",
-     "Every text that SE's own commands send to GitHub either selects exactly one registered form "
+     "Every text that SE's own commands send to GitHub either selects exactly one registered template "
      "and passes it, or is free by a stated rule."),
     # A clause end before "or" gets no preference: never at "from its own process".
     (GUARD_LONG_SENTENCE, before(GUARD_LONG_SENTENCE, ", the seconds")),
@@ -6389,7 +6389,7 @@ def test_deliver_names_the_issue_with_a_closing_keyword_only_for_pre_merge_accep
 
 @pytest.mark.parametrize(
     ("body", "keyword"), [(BODY, "Fixes"), (POST_MERGE_BODY, "Refs")], ids=["pre-merge", "post-merge"])
-def test_pr_body_prints_the_form_deliver_writes(tmp_path, capsys, body, keyword):
+def test_pr_body_prints_the_template_deliver_writes(tmp_path, capsys, body, keyword):
     issue_body = tmp_path / "issue.md"
     issue_body.write_text(body, encoding="utf-8")
     report = tmp_path / "report.md"
@@ -7405,18 +7405,18 @@ def test_switched_on_refresh_and_the_unread_refusal_mark_an_outside_comment(
     assert "outside text" not in lines[1]
 
 
-# The form check of the filing commands (README "Forms"): se.toml [forms] at the integration branch.
+# The template check of the filing commands (README "Templates"): se.toml [templates] at the integration branch.
 
-FORMS = work_tickets.sibling("forms")
-WORK_FORM = FORMS.load(PROJECT, tree=True)["work"]
-WORK_TITLE = WORK_FORM.example["title"]
-WORK_FIELDS = dict(WORK_FORM.example["fields"])
+TEMPLATES = work_tickets.sibling("templates")
+WORK_TEMPLATE = TEMPLATES.load(PROJECT, tree=True)["work"]
+WORK_TITLE = WORK_TEMPLATE.example["title"]
+WORK_FIELDS = dict(WORK_TEMPLATE.example["fields"])
 
 
 @pytest.fixture
-def forms_home(tmp_path: Path, monkeypatch) -> Path:
-    """A clean home for the count of refusals (~/.se/forms/) and one session."""
-    home = tmp_path / "forms-home"
+def templates_home(tmp_path: Path, monkeypatch) -> Path:
+    """A clean home for the count of refusals (~/.se/templates/) and one session."""
+    home = tmp_path / "templates-home"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("SE_SESSION", "session-a")
@@ -7424,22 +7424,22 @@ def forms_home(tmp_path: Path, monkeypatch) -> Path:
 
 
 def enforce(worktree: Path, mode: str, refusals: int | None = None) -> None:
-    """The worktree's se.toml with `[forms]`; the worktree is no repository, so no origin ref
+    """The worktree's se.toml with `[templates]`; the worktree is no repository, so no origin ref
     exists and the working tree's se.toml is read."""
     extra = f"refusals = {refusals}\n" if refusals is not None else ""
-    (worktree / "se.toml").write_text(f'{IDENTITY}\n[forms]\nenforce = "{mode}"\n{extra}',
+    (worktree / "se.toml").write_text(f'{IDENTITY}\n[templates]\nenforce = "{mode}"\n{extra}',
                                       encoding="utf-8")
 
 
 def without_problem(worktree: Path) -> Path:
     path = worktree / "no-problem.md"
     fields = {key: value for key, value in WORK_FIELDS.items() if key != "problem"}
-    path.write_text(FORMS.render(WORK_FORM, fields), encoding="utf-8")
+    path.write_text(TEMPLATES.render(WORK_TEMPLATE, fields), encoding="utf-8")
     return path
 
 
-def test_with_no_forms_table_file_backlog_file_and_route_file_byte_for_byte(worktree, monkeypatch,
-                                                                            capsys, forms_home):
+def test_with_no_templates_table_file_backlog_file_and_route_file_byte_for_byte(worktree, monkeypatch,
+                                                                            capsys, templates_home):
     github = LabelledGh({1: {"number": 1, "title": "Outside", "body": "Please fix it.",
                              "url": "https://git.example/owner/repo/issues/1", "labels": []}})
     calls: list[list[str]] = []
@@ -7448,15 +7448,15 @@ def test_with_no_forms_table_file_backlog_file_and_route_file_byte_for_byte(work
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     body = worktree / "body.md"
-    body.write_text("No form at all: one line.\n", encoding="utf-8")
+    body.write_text("No template at all: one line.\n", encoding="utf-8")
     routing = worktree / "routing.md"
     routing.write_text("## Package kind\n\nfeat\n", encoding="utf-8")
     assert run(worktree, "file", "--title", "feat/plain-20261116", "--body-file", str(body)) == 0
     assert run(worktree, "backlog", "file", "--title", "plain-idea", "--body-file", str(body)) == 0
     assert run(worktree, "route", "1", "--title", "fix/routed-20261116",
                "--routing-file", str(routing)) == 0
-    assert " form " not in capsys.readouterr().err
-    marked = "<!-- se:fleet -->\nNo form at all: one line.\n"
+    assert " template " not in capsys.readouterr().err
+    marked = "<!-- se:fleet -->\nNo template at all: one line.\n"
     assert github.issues[2] == {
         "number": 2, "title": "feat/plain-20261116", "body": marked, "labels":
         ["work", "ready", "repo:repo"], "url": "https://git.example/owner/repo/issues/2"}
@@ -7470,21 +7470,21 @@ def test_with_no_forms_table_file_backlog_file_and_route_file_byte_for_byte(work
     writes = [call[:3] for call in calls if call[:2] in (["issue", "create"], ["issue", "edit"])]
     assert writes == [["issue", "create", "--title"], ["issue", "create", "--title"],
                       ["issue", "edit", "1"]]
-    assert not (forms_home / ".se" / "forms").exists()
+    assert not (templates_home / ".se" / "templates").exists()
 
 
-def test_warn_files_a_work_body_without_a_problem_and_names_it(worktree, gh, capsys, forms_home):
+def test_warn_files_a_work_body_without_a_problem_and_names_it(worktree, gh, capsys, templates_home):
     enforce(worktree, "warn")
     assert run(worktree, "file", "--title", WORK_TITLE, "--body-file",
                str(without_problem(worktree))) == 0
     captured = capsys.readouterr()
     assert "Filed work issue" in captured.out
     assert "Problem: missing" in captured.err and "filed anyway" in captured.err
-    assert "<!-- se:form work -->" in gh.bodies[-1]
+    assert "<!-- se:template se/work " in gh.bodies[-1]
 
 
 def test_refuse_refuses_before_any_gh_call_relay_call_or_printed_plan(worktree, gh, monkeypatch,
-                                                                       capsys, forms_home):
+                                                                       capsys, templates_home):
     enforce(worktree, "refuse")
     body = without_problem(worktree)
     assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 1
@@ -7492,7 +7492,7 @@ def test_refuse_refuses_before_any_gh_call_relay_call_or_printed_plan(worktree, 
     assert gh.calls == [] and captured.out == ""
     refusal = captured.err.strip().splitlines()
     assert len(refusal) <= 10 and any("Problem: missing" in line for line in refusal)
-    assert f"{PROJECT / 'scripts' / 'forms.py'} draft work" in captured.err
+    assert f"{PROJECT / 'scripts' / 'templates.py'} draft work" in captured.err
     assert not re.search(r"\b(tries|attempts?|left)\b", captured.err)
 
     relayed = []
@@ -7504,8 +7504,8 @@ def test_refuse_refuses_before_any_gh_call_relay_call_or_printed_plan(worktree, 
     assert "--hold" in captured.err  # the second refusal of the same issue offers it
 
 
-def test_file_fields_without_gh_prints_the_rendered_body_that_the_form_passes(
-        worktree, monkeypatch, capsys, tmp_path, forms_home):
+def test_file_fields_without_gh_prints_the_rendered_body_that_the_template_passes(
+        worktree, monkeypatch, capsys, tmp_path, templates_home):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -7513,18 +7513,18 @@ def test_file_fields_without_gh_prints_the_rendered_body_that_the_form_passes(
     fields.write_text(json.dumps(WORK_FIELDS), encoding="utf-8")
     assert run(worktree, "file", "--title", WORK_TITLE, "--fields", str(fields)) == 0
     out = capsys.readouterr().out
-    rendered = FORMS.render(WORK_FORM, WORK_FIELDS)
+    rendered = TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS)
     create = next(line for line in out.splitlines() if '"method": "create"' in line)
     planned = json.loads(create.split(" ", 2)[2])["body"]
     assert planned == rendered
     checked = tmp_path / "planned.md"
     checked.write_text(planned, encoding="utf-8")
-    assert FORMS.main(["check", "work", "--body-file", str(checked), "--title", WORK_TITLE,
+    assert TEMPLATES.main(["check", "work", "--body-file", str(checked), "--title", WORK_TITLE,
                        "--tree"]) == 0
 
 
 def test_file_blocked_by_without_gh_names_the_bodys_blocked_by_instead_of_a_link(
-        worktree, monkeypatch, capsys, forms_home):
+        worktree, monkeypatch, capsys, templates_home):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -7538,7 +7538,7 @@ def test_file_blocked_by_without_gh_names_the_bodys_blocked_by_instead_of_a_link
     assert "link the blockers on GitHub" not in captured.err
 
 
-def test_each_filing_command_takes_exactly_one_body(worktree, gh, capsys, forms_home):
+def test_each_filing_command_takes_exactly_one_body(worktree, gh, capsys, templates_home):
     fields = worktree / "fields.json"
     fields.write_text("{}", encoding="utf-8")
     body = worktree / "body.md"
@@ -7552,8 +7552,8 @@ def test_each_filing_command_takes_exactly_one_body(worktree, gh, capsys, forms_
     assert gh.calls == []
 
 
-def test_hold_files_as_given_after_two_refusals_off_form_and_never_started(
-        worktree, monkeypatch, capsys, forms_home):
+def test_hold_files_as_given_after_two_refusals_off_template_and_never_started(
+        worktree, monkeypatch, capsys, templates_home):
     github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
                              "url": "https://git.example/owner/repo/issues/1", "state": "closed"}})
     monkeypatch.setattr(work_tickets, "run_gh", github)
@@ -7562,7 +7562,7 @@ def test_hold_files_as_given_after_two_refusals_off_form_and_never_started(
     monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
     enforce(worktree, "refuse")
     body = worktree / "body.md"
-    body.write_text("Only a line, no form.\n", encoding="utf-8")
+    body.write_text("Only a line, no template.\n", encoding="utf-8")
     command = ["file", "--title", WORK_TITLE, "--body-file", str(body)]
     assert run(worktree, *command, "--hold") == 1
     assert "--hold opens only after" in capsys.readouterr().err
@@ -7576,21 +7576,21 @@ def test_hold_files_as_given_after_two_refusals_off_form_and_never_started(
     capsys.readouterr()
     monkeypatch.setenv("SE_SESSION", "session-a")
     assert run(worktree, *command, "--hold") == 0
-    assert "held: labelled off-form" in capsys.readouterr().out
+    assert "held: labelled off-template" in capsys.readouterr().out
     held = github.issues[2]
-    assert held["body"] == "<!-- se:fleet -->\nOnly a line, no form.\n"
-    assert held["labels"] == ["work", "repo:repo", "off-form"]
-    assert "off-form" in github.labels
+    assert held["body"] == "<!-- se:fleet -->\nOnly a line, no template.\n"
+    assert held["labels"] == ["work", "repo:repo", "off-template"]
+    assert "off-template" in github.labels
     assert run(worktree, "ready") == 0
     assert "#2" not in capsys.readouterr().out
     assert run(worktree, "start", "2") == 1
     assert "not startable" in capsys.readouterr().err
-    assert not list(worktree.rglob("*.json"))  # the count lives under ~/.se/forms/, not here
-    assert list((forms_home / ".se" / "forms").glob("*.json"))
+    assert not list(worktree.rglob("*.json"))  # the count lives under ~/.se/templates/, not here
+    assert list((templates_home / ".se" / "templates").glob("*.json"))
 
 
-def test_hold_on_backlog_file_and_route_drops_ready_and_adds_off_form(
-        worktree, monkeypatch, capsys, forms_home):
+def test_hold_on_backlog_file_and_route_drops_ready_and_adds_off_template(
+        worktree, monkeypatch, capsys, templates_home):
     github = LabelledGh({1: {"number": 1, "title": "Outside", "body": "Please fix it.",
                              "url": "https://git.example/owner/repo/issues/1", "labels": []}})
     monkeypatch.setattr(work_tickets, "run_gh", github)
@@ -7608,15 +7608,15 @@ def test_hold_on_backlog_file_and_route_drops_ready_and_adds_off_form(
         assert "--hold" in capsys.readouterr().err  # refusals = 1: the first refusal offers it
         assert run(worktree, *command, "--hold") == 0
         capsys.readouterr()
-    assert github.issues[2]["labels"] == ["backlogged", "se-person", "off-form"]
+    assert github.issues[2]["labels"] == ["backlogged", "se-person", "off-template"]
     assert github.issues[2]["body"] == "<!-- se:fleet -->\nA line.\n"
-    assert github.issues[1]["labels"] == ["work", "repo:repo", "off-form"]
+    assert github.issues[1]["labels"] == ["work", "repo:repo", "off-template"]
     assert github.issues[1]["body"].endswith("### Package kind\n\nnone of them\n")
 
 
 def held_work_issue(worktree: Path, monkeypatch, capsys) -> tuple[LabelledGh, list[list[str]]]:
     """A work issue #2 filed with --hold as in
-    `test_hold_files_as_given_after_two_refusals_off_form_and_never_started`, and the gh calls
+    `test_hold_files_as_given_after_two_refusals_off_template_and_never_started`, and the gh calls
     made after it."""
     github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
                              "url": "https://git.example/owner/repo/issues/1", "state": "closed"}})
@@ -7628,15 +7628,15 @@ def held_work_issue(worktree: Path, monkeypatch, capsys) -> tuple[LabelledGh, li
     monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
     enforce(worktree, "refuse", refusals=1)
     body = worktree / "body.md"
-    body.write_text("Only a line, no form.\n", encoding="utf-8")
+    body.write_text("Only a line, no template.\n", encoding="utf-8")
     command = ["file", "--title", WORK_TITLE, "--body-file", str(body)]
     assert run(worktree, *command) == 1
     assert "work_tickets.py unhold <issue>" in capsys.readouterr().err  # the refusal offering --hold
     assert run(worktree, *command, "--hold") == 0
     out = capsys.readouterr().out
-    assert "held: labelled off-form and not ready; fix its title or body on the issue itself, " \
+    assert "held: labelled off-template and not ready; fix its title or body on the issue itself, " \
            "then run work_tickets.py unhold 2" in out
-    assert github.issues[2]["labels"] == ["work", "repo:repo", "off-form"]
+    assert github.issues[2]["labels"] == ["work", "repo:repo", "off-template"]
     calls.clear()
     return github, calls
 
@@ -7646,53 +7646,53 @@ def edits(calls: list[list[str]]) -> list[list[str]]:
 
 
 def test_unhold_refuses_an_unfixed_held_issue_and_lifts_the_hold_once_it_passes(
-        worktree, monkeypatch, capsys, forms_home):
+        worktree, monkeypatch, capsys, templates_home):
     github, calls = held_work_issue(worktree, monkeypatch, capsys)
     assert run(worktree, "unhold", "2") == 1
     error = capsys.readouterr().err
-    assert "unhold: the work form refuses" in error and "Problem" in error
-    assert "forms.py draft work" in error and "--hold" not in error
-    assert edits(calls) == [] and github.issues[2]["labels"] == ["work", "repo:repo", "off-form"]
+    assert "unhold: the work template refuses" in error and "Problem" in error
+    assert "templates.py draft work" in error and "--hold" not in error
+    assert edits(calls) == [] and github.issues[2]["labels"] == ["work", "repo:repo", "off-template"]
 
-    github.issues[2]["body"] = FORMS.render(WORK_FORM, WORK_FIELDS)
-    enforce(worktree, "off")  # unhold checks whatever [forms] enforce says
+    github.issues[2]["body"] = TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS)
+    enforce(worktree, "off")  # unhold checks whatever [templates] enforce says
     assert run(worktree, "unhold", "2") == 0
     assert capsys.readouterr().out == (
-        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed, ready added\n")
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-template removed, ready added\n")
     assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
     assert [call[3:5] for call in edits(calls)] == [["--add-label", "ready"],
-                                                   ["--remove-label", "off-form"]]
-    assert github.issues[2]["body"] == FORMS.render(WORK_FORM, WORK_FIELDS)
+                                                   ["--remove-label", "off-template"]]
+    assert github.issues[2]["body"] == TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS)
     assert run(worktree, "ready") == 0
     assert "#2" in capsys.readouterr().out
 
     calls.clear()
     assert run(worktree, "unhold", "2") == 1
-    assert "not held (off-form): nothing to unhold" in capsys.readouterr().err
-    github.issues[1]["labels"] = ["work", "off-form"]
+    assert "not held (off-template): nothing to unhold" in capsys.readouterr().err
+    github.issues[1]["labels"] = ["work", "off-template"]
     assert run(worktree, "unhold", "1") == 1
     assert "#1 is closed" in capsys.readouterr().err
-    github.issues[1].update(state="open", labels=["off-form"])
+    github.issues[1].update(state="open", labels=["off-template"])
     assert run(worktree, "unhold", "1") == 1
     assert "neither backlogged nor work" in capsys.readouterr().err
     assert edits(calls) == []
 
 
 def test_unhold_checks_a_work_body_naming_the_handled_marker_in_prose_against_work(
-        worktree, monkeypatch, capsys, forms_home):
+        worktree, monkeypatch, capsys, templates_home):
     github, calls = held_work_issue(worktree, monkeypatch, capsys)
     prose = dict(WORK_FIELDS, goal="Route writes `<!-- se:handled -->` before its section.")
-    github.issues[2]["body"] = FORMS.render(WORK_FORM, prose)
-    assert work_tickets.held_form(2, {**github.issues[2]}) == "work"
+    github.issues[2]["body"] = TEMPLATES.render(WORK_TEMPLATE, prose)
+    assert work_tickets.held_template(2, {**github.issues[2]}) == "work"
     assert run(worktree, "unhold", "2") == 0
     capsys.readouterr()
     assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
 
 
-def test_unhold_refuses_a_private_term_in_the_fixed_text(worktree, monkeypatch, capsys, forms_home):
+def test_unhold_refuses_a_private_term_in_the_fixed_text(worktree, monkeypatch, capsys, templates_home):
     github, calls = held_work_issue(worktree, monkeypatch, capsys)
     address = "alice" + "@" + "corp.test"  # a term of the public list, never written down whole
-    github.issues[2]["body"] = FORMS.render(WORK_FORM, dict(WORK_FIELDS, goal=f"Mail {address}."))
+    github.issues[2]["body"] = TEMPLATES.render(WORK_TEMPLATE, dict(WORK_FIELDS, goal=f"Mail {address}."))
     assert run(worktree, "unhold", "2") == 1
     error = capsys.readouterr().err
     assert "Goal: holds a term of the public list" in error and "ask the owner" in error
@@ -7701,20 +7701,20 @@ def test_unhold_refuses_a_private_term_in_the_fixed_text(worktree, monkeypatch, 
 
 
 def test_unhold_gives_a_blocked_issue_ready_and_ready_still_skips_it(
-        worktree, monkeypatch, capsys, forms_home):
+        worktree, monkeypatch, capsys, templates_home):
     github, calls = held_work_issue(worktree, monkeypatch, capsys)
-    github.issues[2]["body"] = FORMS.render(WORK_FORM, WORK_FIELDS)
+    github.issues[2]["body"] = TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS)
     github.blocked_by[2] = [3]
     assert run(worktree, "unhold", "2") == 0
     assert capsys.readouterr().out == (
-        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed, ready added; ready "
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-template removed, ready added; ready "
         "and start skip it while its open blockers stay open\n")
     assert github.issues[2]["labels"] == ["work", "repo:repo", "ready"]
     assert run(worktree, "ready") == 0
     assert "#2" not in capsys.readouterr().out
 
 
-def test_unhold_lifts_a_fixed_routed_and_backlog_issue(worktree, monkeypatch, capsys, forms_home):
+def test_unhold_lifts_a_fixed_routed_and_backlog_issue(worktree, monkeypatch, capsys, templates_home):
     github = LabelledGh({1: {"number": 1, "title": "Outside", "body": "Please fix it.",
                              "url": "https://git.example/owner/repo/issues/1", "labels": []}})
     calls: list[list[str]] = []
@@ -7738,23 +7738,23 @@ def test_unhold_lifts_a_fixed_routed_and_backlog_issue(worktree, monkeypatch, ca
 
     assert run(worktree, "unhold", "1") == 1
     error = capsys.readouterr().err
-    assert "the routed form refuses" in error and "Package kind" in error
+    assert "the routed template refuses" in error and "Package kind" in error
     assert edits(calls) == []
     github.issues[1]["body"] = github.issues[1]["body"].replace("none of them", "standard")
     assert run(worktree, "unhold", "1") == 0
     capsys.readouterr()
     assert github.issues[1]["labels"] == ["work", "repo:repo", "ready"]
 
-    ticket = FORMS.load(PROJECT, tree=True)["ticket"]
-    github.issues[2]["body"] = FORMS.render(ticket, dict(ticket.example["fields"]))
+    ticket = TEMPLATES.load(PROJECT, tree=True)["ticket"]
+    github.issues[2]["body"] = TEMPLATES.render(ticket, dict(ticket.example["fields"]))
     assert run(worktree, "unhold", "2") == 0
     assert capsys.readouterr().out == (
-        "Unheld #2 https://git.example/owner/repo/issues/2: off-form removed\n")
+        "Unheld #2 https://git.example/owner/repo/issues/2: off-template removed\n")
     assert github.issues[2]["labels"] == ["backlogged", "se-person"]
 
 
 def test_unhold_without_gh_reads_the_issue_file_and_prints_the_label_change(
-        worktree, monkeypatch, capsys, forms_home):
+        worktree, monkeypatch, capsys, templates_home):
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: pytest.fail(
         f"gh called: {arguments}"))
@@ -7763,21 +7763,21 @@ def test_unhold_without_gh_reads_the_issue_file_and_prints_the_label_change(
     assert "--issue-body <file>" in capsys.readouterr().err
     answer = worktree / "issue.json"
     answer.write_text(json.dumps({
-        "number": 2, "title": WORK_TITLE, "body": FORMS.render(WORK_FORM, WORK_FIELDS),
-        "state": "open", "labels": ["work", "repo:repo", "off-form"],
+        "number": 2, "title": WORK_TITLE, "body": TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS),
+        "state": "open", "labels": ["work", "repo:repo", "off-template"],
         "html_url": "https://git.example/owner/repo/issues/2"}), encoding="utf-8")
     assert run(worktree, "unhold", "2", "--issue-body", str(answer)) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "GitHub plan: unhold #2"
     steps = [line for line in out if line[:3] in ("1. ", "2. ")]
-    assert "with ready" in steps[0] and "without off-form" in steps[1]
-    assert "Then: #2 is unheld: off-form removed, ready added" in out
+    assert "with ready" in steps[0] and "without off-template" in steps[1]
+    assert "Then: #2 is unheld: off-template removed, ready added" in out
     assert out[-1] == "Run the GitHub plan above to unhold #2"
 
 
-def test_every_held_line_and_the_off_form_label_name_unhold():
-    assert "work_tickets.py unhold" in work_tickets.LABEL_DESCRIPTIONS["off-form"]
-    assert len(work_tickets.LABEL_DESCRIPTIONS["off-form"]) <= 100
+def test_every_held_line_and_the_off_template_label_name_unhold():
+    assert "work_tickets.py unhold" in work_tickets.LABEL_DESCRIPTIONS["off-template"]
+    assert len(work_tickets.LABEL_DESCRIPTIONS["off-template"]) <= 100
     filed = work_tickets.Filed(held=True)
     assert "work_tickets.py unhold <its number>" in filed.line("owner/repo", "work issue")
     assert "work_tickets.py unhold 7" in work_tickets.Filed(
@@ -7785,7 +7785,7 @@ def test_every_held_line_and_the_off_form_label_name_unhold():
 
 
 def test_warn_and_refuse_check_backlog_file_against_ticket_and_route_against_routed(
-        worktree, gh, capsys, forms_home):
+        worktree, gh, capsys, templates_home):
     body = worktree / "body.md"
     body.write_text("A line.\n", encoding="utf-8")
     routing = worktree / "routing.md"
@@ -7795,19 +7795,19 @@ def test_warn_and_refuse_check_backlog_file_against_ticket_and_route_against_rou
     enforce(worktree, "refuse")
     assert run(worktree, "backlog", "file", "--title", "idea", "--body-file", str(body)) == 1
     error = capsys.readouterr().err
-    assert "the ticket form refuses" in error and "Situation: missing" in error
+    assert "the ticket template refuses" in error and "Situation: missing" in error
     assert run(worktree, "route", "3", "--title", "fix/y-20261116", "--routing-file",
                str(routing)) == 1
     error = capsys.readouterr().err
-    assert "the routed form refuses" in error and "Package kind:" in error
+    assert "the routed template refuses" in error and "Package kind:" in error
     assert not [call for call in gh.calls if call[:2] in (["issue", "create"], ["issue", "edit"])]
     enforce(worktree, "warn")
     assert run(worktree, "backlog", "file", "--title", "idea", "--body-file", str(body)) == 0
     assert "Situation: missing" in capsys.readouterr().err
 
 
-def test_the_working_trees_forms_table_changes_nothing_while_the_integration_branch_has_none(
-        worktree, monkeypatch, capsys, forms_home):
+def test_the_working_trees_templates_table_changes_nothing_while_the_integration_branch_has_none(
+        worktree, monkeypatch, capsys, templates_home):
     fake_git.init(worktree)
     fake_git.git("-C", str(worktree), "add", "-A")
     fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
@@ -7822,27 +7822,27 @@ def test_the_working_trees_forms_table_changes_nothing_while_the_integration_bra
     body = without_problem(worktree)
     assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 0
     captured = capsys.readouterr()
-    assert " form " not in captured.err and github.issues[2]["body"] == work_tickets.fleet_marked(
+    assert " template " not in captured.err and github.issues[2]["body"] == work_tickets.fleet_marked(
         body.read_text(encoding="utf-8").strip() + "\n")
 
     fake_git.git("-C", str(worktree), "add", "-A")
     fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                 "commit", "-q", "-m", "forms refuse")
+                 "commit", "-q", "-m", "templates refuse")
     fake_git.git("-C", str(worktree), "update-ref", "refs/remotes/origin/main", "HEAD")
     enforce(worktree, "off")  # the branch switches it off again: the integration branch wins
     assert run(worktree, "file", "--title", "feat/other-20261116", "--body-file", str(body)) == 1
-    assert "the work form refuses" in capsys.readouterr().err
+    assert "the work template refuses" in capsys.readouterr().err
 
 
-def test_a_retro_filed_from_its_template_passes_while_the_work_form_refuses(
-        worktree, monkeypatch, capsys, forms_home):
+def test_a_retro_filed_from_its_template_passes_while_the_work_template_refuses(
+        worktree, monkeypatch, capsys, templates_home):
     """SE files a retro as the template stands, its front matter dropped and its Scope filled,
-    through `file`; with `[forms] enforce = "refuse"` on the integration branch it files."""
+    through `file`; with `[templates] enforce = "refuse"` on the integration branch it files."""
     fake_git.init(worktree)
     enforce(worktree, "refuse")
     fake_git.git("-C", str(worktree), "add", "-A")
     fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                 "commit", "-q", "-m", "forms refuse")
+                 "commit", "-q", "-m", "templates refuse")
     fake_git.git("-C", str(worktree), "update-ref", "refs/remotes/origin/main", "HEAD")
     github = LabelledGh({1: {"number": 1, "title": "x", "body": "", "labels": [],
                              "url": "https://git.example/owner/repo/issues/1", "state": "closed"}})
@@ -7858,19 +7858,19 @@ def test_a_retro_filed_from_its_template_passes_while_the_work_form_refuses(
     body.write_text(text, encoding="utf-8")
     assert run(worktree, "file", "--title", "retro-session-20261116", "--label", "retro",
                "--body-file", str(body)) == 0
-    assert "the work form refuses" not in capsys.readouterr().err
+    assert "the work template refuses" not in capsys.readouterr().err
     filed = github.issues[2]
     assert filed["title"] == "retro-session-20261116"
     assert set(filed["labels"]) >= {"work", "ready", "repo:repo", "retro"}
-    assert "<!-- se:form work -->" in filed["body"]
+    assert "<!-- se:template se/work " in filed["body"]
     assert "retro.py collect <this issue> --out <draft>" in filed["body"]
     assert "retro.py file <this issue> --draft <draft>" in filed["body"]
 
 
 def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, monkeypatch, capsys,
-                                                               forms_home):
+                                                               templates_home):
     """SE's own se.toml, read from the checkout, on the integration branch: `file` refuses a body
-    that lacks its Problem before any gh call, relay call or printed plan (README "Forms")."""
+    that lacks its Problem before any gh call, relay call or printed plan (README "Templates")."""
     fake_git.init(worktree)
     (worktree / "se.toml").write_text((PROJECT / "se.toml").read_text(encoding="utf-8"),
                                       encoding="utf-8")
@@ -7878,7 +7878,7 @@ def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, mon
     fake_git.git("-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@example.com",
                  "commit", "-q", "-m", "SE's own settings")
     fake_git.git("-C", str(worktree), "update-ref", "refs/remotes/origin/main", "HEAD")
-    assert FORMS.enforcement(worktree).enforce == "refuse"
+    assert TEMPLATES.enforcement(worktree).enforce == "refuse"
     relayed = []
     monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: relayed.append(repo))
     body = without_problem(worktree)
@@ -7887,15 +7887,15 @@ def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, mon
         assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 1
         captured = capsys.readouterr()
         assert gh.calls == [] and relayed == [] and captured.out == ""
-        assert "the work form refuses" in captured.err and "Problem: missing" in captured.err
+        assert "the work template refuses" in captured.err and "Problem: missing" in captured.err
 
 
-def test_a_private_term_is_refused_held_never_and_never_printed(worktree, gh, capsys, forms_home):
+def test_a_private_term_is_refused_held_never_and_never_printed(worktree, gh, capsys, templates_home):
     (worktree / ".public-check.local").write_text("# a private term\nquuxcorp\n", encoding="utf-8")
     enforce(worktree, "refuse", refusals=1)
     fields = dict(WORK_FIELDS, goal="Ship it for Quuxcorp before Friday.")
     body = worktree / "body.md"
-    body.write_text(FORMS.render(WORK_FORM, fields), encoding="utf-8")
+    body.write_text(TEMPLATES.render(WORK_TEMPLATE, fields), encoding="utf-8")
     command = ["file", "--title", WORK_TITLE, "--body-file", str(body)]
     for extra in ([], [], ["--hold"]):
         assert run(worktree, *command, *extra) == 1
@@ -7913,11 +7913,11 @@ def test_a_private_term_is_refused_held_never_and_never_printed(worktree, gh, ca
     assert "local list" in error and "quux" not in error.lower()
 
 
-def test_without_a_local_list_only_the_public_list_runs(worktree, gh, capsys, forms_home):
+def test_without_a_local_list_only_the_public_list_runs(worktree, gh, capsys, templates_home):
     enforce(worktree, "refuse")
     fields = dict(WORK_FIELDS, goal="Ship it for Quuxcorp; mail " + "alice" + "@corp.test.")
     body = worktree / "body.md"
-    body.write_text(FORMS.render(WORK_FORM, fields), encoding="utf-8")
+    body.write_text(TEMPLATES.render(WORK_TEMPLATE, fields), encoding="utf-8")
     assert run(worktree, "file", "--title", WORK_TITLE, "--body-file", str(body)) == 1
     error = capsys.readouterr().err
     assert "Goal: holds a term of the public list" in error and "local list" not in error
@@ -8024,7 +8024,7 @@ def test_file_labels_the_issue_with_the_repository_it_files_in_through_gh_and_in
     body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)  # without gh: the plan
     monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
-    monkeypatch.setattr(work_tickets, "form_check", lambda *arguments: False)
+    monkeypatch.setattr(work_tickets, "template_check", lambda *arguments: False)
     assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body),
                "--repo", "git.example/owner/obs") == 0
     plan = capsys.readouterr().out

@@ -39,7 +39,7 @@ UNLISTED = {
     "docs/go-core.md": "the Go core's design, linked from README and AGENTS.md",
     "docs/method.md": "the design of SE's method staying in SE, linked from docs/components.md",
     "docs/guidance.md": "the guidance system's design, read by the workers of its packages",
-    "docs/templates.md": "the template system's design, linked from README \"Forms\"",
+    "docs/templates.md": "the template system's design, linked from README \"Templates\"",
     "docs/doors/copilot.md": "outside facts for whoever changes the Copilot layout",
     "docs/doors/mcp.md": "outside facts for whoever changes the MCP door",
     "docs/harvest-2026-11.md": "a dated record",

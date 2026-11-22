@@ -1,5 +1,5 @@
-# Inside terms: words of SE's own machinery that a reader outside the fleet does not know. A form
-# whose rule `terms` is on warns where a field uses one, never refuses (scripts/forms.py).
+# Inside terms: words of SE's own machinery that a reader outside the fleet does not know. A template
+# whose rule `terms` is on warns where a field uses one, never refuses (scripts/templates.py).
 says = "Inside terms and the plain words to use instead."
 
 [[terms]]

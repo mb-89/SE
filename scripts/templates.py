@@ -1,38 +1,38 @@
 #!/usr/bin/env python3
-"""Forms: the shape of the text SE writes, kept as data, read, checked and written by one engine.
+"""Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
-where se.toml `[forms] enforce` is on (README "Forms"); this module owns that switch's reading
+where se.toml `[templates] enforce` is on (README "Templates"); this module owns that switch's reading
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
-**Form files.** One TOML file per form, `forms/<name>.toml`; `forms/terms.toml` is no form but the
-list of inside terms (below). A form declares:
+**Template files.** One TOML file per template, `templates/<name>.toml`; `templates/terms.toml` is no template but the
+list of inside terms (below). A template declares:
 
 - `name`, `reader` (`owner` or `fleet`: who reads what it shapes) and `says`, one line;
 - `[applies] actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
   `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
-  so a form without it does not load; `paths`, the globs of the files a `file.write` form claims,
+  so a template without it does not load; `paths`, the globs of the files a `file.write` template claims,
   relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
   with `actions = ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
   expression a whole line matches) and `title`, and the filters `labels` (every one present) and
   `base = "integration"` (a pull request into the integration branch); `fallback` (selection,
   below);
-- `extends`, another form whose fields, rules, actors and `[applies]` it inherits; `remove` names
+- `extends`, another template whose fields, rules, actors and `[applies]` it inherits; `remove` names
   inherited fields it drops, a field of the same name replaces the inherited one, and `order`
   lists its final field order (every field once) where the inherited order does not fit;
-- `keep_unknown` (default true): whether `render` keeps the sections the form does not declare;
-- `tags` (optional), the tags of the guidance the form gets as a template; this engine never reads
-  them, `scripts/se_guidance.py` does (docs/guidance.md "Resolution");
+- `keep_unknown` (default true): whether `render` keeps the sections the template does not declare;
+- `tags` (optional), the tags of the guidance the template gets; this engine never reads them,
+  `scripts/se_guidance.py` does (docs/guidance.md "Resolution");
 - `[rules]`, each writing rule it uses marked `refuse`, `warn` or `off`; a rule it does not name is
   off. A warn-only rule marked `refuse` does not load;
 - `actors`, the names a step or a check may name (rule `actor`), and `[example]`, a `title` and
-  `fields` that pass the form, which the tests render and parse back;
+  `fields` that pass the template, which the tests render and parse back;
 - `[scope]` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is.
 
-**Adapters.** A form without `[[fields]]` is an adapter: a text SE already writes and already
+**Adapters.** A template without `[[fields]]` is an adapter: a text SE already writes and already
 checks elsewhere. It names that check, `checker = "<module>:<function>"` (a script beside this
 one), and the engine calls it instead of field rules of its own; `[adapter]` says how:
 
@@ -51,12 +51,12 @@ one), and the engine calls it instead of field rules of its own; `[adapter]` say
   start, and `[[adapter.lines]]`, each a `pattern` a whole line (with `first`, the first line)
   must match, and what it `says`.
 
-The engine never adds `<!-- se:form <name> -->` to an adapter's body: `render` gives it back as it
+The engine never adds its template marker to an adapter's body: `render` gives it back as it
 stands, and its findings name the field `body`.
 
 **Fields**, `[[fields]]`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
 fills it), `says` (what belongs there, the fix's wording and the draft's comment), `exact_heading`
-(only `## <heading>`, at the form's level, counts) and `verbatim` (the text is kept and written
+(only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
 back as it stands). Besides: `source = "title"` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
 `numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
@@ -65,7 +65,7 @@ should have, 0 for none), `actor`, `one_sentence`, `not_picked` and `shape`, a t
 `title-shape`).
 
 A field may name code as `"<module>:<NAME>"`, a script beside this one, as an adapter's keys do;
-`load` resolves it and refuses one that does not resolve, naming the form file and the key.
+`load` resolves it and refuses one that does not resolve, naming the template file and the key.
 `shape` is `words` (plain words: no path, branch name or number) or such a reference: a pattern
 the whole title matches, or a function of the title whose answer, where not empty, is the warning.
 An entry of `choices` may be such a reference too: it stands for the items of that list or the
@@ -82,45 +82,50 @@ and with a trailing colon, and `_No response_` as empty, except where a field se
 A heading that names no field is a section of its own, unless it is deeper than the section it sits
 in. Emptiness is judged without HTML comments.
 
-**Files.** For a `file.write` form the text is a file: its front matter and its page title, the
+**Files.** For a `file.write` template the text is a file: its front matter and its page title, the
 first `#` line above the first field, are its head. `parse` never reads the page title as a field,
 even where its text is a field's heading; `render` keeps the head as it stands, writes
-`form: <name>` into the front matter (a new block where the file has none) and writes neither
+`template: <name>` into the front matter (a new block where the file has none) and writes neither
 marker, its fields as `## ` headings below the title.
 
-**Writing.** `render` writes SE's fleet marker once, then `<!-- se:form <name> -->` (with a scope,
-the form marker alone, after the scope's marker), then `## ` headings. A section the form does not
+**Writing.** `render` writes SE's fleet marker once, then the template marker,
+`<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
+alone, after the scope's marker), then `## ` headings. The marker says what the engine knows:
+the repository `se` for SE's own templates and `project` for any other `templates/` or
+`--templates` folder, the version `0.0.0`, as no template declares one yet, and
+`sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
+by a NUL byte (`Template.marker_line`). Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
-**Selection** (`select(forms, action, body, title, labels=, base=, integration=, repo=, home=,
+**Selection** (`select(templates, action, body, title, labels=, base=, integration=, repo=, home=,
 path=)`), in this order; for `file.write` the order below it:
 
 1. Free where `repo` is given and is not in `home`, the repositories SE writes to (origin and
    se.toml `[outside]`, `home_repositories`).
-2. The allowed forms: those that name the action, whose `labels` the text carries and, with
+2. The allowed templates: those that name the action, whose `labels` the text carries and, with
    `base = "integration"`, whose pull request goes into the integration branch.
 3. A marker only narrows the choice within the allowed set: a body's own
-   `<!-- se:form <name> -->` naming an allowed form wins. Such a line naming a form outside the
+   template marker naming an allowed template wins. Such a line naming a template outside the
    allowed set, or an adapter's marker of an adapter outside it, is a refused finding (rule
-   `form`), and selection goes on without it. SE's other markers (`se:fleet`, `se:handled` in a
-   comment, `se:open-points`, `se:refs-*`) name no form and select nothing on their own.
-4. By `[applies] order` (then name), the first allowed form with conditions that all hold
+   `template`), and selection goes on without it. SE's other markers (`se:fleet`, `se:handled` in a
+   comment, `se:open-points`, `se:refs-*`) name no template and select nothing on their own.
+4. By `[applies] order` (then name), the first allowed template with conditions that all hold
    (`marker`, `marker_pattern`: the body has that line; `title`: the title matches).
-5. The first allowed form without conditions, or with `fallback = true`.
-6. None: free form. For a pull request into the integration branch this tries `landing` and
+5. The first allowed template without conditions, or with `fallback = true`.
+6. None: free. For a pull request into the integration branch this tries `landing` and
    `housekeeping` before `field-report`; an unmarked comment, and a pull request into any other
    branch, are free.
 
 For a file, `path` (relative to the project root) selects:
 
-1. The allowed forms: the `file.write` forms whose `paths` match it; none, and the file is free.
-2. The front matter's `form: <name>` naming an allowed form chooses it, as a body's form marker
-   does; one naming another form is a refused finding (rule `form`).
-3. By `[applies] order` (then name), the first allowed form whose conditions all hold, matched
+1. The allowed templates: the `file.write` templates whose `paths` match it; none, and the file is free.
+2. The front matter's `template: <name>` naming an allowed template chooses it, as a body's template marker
+   does; one naming another template is a refused finding (rule `template`).
+3. By `[applies] order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
-4. None: a refused finding, `<path>: no form takes this file; name its form in the front matter,
-   form: <name>`.
+4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
+   template: <name>`.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -130,19 +135,19 @@ Refuse rules: `required` (missing, empty or placeholder, or the field's own `say
 Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, taken as
 `work_tickets.goal_summary` takes it, runs past `first_sentence_chars`: a work issue's Goal's
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
-Priority, Assignee or Milestone lines), `terms` (`forms/terms.toml`), `unnamed-entry` (a blocker
+Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
 
-**Interface** for the pieces that build on it: `load(root, tree=False)` reads `forms/` at
-`origin/<integration branch>` through `git_door` where that ref holds forms, else from the working
-tree; `parse(form, body, title)` gives a `Document`; `render(form, document_or_fields)`;
-`check(form, document)` gives `Finding`s; `select(...)` gives a `Selection`, its form (None: free)
-and its findings; `verdict(forms, action, body, title, ...)` both at once; `draft(form)`;
-`list_forms(forms)` (named so beside Python's `list`). All but `load` (which also imports the scripts
+**Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
+`origin/<integration branch>` through `git_door` where that ref holds templates, else from the working
+tree; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
+`check(template, document)` gives `Finding`s; `select(...)` gives a `Selection`, its template (None: free)
+and its findings; `verdict(templates, action, body, title, ...)` both at once; `draft(template)`;
+`list_templates(templates)` (named so beside Python's `list`). All but `load` (which also imports the scripts
 a field names) and `home_repositories` are pure, but for the checkers an adapter names and the
 functions a field's shape names.
 
-**Command.** `forms.py check <form> (--body-file FILE | --fields FILE | --body TEXT |
+**Command.** `templates.py check <template> (--body-file FILE | --fields FILE | --body TEXT |
 --fields-json TEXT) [--title TEXT] [--render] [--tree]` prints at most 10 lines of findings and
 exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
 
@@ -150,25 +155,25 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
   an object field as a mapping or as the schema's list of `{"key", "value"}` pairs (`answer`).
 - `--render`: where nothing refuses, stdout is only the Markdown `render` writes, its markers
   included, and the warnings go to stderr.
-- Without `<form>`, `--action <action>` with `--repo`, `--labels` (comma-separated), `--base` and
-  `--title` checks against the form `select` picks; where it picks none it prints
-  `free: no form applies (<action>)` and exits 0 (with `--render`, that line on stderr and the
-  body as given on stdout). A form and `--action` together are a usage error.
+- Without `<template>`, `--action <action>` with `--repo`, `--labels` (comma-separated), `--base` and
+  `--title` checks against the template `select` picks; where it picks none it prints
+  `free: no template applies (<action>)` and exits 0 (with `--render`, that line on stderr and the
+  body as given on stdout). A template and `--action` together are a usage error.
 
-- `--path FILE`, without `<form>`: the form that claims the file (`file.write`), whose text it
+- `--path FILE`, without `<template>`: the template that claims the file (`file.write`), whose text it
   checks unless `--body`, `--body-file`, `--fields` or `--fields-json` gives one; on a file no
-  form claims it prints `free: no form claims <path>` and exits 0. `--root DIR` is the project
+  template claims it prints `free: no template claims <path>` and exits 0. `--root DIR` is the project
   root the globs are relative to: by default the git checkout holding the path, else the working
   directory.
 
-`forms.py draft (<form> | --path FILE [--root DIR]) [--json]` prints the empty form. Its JSON holds `form`, `says`, `fields`
+`templates.py draft (<template> | --path FILE [--root DIR]) [--json]` prints the empty template. Its JSON holds `template`, `says`, `fields`
 (each field's empty value) and `field_says`, then `field_shape`, each field's `kind` and, where
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
 `first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
-(`schema`). `forms.py list` names every form with its actions, then the paths it claims and, for an
-adapter, its checker. `--tree` reads the working tree's `forms/`; `--forms DIR`, on all three, reads
-the forms and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
+(`schema`). `templates.py list` names every template with its actions, then the paths it claims and, for an
+adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all three, reads
+the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
 """
 
 from __future__ import annotations
@@ -180,16 +185,20 @@ import json
 import re
 import sys
 import tomllib
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass, field as dataclass_field, replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FORMS = "forms"
+TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
 
 FLEET_MARKER = "<!-- se:fleet -->"
-FORM_MARKER = "<!-- se:form {name} -->"
-FORM_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:form ([\w-]+) -->[ \t]*$", re.MULTILINE)
+TEMPLATE_MARKER = "<!-- se:template {repository}/{name} {version} {digest} -->"
+TEMPLATE_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:template [\w.-]+(?:/[\w.-]+)*/([\w-]+) [\w.+-]+ "
+                                     r"sha256:[0-9a-f]+ -->[ \t]*$", re.MULTILINE)
+SE_REPOSITORY = "se"  # the repository of SE's own templates in the marker
+PROJECT_REPOSITORY = "project"  # that of a project's own, or a --templates folder's
+UNVERSIONED = "0.0.0"  # the version a template that declares none is written with
 
 ISSUE_ACTIONS = ("issue.create", "issue.edit")
 FILE_ACTION = "file.write"
@@ -199,13 +208,13 @@ READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
-ADAPTER_RULES = ("checker", "line", "title", "form")  # always refuse; an adapter has no [rules]
+ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no [rules]
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
               "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
-FORM_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
+TEMPLATE_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter", "tags"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
@@ -215,7 +224,7 @@ RESULTS = ("problems", "raises", "truth")
 REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-FRONT_FORM = re.compile(r"^form[ \t]*:[ \t]*['\"]?([\w-]+)['\"]?[ \t]*$", re.MULTILINE)
+FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?([\w-]+)['\"]?[ \t]*$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -241,14 +250,14 @@ LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
 FIRST_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 
 
-class FormError(Exception):
-    """A form that does not load, or a usage the command refuses: the message names the file or
+class TemplateError(Exception):
+    """A template that does not load, or a usage the command refuses: the message names the file or
     the argument and the remedy."""
 
 
 @dataclass(frozen=True)
 class Field:
-    """One field of a form; the module docstring owns what each key means."""
+    """One field of a template; the module docstring owns what each key means."""
     name: str
     kind: str
     heading: str = ""
@@ -281,14 +290,14 @@ class Field:
 
 @dataclass(frozen=True)
 class Term:
-    """An inside term (`forms/terms.toml`) and the plain words a reader outside knows."""
+    """An inside term (`templates/terms.toml`) and the plain words a reader outside knows."""
     term: str
     plain: str
 
 
 @dataclass(frozen=True)
-class Form:
-    """A loaded form, its `extends` resolved."""
+class Template:
+    """A loaded template, its `extends` resolved."""
     name: str
     reader: str
     says: str
@@ -311,19 +320,28 @@ class Form:
     checker: str = ""
     adapter: dict = dataclass_field(default_factory=dict)
     paths: tuple[str, ...] = ()
+    repository: str = SE_REPOSITORY
+    version: str = UNVERSIONED
+    digest: str = ""
+
+    @property
+    def marker_line(self) -> str:
+        """The template's marker line, `<!-- se:template <repository>/<name> <version> <digest> -->`."""
+        return TEMPLATE_MARKER.format(repository=self.repository, name=self.name,
+                                      version=self.version, digest=self.digest)
 
     @property
     def is_file(self) -> bool:
-        """Whether the form shapes files (`file.write`), claimed by its `paths`."""
+        """Whether the template shapes files (`file.write`), claimed by its `paths`."""
         return FILE_ACTION in self.actions
 
     def claims(self, path: str) -> bool:
-        """Whether one of the form's `paths` matches `path`, relative to the project root."""
+        """Whether one of the template's `paths` matches `path`, relative to the project root."""
         return any(glob_pattern(glob).fullmatch(path) for glob in self.paths)
 
     @property
     def is_adapter(self) -> bool:
-        """Whether the form is an adapter: no fields of its own, a check SE already has."""
+        """Whether the template is an adapter: no fields of its own, a check SE already has."""
         return not self.fields
 
     def field(self, name: str) -> Field | None:
@@ -334,7 +352,7 @@ class Form:
 
     @property
     def level(self) -> int:
-        """The heading level of the form's sections: 2, or the scope's."""
+        """The heading level of the template's sections: 2, or the scope's."""
         return int(self.scope.get("level", 2)) if self.scope else 2
 
 
@@ -362,9 +380,9 @@ class Part:
 
 @dataclass
 class Document:
-    """A body read into a form's fields; `parts` keeps its layout so `render` can write the rest
+    """A body read into a template's fields; `parts` keeps its layout so `render` can write the rest
     back as it was. `fields` holds the fields present, the title among them."""
-    form: str
+    template: str
     fields: dict[str, object]
     parts: list[Part] = dataclass_field(default_factory=list)
     source: str = ""
@@ -375,22 +393,22 @@ class Document:
 # Loading
 
 
-def _form_files(root: Path, tree: bool, folder: Path | None = None) -> dict[str, str]:
-    """`forms/<file>` -> its text, at origin's integration branch where that holds forms, else
+def _template_files(root: Path, tree: bool, folder: Path | None = None) -> dict[str, str]:
+    """`templates/<file>` -> its text, at origin's integration branch where that holds templates, else
     from the working tree; with `folder`, the `*.toml` files of that folder alone."""
     if folder is not None:
         if not folder.is_dir():
-            raise FormError(f"forms: --forms {folder} is no folder; name the folder that holds "
-                            "the forms")
+            raise TemplateError(f"templates: --templates {folder} is no folder; name the folder that holds "
+                            "the templates")
         return {path.name: path.read_text(encoding="utf-8")
                 for path in sorted(folder.glob("*.toml"))}
     if not tree:
         files = _git_files(root)
         if files:
             return files
-    folder = root / FORMS
+    folder = root / TEMPLATES
     if not folder.is_dir():
-        raise FormError(f"forms: {folder} does not exist; run from an SE checkout")
+        raise TemplateError(f"templates: {folder} does not exist; run from an SE checkout")
     return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.glob("*.toml"))}
 
 
@@ -406,12 +424,12 @@ def _integration_branch(root: Path) -> str:
 def _git_files(root: Path) -> dict[str, str]:
     door = _sibling("git_door")
     ref = f"origin/{_integration_branch(root)}"
-    listed = door.run("ls-tree", "-r", "--name-only", ref, "--", FORMS, root=root)
+    listed = door.run("ls-tree", "-r", "--name-only", ref, "--", TEMPLATES, root=root)
     if listed.returncode != 0:
         return {}
     files = {}
     for path in listed.stdout.splitlines():
-        if path.startswith(f"{FORMS}/") and path.endswith(".toml") and path.count("/") == 1:
+        if path.startswith(f"{TEMPLATES}/") and path.endswith(".toml") and path.count("/") == 1:
             shown = door.run("show", f"{ref}:{path}", root=root)
             if shown.returncode == 0:
                 files[path.split("/", 1)[1]] = shown.stdout
@@ -428,64 +446,79 @@ def _sibling(name: str):
     return module
 
 
-def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -> dict[str, Form]:
-    """Every form of `root`'s `forms/`, by name (the module docstring: where it reads them); with
-    `folder`, the forms and the terms of that folder instead, for one run (`--forms`)."""
-    files = _form_files(root, tree, folder)
+def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -> dict[str, Template]:
+    """Every template of `root`'s `templates/`, by name (the module docstring: where it reads them); with
+    `folder`, the templates and the terms of that folder instead, for one run (`--templates`)."""
+    files = _template_files(root, tree, folder)
+    own = folder is None and root.resolve() == ROOT.resolve()
+    repository = SE_REPOSITORY if own else PROJECT_REPOSITORY
     raw: dict[str, dict] = {}
+    texts: dict[str, str] = {}
     terms: tuple[Term, ...] = ()
     for name, text in files.items():
-        where = str(folder / name) if folder is not None else f"{FORMS}/{name}"
+        where = str(folder / name) if folder is not None else f"{TEMPLATES}/{name}"
         try:
             data = tomllib.loads(text)
         except tomllib.TOMLDecodeError as error:
-            raise FormError(f"{where}: not TOML ({error}); fix the file") from error
+            raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
         if name == TERMS_FILE:
             terms = tuple(Term(str(item["term"]), str(item.get("plain", "")))
                           for item in data.get("terms", []))
             continue
-        form_name = data.get("name")
-        if form_name != name.removesuffix(".toml"):
-            raise FormError(f"{where}: name = {form_name!r} must be the file's name, "
+        template_name = data.get("name")
+        if template_name != name.removesuffix(".toml"):
+            raise TemplateError(f"{where}: name = {template_name!r} must be the file's name, "
                             f"{name.removesuffix('.toml')!r}")
         data["path"] = where
-        raw[form_name] = data
-    return {name: _build(name, raw, terms, ()) for name in sorted(raw)}
+        raw[template_name] = data
+        texts[template_name] = text
+    built = {name: _build(name, raw, terms, ()) for name in sorted(raw)}
+    return {name: replace(template, repository=repository,
+                          digest=_digest(name, raw, texts)) for name, template in built.items()}
+
+
+def _digest(name: str, raw: dict[str, dict], texts: dict[str, str]) -> str:
+    """`sha256:<hex>` of the template's file text and those of the templates it extends, in turn."""
+    chain = hashlib.sha256()
+    while name in texts:
+        chain.update(texts[name].encode("utf-8") + b"\0")
+        name = raw[name].get("extends", "")
+    return f"sha256:{chain.hexdigest()}"
 
 
 def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
-           seen: tuple[str, ...]) -> Form:
+           seen: tuple[str, ...]) -> Template:
     data = raw[name]
     where = data["path"]
-    unknown = set(data) - FORM_KEYS - {"path"}
+    unknown = set(data) - TEMPLATE_KEYS - {"path"}
     if unknown:
-        raise FormError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the form file format "
-                        "is scripts/forms.py's docstring")
-    parent: Form | None = None
+        raise TemplateError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the template file format "
+                        "is scripts/templates.py's docstring")
+    parent: Template | None = None
     if "extends" in data:
         base = data["extends"]
         if base in seen or base == name:
-            raise FormError(f"{where}: extends {base!r} in a cycle ({' -> '.join((*seen, name))})")
+            raise TemplateError(f"{where}: extends {base!r} in a cycle ({' -> '.join((*seen, name))})")
         if base not in raw:
-            raise FormError(f"{where}: extends {base!r}, which is no form in {FORMS}/")
+            raise TemplateError(f"{where}: extends {base!r}, which is no template in {TEMPLATES}/")
         parent = _build(base, raw, terms, (*seen, name))
     applies = data.get("applies")
     if isinstance(applies, dict) and set(applies) - APPLIES_KEYS:
-        raise FormError(f"{where}: [applies] has unknown keys "
+        raise TemplateError(f"{where}: [applies] has unknown keys "
                         f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
                         f"{', '.join(sorted(APPLIES_KEYS))}")
     if not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
-            raise FormError(f"{where}: [applies] actions is required; name the actions the form "
+            raise TemplateError(f"{where}: [applies] actions is required; name the actions the template "
                             f"shapes ({', '.join(ACTIONS)})")
         applies = {"actions": list(parent.actions), **(applies or {})}
     actions = tuple(applies["actions"])
     for action in actions:
         if action not in ACTIONS:
-            raise FormError(f"{where}: action {action!r} is none of {', '.join(ACTIONS)}")
+            raise TemplateError(f"{where}: action {action!r} is none of {', '.join(ACTIONS)}")
     reader = data.get("reader", parent.reader if parent else "")
     if reader not in READERS:
-        raise FormError(f"{where}: reader {reader!r} is none of {', '.join(READERS)}")
+        raise TemplateError(f"{where}: reader {reader!r} is none of {', '.join(READERS)}")
     inherited = list(parent.fields) if parent else []
     removed = set(data.get("remove", []))
     fields = [item for item in inherited if item.name not in removed]
@@ -500,42 +533,42 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         order = list(data["order"])
         names = [item.name for item in fields]
         if sorted(order) != sorted(names):
-            raise FormError(f"{where}: order must list every field once: "
+            raise TemplateError(f"{where}: order must list every field once: "
                             f"{', '.join(names)}")
         fields.sort(key=lambda item: order.index(item.name))
     rules = {**(parent.rules if parent else {}), **data.get("rules", {})}
     for rule, severity in rules.items():
         if rule not in REFUSE_RULES + WARN_RULES:
-            raise FormError(f"{where}: rule {rule!r} is unknown; the rules are "
+            raise TemplateError(f"{where}: rule {rule!r} is unknown; the rules are "
                             f"{', '.join(REFUSE_RULES + WARN_RULES)}")
         if severity not in (REFUSE, WARN, OFF):
-            raise FormError(f"{where}: rule {rule} is {severity!r}; mark it refuse, warn or off")
+            raise TemplateError(f"{where}: rule {rule} is {severity!r}; mark it refuse, warn or off")
         if rule in WARN_RULES and severity == REFUSE:
-            raise FormError(f"{where}: rule {rule} only warns, never refuses; mark it warn")
+            raise TemplateError(f"{where}: rule {rule} only warns, never refuses; mark it warn")
     example = data.get("example", {})
     adapter = _adapter(data, where, fields, parent)
     base_branch = str(applies.get("base", parent.base if parent else ""))
     if base_branch not in ("", "integration"):
-        raise FormError(f"{where}: [applies] base is {base_branch!r}; the one base is "
+        raise TemplateError(f"{where}: [applies] base is {base_branch!r}; the one base is "
                         "\"integration\", the integration branch")
     paths = applies.get("paths", list(parent.paths) if parent else [])
     if not isinstance(paths, list) or not all(isinstance(glob, str) and glob.strip()
                                               for glob in paths):
-        raise FormError(f"{where}: [applies] paths is a list of globs relative to the project "
+        raise TemplateError(f"{where}: [applies] paths is a list of globs relative to the project "
                         "root, such as \"book/*/steps/*.md\"")
     if paths and set(actions) != {FILE_ACTION}:
-        raise FormError(f"{where}: [applies] paths claims files and goes only with "
+        raise TemplateError(f"{where}: [applies] paths claims files and goes only with "
                         f"actions = [\"{FILE_ACTION}\"]; take out paths, or the other actions")
     if FILE_ACTION in actions and not paths:
-        raise FormError(f"{where}: action {FILE_ACTION} needs [applies] paths, the globs of the "
-                        "files the form claims")
+        raise TemplateError(f"{where}: action {FILE_ACTION} needs [applies] paths, the globs of the "
+                        "files the template claims")
     marker_pattern = str(applies.get("marker_pattern", ""))
     try:
         re.compile(marker_pattern)
     except re.error as error:
-        raise FormError(f"{where}: [applies] marker_pattern is no regular expression "
+        raise TemplateError(f"{where}: [applies] marker_pattern is no regular expression "
                         f"({error})") from error
-    return Form(
+    return Template(
         name=name, reader=reader, says=str(data.get("says", parent.says if parent else "")),
         actions=actions, fields=tuple(fields), rules=rules,
         order=int(applies.get("order", parent.order if parent else 100)),
@@ -573,45 +606,45 @@ def glob_pattern(glob: str) -> re.Pattern:
     return re.compile("".join(out))
 
 
-def _adapter(data: dict, where: str, fields: list[Field], parent: Form | None) -> dict:
+def _adapter(data: dict, where: str, fields: list[Field], parent: Template | None) -> dict:
     """An adapter's `[adapter]` table, checked as far as it can be without importing its
-    checker; a form with fields takes none."""
+    checker; a template with fields takes none."""
     adapter = data.get("adapter", {})
     if fields:
         if "checker" in data or adapter:
-            raise FormError(f"{where}: a form with fields takes no checker or [adapter]; an "
-                            "adapter is a form without [[fields]]")
+            raise TemplateError(f"{where}: a template with fields takes no checker or [adapter]; an "
+                            "adapter is a template without [[fields]]")
         return {}
     if parent is not None:
-        raise FormError(f"{where}: an adapter extends no form")
+        raise TemplateError(f"{where}: an adapter extends no template")
     if not isinstance(adapter, dict) or set(adapter) - ADAPTER_KEYS:
         extra = sorted(set(adapter) - ADAPTER_KEYS) if isinstance(adapter, dict) else ["?"]
-        raise FormError(f"{where}: [adapter] has unknown keys {', '.join(extra)}; the keys are "
-                        f"{', '.join(sorted(ADAPTER_KEYS))} (scripts/forms.py's docstring)")
+        raise TemplateError(f"{where}: [adapter] has unknown keys {', '.join(extra)}; the keys are "
+                        f"{', '.join(sorted(ADAPTER_KEYS))} (scripts/templates.py's docstring)")
     references = [data.get("checker", ""), adapter.get("extract", ""), adapter.get("when", ""),
                   adapter.get("title_rule", "")]
     for reference in references:
         if reference and not REFERENCE.match(str(reference)):
-            raise FormError(f"{where}: {reference!r} is no \"<module>:<name>\" of a script "
-                            "beside scripts/forms.py")
+            raise TemplateError(f"{where}: {reference!r} is no \"<module>:<name>\" of a script "
+                            "beside scripts/templates.py")
     if adapter.get("result", "problems") not in RESULTS:
-        raise FormError(f"{where}: [adapter] result is {adapter.get('result')!r}; one of "
+        raise TemplateError(f"{where}: [adapter] result is {adapter.get('result')!r}; one of "
                         f"{', '.join(RESULTS)}")
     if adapter.get("missing", REFUSE) not in (REFUSE, WARN, "pass"):
-        raise FormError(f"{where}: [adapter] missing is {adapter.get('missing')!r}; one of "
+        raise TemplateError(f"{where}: [adapter] missing is {adapter.get('missing')!r}; one of "
                         "refuse, warn, pass")
     if adapter.get("result") == "truth" and not adapter.get("refusal"):
-        raise FormError(f"{where}: [adapter] result \"truth\" needs its refusal, the fix a "
+        raise TemplateError(f"{where}: [adapter] result \"truth\" needs its refusal, the fix a "
                         "false answer gives")
     for line in adapter.get("lines", []):
         if set(line) - {"pattern", "first", "says"} or not line.get("pattern") or \
                 not line.get("says"):
-            raise FormError(f"{where}: each [[adapter.lines]] has a pattern and says, and may "
+            raise TemplateError(f"{where}: each [[adapter.lines]] has a pattern and says, and may "
                             "set first")
         try:
             re.compile(line["pattern"])
         except re.error as error:
-            raise FormError(f"{where}: [[adapter.lines]] pattern {line['pattern']!r} is no "
+            raise TemplateError(f"{where}: [[adapter.lines]] pattern {line['pattern']!r} is no "
                             f"regular expression ({error})") from error
     return dict(adapter)
 
@@ -620,9 +653,9 @@ def _field(entry: dict, where: str) -> Field:
     unknown = set(entry) - FIELD_KEYS
     name = entry.get("name", "?")
     if unknown:
-        raise FormError(f"{where}: field {name} has unknown keys {', '.join(sorted(unknown))}")
+        raise TemplateError(f"{where}: field {name} has unknown keys {', '.join(sorted(unknown))}")
     if entry.get("kind") not in KINDS:
-        raise FormError(f"{where}: field {name} has kind {entry.get('kind')!r}; one of "
+        raise TemplateError(f"{where}: field {name} has kind {entry.get('kind')!r}; one of "
                         f"{', '.join(KINDS)}")
     choices: list[str] = []
     for choice in entry.get("choices", ()):
@@ -631,7 +664,7 @@ def _field(entry: dict, where: str) -> Field:
             if isinstance(named, dict):
                 named = list(named)
             if not isinstance(named, (list, tuple, set, frozenset)):
-                raise FormError(f"{where}: field {name} choices: {choice} is no list or mapping; "
+                raise TemplateError(f"{where}: field {name} choices: {choice} is no list or mapping; "
                                 "name one whose items or keys are the choices")
             choices += [str(item) for item in named]
         else:
@@ -641,29 +674,29 @@ def _field(entry: dict, where: str) -> Field:
     if REFERENCE.match(shape):
         rule = _named(shape, where, f"field {name} shape")
         if not isinstance(rule, re.Pattern) and not callable(rule):
-            raise FormError(f"{where}: field {name} shape: {shape} is no pattern or function; "
+            raise TemplateError(f"{where}: field {name} shape: {shape} is no pattern or function; "
                             "name a compiled pattern or a function that gives the warning")
     chars = entry.get("first_sentence_chars", 0)
     if type(chars) is not int or chars < 0:
-        raise FormError(f"{where}: field {name} first_sentence_chars is {chars!r}; write a whole "
+        raise TemplateError(f"{where}: field {name} first_sentence_chars is {chars!r}; write a whole "
                         "number, 0 for none")
     made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices))}, rule=rule)
     if made.in_body and not made.heading:
-        raise FormError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
+        raise TemplateError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
     if made.kind == "choice" and not made.choices:
-        raise FormError(f"{where}: field {name} is a choice without choices")
+        raise TemplateError(f"{where}: field {name} is a choice without choices")
     return made
 
 
 def _named(reference: str, where: str, key: str):
     """What `"<module>:<NAME>"` names in a script beside this one, refused where it does not
-    resolve, naming the form file and the key."""
+    resolve, naming the template file and the key."""
     module, name = reference.split(":", 1)
     try:
         return getattr(_sibling(module), name)
     except (ImportError, AttributeError, OSError) as error:
-        raise FormError(f"{where}: {key}: {reference} does not resolve ({error}); name a script "
-                        "beside scripts/forms.py and what it defines") from error
+        raise TemplateError(f"{where}: {key}: {reference} does not resolve ({error}); name a script "
+                        "beside scripts/templates.py and what it defines") from error
 
 
 # Reading
@@ -674,7 +707,7 @@ def _norm(heading: str) -> str:
 
 
 def _matches(item: Field, line: str, level: int, base: int, own: int) -> bool:
-    """Whether heading `line` (at `level`, below `base`) names `item`; `own` is the form's level."""
+    """Whether heading `line` (at `level`, below `base`) names `item`; `own` is the template's level."""
     if item.exact_heading:
         return line.rstrip() == f"{'#' * own} {item.heading}"
     if level <= base:
@@ -684,7 +717,7 @@ def _matches(item: Field, line: str, level: int, base: int, own: int) -> bool:
     return name == want or name.startswith(want + " (")
 
 
-def _split(text: str, form: Form, base: int) -> tuple[str, list[Part]]:
+def _split(text: str, template: Template, base: int) -> tuple[str, list[Part]]:
     """`text` as its preamble and its sections at levels deeper than `base`."""
     preamble: list[str] = []
     parts: list[Part] = []
@@ -708,8 +741,8 @@ def _split(text: str, form: Form, base: int) -> tuple[str, list[Part]]:
             heading = HEADING.match(bare)
         if heading and len(heading.group(1)) > base:
             level = len(heading.group(1))
-            found = next((item for item in form.fields if item.in_body and item.name not in seen
-                          and _matches(item, bare, level, base, form.level)), None)
+            found = next((item for item in template.fields if item.in_body and item.name not in seen
+                          and _matches(item, bare, level, base, template.level)), None)
             if found is not None or current is None or level <= current[1]:
                 close()
                 part = Part("field" if found else "unknown", heading=bare,
@@ -809,24 +842,24 @@ def value_of(item: Field, raw: str) -> object:
     return text.strip()
 
 
-def parse(form: Form, body: str, title: str | None = None) -> Document:
-    """`body` read into `form`'s fields (the module docstring: reading)."""
-    if form.is_adapter:  # the body as it stands: its own check reads it
+def parse(template: Template, body: str, title: str | None = None) -> Document:
+    """`body` read into `template`'s fields (the module docstring: reading)."""
+    if template.is_adapter:  # the body as it stands: its own check reads it
         fields = {} if title is None else {"title": title}
-        return Document(form=form.name, fields=fields, source=body, read=dict(fields))
-    if form.is_file:
-        return _parse_file(form, body)
+        return Document(template=template.name, fields=fields, source=body, read=dict(fields))
+    if template.is_file:
+        return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
-    document = Document(form=form.name, fields={}, source=text)
-    if form.scope:
-        parts, region = _scoped(form, text)
+    document = Document(template=template.name, fields={}, source=text)
+    if template.scope:
+        parts, region = _scoped(template, text)
     else:
         region = text
-        preamble, sections = _split(text, form, 0)
+        preamble, sections = _split(text, template, 0)
         parts = [Part("preamble", raw=preamble), *sections]
     document.parts = parts
     preamble = next((part.raw for part in parts if part.kind == "preamble"), "")
-    for item in form.fields:
+    for item in template.fields:
         if item.source == "title":
             if title is not None:
                 document.fields[item.name] = title
@@ -837,9 +870,9 @@ def parse(form: Form, body: str, title: str | None = None) -> Document:
                 document.fields[item.name] = match.group(1)
     for part in parts:
         if part.kind == "field":
-            document.fields[part.name] = value_of(form.field(part.name), part.raw)
+            document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
-    for item in form.fields:
+    for item in template.fields:
         if item.in_body and item.name not in document.fields:
             near = next((line for line in region.splitlines() if (match := HEADING.match(line))
                          and _norm(match.group(2)) == _norm(item.heading)), None)
@@ -849,7 +882,7 @@ def parse(form: Form, body: str, title: str | None = None) -> Document:
     return document
 
 
-def _title_end(form: Form, text: str) -> int:
+def _title_end(template: Template, text: str) -> int:
     """Where a file's head ends: just after its page title, the first `#` line above the first
     field; 0 where a field's heading comes first or there is no `#` line."""
     offset, fence = 0, None
@@ -865,30 +898,30 @@ def _title_end(form: Form, text: str) -> int:
             level = len(heading.group(1))
             if level == 1:
                 return offset + len(line)
-            if any(item.in_body and _matches(item, bare, level, 0, form.level)
-                   for item in form.fields):
+            if any(item.in_body and _matches(item, bare, level, 0, template.level)
+                   for item in template.fields):
                 return 0
         offset += len(line)
     return 0
 
 
-def _parse_file(form: Form, body: str) -> Document:
-    """A claimed file read into `form`'s fields: its front matter and its page title are its
+def _parse_file(template: Template, body: str) -> Document:
+    """A claimed file read into `template`'s fields: its front matter and its page title are its
     head, kept as they stand and never a field (the module docstring: Files)."""
     front = FRONT_MATTER.match(body)
     head = front.group(0) if front else ""
     rest = body[len(head):]
-    end = _title_end(form, rest)
+    end = _title_end(template, rest)
     title, rest = rest[:end], rest[end:]
-    preamble, sections = _split(rest, form, 0)
-    document = Document(form=form.name, fields={}, source=rest,
+    preamble, sections = _split(rest, template, 0)
+    document = Document(template=template.name, fields={}, source=rest,
                         parts=[Part("front", raw=head), Part("head", raw=title),
                                Part("preamble", raw=preamble), *sections])
     for part in sections:
         if part.kind == "field":
-            document.fields[part.name] = value_of(form.field(part.name), part.raw)
+            document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
-    for item in form.fields:
+    for item in template.fields:
         if item.in_body and item.name not in document.fields:
             near = next((line for line in rest.splitlines() if (match := HEADING.match(line))
                          and _norm(match.group(2)) == _norm(item.heading)), None)
@@ -897,35 +930,35 @@ def _parse_file(form: Form, body: str) -> Document:
     return document
 
 
-def front_matter_form(body: str) -> str | None:
-    """The form a file's front matter names on its `form:` line, or None."""
+def front_matter_template(body: str) -> str | None:
+    """The template a file's front matter names on its `template:` line, or None."""
     front = FRONT_MATTER.match(body)
-    found = FRONT_FORM.search(front.group(0)) if front else None
+    found = FRONT_TEMPLATE.search(front.group(0)) if front else None
     return found.group(1) if found else None
 
 
-def _with_form(front: str, name: str) -> str:
-    """Front matter `front` with its `form:` line naming `name`, every other byte kept; a new
+def _with_template(front: str, name: str) -> str:
+    """Front matter `front` with its `template:` line naming `name`, every other byte kept; a new
     block where `front` is empty."""
     if not front:
-        return f"---\nform: {name}\n---\n\n"
-    if FRONT_FORM.search(front):
-        return FRONT_FORM.sub(f"form: {name}", front, count=1)
+        return f"---\ntemplate: {name}\n---\n\n"
+    if FRONT_TEMPLATE.search(front):
+        return FRONT_TEMPLATE.sub(f"template: {name}", front, count=1)
     newline = "\r\n" if "\r\n" in front else "\n"
     closing = front.rstrip("\r\n").rfind("\n") + 1
-    return front[:closing] + f"form: {name}{newline}" + front[closing:]
+    return front[:closing] + f"template: {name}{newline}" + front[closing:]
 
 
-def _scoped(form: Form, text: str) -> tuple[list[Part], str]:
-    """A scoped form's parts: the data above its marker, then its section's own parts."""
-    after = form.scope.get("after", "")
+def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
+    """A scoped template's parts: the data above its marker, then its section's own parts."""
+    after = template.scope.get("after", "")
     lines = text.splitlines(keepends=True)
     index = next((i for i, line in enumerate(lines) if line.strip() == after), None)
     if index is None:
         return [Part("prefix", raw=text)], ""
     prefix = "".join(lines[:index + 1])
     rest = lines[index + 1:]
-    want = _norm(form.scope.get("section", ""))
+    want = _norm(template.scope.get("section", ""))
     start = None
     fence = None
     for i, line in enumerate(rest):
@@ -958,7 +991,7 @@ def _scoped(form: Form, text: str) -> tuple[list[Part], str]:
             end = i
             break
     region = "".join(rest[start + 1:end])
-    preamble, sections = _split(region, form, form.level - 1)
+    preamble, sections = _split(region, template, template.level - 1)
     return [Part("prefix", raw=prefix), Part("gap", raw="".join(rest[:start])),
             Part("scope", heading=rest[start].rstrip("\r\n")), Part("preamble", raw=preamble),
             *sections, Part("suffix", raw="".join(rest[end:]))], "".join(rest[start:end])
@@ -1002,42 +1035,42 @@ def _count(item: Field, value: object) -> int:
 
 def _without_markers(text: str) -> str:
     kept = [line for line in text.splitlines(keepends=True)
-            if line.strip() != FLEET_MARKER and not FORM_MARKER_PATTERN.match(line.rstrip("\r\n"))]
+            if line.strip() != FLEET_MARKER and not TEMPLATE_MARKER_PATTERN.match(line.rstrip("\r\n"))]
     return "".join(kept)
 
 
-def render(form: Form, document: Document | dict) -> str:
+def render(template: Template, document: Document | dict) -> str:
     """Canonical Markdown of `document` (a parsed Document, or a mapping of field values), as the
     module docstring's "Writing" says."""
-    if form.is_adapter:
+    if template.is_adapter:
         if not isinstance(document, Document):
-            raise FormError(f"forms: {form.name} is an adapter and has no fields to render; the "
+            raise TemplateError(f"templates: {template.name} is an adapter and has no fields to render; the "
                             "command that writes it writes its body")
         return document.source  # never marked: the adapter's own writer owns its text
     if not isinstance(document, Document):
-        document = Document(form=form.name, fields=answer(form, document))
+        document = Document(template=template.name, fields=answer(template, document))
     values = document.fields
-    marker = FORM_MARKER.format(name=form.name)
-    hashes = "#" * form.level
+    marker = template.marker_line
+    hashes = "#" * template.level
     parts = list(document.parts)
-    if form.scope and not any(part.kind == "scope" for part in parts):
+    if template.scope and not any(part.kind == "scope" for part in parts):
         data = "".join(part.raw for part in parts if part.kind in ("prefix", "gap"))
-        if form.scope.get("after", "") in data.splitlines():  # the marker without its section
+        if template.scope.get("after", "") in data.splitlines():  # the marker without its section
             data = "\n".join(line for line in data.splitlines()
-                             if line.strip() != form.scope.get("after", ""))
+                             if line.strip() != template.scope.get("after", ""))
         parts = [*([Part("data", raw=_end(data))] if data.strip() else []),
-                 Part("prefix", raw=form.scope.get("after", "") + "\n"), Part("gap"),
-                 Part("scope", heading=f"## {form.scope.get('section', '')}"),
+                 Part("prefix", raw=template.scope.get("after", "") + "\n"), Part("gap"),
+                 Part("scope", heading=f"## {template.scope.get('section', '')}"),
                  Part("preamble"), Part("suffix")]
     elif not parts:
-        parts = [Part("front"), Part("head"), Part("preamble")] if form.is_file else \
+        parts = [Part("front"), Part("head"), Part("preamble")] if template.is_file else \
             [Part("preamble")]
     # Fields with a value but no section yet go after the nearest earlier field that has one.
     placed = {part.name for part in parts if part.kind == "field"}
-    for item in form.fields:
+    for item in template.fields:
         if not item.in_body or item.name in placed or values.get(item.name) in (None, "", [], {}):
             continue
-        names = [other.name for other in form.fields]
+        names = [other.name for other in template.fields]
         earlier = names[:names.index(item.name)]
         index = max((i for i, part in enumerate(parts) if part.kind == "field"
                      and part.name in earlier), default=None)
@@ -1051,7 +1084,7 @@ def render(form: Form, document: Document | dict) -> str:
     number = 1
     for part in parts:
         if part.kind == "front":
-            out.append(_with_form(part.raw, form.name))
+            out.append(_with_template(part.raw, template.name))
         elif part.kind == "head":
             out.append(_without_markers(part.raw))
         elif part.kind == "prefix":
@@ -1062,10 +1095,10 @@ def render(form: Form, document: Document | dict) -> str:
         elif part.kind == "scope":
             out.append(part.heading + "\n")
         elif part.kind == "preamble":
-            preamble = _labels(form, document, _without_markers(part.raw))
-            if form.is_file:
+            preamble = _labels(template, document, _without_markers(part.raw))
+            if template.is_file:
                 out.append(preamble)
-            elif not form.scope:
+            elif not template.scope:
                 out.append(f"{FLEET_MARKER}\n{marker}\n")
                 preamble = preamble.lstrip("\n")
                 out.append("\n" + _end(preamble) if preamble.strip() else "\n")
@@ -1074,10 +1107,10 @@ def render(form: Form, document: Document | dict) -> str:
         elif part.kind in ("suffix", "data"):
             out.append(part.raw + ("\n" if part.kind == "data" and part.raw.strip() else ""))
         elif part.kind == "unknown":
-            if form.keep_unknown:
+            if template.keep_unknown:
                 out.append(part.heading + "\n" + part.raw)
         else:
-            item = form.field(part.name)
+            item = template.field(part.name)
             if part.name not in values:
                 continue
             value = values[part.name]
@@ -1098,9 +1131,9 @@ def _end(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
-def _labels(form: Form, document: Document, preamble: str) -> str:
+def _labels(template: Template, document: Document, preamble: str) -> str:
     """The preamble with each label field's line as its value now."""
-    for item in form.fields:
+    for item in template.fields:
         if not item.label or item.name not in document.fields:
             continue
         value = document.fields[item.name]
@@ -1115,40 +1148,40 @@ def _labels(form: Form, document: Document, preamble: str) -> str:
     return preamble
 
 
-def draft(form: Form) -> str:
-    """The empty form as Markdown, each field's `says` as a comment; an adapter's says what
+def draft(template: Template) -> str:
+    """The empty template as Markdown, each field's `says` as a comment; an adapter's says what
     writes and checks it."""
-    if form.is_adapter:
-        return f"<!-- {form.name}: {form.says} -->\n<!-- {_checked_by(form)} -->\n"
+    if template.is_adapter:
+        return f"<!-- {template.name}: {template.says} -->\n<!-- {_checked_by(template)} -->\n"
     lines = []
-    if form.is_file:
-        lines += ["---", f"form: {form.name}", "---", ""]
-    elif form.scope:
-        lines += [form.scope.get("after", ""), FORM_MARKER.format(name=form.name),
-                  f"## {form.scope.get('section', '')}", ""]
+    if template.is_file:
+        lines += ["---", f"template: {template.name}", "---", ""]
+    elif template.scope:
+        lines += [template.scope.get("after", ""), template.marker_line,
+                  f"## {template.scope.get('section', '')}", ""]
     else:
-        lines += [FLEET_MARKER, FORM_MARKER.format(name=form.name), ""]
-    hashes = "#" * form.level
-    for item in form.fields:
+        lines += [FLEET_MARKER, template.marker_line, ""]
+    hashes = "#" * template.level
+    for item in template.fields:
         if item.source == "title":
             lines += [f"<!-- title: {item.says} -->", ""]
         elif item.label:
             lines += [f"{item.label}: <!-- {item.says} -->", ""]
-    for item in form.fields:
+    for item in template.fields:
         if item.in_body:
             lines += [f"{hashes} {item.heading}", "", f"<!-- {item.says} -->", ""]
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def draft_fields(form: Form) -> dict[str, object]:
-    """The empty form as data: each field's empty value and its `says`, then each field's shape
-    (`field_shape`) and the form's JSON Schema (`schema`)."""
+def draft_fields(template: Template) -> dict[str, object]:
+    """The empty template as data: each field's empty value and its `says`, then each field's shape
+    (`field_shape`) and the template's JSON Schema (`schema`)."""
     empty = {"list": [], "issue": [], "checklist": [], "object": {}}
-    return {"form": form.name, "says": form.says,
-            "fields": {item.name: empty.get(item.kind, "") for item in form.fields},
-            "field_says": {item.name: item.says for item in form.fields},
-            "field_shape": {item.name: field_shape(item) for item in form.fields},
-            "schema": schema(form)}
+    return {"template": template.name, "says": template.says,
+            "fields": {item.name: empty.get(item.kind, "") for item in template.fields},
+            "field_says": {item.name: item.says for item in template.fields},
+            "field_shape": {item.name: field_shape(item) for item in template.fields},
+            "schema": schema(template)}
 
 
 #: The keys `field_shape` gives, each where the field sets it.
@@ -1196,20 +1229,20 @@ def _property(item: Field) -> dict[str, object]:
     return {**made, "description": item.says}
 
 
-def schema(form: Form) -> dict[str, object]:
-    """A JSON Schema 2020-12 of `form`'s fields, written with SCHEMA_KEYWORDS alone, so it can be
+def schema(template: Template) -> dict[str, object]:
+    """A JSON Schema 2020-12 of `template`'s fields, written with SCHEMA_KEYWORDS alone, so it can be
     handed to a model as it is; an adapter's has no property."""
     return {"$schema": SCHEMA_DIALECT, "type": "object",
-            "properties": {item.name: _property(item) for item in form.fields},
-            "required": [item.name for item in form.fields if item.required],
+            "properties": {item.name: _property(item) for item in template.fields},
+            "required": [item.name for item in template.fields if item.required],
             "additionalProperties": False}
 
 
-def answer(form: Form, values: dict[str, object]) -> dict[str, object]:
+def answer(template: Template, values: dict[str, object]) -> dict[str, object]:
     """Field values as `render` takes them: an object field given as the schema's list of
     `{"key", "value"}` pairs becomes the mapping of today."""
     given = dict(values)
-    for item in form.fields:
+    for item in template.fields:
         value = given.get(item.name)
         if item.kind == "object" and isinstance(value, list) and all(
                 isinstance(pair, dict) and set(pair) == {"key", "value"} for pair in value):
@@ -1217,34 +1250,34 @@ def answer(form: Form, values: dict[str, object]) -> dict[str, object]:
     return given
 
 
-def _checked_by(form: Form) -> str:
+def _checked_by(template: Template) -> str:
     """What checks an adapter: its checker, its title rule and its lines."""
-    parts = [f"checker {form.checker or 'none'}"]
-    if form.adapter.get("title_rule"):
-        parts.append(f"title {form.adapter['title_rule']}")
-    if form.adapter.get("lines"):
-        parts.append(f"{len(form.adapter['lines'])} lines")
-    return ", ".join(parts) + ("" if len(parts) > 1 or form.checker else " (no field required)")
+    parts = [f"checker {template.checker or 'none'}"]
+    if template.adapter.get("title_rule"):
+        parts.append(f"title {template.adapter['title_rule']}")
+    if template.adapter.get("lines"):
+        parts.append(f"{len(template.adapter['lines'])} lines")
+    return ", ".join(parts) + ("" if len(parts) > 1 or template.checker else " (no field required)")
 
 
-def list_forms(forms: dict[str, Form]) -> list[str]:
-    """One line per form: its name, reader, actions, the paths it claims, an adapter's checker,
+def list_templates(templates: dict[str, Template]) -> list[str]:
+    """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
-    return [f"{form.name} ({form.reader}): {', '.join(form.actions)}: "
-            + (f"{', '.join(form.paths)}: " if form.paths else "")
-            + (f"{_checked_by(form)}: " if form.is_adapter else "") + form.says
-            for form in sorted(forms.values(), key=lambda item: (item.order, item.name))]
+    return [f"{template.name} ({template.reader}): {', '.join(template.actions)}: "
+            + (f"{', '.join(template.paths)}: " if template.paths else "")
+            + (f"{_checked_by(template)}: " if template.is_adapter else "") + template.says
+            for template in sorted(templates.values(), key=lambda item: (item.order, item.name))]
 
 
 @dataclass(frozen=True)
 class Selection:
-    """What `select` chose: the form (None: free form) and the refused markers it met."""
-    form: Form | None
+    """What `select` chose: the template (None: free) and the refused markers it met."""
+    template: Template | None
     findings: tuple[Finding, ...] = ()
 
     @property
     def name(self) -> str | None:
-        return self.form.name if self.form else None
+        return self.template.name if self.template else None
 
 
 def _repository(name: str) -> str:
@@ -1262,7 +1295,7 @@ def _at_home(repo: str, home) -> bool:
 
 
 def home_repositories(root: Path = ROOT) -> set[str]:
-    """The repositories SE writes forms for: origin's, and each one se.toml `[outside]` lists."""
+    """The repositories SE writes templates for: origin's, and each one se.toml `[outside]` lists."""
     found = set()
     origin = _sibling("work_tickets").remote_repo(root)
     if origin:
@@ -1275,113 +1308,114 @@ def home_repositories(root: Path = ROOT) -> set[str]:
     return found
 
 
-def _carries(form: Form, lines: set[str]) -> bool:
-    """Whether the body's stripped `lines` hold `form`'s marker condition."""
-    if form.marker and form.marker in lines:
+def _carries(template: Template, lines: set[str]) -> bool:
+    """Whether the body's stripped `lines` hold `template`'s marker condition."""
+    if template.marker and template.marker in lines:
         return True
-    return bool(form.marker_pattern) and any(re.fullmatch(form.marker_pattern, line)
+    return bool(template.marker_pattern) and any(re.fullmatch(template.marker_pattern, line)
                                              for line in lines)
 
 
-def _why_not(form: Form, action: str) -> str:
-    if action not in form.actions:
-        return (f"the {form.name} form does not apply to {action}: it shapes "
-                f"{', '.join(form.actions)}")
-    return (f"the {form.name} form does not apply here: it needs the labels "
-            f"{', '.join(form.labels) or 'none'}"
-            + (" and a pull request into the integration branch" if form.base else ""))
+def _why_not(template: Template, action: str) -> str:
+    if action not in template.actions:
+        return (f"the {template.name} template does not apply to {action}: it shapes "
+                f"{', '.join(template.actions)}")
+    return (f"the {template.name} template does not apply here: it needs the labels "
+            f"{', '.join(template.labels) or 'none'}"
+            + (" and a pull request into the integration branch" if template.base else ""))
 
 
-def select(forms: dict[str, Form], action: str, body: str, title: str | None = None, *,
+def select(templates: dict[str, Template], action: str, body: str, title: str | None = None, *,
            labels=(), base: str | None = None, integration: str = "main",
            repo: str | None = None, home=None, path: str | None = None) -> Selection:
-    """The form that shapes `body` for `action`, in the order the module docstring's
-    "Selection" gives; its form None is free form. For `file.write`, `path` is the file's,
+    """The template that shapes `body` for `action`, in the order the module docstring's
+    "Selection" gives; its template None is free. For `file.write`, `path` is the file's,
     relative to the project root."""
     if action not in ACTIONS:
-        raise FormError(f"select: action {action!r} is none of {', '.join(ACTIONS)}")
+        raise TemplateError(f"select: action {action!r} is none of {', '.join(ACTIONS)}")
     if action == FILE_ACTION:
         if path is None:
-            raise FormError(f"select: {FILE_ACTION} selects by the file's path; give path")
-        return _select_file(forms, body, title, path)
+            raise TemplateError(f"select: {FILE_ACTION} selects by the file's path; give path")
+        return _select_file(templates, body, title, path)
     if repo is not None and home is not None and not _at_home(repo, home):
         return Selection(None)
     have = {str(label).casefold() for label in labels}
 
-    def allowed(form: Form) -> bool:
-        return (action in form.actions
-                and all(label.casefold() in have for label in form.labels)
-                and (not form.base or base == integration))
+    def allowed(template: Template) -> bool:
+        return (action in template.actions
+                and all(label.casefold() in have for label in template.labels)
+                and (not template.base or base == integration))
 
-    candidates = sorted((form for form in forms.values() if allowed(form)),
-                        key=lambda form: (form.order, form.name))
+    candidates = sorted((template for template in templates.values() if allowed(template)),
+                        key=lambda template: (template.order, template.name))
     lines = {line.strip() for line in body.splitlines()}
     refused: list[Finding] = []
-    for named in dict.fromkeys(FORM_MARKER_PATTERN.findall(body)):
-        if named in forms and forms[named] not in candidates:
-            refused.append(Finding("body", "form", REFUSE, _why_not(forms[named], action)
-                                   + f"; take out `{FORM_MARKER.format(name=named)}`"))
-    for form in sorted(forms.values(), key=lambda item: item.name):
-        if form.is_adapter and form not in candidates and _carries(form, lines):
-            refused.append(Finding("body", "form", REFUSE, _why_not(form, action)
+    marked = {match.group(1): match.group(0).strip() for match in TEMPLATE_MARKER_PATTERN.finditer(body)}
+    for named, line in marked.items():
+        if named in templates and templates[named] not in candidates:
+            refused.append(Finding("body", "template", REFUSE, _why_not(templates[named], action)
+                                   + f"; take out `{line}`"))
+    for template in sorted(templates.values(), key=lambda item: item.name):
+        if template.is_adapter and template not in candidates and _carries(template, lines):
+            refused.append(Finding("body", "template", REFUSE, _why_not(template, action)
                                    + ", and the body carries its marker"))
-    named = next((form for form in candidates for name in FORM_MARKER_PATTERN.findall(body)
-                  if form.name == name), None)
+    named = next((template for template in candidates for name in TEMPLATE_MARKER_PATTERN.findall(body)
+                  if template.name == name), None)
     if named is not None:
         return Selection(named, tuple(refused))
-    for form in candidates:
-        if not form.marker and not form.marker_pattern and not form.title_pattern:
+    for template in candidates:
+        if not template.marker and not template.marker_pattern and not template.title_pattern:
             continue
-        if (form.marker or form.marker_pattern) and not _carries(form, lines):
+        if (template.marker or template.marker_pattern) and not _carries(template, lines):
             continue
-        if form.title_pattern and not re.search(form.title_pattern, title or ""):
+        if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
-        return Selection(form, tuple(refused))
-    plain = next((form for form in candidates if form.fallback or (
-        not form.marker and not form.marker_pattern and not form.title_pattern)), None)
+        return Selection(template, tuple(refused))
+    plain = next((template for template in candidates if template.fallback or (
+        not template.marker and not template.marker_pattern and not template.title_pattern)), None)
     return Selection(plain, tuple(refused))
 
 
-def _select_file(forms: dict[str, Form], body: str, title: str | None, path: str) -> Selection:
-    """The form that claims the file at `path` (the module docstring: Selection, for a file)."""
+def _select_file(templates: dict[str, Template], body: str, title: str | None, path: str) -> Selection:
+    """The template that claims the file at `path` (the module docstring: Selection, for a file)."""
     path = path.replace("\\", "/").strip("/")
-    candidates = sorted((form for form in forms.values() if FILE_ACTION in form.actions
-                         and form.claims(path)), key=lambda form: (form.order, form.name))
+    candidates = sorted((template for template in templates.values() if FILE_ACTION in template.actions
+                         and template.claims(path)), key=lambda template: (template.order, template.name))
     if not candidates:
         return Selection(None)
-    names = ", ".join(form.name for form in candidates)
+    names = ", ".join(template.name for template in candidates)
     refused: list[Finding] = []
-    named = front_matter_form(body)
+    named = front_matter_template(body)
     if named is not None:
-        chosen = next((form for form in candidates if form.name == named), None)
+        chosen = next((template for template in candidates if template.name == named), None)
         if chosen is not None:
             return Selection(chosen)
-        refused.append(Finding("body", "form", REFUSE, f"{path}: the front matter names "
-                               f"form: {named}, which does not claim this file; name one of "
+        refused.append(Finding("body", "template", REFUSE, f"{path}: the front matter names "
+                               f"template: {named}, which does not claim this file; name one of "
                                f"{names}"))
     lines = {line.strip() for line in body.splitlines()}
-    for form in candidates:
-        if not form.marker and not form.marker_pattern and not form.title_pattern:
+    for template in candidates:
+        if not template.marker and not template.marker_pattern and not template.title_pattern:
             continue
-        if (form.marker or form.marker_pattern) and not _carries(form, lines):
+        if (template.marker or template.marker_pattern) and not _carries(template, lines):
             continue
-        if form.title_pattern and not re.search(form.title_pattern, title or ""):
+        if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
-        return Selection(form, tuple(refused))
-    refused.append(Finding("body", "form", REFUSE, f"{path}: no form takes this file; name its "
-                           f"form in the front matter, form: <name> (one of {names})"))
+        return Selection(template, tuple(refused))
+    refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
+                           f"template in the front matter, template: <name> (one of {names})"))
     return Selection(None, tuple(refused))
 
 
-def verdict(forms: dict[str, Form], action: str, body: str, title: str | None = None,
-            **where) -> tuple[Form | None, list[Finding]]:
-    """The form `select` takes for `body` and every finding: its refused markers, then the
-    form's check; (None, the refused markers) where the body is free."""
-    chosen = select(forms, action, body, title, **where)
+def verdict(templates: dict[str, Template], action: str, body: str, title: str | None = None,
+            **where) -> tuple[Template | None, list[Finding]]:
+    """The template `select` takes for `body` and every finding: its refused markers, then the
+    template's check; (None, the refused markers) where the body is free."""
+    chosen = select(templates, action, body, title, **where)
     found = list(chosen.findings)
-    if chosen.form is not None:
-        found += check(chosen.form, parse(chosen.form, body, title))
-    return chosen.form, found
+    if chosen.template is not None:
+        found += check(chosen.template, parse(chosen.template, body, title))
+    return chosen.template, found
 
 
 # Checking
@@ -1442,23 +1476,23 @@ def _entries(value: object) -> list[str]:
     return [line for line in str(value or "").splitlines() if line.strip()]
 
 
-def check(form: Form, document: Document, *, root: Path = ROOT,
+def check(template: Template, document: Document, *, root: Path = ROOT,
           bare_scripts: bool = True) -> list[Finding]:
-    """Every finding of `document` against `form`, refusals first, in field order; an adapter's
+    """Every finding of `document` against `template`, refusals first, in field order; an adapter's
     are its own check's."""
-    if form.is_adapter:
-        return adapter_findings(form, document)
+    if template.is_adapter:
+        return adapter_findings(template, document)
     found: list[Finding] = []
 
     def add(rule: str, item: str, fix: str) -> None:
-        severity = form.severity(rule)
+        severity = template.severity(rule)
         if severity != OFF:
             found.append(Finding(item, rule, severity, fix))
 
     values = document.fields
     filled: dict[str, object] = {}
-    hashes = "#" * form.level
-    for item in form.fields:
+    hashes = "#" * template.level
+    for item in template.fields:
         if item.source == "title" and item.name not in values:
             continue  # no title given: the body alone is checked
         value = values.get(item.name)
@@ -1499,12 +1533,12 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
                 add("first-sentence", item.name, f"{item.heading}'s first sentence has {chars} "
                     f"characters; keep it to {item.first_sentence_chars}, one complete statement: "
                     "it becomes the landing title")
-        if item.actor and form.actors:
-            names = [re.compile(rf"\b{re.escape(actor)}\b", re.IGNORECASE) for actor in form.actors]
+        if item.actor and template.actors:
+            names = [re.compile(rf"\b{re.escape(actor)}\b", re.IGNORECASE) for actor in template.actors]
             for number, entry in enumerate(_entries(value), 1):
                 if not any(name.search(entry) for name in names):
                     add("actor", item.name, f"{item.heading} item {number} names nobody: say who "
-                        f"does it ({', '.join(form.actors)})")
+                        f"does it ({', '.join(template.actors)})")
         if item.one_sentence:
             for number, entry in enumerate(_entries(value), 1):
                 if SENTENCE_END.search(_prose(entry)):
@@ -1514,7 +1548,7 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
             for entry in _entries(value):
                 if BARE_ISSUE.match(entry.strip()):
                     add("unnamed-entry", item.name, f"{item.heading} entry {entry.strip()} has no "
-                        "name: add what it is, `#12 the forms engine`")
+                        "name: add what it is, `#12 the templates engine`")
         if item.kind not in ("issue", "code") and item.source != "title":
             if BARE_NUMBER.search(_prose(text)):
                 add("bare-number", item.name, f"{item.heading} names an issue by its number "
@@ -1524,14 +1558,14 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
                     "Priority, Assignee, Milestone): leave those to the tracker")
             if not item.verbatim:
                 prose = _prose(COMMENT.sub("", text))
-                for term in form.terms:
+                for term in template.terms:
                     if re.search(rf"\b{re.escape(term.term)}\b", prose, re.IGNORECASE):
                         add("terms", item.name, f"{item.heading} uses the inside term "
                             f"{term.term!r}: say {term.plain}")
         if item.source == "title":
-            _title(form, item, text, document, add)
+            _title(template, item, text, document, add)
     seen: dict[str, str] = {}
-    for item in form.fields:
+    for item in template.fields:
         if item.name not in filled or item.source == "title":
             continue
         key = _squash(_plain(filled[item.name]))
@@ -1540,13 +1574,13 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
                 add("duplicate", item.name, f"{item.heading} repeats {seen[key]} word for word: "
                     "say in each what only it says")
             else:
-                seen[key] = form.field(item.name).heading or item.name
+                seen[key] = template.field(item.name).heading or item.name
     if document.source:
         for finding in _sibling("references").dangling(document.source, root, paths=False,
                                                          created=True, bare_scripts=bare_scripts):
-            add("dangling", _field_at(form, document, finding.line), f"{finding}: correct it, "
+            add("dangling", _field_at(template, document, finding.line), f"{finding}: correct it, "
                 "or say in Requirements that this issue adds it")
-    order = {item.name: index for index, item in enumerate(form.fields)}
+    order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
 
@@ -1559,14 +1593,14 @@ class _Refused(Exception):
 _MISCONFIGURED = (TypeError, AttributeError, NameError, ImportError, KeyError)
 
 
-def resolve(reference: str, form: Form):
+def resolve(reference: str, template: Template):
     """`"<module>:<name>"`, a function or a value of a script beside this one."""
     module, name = reference.split(":", 1)
     try:
         found = getattr(_sibling(module), name)
     except (ImportError, AttributeError, OSError) as error:
-        raise FormError(f"{form.path}: {reference} does not resolve ({error}); name a script "
-                        "beside scripts/forms.py and what it defines") from error
+        raise TemplateError(f"{template.path}: {reference} does not resolve ({error}); name a script "
+                        "beside scripts/templates.py and what it defines") from error
     return found
 
 
@@ -1621,15 +1655,15 @@ def _dropped(value: object, drop: dict) -> object:
     return value
 
 
-def adapter_findings(form: Form, document: Document) -> list[Finding]:
+def adapter_findings(template: Template, document: Document) -> list[Finding]:
     """An adapter's findings: its lines, its title rule, then its checker's answer, called as
     `[adapter]` says (the module docstring: adapters)."""
-    spec, body = form.adapter, document.source
+    spec, body = template.adapter, document.source
     title = document.fields.get("title")
     found: list[Finding] = []
 
     def refuse(rule: str, fix: str, severity: str = REFUSE) -> None:
-        found.append(Finding("body", rule, severity, f"{form.name}: {fix}"))
+        found.append(Finding("body", rule, severity, f"{template.name}: {fix}"))
 
     lines = [line.strip() for line in body.splitlines()]
     for line in spec.get("lines", []):
@@ -1641,16 +1675,16 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
         if not held:
             refuse("line", line["says"])
     if spec.get("title_rule"):
-        rule = resolve(spec["title_rule"], form)
+        rule = resolve(spec["title_rule"], template)
         rule = rule if isinstance(rule, re.Pattern) else re.compile(str(rule))
         if title is None or rule.match(title) is None:
             refuse("title", f"the title {title!r} does not match {rule.pattern!r} "
                    f"({spec['title_rule']})")
-    if not form.checker:
+    if not template.checker:
         return found
     try:
         if spec.get("extract"):
-            value = resolve(spec["extract"], form)(body, **dict(spec.get("extract_with", {})))
+            value = resolve(spec["extract"], template)(body, **dict(spec.get("extract_with", {})))
         elif spec.get("json_after"):
             value = _json_after(body, spec["json_after"])
         elif spec.get("sections"):
@@ -1658,7 +1692,7 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
         else:
             value = body
     except _MISCONFIGURED as error:
-        raise FormError(f"{form.path}: its reading failed ({type(error).__name__}: {error}); "
+        raise TemplateError(f"{template.path}: its reading failed ({type(error).__name__}: {error}); "
                         "fix [adapter]") from error
     except Exception as error:  # the extractor's own refusal, such as a QueueError
         refuse("checker", str(error))
@@ -1666,12 +1700,12 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
     if value is None:
         missing = spec.get("missing", REFUSE)
         if missing != "pass":
-            refuse("checker", f"the body holds nothing for {form.checker} to check"
+            refuse("checker", f"the body holds nothing for {template.checker} to check"
                    + (f" (no {spec['json_after']} block)" if spec.get("json_after") else ""),
                    missing)
         return found
     value = _dropped(value, dict(spec.get("drop", {})))
-    if spec.get("when") and not resolve(spec["when"], form)(value):
+    if spec.get("when") and not resolve(spec["when"], template)(value):
         return found
     keywords = {**dict(spec.get("with", {})), **{name: None for name in spec.get("none", [])}}
     if spec.get("title_as"):
@@ -1679,12 +1713,12 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
     arguments = [] if spec.get("text_as") else [value]
     if spec.get("text_as"):
         keywords[spec["text_as"]] = value
-    checker = resolve(form.checker, form)
+    checker = resolve(template.checker, template)
     result = spec.get("result", "problems")
     try:
         answer = checker(*arguments, **keywords)
     except _MISCONFIGURED as error:
-        raise FormError(f"{form.path}: {form.checker} failed ({type(error).__name__}: {error}); "
+        raise TemplateError(f"{template.path}: {template.checker} failed ({type(error).__name__}: {error}); "
                         "fix [adapter]") from error
     except Exception as error:  # the checker's refusal
         if result != "raises":
@@ -1699,7 +1733,7 @@ def adapter_findings(form: Form, document: Document) -> list[Finding]:
     return found
 
 
-def _title(form: Form, item: Field, title: str, document: Document, add) -> None:
+def _title(template: Template, item: Field, title: str, document: Document, add) -> None:
     text = title.strip()
     if isinstance(item.rule, re.Pattern):
         if not item.rule.fullmatch(text):
@@ -1721,7 +1755,7 @@ def _title(form: Form, item: Field, title: str, document: Document, add) -> None
             "alone")
 
 
-def _field_at(form: Form, document: Document, line: int) -> str:
+def _field_at(template: Template, document: Document, line: int) -> str:
     """The field whose section holds `line` of the document's checked text."""
     count, name = 1, "body"
     for part in document.parts:
@@ -1740,16 +1774,16 @@ def _field_at(form: Form, document: Document, line: int) -> str:
 # Enforcing: the switch the filing commands read, the private terms, the refusal and its count
 
 
-#: se.toml `[forms] enforce`: the values the filing commands know, `off` the default.
+#: se.toml `[templates] enforce`: the values the filing commands know, `off` the default.
 ENFORCE_VALUES = (OFF, WARN, REFUSE)
-#: se.toml `[forms] gate`: the values SE's form gate on GitHub writes knows (se_forms.py gate),
+#: se.toml `[templates] gate`: the values SE's template gate on GitHub writes knows (se_templates.py gate),
 #: `off` the default.
 GATE_VALUES = (OFF, WARN, REFUSE)
-#: se.toml `[forms] files`: whether SE's checks before work is done check the files a form claims
-#: (se_forms.py check-files), and with `write` also the gate at each write; `off` the default.
+#: se.toml `[templates] files`: whether SE's checks before work is done check the files a template claims
+#: (se_templates.py check-files), and with `write` also the gate at each write; `off` the default.
 CHECK, WRITE = "check", "write"
 FILES_VALUES = (OFF, CHECK, WRITE)
-#: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
+#: se.toml `[templates] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
 REFUSAL_LINES = 10
@@ -1758,7 +1792,7 @@ ALSO = "Also (does not block):"
 
 @dataclass(frozen=True)
 class Enforcement:
-    """se.toml `[forms]` as the filing commands read it, and where it was read."""
+    """se.toml `[templates]` as the filing commands read it, and where it was read."""
     enforce: str = OFF
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
@@ -1767,9 +1801,9 @@ class Enforcement:
 
 
 def enforcement(root: Path) -> Enforcement:
-    """`[forms]` of `root`'s se.toml at `origin/<integration branch>` through git_door, so a branch
+    """`[templates]` of `root`'s se.toml at `origin/<integration branch>` through git_door, so a branch
     cannot switch its own check off; the working tree's only where that ref does not exist. A value
-    outside the switch's set is a FormError naming the file."""
+    outside the switch's set is a TemplateError naming the file."""
     door = _sibling("git_door")
     ref = f"origin/{_integration_branch(root)}"
     known = door.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", root=root)
@@ -1782,64 +1816,64 @@ def enforcement(root: Path) -> Enforcement:
         path = root / "se.toml"
         text = path.read_text(encoding="utf-8") if path.is_file() else ""
     try:
-        table = tomllib.loads(text).get("forms", {})
+        table = tomllib.loads(text).get("templates", {})
     except tomllib.TOMLDecodeError as error:
-        raise FormError(f"forms: {where} is no TOML ({error}); fix it") from error
+        raise TemplateError(f"templates: {where} is no TOML ({error}); fix it") from error
     if not isinstance(table, dict):
-        raise FormError(f"forms: [forms] in {where} must be a table")
+        raise TemplateError(f"templates: [templates] in {where} must be a table")
     enforce = table.get("enforce", OFF)
     if enforce not in ENFORCE_VALUES:
-        raise FormError(f"forms: [forms] enforce = {enforce!r} in {where} is none of "
-                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Forms\")")
+        raise TemplateError(f"templates: [templates] enforce = {enforce!r} in {where} is none of "
+                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Templates\")")
     gate = table.get("gate", OFF)
     if gate not in GATE_VALUES:
-        raise FormError(f"forms: [forms] gate = {gate!r} in {where} is none of "
-                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Forms\")")
+        raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
+                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
     files = table.get("files", OFF)
     if files not in FILES_VALUES:
-        raise FormError(f"forms: [forms] files = {files!r} in {where} is none of "
-                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Forms\")")
+        raise TemplateError(f"templates: [templates] files = {files!r} in {where} is none of "
+                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Templates\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
-        raise FormError(f"forms: [forms] refusals = {refusals!r} in {where} must be a whole "
+        raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
     return Enforcement(enforce, refusals, where, gate, files)
 
 
-def formed(form: Form, *, body: str | None = None, fields: dict | None = None,
+def filled(template: Template, *, body: str | None = None, fields: dict | None = None,
            enforce: str = OFF) -> str:
     """The body a filing command files: `fields` always rendered through `render`; `body` as it
     stands with `enforce` off, else parsed and rendered again, its unknown sections kept."""
     if fields is not None:
-        return render(form, fields)
+        return render(template, fields)
     if body is None:
-        raise FormError("forms: give a body or fields")
-    if enforce == OFF or form.is_adapter:
+        raise TemplateError("templates: give a body or fields")
+    if enforce == OFF or template.is_adapter:
         return body
-    return render(form, parse(form, body))
+    return render(template, parse(template, body))
 
 
-def private_findings(form: Form, title: str, body: str, root: Path) -> list[Finding]:
+def private_findings(template: Template, title: str, body: str, root: Path) -> list[Finding]:
     """A refused finding for every term of the lists `public_check.py` reads (its public list and
     the local list of `root` where it holds one) in the title or the body: each names the field and
-    the list's label, never the term. A list that does not load is a FormError naming only its
+    the list's label, never the term. A list that does not load is a TemplateError naming only its
     line."""
     check = _sibling("public_check")
     try:
         local = check.load_local(root)
     except check.SetupError as error:
-        raise FormError(f"forms: {error}") from error
+        raise TemplateError(f"templates: {error}") from error
     lists = [("public", pattern) for pattern in check.GENERIC_PATTERNS
              if local is None or pattern.label not in local.off]
     lists += [("local", pattern) for pattern in (local.terms if local is not None else [])]
-    document = parse(form, body, title) if not form.is_adapter else None
+    document = parse(template, body, title) if not template.is_adapter else None
     found: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for where, text in (("title", title), ("body", body)):
         for line, _, label in check.find(text, [pattern for _, pattern in lists]):
             kind = next(name for name, pattern in lists if pattern.label == label)
             field_name = (where if where == "title" or document is None
-                          else _field_at(form, document, line))
+                          else _field_at(template, document, line))
             key = (field_name, label)
             if key in seen:
                 continue
@@ -1853,14 +1887,14 @@ def private_findings(form: Form, title: str, body: str, root: Path) -> list[Find
     return found
 
 
-def _heading(form: Form, name: str) -> str:
-    item = form.field(name)
+def _heading(template: Template, name: str) -> str:
+    item = template.field(name)
     return (item.heading or item.name) if item is not None else name
 
 
-def _line(form: Form, finding: Finding) -> str:
+def _line(template: Template, finding: Finding) -> str:
     """A finding as `<field>: <what is wrong>: <the fix>`."""
-    heading = _heading(form, finding.field)
+    heading = _heading(template, finding.field)
     fix = finding.fix
     if fix.startswith(f"{heading} "):
         fix = fix[len(heading) + 1:]
@@ -1877,33 +1911,33 @@ def _fit(head: list[str], lines: list[str], tail: list[str]) -> list[str]:
     return head + lines + tail
 
 
-def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
+def report(command: str, template: Template, findings: list[Finding], *, refused: bool,
            hold: str = "", scripts: Path = ROOT / "scripts", gate: bool = False) -> str:
-    """The text a filing command prints for `findings` against `form`, at most REFUSAL_LINES
+    """The text a filing command prints for `findings` against `template`, at most REFUSAL_LINES
     lines: every refused finding with its fix, the warnings after ALSO, the `draft` command with
     the real path of SE's scripts and, with `hold` (the label it files with), the `--hold` way
-    out. It never counts tries. With `gate` (se_forms.py gate, a write through the GitHub tools)
-    its tail lines name the MCP door's forms tool before the `draft` command, and the hold names
+    out. It never counts tries. With `gate` (se_templates.py gate, a write through the GitHub tools)
+    its tail lines name the MCP door's templates tool before the `draft` command, and the hold names
     both ways out: the filing command with `--hold`, or the same issue write labelled `hold` and
     without `ready`."""
-    refusing = [f"  {_line(form, item)}" for item in findings if item.severity == REFUSE]
-    warning = [_line(form, item) for item in findings if item.severity != REFUSE]
+    refusing = [f"  {_line(template, item)}" for item in findings if item.severity == REFUSE]
+    warning = [_line(template, item) for item in findings if item.severity != REFUSE]
     if refused:
-        head = [f"{command}: the {form.name} form refuses this text; fix every finding and run "
+        head = [f"{command}: the {template.name} template refuses this text; fix every finding and run "
                 "it again:"]
         lines = refusing
         tail = [f"{ALSO} {'; '.join(warning)}"] if warning else []
     else:
-        head = [f"{command}: the {form.name} form finds this ([forms] enforce = warn); filed "
+        head = [f"{command}: the {template.name} template finds this ([templates] enforce = warn); filed "
                 "anyway:"]
-        lines = [f"  {_line(form, item)}" for item in findings]
+        lines = [f"  {_line(template, item)}" for item in findings]
         tail = []
     if gate:
-        tail.append(f"Get the form: the se server's forms tool, command \"se_forms.py draft\", "
-                    f"args [\"{form.name}\"] (or uv run python {scripts / 'forms.py'} draft "
-                    f"{form.name} --json)")
+        tail.append(f"Get the template: the se server's templates tool, command \"se_templates.py draft\", "
+                    f"args [\"{template.name}\"] (or uv run python {scripts / 'templates.py'} draft "
+                    f"{template.name} --json)")
     else:
-        tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
+        tail.append(f"The empty template: uv run python {scripts / 'templates.py'} draft {template.name}")
     if hold and gate:
         tail.append("Or file it with the filing command and --hold, or send the same issue write "
                     f"with the label {hold} and without ready; then fix its text on the issue "
@@ -1915,21 +1949,21 @@ def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
     return "\n".join(_fit(head, lines, tail))
 
 
-def target(form: str, repo: str, action: str, *, number: int | None = None,
+def target(template: str, repo: str, action: str, *, number: int | None = None,
            title: str = "") -> str:
-    """What one count of refusals is about: the form, the repository and the action, then the
+    """What one count of refusals is about: the template, the repository and the action, then the
     issue's number, or the normalised title of a new issue."""
     what = f"#{number}" if number is not None else " ".join(title.casefold().split())
-    return f"{form}|{repo.casefold()}|{action}|{what}"
+    return f"{template}|{repo.casefold()}|{action}|{what}"
 
 
 def counts_file(environ: dict[str, str] | None = None) -> Path:
-    """The session's count of refusals: `~/.se/forms/<session>.json`, never inside a checkout.
+    """The session's count of refusals: `~/.se/templates/<session>.json`, never inside a checkout.
     The session is the one the variables `ci_trust.SESSION_VARIABLES` name."""
     _sibling("git_door")
     name = _sibling("ci_trust").session(environ)
     digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
-    return Path.home() / ".se" / "forms" / f"{digest}.json"
+    return Path.home() / ".se" / "templates" / f"{digest}.json"
 
 
 def _counts(path: Path) -> dict[str, int]:
@@ -1959,33 +1993,33 @@ def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
 # Command
 
 
-def fields_file(path: Path, command: str = "forms.py check") -> dict[str, object]:
+def fields_file(path: Path, command: str = "templates.py check") -> dict[str, object]:
     """The field values of a `--fields` file: an object of them, or `draft --json`'s answer."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
-        raise FormError(f"{command}: --fields {path} is no JSON file ({error})") from error
+        raise TemplateError(f"{command}: --fields {path} is no JSON file ({error})") from error
     return fields_data(text, f"--fields {path}", command)
 
 
-def fields_data(text: str, given: str, command: str = "forms.py check") -> dict[str, object]:
+def fields_data(text: str, given: str, command: str = "templates.py check") -> dict[str, object]:
     """The field values of JSON `text` (`given` names where it came from): an object of them, or
     `draft --json`'s answer."""
     try:
         data = json.loads(text)
     except ValueError as error:
-        raise FormError(f"{command}: {given} is no JSON ({error})") from error
+        raise TemplateError(f"{command}: {given} is no JSON ({error})") from error
     if isinstance(data, dict) and isinstance(data.get("fields"), dict):
         data = data["fields"]
     if not isinstance(data, dict):
-        raise FormError(f"{command}: {given} must hold an object of field values")
+        raise TemplateError(f"{command}: {given} must hold an object of field values")
     return data
 
 
-def _form(forms: dict[str, Form], name: str) -> Form:
-    if name not in forms:
-        raise FormError(f"forms.py: no form {name!r}; the forms are {', '.join(sorted(forms))}")
-    return forms[name]
+def _template(templates: dict[str, Template], name: str) -> Template:
+    if name not in templates:
+        raise TemplateError(f"templates.py: no template {name!r}; the templates are {', '.join(sorted(templates))}")
+    return templates[name]
 
 
 def _root(path: Path, root: Path | None) -> Path:
@@ -2000,12 +2034,12 @@ def _root(path: Path, root: Path | None) -> Path:
 
 
 def _relative(path: Path, root: Path, command: str) -> str:
-    """`path` relative to `root`, with `/`, as a form's `paths` match it."""
+    """`path` relative to `root`, with `/`, as a template's `paths` match it."""
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError as error:
-        raise FormError(f"{command}: --path {path} is not under the project root {root}; give "
-                        "--root, the folder the forms' paths are relative to") from error
+        raise TemplateError(f"{command}: --path {path} is not under the project root {root}; give "
+                        "--root, the folder the templates' paths are relative to") from error
 
 
 def _file_text(path: Path, command: str, *, missing_ok: bool = False) -> str:
@@ -2014,18 +2048,18 @@ def _file_text(path: Path, command: str, *, missing_ok: bool = False) -> str:
     except FileNotFoundError as error:
         if missing_ok:
             return ""
-        raise FormError(f"{command}: cannot read --path {path} ({error})") from error
+        raise TemplateError(f"{command}: cannot read --path {path} ({error})") from error
     except OSError as error:
-        raise FormError(f"{command}: cannot read --path {path} ({error})") from error
+        raise TemplateError(f"{command}: cannot read --path {path} ({error})") from error
 
 
-def _claimed(forms: dict[str, Form], options: argparse.Namespace, command: str,
+def _claimed(templates: dict[str, Template], options: argparse.Namespace, command: str,
              body: str | None = None) -> tuple[str, Selection]:
-    """The file `--path` names, relative to its root, and the form `select` picks for it; the
+    """The file `--path` names, relative to its root, and the template `select` picks for it; the
     file's own text selects where it exists, else `body`."""
     relative = _relative(options.path, _root(options.path, options.root), command)
     text = _file_text(options.path, command, missing_ok=True) or body or ""
-    return relative, select(forms, FILE_ACTION, text, getattr(options, "title", None),
+    return relative, select(templates, FILE_ACTION, text, getattr(options, "title", None),
                             path=relative)
 
 
@@ -2035,74 +2069,74 @@ def _given(options: argparse.Namespace) -> tuple[str | None, dict[str, object] |
     if all(value is None for value in (options.body, options.body_file, options.fields,
                                        options.fields_json)):
         if options.path is None:
-            raise FormError("forms.py check: give the text: --body-file, --fields, --body, "
+            raise TemplateError("templates.py check: give the text: --body-file, --fields, --body, "
                             "--fields-json or --path")
-        return _file_text(options.path, "forms.py check"), None
+        return _file_text(options.path, "templates.py check"), None
     if options.body is not None:
         return options.body, None
     if options.body_file is not None:
         try:
             return options.body_file.read_text(encoding="utf-8"), None
         except OSError as error:
-            raise FormError(f"forms.py check: cannot read --body-file {options.body_file} "
+            raise TemplateError(f"templates.py check: cannot read --body-file {options.body_file} "
                             f"({error})") from error
     if options.fields_json is not None:
         return None, fields_data(options.fields_json, "--fields-json")
     return None, fields_file(options.fields)
 
 
-def _selected(forms: dict[str, Form], options: argparse.Namespace,
+def _selected(templates: dict[str, Template], options: argparse.Namespace,
               body: str) -> Selection:
-    """The form `select` picks for `check --action`, as a write would."""
+    """The template `select` picks for `check --action`, as a write would."""
     labels = [label.strip() for label in (options.labels or "").split(",") if label.strip()]
     where: dict[str, object] = {"labels": labels, "base": options.base,
                                 "integration": _integration_branch(ROOT)}
     if options.repo is not None:
         where.update(repo=options.repo, home=home_repositories(ROOT))
-    return select(forms, options.action, body, options.title, **where)
+    return select(templates, options.action, body, options.title, **where)
 
 
-def _check(forms: dict[str, Form], options: argparse.Namespace):
-    """What `check` checks: the form (None: free), the Markdown it would file, the document and
+def _check(templates: dict[str, Template], options: argparse.Namespace):
+    """What `check` checks: the template (None: free), the Markdown it would file, the document and
     the refused markers selection met."""
-    if options.form is None and options.action is None and options.path is None:
-        raise FormError("forms.py check: name a form, or give --action to select one as a write "
+    if options.template is None and options.action is None and options.path is None:
+        raise TemplateError("templates.py check: name a template, or give --action to select one as a write "
                         "would (--path for a file)")
-    if options.form is not None and options.action is not None:
-        raise FormError("forms.py check: give a form or --action, not both")
+    if options.template is not None and options.action is not None:
+        raise TemplateError("templates.py check: give a template or --action, not both")
     if options.action is None and any(value is not None for value in
                                       (options.repo, options.labels, options.base)):
-        raise FormError("forms.py check: --repo, --labels and --base select a form; give them "
+        raise TemplateError("templates.py check: --repo, --labels and --base select a template; give them "
                         "with --action")
     if options.action == FILE_ACTION and options.path is None:
-        raise FormError(f"forms.py check: {FILE_ACTION} selects by the file; give --path")
+        raise TemplateError(f"templates.py check: {FILE_ACTION} selects by the file; give --path")
     if options.path is not None and options.action not in (None, FILE_ACTION):
-        raise FormError(f"forms.py check: --path selects a form for {FILE_ACTION}; give it "
+        raise TemplateError(f"templates.py check: --path selects a template for {FILE_ACTION}; give it "
                         f"without --action {options.action}")
     if options.root is not None and options.path is None:
-        raise FormError("forms.py check: --root is the root of --path; give --path")
-    named = _form(forms, options.form) if options.form is not None else None
+        raise TemplateError("templates.py check: --root is the root of --path; give --path")
+    named = _template(templates, options.template) if options.template is not None else None
     body, values = _given(options)
     met: tuple[Finding, ...] = ()
     if named is not None:
-        form: Form | None = named
+        template: Template | None = named
     elif options.path is not None:
-        _, chosen = _claimed(forms, options, "forms.py check", body)
-        form, met = chosen.form, chosen.findings
+        _, chosen = _claimed(templates, options, "templates.py check", body)
+        template, met = chosen.template, chosen.findings
     else:
-        chosen = _selected(forms, options, body or "")
-        form, met = chosen.form, chosen.findings
-    if form is None:
+        chosen = _selected(templates, options, body or "")
+        template, met = chosen.template, chosen.findings
+    if template is None:
         return None, body or "", None, met
     if values is None:
-        document = parse(form, body, options.title)
-        return form, render(form, document), document, met
-    values = answer(form, values)
-    title = next((item.name for item in form.fields if item.source == "title"), None)
+        document = parse(template, body, options.title)
+        return template, render(template, document), document, met
+    values = answer(template, values)
+    title = next((item.name for item in template.fields if item.source == "title"), None)
     if options.title is not None and title:
         values[title] = options.title
-    rendered = render(form, values)
-    return form, rendered, parse(form, rendered, values.get(title) if title else None), met
+    rendered = render(template, values)
+    return template, rendered, parse(template, rendered, values.get(title) if title else None), met
 
 
 def _capped(findings: list[Finding]) -> list[str]:
@@ -2114,11 +2148,11 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="forms.py", description="SE's forms: check, draft, list")
+    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, list")
     commands = parser.add_subparsers(dest="command", required=True)
-    checking = commands.add_parser("check", help="check a body or a set of fields against a form")
-    checking.add_argument("form", nargs="?",
-                          help="the form; without it, --action or --path selects one")
+    checking = commands.add_parser("check", help="check a body or a set of fields against a template")
+    checking.add_argument("template", nargs="?",
+                          help="the template; without it, --action or --path selects one")
     given = checking.add_mutually_exclusive_group()
     given.add_argument("--body-file", type=Path)
     given.add_argument("--fields", type=Path)
@@ -2128,23 +2162,23 @@ def main(arguments: list[str] | None = None) -> int:
     checking.add_argument("--render", action="store_true",
                           help="print the Markdown to file where nothing refuses")
     checking.add_argument("--action", choices=ACTIONS,
-                          help="select the form as a write of this action would")
+                          help="select the template as a write of this action would")
     checking.add_argument("--repo", help="with --action: the repository written to")
     checking.add_argument("--labels", help="with --action: the labels, comma-separated")
     checking.add_argument("--base", help="with --action: a pull request's base branch")
-    drafting = commands.add_parser("draft", help="print the empty form")
-    drafting.add_argument("form", nargs="?", help="the form; without it, --path selects one")
+    drafting = commands.add_parser("draft", help="print the empty template")
+    drafting.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
-    listing = commands.add_parser("list", help="name every form with its actions")
+    listing = commands.add_parser("list", help="name every template with its actions")
     for command in (checking, drafting):
         command.add_argument("--path", type=Path,
-                             help=f"the file: the form that claims it ({FILE_ACTION})")
+                             help=f"the file: the template that claims it ({FILE_ACTION})")
         command.add_argument("--root", type=Path, help="the project root of --path's globs "
                              "(default: the git checkout holding it, else the working directory)")
     for command in (checking, drafting, listing):
-        command.add_argument("--tree", action="store_true", help="read the working tree's forms/")
-        command.add_argument("--forms", type=Path, help="read the forms and terms.toml from this "
-                             "folder instead of SE's forms/")
+        command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
+        command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
+                             "folder instead of SE's templates/")
     options = parser.parse_args(arguments)
     if options.command == "check" and options.path is None and all(
             value is None for value in (options.body, options.body_file, options.fields,
@@ -2152,42 +2186,42 @@ def main(arguments: list[str] | None = None) -> int:
         checking.error("one of the arguments --body-file --fields --body --fields-json --path "
                        "is required")
     try:
-        forms = load(ROOT, tree=options.tree, folder=options.forms)
+        templates = load(ROOT, tree=options.tree, folder=options.templates)
         if options.command == "list":
-            print("\n".join(list_forms(forms)))
+            print("\n".join(list_templates(templates)))
             return 0
         if options.command == "draft":
-            if (options.form is None) == (options.path is None):
-                raise FormError("forms.py draft: name a form, or give --path to take the form "
+            if (options.template is None) == (options.path is None):
+                raise TemplateError("templates.py draft: name a template, or give --path to take the template "
                                 "that claims the file, not both")
             if options.root is not None and options.path is None:
-                raise FormError("forms.py draft: --root is the root of --path; give --path")
+                raise TemplateError("templates.py draft: --root is the root of --path; give --path")
             if options.path is not None:
-                relative, chosen = _claimed(forms, options, "forms.py draft")
-                if chosen.form is None:
+                relative, chosen = _claimed(templates, options, "templates.py draft")
+                if chosen.template is None:
                     if chosen.findings:
                         print("\n".join(_capped(list(chosen.findings))))
                         return 1
-                    print(f"free: no form claims {relative}")
+                    print(f"free: no template claims {relative}")
                     return 0
-                form = chosen.form
+                template = chosen.template
             else:
-                form = _form(forms, options.form)
-            print(json.dumps(draft_fields(form), indent=2) if options.json else draft(form), end=""
+                template = _template(templates, options.template)
+            print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template), end=""
                   if not options.json else "\n")
             return 0
-        form, rendered, document, met = _check(forms, options)
-    except FormError as error:
+        template, rendered, document, met = _check(templates, options)
+    except TemplateError as error:
         print(error, file=sys.stderr)
         return 2
-    findings = [*met, *(check(form, document) if form is not None else ())]
+    findings = [*met, *(check(template, document) if template is not None else ())]
     refused = sum(finding.severity == REFUSE for finding in findings)
     lines = _capped(findings)
-    if form is None and not findings:
-        free = (f"free: no form claims "
-                f"{_relative(options.path, _root(options.path, options.root), 'forms.py check')}"
-                if options.path is not None and options.form is None
-                else f"free: no form applies ({options.action})")
+    if template is None and not findings:
+        free = (f"free: no template claims "
+                f"{_relative(options.path, _root(options.path, options.root), 'templates.py check')}"
+                if options.path is not None and options.template is None
+                else f"free: no template applies ({options.action})")
         if options.render:
             print(free, file=sys.stderr)
             print(rendered, end="")
@@ -2199,7 +2233,7 @@ def main(arguments: list[str] | None = None) -> int:
             print("\n".join(lines), file=sys.stderr)
         print(rendered, end="")
         return 0
-    print("\n".join(lines) if lines else f"{form.name}: no findings")
+    print("\n".join(lines) if lines else f"{template.name}: no findings")
     return 1 if refused else 0
 
 

@@ -96,7 +96,7 @@ CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
 #: The scripts whose commands are components, in the README's order: each defines make_parser,
 #: COMPONENTS and INTERACTIVE_COMMANDS.
-SCRIPTS = ("work_tickets", "review", "retro", "overhaul", "timeline", "deck", "se", "se_forms",
+SCRIPTS = ("work_tickets", "review", "retro", "overhaul", "timeline", "deck", "se", "se_templates",
            "se_guidance")
 #: Who writes the declarations (work_tickets.py's `docs` and `format`).
 GENERATOR = "`work_tickets.py docs`"

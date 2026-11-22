@@ -22,9 +22,11 @@ gets from the note. A note's depth is the number of folders between it and `guid
 are every folder name on that way and its own `tags`, as one set. A tag and a name are lowercase
 words of letters and digits joined by single dashes (TAG).
 
-**Templates.** Until templates exist, SE's forms are the templates (docs/guidance.md): each
-`forms/<name>.toml` of a source, but `forms/terms.toml`, is the template `<name>` with the tags of
-its `tags` list (none where it sets none); a project's form replaces a module's of the same name.
+**Templates.** Until the template notes exist, SE's TOML templates are the templates
+(docs/guidance.md): each `templates/<name>.toml` of a source, but `templates/terms.toml`, is the
+template `<name>` with the tags of its `tags` list (none where it sets none), a key
+`scripts/templates.py` accepts and never reads; a project's template replaces a module's of the
+same name.
 
 **Resolution.** A template gets every note whose tags it carries all of. A tag query
 (`--tags a,b`) gets every note that carries all the asked tags, and every note at depth 0. Where a
@@ -52,7 +54,7 @@ the generated ones (`pyproject.toml` beside `[tool.ruff]`).
   of, a module's override of a project's note, or an override in a cycle (bad override);
 - a note over a quarter of kern's page limit (`PageLimit` in kern's `mcp/page.go`, read from the
   kern clone se pins), naming its size;
-- a form whose `tags` is no list of tags;
+- a template whose `tags` is no list of tags;
 - an implementation of a path outside the project or in `guidance/`, of a file of unknown
   comments, or a second one of one path in a note;
 - a generated file that does not match its notes, edited by hand or behind a changed note, naming
@@ -91,7 +93,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SE_ROOT = HERE.parent
 TREE = "guidance"
-FORMS = "forms"
+TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
 #: A tag, a folder name and a note's name: lowercase words of letters and digits joined by dashes.
 TAG = re.compile(r"\A[a-z0-9]+(?:-[a-z0-9]+)*\Z")
@@ -335,7 +337,7 @@ def read_note(source: Source, path: Path, findings: list[str]) -> Note | None:
 
 
 def read_templates(source: Source, templates: dict[str, Template], findings: list[str]) -> None:
-    folder = source.root / FORMS
+    folder = source.root / TEMPLATES
     if not folder.is_dir():
         return
     for path in sorted(folder.glob("*.toml")):
@@ -345,12 +347,12 @@ def read_templates(source: Source, templates: dict[str, Template], findings: lis
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8"))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-            findings.append(f"{where}: not TOML ({error}); fix the form")
+            findings.append(f"{where}: not TOML ({error}); fix the template")
             continue
         tags = data.get("tags", [])
         if not isinstance(tags, list) or not all(isinstance(t, str) and TAG.match(t) for t in tags):
             findings.append(f"{where}: tags is no list of tags, lowercase words joined by "
-                            "dashes; fix the form's tags")
+                            "dashes; fix the template's tags")
             tags = []
         name = data.get("name") if isinstance(data.get("name"), str) else path.stem
         templates[name] = Template(name, frozenset(tags), where)
@@ -627,7 +629,7 @@ def make_parser() -> argparse.ArgumentParser:
         description="Print the notes a template gets, or those that carry every asked tag with "
                     "the notes at depth 0, by depth, tag count, modules first, then path.")
     asked = collecting.add_mutually_exclusive_group(required=True)
-    asked.add_argument("--template", help="a template, a form's name")
+    asked.add_argument("--template", help="a template, as se_templates.py list names it")
     asked.add_argument("--tags", help="the tags, comma-separated: notes that carry all of them")
     collecting.add_argument("--json", action="store_true",
                             help="print the notes as JSON: name, path, depth and tags")

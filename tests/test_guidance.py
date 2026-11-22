@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import forms
+import templates
 import se_guidance
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +42,7 @@ def note(root: Path, path: str, name: str, *, tags: list[str] | None = None,
 
 
 def template(root: Path, name: str, tags: list[str] | None = None) -> None:
-    folder = root / "forms"
+    folder = root / "templates"
     folder.mkdir(parents=True, exist_ok=True)
     tagged = "" if tags is None else f"tags = {json.dumps(tags)}\n"
     (folder / f"{name}.toml").write_text(f'name = "{name}"\n{tagged}', encoding="utf-8")
@@ -72,7 +72,7 @@ def project(tmp_path) -> Path:
     template(root, "integrator", ["work", "testing", "integrator"])
     template(root, "other", ["other"])
     template(lib, "plain")
-    (root / "forms" / "terms.toml").write_text('[[terms]]\nterm = "x"\n', encoding="utf-8")
+    (root / "templates" / "terms.toml").write_text('[[terms]]\nterm = "x"\n', encoding="utf-8")
     return root
 
 
@@ -223,11 +223,11 @@ REFUSALS = {
         "dashes; rename the folder\n"
         "guidance/Work_Stuff/n.md: orphan, no template carries all its tags (Work_Stuff); fix "
         "its tags or delete it"),
-    "a form whose tags are no list": (
-        lambda root: (root / "forms" / "bad.toml").write_text('name = "bad"\ntags = "work"\n',
+    "a template whose tags are no list": (
+        lambda root: (root / "templates" / "bad.toml").write_text('name = "bad"\ntags = "work"\n',
                                                                encoding="utf-8"),
-        "forms/bad.toml: tags is no list of tags, lowercase words joined by dashes; fix the "
-        "form's tags"),
+        "templates/bad.toml: tags is no list of tags, lowercase words joined by dashes; fix the "
+        "template's tags"),
 }
 
 
@@ -247,27 +247,29 @@ def test_collect_leaves_out_a_note_that_does_not_load_and_names_it(capsys, proje
                    "name: and description:, and --- (se_guidance.py check)\n")
 
 
-def test_a_form_with_tags_loads_and_gives_its_template_those_tags(capsys, tmp_path):
-    """SE's forms are the templates: forms.py accepts `tags`, which se_guidance.py reads."""
-    folder = tmp_path / "project" / "forms"
+def test_a_template_with_tags_loads_and_gets_the_notes_of_those_tags(capsys, tmp_path):
+    """SE's TOML templates are the templates: templates.py accepts `tags`, which se_guidance.py
+    reads."""
+    folder = tmp_path / "project" / "templates"
     folder.mkdir(parents=True)
-    for path in (ROOT / "forms").glob("*.toml"):
+    for path in (ROOT / "templates").glob("*.toml"):
         text = path.read_text(encoding="utf-8")
         if path.name == "work.toml":
             text = text.replace('name = "work"\n', 'name = "work"\ntags = ["work"]\n', 1)
         (folder / path.name).write_text(text, encoding="utf-8")
-    assert "work" in forms.load(ROOT, folder=folder)
+    assert "work" in templates.load(ROOT, folder=folder)
     root = folder.parent
     note(root, "guidance/work/w.md", "w")
     assert names(capsys, root, "--template", "work") == ["w"]
     assert names(capsys, root, "--template", "ticket") == []
 
 
-def test_ses_own_tree_passes_and_its_seed_note_reaches_every_form(capsys):
+def test_ses_own_tree_passes_and_its_seed_note_reaches_every_template(capsys):
     code, out, _ = run(capsys, "check", "--root", str(ROOT))
     assert code == 0 and out.startswith("passes: ")
-    for form in sorted(forms.load(ROOT, tree=True)):
-        assert "guidance-comes-first" in names(capsys, ROOT, "--template", form), form
+    for template_name in sorted(templates.load(ROOT, tree=True)):
+        assert "guidance-comes-first" in names(capsys, ROOT, "--template", template_name), (
+            template_name)
 
 
 # Change after filing: implementations live in the note, and tool files are their projections.

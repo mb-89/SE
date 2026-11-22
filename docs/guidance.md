@@ -13,8 +13,8 @@ skips what it may skip, so the guidance that matters must stand in the agent's w
 The template system that uses guidance is designed beside this one, in
 [docs/templates.md](templates.md). This note relies on one fact of it only: a template carries
 tags and calls "collect the guidance for this template"
-([Tags and guidance](templates.md#tags-and-guidance)). Until templates exist, SE's forms
-(README [Forms](../README.md#forms)) are the templates: each form gains its tags.
+([Tags and guidance](templates.md#tags-and-guidance)). Until the template notes exist, SE's TOML
+templates (README [Templates](../README.md#templates)) are the templates: each gains its tags.
 
 ## Words
 
@@ -97,8 +97,8 @@ rules, not that system's code.
 ### The template command prints guidance first
 
 The command that hands an agent its template (`templates.py fill` and the fill tool,
-[docs/templates.md "Fill"](templates.md#fill); until they exist, `se_forms.py draft` and the
-forms tool's `draft`) prints the template's resolved guidance
+[docs/templates.md "Fill"](templates.md#fill); until they exist, `se_templates.py draft` and the
+templates tool's `draft`) prints the template's resolved guidance
 before the template itself. The agent cannot reach the template's fields without reading past the
 guidance, so reading it is the only way to the work.
 

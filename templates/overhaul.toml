@@ -1,5 +1,5 @@
 # The overhaul's report comment: its judged block, checked by overhaul.py's own
-# judgment_problems. scripts/forms.py's docstring owns this file's format.
+# judgment_problems. scripts/templates.py's docstring owns this file's format.
 name = "overhaul"
 reader = "fleet"
 says = "An overhaul's report: the verdicts, the findings and the judged block the next one reads."
