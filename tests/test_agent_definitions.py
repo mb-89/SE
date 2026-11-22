@@ -15,7 +15,7 @@ RULE_BOOK = SOURCE / "skills" / "work-model" / "references" / "rules.md"
 ROLES = ("se", "worker", "integrator", "reviewer")
 # The authored prose: the agent and skill sources, the issue templates and the pull request template
 # (generated layouts excluded).
-# The field report's form, the pull request template.
+# The field report's template: the pull request template.
 REPORT_TEMPLATE = GITHUB / "pull_request_template.md"
 PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md"), REPORT_TEMPLATE])
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")

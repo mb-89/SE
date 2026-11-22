@@ -102,7 +102,7 @@ REREAD = "reread-before-hold.json"
 # The issue templates belong to se, wherever a project keeps it; messages name them relative to it.
 TEMPLATE_DIRECTORY = ".github/ISSUE_TEMPLATE"
 TEMPLATES = Path(__file__).resolve().parents[1] / TEMPLATE_DIRECTORY
-# The field report's one form, the pull request template a worker's pull request description is
+# The field report's one template, the pull request template a worker's pull request description is
 # drawn from; the report sits between REPORT_BEGIN and REPORT_END, where the integration reads it.
 FIELD_REPORT_TEMPLATE = ".github/pull_request_template.md"
 REPORT_BEGIN = "<!-- se:field-report -->"
@@ -124,14 +124,14 @@ PAUSE_LABEL = "pause"  # an open issue with it pauses the fleet (work model, Pau
 # label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
 WORK_LABELS = ("work", "ready")
 IN_PROGRESS_LABEL = "in-progress"
-# An issue filed with --hold past its form's refusals (README "Forms"): never started until fixed.
-OFF_FORM_LABEL = "off-form"
-NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_FORM_LABEL})
+# An issue filed with --hold past its template's refusals (README "Templates"): never started until fixed.
+OFF_TEMPLATE_LABEL = "off-template"
+NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_TEMPLATE_LABEL})
 LABEL_DESCRIPTIONS = {
     "work": "A work issue: one package for one worker",
     "ready": "Checked by SE and may be worked",
     BACKLOG_LABEL: "A far-out idea for the person; not work until SE re-files it",
-    OFF_FORM_LABEL: "Filed with --hold outside its form; fix the text on the issue, then "
+    OFF_TEMPLATE_LABEL: "Filed with --hold off its template; fix the text on the issue, then "
                     "work_tickets.py unhold <issue>",
 }
 OUTSIDE_PAGE = 100
@@ -2248,7 +2248,7 @@ FIELD_REPORT_TEMPLATE_NAME = f"the se checkout's {FIELD_REPORT_TEMPLATE}"
 
 
 def field_report_template() -> str:
-    """The pull request template, the field report's one form, markers included."""
+    """The pull request template, the field report's one template, markers included."""
     path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
     try:
         return path.read_text(encoding="utf-8")
@@ -3242,7 +3242,7 @@ def push(root: Path, branch: str | None = None) -> str | None:
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
     like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
-    `[forms] files` is `check`, a changed file a form claims that breaks it refuses the push before
+    `[templates] files` is `check`, a changed file a template claims that breaks it refuses the push before
     anything else runs (claimed_files_problem). Any other branch is a work branch, pushed only
     where origin is the repository its recorded work issue is for (guard_work_publication).
     Returns the release's tag, None where nothing is released."""
@@ -3251,7 +3251,7 @@ def push(root: Path, branch: str | None = None) -> str | None:
     target = integration_branch(root)
     try:
         files = claimed_files_problem(root)
-    except sibling("forms").FormError as error:
+    except sibling("templates").TemplateError as error:
         raise QueueError(f"push: {error}") from error
     if files is not None:
         raise QueueError(f"push: {files}")
@@ -3847,19 +3847,19 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
 
 
 def claimed_files_problem(root: Path) -> str | None:
-    """What se.toml `[forms] files = "check"` refuses in the checkout `root`: the lines of
-    `se_forms.py check-files --changed origin/<integration branch>`; None where the switch is off
+    """What se.toml `[templates] files = "check"` refuses in the checkout `root`: the lines of
+    `se_templates.py check-files --changed origin/<integration branch>`; None where the switch is off
     or every changed claimed file passes. Errors raise."""
-    lines = sibling("se_forms").changed_refusal(root, f"origin/{integration_branch(root)}")
+    lines = sibling("se_templates").changed_refusal(root, f"origin/{integration_branch(root)}")
     if lines is None:
         return None
-    return ("A changed file a form claims breaks its form (se.toml [forms] files = \"check\"); "
+    return ("A changed file a template claims breaks its template (se.toml [templates] files = \"check\"); "
             "fix every finding:\n" + "\n".join(lines))
 
 
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, or, where se.toml `[forms] files` is `check`, while a changed file a form
+    is not delivered, or, where se.toml `[templates] files` is `check`, while a changed file a template
     claims breaks it in any checkout it judges, at most `[stop] refusals` times in a row; under
     Copilot only advise (copilot_advises); everywhere else, and where it cannot judge, let the turn
     end (advice fails open). `count` false judges without counting."""
@@ -3913,7 +3913,7 @@ def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> St
     refused = stop_count(root) + 1
     if refused > cap:
         set_stop_count(root, 0)
-        how = "undelivered" if problem else "with claimed files off their forms"
+        how = "undelivered" if problem else "with claimed files off their templates"
         return StopVerdict(note=f"se Stop hook: refused {cap} times in a row; the turn may end "
                                 f"{how}: {one_line(both, 300)}")
     set_stop_count(root, refused)
@@ -4347,7 +4347,7 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | Non
 
 def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
     """Delivered, waiting for integration: the open pull requests to the integration branch whose
-    description carries a complete field report, one that follows its form."""
+    description carries a complete field report, one that follows its template."""
     pulls = json.loads(run_gh(root, [
         "pr", "list", "--state", "open", "--base", integration_branch(root),
         "--json", "number,title,url,body", "--limit", "200", *repo_arguments(remote_repo(root) or repo),
@@ -4466,7 +4466,7 @@ def label_pattern(label: str) -> re.Pattern[str]:
 
 def field_report_problems(body: str, issue_body: str | None) -> list[str]:
     """Where the field report `body` departs from the pull request template, the one owner of its
-    form (the report between the markers).
+    template (the report between the markers).
 
     Every section the template has, every bold field label it writes (`**Result:**`,
     `**Commit groupings:**`), every table's header row and width, the header's placeholders and
@@ -4800,7 +4800,7 @@ def checked_name(command: str, name: str) -> str:
 
 def name_refusal(name: str) -> str:
     """Why `name` breaks the name rule, with a shorter name to use; empty where `checked_name`
-    accepts it. The forms' title shape (forms/ticket.toml) names it."""
+    accepts it. The templates' title shape (templates/ticket.toml) names it."""
     name = name.strip()
     if NAME_PATTERN.fullmatch(name) or OLD_NAME_PATTERN.fullmatch(name):
         return ""
@@ -5029,7 +5029,7 @@ def filing_plan(repo: str, command: str, title: str, body: str, filing: Step,
 class Filed:
     """What a dedupe plan did: the twin it answered, or the issue it filed (`number`, `url`) and
     the lower twin it then closed it as a duplicate of; all None where it was handed off. `held`: filed
-    with --hold, off its form."""
+    with --hold, off its template."""
 
     twin: int | None = None
     number: int | None = None
@@ -5053,12 +5053,12 @@ class Filed:
         url = self.url or issue_url(repo, self.number)
         return f"Filed {what} {url}" + (
             f", closed as a duplicate of #{self.lower}" if self.lower is not None else "") + (
-            f", held: labelled {OFF_FORM_LABEL} and not ready; {unhold_hint(self.number)}"
+            f", held: labelled {OFF_TEMPLATE_LABEL} and not ready; {unhold_hint(self.number)}"
             if self.held else "")
 
 
 def unhold_hint(number: int | None) -> str:
-    """The way back of a held issue (README "Forms"): its text fixed on the issue itself, since
+    """The way back of a held issue (README "Templates"): its text fixed on the issue itself, since
     filing it again only comments on it, then `unhold`."""
     return ("fix its title or body on the issue itself, then run work_tickets.py unhold "
             + (str(number) if number is not None else "<its number>"))
@@ -5095,66 +5095,66 @@ def refuse_dangling(repo: str, command: str, body: str) -> None:
             + "\n".join(f"  {finding}" for finding in found))
 
 
-def form_of(name: str):
-    """The form `name` of SE's forms (`forms.load`), a QueueError where they do not load."""
-    forms = sibling("forms")
+def template_of(name: str):
+    """The template `name` of SE's templates (`templates.load`), a QueueError where they do not load."""
+    templates = sibling("templates")
     try:
-        return forms.load(SE_ROOT)[name]
-    except forms.FormError as error:
+        return templates.load(SE_ROOT)[name]
+    except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
 
 def enforcement(root: Path):
-    """se.toml `[forms]` as `forms.enforcement` reads it for `root`, a QueueError where it is
+    """se.toml `[templates]` as `templates.enforcement` reads it for `root`, a QueueError where it is
     wrong."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     try:
-        return forms.enforcement(root)
-    except forms.FormError as error:
+        return templates.enforcement(root)
+    except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
 
-def form_body(root: Path, form: str, command: str, file: Path | None, fields: Path | None,
+def template_body(root: Path, template: str, command: str, file: Path | None, fields: Path | None,
               read: Callable[[Path], str]) -> tuple[str, str]:
     """The body a filing command files and the body as given (what `--hold` files): from
-    `fields` always rendered through the form; from `file` (`read` reads it) as it stands with
-    `[forms] enforce` off, else parsed and rendered again (README "Forms")."""
-    forms = sibling("forms")
+    `fields` always rendered through the template; from `file` (`read` reads it) as it stands with
+    `[templates] enforce` off, else parsed and rendered again (README "Templates")."""
+    templates = sibling("templates")
     if (file is None) == (fields is None):
         raise QueueError(f"{command} takes exactly one of --body-file and --fields")
     try:
         if fields is not None:
-            rendered = forms.render(form_of(form), forms.fields_file(fields, command))
+            rendered = templates.render(template_of(template), templates.fields_file(fields, command))
             return rendered, rendered
         given = read(file)
         gate = enforcement(root)
-        if gate.enforce == forms.OFF:
+        if gate.enforce == templates.OFF:
             return given, given
-        return forms.formed(form_of(form), body=given, enforce=gate.enforce), given
-    except forms.FormError as error:
+        return templates.filled(template_of(template), body=given, enforce=gate.enforce), given
+    except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
 
 def held_labels(labels: list[str]) -> list[str]:
-    """The labels of an issue filed with --hold: without `ready`, with OFF_FORM_LABEL."""
-    return [*(label for label in labels if label != "ready"), OFF_FORM_LABEL]
+    """The labels of an issue filed with --hold: without `ready`, with OFF_TEMPLATE_LABEL."""
+    return [*(label for label in labels if label != "ready"), OFF_TEMPLATE_LABEL]
 
 
-def form_findings(root: Path, repo: str, chosen, title: str, body: str,
+def template_findings(root: Path, repo: str, chosen, title: str, body: str,
                   given: str | None = None) -> tuple[list, list]:
-    """The checks a filing runs against the form `chosen` (README "Forms"), one owner for
-    `form_check` and `unhold`: the private terms of the title and the body (and of the text as
-    `given`, where it is another), then the form's own checks of the body. Gives the private
+    """The checks a filing runs against the template `chosen` (README "Templates"), one owner for
+    `template_check` and `unhold`: the private terms of the title and the body (and of the text as
+    `given`, where it is another), then the template's own checks of the body. Gives the private
     findings and every finding."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     try:
-        private = forms.private_findings(chosen, title, body, root)
+        private = templates.private_findings(chosen, title, body, root)
         if given is not None:
-            private += [finding for finding in forms.private_findings(chosen, title, given, root)
+            private += [finding for finding in templates.private_findings(chosen, title, given, root)
                         if finding not in private]
-        return private, private + forms.check(chosen, forms.parse(chosen, body, title),
+        return private, private + templates.check(chosen, templates.parse(chosen, body, title),
                                               root=SE_ROOT, bare_scripts=own_scripts(repo))
-    except forms.FormError as error:
+    except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
 
@@ -5164,8 +5164,8 @@ ROUTED_PATTERN = re.compile(
     rf"^{re.escape(HANDLED_MARKER)}[ \t]*\r?\n## {ROUTING_SECTION}[ \t]*$", re.MULTILINE)
 
 
-def held_form(number: int, issue: dict[str, object]) -> str:
-    """The form the command that filed held issue `number` checked, by its labels: `ticket` for
+def held_template(number: int, issue: dict[str, object]) -> str:
+    """The template the command that filed held issue `number` checked, by its labels: `ticket` for
     a backlog issue (`backlog file`), else for a work issue `routed` where its body holds the
     routing `route` writes (ROUTED_PATTERN) and `work` otherwise (`file`)."""
     labels = issue_labels(issue)
@@ -5174,13 +5174,13 @@ def held_form(number: int, issue: dict[str, object]) -> str:
     if "work" in labels:
         return "routed" if ROUTED_PATTERN.search(str(issue.get("body") or "")) else "work"
     raise QueueError(f"unhold: #{number} is labelled {', '.join(sorted(labels)) or 'nothing'}, "
-                     f"neither {BACKLOG_LABEL} nor work, so no filing command's form fits it")
+                     f"neither {BACKLOG_LABEL} nor work, so no filing command's template fits it")
 
 
 def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -> str:
-    """Check held issue `number` as it stands on GitHub against the form that filed it, with the
-    checks a filing runs, whatever `[forms] enforce` says; where it passes, give a work issue
-    `ready` back and then remove OFF_FORM_LABEL, so a run cut short leaves it held. Without gh,
+    """Check held issue `number` as it stands on GitHub against the template that filed it, with the
+    checks a filing runs, whatever `[templates] enforce` says; where it passes, give a work issue
+    `ready` back and then remove OFF_TEMPLATE_LABEL, so a run cut short leaves it held. Without gh,
     the issue is `issue_file` as the GitHub tools read it and the label change is printed as a
     plan. Title and body are never changed. Gives the line naming the result."""
     repo = resolve_repo(root, repo)
@@ -5199,25 +5199,25 @@ def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -
     if str(issue.get("state") or "open").lower() != "open":
         raise QueueError(f"unhold: #{number} is closed: nothing to unhold")
     labels = issue_labels(issue)
-    if OFF_FORM_LABEL not in labels:
-        raise QueueError(f"unhold: #{number} is not held ({OFF_FORM_LABEL}): nothing to unhold")
-    form = held_form(number, issue)
+    if OFF_TEMPLATE_LABEL not in labels:
+        raise QueueError(f"unhold: #{number} is not held ({OFF_TEMPLATE_LABEL}): nothing to unhold")
+    template = held_template(number, issue)
     title, body = str(issue.get("title") or ""), str(issue.get("body") or "")
     checked_name("unhold", title)
     refuse_dangling(repo, "unhold", body)
-    forms = sibling("forms")
-    chosen = form_of(form)
-    _, found = form_findings(root, repo, chosen, title, body)
-    if any(finding.severity == forms.REFUSE for finding in found):
-        raise QueueError(forms.report("unhold", chosen, found, refused=True))
+    templates = sibling("templates")
+    chosen = template_of(template)
+    _, found = template_findings(root, repo, chosen, title, body)
+    if any(finding.severity == templates.REFUSE for finding in found):
+        raise QueueError(templates.report("unhold", chosen, found, refused=True))
     if found:
-        print(forms.report("unhold", chosen, found, refused=False).replace(
-            "([forms] enforce = warn); filed anyway", "(none refuses); unheld"), file=sys.stderr)
+        print(templates.report("unhold", chosen, found, refused=False).replace(
+            "([templates] enforce = warn); filed anyway", "(none refuses); unheld"), file=sys.stderr)
     work = "work" in labels
-    done = f"{OFF_FORM_LABEL} removed" + (", ready added" if work else "")
+    done = f"{OFF_TEMPLATE_LABEL} removed" + (", ready added" if work else "")
     plan = Plan(f"unhold #{number}", (
         *((label_step(repo, number, "ready", add=True),) if work else ()),
-        label_step(repo, number, OFF_FORM_LABEL, add=False),
+        label_step(repo, number, OFF_TEMPLATE_LABEL, add=False),
     ), f"#{number} is unheld: {done}")
     if handing_off:
         print(plan.text())
@@ -5231,62 +5231,62 @@ def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -
         "; ready and start skip it while its open blockers stay open" if blocked and work else "")
 
 
-def form_check(root: Path, repo: str, command: str, title: str, body: str, form: str,
+def template_check(root: Path, repo: str, command: str, title: str, body: str, template: str,
                existing: int | None = None, hold: bool = False, given: str | None = None) -> bool:
-    """The form check of a filing (README "Forms"), before anything is written: with `[forms]
+    """The template check of a filing (README "Templates"), before anything is written: with `[templates]
     enforce` off nothing; `warn` prints the findings on stderr; `refuse` raises the refusal and
     counts it for this session. Gives whether the issue is filed held: `hold` past the count of
     refusals, never with a private term in the title, the body or the text as `given`."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     gate = enforcement(root)
-    if gate.enforce == forms.OFF:
+    if gate.enforce == templates.OFF:
         if hold:
-            raise QueueError(f"{command} --hold: [forms] enforce is off in {gate.where}, so "
+            raise QueueError(f"{command} --hold: [templates] enforce is off in {gate.where}, so "
                              "nothing refuses; run it without --hold")
         return False
-    chosen = form_of(form)
-    private, found = form_findings(root, repo, chosen, title, body,
+    chosen = template_of(template)
+    private, found = template_findings(root, repo, chosen, title, body,
                                    given if hold and given != body else None)
-    refused = [finding for finding in found if finding.severity == forms.REFUSE]
-    if gate.enforce == forms.WARN:
+    refused = [finding for finding in found if finding.severity == templates.REFUSE]
+    if gate.enforce == templates.WARN:
         if found:
-            print(forms.report(command, chosen, found, refused=False), file=sys.stderr)
+            print(templates.report(command, chosen, found, refused=False), file=sys.stderr)
         if hold:
-            raise QueueError(f"{command} --hold: [forms] enforce is warn in {gate.where}, so "
+            raise QueueError(f"{command} --hold: [templates] enforce is warn in {gate.where}, so "
                              "nothing refuses; run it without --hold")
         return False
     if not refused:
         if hold:
-            raise QueueError(f"{command} --hold: the {form} form refuses nothing here; run it "
+            raise QueueError(f"{command} --hold: the {template} template refuses nothing here; run it "
                              "without --hold")
         if found:
-            print(forms.report(command, chosen, found, refused=False).replace(
-                "([forms] enforce = warn); filed anyway", "(none refuses); filed"),
+            print(templates.report(command, chosen, found, refused=False).replace(
+                "([templates] enforce = warn); filed anyway", "(none refuses); filed"),
                 file=sys.stderr)
         return False
     action = "issue.edit" if existing is not None else "issue.create"
-    key = forms.target(form, api_repo(repo), action, number=existing, title=title)
-    if hold and not private and forms.refusals(key) >= gate.refusals:
+    key = templates.target(template, api_repo(repo), action, number=existing, title=title)
+    if hold and not private and templates.refusals(key) >= gate.refusals:
         return True
     if hold:
         why = ("--hold never files a text with a private term" if private else
                "--hold opens only after this issue was refused more than once in this session")
         raise QueueError(f"{command} --hold: {why}; fix it first.\n"
-                         + forms.report(command, chosen, found, refused=True))
-    count = forms.count_refusal(key)
-    offer = OFF_FORM_LABEL if count >= gate.refusals and not private else ""
-    raise QueueError(forms.report(command, chosen, found, refused=True, hold=offer))
+                         + templates.report(command, chosen, found, refused=True))
+    count = templates.count_refusal(key)
+    offer = OFF_TEMPLATE_LABEL if count >= gate.refusals and not private else ""
+    raise QueueError(templates.report(command, chosen, found, refused=True, hold=offer))
 
 
 def filed_once(root: Path, repo: str, command: str, title: str, body: str, filing: Step,
-               existing: int | None = None, *, form: str, hold: bool = False,
+               existing: int | None = None, *, template: str, hold: bool = False,
                given: str | None = None) -> Filed:
     """Run the dedupe plan around `filing` through gh, or print it where gh is not signed in; a
     body naming a missing se command is refused first (`refuse_dangling`), then the title and the
-    body are checked against `form` (`form_check`), before anything is printed or written. Held
-    (`--hold`), the text as `given` is filed instead, labelled OFF_FORM_LABEL and not ready."""
+    body are checked against `template` (`template_check`), before anything is printed or written. Held
+    (`--hold`), the text as `given` is filed instead, labelled OFF_TEMPLATE_LABEL and not ready."""
     refuse_dangling(repo, command, body)
-    held = form_check(root, repo, command, title, body, form, existing, hold, given)
+    held = template_check(root, repo, command, title, body, template, existing, hold, given)
     if held and given is not None and given != body:
         refuse_dangling(repo, command, given)
         body = given
@@ -5426,13 +5426,13 @@ def file_work_issue(
 ) -> str:
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
-    blockers are linked. The body is `file`, or `fields` rendered through the work form, checked
-    against it (README "Forms"). Returns the filed issue's URL, or the line naming the twin it
+    blockers are linked. The body is `file`, or `fields` rendered through the work template, checked
+    against it (README "Templates"). Returns the filed issue's URL, or the line naming the twin it
     answered."""
     if not title.strip():
         raise QueueError("file needs a title, the ticket's name and its branch")
     title = checked_name("file", title)
-    body, given = form_body(root, "work", "file", file, fields, lambda path: fleet_marked(
+    body, given = template_body(root, "work", "file", file, fields, lambda path: fleet_marked(
         read_text_file(path, "work issue body") + "\n"))
     labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
@@ -5444,7 +5444,7 @@ def file_work_issue(
             "holds the issue back from ready and start with no link, or run it where gh is "
             "signed in")
     outcome = filed_once(root, repo, "file", title.strip(), body,
-                         work_issue_filing(repo, title.strip(), body, first), form="work",
+                         work_issue_filing(repo, title.strip(), body, first), template="work",
                          hold=hold, given=given)
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
@@ -5493,17 +5493,17 @@ def routed_body(body: str, title: str, routing: str, kind: str | None = None) ->
 
 
 def routed_fields(body: str, title: str, fields: Path, kind: str) -> str:
-    """The body unchanged, then the routing block rendered through the routed form from `fields`:
+    """The body unchanged, then the routing block rendered through the routed template from `fields`:
     "Routed from" the original title and, where the fields name none, the Package kind `kind`,
     as `routed_body` states them."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     try:
-        values = forms.fields_file(fields, "route")
+        values = templates.fields_file(fields, "route")
         values.setdefault("routed_from", title.strip())
         if not values.get("package_kind"):
             values["package_kind"] = kind
-        return f"{body.rstrip()}\n\n" + forms.render(form_of("routed"), values)
-    except forms.FormError as error:
+        return f"{body.rstrip()}\n\n" + templates.render(template_of("routed"), values)
+    except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
 
@@ -5521,8 +5521,8 @@ def route_outside_issue(
 
     With the `[outside-text]` switch on, an outside author's body (one whose association is not
     inside, or not known) goes into the routed issue inside the envelope instead of unchanged.
-    The routing is `file`, or `fields` rendered through the routed form, checked against it
-    (README "Forms")."""
+    The routing is `file`, or `fields` rendered through the routed template, checked against it
+    (README "Templates")."""
     if (file is None) == (fields is None):
         raise QueueError("route takes exactly one of --routing-file and --fields")
     routing = read_text_file(file, "routing sections") if file is not None else ""
@@ -5566,14 +5566,14 @@ def route_outside_issue(
         text, _ = enveloped(text, f"the body of issue #{number}", association)
     if fields is None:
         given = routed_body(text, str(issue["title"]), routing, checked_kind(kind))
-        body, _ = form_body(root, "routed", "route", file, None, lambda _: given)
+        body, _ = template_body(root, "routed", "route", file, None, lambda _: given)
     else:
         given = body = routed_fields(text, str(issue["title"]), fields, checked_kind(kind))
     filing = Step("route", "issue_write", {
         **owner_repo(repo), "method": "update", "issue_number": number, "title": branch,
         "body": body, "labels": f"<the issue's labels with {', '.join(work_labels(root, repo))}>"},
         note="issue_read get_labels reads the issue's labels; issue_write sets the whole list")
-    outcome = filed_once(root, repo, "route", branch, body, filing, existing=number, form="routed",
+    outcome = filed_once(root, repo, "route", branch, body, filing, existing=number, template="routed",
                          hold=hold, given=given)
     if outcome.twin is not None:
         return outcome.line(repo, branch)
@@ -5582,7 +5582,7 @@ def route_outside_issue(
             f"; it is held: {unhold_hint(number)}" if outcome.held else "")
     return f"Routed issue #{number} as {branch}" + (
         f"; closed as a duplicate of #{outcome.lower}" if outcome.duplicate else "") + (
-        f"; held: labelled {OFF_FORM_LABEL} and not ready; {unhold_hint(number)}" if outcome.held
+        f"; held: labelled {OFF_TEMPLATE_LABEL} and not ready; {unhold_hint(number)}" if outcome.held
         else "")
 
 
@@ -5590,7 +5590,7 @@ def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
                  fields: Path | None = None, hold: bool = False) -> str:
     """File a far-out idea as a backlog issue for the person, once
     (dedupe: work model, Issues), creating its label where missing; its body is `file`, or
-    `fields` rendered through the ticket form, checked against it (README "Forms")."""
+    `fields` rendered through the ticket template, checked against it (README "Templates")."""
     repo = resolve_repo(root, repo)
 
     def read(path: Path) -> str:
@@ -5601,13 +5601,13 @@ def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
 
     if not title.strip():
         raise QueueError("backlog file needs a title and a body")
-    body, given = form_body(root, "ticket", "backlog file", file, fields, read)
+    body, given = template_body(root, "ticket", "backlog file", file, fields, read)
     title = checked_name("backlog file", title)
     filing = Step("create", "issue_write", {
         **owner_repo(repo), "method": "create", "title": title.strip(),
         "body": body, "labels": [BACKLOG_LABEL, PERSON_LABEL]},
         gives=("number",))
-    return filed_once(root, repo, "backlog file", title.strip(), body, filing, form="ticket",
+    return filed_once(root, repo, "backlog file", title.strip(), body, filing, template="ticket",
                       hold=hold, given=given).line(repo, "backlog issue")
 
 
@@ -6928,7 +6928,7 @@ def without_tracker_references(sentence: str) -> str:
 CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
 #: Where a Goal's list starts: its lead-in is the Goal's first sentence.
 LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
-#: How long a Goal's first sentence should keep to, as the work form warns (`forms/work.toml`
+#: How long a Goal's first sentence should keep to, as the work template warns (`templates/work.toml`
 #: `first_sentence_chars`); and the longest a landing title's summary runs whole.
 SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
 #: The longest title GitHub keeps: a landing title stays within it, its branch name included.
@@ -9916,8 +9916,8 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
 
 
 @command("field-report",
-         f"draft or check the field report a pull request description carries, in the form of "
-         f"{FIELD_REPORT_TEMPLATE}",
+         f"draft or check the field report a pull request description carries, laid out as "
+         f"{FIELD_REPORT_TEMPLATE} lays it out",
          arg("--worktree",
              help="path to the selected worktree; needed except by --check with --issue-body"),
          Exclusive((
@@ -9995,11 +9995,11 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
          Exclusive((
              arg("--body-file", type=Path, help="the filled .github/ISSUE_TEMPLATE/work.md body"),
              arg("--fields", type=Path, metavar="FILE",
-                 help="instead: JSON with the work form's fields (forms.py draft work --json), "
+                 help="instead: JSON with the work template's fields (templates.py draft work --json), "
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
-             help="after [forms] refusals of this issue in this session: file the text as given, "
-                  "labelled off-form and not ready (README \"Forms\")"),
+             help="after [templates] refusals of this issue in this session: file the text as given, "
+                  "labelled off-template and not ready (README \"Templates\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
          arg("--label", action="append", default=[], metavar="LABEL",
@@ -10026,11 +10026,11 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
                  help="the work.md sections the issue lacks, completed, appended to its body under "
                       f"## {ROUTING_SECTION} with the handled marker"),
              arg("--fields", type=Path, metavar="FILE",
-                 help="instead: JSON with the routed form's fields (forms.py draft routed --json), "
+                 help="instead: JSON with the routed template's fields (templates.py draft routed --json), "
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
-             help="after [forms] refusals of this issue in this session: file the text as given, "
-                  "labelled off-form and not ready (README \"Forms\")"),
+             help="after [templates] refusals of this issue in this session: file the text as given, "
+                  "labelled off-template and not ready (README \"Templates\")"),
          arg("--issue-title", help="without gh: the issue's title as the GitHub tools read it"),
          arg("--issue-body", type=Path,
              help="without gh: a file with the issue's body as the GitHub tools read it"),
@@ -10061,11 +10061,11 @@ BACKLOG = command_group(
          Exclusive((
              arg("--body-file", type=Path, help="Markdown body"),
              arg("--fields", type=Path, metavar="FILE",
-                 help="instead: JSON with the ticket form's fields (forms.py draft ticket --json), "
+                 help="instead: JSON with the ticket template's fields (templates.py draft ticket --json), "
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
-             help="after [forms] refusals of this issue in this session: file the text as given, "
-                  "labelled off-form and not ready (README \"Forms\")"),
+             help="after [templates] refusals of this issue in this session: file the text as given, "
+                  "labelled off-template and not ready (README \"Templates\")"),
          REPO, parent=BACKLOG)
 def run_backlog_file(root: Path, args: argparse.Namespace) -> int:
     print(backlog_file(root, args.title, args.body_file, args.repo, args.fields, args.hold))
@@ -10633,7 +10633,7 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("push", "where se.toml [forms] files is check, se_forms.py check-files --changed "
+@command("push", "where se.toml [templates] files is check, se_templates.py check-files --changed "
                  "origin/<integration branch> first; public check's push gate; a work branch only "
                  "where origin is the repository its recorded work issue is for (README \"Work "
                  "publication\"); then git push -u origin <branch>; retries a "
@@ -10990,8 +10990,8 @@ def run_block(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("unhold", "for SE: check an issue filed with --hold against its form again and, where "
-                   "it passes, remove off-form and give a work issue ready back",
+@command("unhold", "for SE: check an issue filed with --hold against its template again and, where "
+                   "it passes, remove off-template and give a work issue ready back",
          WORKTREE,
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh: the issue as your GitHub tools' issue_read (method get) answered "
@@ -11251,9 +11251,9 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "field-report --check at the branch tip, naming what is missing and the "
                        "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
                        "under Copilot it only says what is undelivered unless [copilot] "
-                       "refuse_stop is true. Where se.toml [forms] files is check it also "
-                       "refuses, in any checkout, while a changed file a form claims breaks it "
-                       "(se_forms.py check-files). "
+                       "refuse_stop is true. Where se.toml [templates] files is check it also "
+                       "refuses, in any checkout, while a changed file a template claims breaks it "
+                       "(se_templates.py check-files). "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",

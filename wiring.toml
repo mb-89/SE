@@ -43,9 +43,9 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 component = "scaffold"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "scaffold"]
 
-[instances.forms]
-component = "forms"
-command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "forms"]
+[instances.templates]
+component = "templates"
+command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "templates"]
 # kern's GitHub component, and SE's fleet, retro-due and origin reading it (components/README.md), all
 # compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
 # repository name and the integration branch; retro-due's due-after count, with the tracker the home

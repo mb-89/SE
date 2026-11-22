@@ -1,6 +1,6 @@
 # The field report, the description of a work pull request: structure only, through the check
 # work_tickets.py owns. `deliver`, the job `check` and `integrate` keep the full check with its
-# evidence against the work issue. scripts/forms.py's docstring owns this file's format.
+# evidence against the work issue. scripts/templates.py's docstring owns this file's format.
 name = "field-report"
 reader = "fleet"
 says = "A work pull request's description: the field report between its markers."

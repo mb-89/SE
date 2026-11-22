@@ -131,13 +131,13 @@ jobs:
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
-      # The changed files a form claims (README "Forms"): the command reads se.toml [forms] files
+      # The changed files a template claims (README "Templates"): the command reads se.toml [templates] files
       # at origin/<integration branch> itself and passes where it is off.
-      - name: The changed files a form claims follow their forms
+      - name: The changed files a template claims follow their templates
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: uv run python scripts/se_forms.py check-files --changed "origin/$BASE_REF"
+        run: uv run python scripts/se_templates.py check-files --changed "origin/$BASE_REF"
       # SE's Go components, on the Go their go.mod pins.
       - if: needs.trust.outputs.trusted != 'true'
         uses: actions/setup-go@v6
