@@ -938,6 +938,7 @@ harnesses.
   - `--max-ai-credits <n>` (at least 30) caps that session's spend; the person may add it.
 - **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
   delivered pull requests a message would have announced; a role that would send one sends none.
-- **No ask tool** (`ask_user`): SE asks the person in the chat, its question the turn's last
-  lines, as the catch-up skill ends every turn; workers and integrators still never ask.
+- **Ask tool** (`ask_user`): SE never uses it, on any host: a decision goes to the person as a deck,
+  any other open point as the turn's last lines, as the catch-up skill ends every turn; workers and
+  integrators never ask.
 

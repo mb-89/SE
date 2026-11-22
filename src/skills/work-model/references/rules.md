@@ -828,7 +828,8 @@ Anything controversial goes to a person, and everything else flows without one.
   could decide.
 - **Implementations:**
   - se: the [escalation ladder](../SKILL.md#escalation-ladder); decisions reach the person as
-    decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues.
+    decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues
+    and never in a question dialog.
   - Go line (frozen): the retro counted `se-person` answers.
 - **Related:** wrk-004, dec-012
 

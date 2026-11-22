@@ -73,14 +73,27 @@ def test_non_se_roles_ban_input_prompts_and_escalate(role):
 
 
 def test_only_se_talks_to_the_human():
-    dispatcher = normalized(AGENTS / "se.md")
-    assert "only session the human talks to" in dispatcher
-    assert "only role that may ask the human with `ask_user`" in dispatcher
+    se = normalized(AGENTS / "se.md")
+    assert "only session the human talks to" in se
+    assert "You never ask with a question dialog" in se
     for role in ("worker", "integrator", "reviewer"):
         assert "ask the human" not in normalized(AGENTS / f"{role}.md")
     rules = normalized(WORK_MODEL)
     assert "Only SE talks to the human" in rules
     assert "to the human at the top level" not in rules
+
+
+def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_deck():
+    front = (AGENTS / "se.md").read_text(encoding="utf-8").split("---")[1]
+    assert "claude.disallowedTools: AskUserQuestion" in front
+    se, catch_up, work_model = normalized(AGENTS / "se.md"), normalized(SKILL), normalized(WORK_MODEL)
+    assert "a decision reaches the person only as a deck" in se
+    assert "other open points as text at the end of the turn" in se
+    for text in (se, catch_up, work_model):
+        for asks in ("may ask the human with `ask_user`", "asked with the `ask_user` tool",
+                     "where there is no `ask_user`, ask", "If `ask_user` does not reach",
+                     "SE asks the person in the chat"):
+            assert asks not in text, asks
 
 
 def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
@@ -547,7 +560,7 @@ def test_the_host_procedure_branches_on_the_tools_the_session_has():
     assert "-RedirectStandardOutput <worktree>\\.se\\worker.log -WindowStyle Hidden`" in section
     assert "give the person that one line to run" in section
     assert "**No message tool**: read the queue at each turn (`work_tickets.py queue`)" in section
-    assert "**No ask tool** (`ask_user`): SE asks the person in the chat" in section
+    assert "**Ask tool** (`ask_user`): SE never uses it" in section
     assert "Out of scope: the Copilot cloud agent, and VS Code's Claude and Local harnesses." in section
 
 
