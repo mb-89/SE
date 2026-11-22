@@ -112,7 +112,7 @@ work without making it safer ([Harvest](harvest-2026-11.md), "Superseded by SE's
   `already printed this session: <name>, <name>` where the note would stand. A note whose text
   changed since it was printed has another digest and prints again.
 - **The record lives in kern**, one name family `session/<id>/guidance` beside the session's
-  other names ([kern/README.md](../kern/README.md)); it ends with the session's lease. Without a
+  other names (kern's README "The host", its leases); it ends with the session's lease. Without a
   core, the record falls back to one file under the session's runtime folder, as the door's other
   fallbacks do.
 - **A compaction clears it.** After the host compacts a session, the notes are gone from the
@@ -128,8 +128,8 @@ work without making it safer ([Harvest](harvest-2026-11.md), "Superseded by SE's
   instead of showing it ([`scripts/host-limits.toml`](../scripts/host-limits.toml),
   `tool-output-offload`); guidance the agent finds only in a file is guidance it may skip.
 - **The margin.** Each answer stays under kern's page limit, 45,000 bytes, the margin kern's door
-  already keeps below that cap ([kern/README.md](../kern/README.md), "Long answers come in
-  pages"). The guidance tool uses the same constant, never a second one.
+  already keeps below that cap (kern's README "The MCP door", "Long answers come in pages").
+  The guidance tool uses the same constant, never a second one.
 - **More is split across the next calls.** Pages break between notes, never inside one. Each page
   says how many follow and how to ask for the next, and the template itself comes on the last, so
   the agent pages through the guidance to reach it. Each page's notes enter the session record as
