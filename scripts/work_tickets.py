@@ -88,7 +88,9 @@ BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
 RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[—–:,-]*[ \t]*([^\n]*)")
-BREAKING_PATTERN = re.compile(r"\*\*Breaking:\*\*")
+# A breaking change's line under Removed behaviour: one that starts with the marker, as a list item
+# or not; a quoted sentence that only names the marker inside it is none.
+BREAKING_PATTERN = re.compile(r"^\s*(?:[-*+]\s+)?\*\*Breaking:\*\*")
 REMOVED_SECTION = "Removed behaviour, deleted or weakened tests, and authored prose"
 WORK_ISSUE_PATTERN = re.compile(r"\bWork issue:\*{0,2}\s*#(\d+)\b", re.IGNORECASE)
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)

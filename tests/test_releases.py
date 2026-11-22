@@ -286,6 +286,16 @@ def test_below_1_0_a_breaking_report_still_refuses_patch_and_from_1_0_minor(chec
                                      declared("minor", BREAKING_REMOVAL))
 
 
+def test_a_quoted_sentence_naming_the_breaking_marker_is_no_breaking_change(checkout):
+    quoted = ("- README.md: such a report lists each as a `**Breaking:**` line under \"Removed "
+              "behaviour\".")
+    assert work_tickets.release_trailer(checkout, "topic", issue_body(False),
+                                        declared("minor", quoted)) == "Release-kind: minor"
+    with pytest.raises(work_tickets.QueueError, match="which is major"):
+        work_tickets.release_trailer(checkout, "topic", issue_body(False),
+                                     declared("minor", f"{quoted}\n**Breaking:** removed --all"))
+
+
 def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
     released_at(checkout, "0.3.1")
     integrate(checkout, "topic", breaking=True, report=declared("major", BREAKING_REMOVAL))
