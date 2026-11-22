@@ -39,10 +39,11 @@ os.environ["SE_KERN"] = "off"
 # directly beside its remote, and a test of the finder sets its fake listing.
 os.environ[se_modules.LISTING_VARIABLE] = "off"
 
-# What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
-# which switch commands to their runner behaviour (`start` a cloud start, `capacity` none), the
-# and the environment's default agent, which adds a sentence to the start's hand-over.
-RUNNER_VARIABLES = ("CI", "SE_CLOUD_AGENT", "SE_DEFAULT_AGENT")
+# What a CI runner or a cloud session sets and a local machine does not: GitHub Actions' variables,
+# Claude Code's cloud mark and SE's cloud agent, which switch commands to their runner behaviour
+# (`start` a cloud start, `capacity` the cloud's worker limit), and the environment's default
+# agent, which adds a sentence to the start's hand-over.
+RUNNER_VARIABLES = ("CI", "CLAUDE_CODE_REMOTE", "SE_CLOUD_AGENT", "SE_DEFAULT_AGENT")
 RUNNER_PREFIX = "GITHUB_"
 
 
