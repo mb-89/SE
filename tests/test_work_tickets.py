@@ -2431,7 +2431,7 @@ def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
     read: list[int] = []
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:
                         read.append(1) or [{"number": 5, "title": "feat/five"}])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
 
     code = work_tickets.main(["start", "5", "--cloud-agent", "bot", "--worktree", str(worktree),
                               "--repo", PAUSE_REPO])

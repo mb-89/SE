@@ -92,7 +92,7 @@ read-only = true
 mcp = "Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read."
 
 [commands."work_tickets.py start"]
-usage = "work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]\n                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]\n                      [--blockers FILE]\n                      issue"
+usage = "work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT]\n                      [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE]\n                      [--blockers FILE] [--running FILE]\n                      issue"
 summary = "start a ready work issue: worktree from the newest main, label in- ..."
 group = "Integration"
 help = "start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout"
@@ -118,12 +118,12 @@ mcp = "Lists the ready work issues a session may start now. Use it to choose the
 
 [commands."work_tickets.py capacity"]
 usage = "work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]"
-summary = "show local worker capacity or cloud unlimited capacity"
+summary = "show how many more workers may start: the worker limit ([workers] in ..."
 group = "Integration"
-help = "show local worker capacity or cloud unlimited capacity"
+help = "show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running"
 class = "interactive"
 read-only = true
-mcp = "Shows how many workers may run now: the local slots, or unlimited in the cloud. Use it before starting workers."
+mcp = "Shows how many more workers may start now: the worker limit less those running, on a local device also its cores and memory; unlimited in the cloud unless limited. Use it before starting workers."
 
 [commands."work_tickets.py queue"]
 usage = "work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]"

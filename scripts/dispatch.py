@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The dispatcher (README "Dispatcher"): a check with no model that fires the scheduled task whose
-session is a fresh integrator, where startable work waits and no integrator runs.
+session is a fresh integrator, where startable work waits, no integrator runs and the worker
+limit leaves room.
 
 `work_tickets.py dispatch` registers the command and passes itself as `wt`: this module reads
 GitHub through its doors (`run_gh`, `issue_api`) and its one owner of startable work
@@ -130,9 +131,11 @@ def secrets(environ: dict[str, str] | os._Environ = os.environ) -> tuple[str, st
 
 
 def dispatch(wt: ModuleType, root: Path, repo: str, mode: str, pause: list[dict[str, object]],
-             startable: list[dict[str, object]], now: datetime | None = None) -> list[str]:
+             startable: list[dict[str, object]], now: datetime | None = None,
+             slots: int | None = None) -> list[str]:
     """The dispatcher's run: the startable issues, whether an integrator runs, and the verdict.
-    `pause` and `startable` are what work_tickets.py read (`pause_issues`, `ready_issues`).
+    `pause` and `startable` are what work_tickets.py read (`pause_issues`, `ready_issues`), `slots`
+    its `capacity`: how many more workers the worker limit lets start, None where none limits.
     `mode` is "report" (no verdict acted on), "dry-run" (prints the fire it would make) or "fire"
     (fires the scheduled task once where startable work waits, no integrator runs and the fleet
     is not paused). It reads GitHub only, so a run that fires nothing makes no model call."""
@@ -143,12 +146,15 @@ def dispatch(wt: ModuleType, root: Path, repo: str, mode: str, pause: list[dict[
     lines += [] if startable else ["Startable: none"]
     lines += [f"Integrator runs: {line}" for line in running]
     lines += [] if running else ["Integrator runs: none seen"]
+    lines += [] if slots is None else [f"Capacity: {slots}"]
     if pause:
         return [*lines, f"Fires nothing: the fleet is paused by {wt.pause_names(pause)}"]
     if not startable:
         return [*lines, "Fires nothing: no startable work"]
     if running:
         return [*lines, "Fires nothing: an integrator runs"]
+    if slots is not None and slots <= 0:
+        return [*lines, "Fires nothing: the worker limit is reached ([workers] in se.toml)"]
     text = ("Startable work waits and no integrator runs: "
             + ", ".join(f"#{issue['number']}" for issue in startable))
     if mode == "dry-run":

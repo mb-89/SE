@@ -564,8 +564,9 @@ Pull requests built on an old `main` cause most integration trouble.
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
   pieces left ([integrator](../../agents/integrator.md)), the issue stays open and the comment names
   what it waits for.
-- Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
-  workers have none. File clashes and the serial merge queue apply everywhere.
+- At most `[workers]` working agents run at once, 4 on a local device by default, the cloud open
+  unless set ([README "Workers"](../../../README.md#workers)); a local device also counts its CPU
+  cores and memory. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
   removed; a session is kept only while it holds an unresolved discussion with a handover issue.
 
@@ -574,7 +575,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
   - it refuses an issue that is not startable (including open blockers, an existing branch, a
-    file-ownership clash or exhausted local capacity);
+    file-ownership clash or exhausted capacity, the worker limit among it);
   - it fetches, runs
     `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> origin/main` and
     changes the issue's `ready` label to `in-progress`;
@@ -873,10 +874,12 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `queue` syncs the checkout and prints its reads as a plan: the pause search, the
     escalations, the open pull requests to the integration branch (delivered where `field-report
     --check` passes on the description) and the ready work issues; the cloud's capacity is
-    unlimited.
+    unlimited unless `[workers] cloud` limits it, and then the plan also lists the workers running.
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
+  - Where a [worker limit](../../../README.md#workers) holds, it refuses once that many run. It
+    reads them through kern's relay, else from `--running <file>`, their `list_issues` answer.
   - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
     Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
     `issue_read` (method `get`) answers saved as one JSON list, and refuses until it knows them.

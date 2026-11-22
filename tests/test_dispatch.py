@@ -35,18 +35,21 @@ def worktree(tmp_path: Path) -> Path:
 
 
 def run_dispatch(worktree, mode, fleet):
-    return dispatcher.dispatch(work_tickets, worktree, REPO, mode, fleet.pause, fleet.startable)
+    return dispatcher.dispatch(work_tickets, worktree, REPO, mode, fleet.pause, fleet.startable,
+                               slots=fleet.slots)
 
 
 class Fleet:
-    """What dispatch reads, faked: the pause switch, the startable issues, the integrator's signs;
-    every fire is recorded, and a fire raises where `fires` is False."""
+    """What dispatch reads, faked: the pause switch, the startable issues, the capacity the worker
+    limit leaves (`slots`, None where none limits), the integrator's signs; every fire is recorded,
+    and a fire raises where `fires` is False."""
 
-    def __init__(self, monkeypatch, startable=(), running=(), paused=(), fires=True):
+    def __init__(self, monkeypatch, startable=(), running=(), paused=(), fires=True, slots=None):
         self.fired: list[tuple[str, str, str]] = []
-        self.pause, self.startable = list(paused), list(startable)
+        self.pause, self.startable, self.slots = list(paused), list(startable), slots
         monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: self.pause)
         monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: self.startable)
+        monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: self.slots)
         monkeypatch.setattr(dispatcher, "integrator_activity",
                             lambda wt, root, repo, now=None: list(running))
 
@@ -103,6 +106,20 @@ def test_a_running_integrator_or_the_pause_fires_nothing(worktree, monkeypatch, 
         "paused": [{"number": 9, "title": "pause", "url": "https://example.com/9"}]}
     fleet = Fleet(monkeypatch, startable=STARTABLE, fires=False, **held)
     assert run_dispatch(worktree, "fire", fleet)[-1].startswith("Fires nothing: ")
+
+
+def test_a_reached_worker_limit_fires_nothing_and_room_left_fires(worktree, monkeypatch, capsys):
+    monkeypatch.setenv(dispatcher.TRIGGER_VARIABLE, TRIGGER)
+    monkeypatch.setenv(dispatcher.TOKEN_VARIABLE, "secret")
+    full = Fleet(monkeypatch, startable=STARTABLE, fires=False, slots=0)
+    lines = run_dispatch(worktree, "fire", full)
+    assert "Capacity: 0" in lines
+    assert lines[-1] == "Fires nothing: the worker limit is reached ([workers] in se.toml)"
+
+    room = Fleet(monkeypatch, startable=STARTABLE, slots=1)
+    assert work_tickets.main(["dispatch", "--fire", "--worktree", str(worktree), "--repo", REPO]) == 0
+    assert "Capacity: 1" in capsys.readouterr().out
+    assert len(room.fired) == 1
 
 
 @pytest.mark.parametrize("trigger", [None, "trig_01abc", "http://example.com/v1/routines/trig_1/fire"])
