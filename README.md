@@ -492,8 +492,11 @@ and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub 
 to `main`; a failed build publishes nothing, so the previous artifact stays.
 
 The Timeline, `timeline.html` beside the documentation, builds itself from the issues and
-releases of the repositories in `se.toml` `[timeline]` (a bare name lies beside SE's home); [scripts/timeline.py](scripts/timeline.py)
-owns what shows where, and the same workflow rebuilds it hourly and on each issue event.
+releases of the repositories in `se.toml` `[timeline]`, one lane each: SE, obs and kern (a bare
+name lies beside SE's home). The same workflow rebuilds it hourly and on each issue event.
+
+[scripts/timeline.py](scripts/timeline.py) owns what shows where, and how a repository the
+workflow's token cannot read shows as a named gap instead of failing the build.
 
 ## Modules
 
