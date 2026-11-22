@@ -406,6 +406,12 @@ def test_the_rule_book_puts_the_datum_on_what_exists_today():
     assert "only where nothing exists is it the strongest rival" in rule
 
 
+def test_a_verdict_given_in_the_chat_answers_its_decision_in_an_open_deck():
+    section = normalized(DECISION).split("## Bringing decisions to the person", 1)[1].split("## The record", 1)[0]
+    assert "A verdict the person gives in the chat for a decision of an open deck is that decision's answer" in section
+    assert "records it as it records a deck answer" in section
+
+
 def test_effort_is_a_criterion_only_where_it_is_exceptional():
     assert "Effort to build or move is a criterion only where it is exceptional" in normalized(DECISION)
     rule = normalized(RULE_BOOK).split("### dec-006 Right before cheap", 1)[1].split("###", 1)[0]

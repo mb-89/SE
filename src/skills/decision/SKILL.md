@@ -139,6 +139,11 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
    - Any verdict may carry a comment, Bless included: act on the comment too.
    - A decision that reads `comment` has the person's comment and no verdict: it is still open, so
      answer the comment and ask again.
+4. A verdict the person gives in the chat for a decision of an open deck is that decision's answer,
+   as if they had sent it from the deck; they need not send it there as well.
+   - SE records it as it records a deck answer: that decision's entry in the answers payload,
+     with the verdict and the person's chat words as its comment, then step 3.
+   - A chat message that names no verdict, or no decision it answers, is a comment: answer it.
 
 ## The record
 
