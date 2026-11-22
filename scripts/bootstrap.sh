@@ -7,7 +7,8 @@
 #   git      required; cannot be installed without admin rights, so it names the one line to run
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
-#   modules  the current project's se.toml modules, synced by se_modules.py
+#   modules  the current project's se.toml components and theirs, resolved from what is placed first
+#            (se_start.py start-components); a required one missing stops the start
 #   identity in --hook mode: the project's commit identity, set as setup.sh sets it
 #   hooks    in --hook mode: the project's core.hooksPath where it is unset, set as setup.sh sets it
 #   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
@@ -393,11 +394,19 @@ if $binary; then
   finish 0
 fi
 
-# Modules: the project's se.toml modules, fetched at their pins.
+# Components (docs/components.md "Required and optional at start"): the tree of the project's
+# se.toml [components] resolved before the core starts, from what is placed first, the rest found
+# and placed at its pins (se_start.py start-components). Its lines are shown as they are: an
+# optional component missing is one line and the start goes on; a required one missing stops the
+# start here, its message the greeting's, and nothing after it runs (no identity, hooks or core).
 if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[components\.' "$project/se.toml"; then
-  if ! out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" --root "$project" sync 2>&1)"; then
-    say "$out"
-    need "syncing the modules of $project/se.toml failed; run this again when the cause above is fixed"
+  out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
+    --root "$project" start-components 2>/dev/null)"
+  stopped=$?
+  while IFS= read -r line; do [ -n "$line" ] && notes+=("$line"); done <<<"$out"
+  if [ "$stopped" != 0 ]; then
+    [ -n "$out" ] && finish 1
+    need "SE cannot start: checking the components of $project/se.toml failed; run: uv run python $se_root/scripts/se_start.py --root $project start-components"
   fi
 fi
 # The commit identity (README "Install"): at a session's start the project's checkout gets its
