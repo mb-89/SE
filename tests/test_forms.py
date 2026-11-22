@@ -367,6 +367,21 @@ def test_the_ticket_title_warns_where_the_body_repeats_it(catalog):
                and "the body repeats the title" in finding.fix for finding in found), found
 
 
+def test_the_work_form_warns_where_the_goal_s_first_sentence_runs_past_the_landing_title_width(
+        catalog):
+    work = catalog["work"]
+    assert work.field("goal").first_sentence_chars == work_tickets.SUMMARY_WIDTH
+    long = ("Where SE's forms are switched on, a GitHub write through the GitHub MCP tools whose "
+            "body breaks its form is refused before it runs, naming the forms and every fix.")
+    assert len(long) == 163
+    found = findings(work, {**work_fields(catalog), "goal": long + " The refusal names the form."})
+    assert [(finding.rule, finding.severity) for finding in found] == [("first-sentence", forms.WARN)]
+    assert "163" in found[0].fix and "landing title" in found[0].fix
+    short = "Every landing title is a complete statement."
+    assert len(short) == 44
+    assert findings(work, {**work_fields(catalog), "goal": short + " Why it matters."}) == []
+
+
 #: Titles under the name rule, of its old form, and breaking it, as `checked_name` judges them.
 TITLES = ["forms-match-names-and-kinds", "plain", "123", "a1-b2", "feat/plain-titles-20261116",
           "fix/routed-20261116", "one-two-three-four-five-six", "Forms-Match", "double--dash",
