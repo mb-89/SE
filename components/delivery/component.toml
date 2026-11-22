@@ -21,7 +21,7 @@ class = "batch"
 usage = "work_tickets.py sync --worktree WORKTREE"
 summary = "merge the newest integration branch (se.toml ..."
 group = "Delivery"
-help = "merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin"
+help = "merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin, then move the se clone (.se/modules/se) of a repository that pins se to the pin the merged se.lock names"
 class = "batch"
 
 [commands."work_tickets.py identity"]

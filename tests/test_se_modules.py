@@ -989,3 +989,34 @@ def test_a_local_checkout_of_a_go_pin_reports_its_release_toml_version(go_pinned
     (checkout / "release.toml").unlink()
     code, out = run(go_pinned, capsys, "sync")
     assert code == 1 and "release.toml sets no version, so the pin 1.4.2 cannot be checked" in out
+
+
+def test_work_tickets_sync_moves_the_se_clone_to_the_pin_the_merged_lock_names(world, capsys, monkeypatch):
+    # A repository that pins se: after sync merges main, whose se.lock names a newer se, the clone
+    # `.se/modules/se` is there too, so the public check runs at that pin (work_tickets.py sync).
+    import work_tickets
+    monkeypatch.setattr(se_modules, "default_local_config", lambda: world.local)
+    world.manifest.write_text(f'[modules.se]\nurl = "{world.upstream.as_posix()}"\nversion = "^1.0"\n')
+
+    def lock(version: str, sha: str) -> None:
+        write(world.root / "se.lock", f'[modules.se]\nversion = "{version}"\nref = "{sha}"\n')
+
+    lock("1.0.0", world.shas[0])
+    assert run(world, capsys, "sync")[0] == 0
+    clone = world.root / ".se" / "modules" / "se"
+    assert git(clone, "rev-parse", "HEAD") == world.shas[0]
+
+    lock("1.0.2", world.shas[2])  # what the merge brought
+    work_tickets.se_module_at_lock(world.root)
+    assert git(clone, "rev-parse", "HEAD") == world.shas[2]
+    assert f"Moved se: pinned {clone}" in capsys.readouterr().out
+
+    work_tickets.se_module_at_lock(world.root)  # at the pin already: nothing to say
+    assert capsys.readouterr().out == ""
+
+
+def test_work_tickets_sync_leaves_a_repository_without_an_se_clone_alone(world, monkeypatch):
+    import work_tickets
+    monkeypatch.setattr(se_modules, "default_local_config", lambda: world.local)
+    work_tickets.se_module_at_lock(world.root)  # se.toml pins only lib, and no se clone exists
+    assert not (world.root / ".se" / "modules" / "se").exists()

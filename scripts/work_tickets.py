@@ -1204,7 +1204,39 @@ def sync(root: Path) -> str:
     commit = run_git(root, "rev-parse", "--short", main_ref)
     if commit.returncode != 0 or not commit.stdout.strip():
         raise QueueError(f"Merged {main_ref} but cannot determine its commit")
+    se_module_at_lock(root)
     return commit.stdout.strip()
+
+
+#: The module name of se itself, in a repository that pins it (README "Modules").
+SE_MODULE = "se"
+
+
+def se_module_at_lock(root: Path) -> None:
+    """Move the checkout's clone of se (`.se/modules/se`) to the pin the merged se.lock names, so
+    the public check and the scripts run from it are at that pin after the merge; a repository
+    that pins no se, a local path in its place or a clone not placed yet is left as it is
+    (`se_modules.py sync se` places it)."""
+    modules = sibling("se_modules")
+    clone = root / modules.MODULES_DIR / SE_MODULE
+    if not (root / modules.MANIFEST).is_file() or not modules.is_populated(clone):
+        return
+    try:
+        module = next((item for item in modules.load_manifest(root) if item.name == SE_MODULE), None)
+        if module is None:
+            return
+        local = modules.load_local(modules.default_local_config())
+        source = modules.resolve(root, module, local)
+        if source.kind != "pinned":
+            return
+        source = modules.resolve(root, modules.lock_range(root, module, local), local)
+        before = modules.git(clone, "rev-parse", "HEAD")
+        line = modules.sync_module(source)
+    except modules.ModuleError as error:
+        raise QueueError(f"sync: cannot move {clone} to the pin se.lock names: {error}; run "
+                         "se_modules.py sync se") from None
+    if source.module.ref != before:
+        print(f"Moved {line}")
 
 
 def fetch_issue(root: Path, number: int, repo: str | None,
@@ -10119,7 +10151,9 @@ def run_refs_apply(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("sync", "merge the newest integration branch (se.toml project.integration_branch, "
-                 "default main) from origin, or locally without origin", WORKTREE)
+                 "default main) from origin, or locally without origin, then move the se clone "
+                 "(.se/modules/se) of a repository that pins se to the pin the merged se.lock "
+                 "names", WORKTREE)
 def run_sync(root: Path, args: argparse.Namespace) -> int:
     print(f"Merged {integration_branch(root)} {sync(root)}")
     return 0
