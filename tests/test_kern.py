@@ -297,7 +297,7 @@ def kern_at_pin(folder: Path, files: dict[str, str]) -> tuple[subprocess.Complet
     output = folder.parent / f"{folder.name}.output"
     output.write_text("", encoding="utf-8")
     script = step(yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"], "The kern se.lock locks")
-    assert script["shell"] == "python3 {0}" and script["env"] == {"FOLDER": "${{ inputs.folder }}"}
+    assert script["shell"] == "python3 {0}" and script["env"] == {"PYTHONUNBUFFERED": "1", "FOLDER": "${{ inputs.folder }}"}
     result = subprocess.run([sys.executable, "-c", script["run"]], cwd=folder.parent, capture_output=True,
                             text=True, env={**os.environ, "FOLDER": folder.name, "GITHUB_OUTPUT": str(output)})
     return result, output.read_text(encoding="utf-8")
