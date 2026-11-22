@@ -22,6 +22,7 @@
 - Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into both
   layouts as `skills/<name>/SKILL.md`, `<name>` its front matter's
   ([docs/guidance.md "Notes in folders"](docs/guidance.md#notes-in-folders)).
+  `se_plugin.py check` also runs `scripts/se_guidance.py check`, so an orphan note fails there.
 - The outside skills a role relies on are one list, `se.toml` `[roles.<role>] skills`, never an
   agent's own front matter.
   - Each entry is `<plugin>@<marketplace>:<skill>`; a skill Claude Code ships loads by itself and

@@ -44,7 +44,9 @@ folders") is also a skill: `build` writes it into both layouts' skills folders a
 `<name>/SKILL.md`, `<name>` its front matter's `name`, its front matter and body as a skill of
 `src/skills` would be (`notes`). The build refuses a note that does not load (scripts/se_guidance.py
 reads it), a second note of one name, and a note whose name a skill of `src/skills` or a listed draft
-has. A module's tree enters no layout: its notes are its own.
+has. A module's tree enters no layout: its notes are its own. `check` also runs the guidance check
+(`se_guidance.py check`, `guidance_findings`) over the checkout and its modules, so a note it refuses,
+an orphan among them, fails where a stale layout fails.
 """
 
 from __future__ import annotations
@@ -414,6 +416,15 @@ def notes(root: Path) -> list[tuple[PurePosixPath, str]]:
     return found
 
 
+def guidance_findings(root: Path) -> list[str]:
+    """What the guidance check (`se_guidance.py check`) refuses in the checkout and its modules."""
+    se_guidance = guidance()
+    try:
+        return se_guidance.check(se_guidance.load(root), se_guidance.page_limit())
+    except se_guidance.Usage as error:
+        raise SourceError(str(error)) from error
+
+
 def notice(source: PurePosixPath | str) -> str:
     """The notice line that opens a Markdown file generated from `source`."""
     return NOTICE.format(source=source)
@@ -731,7 +742,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="se_plugin.py", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("build", "check"),
                         help="build: write both layouts from src/ and guidance/; check: refuse when they "
-                        "differ")
+                        "differ or the guidance check refuses a note")
     parser.add_argument("--root", type=Path, default=ROOT, help="the se checkout (default: this one)")
     args = parser.parse_args(argv)
     try:
@@ -740,16 +751,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"wrote {path}")
             return 0
         lines = differences(args.root)
+        refused = guidance_findings(args.root)
     except SourceError as error:
         print(f"error: se_plugin.py: {error}", file=sys.stderr)
         return 2
-    for line in lines:
+    for line in [*lines, *refused]:
         print(f"se_plugin.py check: {line}", file=sys.stderr)
     if lines:
         print("se_plugin.py check: generated files differ from src/ and guidance/; edit the source, "
               "then run `python scripts/se_plugin.py build`", file=sys.stderr)
+    if refused:
+        print(f"se_plugin.py check: the guidance check refuses the notes above ({guidance().CHECK}); "
+              "fix each as it says", file=sys.stderr)
+    if lines or refused:
         return 1
-    print("se_plugin.py check: both layouts match src/ and guidance/")
+    print("se_plugin.py check: both layouts match src/ and guidance/, and the guidance check passes")
     return 0
 
 

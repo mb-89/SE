@@ -909,7 +909,7 @@ def test_ses_own_se_toml_includes_no_draft():
 
 
 # Guidance notes: each note of the project's guidance tree is also a skill in both layouts
-# (docs/guidance.md "Notes in folders").
+# (docs/guidance.md "Notes in folders"), and `check` runs the guidance check (se_guidance.py).
 NOTE = ("---\nname: {name}\ndescription: 'How to tell a flake from your own failure.'\n"
         "tags: [{tags}]\n---\n\nRerun it at base, see [the work model](../../../src/skills/x/SKILL.md).\n")
 
@@ -941,6 +941,17 @@ def test_build_writes_each_guidance_note_as_a_skill_in_both_layouts(tmp_path, ca
     (root / "guidance" / "work" / "testing" / "repeat-count.md").unlink()
     assert se_plugin.differences(root) == [f"{layout}/repeat-count/SKILL.md: not generated from src/; remove "
                                            "it or add its source" for layout in (".github/skills", "skills")]
+
+
+def test_check_refuses_an_orphan_note_with_the_guidance_check(tmp_path, capsys):
+    root = guidance_copy(tmp_path, tags="nobody")
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    capsys.readouterr()
+    assert se_plugin.main(["check", "--root", str(root)]) == 1
+    err = capsys.readouterr().err
+    assert ("se_plugin.py check: guidance/work/testing/repeat-count.md: orphan, no template carries all "
+            "its tags (nobody, testing, work); fix its tags or delete it") in err
+    assert "differs from its source" not in err and "se_guidance.py check" in err
 
 
 def test_a_note_that_shares_a_skills_name_is_refused(tmp_path, capsys):
