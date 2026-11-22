@@ -33,7 +33,27 @@ def decision_deck(tmp_path: Path) -> str:
                                         encoding="utf-8")
     destination = tmp_path / "deck.html"
     assert deck.build(folder, destination) == 0
-    return deck.document_path(destination).read_text(encoding="utf-8")
+    return _drawn(deck.document_path(destination).read_text(encoding="utf-8"))
+
+
+DRAWN = "<svg the build machine drew from the source>"
+
+
+def _drawn(document: str) -> str:
+    """``document`` with each diagram's drawn ``svg`` replaced by DRAWN once it is one: its size follows
+    the machine's fonts (301 px high here, 299 on CI's runner), while its ``source`` is the note's own."""
+    def walk(node):
+        if isinstance(node, dict):
+            if "source" in node and "svg" in node:
+                assert node["svg"].startswith("<svg ") and node["svg"].endswith("</svg>"), node["svg"][:80]
+                node["svg"] = DRAWN
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+        return node
+    return json.dumps(walk(json.loads(document)), indent=2, ensure_ascii=False) + "\n"
 
 
 def timeline_page(_: Path) -> str:

@@ -1229,13 +1229,13 @@ def se_module_at_lock(root: Path) -> None:
         source = modules.resolve(root, module, local)
         if source.kind != "pinned":
             return
-        source = modules.resolve(root, modules.lock_range(root, module, local), local)
         before = modules.git(clone, "rev-parse", "HEAD")
-        line = modules.sync_module(source)
+        line = modules.sync_tree(root, local, [SE_MODULE])[0]
+        after = modules.git(clone, "rev-parse", "HEAD")
     except modules.ModuleError as error:
         raise QueueError(f"sync: cannot move {clone} to the pin se.lock names: {error}; run "
                          "se_modules.py sync se") from None
-    if source.module.ref != before:
+    if after != before:
         print(f"Moved {line}")
 
 
@@ -3241,10 +3241,10 @@ def push(root: Path, branch: str | None = None) -> str | None:
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
-    `[templates] files` is `check`, a changed file a template claims that breaks it refuses the push before
-    anything else runs (claimed_files_problem). Any other branch is a work branch, pushed only
-    where origin is the repository its recorded work issue is for (guard_work_publication).
+    like it, needs the verdicts on its tree; its tag waits for the landed commit. A changed file a
+    template claims that breaks it refuses the push before anything else runs
+    (claimed_files_problem). Any other branch is a work branch, pushed only where origin is the
+    repository its recorded work issue is for (guard_work_publication).
     Returns the release's tag, None where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
@@ -3847,22 +3847,21 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
 
 
 def claimed_files_problem(root: Path) -> str | None:
-    """What se.toml `[templates] files = "check"` refuses in the checkout `root`: the lines of
-    `se_templates.py check-files --changed origin/<integration branch>`; None where the switch is off
-    or every changed claimed file passes. Errors raise."""
+    """What the claimed files refuse in the checkout `root`: the lines of `se_templates.py
+    check-files --changed origin/<integration branch>`; None where no template claims a path or
+    every changed claimed file passes. Errors raise."""
     lines = sibling("se_templates").changed_refusal(root, f"origin/{integration_branch(root)}")
     if lines is None:
         return None
-    return ("A changed file a template claims breaks its template (se.toml [templates] files = \"check\"); "
-            "fix every finding:\n" + "\n".join(lines))
+    return ("A changed file a template claims breaks its template; fix every finding:\n"
+            + "\n".join(lines))
 
 
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, or, where se.toml `[templates] files` is `check`, while a changed file a template
-    claims breaks it in any checkout it judges, at most `[stop] refusals` times in a row; under
-    Copilot only advise (copilot_advises); everywhere else, and where it cannot judge, let the turn
-    end (advice fails open). `count` false judges without counting."""
+    is not delivered, or while a changed file a template claims breaks it in any checkout it
+    judges, at most `[stop] refusals` times in a row; under Copilot only advise (copilot_advises);
+    everywhere else, and where it cannot judge, let the turn end (advice fails open). `count` false judges without counting."""
     if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
         return StopVerdict()
     root = checkout_top(path)
@@ -4800,7 +4799,7 @@ def checked_name(command: str, name: str) -> str:
 
 def name_refusal(name: str) -> str:
     """Why `name` breaks the name rule, with a shorter name to use; empty where `checked_name`
-    accepts it. The templates' title shape (templates/ticket.toml) names it."""
+    accepts it. The templates' title shape (templates/ticket.md) names it."""
     name = name.strip()
     if NAME_PATTERN.fullmatch(name) or OLD_NAME_PATTERN.fullmatch(name):
         return ""
@@ -5141,19 +5140,24 @@ def held_labels(labels: list[str]) -> list[str]:
 
 
 def template_findings(root: Path, repo: str, chosen, title: str, body: str,
-                  given: str | None = None) -> tuple[list, list]:
+                  given: str | None = None, recorded: str | None = None) -> tuple[list, list]:
     """The checks a filing runs against the template `chosen` (README "Templates"), one owner for
     `template_check` and `unhold`: the private terms of the title and the body (and of the text as
-    `given`, where it is another), then the template's own checks of the body. Gives the private
-    findings and every finding."""
+    `given`, where it is another), then the template's own checks of the body, and the version the
+    text as `recorded` was filled from, where it is another than the body that `render` marked
+    with the template's version now (`templates.provenance`). Gives the private findings and every
+    finding."""
     templates = sibling("templates")
     try:
         private = templates.private_findings(chosen, title, body, root)
         if given is not None:
             private += [finding for finding in templates.private_findings(chosen, title, given, root)
                         if finding not in private]
-        return private, private + templates.check(chosen, templates.parse(chosen, body, title),
-                                              root=SE_ROOT, bare_scripts=own_scripts(repo))
+        moved = (templates.provenance(chosen, templates.parse(chosen, recorded, title))
+                 if recorded is not None and recorded != body and not chosen.is_adapter else [])
+        return private, private + moved + templates.check(
+            chosen, templates.parse(chosen, body, title), root=SE_ROOT,
+            bare_scripts=own_scripts(repo))
     except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
@@ -5246,7 +5250,7 @@ def template_check(root: Path, repo: str, command: str, title: str, body: str, t
         return False
     chosen = template_of(template)
     private, found = template_findings(root, repo, chosen, title, body,
-                                   given if hold and given != body else None)
+                                   given if hold and given != body else None, recorded=given)
     refused = [finding for finding in found if finding.severity == templates.REFUSE]
     if gate.enforce == templates.WARN:
         if found:
@@ -6928,7 +6932,7 @@ def without_tracker_references(sentence: str) -> str:
 CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
 #: Where a Goal's list starts: its lead-in is the Goal's first sentence.
 LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
-#: How long a Goal's first sentence should keep to, as the work template warns (`templates/work.toml`
+#: How long a Goal's first sentence should keep to, as the work template warns (`templates/work.md`
 #: `first_sentence_chars`); and the longest a landing title's summary runs whole.
 SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
 #: The longest title GitHub keeps: a landing title stays within it, its branch name included.
@@ -10633,10 +10637,9 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("push", "where se.toml [templates] files is check, se_templates.py check-files --changed "
-                 "origin/<integration branch> first; public check's push gate; a work branch only "
-                 "where origin is the repository its recorded work issue is for (README \"Work "
-                 "publication\"); then git push -u origin <branch>; retries a "
+@command("push", "se_templates.py check-files --changed origin/<integration branch> first; "
+                 "public check's push gate; a work branch only where origin is the repository "
+                 "its recorded work issue is for (README \"Work publication\"); then git push -u origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
@@ -11251,8 +11254,7 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "field-report --check at the branch tip, naming what is missing and the "
                        "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
                        "under Copilot it only says what is undelivered unless [copilot] "
-                       "refuse_stop is true. Where se.toml [templates] files is check it also "
-                       "refuses, in any checkout, while a changed file a template claims breaks it "
+                       "refuse_stop is true. It also refuses, in any checkout, while a changed file a template claims breaks it "
                        "(se_templates.py check-files). "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "

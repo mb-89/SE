@@ -34,11 +34,11 @@
 # `input` or `script` in which `gh` stands as a word followed by a space (shelled below), so
 # `se_templates.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
 # only, so every other call costs what it did. SE_TEMPLATES_GATE=off skips it.
-# Where the project's se.toml `[templates] files` is `write`, which SE's start leaves as the line
-# `write` in <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), the gate also runs for
-# Claude Code's Write, Edit and MultiEdit of a file in the project and for the GitHub tools that
-# write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools); without that line
-# they cost what they did.
+# Where a template claims a path, which SE's start leaves as the line `claimed` in
+# <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), the gate also runs for Claude
+# Code's Write, Edit and MultiEdit of a file in the project and for the GitHub tools that write
+# files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a claimed path's
+# write, which only the fill makes; without that line they cost what they did.
 #
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
@@ -127,12 +127,12 @@ guarded() { # <payload> [tool ...]: the tools, GATE_TOOLS where none is given
 }
 FILE_TOOLS=(Write Edit MultiEdit)
 GITHUB_FILE_TOOLS=(push_files create_or_update_file)
-# Whether the payload is a file tool's call the gate judges: only where the start left `write` in
+# Whether the payload is a file tool's call the gate judges: only where the start left `claimed` in
 # templates-files; Claude Code's own file tools by their whole name, whose file_path lies in the
 # project, and the GitHub file tools as guarded reads them. Builtins only.
 files_write=false
 if [ "$event" = PreToolUse ] && read -r level 2>/dev/null <"$project/.se/.runtime/templates-files" &&
-  [ "${level%$'\r'}" = write ]; then
+  [ "${level%$'\r'}" = claimed ]; then
   files_write=true
 fi
 filed() { # <payload>

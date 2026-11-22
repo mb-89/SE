@@ -19,6 +19,10 @@
 - `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
   (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
   `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+- Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into both
+  layouts as `skills/<name>/SKILL.md`, `<name>` its front matter's
+  ([docs/guidance.md "Notes in folders"](docs/guidance.md#notes-in-folders)).
+  `se_plugin.py check` also runs `scripts/se_guidance.py check`, so an orphan note fails there.
 - The outside skills a role relies on are one list, `se.toml` `[roles.<role>] skills`, never an
   agent's own front matter.
   - Each entry is `<plugin>@<marketplace>:<skill>`; a skill Claude Code ships loads by itself and
@@ -37,7 +41,7 @@
 | Suite | Command | When it runs |
 |---|---|---|
 | Focused | `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test) | the tests of what changed |
-| SE's Go components under `components/` | `uv run python scripts/se_modules.py sync kern`, then `cd components && go vet ./... && go test ./...` | on kern at the pin `se.toml` `[modules.kern]` reads from `components/go.mod`, in `.se/modules/kern` (every pytest run places it first, `tests/conftest.py`); declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)); kern's own tests run in kern's repository |
+| SE's Go components under `components/` | `uv run python scripts/se_modules.py sync kern`, then `cd components && go vet ./... && go test ./...` | on kern at the pin `se.toml` `[components.kern]` reads from `components/go.mod`, in `.se/modules/kern` (every pytest run places it first, `tests/conftest.py`); declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)); kern's own tests run in kern's repository |
 | Complete | `uv run pytest -q` and the suites beside it | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([README "Test budget"](README.md#test-budget)) |
 | Repository hygiene | `uv run python scripts/hygiene.py` | a step of the `check` job, not a test: it checks SE's own checkout through git's real door; its logic is unit-tested on the fake, each check failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`) |
 | Dangling references | the same command | it fails where the agents, the skills (the rule book among them), README.md or AGENTS.md name what the repository lacks |
@@ -191,7 +195,7 @@ pass it; they refuse:
   - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
 - One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that
-  pins se (`[modules.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
+  pins se (`[components.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version
   outside its `version` range or none readable, naming both; `scripts/se_modules.py sync` brings
   the clone there.

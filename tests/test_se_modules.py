@@ -33,56 +33,45 @@ def write(path: Path, text: str) -> Path:
     return path
 
 
-# Requirement 1: se.toml declares modules.
+# Requirement 1: se.toml lists components by name, with no address.
 
 
-def test_manifest_declares_modules(tmp_path):
+def test_manifest_declares_components(tmp_path):
     write(
         tmp_path / "se.toml",
         f"""
-[modules.obs]
-url = "https://git.example.org/team/obs.git"
+[components.obs]
 ref = "{SHA_A}"
 
-[modules.style]
-url = "https://git.example.org/team/style.git"
+[components.style]
 ref = "{SHA_A.upper()}"
 path = "themes/plain"
+optional = true
 """,
     )
     modules = se_modules.load_manifest(tmp_path)
     assert [m.name for m in modules] == ["obs", "style"]
-    assert modules[0].url == "https://git.example.org/team/obs.git"
     assert modules[0].ref == SHA_A
-    assert modules[0].path is None
+    assert modules[0].path is None and modules[0].optional is False, "an entry without optional is required"
     assert modules[1].ref == SHA_A
-    assert modules[1].path == "themes/plain"
+    assert modules[1].path == "themes/plain" and modules[1].optional is True
 
 
-def test_a_module_url_relative_to_origin_names_the_repository_beside_it(tmp_path, fake_git_door):
-    root = fake_git.init(tmp_path / "project")
-    write(root / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n'
-                            f'[modules.se]\nurl = "../SE.git"\nversion = "^1.0"\n')
-    with pytest.raises(se_modules.ModuleError, match="module obs: ../obs.git is relative to origin"):
-        se_modules.load_manifest(root)
-
-    fake_git.git("-C", str(root), "remote", "add", "origin", "https://git.example.org/team/project")
-    assert [m.url for m in se_modules.load_manifest(root)] == [
-        "https://git.example.org/team/obs.git", "https://git.example.org/team/SE.git"]
-    fake_git.git("-C", str(root), "remote", "set-url", "origin", "git@git.example.org:team/project.git")
-    assert [m.url for m in se_modules.load_manifest(root)] == [
-        "git@git.example.org:team/obs.git", "git@git.example.org:team/SE.git"]
+def test_an_entry_with_url_is_refused_naming_finding_by_name(tmp_path):
+    for url in ("../obs.git", "https://git.example.org/team/obs.git"):
+        write(tmp_path / "se.toml", f'[components.obs]\nurl = "{url}"\nref = "{SHA_A}"\n')
+        with pytest.raises(se_modules.ModuleError, match="component obs: url is refused in se.toml: a "
+                           "component is found by its name under the owners of the checkout's remotes"):
+            se_modules.load_manifest(tmp_path)
 
 
-def test_an_absolute_module_url_is_read_as_it_stands_with_or_without_an_origin(tmp_path, fake_git_door):
-    root = fake_git.init(tmp_path / "project")
-    write(root / "se.toml", f'[modules.se]\nurl = "https://git.example.org/team/SE.git"\nref = "{SHA_A}"\n')
-    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/SE.git"
-    fake_git.git("-C", str(root), "remote", "add", "origin", "git@example.com:alice/project.git")
-    assert se_modules.load_manifest(root)[0].url == "https://git.example.org/team/SE.git"
+def test_the_old_modules_table_is_refused_naming_the_rename(tmp_path):
+    write(tmp_path / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n')
+    with pytest.raises(se_modules.ModuleError, match=re.escape("[modules] is [components] since se 6")):
+        se_modules.load_manifest(tmp_path)
 
 
-def test_manifest_without_modules_is_empty(tmp_path):
+def test_manifest_without_components_is_empty(tmp_path):
     write(tmp_path / "se.toml", "")
     assert se_modules.load_manifest(tmp_path) == []
 
@@ -99,24 +88,25 @@ def test_manifest_accepts_project_settings(tmp_path):
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ('url = "https://x.example/a.git"', "ref"),
-        (f'ref = "{SHA_A}"', "url"),
-        ('url = "https://x.example/a.git"\nref = "main"', "full commit SHA"),
-        ('url = "https://x.example/a.git"\nref = "abc1234"', "full commit SHA"),
-        (f'url = "https://x.example/a.git"\nref = "{SHA_A}"\npath = "../up"', "path"),
-        (f'url = "https://x.example/a.git"\nref = "{SHA_A}"\npath = "/abs"', "path"),
-        (f'url = "https://x.example/a.git"\nref = "{SHA_A}"\nbranch = "dev"', "unknown key"),
+        ('path = "sub"', "ref"),
+        ('ref = "main"', "full commit SHA"),
+        ('ref = "abc1234"', "full commit SHA"),
+        (f'ref = "{SHA_A}"\npath = "../up"', "path"),
+        (f'ref = "{SHA_A}"\npath = "/abs"', "path"),
+        (f'ref = "{SHA_A}"\nbranch = "dev"', "unknown key"),
+        (f'ref = "{SHA_A}"\noptional = "yes"', "optional must be true or false"),
     ],
 )
 def test_manifest_rejects_invalid_module(tmp_path, body, message):
-    write(tmp_path / "se.toml", f"[modules.m]\n{body}\n")
+    write(tmp_path / "se.toml", f"[components.m]\n{body}\n")
     with pytest.raises(se_modules.ModuleError, match=message):
         se_modules.load_manifest(tmp_path)
 
 
-def test_manifest_rejects_bad_module_name(tmp_path):
-    write(tmp_path / "se.toml", f'[modules."a/b"]\nurl = "u"\nref = "{SHA_A}"\n')
-    with pytest.raises(se_modules.ModuleError, match="name"):
+@pytest.mark.parametrize("name", ["a/b", "a.b", "a_b", "-a", "a" * 33])
+def test_manifest_rejects_a_name_no_repository_carries(tmp_path, name):
+    write(tmp_path / "se.toml", f'[components."{name}"]\nref = "{SHA_A}"\n')
+    with pytest.raises(se_modules.ModuleError, match="1 to 32 letters, digits and '-'"):
         se_modules.load_manifest(tmp_path)
 
 
@@ -128,8 +118,8 @@ def test_manifest_missing_is_an_error(tmp_path):
 # Requirement 2: machine-local ~/.se/local.toml.
 
 
-def module(name="lib", url="https://git.example.org/team/lib.git", ref=SHA_A, path=None):
-    return se_modules.Module(name, url, ref, path)
+def module(name="lib", ref=SHA_A, path=None):
+    return se_modules.Module(name, ref, path)
 
 
 def test_local_config_default_is_in_home(tmp_path, monkeypatch):
@@ -227,13 +217,6 @@ def test_resolve_falls_back_to_pin_when_local_path_is_missing(tmp_path):
     assert "missing" in source.note
 
 
-def test_resolve_pinned_applies_url_rewrite(tmp_path):
-    local = se_modules.LocalConfig(paths={}, urls={"https://git.example.org/": "https://mirror.example.net/"})
-    source = se_modules.resolve(tmp_path, module(), local)
-    assert source.kind == "pinned"
-    assert source.url == "https://mirror.example.net/team/lib.git"
-
-
 # Requirement 3: sync, status, update, path on the fake git's temporary repositories.
 
 
@@ -272,17 +255,24 @@ def make_upstream(path: Path, count: int = 3) -> list[str]:
     return [commit(path, f"change {i}", {"version.txt": f"{i}\n", "sub/file.txt": f"sub {i}\n"}) for i in range(1, count + 1)]
 
 
+#: The consumer's origin: its owner `team` on a host SE lists no repositories of, so a component
+#: is read directly beside it (`host_listing`), at the address the machine's [urls] rewrites to the
+#: fake upstreams (`World.urls`).
+ORIGIN = "https://git.example.org/team/consumer"
+
+
 @pytest.fixture
 def world(tmp_path):
-    """An upstream module with three commits and a consumer pinned to the first one."""
+    """An upstream component with three commits and a consumer pinned to the first one, which finds
+    it beside its origin: `https://git.example.org/team/lib`, rewritten to the upstream's folder."""
     upstream = tmp_path / "upstream" / "lib"
     shas = make_upstream(upstream)
-    consumer = tmp_path / "consumer"
+    consumer = fake_git.init(tmp_path / "consumer")
+    git(consumer, "remote", "add", "origin", ORIGIN)
     manifest = write(
         consumer / "se.toml",
-        f"""# modules of the consumer
-[modules.lib]  # the library
-url = "{upstream.as_posix()}"
+        f"""# components of the consumer
+[components.lib]  # the library
 ref = "{shas[0]}"  # pinned
 path = "sub"
 
@@ -297,6 +287,8 @@ ref = "keep"
 
     w = World()
     w.upstream, w.shas, w.root, w.manifest, w.local = upstream, shas, consumer, manifest, local
+    w.urls = f'[urls]\n"https://git.example.org/team/" = "{upstream.parent.as_posix()}/"\n'
+    write(local, w.urls)
     w.cache = consumer / ".se" / "modules" / "lib"
     return w
 
@@ -316,18 +308,7 @@ def test_sync_clones_at_pin(world, capsys):
     assert "lib: pinned" in out
 
 
-@pytest.mark.parametrize("origin", [
-    "../upstream/consumer.git",
-    "./../upstream/consumer.git",
-    "{upstream}/consumer.git",
-])
-def test_a_clean_sync_clones_a_relative_sibling_module_beside_the_origin(world, capsys, origin):
-    # `../lib` beside the consumer's origin, whatever form that origin takes; a relative path origin
-    # is the consumer checkout's, not the module cache's (#1525).
-    fake_git.init(world.root)
-    upstream = world.upstream.parent.as_posix()
-    git(world.root, "remote", "add", "origin", origin.format(upstream=upstream))
-    world.manifest.write_text(world.manifest.read_text().replace(world.upstream.as_posix(), "../lib"))
+def test_a_clean_sync_finds_the_component_beside_the_origin_and_clones_it(world, capsys):
     assert not world.cache.exists()
 
     code, out = run(world, capsys, "sync")
@@ -335,22 +316,18 @@ def test_a_clean_sync_clones_a_relative_sibling_module_beside_the_origin(world, 
     assert code == 0, out
     assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
     assert Path(git(world.cache, "remote", "get-url", "origin")) == world.upstream
+    assert ("origin: the mark of git.example.org/team/lib could not be checked (SE_COMPONENT_LISTING=off); "
+            "its repository is read directly") in out
 
 
-def test_a_relative_module_keeps_its_local_path_and_url_rewrite(world, capsys):
-    fake_git.init(world.root)
-    git(world.root, "remote", "add", "origin", "https://git.example.invalid/team/consumer.git")
-    world.manifest.write_text(world.manifest.read_text().replace(world.upstream.as_posix(), "../lib"))
+def test_a_placed_clone_at_its_pin_is_used_without_asking_any_remote(world, capsys):
+    assert run(world, capsys, "sync")[0] == 0
+    git(world.root, "remote", "set-url", "origin", "https://git.example.invalid/gone/consumer")
 
-    write(world.local, f'[paths]\nlib = "{world.upstream.as_posix()}"\n')
     code, out = run(world, capsys, "sync")
-    assert code == 0, out
-    assert "lib: local" in out and not world.cache.exists()
 
-    write(world.local, f'[urls]\n"https://git.example.invalid/team/" = "{world.upstream.parent.as_posix()}/"\n')
-    code, out = run(world, capsys, "sync")
     assert code == 0, out
-    assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
+    assert "lib: pinned" in out and "could not be checked" not in out
 
 
 def test_sync_follows_a_changed_pin_and_fetches(world, capsys):
@@ -386,19 +363,18 @@ def test_sync_reports_a_path_missing_at_the_pin(world, capsys):
     assert "absent" in out
 
 
-def test_sync_applies_url_rewrite(world, capsys):
-    world.manifest.write_text(
-        world.manifest.read_text().replace(world.upstream.as_posix(), "https://git.example.invalid/team/lib")
-    )
-    write(world.local, f'[urls]\n"https://git.example.invalid/team/" = "{world.upstream.parent.as_posix()}/"\n')
+def test_sync_applies_the_url_rewrite_to_the_found_address(world, capsys):
+    write(world.local, "")
+    code, out = run(world, capsys, "sync")
+    assert code == 1 and "https://git.example.org/team/lib could not be read" in out, out
+    write(world.local, world.urls)
     code, out = run(world, capsys, "sync")
     assert code == 0, out
     assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
-    assert "example.invalid" in world.manifest.read_text()
 
 
 def test_sync_and_path_use_an_existing_local_path(world, capsys):
-    write(world.local, f'[paths]\nlib = "{world.upstream.as_posix()}"\n')
+    write(world.local, world.urls + f'[paths]\nlib = "{world.upstream.as_posix()}"\n')
     code, out = run(world, capsys, "sync")
     assert code == 0, out
     assert "lib: local" in out
@@ -421,7 +397,7 @@ def test_unknown_module_name_is_an_error(world, capsys):
 
 
 def test_update_moves_the_pin_to_newest_main(world, capsys):
-    write(world.local, f'[paths]\nother = "{(world.root / "elsewhere").as_posix()}"\n')
+    write(world.local, world.urls + f'[paths]\nother = "{(world.root / "elsewhere").as_posix()}"\n')
     before = world.manifest.read_text()
     code, out = run(world, capsys, "update", "lib")
     assert code == 0, out
@@ -462,7 +438,7 @@ def test_update_all(world, capsys, tmp_path):
     other = tmp_path / "upstream" / "other"
     other_shas = make_upstream(other, 2)
     with world.manifest.open("a") as handle:
-        handle.write(f'\n[modules."other"]\nurl = "{other.as_posix()}"\nref = \'{other_shas[0]}\'\n')
+        handle.write(f'\n[components."other"]\nref = \'{other_shas[0]}\'\n')
     code, out = run(world, capsys, "update", "--all")
     assert code == 0, out
     assert {m.name: m.ref for m in se_modules.load_manifest(world.root)} == {
@@ -491,7 +467,7 @@ def test_status_of_a_pinned_module(world, capsys):
 
 
 def test_status_of_a_missing_local_path(world, capsys):
-    write(world.local, f'[paths]\nlib = "{(world.root / "absent").as_posix()}"\n')
+    write(world.local, world.urls + f'[paths]\nlib = "{(world.root / "absent").as_posix()}"\n')
     code, out = run(world, capsys, "status")
     assert code == 0
     assert "pinned" in out and "local path missing" in out
@@ -500,7 +476,7 @@ def test_status_of_a_missing_local_path(world, capsys):
 def test_status_shows_drift_of_a_local_path(world, capsys, tmp_path):
     checkout = tmp_path / "checkout"
     fake_git.clone(world.upstream.as_posix(), checkout)
-    write(world.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
+    write(world.local, world.urls + f'[paths]\nlib = "{checkout.as_posix()}"\n')
 
     code, out = run(world, capsys, "status")
     assert code == 0
@@ -529,7 +505,7 @@ def test_status_shows_drift_of_a_local_path(world, capsys, tmp_path):
 def test_status_of_a_local_path_that_is_no_git_checkout(world, capsys, tmp_path):
     plain = tmp_path / "plain"
     (plain / "sub").mkdir(parents=True)
-    write(world.local, f'[paths]\nlib = "{plain.as_posix()}"\n')
+    write(world.local, world.urls + f'[paths]\nlib = "{plain.as_posix()}"\n')
     code, out = run(world, capsys, "status")
     assert code == 0
     assert "not a git checkout" in out
@@ -547,13 +523,11 @@ def test_root_is_found_from_a_subdirectory(world, capsys, monkeypatch):
 
 
 def test_network_transports_are_blocked(world, capsys):
-    """A url that is not rewritten to a local path fails instead of reaching the network."""
-    world.manifest.write_text(
-        world.manifest.read_text().replace(world.upstream.as_posix(), "https://git.example.invalid/team/lib")
-    )
+    """An address that is not rewritten to a local path fails instead of reaching the network."""
+    write(world.local, "")
     code, out = run(world, capsys, "sync")
     assert code == 1
-    assert "not allowed" in out or "transport" in out
+    assert "the required component lib is missing" in out and "could not be read" in out, out
     assert not (world.cache / ".git" / "index").exists()
 
 
@@ -633,9 +607,7 @@ def released(world):
     for tag in ["v1.3.0", "v1.4.0", "v1.4.2", "v1.10.1", "v2.0.0", "nightly", "v1.11.0-rc1"]:
         tags[tag] = commit(world.upstream, tag, {"version.txt": f"{tag}\n"})
         git(world.upstream, "tag", tag)
-    world.manifest.write_text(
-        f'[modules.lib]\nurl = "{world.upstream.as_posix()}"\nversion = "^1.4"\npath = "sub"\n'
-    )
+    world.manifest.write_text('[components.lib]\nversion = "^1.4"\npath = "sub"\n')
     world.tags = tags
     return world
 
@@ -732,8 +704,9 @@ def test_a_range_no_tag_matches_is_an_error_naming_the_remedy(released, capsys):
     released.manifest.write_text(released.manifest.read_text().replace("^1.4", "^3"))
     code, out = run(released, capsys, "sync")
     assert code == 1
-    assert "no tag vMAJOR.MINOR.PATCH" in out and "matches version '^3'" in out
-    assert "widen the range or release the module" in out
+    assert "the required component lib is missing (consumer -> lib)" in out, out
+    assert "with a release its pin ^3 admits (read: origin)" in out
+    assert "offers no release the pin admits" in out and "git remote add <remote> <address>" in out
 
 
 def test_ref_and_version_together_or_update_to_a_ranged_module_are_errors(released, capsys):
@@ -750,7 +723,7 @@ def test_a_local_path_is_used_as_it_is_and_its_version_reported_not_updated(rele
     git(checkout, "add", "se.toml")
     head = commit(checkout, "local work", {"sub/local.txt": "mine\n"})
     write(checkout / "sub" / "uncommitted.txt", "draft\n")
-    write(released.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
+    write(released.local, released.urls + f'[paths]\nlib = "{checkout.as_posix()}"\n')
     for command in ("sync", "status"):
         code, out = run(released, capsys, command)
         assert code == 0, out
@@ -770,7 +743,7 @@ def test_a_local_path_is_used_as_it_is_and_its_version_reported_not_updated(rele
 def test_a_missing_or_malformed_local_version_is_an_error_naming_the_file_and_the_remedy(
         released, capsys, text, message):
     write(released.upstream / "se.toml", text)
-    write(released.local, f'[paths]\nlib = "{released.upstream.as_posix()}"\n')
+    write(released.local, released.urls + f'[paths]\nlib = "{released.upstream.as_posix()}"\n')
     code, out = run(released, capsys, "sync")
     assert code == 1
     assert str(released.upstream / "se.toml") in out and message in out
@@ -782,11 +755,17 @@ def test_a_missing_or_malformed_local_version_is_an_error_naming_the_file_and_th
 RELEASE = ".github/workflows/release.yml"
 
 
+def se_at_upstream(w) -> None:
+    """The component `se` is found beside the origin, at the address the upstream's folder holds."""
+    write(w.local, w.urls + f'"https://git.example.org/team/se" = "{w.upstream.as_posix()}"\n')
+
+
 def test_update_regenerates_the_copies_of_ses_workflows_at_the_new_pin(world, capsys):
     import se_workflows
     shas = [commit(world.upstream, f"release {i}", {RELEASE: f"name: release\non:\n  workflow_call:\n# {i}\n"})
             for i in (1, 2)]
-    world.manifest.write_text(f'[modules.se]\nurl = "{world.upstream.as_posix()}"\nref = "{shas[0]}"\n')
+    world.manifest.write_text(f'[components.se]\nref = "{shas[0]}"\n')
+    se_at_upstream(world)
     assert run(world, capsys, "sync")[0] == 0
     clone = world.root / ".se" / "modules" / "se"
     place = "${{ github.repository_owner }}/SE"
@@ -872,7 +851,7 @@ def test_hooks_core_command_needs_no_manifest_and_names_a_refused_file(tmp_path,
 
 @pytest.mark.parametrize("text", ['[hooks]\ncore = "off"\n', "[hooks]\ncore = 1\n", '[hooks]\ncor = "off"\n'])
 def test_sync_accepts_hooks_core_and_refuses_any_other_hooks(world, capsys, text):
-    write(world.local, text)
+    write(world.local, world.urls + text)
     code, out = run(world, capsys, "sync")
     if text == '[hooks]\ncore = "off"\n':
         assert code == 0 and "lib: pinned" in out, out
@@ -915,7 +894,7 @@ GO_MOD = "module example.com/app\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/x/y v1.
 @pytest.fixture
 def go_pinned(released):
     """The consumer pins lib by its components/go.mod's require lib v1.4.2."""
-    released.manifest.write_text(f'[modules.lib]\nurl = "{released.upstream.as_posix()}"\ngo = "components/go.mod"\n')
+    released.manifest.write_text('[components.lib]\ngo = "components/go.mod"\n')
     released.gomod = write(released.root / "components" / "go.mod", GO_MOD.format(version="1.4.2"))
     return released
 
@@ -965,7 +944,7 @@ def test_a_go_pin_whose_version_has_no_tag_is_refused(go_pinned, capsys):
     go_pinned.gomod.write_text(GO_MOD.format(version="1.4.1"))
     code, out = run(go_pinned, capsys, "sync")
     assert code == 1
-    assert "no tag v1.4.1 in" in out and "components/go.mod's require lib v1.4.1" in out, out
+    assert "the required component lib is missing" in out and "its pin components/go.mod v1.4.1 admits" in out, out
 
 
 def test_update_of_a_go_pin_is_refused_naming_the_go_mod_line(go_pinned, capsys):
@@ -980,7 +959,7 @@ def test_a_local_checkout_of_a_go_pin_reports_its_release_toml_version(go_pinned
     checkout = go_pinned.upstream
     write(checkout / "se.toml", "[tests]\ncommand = []\n")
     write(checkout / "release.toml", 'version = "1.4.2"\n')
-    write(go_pinned.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
+    write(go_pinned.local, go_pinned.urls + f'[paths]\nlib = "{checkout.as_posix()}"\n')
     for command in ("sync", "status"):
         code, out = run(go_pinned, capsys, command)
         assert code == 0 and "lib: local" in out and "version 1.4.2" in out and "off the pin" not in out, out
@@ -996,11 +975,14 @@ def test_work_tickets_sync_moves_the_se_clone_to_the_pin_the_merged_lock_names(w
     # `.se/modules/se` is there too, so the public check runs at that pin (work_tickets.py sync).
     import work_tickets
     monkeypatch.setattr(se_modules, "default_local_config", lambda: world.local)
-    world.manifest.write_text(f'[modules.se]\nurl = "{world.upstream.as_posix()}"\nversion = "^1.0"\n')
+    world.manifest.write_text('[components.se]\nversion = "^1.0"\n')
+    se_at_upstream(world)
 
     def lock(version: str, sha: str) -> None:
-        write(world.root / "se.lock", f'[modules.se]\nversion = "{version}"\nref = "{sha}"\n')
+        write(world.root / "se.lock", f'[components.se]\nversion = "{version}"\nref = "{sha}"\n')
 
+    git(world.upstream, "tag", "v1.0.0", world.shas[0])
+    git(world.upstream, "tag", "v1.0.2", world.shas[2])
     lock("1.0.0", world.shas[0])
     assert run(world, capsys, "sync")[0] == 0
     clone = world.root / ".se" / "modules" / "se"
@@ -1020,3 +1002,288 @@ def test_work_tickets_sync_leaves_a_repository_without_an_se_clone_alone(world, 
     monkeypatch.setattr(se_modules, "default_local_config", lambda: world.local)
     work_tickets.se_module_at_lock(world.root)  # se.toml pins only lib, and no se clone exists
     assert not (world.root / ".se" / "modules" / "se").exists()
+
+
+# Finding a component by name under the owners of the checkout's remotes (docs/components.md
+# "Finding a component"), on the fake door with a fake host listing (SE_COMPONENT_LISTING=fake:).
+
+
+@pytest.fixture
+def hosts(tmp_path, monkeypatch):
+    """A consumer whose remotes are `origin` (owner team) and `fork` (owner alice) on one host, its
+    machine's [urls] rewriting that host to folders, and a fake listing of both owners."""
+    consumer = fake_git.init(tmp_path / "consumer")
+    git(consumer, "remote", "add", "origin", "https://git.example.org/team/consumer.git")
+    git(consumer, "remote", "add", "fork", "https://git.example.org/alice/consumer.git")
+    folders = tmp_path / "hosts"
+    local = write(tmp_path / "home" / ".se" / "local.toml",
+                  f'[urls]\n"https://git.example.org/" = "{folders.as_posix()}/"\n')
+    listing = tmp_path / "listing.json"
+
+    class Hosts:
+        root, manifest = consumer, consumer / "se.toml"
+
+        def __init__(self) -> None:
+            self.local = local
+
+        def list(self, owners: dict) -> None:
+            listing.write_text(json.dumps(owners), encoding="utf-8")
+            monkeypatch.setenv(se_modules.LISTING_VARIABLE, f"fake:{listing}")
+
+        def release(self, owner: str, name: str, versions: list[str], manifest: str = "") -> dict[str, str]:
+            """`<owner>/<name>.git` with a commit per version, each tagged `v<version>`."""
+            repo = folders / owner / f"{name}.git"
+            if not (repo / ".git").exists():
+                repo.mkdir(parents=True)
+                fake_git.init(repo, "-b", "main")
+            tags = {}
+            for version in versions:
+                tags[version] = commit(repo, f"{name} {version}", {"version.txt": f"{owner} {version}\n",
+                                                                   "se.toml": manifest})
+                git(repo, "tag", f"v{version}")
+            return tags
+
+    hosts = Hosts()
+    hosts.list({"git.example.org/team": [], "git.example.org/alice": []})
+    return hosts
+
+
+def finds(hosts, capsys, *args: str) -> tuple[int, str]:
+    capsys.readouterr()
+    code = se_modules.main(["--root", str(hosts.root), "--local", str(hosts.local), *args])
+    captured = capsys.readouterr()
+    return code, captured.out + captured.err
+
+
+def origin_of(hosts, name: str) -> str:
+    return Path(git(hosts.root / ".se" / "modules" / name, "remote", "get-url", "origin")).as_posix()
+
+
+def test_a_component_is_found_under_the_first_remotes_owner(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"])
+    alice = hosts.release("alice", "lib", ["1.1.0"])
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": ["lib"]})
+    write(hosts.manifest, '[components.lib]\nversion = "^1.0"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert origin_of(hosts, "lib").endswith("/hosts/team/lib.git"), "origin's owner first, though alice's is newer"
+    assert se_modules.read_lock(hosts.root)["lib"][0] == "1.0.0" and alice["1.1.0"]
+    assert "could not be checked" not in out
+
+
+def test_a_component_is_found_under_a_later_remotes_owner(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"])  # beside origin, but not marked as a component
+    alice = hosts.release("alice", "Lib", ["1.1.0"])  # named without case, reached as listed
+    hosts.list({"git.example.org/team": ["other"], "git.example.org/alice": ["Lib"]})
+    write(hosts.manifest, '[components.lib]\nversion = "^1.0"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert origin_of(hosts, "lib").endswith("/hosts/alice/Lib.git")
+    assert se_modules.read_lock(hosts.root) == {"lib": ("1.1.0", alice["1.1.0"])}
+
+
+def test_the_first_owner_whose_release_the_pin_admits_wins_and_an_owner_is_read_once(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"])
+    alice = hosts.release("alice", "lib", ["2.0.0"])
+    git(hosts.root, "remote", "add", "mirror", "https://git.example.org/team/elsewhere.git")
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": ["lib"]})
+    write(hosts.manifest, '[components.lib]\nversion = "^2"\n')
+    calls = []
+    finder = se_modules.Finder(hosts.root, se_modules.load_local(hosts.local),
+                               lambda host, owner: calls.append(owner) or se_modules.host_listing(host, owner))
+
+    found = finder.find("lib", lambda offer: any(v[0] == 2 for v in offer.releases))
+
+    assert found.offer.owner == "git.example.org/alice" and found.offer.releases == {(2, 0, 0): alice["2.0.0"]}
+    assert found.read == ["origin", "fork"], "mirror's owner is origin's, read once at its first place"
+    assert calls == ["team", "alice"]
+
+
+def test_an_owner_the_host_cannot_list_is_one_line_and_finding_goes_on(hosts, capsys):
+    alice = hosts.release("alice", "lib", ["1.0.0"])
+    hosts.list({"git.example.org/team": "no login for a private owner", "git.example.org/alice": ["lib"]})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert ("origin: git.example.org cannot list the repositories of team: no login for a private owner"
+            in out.splitlines())
+    assert se_modules.read_lock(hosts.root) == {"lib": ("1.0.0", alice["1.0.0"])}
+
+
+def test_a_required_component_no_owner_offers_fails_naming_the_path_the_remotes_and_the_remedy(hosts, capsys):
+    write(hosts.manifest, '[components.obs]\nversion = "^4.0"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 1
+    assert ("the required component obs is missing (consumer -> obs).\nNo remote's owner offers a repository "
+            "obs marked as a component with a release its pin ^4.0 admits (read: origin, fork).") in out
+    assert "origin: git.example.org/team marks no repository obs as a component" in out
+    assert "Add a remote of an owner that offers it: git remote add <remote> <address>" in out
+
+
+def test_an_optional_component_missing_is_one_line_and_the_rest_is_placed(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"])
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.style]\nversion = "^1"\noptional = true\n\n'
+                          '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert "optional component consumer -> style not found on any remote's owner" in out.splitlines()
+    assert set(se_modules.read_lock(hosts.root)) == {"lib"}
+
+
+# A found tag checked against se.lock's commit.
+
+
+def test_a_found_tag_at_another_commit_than_the_lock_records_is_refused_naming_both(hosts, capsys):
+    tags = hosts.release("team", "lib", ["1.0.0"])
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+    write(hosts.root / "se.lock", f'[components.lib]\nversion = "1.0.0"\nref = "{SHA_A}"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 1
+    assert (f"component lib: the release v1.0.0 that {(hosts.root.parent / 'hosts/team/lib.git').as_posix()} offers "
+            f"(origin's owner git.example.org/team) points to {tags['1.0.0']}, but se.lock records {SHA_A}") in out
+    assert "run se_modules.py update lib to lock the found one" in out
+    assert not (hosts.root / ".se" / "modules" / "lib").exists()
+
+    code, out = finds(hosts, capsys, "update", "lib")
+    assert code == 0, out
+    assert se_modules.read_lock(hosts.root) == {"lib": ("1.0.0", tags["1.0.0"])}
+
+
+# The tree: each component's own list, read from its release, one version per name.
+
+
+def test_the_tree_places_a_components_own_components_and_locks_them(hosts, capsys):
+    style = hosts.release("team", "style", ["1.2.0", "1.3.0"])
+    lib = hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nversion = "~1.2"\n')
+    hosts.list({"git.example.org/team": ["lib", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert se_modules.read_lock(hosts.root) == {"lib": ("1.0.0", lib["1.0.0"]), "style": ("1.2.0", style["1.2.0"])}
+    assert git(hosts.root / ".se" / "modules" / "style", "rev-parse", "HEAD") == style["1.2.0"]
+    assert "(for lib)" in [line for line in out.splitlines() if line.startswith("style:")][0]
+
+
+def test_two_hosts_whose_pins_admit_no_common_release_fail_naming_both_paths_and_pins(hosts, capsys):
+    hosts.release("team", "style", ["1.2.0", "2.0.0"])
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nversion = "^1.2"\n')
+    hosts.list({"git.example.org/team": ["lib", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n\n[components.style]\nversion = "^2.0"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 1
+    assert ("component style: consumer -> style pins ^2.0 and consumer -> lib -> style pins ^1.2, and no "
+            "release of style admits both; align the two pins") in out
+
+
+def test_two_hosts_whose_pins_admit_a_common_release_take_it(hosts, capsys):
+    style = hosts.release("team", "style", ["1.2.0", "1.5.0"])
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nversion = "~1.2"\n')
+    hosts.list({"git.example.org/team": ["lib", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.style]\nversion = "^1"\n\n[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 0, out
+    assert se_modules.read_lock(hosts.root)["style"] == ("1.2.0", style["1.2.0"]), "the newest both admit"
+
+
+def test_a_name_already_on_the_path_is_that_component_checked_against_its_pin(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.consumer]\nversion = "^2"\n')
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": []})
+    write(hosts.manifest, '[project]\nversion = "1.4.0"\n\n[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 1
+    assert ("component consumer: consumer -> lib -> consumer pins ^2, but consumer is the root, at 1.4.0; "
+            "change that pin") in out
+    write(hosts.manifest, '[project]\nversion = "2.0.0"\n\n[components.lib]\nversion = "^1"\n')
+    assert finds(hosts, capsys, "sync")[0] == 0
+    assert not (hosts.root / ".se" / "modules" / "consumer").exists(), "the root is never placed again"
+
+
+def test_a_component_whose_release_lists_url_is_refused_naming_its_path(hosts, capsys):
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nurl = "../style.git"\nversion = "^1"\n')
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "sync")
+
+    assert code == 1 and "component style: url is refused in se.toml of consumer -> lib" in out, out
+
+
+# The host's listing: github.com's search for the topic, with the person's login where one is set.
+
+
+class Answer:
+    def __init__(self, data: dict) -> None:
+        self.data = json.dumps(data).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, *_):
+        return self.data
+
+
+def test_github_lists_an_owners_repositories_marked_component_with_the_login(monkeypatch):
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append((request.full_url, request.get_header("Authorization")))
+        return Answer({"items": [{"name": "kern"}, {"name": "obs"}]})
+
+    monkeypatch.setattr(se_modules.urllib.request, "urlopen", urlopen)
+    monkeypatch.delenv(se_modules.LISTING_VARIABLE)
+    monkeypatch.setenv("GH_TOKEN", "token-value")
+    assert se_modules.host_listing("github.com", "alice") == {"kern": "kern", "obs": "obs"}
+    assert seen == [("https://api.github.com/search/repositories?q=topic%3Acomponent%20user%3Aalice&per_page=100",
+                     "Bearer token-value")]
+
+
+@pytest.mark.parametrize(("error", "kind", "message"), [
+    (se_modules.urllib.error.HTTPError("u", 422, "Unprocessable", {}, None), "Unlisted",
+     "github.com knows no owner alice it can list (HTTP 422)"),
+    (se_modules.urllib.error.HTTPError("u", 403, "rate limited", {}, None), "NoListing", "github.com answered HTTP 403"),
+    (se_modules.urllib.error.URLError("offline"), "NoListing", "github.com could not be read: offline"),
+])
+def test_a_listing_github_refuses_names_why(monkeypatch, error, kind, message):
+    def urlopen(request, timeout):
+        raise error
+
+    monkeypatch.setattr(se_modules.urllib.request, "urlopen", urlopen)
+    monkeypatch.delenv(se_modules.LISTING_VARIABLE)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    with pytest.raises(getattr(se_modules, kind), match=re.escape(message)):
+        se_modules.host_listing("github.com", "alice")
+
+
+def test_a_host_se_lists_nothing_of_or_the_listing_off_reads_beside_the_remote(monkeypatch):
+    monkeypatch.delenv(se_modules.LISTING_VARIABLE)
+    with pytest.raises(se_modules.NoListing, match="SE lists no repositories on git.example.org"):
+        se_modules.host_listing("git.example.org", "team")
+    monkeypatch.setenv(se_modules.LISTING_VARIABLE, "off")
+    with pytest.raises(se_modules.NoListing, match="SE_COMPONENT_LISTING=off"):
+        se_modules.host_listing("github.com", "team")

@@ -3,10 +3,9 @@
 the command component `templates` that kern's MCP door serves as its tool `templates` (README "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
 
-The engine stays free of SE's own scripts; this script joins it to them. Its three door commands
+The engine stays free of SE's own scripts; this script joins it to them. Its four door commands
 only read: nothing is filed, written or sent through them, and none calls GitHub or starts a
-model. The fourth, `gate`, is the hook's and not the door's; it writes only its count of refusals
-and its log.
+model. `gate` is the hook's and not the door's; it writes only its count of refusals and its log.
 
 - `se_templates.py list [--tree]` prints what `templates.py list` prints: every template of SE's with its
   actions and, for an adapter, its checker.
@@ -28,6 +27,20 @@ and its log.
     given; it replaces the template's own warning of that shape;
   - for a template of an issue, the SE commands that do not exist, as `work_tickets.refuse_dangling`
     finds them, where the template's own check named none.
+
+- `se_templates.py fill <template> [--prompt TEXT] [--input FILE | --input-text TEXT] [--fields FILE |
+  --fields-json TEXT] [--title TEXT] [--worktree DIR] [--templates DIR] [--tree]` is the tool's
+  action `fill` (docs/templates.md "Fill"), `templates.py fill` with `check`'s findings:
+  - without fields it prints `templates.instructions` as JSON, the instructions first and the
+    guidance of `--worktree`'s trees, exit 0;
+  - with fields it needs the raw input and answers as `check --render` answers, `refused: <n>
+    findings` or `passes` then the document (`templates.fill`): `check`'s findings for the title
+    and the rendered text, and the `quote` findings against the raw input (`templates.quoted`); a
+    refusal's last line names `se_templates.py fill <template>`.
+  - It writes nothing, as the door's tools only read: the agent writes the file or files the
+    document it answers, through the filing commands or the tracker's tools, which the gate checks.
+    `templates.py fill` writes a file template's file itself. `--templates` reads the templates
+    from that folder.
 
 **Its answer.** `check` exits 0 whatever it finds, and 2 on a usage error only, as kern's door
 answers any other exit code as `command-failed` with a remedy about usage. Its first line is the
@@ -102,29 +115,30 @@ judged by their own rules (The file tools, below).
   GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
   tool call for the host's own hook timeout.
 
-**The file tools.** Where the project's se.toml `[templates] files` is `write`, the gate also judges
-a file tool's call by the file it would leave (FILE_TOOLS, GITHUB_FILE_TOOLS); `scripts/se_hook.sh`
-runs it for one only where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) left
-`write` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME).
+**The file tools.** A path a `file.write` template claims is written only by the fill
+(docs/templates.md "Fill"): the gate denies every other write of it, a file tool's call
+(FILE_TOOLS, GITHUB_FILE_TOOLS), whatever it would leave. `scripts/se_hook.sh` runs it for one only
+where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) found a template that claims a
+path and left the line `claimed` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME).
 
 - Claude Code's `Write`, `Edit` and `MultiEdit`, by their whole name: the project is the checkout
-  holding `file_path`, whose se.toml decides; a path outside it is free. The result is built in
-  memory and the file never written: `Write` its `content`; `Edit` the file on disk with
-  `old_string` replaced by `new_string` (each one with `replace_all`); `MultiEdit` each of its
-  `edits` in turn. A call the tool itself refuses (an `old_string` not in the file, or there more
-  than once without `replace_all`, or a file that does not exist) passes.
+  holding `file_path`; a path outside it is free.
 - The GitHub tools `push_files` (each of its `files`) and `create_or_update_file`: each path
   relative to the target repository's root, where the target is at home as for a GitHub write
-  (Which se.toml decides) and that se.toml's `files` is `write`.
-- The check: the templates check-files reads (Claimed files); a path no template claims passes, one that
-  breaks its template is denied with check-files' lines, each refused finding and the line naming
-  `templates.py draft --path`. Each refusal is counted (`templates.count_refusal`, its target the template,
-  the repository or project, `file.write` and the path); there is no hold for a file. `[templates]
-  gate` does not change it; `SE_TEMPLATES_GATE=off` turns it off as it turns the gate off.
+  (Which se.toml decides).
+- The templates: those check-files reads (Claimed files). A path no template claims passes; a
+  claimed one is denied, naming each claimed path, its template and the fill that writes it,
+  `templates.py fill <template> --path <file>`, whose call without fields answers the template's
+  instructions.
+  The fill writes the file itself, through no file tool, so the gate never sees it; a claimed file
+  goes to GitHub as a commit of the file the fill wrote. Each refusal is counted
+  (`templates.count_refusal`, its target the template, the repository or project, `file.write` and the
+  path); there is no hold for a file. `[templates] gate` does not change it; `SE_TEMPLATES_GATE=off`
+  turns it off as it turns the gate off.
 - The failure rule and the bound are the gate's: an error before it knows that a template claims the
   file passes and logs, one after it denies with GATE_FAILED.
-- For tests only, `--files`, `--templates` and `--root` set the switch, the templates' folder and the
-  project root for the run; the hook never passes them.
+- For tests only, `--templates` and `--root` set the templates' folder and the project root for the
+  run; the hook never passes them.
 
 **Claimed files.** `se_templates.py check-files [PATH ...] [--changed REF] [--root DIR] [--templates DIR]`
 checks the files a `file.write` template claims by its `[applies] paths`, each as `templates.py check
@@ -133,15 +147,12 @@ and CI's `check` job run it (README "Templates").
 
 - Which files: the PATHs given; or, with `--changed REF`, every file that differs between REF's
   merge base with HEAD and the working tree (committed, staged or not) and every untracked file
-  git does not ignore, where a template claims its path. A deleted file is not checked. `--root` is
+  git does not ignore, where a template claims its path. A deleted file is not checked; where no
+  template claims a path, it says so in one line and reads no git. `--root` is
   the project root the templates' paths are relative to (default: the git checkout holding the
   working directory).
 - Which templates: `--templates DIR`'s; else the root's `templates/` (at `origin/<integration branch>` where
   it holds them, `templates.load`); where the root has none, SE's own.
-- The switch: with `--changed` it reads se.toml `[templates] files` of the root (`templates.enforcement`,
-  at `origin/<integration branch>`, so a branch cannot switch its own check off): `off` (the
-  default) checks nothing and says so in one line; `check` and `write` check. Given PATHs are
-  always checked.
 - Its answer: per file that breaks its template, one line a refused finding, `<path> (<template>):
   <field>: <fix>`, at most CHECK_FILES_LINES lines in all with a count of the rest, then the line
   that names `templates.py draft --path`; exit code 1. Where nothing is claimed or nothing refuses, one
@@ -186,11 +197,12 @@ import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-#: The title shape of the templates whose title is a ticket's name (templates/ticket.toml, templates/work.toml).
+#: The title shape of the templates whose title is a ticket's name (templates/ticket.md, templates/work.md).
 NAME_SHAPE = "work_tickets:name_refusal"
 NAME_RULE = "name"
 DANGLING_RULE = "dangling"
 COMMAND = "se_templates.py check"
+FILL_COMMAND = "se_templates.py fill"
 PASSES = "passes"
 #: The gate's bound on its own run, from its start to its answer: past it, the write passes.
 GATE_SECONDS = 10.0
@@ -213,13 +225,14 @@ GATE_TOOLS = {
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
 GATE_FAILED = "SE's template gate failed on this write ({kind}), so it was not sent"
-#: The file tools (the module docstring: The file tools), guarded where `[templates] files` is
-#: `write`: Claude Code's own, by their whole name, and the GitHub tools that write files.
+#: The file tools (the module docstring: The file tools), guarded wherever a template claims a
+#: path: Claude Code's own, by their whole name, and the GitHub tools that write files.
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
 GITHUB_FILE_TOOLS = ("push_files", "create_or_update_file")
-#: The switch's line SE's start writes for se_hook.sh (`gate --runtime`): there only where
-#: `[templates] files` is `write`.
+#: The line SE's start writes for se_hook.sh (`gate --runtime`): there only where a template
+#: claims a path, its one line FILES_CLAIMED.
 FILES_RUNTIME = Path(".se") / ".runtime" / "templates-files"
+FILES_CLAIMED = "claimed"
 #: The shell reader (the module docstring: The shell reader). The input keys of a shell tool.
 SHELL_KEYS = ("command", "input", "script")
 #: `gh` as a word followed by a space, as se_hook.sh's filter finds it (`\n` and `\t` as JSON
@@ -620,11 +633,11 @@ def sibling(name: str):
 COMPONENTS = (sibling("se_components").Group(
     "templates", "Templates",
     "SE's templates: list names them, draft gives a template's fields, their instructions and their shape, "
-    "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
-    "to file.",
-    ("list", "draft", "check", "gate", "check-files", "backstop")),)
-#: The commands that go through kern where it runs (se_components.routed): all three only read.
-INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
+    "check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
+    "to file, and fill checks an agent's fields against the raw input and gives the document.",
+    ("list", "draft", "check", "fill", "gate", "check-files", "backstop")),)
+#: The commands that go through kern where it runs (se_components.routed): all four only read.
+INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check", "fill"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
 READ_ONLY_COMMANDS = {
     "list": "Lists SE's templates with the actions each shapes. Use it to find the template for a text "
@@ -635,6 +648,10 @@ READ_ONLY_COMMANDS = {
     "check": "Checks a text or a fields object against a template as SE's filing commands would: its "
              "first line is passes or refused, then every finding or, with --render, the Markdown "
              "to file. Use it before filing; it files nothing.",
+    "fill": "Fills a template from the raw input: without fields it gives the template's instructions, "
+            "guidance and empty draft; with fields and the raw input its first line is passes, "
+            "then the document to write or file, or refused, then every finding. Use it to write "
+            "any text a template shapes; it writes nothing.",
 }
 
 
@@ -674,6 +691,25 @@ def make_parser() -> argparse.ArgumentParser:
     checking.add_argument("--worktree", type=Path, default=Path("."),
                           help="the project whose private terms are checked (default: .)")
     checking.add_argument("--tree", **tree)
+    filling = commands.add_parser(
+        "fill", help="fill a template from the raw input: the instructions, or the checked document",
+        description="templates.py fill with the checks check adds: without fields, the template's "
+                    "instructions, guidance and empty draft as JSON; with fields and the raw input, "
+                    "passes and the document, or refused: <n> findings. It writes nothing and exits 0.")
+    filling.add_argument("template", help="the template, as list names it")
+    filling.add_argument("--prompt", help="what the agent was asked to write")
+    raws = filling.add_mutually_exclusive_group()
+    raws.add_argument("--input", type=Path, help="the raw input the fields come from, as a file")
+    raws.add_argument("--input-text", help="the raw input as text")
+    values = filling.add_mutually_exclusive_group()
+    values.add_argument("--fields", type=Path, help="the field values as a JSON file")
+    values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    filling.add_argument("--title", help="the title it would be filed with")
+    filling.add_argument("--worktree", type=Path, default=Path("."),
+                         help="the project whose private terms and guidance are read (default: .)")
+    filling.add_argument("--templates", type=Path,
+                         help="read the templates from this folder instead of SE's templates/")
+    filling.add_argument("--tree", **tree)
     gating = commands.add_parser(
         "gate",
         help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its template",
@@ -681,24 +717,22 @@ def make_parser() -> argparse.ArgumentParser:
                     "nothing (the module docstring: The gate). It exits 0.")
     gating.add_argument("--gate", choices=sibling("templates").GATE_VALUES,
                         help="for tests only: the switch for this run, whatever se.toml says")
-    gating.add_argument("--files", choices=sibling("templates").FILES_VALUES,
-                        help="for tests only: [templates] files for this run, whatever se.toml says")
     gating.add_argument("--templates", type=Path,
                         help="for tests only: read the templates that claim files from this folder")
     gating.add_argument("--root", type=Path,
                         help="for tests only: the project root of a file tool's path")
     gating.add_argument("--runtime", type=Path, metavar="ROOT",
-                        help="SE's start: write ROOT/.se/.runtime/templates-files where se.toml "
-                             "[templates] files is write, remove it otherwise; reads no payload")
+                        help="SE's start: write ROOT/.se/.runtime/templates-files where a template "
+                             "claims a path, remove it otherwise; reads no payload")
     files = commands.add_parser(
         "check-files", help="check the files a template claims, given or changed since a ref",
         description="Check each claimed file as templates.py check --path does: the PATHs given, or "
                     "with --changed every claimed file changed since REF's merge base, committed "
-                    "or not, where se.toml [templates] files is check. It exits 1 where one refuses.")
+                    "or not. It exits 1 where one refuses.")
     files.add_argument("paths", nargs="*", type=Path, metavar="PATH", help="a file to check")
     files.add_argument("--changed", metavar="REF",
                        help="check every claimed file changed since REF's merge base with HEAD, "
-                            "untracked ones too, where [templates] files is check")
+                            "untracked ones too")
     files.add_argument("--root", type=Path, help="the project root of the templates' paths (default: "
                                                  "the git checkout holding the working directory)")
     files.add_argument("--templates", type=Path, help="read the templates from this folder instead")
@@ -716,8 +750,9 @@ def make_parser() -> argparse.ArgumentParser:
     backstop.add_argument("--worktree", type=Path, default=Path("."),
                           help="the checkout whose se.toml and private terms are read "
                                "(default: .)")
-    for command in (listing, drafting, checking, gating, files, backstop):
+    for command in (listing, drafting, checking, filling, gating, files, backstop):
         command.set_defaults(run={"list": run_list, "draft": run_draft, "check": run_check,
+                                  "fill": run_fill,
                                   "gate": run_gate, "check-files": run_check_files,
                                   "backstop": run_backstop}[command.prog.split()[-1]])
     return top
@@ -730,7 +765,8 @@ class Usage(Exception):
 def loaded(options: argparse.Namespace) -> dict:
     templates = sibling("templates")
     try:
-        return templates.load(templates.ROOT, tree=options.tree)
+        return templates.load(templates.ROOT, tree=options.tree,
+                              folder=getattr(options, "templates", None))
     except templates.TemplateError as error:
         raise Usage(str(error)) from error
 
@@ -857,13 +893,15 @@ def findings(template, root: Path, repo: str, title: str | None, body: str) -> l
     return sorted(found, key=lambda item: item.severity != templates.REFUSE)
 
 
-def refusal(template, found: list) -> list[str]:
-    """`templates.report`'s refusal, its last line naming this script's draft."""
+def refusal(template, found: list, command: str = COMMAND) -> list[str]:
+    """`templates.report`'s refusal, its last line naming this script's draft (for `fill`, its fill
+    without fields, which gives the draft with the instructions)."""
     templates = sibling("templates")
     if template is None:
         return [f"  {item.field}: {item.fix}" for item in found if item.severity == templates.REFUSE]
-    lines = templates.report(COMMAND, template, found, refused=True).splitlines()
-    lines[-1] = f"The empty template: uv run python {HERE / 'se_templates.py'} draft {template.name}"
+    lines = templates.report(command, template, found, refused=True).splitlines()
+    word = "fill" if command == FILL_COMMAND else "draft"
+    lines[-1] = f"The empty template: uv run python {HERE / 'se_templates.py'} {word} {template.name}"
     return lines
 
 
@@ -900,6 +938,46 @@ def run_check(options: argparse.Namespace) -> int:
         print(rendered, end="")
         return 0
     print("\n".join([PASSES, *warnings]))
+    return 0
+
+
+def run_fill(options: argparse.Namespace) -> int:
+    """`fill`: `templates.instructions` without fields; else `templates.fill`'s document against the
+    raw input with `check`'s findings, answered as `check --render` answers. It writes nothing."""
+    templates = sibling("templates")
+    template = named(loaded(options), options.template, FILL_COMMAND)
+    root = options.worktree.resolve()
+    if options.fields is None and options.fields_json is None:
+        print(json.dumps(templates.instructions(template, options.prompt or "", root), indent=2))
+        return 0
+    try:
+        if options.input is not None:
+            try:
+                raw = options.input.read_text(encoding="utf-8")
+            except OSError as error:
+                raise Usage(f"{FILL_COMMAND}: cannot read --input {options.input} ({error})") from error
+        elif options.input_text is not None:
+            raw = options.input_text
+        else:
+            raise Usage(f"{FILL_COMMAND}: give the raw input the fields come from: --input FILE or "
+                        "--input-text TEXT")
+        values = (templates.fields_data(options.fields_json, "--fields-json", FILL_COMMAND)
+                  if options.fields is None else templates.fields_file(options.fields, FILL_COMMAND))
+        rendered, own = templates.fill(template, values, raw, title=options.title)
+    except templates.TemplateError as error:
+        raise Usage(str(error)) from error
+    _, title = filed(template, None, values, options.title)
+    found = findings(template, root, repository(root, None), title, rendered)
+    found += [item for item in own if item.rule == templates.QUOTE_RULE and item not in found]
+    found.sort(key=lambda item: item.severity != templates.REFUSE)
+    refused = sum(item.severity == templates.REFUSE for item in found)
+    if refused:
+        print("\n".join([f"refused: {refused} findings", *refusal(template, found, FILL_COMMAND)]))
+        return 0
+    if found:
+        print("\n".join(str(item) for item in found[:templates.REFUSAL_LINES]), file=sys.stderr)
+    print(PASSES)
+    print(rendered, end="")
     return 0
 
 
@@ -1038,8 +1116,7 @@ def gate_template(catalog: dict, write: Write, root: Path):
 
 def instead(write: Write) -> str:
     if write.files:
-        return (f"write it as uv run python {HERE / 'templates.py'} draft --path <file> gives it, "
-                "and fill every field")
+        return f"write it with uv run python {HERE / 'templates.py'} fill <template> --path <file>"
     if write.action in sibling("templates").ISSUE_ACTIONS:
         return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
                 "ticket)")
@@ -1050,7 +1127,7 @@ def judge(text: str, switch: str | None, seen: dict,
           given: argparse.Namespace | None = None) -> str:
     """The gate's answer for the payload `text`: a JSON object, or "" (it passes); `seen` gets
     the project, where the log goes. A shell call is judged write by write, its first deny the
-    answer. `given` holds the test-only `--files`, `--templates` and `--root`."""
+    answer. `given` holds the test-only `--templates` and `--root`."""
     project: Path | None = None
     try:
         payload = json.loads(text)
@@ -1133,30 +1210,6 @@ def judged(write: Write, template, found: list, root: Path, gate, switch: str) -
     return deny(templates.report(command, template, found, refused=True, hold=offer, gate=True))
 
 
-def left_by(write: Write, path: Path) -> str | None:
-    """The text Claude Code's file tool `write` would leave at `path`, built in memory; None where
-    the tool itself refuses the call (an `old_string` it does not find once) or it is not one."""
-    given = write.input
-    if write.name == "Write":
-        content = given.get("content")
-        return content if isinstance(content, str) else None
-    edits = [given] if write.name == "Edit" else given.get("edits")
-    if not isinstance(edits, list) or not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8")
-    for edit in edits:
-        old, new = (edit.get(key) if isinstance(edit, dict) else None
-                    for key in ("old_string", "new_string"))
-        if not isinstance(old, str) or not isinstance(new, str) or not old:
-            return None
-        found = text.count(old)
-        every = edit.get("replace_all") is True
-        if found == 0 or (found > 1 and not every):
-            return None
-        text = text.replace(old, new) if every else text.replace(old, new, 1)
-    return text
-
-
 def github_files(write: Write) -> list[tuple[str, str]]:
     """The (path, content) pairs a GitHub file tool's call writes, each path relative to the
     target repository's root; those without a string path and content are left out."""
@@ -1173,10 +1226,9 @@ def github_files(write: Write) -> list[tuple[str, str]]:
 def judge_files(write: Write, project: Path | None, given: argparse.Namespace | None) -> str:
     """The answer for a file tool's call (the module docstring: The file tools)."""
     templates = sibling("templates")
-    level = getattr(given, "files", None)
     folder = getattr(given, "templates", None)
     try:
-        if level is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
+        if os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
             return ""
         if write.name in FILE_TOOLS:
             raw = str(write.input.get("file_path") or "")
@@ -1186,65 +1238,64 @@ def judge_files(write: Write, project: Path | None, given: argparse.Namespace | 
             root = getattr(given, "root", None) or checkout(str(path.parent))
             if root is None or not path.resolve().is_relative_to(root.resolve()):
                 return ""
-            claims = [(path.resolve().relative_to(root.resolve()).as_posix(), None)]
-            what, repo = f"{write.name} of {claims[0][0]}", str(root)
+            paths = [path.resolve().relative_to(root.resolve()).as_posix()]
+            what, repo = f"{write.name} of {paths[0]}", str(root)
         else:
             if write.repo.startswith("/") or write.repo.endswith("/"):
                 return ""
             root = getattr(given, "root", None) or deciding(write, project)
             if root is None:
                 return ""
-            claims = github_files(write)
+            paths = [relative for relative, _ in github_files(write)]
             what, repo = f"{write.tool} in {write.repo}", write.repo
-        if (level or templates.enforcement(root).files) != templates.WRITE:
-            return ""
         catalog, source = claim_templates(root, folder)
-        claims = [(relative, text) for relative, text in claims
-                  if any(template.is_file and template.claims(relative) for template in catalog.values())]
+        claims = [(relative, owners) for relative in paths
+                  if (owners := [name for name, template in catalog.items()
+                                 if template.is_file and template.claims(relative)])]
         if not claims:
             return ""
     except Exception as error:  # it cannot judge: the write passes, and the log says why
         log_line(project, error)
         return ""
     try:
-        if write.name in FILE_TOOLS:
-            text = left_by(write, path)
-            if text is None:
-                return ""
-            claims = [(claims[0][0], text)]
-        return judged_files(write, what, repo, catalog, root, claims, source)
+        return free_write(write, what, repo, root, claims, source)
     except Exception as error:
         raise Judged(error, write) from error
 
 
-def judged_files(write: Write, what: str, repo: str, catalog: dict, root: Path,
-                 claims: list[tuple[str, str]], source: Path | None) -> str:
-    """The deny for the claimed files `claims` (path, the text the call leaves) where one breaks
-    its template, each refusal counted for the cap; "" where every one passes."""
+def free_write(write: Write, what: str, repo: str, root: Path, claims: list[tuple[str, list[str]]],
+               source: Path | None) -> str:
+    """The deny for a free write of the claimed paths `claims` (path, the templates that claim
+    it), naming each one's template and the fill that writes it; each refusal counted for the cap."""
     templates = sibling("templates")
-    lines, code, refused = text_lines(catalog, root, claims, source)
-    if not code:
-        return ""
     environ = {"SE_SESSION": write.session} if write.session else None
-    for template, relative in refused:
-        templates.count_refusal(templates.target(template, repo, templates.FILE_ACTION, title=relative), environ)
-    return deny("\n".join([f"{what}: a file a template claims would break it; fix every finding and "
-                           "write it again:", *(f"  {line}" for line in lines[:-1]), lines[-1]]))
+    lines = []
+    for relative, owners in claims:
+        templates.count_refusal(templates.target(owners[0], repo, templates.FILE_ACTION, title=relative),
+                                environ)
+        name = owners[0] if len(owners) == 1 else "<template>"
+        fill = f"uv run python {HERE / 'templates.py'} fill {name} --path {root / relative} --root {root}"
+        if source is not None:
+            fill += f" --templates {source}"
+        lines += [f"  {relative} ({', '.join(owners)}): {fill}"]
+    return deny("\n".join([f"{what}: a template claims this path, so only its fill writes it:", *lines,
+                           "Without --fields the fill answers the template's instructions; with "
+                           "--fields and --input it writes the file"]))
 
 
 def run_runtime(root: Path) -> int:
-    """`gate --runtime`: write FILES_RUNTIME under `root` where its se.toml's `[templates] files`
-    (at origin/<integration branch>) is `write`, remove it otherwise; exit 0, 1 where it fails."""
+    """`gate --runtime`: write FILES_RUNTIME under `root` where a template the gate reads for it
+    (claim_templates) claims a path, remove it otherwise; exit 0, 1 where it fails."""
     templates = sibling("templates")
     path = root / FILES_RUNTIME
     try:
         try:
-            level = templates.enforcement(root).files
+            claimed = claims_a_path(claim_templates(root, None)[0])
         except templates.TemplateError:
-            level = templates.OFF
-        if level == templates.WRITE:
+            claimed = False
+        if claimed:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{templates.WRITE}\n", encoding="utf-8")
+            path.write_text(f"{FILES_CLAIMED}\n", encoding="utf-8")
         else:
             path.unlink(missing_ok=True)
     except OSError as error:
@@ -1289,6 +1340,11 @@ def project_root(given: Path | None) -> Path:
         return given.resolve()
     here = Path.cwd().resolve()
     return checkout(str(here)) or here
+
+
+def claims_a_path(catalog: dict) -> bool:
+    """Whether a `file.write` template of `catalog` claims a path."""
+    return any(template.is_file and template.paths for template in catalog.values())
 
 
 def claim_templates(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
@@ -1362,17 +1418,14 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
                                     for template in catalog.values()):
             continue
         texts.append((relative, templates._file_text(path, CHECK_FILES)))
-    lines, code, _ = text_lines(catalog, root, texts, source)
-    return lines, code
+    return text_lines(catalog, root, texts, source)
 
 
 def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: Path | None
-               ) -> tuple[list[str], int, list[tuple[str, str]]]:
-    """file_lines' answer for `texts` (each file's path relative to `root`, and its text), with
-    the (template, path) of each file that refuses; the gate judges a file tool's result by it."""
+               ) -> tuple[list[str], int]:
+    """file_lines' answer for `texts`, each file's path relative to `root` and its text."""
     templates = sibling("templates")
     refusing: list[str] = []
-    refused: list[tuple[str, str]] = []
     checked = 0
     for relative, text in texts:
         chosen = templates.select(catalog, templates.FILE_ACTION, text, None, path=relative)
@@ -1382,8 +1435,6 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
         found = list(chosen.findings)
         if chosen.template is not None:
             found += templates.check(chosen.template, templates.parse(chosen.template, text), root=root)
-        if any(item.severity == templates.REFUSE for item in found):
-            refused.append((chosen.template.name if chosen.template else "", relative))
         for item in found:
             if item.severity != templates.REFUSE:
                 continue
@@ -1394,26 +1445,25 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
                                 f"{templates._line(chosen.template, item)}")
     if not refusing:
         if not checked:
-            return [f"{CHECK_FILES}: no template claims a file checked"], 0, refused
+            return [f"{CHECK_FILES}: no template claims a file checked"], 0
         passed = "file passes its template" if checked == 1 else "files pass their templates"
-        return [f"{CHECK_FILES}: {checked} claimed {passed}"], 0, refused
+        return [f"{CHECK_FILES}: {checked} claimed {passed}"], 0
     room = CHECK_FILES_LINES - 1
     if len(refusing) > room:
         refusing = refusing[:room - 1] + [f"... and {len(refusing) - room + 1} more findings"]
     draft = f"uv run python {HERE / 'templates.py'} draft --path <file> --root {root}"
     if source is not None:
         draft += f" --templates {source}"
-    return [*refusing, f"The empty template of each: {draft}"], 1, refused
+    return [*refusing, f"The empty template of each: {draft}"], 1
 
 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
-    lines where se.toml `[templates] files` is `check` and a changed claimed file breaks its template;
-    None where the switch is off or every such file passes. Errors raise."""
-    templates = sibling("templates")
-    if templates.enforcement(root).files not in (templates.CHECK, templates.WRITE):
-        return None
+    lines where a changed claimed file breaks its template; None where no template claims a path
+    or every such file passes. Errors raise."""
     catalog, source = claim_templates(root, None)
+    if not claims_a_path(catalog):
+        return None
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
 
@@ -1426,12 +1476,10 @@ def run_check_files(options: argparse.Namespace) -> int:
     root = project_root(options.root)
     try:
         if options.changed:
-            switch = templates.enforcement(root)
-            if switch.files not in (templates.CHECK, templates.WRITE):
-                print(f"{CHECK_FILES}: [templates] files is {switch.files} in {switch.where}; "
-                      "nothing checked")
-                return 0
             catalog, source = claim_templates(root, options.templates)
+            if not claims_a_path(catalog):
+                print(f"{CHECK_FILES}: no template claims a path; nothing checked")
+                return 0
             paths = changed_files(root, options.changed)
         else:
             catalog, source = claim_templates(root, options.templates)

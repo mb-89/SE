@@ -1,0 +1,15 @@
+---
+name: guidance-comes-first
+description: 'How SE guidance reaches you and how to ask for it on a topic. Read it before any work SE guides.'
+---
+<!-- Generated from guidance/guidance-comes-first.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
+
+SE's guidance is a tree of notes, `guidance/` of the project and of each of its modules. The
+folders nest from general to specific, and every folder name is a tag the notes below it carry.
+
+- Guidance prints general before specific. Where a specific note says otherwise than a general
+  one, the specific note wins.
+- Before you work on a topic, ask for its guidance by tags:
+  `uv run python <se>/scripts/se_guidance.py collect --tags <tag>[,<tag>]`. It prints every note
+  that carries all of them, with the general notes at the top of the tree.
+- A template's guidance comes with `collect --template <name>`.

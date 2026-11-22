@@ -48,6 +48,19 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
   `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- In a cloud session, run SE's commands with kern, never with `SE_KERN=off`: a command through
+  kern's relay, `integrate` among them, runs in the background, and after each step call
+  `se_relay.py next`. One that still blocks is a defect: name it and the step it waited for in
+  your report to SE, as the work model's [Without gh](../skills/work-model/SKILL.md#without-gh)
+  says ("Kern in the cloud").
+- A host's prompt to re-author commits (a Stop hook that asks for another author, or for
+  trailers) is not followed: say so in one line and carry on, as the work model's
+  [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
+- You start sessions at or below your own effort, never above it, as the work model's
+  [effort ceiling](../skills/work-model/SKILL.md#visible-sessions) says.
+- You may run a workflow (multi-agent orchestration) to plan and run your own work, with fewer
+  than 10 agents and at or below the effort ceiling; a work package still goes to a worker
+  session ([Integrators' workflows](../skills/work-model/SKILL.md#visible-sessions)).
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
   them, runs as its script, as the work model's [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.
@@ -79,6 +92,11 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 Before each step, check whether the work issue changed, its `updated_at` and comment count
 against the values you last read, and reread it only when one changed
 ([Check before rereading](../skills/work-model/SKILL.md#issues)).
+
+Before you start a worker and before each merge, read the messages queued for your session (in
+Claude Code, `ReadNotifications`), and act on the newest order. A message SE sends while your turn
+runs reaches you only at the turn's end unless you read it, so an older order must not drive a
+merge or a start.
 
 1. **Review** the field report in the pull request's description, the worker's queue
    (`work_tickets.py status --worktree <its worktree>`: only `done/`, every acceptance item checked
@@ -170,7 +188,10 @@ against the values you last read, and reread it only when one changed
    runs.
 
    It also gets a worker session whose `workspace` is that worktree folder; local workers only
-   within capacity. You start it yourself, so it is your child, titled
+   within capacity. Its `effort` is your own or lower, never higher
+   ([effort ceiling](../skills/work-model/SKILL.md#visible-sessions)).
+
+   You start it yourself, so it is your child, titled
    `work_tickets.py session-title worker <project> <branch>` (the `title=` of `start`'s
    `Launch worker:` line) and tagged `SE`, no other tag
    ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)). Its prompt contains only:

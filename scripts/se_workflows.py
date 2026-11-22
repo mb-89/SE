@@ -13,7 +13,7 @@ the project's own `.github/`, and the project calls them as `uses: ./.github/...
   action runs SE's scripts, the battery checks out the kern it runs at), the copy checks out SE at
   the pin instead; a reusable workflow keeps only its `workflow_call` trigger.
 - `plan`: what `write` and `check` work from: the files, the pin and SE's location, from the
-  arguments, the project's `[modules.se]`, then the copies it holds already; with each action a
+  arguments, the project's `[components.se]`, then the copies it holds already; with each action a
   workflow among them calls (`CALLS`), so a project that holds the battery's or the release's copy
   gets the action `kern-at-pin` beside it.
 
@@ -79,18 +79,15 @@ class WorkflowError(Exception):
     """A refusal that names its remedy."""
 
 
-def repository_expression(url: str) -> str:
-    """How CI reaches SE, from a module URL: `../<name>.git`, the repository beside the project,
-    is `${{ github.repository_owner }}/<name>`; an absolute URL is its `<owner>/<name>`."""
-    if se_home.is_relative(url):
-        match = re.fullmatch(r"\.\./([\w.-]+?)(?:\.git)?/?", url)
-        if match is None:
-            raise WorkflowError(f"{url}: a relative SE URL reaches CI only as ../<name>.git, the "
-                                "repository beside the project")
-        return f"{OWNER}/{match[1]}"
+def repository_expression(url: str, project: se_home.Home | None = None) -> str:
+    """How CI reaches SE, from the address SE was found at (its clone's origin): a repository
+    under the project's own owner on the project's host is `${{ github.repository_owner }}/<name>`,
+    so no copy names the owner; any other is its `<owner>/<name>`."""
     found = se_home.parse(url)
     if found is None:
         raise WorkflowError(f"{url}: no https or ssh repository URL, so CI cannot reach SE by it")
+    if project is not None and (project.host, project.owner.lower()) == (found.host, found.owner.lower()):
+        return f"{OWNER}/{found.repository}"
     return found.tracker
 
 
@@ -183,7 +180,7 @@ def module_table(root: Path) -> dict | None:
     if not manifest.is_file():
         return None
     with manifest.open("rb") as handle:
-        table = tomllib.load(handle).get("modules", {}).get(MODULE)
+        table = tomllib.load(handle).get("components", {}).get(MODULE)
     return table if isinstance(table, dict) else None
 
 
@@ -197,7 +194,7 @@ def commit(source: Path, ref: str) -> str:
 
 def plan(root: Path, paths: list[str], ref: str | None = None, repository: str | None = None,
          source: Path | None = None) -> Plan:
-    """The plan from the arguments, else the project's `[modules.se]`, else the copies it holds."""
+    """The plan from the arguments, else the project's `[components.se]`, else the copies it holds."""
     copies = held(root)
     table = module_table(root)
     module = None
@@ -217,17 +214,17 @@ def plan(root: Path, paths: list[str], ref: str | None = None, repository: str |
     places = {seen[2] for seen in copies.values()}
     ref = ref or (module.ref if module else None) or (pins.pop() if len(pins) == 1 else None)
     if ref is None:
-        raise WorkflowError(f"no pin for SE's files in {root}: pin SE as [modules.se] in se.toml, or "
+        raise WorkflowError(f"no pin for SE's files in {root}: pin SE as [components.se] in se.toml, or "
                             "name it with --ref" + (" (the copies name more than one)" if pins else ""))
-    url = str(table.get("url", "")) if table is not None else ""
+    found = se_home.origin(source) if source is not None and table is not None and (source / ".git").exists() else None
     if repository is None:
-        if se_home.is_relative(url) or se_home.parse(url) is not None:
-            repository = repository_expression(url)
+        if found and se_home.parse(found) is not None:
+            repository = repository_expression(found, se_home.find(root))
         elif len(places) == 1:
             repository = places.pop()
         else:
-            raise WorkflowError(f"no SE location for {root}: pin SE as [modules.se] in se.toml, or "
-                                "name it with --repository")
+            raise WorkflowError(f"no SE location for {root}: pin SE as [components.se] in se.toml and "
+                                "place it (se_modules.py sync se), or name it with --repository")
     chosen = tuple(paths) or tuple(copies)
     if not chosen:
         raise WorkflowError(f"{root} holds no copy of SE's files; name the ones it calls: "
@@ -353,8 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="the project (default: here)")
     parser.add_argument("--source", type=Path, help="the SE checkout holding the pin (default: the "
                         "project's se module, else this SE)")
-    parser.add_argument("--ref", help="the pin (default: [modules.se], else the copies' own)")
-    parser.add_argument("--repository", help="how CI reaches SE (default: from [modules.se]'s url, "
+    parser.add_argument("--ref", help="the pin (default: [components.se], else the copies' own)")
+    parser.add_argument("--repository", help="how CI reaches SE (default: from where the sync found [components.se], "
                         "else the copies' own)")
     commands = parser.add_subparsers(dest="command", required=True)
     writing = commands.add_parser("write", help="write the copies at the pin")

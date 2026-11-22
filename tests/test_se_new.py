@@ -81,7 +81,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True, lock: bool = 
     where `lock`; a commit after the tag changes the template's README, which the pin leaves out."""
     git_fake.init(root, "-b", "main")
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n\n'
-                            '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+                            '[components.kern]\ngo = "components/go.mod"\n',
                  "components/go.mod": f"module se/components\n\nrequire kern v{version}\n",
                  ".github/workflows/kern-battery.yml": BATTERY,
                  ".github/actions/kern-at-pin/action.yml": KERN_AT_PIN})
@@ -119,13 +119,14 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     # It pins the kern SE pins and carries none: go.mod requires it and replaces it by its clone.
     go_mod = (app / "go.mod").read_text()
     assert go_mod.startswith("module example.com/ledger\n") and "require kern v0.1.0\n" in go_mod
-    assert go_mod.endswith("// there (se.toml [modules.kern]).\nreplace kern => ./.se/modules/kern\n")
+    assert go_mod.endswith("// there (se.toml [components.kern]).\nreplace kern => ./.se/modules/kern\n")
     assert "se_modules.py sync kern" in go_mod
     assert "=> ../" not in go_mod and "one folder up" not in go_mod
     assert not (app / "kern").exists(), "no copy of kern's source"
     assert not (app / "index").exists() and not (app / "release.toml").exists(), "only the template"
     assert not (app / "AGENTS.md").exists(), "kern's own project files stay in kern's repository"
-    assert tomllib.loads((app / "se.toml").read_text())["modules"]["kern"] == {"url": "../kern.git", "go": True}
+    settings = tomllib.loads((app / "se.toml").read_text())
+    assert settings["components"]["kern"] == {"go": True} and "modules" not in settings, "se 6's table, found by name"
     assert (app / "se.lock").read_text() == (source / "se.lock").read_text(), "SE's kern lock line"
     # SE's clone at the pin, beside it and ignored, so it builds before it has an origin.
     kern = se_modules.kern_dir(app)
@@ -138,13 +139,12 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
                         "<se>/scripts/se_modules.py sync kern there to keep it at the pin")
     tracked = git(app, "ls-files").splitlines()
     assert not [name for name in tracked if name.startswith(("kern/", ".se/"))], tracked
-    # Once it has an origin, its clone is at the pin, and sync points the clone at kern beside it.
+    # Once it has an origin, its clone is at the pin, and sync keeps it there without searching:
+    # a clone that holds the locked commit is used as it is (se_modules.py's finder).
     git(app, "remote", "add", "origin", "https://github.com/alice/ledger.git")
     assert se_modules.main(["--root", str(app), "status", "kern"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].endswith(": at pin")
-    assert git(kern, "remote", "get-url", "origin") == str(se_modules.kern_dir(source))
     assert se_modules.main(["--root", str(app), "sync", "kern"]) == 0
-    assert git(kern, "remote", "get-url", "origin") == "https://github.com/alice/kern.git"
     assert git(kern, "rev-parse", "HEAD") == pin
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
     # The generic pair, byte for byte SE's, RUNME.sh executable.
@@ -231,13 +231,15 @@ def test_kerns_template_holds_what_the_command_fills_in() -> None:
     template = se_modules.kern_dir(PROJECT) / "template"  # kern at its pin (tests/conftest.py)
     assert se_new.KERN_REPLACE.search((template / "go.mod").read_text(encoding="utf-8"))
     assert se_new.KERN_REQUIRE.search((template / "go.mod").read_text(encoding="utf-8"))
-    assert se_new.TEMPLATE_IDENTITY in (template / "se.toml").read_text(encoding="utf-8")
+    settings = (template / "se.toml").read_text(encoding="utf-8")
+    assert se_new.TEMPLATE_IDENTITY in settings
+    assert se_new.KERN_TABLE in settings or se_new.TEMPLATE_KERN_TABLE.search(settings), "its kern pin"
     assert (template / "cmd" / "app" / "main.go").is_file()
 
 
 def pinned(root: Path, require: str = "1.2.3", download: str | None = "releases/download/v{version}") -> Path:
     """`root` pinning kern by its go.mod's require, with the clone's release.toml naming `download`."""
-    write(root, {"se.toml": '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
+    write(root, {"se.toml": '[components.kern]\ngo = true\n',
                  "go.mod": f"module app\n\nrequire kern v{require}\n",
                  ".se/modules/kern/release.toml": 'version = "9.9.9"\n'
                  + (f'download = "{download}"\n' if download else "")})
@@ -249,7 +251,7 @@ def test_the_pin_is_the_version_go_mod_requires_and_the_tag_the_clones_release_t
     assert se_modules.kern_pin(pinned(tmp_path / "a")) == ("1.2.3", "v1.2.3"), "the require, not the clone's version"
     with pytest.raises(se_modules.ModuleError, match=r"not vMAJOR\.MINOR\.PATCH"):
         se_modules.kern_pin(pinned(tmp_path / "b", require="1.2"))
-    with pytest.raises(se_modules.ModuleError, match=r"no \[modules\.kern\] with go"):
+    with pytest.raises(se_modules.ModuleError, match=r"no \[components\.kern\] with go"):
         se_modules.kern_pin(tmp_path / "none")
     (tmp_path / "a" / ".se" / "modules" / "kern" / "release.toml").unlink()
     with pytest.raises(se_modules.ModuleError, match="kern is not placed; run uv run python scripts/se_modules.py sync kern"):
@@ -285,7 +287,7 @@ def test_a_download_path_lies_under_origins_home_and_without_one_there_is_none(
     none, app-binary answers `-` and the start builds the binary from its folder."""
     pinned(tmp_path, require="0.3.0")
     write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n\n'
-                                '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
+                                '[components.kern]\ngo = true\n',
                      "components/release.toml": 'version = "2.0.0"\ndownload = "releases/download/app-v{version}"\n'
                      'binary = "app"\npackage = "./cmd/app"\n'})
     kern = se_modules.kern_dir(tmp_path)

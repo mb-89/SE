@@ -100,28 +100,26 @@ def setup(tmp_path, monkeypatch):
     local_dir = tmp_path / "local-lib"
     write(local_dir / "se.toml", '[project]\nversion = "3.1.0"\n')
     write(project / "se.toml", f"""
-[modules.lib]
-url = "{LIB_URL}"
+[components.lib]
 version = "^1.2"
 
-[modules.tool]
-url = "{TOOL_URL}"
+[components.tool]
 version = "~2.0.1"
 
-[modules.mine]
-url = "https://git.example.org/team/mine.git"
+[components.mine]
 version = "^3"
 
-[modules.obs]
-url = "{OBS_URL}"
+[components.obs]
 ref = "{SHA}"
 """)
+    # Where each placed component was found: its clone's origin (se_start._found_at).
+    monkeypatch.setattr(se_start, "_found_at", lambda clone: f"https://git.example.org/team/{clone.name}.git")
     write(project / "se.lock", f"""
-[modules.lib]
+[components.lib]
 version = "1.2.0"
 ref = "{SHA}"
 
-[modules.tool]
+[components.tool]
 version = "2.0.3"
 ref = "{SHA}"
 """)
@@ -179,10 +177,10 @@ def test_up_to_date_out_of_date_newer_major_local_path_and_commit_pin(setup):
     assert states["obs"].due is None and states["obs"].latest == (0, 9, 0)
     lines = se_start.full(report(setup), setup["se"])
     assert any(line.startswith("tool: in use 2.0.3; latest 2.1.0; up to date; 2.1.0 is outside ~2.0.1, never "
-                               "applied by refresh; to take it, set version = \"^2.1\" in [modules.tool] of ")
+                               "applied by refresh; to take it, set version = \"^2.1\" in [components.tool] of ")
                for line in lines)
     assert any(line.startswith("lib: in use 1.2.0; latest 2.0.0; update due to 1.4.1; 2.0.0 is outside ^1.2, "
-                               "never applied by refresh; to take it, set version = \"^2.0\" in [modules.lib] of ")
+                               "never applied by refresh; to take it, set version = \"^2.0\" in [components.lib] of ")
                for line in lines)
     assert any(line.startswith("mine: in use 3.1.0 (local path ") and line.endswith("local, refresh never touches it")
                for line in lines)
@@ -201,9 +199,9 @@ def test_the_greeting_names_only_what_is_out_of_date_and_the_refresh(setup):
         "  SE: 2.0.0 is outside SE's major 1; refresh never applies it; to take it, install SE 2.0.0 "
         "again as README \"Install\" says",
         f"  lib: 2.0.0 is outside ^1.2; refresh never applies it; to take it, set version = \"^2.0\" in "
-        f"[modules.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
+        f"[components.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
         f"  tool: 2.1.0 is outside ~2.0.1; refresh never applies it; to take it, set version = \"^2.1\" in "
-        f"[modules.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
+        f"[components.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
         f"Refresh: uv run python {setup['se'].as_posix()}/scripts/se_start.py refresh",
     ]
 
@@ -249,10 +247,10 @@ def test_offline_marks_the_check_as_not_done(setup):
 
 
 def test_a_bad_manifest_is_named_and_the_greeting_still_appears(setup):
-    write(setup["project"] / "se.toml", "[modules.lib]\nurl = 1\n")
+    write(setup["project"] / "se.toml", "[components.lib]\nurl = 1\n")
     lines = se_start.greeting(report(setup, offline=True), setup["se"])
     assert lines[0].startswith("SE 1.2.0 started: ")
-    assert any("modules of" in line and "url is required" in line for line in lines)
+    assert any("modules of" in line and "url is refused" in line for line in lines)
 
 
 def test_an_installed_copy_is_checked_against_its_plugin_manifests_repository(setup):
@@ -321,7 +319,7 @@ def test_no_cache_yet_says_the_check_runs_in_the_background(setup):
 
 def test_a_new_module_without_a_cached_answer_starts_a_check(setup):
     report(setup, "check")
-    write(setup["project"] / "se.toml", f'[modules.new]\nurl = "https://git.example.org/team/new.git"\nversion = "^1"\n')
+    write(setup["project"] / "se.toml", f'[components.new]\nversion = "^1"\n')
     report(setup)
     assert len(setup["world"].spawn) == 1
 
@@ -413,10 +411,10 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
 # kern's state, as bootstrap.sh hands it over (README "Kern").
 
 def bare_kern(se: Path) -> None:
-    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [modules.kern]), its clone placed."""
+    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [components.kern]), its clone placed."""
     manifest = se / "se.toml"
     text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
-    write(manifest, text + '\n[modules.kern]\nurl = "../kern.git"\ngo = true\n')
+    write(manifest, text + '\n[components.kern]\ngo = true\n')
     write(se / "go.mod", "module se\n\nrequire kern v0.2.0\n")
     write(se / ".se" / "modules" / "kern" / "release.toml",
           'version = "0.2.0"\ndownload = "https://example.com/alice/kern/releases/download/v{version}"\n')
@@ -885,21 +883,22 @@ def repos(tmp_path, isolated_git):
     git(se, "reset", "-q", "--hard", "v1.0.0")
     remotes = {}
     for name, versions in {"lib": ("1.0.0", "1.1.0", "2.0.0"), "tool": ("1.0.0",)}.items():
-        remote = tmp_path / f"{name}-remote"
-        remote.mkdir()
+        remote = tmp_path / "hosts" / name  # beside the project's origin, as its [urls] rewrites it
+        remote.mkdir(parents=True)
         fake_git.init(remote, "-b", "main")
         for version in versions:
             release(remote, version)
         remotes[name] = remote
-    project = tmp_path / "project"
+    project = fake_git.init(tmp_path / "project")
+    git(project, "remote", "add", "origin", "https://git.example.org/team/project")
     local_dir = tmp_path / "local-lib"
     write(local_dir / "se.toml", '[project]\nversion = "0.1.0"\n')
-    write(project / "se.toml", "".join(
-        f'[modules.{name}]\nurl = "{remote.as_uri()}"\nversion = "^1"\n\n' for name, remote in remotes.items())
-        + f'[modules.mine]\nurl = "{remotes["lib"].as_uri()}"\nversion = "^0.1"\n')
-    config = write(tmp_path / "local.toml", f'[paths]\nmine = "{local_dir.as_posix()}"\n')
-    for name, remote in remotes.items():
-        se_modules.write_lock(project, name, "1.0.0", git(remote, "rev-parse", "v1.0.0"))
+    write(project / "se.toml", "".join(f'[components.{name}]\nversion = "^1"\n\n' for name in remotes)
+          + '[components.mine]\nversion = "^0.1"\n')
+    config = write(tmp_path / "local.toml", f'[urls]\n"https://git.example.org/team/" = '
+                                            f'"{(tmp_path / "hosts").as_posix()}/"\n\n[paths]\nmine = "{local_dir.as_posix()}"\n')
+    se_modules.write_lock(project, {name: ("1.0.0", git(remote, "rev-parse", "v1.0.0"))
+                                    for name, remote in remotes.items()})
     assert se_modules.main(["--root", str(project), "--local", str(config), "sync"]) == 0
     clock = Clock()
     world = se_start.World(clock=clock, spawn=Spawns(), work=Work())
@@ -962,7 +961,7 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert not failed, lines
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
     assert "lib: 1.0.0 -> 1.1.0 (se.lock; commit it)" in lines
-    assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [modules.lib] of "
+    assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [components.lib] of "
             f"{(repos['project'] / 'se.toml').as_posix()}, then run: uv run python {repos['se'].as_posix()}"
             "/scripts/se_modules.py update lib") in lines
     assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as README "
@@ -1300,7 +1299,7 @@ def test_start_hooks_takes_the_hooks_of_the_se_module_a_project_pins_else_this_s
     clone = fresh_clone(base, "pinning")
     module = base / "se-module"
     write(module / ".githooks" / "se-script", "#!/bin/sh\n")
-    write(clone / "se.toml", '[modules.se]\nurl = "https://example.com/se.git"\nref = "%s"\n' % ("0" * 40))
+    write(clone / "se.toml", '[components.se]\nref = "%s"\n' % ("0" * 40))
     config = write(base / "local.toml", f'[paths]\nse = "{module.as_posix()}"\n')
     assert se_start.start_hooks(plugin, clone, config) == ""
     assert hooks_path(clone) == (module / ".githooks").as_posix()  # the pinned se's, as its setup.sh sets
@@ -1322,3 +1321,120 @@ def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path
     assert se_start._docs_url(se_root) == "https://alice.github.io/se/"
     write(se_root / "se.toml", '[project]\nversion = "1.0.0"\ndocs_url = "https://docs.example.com/se/"\n')
     assert se_start._docs_url(se_root) == "https://docs.example.com/se/"
+
+
+# The components at the session's start (start_components, docs/components.md "Required and optional
+# at start"): the tree resolved from what is placed first, a required component missing stopping the
+# start, an optional one a line.
+
+
+@pytest.fixture
+def tree(tmp_path, isolated_git, monkeypatch):
+    """SE's checkout, origin `team/se` on a host its machine's [urls] rewrites to folders, with a fake
+    listing of origin's owner (SE_COMPONENT_LISTING=fake:) that marks no repository yet."""
+    root = fake_git.init(tmp_path / "se")
+    git(root, "remote", "add", "origin", SE_URL)
+    folders = tmp_path / "hosts"
+    local = write(tmp_path / "home" / ".se" / "local.toml",
+                  f'[urls]\n"https://git.example.org/" = "{folders.as_posix()}/"\n')
+    listing = tmp_path / "listing.json"
+
+    class Tree:
+        def __init__(self) -> None:
+            self.root, self.local, self.folders = root, local, folders
+
+        def list(self, owners: dict) -> None:
+            listing.write_text(json.dumps(owners), encoding="utf-8")
+            monkeypatch.setenv(se_modules.LISTING_VARIABLE, f"fake:{listing}")
+
+        def release(self, name: str, version: str) -> str:
+            """`team/<name>.git` with one commit, tagged `v<version>`, marked as a component."""
+            repo = folders / "team" / f"{name}.git"
+            repo.mkdir(parents=True)
+            fake_git.init(repo, "-b", "main")
+            write(repo / "version.txt", f"{version}\n")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", f"{name} {version}")
+            git(repo, "tag", f"v{version}")
+            return git(repo, "rev-parse", "HEAD")
+
+        def components(self, text: str) -> None:
+            write(root / "se.toml", '[project]\nversion = "1.0.0"\n\n' + text)
+
+        def start(self) -> tuple[list[str], bool]:
+            return se_start.start_components(root, local)
+
+    found = Tree()
+    found.list({"git.example.org/team": []})
+    return found
+
+
+def test_a_required_component_missing_stops_the_start_naming_its_path_the_remotes_read_and_the_remedy(tree):
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    lines, stopped = tree.start()
+
+    assert stopped
+    assert lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    assert lines[1] == ("No remote's owner offers a repository obs marked as a component with a release its "
+                        "pin ^4.0 admits (read: origin).")
+    assert "  origin: git.example.org/team marks no repository obs as a component" in lines
+    assert lines[-1] == "Add a remote of an owner that offers it: git remote add <remote> <address>"
+    assert not (tree.root / se_modules.MODULES_DIR / "obs").exists(), "nothing half-placed"
+
+
+def test_a_remote_that_could_not_be_read_is_named_with_gits_message(tree, monkeypatch):
+    monkeypatch.setenv(se_modules.LISTING_VARIABLE, "off")  # the repository beside origin, read directly
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    lines, stopped = tree.start()
+
+    assert stopped and lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    unread = [line for line in lines if line.startswith("  origin: ")]
+    assert len(unread) == 1 and " could not be read: git ls-remote --tags " in unread[0], lines
+    assert unread[0].split(" failed in ", 1)[1].split(": ", 1)[1], "git's own message follows"
+
+
+def test_an_optional_component_missing_is_one_line_and_the_start_goes_on(tree):
+    lib = tree.release("lib", "1.0.0")
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.style]\nversion = "^1"\noptional = true\n\n[components.lib]\nversion = "^1"\n')
+
+    lines, stopped = tree.start()
+
+    assert not stopped
+    assert lines == ["optional component se -> style not found on any remote's owner"]
+    assert git(tree.root / se_modules.MODULES_DIR / "lib", "rev-parse", "HEAD") == lib
+    assert se_modules.read_lock(tree.root) == {"lib": ("1.0.0", lib)}
+
+
+def test_a_start_with_every_component_placed_at_its_locked_commit_asks_no_remote(tree, door_fake, monkeypatch):
+    tree.release("lib", "1.0.0")
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.lib]\nversion = "^1"\n')
+    assert tree.start() == ([], False)
+    assert any("ls-remote" in call for call in door_fake.calls), "the first start found lib on its remote"
+    shutil.rmtree(tree.folders)  # no remote offers anything now
+    monkeypatch.setenv(se_modules.LISTING_VARIABLE, "fake:" + (tree.folders / "gone.json").as_posix())
+    door_fake.calls.clear()
+
+    assert tree.start() == ([], False)
+
+    asked = [call for call in door_fake.calls if {"ls-remote", "fetch", "clone"} & set(call)]
+    assert asked == [], "a placed tree asks no remote"
+
+
+def test_start_components_prints_the_stop_and_exits_1(tree, capsys):
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    code = se_start.main(["--root", str(tree.root), "--local", str(tree.local), "start-components"])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert out.startswith("SE cannot start: the required component obs is missing (se -> obs).\n")
+
+
+def test_start_components_of_a_project_without_components_says_nothing(tmp_path, capsys):
+    write(tmp_path / "plain" / "se.toml", '[project]\nversion = "0.1.0"\n')
+    assert se_start.start_components(tmp_path / "plain", None) == ([], False)
+    assert se_start.start_components(None, None) == ([], False)

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import copilot
+import fake_git
 import se_plugin
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +41,7 @@ def test_the_marketplace_comes_from_ses_home_on_any_host() -> None:
     assert copilot.marketplace_source(other) == {"source": "git", "url": "https://git.example.com/alice/SE.git"}
 
 
-def test_without_a_home_the_install_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_without_a_home_the_install_writes_nothing(fake_git_door, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                   capsys: pytest.CaptureFixture) -> None:
     def no_home():
         raise copilot.InstallError("no origin remote")
@@ -62,7 +63,7 @@ def test_settings_merge_keeps_every_other_key() -> None:
     assert existing["enabledPlugins"] == {"a@b": False}
 
 
-def test_install_writes_the_settings_file_then_leaves_it_alone(tmp_path: Path) -> None:
+def test_install_writes_the_settings_file_then_leaves_it_alone(fake_git_door, tmp_path: Path) -> None:
     synced = []
     assert copilot.install(tmp_path, synced.append) == 0
     path = tmp_path / ".github" / "copilot" / "settings.json"
@@ -75,7 +76,7 @@ def test_install_writes_the_settings_file_then_leaves_it_alone(tmp_path: Path) -
     assert synced == [tmp_path.resolve()] * 2
 
 
-def test_install_refuses_a_settings_file_it_cannot_read_and_writes_nothing(tmp_path: Path,
+def test_install_refuses_a_settings_file_it_cannot_read_and_writes_nothing(fake_git_door, tmp_path: Path,
                                                                            capsys: pytest.CaptureFixture) -> None:
     path = tmp_path / ".github" / "copilot" / "settings.json"
     path.parent.mkdir(parents=True)
@@ -86,16 +87,32 @@ def test_install_refuses_a_settings_file_it_cannot_read_and_writes_nothing(tmp_p
     assert "fix or remove it" in capsys.readouterr().err
 
 
-def test_install_pins_se_as_a_range_and_keeps_an_existing_pin(tmp_path: Path) -> None:
+def test_install_pins_se_as_a_range_and_keeps_an_existing_pin(fake_git_door, tmp_path: Path) -> None:
     (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"', encoding="utf-8")
     assert copilot.install(tmp_path, None) == 0
     data = tomllib.loads((tmp_path / "se.toml").read_text(encoding="utf-8"))
     assert data["project"] == {"version": "1.0.0"}
-    assert data["modules"]["se"] == {"url": "https://github.com/alice/SE.git", "version": copilot.version_range()}
-    pinned = 'url = "https://github.com/alice/SE.git"\nref = "' + "a" * 40 + '"\n'
-    (tmp_path / "se.toml").write_text("[modules.se]\n" + pinned, encoding="utf-8")
+    assert data["components"]["se"] == {"version": copilot.version_range()}
+    pinned = 'ref = "' + "a" * 40 + '"\n'
+    (tmp_path / "se.toml").write_text("[components.se]\n" + pinned, encoding="utf-8")
     assert copilot.install(tmp_path, None) == 0
-    assert (tmp_path / "se.toml").read_text(encoding="utf-8") == "[modules.se]\n" + pinned
+    assert (tmp_path / "se.toml").read_text(encoding="utf-8") == "[components.se]\n" + pinned
+
+
+def test_install_adds_a_remote_of_ses_owner_where_none_reaches_it(fake_git_door, tmp_path: Path, capsys) -> None:
+    repo = fake_git.init(tmp_path / "repo")
+    fake_git.git("-C", str(repo), "remote", "add", "origin", "https://github.com/bob/project.git")
+    assert copilot.install(repo, None) == 0
+    assert "copilot install: remotes: adds se (https://github.com/alice/SE.git)" in capsys.readouterr().out
+    assert copilot.se_home.remotes(repo)[1] == ("se", "https://github.com/alice/SE.git")
+    assert copilot.install(repo, None) == 0
+    assert "remotes: one already reaches SE's owner alice" in capsys.readouterr().out
+
+    other = fake_git.init(tmp_path / "other")
+    fake_git.git("-C", str(other), "remote", "add", "origin", "git@github.com:Alice/other.git")
+    assert copilot.install(other, None) == 0
+    assert "remotes: one already reaches SE's owner alice" in capsys.readouterr().out
+    assert [name for name, _ in copilot.se_home.remotes(other)] == ["origin"]
 
 
 def test_the_range_admits_this_se() -> None:
@@ -104,7 +121,7 @@ def test_the_range_admits_this_se() -> None:
 
 
 @pytest.mark.parametrize("existing", ["", "build/", "build/\n.se\n"])
-def test_install_ignores_se_once(tmp_path: Path, existing: str) -> None:
+def test_install_ignores_se_once(fake_git_door, tmp_path: Path, existing: str) -> None:
     (tmp_path / ".gitignore").write_text(existing, encoding="utf-8")
     for _ in range(2):
         assert copilot.install(tmp_path, None) == 0
@@ -113,12 +130,12 @@ def test_install_ignores_se_once(tmp_path: Path, existing: str) -> None:
     assert lines[:len(existing.splitlines())] == existing.splitlines()
 
 
-def test_a_failed_sync_names_the_command_to_run_again(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_a_failed_sync_names_the_command_to_run_again(fake_git_door, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     assert copilot.install(tmp_path, lambda repo: 3) == 1
     assert "se_modules.py --root" in capsys.readouterr().err
 
 
-def test_ses_own_checkout_installs_nothing(capsys: pytest.CaptureFixture) -> None:
+def test_ses_own_checkout_installs_nothing(fake_git_door, capsys: pytest.CaptureFixture) -> None:
     assert copilot.install(ROOT, None) == 0
     assert "needs nothing installed" in capsys.readouterr().out
 
@@ -135,6 +152,16 @@ def test_the_self_tests_static_checks_pass_on_this_checkout() -> None:
     report = copilot.Report([])
     copilot.check_hooks(ROOT, report)
     assert report.lines and report.lines[0].startswith("passed hooks:"), report.lines
+
+
+def test_the_self_tests_plugin_copy_passes_its_layout_check(tmp_path) -> None:
+    """The copy holds SE's guidance tree, whose check reads kern's page limit: the copy places kern
+    as SE's start places it in an install, so `se_plugin.py check` of the copy passes."""
+    plugin = tmp_path / "plugin" / "se"
+    report = copilot.Report([])
+    copilot.copy_plugin(plugin, report)
+    copilot.check_layout(plugin, report)
+    assert [line.split(":")[0] for line in report.lines] == ["passed kern", "passed layout"], report.lines
 
 
 def test_the_self_test_passes_on_no_session_variable_of_its_own() -> None:

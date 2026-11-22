@@ -69,7 +69,7 @@ Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
 
 **Everything else arrives by itself.** At the first start SE runs
 [scripts/bootstrap.sh](scripts/bootstrap.sh): it installs `uv` into the user's home, Python 3.11 or
-newer through `uv`, and the project's [modules](#modules); in a session it fetches and starts
+newer through `uv`, and the project's [components](#modules); in a session it fetches and starts
 [kern](#kern). It is quiet when nothing is missing.
 
 Claude Code runs it at every session start from the plugin's hooks, Copilot from
@@ -183,6 +183,20 @@ uv run python <se>/scripts/se_start.py refresh
     Claude Code installed are left to `refresh`.
   - Where the session's working tree is SE's own checkout, the core runs that checkout's release
     pins, not the installed SE's, so a session on `main` runs `main`'s.
+- Then, still before the core starts, the hook resolves the tree of the project's components,
+  `se_start.py start-components`
+  ([docs/components.md](docs/components.md#required-and-optional-at-start)).
+  - What is placed comes first: a clone at the commit `se.lock` locks is used without asking any
+    remote, so a start with every component placed works offline; the rest is found by name and
+    placed at its pin ([Modules](#modules)).
+  - A required component missing anywhere in the tree stops the start. The greeting shows one
+    message, opening `SE cannot start:`, with its path from the root (`se -> obs`), the remotes
+    read, each with why it offered nothing (Git's message where it could not be read), and the
+    remedy, a remote of an owner that offers it.
+  - Nothing after the stop runs: no commit identity, hooks or core. Any other failure to resolve
+    the tree stops it the same way, such as a found release whose tag points elsewhere than
+    `se.lock` records.
+  - An optional component missing is one line naming its path, and the start goes on.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`
@@ -243,11 +257,11 @@ uv run python <se>/scripts/se_start.py refresh
 - What fails stays at the version in use, with the cause and the command to try again. An se
   checkout with local changes or its own commits is a development checkout and is left alone. Run
   twice, the second `refresh` moves nothing.
-- An installed SE older than the project's se: where the project's `se.toml` uses a key the
-  installed SE does not know, the start's modules step fails, and the greeting's update check
-  names the same cause.
-  - Such a key is `go` of `[modules.kern]`, SE's pin of kern since kern left SE's tree: `se
-    bootstrap: error: module kern: unknown key(s) go`.
+- An installed SE older than the project's se: where the project's `se.toml` uses a key or
+  table the installed SE does not know, the start's modules step fails or places nothing, and the
+  greeting's update check names the same cause.
+  - Such a table is `[components]`, which replaced `[modules]` in se 6: an SE before 6 reads no
+    component of it, and an SE 6 refuses a `[modules]` table, naming the rename.
   - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
     new session, whose start moves it.
 
@@ -258,7 +272,7 @@ released as `se-v<version>` that `components/release.toml` owns. `scripts/se_mod
 is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
 no Go components. The plugin's hooks start the binary and post every session event to it:
 
-- **kern at its pin:** the `se` binary is built on the kern `se.toml` `[modules.kern]` pins
+- **kern at its pin:** the `se` binary is built on the kern `se.toml` `[components.kern]` pins
   ([Modules](#modules)), its clone in `.se/modules/kern`.
   - Before the core starts, the start syncs the installed SE's kern where that clone is missing
     or not at the commit `se.lock` locks, both read from the files alone, so an SE at its pin
@@ -314,7 +328,7 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 - **Declared:** each command group of a script is one component, `components/<group>/`:
   `work_tickets.py`'s tickets, issues, delivery and integration, `review.py`'s review, `retro.py`'s
   retro, `overhaul.py`'s overhaul, render, the
-  pages `timeline.py` and `deck.py` build, and `se.py`'s scaffold.
+  pages `timeline.py` and `deck.py` build, `se.py`'s scaffold and `se_guidance.py`'s guidance.
   - Its `component.toml` is what `work_tickets.py docs` writes from the script's argparse parser
     (for `work_tickets.py`, built from its command registry), and its `__init__.py` answers each
     declared command with the script's own code.
@@ -416,7 +430,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 | `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
-| `templates` | `list`, `draft`, `check` | `components/templates` |
+| `templates` | `list`, `draft`, `check`, `fill` | `components/templates` |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
@@ -484,7 +498,7 @@ se's documentation is one HTML file, published at the GitHub Pages site of SE's 
 origin; a project that publishes elsewhere sets `docs_url` in `se.toml` `[project]`.
 
 `docs.md` is its manifest: it lists se's notes as chapters and restates none of them. The obs
-module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
+component (`[components.obs]` in `se.toml`, found beside SE's repository) builds it:
 
 ```sh
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
@@ -532,43 +546,81 @@ repository the workflow's token cannot read shows as a named gap instead of fail
 
 ## Modules
 
-A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
-pinned to commits or to semantic version ranges, from any Git host. `scripts/se_modules.py`
-implements this section; its invocation is in [Commands](#commands).
+A repository pulls the parts it builds with (se itself, kern, obs, styles, other repositories) as
+**components**, each found by its name on the checkout's remotes and pinned to a commit or a
+semantic version range ([docs/components.md](docs/components.md) owns the design).
+`scripts/se_modules.py` implements this section; its invocation is in [Commands](#commands).
 
 ### `se.toml`
 
-The consuming repository declares its modules in `se.toml` at its root:
+The host, the repository that uses them, lists its components in `se.toml` at its root, by name,
+under `[components]` (se 6 renamed it from `[modules]`, which is refused naming the rename):
 
 ```toml
-[modules.obs]
-url = "https://github.com/<owner>/obs.git"   # public form of the clone URL
+[components.obs]
 ref = "<40-hex commit SHA>"                  # the pin
-path = "skills"                              # optional: the part of the module that is used
+path = "skills"                              # optional: the part of the component that is used
 
-[modules.style]
-url = "https://github.com/<owner>/style.git"
-version = "^1.4"                             # in place of ref: a semver range of the module's tags
+[components.style]
+version = "^1.4"                             # in place of ref: a semver range of its release tags
+optional = true                              # the host works without it; absent: required
 
-[modules.kern]
-url = "../kern.git"
+[components.kern]
 go = "components/go.mod"                     # in place of ref: the version that go.mod requires
 ```
 
 | Key | Meaning |
 |---|---|
-| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
-| `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
-| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref`, `version` and `go`. |
-| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version without its tag, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
-| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, and each `go` pin's tag, with its version and commit; `sync` and `update` write it and the repository commits it. |
-| `path` | optional relative directory inside the module; without it the whole module is used. |
-| Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
-| The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
+| `ref` | the pin, a full commit SHA. Any commit on the component's `main` can be pinned, not only releases; `update` moves it. |
+| `version` | in place of `ref`, a semantic version range of the component's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a component releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). An entry pins one of `ref`, `version` and `go`. |
+| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version no owner tags, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
+| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. |
+| `path` | optional relative directory inside the component; without it the whole component is used. |
+| `url` | refused: an entry names no address, since a component is found by its name. A machine that needs another place says so in the machine-local file below. |
+| `se.lock` | next to `se.toml`, it records, as `[components.<name>]`, the release each `version` range and `go` pin of the tree chose, with its version and commit; `sync` and `update` write it and the repository commits it. |
+| Component names | the name of the component's repository, compared without case: 1 to 32 letters, digits and `-`, starting with a letter or digit. Other keys are errors. |
+| The component `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
 
-A common repository declares only modules that are public. Work-only modules on private hosts are
-declared the same way, in a work repository that consumes the common ones; a common repository never
+A common repository lists only components that are public. Work-only components on private hosts
+are listed the same way, in a work repository that uses the common ones; a common repository never
 names them.
+
+#### Finding a component
+
+`sync` and `update` find each name as [docs/components.md "Finding a component"](docs/components.md#finding-a-component)
+says, reading only the checkout's own Git configuration:
+
+- The remotes: `origin` first, then the others in the order Git lists them; each remote's host
+  and owner come from its address (`scripts/se_home.py`); a local path offers nothing.
+- The mark: on `github.com` the owner's repositories with the topic `component` are listed once
+  per run, with the login of `GH_TOKEN` or `GITHUB_TOKEN` where one is set. The repository named
+  like the component is reached as its remote is, with its name in place of the remote's.
+- An owner the host cannot list is one line, and finding goes on with the next owner. On a host
+  SE lists nothing of, or where the listing cannot be read, the repository beside the remote is
+  read directly, its mark unchecked, in one line. `SE_COMPONENT_LISTING=off` does so everywhere.
+- The releases: its `v` tags, read without fetching objects (`git ls-remote --tags`); the first
+  owner that offers a release the pin admits wins, and its highest admitted release is taken.
+
+A clone already at its locked commit is used without asking any remote. A found release whose tag
+points to another commit than `se.lock` records is refused, naming both commits and
+`se_modules.py update <name>`, so a stand-in never replaces a locked component silently.
+
+Another owner's components join by adding any one of that owner's repositories as a remote; a fork
+named like a component under such an owner stands in for it where the pin admits its release.
+
+#### The tree
+
+Resolving is recursive: each placed component's own `se.toml` `[components]`, read from its
+release (a local checkout's working tree), is resolved the same way, and every component of the
+tree is placed in the root's `.se/modules/<name>`. A release whose `se.toml` lists no
+`[components]` lists none.
+
+- One version per name: a name the tree reaches twice is one component, and each host's pin must
+  admit its release; where they admit a common one the newest is taken, else `sync` fails naming
+  both paths and both pins.
+- A name already on the path is that component: an entry that names a host above it on the path,
+  the root included, is that host itself, and its pin is checked against that host's version, not
+  resolved again.
 
 ### Project settings
 
@@ -704,6 +756,8 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates. A repository whose host has no
    runners accepts the integrator's status instead ([Landing without CI](#landing-without-ci)).
+   - The run it waits for and names may be an edit's, which took its suite's result from an
+     earlier run of exactly that tree and names it ([Edits reuse the suite](#edits-reuse-the-suite)).
 4. It lands that head, once origin's integration branch is still the tested base; where it
    moved while it waited, it merges nothing: integrate again.
    - A squash landing squash-merges at exactly that head with the merge's message as the commit
@@ -1101,8 +1155,8 @@ What it judges:
     `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
   - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
     sub-agent end and says why.
-- Where se.toml `[templates] files` is `check`, it also refuses in any checkout it judges, worker or
-  not, while a changed file a template claims breaks it ([Templates](#templates)).
+- It also refuses in any checkout it judges, worker or not, while a changed file a template claims
+  breaks it ([Templates](#templates)).
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
@@ -1524,6 +1578,31 @@ until GitHub fails it after 24 hours, and `check` with it.
   re-run; a second attempt, or a run that ended any other way, stays as it ended.
 - **Tested** against a fake of the jobs API and a fake clock (`tests/test_ci_queue.py`); GitHub's
   own queue, cancel and re-run are not reproducible there.
+
+### Edits reuse the suite
+
+A pull request's description and labels change many times without a new commit: the worker
+corrects its field report, the integrator moves labels. Each change starts `check` again, on a tree
+already checked, so such a run checks again only what it can change and takes the rest from an
+earlier run ([scripts/ci_reuse.py](scripts/ci_reuse.py)).
+
+- **What runs again.** On `edited`, `labeled` and `unlabeled` the gate of the commits, the issue
+  rule, the field report and every other cheap step run as always.
+- **What is taken.** The suite, the Go checks and kern-platforms: the job `trust` reads the runs of
+  `check` for the same head, newest first, and takes the first result of the same reuse key.
+  - The key is the tree checked out, the merge of the head into its base, so a base that moved is
+    another tree; and the Component kinds the description gives the suite's release guard.
+  - Each run names its decision step with its key, `Reuse an earlier result of this tree (reuse
+    key <key>)`, which a later run reads in the jobs API; a run that took a result or stopped
+    before the suite holds none, and the run before it is read.
+- **A failure stays.** A failed suite, Go check or leg of that tree keeps `check` failed, as an
+  error naming the run it came from; a pass is a notice naming it.
+- **Everything runs** where no completed run of the head holds a result for the key, where the
+  newest completed one was cancelled, on a re-run attempt (re-run all jobs to run them again), and
+  where the runs cannot be read. Every other event runs everything, as always.
+- **Tested** against a fake of the runs and jobs API and through a local GitHub
+  (`tests/test_ci_reuse.py`), with the steps of `check` that act on the decision run as the runner
+  runs them.
 ### Metrics
 
 Every run of a `work_tickets.py` or `se_start.py` subcommand appends one JSON line to
@@ -1596,7 +1675,7 @@ commit pushed to a configured public mirror. If it is omitted, `integrate` uses 
 `identity`, else the selected checkout's configured Git identity. When it is set, `sync` writes it into the checkout's git
 config in place of the project's `identity` ([Project settings](#project-settings)).
 
-Each machine may adapt modules without touching tracked files. se only reads this file; it never
+Each machine may adapt components without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
 
 The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]`, `[urls]` and `[hooks]`;
@@ -1606,7 +1685,7 @@ owned by the other.
 
 ```toml
 [paths]
-obs = "~/src/obs"                     # use this checkout of module obs if the directory exists
+obs = "~/src/obs"                     # use this checkout of component obs if the directory exists
 
 [urls]
 "https://github.com/" = "https://mirror.example.com/github/"   # prefix rewrite, longest wins
@@ -1614,9 +1693,9 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 
 | Setting | Meaning |
 |---|---|
-| `[paths]` | a local checkout per module name. If the directory exists, the module comes from it as it is (working tree, any commit, no git step) and is never updated. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
-| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the module's `version` range admits it. A malformed version, or none where the module pins a range, is an error naming that file. |
-| `[urls]` | prefix rewrites applied to `url` before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
+| `[paths]` | a local checkout per component name. If the directory exists, the component comes from it as it is (working tree, any commit, no git step), is never updated, and wins over finding; its own `se.toml` `[components]` is resolved from its working tree. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
+| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the component's `version` range admits it. A malformed version, or none where the entry pins a range, is an error naming that file. |
+| `[urls]` | prefix rewrites applied to each address the finder reaches a component at, before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
 | `[hooks] core = "off"` | or `SE_HOOK_CORE=off` in the environment, which answers first: SE's session hooks then start no core and post to none, and nothing is uninstalled. The start still refreshes, syncs and greets, and the Stop check still answers. |
 | `SE_TEMPLATES_GATE=off` | in the environment: SE's template gate judges no GitHub write on this machine, whatever se.toml `[templates] gate` says; unset, it follows se.toml ([Templates](#templates)). |
 | `[paths] se = "<the installed SE's folder>"` | this machine's SE stays at its version, because the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)). |
@@ -1646,16 +1725,16 @@ uv run python <se>/scripts/se_modules.py path <name>
 
 | Command | What it does |
 |---|---|
-| `sync` | a module with an existing local path is used from there; any other is cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Consuming repositories ignore `.se/`. |
-| `status` | one line per module with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
-| `update` | fetches the module (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
-| `path` | prints the directory a module is used from (its `path` included), for tools that load it. |
+| `sync` | resolves the tree ([The tree](#the-tree)): a component with an existing local path is used from there; any other is found by name ([Finding a component](#finding-a-component)), cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Hosts ignore `.se/`. |
+| `status` | one line per component of the root's list with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
+| `update` | finds the component again, its lock aside, and fetches it (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
+| `path` | prints the directory a component is used from (its `path` included), for tools that load it. |
 | `--root` and `--local` | `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>` reads another machine-local file than `~/.se/local.toml`. |
 
 - `status`'s drift is:
   - for a local path, the commits ahead of and behind the pin, uncommitted changes, or a pin the
     checkout does not have yet;
-  - for a pinned module, whether the clone is at the pin and, for a `version` range, a newer
+  - for a pinned component, whether the clone is at the pin and, for a `version` range, a newer
     matching tag the clone knows ("run update").
 - `update`:
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
@@ -1682,7 +1761,7 @@ uv run python <se>/scripts/se_workflows.py check
   file whose first line names its source path, the pin and SE's place.
 - `kern-at-pin` checks kern out at the commit a folder's `se.lock` locks into its
   `.se/modules/kern`, refusing a lock whose version is not the `require kern` of the `go.mod` that
-  the folder's `se.toml` `[modules.kern]` `go` names, naming both lines. A folder whose `se.lock`
+  the folder's `se.toml` `[components.kern]` `go` names, naming both lines. A folder whose `se.lock`
   locks no kern and that carries `kern/go.mod` is left as it is; one with neither is refused,
   naming `se_modules.py sync kern`.
   - `kern-battery.yml` calls it before its vet and `kern-release.yml` before its build, so kern is
@@ -1690,11 +1769,11 @@ uv run python <se>/scripts/se_workflows.py check
     where a project holds either without it.
 - SE's own workflows beside them are not shipped: `check.yml`, `docs.yml` and the templates backstop,
   `templates.yml`, run on SE's own events ([Templates](#templates)).
-- The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
+- The pin is `[components.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
   application `se new app` made, or `--ref`.
-- SE's place, how CI reaches it: a module URL `../<name>.git` is `${{ github.repository_owner
-  }}/<name>`, the repository beside the project on its host, so the copies name no owner; an
-  absolute URL names its own. SE is public, so the run's token reads it.
+- SE's place, how CI reaches it: where `sync` found SE, its clone's origin. One under the
+  project's own owner on its host is `${{ github.repository_owner }}/<name>`, so the copies name no
+  owner; any other names its own `<owner>/<name>`. SE is public, so the run's token reads it.
 - Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
   `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
@@ -1750,7 +1829,7 @@ python3 <se>/scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$
 in the new or empty folder its `--path` names: kern's template at SE's kern pin, the name filled in,
 and git's first commit on `main` as the [project identity](#project-settings).
 
-- **The pin:** the version SE's `[modules.kern]` reads from `components/go.mod` and its tag
+- **The pin:** the version SE's `[components.kern]` reads from `components/go.mod` and its tag
   `v<version>`, which the pinned clone's `release.toml` names, read by `se_modules.py`'s
   `kern_pin`, and the commit SE's `se.lock` locks for it. The template comes from that clone at the
   tag.
@@ -1759,17 +1838,18 @@ and git's first commit on `main` as the [project identity](#project-settings).
 - **kern beside it:** kern's module path names no host, so it cannot be fetched; the application
   pins it as SE does and carries no copy of it, only the template.
   - Its `go.mod` requires `kern v<version>` and replaces the module by `./.se/modules/kern`; its
-    `se.toml` keeps the template's `[modules.kern]` (`url = "../kern.git"`, `go = true`); its
     `se.lock` locks the commit SE's does; its `.gitignore` ignores `.se/modules/`.
+  - Its `se.toml` pins kern as `[components.kern]` with `go = true`; a template that still writes
+    `[modules.kern]` with its `url` gets that table in its place.
   - `se new app` copies SE's clone there at that commit, so the application vets and tests before
-    it has an origin, and nothing under `.se/` is in its first commit. Once its origin exists,
-    `se_modules.py sync kern` there reaches kern beside it (`../kern.git`) and points the clone's
-    origin at it.
+    it has an origin, and nothing under `.se/` is in its first commit. `se_modules.py sync kern`
+    there keeps that clone while it holds the locked commit; once the pin moves, it finds kern by
+    its name under the owners of the application's remotes ([Modules](#modules)).
   - Its CI places kern at that commit with the action `kern-at-pin` before the battery vets and
     tests it, and before its release builds ([Workflows](#workflows)).
 - **What it holds:** the template's (kern's template README): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery (its copy from the SE
-  that made it, [Workflows](#workflows)), the `[tests]` budget and the `[modules.kern]` pin.
+  that made it, [Workflows](#workflows)), the `[tests]` budget and the `[components.kern]` pin.
 - **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
   components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
   release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable
@@ -1880,8 +1960,8 @@ gated push and the pull request, and the Stop hook's check.
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
 | `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [templates] files is check, se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
-| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Where se.toml [templates] files is check it also refuses, in any checkout, while a changed file a template claims breaks it (se_templates.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. It also refuses, in any checkout, while a changed file a template claims breaks it (se_templates.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin, then move the se clone (.se/modules/se) of a repository that pins se to the pin the merged se.lock names |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
 
@@ -1974,8 +2054,9 @@ checkout.
 #### Templates
 
 `components/templates`: SE's templates: list names them, draft gives a template's fields, their
-instructions and their shape, and check finds everything SE's filing commands would refuse in a
-text, or gives the Markdown to file.
+instructions and their shape, check finds everything SE's filing commands would refuse in a text, or
+gives the Markdown to file, and fill checks an agent's fields against the raw input and gives the
+document.
 
 | Command | Usage | What it does |
 |---|---|---|
@@ -1983,8 +2064,21 @@ text, or gives the Markdown to file.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--tree] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--files {off,check,write}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
+
+#### Guidance
+
+`components/guidance`: SE's guidance: collect resolves the guidance trees of the project and its
+modules for a template or a set of tags, general before specific; project writes the tool files the
+notes implement; and check finds what docs/guidance.md refuses in them.
+
+| Command | Usage | What it does |
+|---|---|---|
+| `se_guidance.py check` | `se_guidance.py check [--root ROOT]` | find what docs/guidance.md refuses in the guidance trees |
+| `se_guidance.py collect` | `se_guidance.py collect (--template TEMPLATE \| --tags TAGS) [--json] [--root ROOT]` | print the guidance a template or a set of tags gets, general first |
+| `se_guidance.py project` | `se_guidance.py project [--root ROOT]` | write each tool file the notes implement, its generated part from them |
 <!-- generated by `work_tickets.py docs`: end -->
 
 `scripts/review.py` holds the review commands, which load `work_tickets.py` for its GitHub door.
@@ -2197,8 +2291,9 @@ and its neighbours. It lists:
 document and the packages that build it. This section holds the commands of the engine as it runs
 today.
 
-One TOML file per template under `templates/` is read by one engine, `scripts/templates.py`, whose
-docstring owns the file format, the field kinds, the selection order, the two severities and the
+One Markdown note per template under `templates/`, its front matter the fields and its body the
+skeleton with an instruction per section, is read by one engine, `scripts/templates.py`, whose
+docstring owns the note's format, the field kinds, the selection order, the two severities and the
 marker a rendered document carries, `<!-- se:template <repository>/<name> <version> <digest> -->`.
 
 The templates own the shape of issues; the GitHub issue templates in `.github/ISSUE_TEMPLATE/`
@@ -2210,18 +2305,29 @@ both.
 
 | Template | What it shapes |
 |---|---|
-| `templates/decision.toml` | A decision note: the situation and the problem before the options' pugh fence. |
-| `templates/field-report.toml` | A work pull request's description: the field report between its markers. |
-| `templates/housekeeping.toml` | The owner's housekeeping pull request: no field report, no field required. |
-| `templates/landing.toml` | A landing pull request: it names the work issue, the work pull request and its report. |
-| `templates/merge-message.toml` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
-| `templates/overhaul.toml` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
-| `templates/retro.toml` | A retro's report or draft: its judged block, under its marker. |
-| `templates/review.toml` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
-| `templates/routed.toml` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/decision.md` | A decision note: the situation, the problem and what others do, then the options' pugh fence. |
+| `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
+| `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
+| `templates/overhaul.md` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
+| `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
+| `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
+| `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/retro.md` | A retro's report or draft: its judged block, under its marker. |
+| `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
+| `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
-| `templates/ticket.toml` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
-| `templates/work.toml` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
+| `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
+| `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
+
+Templates nest ([docs/templates.md "Nesting"](docs/templates.md#nesting)):
+
+- a field `node: <template>@<version>` is a part another template checks, such as the decision's
+  options, the `pugh` block;
+- a field `entries: <template>@<version>` is a register whose every entry that template checks,
+  such as the RAID register's raid-entry;
+- a finding of a part names its field, and of an entry also the entry's heading.
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the
@@ -2234,37 +2340,54 @@ template and `templates.py list` names every template with its actions. They rea
 where it holds them, else the working tree (`--tree` always).
 
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
-choices) and the template's JSON Schema, which a model's strict tool use takes as it stands.
+choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
+`templates.py schema <template>` prints that schema alone, generated from the template.
 
-A `file.write` template claims files by its `[applies] paths` globs, such as a milestone's steps.
+A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
-line names or the conditions pick, refuses one none picks and leaves unclaimed files free; the
-front matter and `#` title stay as they are.
+line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
+
+The front matter and `#` title stay as they are, but for the `template`, `version` and `overlay`
+lines the front matter records its template by.
+
+A document is checked against the template version its marker or front matter records: another
+minor or patch version warns, another major version refuses, naming both versions and the fill
+that writes it again ([docs/templates.md "The document"](docs/templates.md#the-document)).
 
 `--templates <folder>` reads the templates from another folder.
 
-Where se.toml `[templates] files` is `check` or `write` (default `off`), a claimed file that breaks
-its template cannot end a turn, be pushed or pass CI; each refusal names the file, the template and each
-finding.
+A claimed file is written only by its fill
+([docs/templates.md "Fill"](docs/templates.md#fill)), and one that breaks its template cannot end a
+turn, be pushed or pass CI; each refusal names the file, the template and each finding.
 
 - `scripts/se_templates.py check-files` with `--changed` and a ref checks every claimed file changed
   since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
 - `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
-  `check` job against the pull request's base. It reads `[templates] files` as `enforce` is read.
-- Under Copilot the Stop hook only advises. SE's own se.toml leaves it off: no template of SE's claims
-  a path yet.
-- `files = "write"` does all `check` does and holds the template at the write too: SE's template gate
-  denies a Write, Edit or MultiEdit of a claimed file whose result breaks its template, before it runs,
-  naming the template and each finding. An Edit is judged on the whole file it would leave, never on
-  its fragment; `push_files` and `create_or_update_file` are judged per path.
-  - SE's start writes the switch into `.se/.runtime/templates-files`, so `scripts/se_hook.sh` picks
-    the file tools with builtins only where it is on; a change takes effect at the next session's
-    start. `scripts/se_templates.py`'s docstring (The file tools) owns the rest.
+  `check` job against the pull request's base. Where no template claims a path, it checks nothing.
+- Under Copilot the Stop hook only advises. No template of SE's claims a path yet.
+- SE's template gate denies every Write, Edit or MultiEdit of a claimed file before it runs, and
+  each path of `push_files` and `create_or_update_file`, whatever it would leave. It names the
+  template and the fill, `templates.py fill <template> --path <file>`, which writes the file itself.
+  - SE's start writes `.se/.runtime/templates-files` where a template claims a path, so
+    `scripts/se_hook.sh` picks the file tools with builtins only there; a template added during a
+    session is guarded from the next session's start. `scripts/se_templates.py`'s docstring (The
+    file tools) owns the rest.
 
 An agent asks for a template through the MCP door's tool `templates`, `scripts/se_templates.py`: `list`
 names the templates, `draft <template>` gives `draft --json`'s answer, and `check` finds all the filing
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
 Markdown to file. It only reads; its first line is `passes` or `refused: <n> findings`.
+
+`fill` is one step from raw input to document ([docs/templates.md "Fill"](docs/templates.md#fill)):
+it takes the template, the prompt, the raw input and the agent's fields.
+
+- Without fields it answers the template's instructions, its guidance and the empty draft.
+- With them it checks the document against the template and the raw input. Every field takes
+  `Not in input` where the input does not say, and a field with `quote: true` refuses a quote the
+  raw input does not hold word for word.
+- `templates.py fill` writes a claimed file to its `--path`, or the document to `--out` or stdout;
+  a refusal names every finding and writes nothing. The tool's `fill` answers as `check --render`
+  and writes nothing; filing stays the filing commands' and the GitHub tools'.
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

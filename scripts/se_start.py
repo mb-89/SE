@@ -4,8 +4,9 @@
 starts the check in the background when the cache is stale; `check` runs that check, and where gh
 is signed in also counts the work landed since the last retro and runs the fleet check; `refresh`
 moves every module that is due within its range, and SE itself, into place; `start-refresh` moves
-an installed SE that is a git checkout to its latest release at the session's start. What each
-command does and where SE runs it is the README section "Start and refresh".
+an installed SE that is a git checkout to its latest release at the session's start;
+`start-components` resolves the project's components there, stopping the start where a required one
+is missing. What each command does and where SE runs it is the README section "Start and refresh".
 """
 
 from __future__ import annotations
@@ -276,6 +277,15 @@ def _se_item(se_root: Path, version: Version | None, local) -> Item:
                 "record, not checked")
 
 
+def _found_at(clone: Path) -> str | None:
+    """Where a placed component was found, its clone's origin; None where it is not placed, as the
+    start reads no remote to find it (docs/components.md "Required and optional at start")."""
+    if not (clone / ".git").exists():
+        return None
+    result = git_door.run("remote", "get-url", "origin", root=clone)
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
 def _module_item(root: Path, module, local, locked) -> Item:
     source = se_modules.resolve(root, module, local)
     if source.kind == "local":
@@ -284,7 +294,7 @@ def _module_item(root: Path, module, local, locked) -> Item:
         except ModuleError:
             version = None
         return Item(module.name, "local", version, None, module.version, note=f"local path {source.checkout}")
-    url = local.rewrite(module.url)
+    url = _found_at(source.checkout)
     if module.version is not None:
         text = locked.get(module.name, ("", ""))[0]
         return Item(module.name, "range", se_modules.parse_version(text), url, module.version,
@@ -673,7 +683,7 @@ def take_outside(state: State, root: Path | None, se_root: Path) -> str:
     if item.kind == "se":
         return f"to take it, install SE {_v(outside)} again as README \"Install\" says"
     where = (root / se_modules.MANIFEST).as_posix() if root else se_modules.MANIFEST
-    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [modules.{item.name}] of {where}, "
+    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [components.{item.name}] of {where}, "
             f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
 
 
@@ -1034,10 +1044,9 @@ def refresh_copy(se_root: Path, item: Item, due: Version) -> str:
 
 def refresh_module(root: Path, local_config: Path | None, name: str, version: Version) -> str:
     """Lock a range module at tag v<version> after its checkout passed in a trial worktree."""
-    local = se_modules.load_local(local_config or se_modules.default_local_config())
     module = next(m for m in se_modules.load_manifest(root) if m.name == name)
-    source = se_modules.pinned_source(root, module, local)
-    clone = source.checkout
+    clone = root / se_modules.MODULES_DIR / name
+    source = se_modules.Source(module, "pinned", clone, _found_at(clone) or "")
     if se_modules.is_populated(clone) and se_modules.is_dirty(clone):
         raise RefreshError(f"{clone} has local changes; commit them in a local path or discard them")
     se_modules.ensure_clone(source)
@@ -1055,7 +1064,7 @@ def refresh_module(root: Path, local_config: Path | None, name: str, version: Ve
     previous = _git(clone, "rev-parse", "HEAD") if se_modules.is_populated(clone) else None
     _git(clone, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", sha)
     try:
-        se_modules.write_lock(root, name, _v(version), sha)
+        se_modules.write_lock(root, {**se_modules.read_lock(root), name: (_v(version), sha)})
     except (OSError, ModuleError):
         if previous:
             se_modules.git_ok(clone, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", previous)
@@ -1210,6 +1219,31 @@ def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
     return f"SE: {_v(version)} -> {_v(due)}, refreshed at this start ({se_root.as_posix()})", True
 
 
+#: The first words of the start's stop (docs/components.md "Required and optional at start").
+STOP = "SE cannot start"
+
+
+def start_components(root: Path | None, local_config: Path | None,
+                     finder: "se_modules.Finder | None" = None) -> tuple[list[str], bool]:
+    """At the session's start, before the core starts: resolve the tree of the project's
+    `[components]` and theirs, as docs/components.md "Required and optional at start" says. What is
+    placed comes first: a clone at its locked commit is used without asking any remote, so a start
+    with every component placed stays within its budget and works offline; the rest is found by
+    name and placed (`se_modules.place_tree`). The lines to show, and whether the start stops: a
+    required component missing anywhere in the tree, or any other failure to resolve it (a lock
+    the found release disagrees with, a bad list), is one message opening with `STOP`; an optional
+    component missing is one line, and the start goes on. A project without an se.toml says
+    nothing. It fails closed: SE works with nothing half-started."""
+    if root is None or not (root / se_modules.MANIFEST).is_file():
+        return [], False
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+        _, said = se_modules.place_tree(root, local, finder=finder)
+    except ModuleError as error:
+        return f"{STOP}: {error}".splitlines(), True
+    return said, False
+
+
 def root_line(se_root: Path) -> str:
     """The one named value that tells a session where SE is: `<se>` in SE's skills and agents."""
     return f"{ROOT_NAME}: {se_root}"
@@ -1292,6 +1326,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
     commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
                         "is a git checkout to its latest release; exit code 0 where it moved")
+    commands.add_parser("start-components", help="bootstrap.sh at the session's start, before the core: resolve "
+                        "the project's components from what is placed; exit code 1 where a required one is "
+                        "missing, which stops the start")
     commands.add_parser("start-hooks", help="bootstrap.sh at the session's start: point an unset core.hooksPath "
                         "of the project at se's hooks, as setup.sh does; a set one stays")
     stopped_parser = commands.add_parser("stopped-hooks", help="setup.sh and setup.ps1, before they set "
@@ -1325,6 +1362,14 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         if line:
             print(line)
         return 0 if moved else 1
+    if args.command == "start-components":
+        try:
+            lines, stopped = start_components(root, args.local)
+        except Exception as error:  # noqa: BLE001 - the start fails closed, whatever went wrong
+            lines, stopped = [f"{STOP}: resolving the components failed: {type(error).__name__}: {error}"], True
+        if lines:
+            print("\n".join(lines))
+        return 1 if stopped else 0
     if args.command == "start-hooks":
         try:
             line = start_hooks(SE_ROOT, root, args.local)

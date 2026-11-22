@@ -42,8 +42,9 @@ A template is one Markdown note in a template repository, `templates/<name>.md`:
 - A template whose document is data only (an interface) has an empty body; its fields are the
   whole template.
 
-The field kinds, the rules with their severities, `extends` and the selection order carry over
-from the TOML engine of today as they are; the engine's docstring keeps owning them.
+The field kinds, the rules with their severities, `extends` and the selection order carried over
+from the TOML files the notes replaced, as they were; the engine's docstring owns them, and the
+front matter's YAML subset with them.
 
 ## The schema
 
@@ -98,10 +99,18 @@ The check of a document checks each node by its own template, so a document is v
 every node in it is. A node records no provenance of its own: the document's names the template,
 which names its nodes' templates at their versions.
 
+A field names its node `node: <template>@<version>`, and a register its entries `entries:
+<template>@<version>`; a block that is a fence, such as the Pugh block, takes the fence's word
+too. The docstring of `scripts/templates.py` (Nesting) owns the rest. SE ships the RAID register
+and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
+
 ## Fill
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
-door's tool `templates`.
+door's tool `templates`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
+rule `quote`) and `scripts/se_templates.py` (its `fill`) own what is built. Until kern's door
+offers a tool that writes, the tool's `fill` answers the checked document and writes nothing, and
+neither files through the tracker: the agent files what it answers.
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against
@@ -122,8 +131,8 @@ Fields stay honest about their source:
 
 The gate refuses free writes. A template that claims paths owns them: a write, an edit or a
 write through the tracker's tools of a claimed path that does not come from the fill is refused before it runs,
-naming the template and the fill to use. The gate is on wherever a template claims a path; the
-se.toml switch that keeps it off today goes.
+naming the template and the fill to use. The gate is on wherever a template claims a path, with
+no se.toml switch to keep it off.
 
 ## Template repositories
 
@@ -167,28 +176,33 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twelve TOML templates, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's fifteen template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
-### SE's TOML templates
+### SE's templates
 
-| File today | Template | Kind | Owner |
+SE's fourteen templates are notes; the term list stays a TOML list until the guidance packages land.
+
+| File | Template | Kind | Owner |
 |---|---|---|---|
-| `templates/ticket.toml` | `ticket` | document | SE |
-| `templates/work.toml` | `work`, `extends` ticket | document | SE |
-| `templates/decision.toml` | `decision`, whose options node is the `pugh` block | document | SE |
-| `templates/field-report.toml` | `field-report` | document | SE |
-| `templates/landing.toml` | `landing` | document | SE |
-| `templates/housekeeping.toml` | `housekeeping` | document | SE |
-| `templates/merge-message.toml` | `merge-message` | interface | SE |
-| `templates/review.toml` | `review`: prose, then its data node | document | SE |
-| `templates/retro.toml` | `retro`: its judged node | document | SE |
-| `templates/overhaul.toml` | `overhaul`: its judged node | document | SE |
-| `templates/routed.toml` | `routed`: the routing section of an outside issue | block | SE |
+| `templates/ticket.md` | `ticket` | document | SE |
+| `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
+| `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
+| `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
+| `templates/raid-entry.md` | `raid-entry` | entry | SE |
+| `templates/field-report.md` | `field-report` | document | SE |
+| `templates/landing.md` | `landing` | document | SE |
+| `templates/housekeeping.md` | `housekeeping` | document | SE |
+| `templates/merge-message.md` | `merge-message` | interface | SE |
+| `templates/review.md` | `review`: prose, then its data node | document | SE |
+| `templates/retro.md` | `retro`: its judged node | document | SE |
+| `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
+| `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
-A TOML template that is an adapter today (`checker` and `[adapter]`) stays one: its template names the
-check its code already owns, and the move only renames it.
+An adapter (`checker` and `adapter`) stays one: its template names the check its code already
+owns.
 
 SE's free texts become interface templates: the worker's delivery notice, an escalation, the
 handover, a design note's outline.

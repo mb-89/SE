@@ -9,7 +9,7 @@ import json
 import re
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -118,14 +118,17 @@ uv run pytest
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
 ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
-            "overhaul", "decision")
+            "overhaul", "pugh")
+#: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
+NESTING = ("decision", "raid-register", "raid-entry")
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
-    assert set(catalog) == {*ISSUE_TEMPLATES, *ADAPTERS}
+    assert set(catalog) == set(EVERY)
     assert all(catalog[name].actions == templates.ISSUE_ACTIONS for name in ISSUE_TEMPLATES)
     assert all(catalog[name].is_adapter for name in ADAPTERS)
-    assert not any(catalog[name].is_adapter for name in ISSUE_TEMPLATES)
+    assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING))
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == templates.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -135,26 +138,36 @@ def test_every_template_loads_with_its_actions_and_the_terms(catalog):
 
 def write_template(root: Path, name: str, text: str) -> None:
     (root / "templates").mkdir(exist_ok=True)
-    (root / "templates" / f"{name}.toml").write_text(text, encoding="utf-8")
+    (root / "templates" / f"{name}.md").write_text(text, encoding="utf-8")
 
 
-MINIMAL = """name = "{name}"
-reader = "owner"
-says = "A template."
-{extra}
-[[fields]]
-name = "goal"
-kind = "text"
-heading = "Goal"
-required = true
-says = "The goal."
+#: A template note's first lines, which every template declares.
+HEAD = 'name: {name}\nversion: 1.0.0\nkind: document\ntags: ["test"]\n'
+ISSUE_CREATE = 'applies:\n  actions: ["issue.create"]\n'
+
+MINIMAL = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+{extra}fields:
+  - name: goal
+    kind: text
+    required: true
+---
+
+## Goal
+
+<!-- goal: The goal. -->
 """
 
 
 @pytest.mark.parametrize("extra, error", [
-    ("", "[applies] actions is required"),
-    ('[applies]\nactions = ["issue.create"]\n[rules]\nwords = "refuse"\n', "only warns"),
-    ('[applies]\nactions = ["issue.delete"]\n', "is none of"),
+    ("", "applies.actions is required"),
+    (f'{ISSUE_CREATE}rules:\n  words: refuse\n', "only warns"),
+    ('applies:\n  actions: ["issue.delete"]\n', "is none of"),
 ])
 def test_a_template_that_breaks_the_format_does_not_load(tmp_path, extra, error):
     write_template(tmp_path, "one", MINIMAL.format(name="one", extra=extra))
@@ -163,14 +176,13 @@ def test_a_template_that_breaks_the_format_does_not_load(tmp_path, extra, error)
 
 
 def test_a_valid_minimal_template_loads(tmp_path):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.create"]\n'))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=ISSUE_CREATE))
     assert list(templates.load(tmp_path, tree=True)) == ["one"]
 
 
 def test_an_extends_cycle_does_not_load(tmp_path):
-    applies = '[applies]\nactions = ["issue.create"]\n'
-    write_template(tmp_path, "a", MINIMAL.format(name="a", extra=f'extends = "b"\n{applies}'))
-    write_template(tmp_path, "b", MINIMAL.format(name="b", extra=f'extends = "a"\n{applies}'))
+    write_template(tmp_path, "a", MINIMAL.format(name="a", extra=f'extends: b\n{ISSUE_CREATE}'))
+    write_template(tmp_path, "b", MINIMAL.format(name="b", extra=f'extends: a\n{ISSUE_CREATE}'))
     with pytest.raises(templates.TemplateError, match="cycle"):
         templates.load(tmp_path, tree=True)
 
@@ -182,12 +194,12 @@ def commit_all(repository: Path) -> None:
 
 
 def test_load_reads_templates_at_origin_where_the_ref_holds_them(tmp_path, fake_git_door):
-    applies = '[applies]\nactions = ["issue.create"]\n'
+    applies = ISSUE_CREATE
     fake_git.init(tmp_path)
     write_template(tmp_path, "landed", MINIMAL.format(name="landed", extra=applies))
     commit_all(tmp_path)
     fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/main", "HEAD")
-    (tmp_path / "templates" / "landed.toml").unlink()
+    (tmp_path / "templates" / "landed.md").unlink()
     write_template(tmp_path, "local", MINIMAL.format(name="local", extra=applies))
     assert list(templates.load(tmp_path)) == ["landed"]
     assert list(templates.load(tmp_path, tree=True)) == ["local"]
@@ -195,7 +207,7 @@ def test_load_reads_templates_at_origin_where_the_ref_holds_them(tmp_path, fake_
 
 def test_load_reads_the_working_tree_without_the_ref(tmp_path, fake_git_door):
     fake_git.init(tmp_path)
-    write_template(tmp_path, "local", MINIMAL.format(name="local", extra='[applies]\nactions = ["issue.create"]\n'))
+    write_template(tmp_path, "local", MINIMAL.format(name="local", extra=ISSUE_CREATE))
     assert list(templates.load(tmp_path)) == ["local"]
 
 
@@ -231,15 +243,15 @@ def test_html_comments_do_not_fill_a_field(catalog):
 
 def test_the_marker_names_the_repository_the_template_its_version_and_its_digest(catalog, tmp_path):
     work = catalog["work"]
-    texts = [(ROOT / "templates" / f"{name}.toml").read_text(encoding="utf-8") for name in ("work", "ticket")]
+    texts = [(ROOT / "templates" / f"{name}.md").read_text(encoding="utf-8") for name in ("work", "ticket")]
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
-    assert work.marker_line == f"<!-- se:template se/work 0.0.0 sha256:{digest} -->"
+    assert work.marker_line == f"<!-- se:template se/work 1.0.0 sha256:{digest} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
     assert templates.TEMPLATE_MARKER_PATTERN.findall(work.marker_line) == ["work"]
     assert templates.TEMPLATE_MARKER_PATTERN.findall("<!-- se:template work -->\n<!-- se:form work -->") == []
     shutil.copytree(ROOT / "templates", tmp_path / "templates")
     own = templates.load(tmp_path, tree=True)["work"]
-    assert own.marker_line == f"<!-- se:template project/work 0.0.0 sha256:{digest} -->"
+    assert own.marker_line == f"<!-- se:template project/work 1.0.0 sha256:{digest} -->"
 
 
 def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(catalog):
@@ -264,10 +276,145 @@ def test_parse_of_render_gives_each_example_back(catalog):
         assert not templates.check(template, document), template.name
 
 
+def adapter_examples() -> dict[str, tuple[str, str | None]]:
+    """Each adapter's example, (body, title), as the SE writer it names writes it: an adapter's
+    body is its writer's, so its template keeps no copy."""
+    return {
+        "field-report": (f"Refs {ISSUE_URL}\n\n{issue_tests.reported_at(issue_tests.TIP)}", "feat/x"),
+        "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL), "feat/x"),
+        "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
+        "merge-message": ("Release-kind: minor", merge_title()),
+        "review": (review_comment(test_review.report()), None),
+        "retro": (marked_block(retro.BLOCK_MARKER, retro_block()), None),
+        "overhaul": (marked_block(overhaul.BLOCK_MARKER, overhaul_block()), None),
+        "pugh": (test_deck.PUGH, None),
+    }
+
+
+@pytest.mark.parametrize("name", EVERY)
+def test_each_of_the_fourteen_templates_renders_and_parses_its_example_back(catalog, name):
+    template = catalog[name]
+    if template.is_adapter:
+        body, title = adapter_examples()[name]
+        document = templates.parse(template, body, title)
+        assert templates.render(template, document) == body
+    else:
+        example = dict(template.example["fields"])
+        document = templates.parse(template, templates.render(template, example), example.get("title"))
+        assert document.fields == example
+    assert [finding for finding in templates.check(template, document)
+            if finding.severity == templates.REFUSE] == []
+    assert len(catalog) == 14
+
+
+def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
+    yaml = pytest.importorskip("yaml")
+    notes = sorted((ROOT / "templates").glob("*.md"))
+    assert [path.stem for path in notes] == sorted(EVERY)
+    assert sorted(path.name for path in (ROOT / "templates").iterdir()) == sorted(
+        [path.name for path in notes] + [templates.TERMS_FILE])
+    for path in notes:
+        text = path.read_text(encoding="utf-8")
+        front = text.split("---\n", 2)[1]
+        assert templates.front_data(front, path.name) == yaml.safe_load(front), path.name
+        data = templates.note_data(text, path.name)
+        assert templates.SEMVER.match(data["version"]) and data["kind"] in templates.TEMPLATE_KINDS
+        assert data["tags"] and all(isinstance(tag, str) for tag in data["tags"])
+
+
+def test_a_note_s_skeleton_gives_each_field_its_heading_and_its_instruction(catalog):
+    work = catalog["work"]
+    assert (work.version, work.kind, work.tags) == ("1.0.0", "document", ("issue", "work"))
+    assert catalog["routed"].kind == "block" and catalog["merge-message"].kind == "interface"
+    goal = work.field("goal")
+    assert goal.heading == "Goal" and goal.says.startswith("What is true once this is done")
+    assert work.field("situation").says == catalog["ticket"].field("situation").says
+    assert work.field("title").says.startswith("The name, its branch too")
+    text = (ROOT / "templates" / "work.md").read_text(encoding="utf-8")
+    assert "## Goal\n\n<!-- goal: What is true once this is done" in text
+    assert "\n    heading:" not in text.split("---\n", 2)[1]
+    routed = (ROOT / "templates" / "routed.md").read_text(encoding="utf-8")
+    assert "\n### Package kind\n" in routed and "\n## " not in routed
+
+
+@pytest.mark.parametrize("front, error", [
+    ("name: one\n\tkind: x\n", "indented with a tab"),
+    ("rules:\n  terms: off\n", "off is a plain value another YAML reader may read otherwise"),
+    ("version: 1.5\n", "1.5 is a plain value"),
+    ("says: The name: a title\n", "quote it as a JSON string"),
+    ("name: one\nname: two\n", "name is given twice"),
+    ("tags: [\"a\",\n", "is no JSON value"),
+    ("applies:\nname: one\n", "applies has no value"),
+    ("name: one\n  kind: x\n", "indented below a key that has its value"),
+    ("- a\n", "the front matter is a list"),
+], ids=["tab", "off", "float", "colon", "twice", "json", "empty", "indent", "list"])
+def test_front_matter_outside_the_subset_is_refused_by_its_line(front, error):
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.front_data(front, "templates/one.md")
+
+
+def test_front_matter_reads_nested_mappings_lists_and_scalars():
+    front = ("# a comment\nname: one\nquoted: \"off\"\nsingle: 'it''s'\ncount: 3\nyes_no: true\n"
+             "list: [\"a\", \"b\"]\nmapping:\n  inner: x\n  \".\": [\"y\"]\nitems:\n  - name: a\n"
+             "    kind: text\n  - plain\n")
+    assert templates.front_data(front, "one") == {
+        "name": "one", "quoted": "off", "single": "it's", "count": 3, "yes_no": True,
+        "list": ["a", "b"], "mapping": {"inner": "x", ".": ["y"]},
+        "items": [{"name": "a", "kind": "text"}, "plain"]}
+
+
+@pytest.mark.parametrize("change, error", [
+    (lambda text: text.replace("    required: true\n---", "    required: true\n    heading: Goal\n---"),
+     "which owns its heading; take heading out of the front matter"),
+    (lambda text: text.replace("    required: true\n---", "    required: true\n    says: The goal.\n---"),
+     "which owns its says"),
+    (lambda text: text.replace("## Goal\n\n<!-- goal: The goal. -->\n", ""),
+     "the skeleton's sections are none; they are one per field with a section"),
+    (lambda text: text.replace("<!-- goal:", "<!-- aim:"), "the skeleton's sections are aim"),
+    (lambda text: text.replace("<!-- goal: The goal. -->", "The goal."), "holds one comment alone"),
+    (lambda text: text.replace("---\n\n## Goal", "---\n\nA note.\n\n## Goal"),
+     "text before the skeleton's first section"),
+    (lambda text: text.replace("## Goal", "# Goal"), "is no section of the skeleton"),
+    (lambda text: text.replace("version: 1.0.0\n", ""), "version is None"),
+    (lambda text: text.replace("version: 1.0.0", "version: \"1.0\""), "version is '1.0'"),
+    (lambda text: text.replace("kind: document", "kind: page"), "kind is 'page'; one of document"),
+    (lambda text: text.replace('tags: ["test"]\n', ""), "tags is a list of words"),
+    (lambda text: text.removeprefix("---\n"), "a template opens with its front matter"),
+], ids=["heading", "says", "no-section", "other-field", "no-comment", "text-before", "page-title",
+        "no-version", "no-semver", "kind", "tags", "no-front-matter"])
+def test_a_note_that_breaks_the_format_does_not_load(tmp_path, change, error):
+    write_template(tmp_path, "one", change(MINIMAL.format(name="one", extra=ISSUE_CREATE)))
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.load(tmp_path, tree=True)
+
+
+def test_load_reads_the_tree_where_origin_holds_no_template_note(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "old.toml").write_text('name = "old"\n', encoding="utf-8")
+    shutil.copy(ROOT / "templates" / templates.TERMS_FILE, tmp_path / "templates" / templates.TERMS_FILE)
+    commit_all(tmp_path)
+    fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/main", "HEAD")
+    write_template(tmp_path, "local", MINIMAL.format(name="local", extra=ISSUE_CREATE))
+    assert list(templates.load(tmp_path)) == ["local"]
+
+
+OBJECT_TEMPLATE = f"""---
+{HEAD.format(name="obj")}reader: fleet
+says: x
+{ISSUE_CREATE}fields:
+  - name: meta
+    kind: object
+---
+
+## Meta
+
+<!-- meta: keys -->
+"""
+
+
 def test_an_object_field_reads_and_writes_key_value_lines(tmp_path):
-    write_template(tmp_path, "obj", 'name = "obj"\nreader = "fleet"\nsays = "x"\n[applies]\n'
-               'actions = ["issue.create"]\n[[fields]]\nname = "meta"\nkind = "object"\n'
-               'heading = "Meta"\nsays = "keys"\n')
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
     template = templates.load(tmp_path, tree=True)["obj"]
     values = {"meta": {"Owner": "SE", "Size": "small"}}
     assert templates.parse(template, templates.render(template, values)).fields == values
@@ -291,7 +438,7 @@ def test_select_takes_the_marker_then_the_conditions_then_the_plain_template(cat
 
 
 def test_select_without_a_template_for_the_action_is_free(tmp_path):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.edit"]\n'))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='applies:\n  actions: ["issue.edit"]\n'))
     assert templates.select(templates.load(tmp_path, tree=True), "issue.create", "", "").template is None
 
 
@@ -448,35 +595,42 @@ def test_a_body_route_writes_with_its_default_type_passes_the_routed_template(tm
     assert "choice" not in capsys.readouterr().out
 
 
-NAMED = """name = "one"
-reader = "owner"
-says = "A template."
-[applies]
-actions = ["issue.create"]
-[rules]
-title-shape = "warn"
-[[fields]]
-name = "title"
-kind = "line"
-source = "title"
-{title}
-[[fields]]
-name = "kind"
-kind = "choice"
-heading = "Kind"
-{kind}
+NAMED = """---
+name: one
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+applies:
+  actions: ["issue.create"]
+rules:
+  title-shape: warn
+fields:
+  - name: title
+    kind: line
+    source: title
+    {title}
+  - name: kind
+    kind: choice
+    {kind}
+---
+
+## Kind
+
+<!-- kind: The kind. -->
 """
 
 
 @pytest.mark.parametrize("title, kind, error", [
-    ('shape = "work_tickets:NO_SUCH_RULE"', 'choices = ["a"]',
-     "templates/one.toml: field title shape: work_tickets:NO_SUCH_RULE does not resolve"),
-    ('shape = "no_such_script:RULE"', 'choices = ["a"]',
-     "templates/one.toml: field title shape: no_such_script:RULE does not resolve"),
-    ('shape = "work_tickets:NAME_WORDS"', 'choices = ["a"]', "is no pattern or function"),
-    ("", 'choices = ["a", "work_tickets:NO_SUCH_KINDS"]',
-     "templates/one.toml: field kind choices: work_tickets:NO_SUCH_KINDS does not resolve"),
-    ("", 'choices = ["work_tickets:NAME_EXAMPLE"]', "is no list or mapping"),
+    ("shape: work_tickets:NO_SUCH_RULE", 'choices: ["a"]',
+     "templates/one.md: field title shape: work_tickets:NO_SUCH_RULE does not resolve"),
+    ("shape: no_such_script:RULE", 'choices: ["a"]',
+     "templates/one.md: field title shape: no_such_script:RULE does not resolve"),
+    ("shape: work_tickets:NAME_WORDS", 'choices: ["a"]', "is no pattern or function"),
+    ("", 'choices: ["a", "work_tickets:NO_SUCH_KINDS"]',
+     "templates/one.md: field kind choices: work_tickets:NO_SUCH_KINDS does not resolve"),
+    ("", 'choices: ["work_tickets:NAME_EXAMPLE"]', "is no list or mapping"),
 ])
 def test_a_field_that_names_code_that_does_not_exist_does_not_load(tmp_path, title, kind, error):
     write_template(tmp_path, "one", NAMED.format(title=title, kind=kind))
@@ -485,8 +639,8 @@ def test_a_field_that_names_code_that_does_not_exist_does_not_load(tmp_path, tit
 
 
 def test_a_field_names_a_pattern_a_function_a_list_and_a_mapping(tmp_path):
-    write_template(tmp_path, "one", NAMED.format(title='shape = "work_tickets:NAME_PATTERN"',
-                                             kind='choices = ["x", "work_tickets:RELEASE_ORDER", '
+    write_template(tmp_path, "one", NAMED.format(title="shape: work_tickets:NAME_PATTERN",
+                                             kind='choices: ["x", "work_tickets:RELEASE_ORDER", '
                                                   '"work_tickets:RELEASE_KINDS"]'))
     one = templates.load(tmp_path, tree=True)["one"]
     assert one.field("kind").choices[:4] == ("x", "patch", "minor", "major")
@@ -663,6 +817,29 @@ def test_check_takes_fields_from_a_draft(tmp_path, capsys, catalog):
     assert "title-shape" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("name", EVERY)
+def test_schema_prints_the_schema_draft_json_gives(capsys, catalog, name):
+    assert templates.main(["draft", name, "--json", "--tree"]) == 0
+    drafted = json.loads(capsys.readouterr().out)["schema"]
+    assert templates.main(["schema", name, "--tree"]) == 0
+    printed = capsys.readouterr().out
+    assert json.loads(printed) == drafted == templates.schema(catalog[name])
+    assert printed == json.dumps(drafted, indent=2) + "\n"
+
+
+def test_schema_takes_the_template_that_claims_a_file_and_refuses_both_or_neither(tmp_path, capsys):
+    step_templates(tmp_path, risks='marker_pattern: "id: S5B"')
+    (tmp_path / "book" / "m1" / "steps").mkdir(parents=True)
+    step = tmp_path / "book" / "m1" / "steps" / "51-S5B.md"
+    step.write_text(STEP, encoding="utf-8")
+    where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
+    assert templates.main(["schema", "--path", str(step), *where]) == 0
+    assert json.loads(capsys.readouterr().out)["required"] == ["risks"]
+    assert templates.main(["schema", "--tree"]) == 2
+    assert "templates.py schema: name a template, or give --path" in capsys.readouterr().err
+    assert templates.main(["schema", "nothing", "--tree"]) == 2
+
+
 def schema_errors(schema: dict, value: object, where: str = "$") -> list[str]:
     """What `value` breaks of `schema`, read with the eight keywords `templates.schema` writes: SE
     adds no validator dependency."""
@@ -749,9 +926,7 @@ def test_draft_json_keeps_its_old_keys_byte_for_byte(capsys, catalog):
 
 
 def test_an_object_field_takes_the_schemas_key_value_pairs(tmp_path):
-    write_template(tmp_path, "obj", 'name = "obj"\nreader = "fleet"\nsays = "x"\n[applies]\n'
-               'actions = ["issue.create"]\n[[fields]]\nname = "meta"\nkind = "object"\n'
-               'heading = "Meta"\nsays = "keys"\n')
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
     template = templates.load(tmp_path, tree=True)["obj"]
     pairs = {"meta": [{"key": "Owner", "value": "SE"}, {"key": "Size", "value": "small"}]}
     assert schema_errors(templates.schema(template), pairs) == []
@@ -825,7 +1000,7 @@ def test_list_names_every_template_with_its_actions(capsys):
     assert templates.main(["list", "--tree"]) == 0
     out = capsys.readouterr().out.splitlines()
     names = [line.split(" ")[0] for line in out]
-    assert sorted(names) == sorted((*ISSUE_TEMPLATES, *ADAPTERS))
+    assert sorted(names) == sorted(EVERY)
     assert all("issue.create, issue.edit" in line for line in out if line.split(" ")[0]
                in ISSUE_TEMPLATES)
 
@@ -849,24 +1024,28 @@ def test_a_missing_argument_exits_2():
 # Templates for files: a template claims files by their path (file.write)
 
 
-STEP_TEMPLATE = """name = "{name}"
-reader = "owner"
-says = "Risks: what could go wrong."
+STEP_TEMPLATE = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "Risks: what could go wrong."
+applies:
+  actions: ["file.write"]
+  paths: [{paths}]
+{extra}rules:
+  required: refuse
+fields:
+  - name: risks
+    kind: list
+    required: true
+    none_ok: true
+---
 
-[applies]
-actions = ["file.write"]
-paths = [{paths}]
-{extra}
-[rules]
-required = "refuse"
+## Risks
 
-[[fields]]
-name = "risks"
-kind = "list"
-heading = "Risks"
-required = true
-none_ok = true
-says = "One item per risk, or None."
+<!-- risks: One item per risk, or None. -->
 """
 
 STEP = "---\nid: S5B\nname: Risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
@@ -875,21 +1054,21 @@ STEP = "---\nid: S5B\nname: Risks\n---\n\n# Risks\n\n## Risks\n\n- The scan miss
 def step_templates(root: Path, **templates_by_name: str) -> dict[str, templates.Template]:
     for name, extra in templates_by_name.items():
         write_template(root, name, STEP_TEMPLATE.format(name=name, paths='"book/*/steps/*.md"',
-                                                extra=extra))
+                                                extra="".join(f"  {line}\n" for line in extra.splitlines())))
     return templates.load(root, folder=root / "templates")
 
 
 @pytest.mark.parametrize("applies, error", [
-    ('actions = ["issue.create"]\npaths = ["*.md"]', "goes only with"),
-    ('actions = ["file.write", "issue.create"]\npaths = ["*.md"]', "goes only with"),
-    ('actions = ["file.write"]', "needs [applies] paths"),
-    ('actions = ["file.write"]\npaths = "*.md"', "list of globs"),
+    ('  actions: ["issue.create"]\n  paths: ["*.md"]', "goes only with"),
+    ('  actions: ["file.write", "issue.create"]\n  paths: ["*.md"]', "goes only with"),
+    ('  actions: ["file.write"]', "needs applies.paths"),
+    ('  actions: ["file.write"]\n  paths: "*.md"', "list of globs"),
 ])
 def test_a_file_template_needs_its_paths_and_its_paths_need_file_write(tmp_path, applies, error):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=f"[applies]\n{applies}\n"))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=f"applies:\n{applies}\n"))
     with pytest.raises(templates.TemplateError) as refused:
         templates.load(tmp_path, folder=tmp_path / "templates")
-    assert error in str(refused.value) and str(tmp_path / "templates" / "one.toml") in str(refused.value)
+    assert error in str(refused.value) and str(tmp_path / "templates" / "one.md") in str(refused.value)
 
 
 def test_a_file_template_loads_with_its_paths_and_its_globs_match_by_folder(tmp_path):
@@ -904,8 +1083,8 @@ def test_a_file_template_loads_with_its_paths_and_its_globs_match_by_folder(tmp_
 
 
 def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
-    catalog = step_templates(tmp_path, risks="marker_pattern = 'id: S5B'", goals="order = 1\n"
-                         "marker_pattern = 'id: S1'")
+    catalog = step_templates(tmp_path, risks='marker_pattern: "id: S5B"', goals="order: 1\n"
+                         'marker_pattern: "id: S1"')
     pick = lambda body, path="book/m1/steps/x.md": templates.select(catalog, "file.write", body,
                                                                  path=path)
     free = pick(STEP, "notes/x.md")
@@ -923,20 +1102,49 @@ def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
         templates.select(catalog, "file.write", STEP)
 
 
+def recorded(template: templates.Template) -> str:
+    """The front matter lines a claimed file records its template by."""
+    return (f"template: project/{template.name}\nversion: {template.version}\n"
+            f"overlay: {template.digest}\n")
+
+
 def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_template(tmp_path):
     template = step_templates(tmp_path, risks="")["risks"]
     document = templates.parse(template, STEP)
     assert document.fields == {"risks": ["The scan misses a tool."]}
     rendered = templates.render(template, document)
-    assert rendered == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert rendered == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(template))
     assert templates.FLEET_MARKER not in rendered and "se:template" not in rendered
     assert templates.parse(template, rendered).fields == document.fields
     assert templates.render(template, templates.parse(template, rendered)) == rendered
     bare = templates.render(template, templates.parse(template, "# Risks\n\n## Risks\n\nNone\n"))
-    assert bare == "---\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    assert bare == f"---\n{recorded(template)}---\n\n# Risks\n\n## Risks\n\nNone\n"
     fresh = templates.render(template, {"risks": ["One."]})
-    assert fresh == "---\ntemplate: risks\n---\n\n## Risks\n\n- One.\n"
+    assert fresh == f"---\n{recorded(template)}---\n\n## Risks\n\n- One.\n"
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
+
+
+def test_render_records_template_version_and_overlay_in_place_and_selection_reads_them(tmp_path):
+    template = step_templates(tmp_path, risks="")["risks"]
+    old = "---\nversion: 0.1.0\nid: S5B\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    rendered = templates.render(template, templates.parse(template, old))
+    assert rendered == ("---\nversion: 1.0.0\n"
+                        f"overlay: {template.digest}\nid: S5B\ntemplate: project/risks\n---\n\n"
+                        "# Risks\n\n## Risks\n\nNone\n")
+    crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
+                                                         "## Risks\r\n\r\nNone\r\n"))
+    assert crlf.startswith("---\r\nid: S5B\r\n" + recorded(template).replace("\n", "\r\n") + "---")
+    assert templates.select(templates.load(tmp_path, folder=tmp_path / "templates"), "file.write",
+                            rendered, path="book/m1/steps/x.md").name == "risks"
+    assert templates.draft(template).startswith(f"---\n{recorded(template)}---\n")
+
+
+def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
+    work = catalog["work"]
+    rendered = templates.render(work, work_fields(catalog))
+    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.0.0 ", " 0.9.0 "))
+    assert old != rendered
+    assert templates.render(work, templates.parse(work, old)) == rendered
 
 
 def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
@@ -947,7 +1155,7 @@ def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
 
 
 def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, capsys):
-    step_templates(tmp_path, risks="marker_pattern = 'id: S5B'")
+    risks = step_templates(tmp_path, risks='marker_pattern: "id: S5B"')["risks"]
     steps = tmp_path / "book" / "m1" / "steps"
     steps.mkdir(parents=True)
     (steps / "51-S5B.md").write_text(STEP, encoding="utf-8")
@@ -956,7 +1164,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
     run = lambda *arguments: (templates.main([*arguments, *where]), capsys.readouterr())
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--render")
-    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(risks))
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
@@ -966,12 +1174,93 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
     assert code == 0 and json.loads(out.out)["template"] == "risks"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"))
-    assert out.out.startswith("---\ntemplate: risks\n---\n\n## Risks\n") and "se:fleet" not in out.out
+    assert out.out.startswith(f"---\n{recorded(risks)}---\n\n## Risks\n") and "se:fleet" not in out.out
     assert run("draft", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     assert templates.main(["list", "--templates", str(tmp_path / "templates")]) == 0
     assert capsys.readouterr().out.startswith(
         "risks (owner): file.write: book/*/steps/*.md: Risks:")
+
+
+# The version a document records (docs/templates.md "The document"): its marker's or its front matter's
+
+
+def at_version(template: templates.Template, version: str) -> templates.Template:
+    """`template` as it would load once its version moved to `version`."""
+    return replace(template, version=version)
+
+
+def version_findings(template: templates.Template, body: str) -> list[templates.Finding]:
+    return [finding for finding in templates.check(template, templates.parse(template, body))
+            if finding.rule == templates.VERSION_RULE]
+
+
+def test_a_document_at_its_template_s_current_version_passes(catalog, tmp_path):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(work, work_fields(catalog))
+    assert templates.parse(work, body).recorded == "2.3.0"
+    assert version_findings(work, body) == []
+    assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
+    risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
+    page = templates.render(risks, templates.parse(risks, STEP))
+    assert "version: 2.3.0\n" in page and version_findings(risks, page) == []
+
+
+def test_a_document_that_records_no_version_passes(catalog, tmp_path):
+    work = at_version(catalog["work"], "2.3.0")
+    assert templates.parse(work, WORK_BODY).recorded == "" and version_findings(work, WORK_BODY) == []
+    risks = step_templates(tmp_path, risks="")["risks"]
+    assert version_findings(risks, STEP.replace("name: Risks\n", "template: risks\n")) == []
+    other = STEP.replace("name: Risks\n", "template: goals\nversion: 0.1.0\n")
+    assert templates.parse(risks, other).recorded == ""
+
+
+@pytest.mark.parametrize("recorded", ["2.3.1", "2.1.4", "2.4.0"])
+def test_a_minor_or_patch_move_warns(catalog, tmp_path, recorded):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(at_version(work, recorded), work_fields(catalog))
+    found = version_findings(work, body)
+    assert [(f.field, f.severity) for f in found] == [("template", "warn")]
+    assert f"records work {recorded}; the template is at 2.3.0" in found[0].fix
+    assert "templates.py check work --body-file <file> --render" in found[0].fix
+    assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
+    risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
+    page = templates.render(at_version(risks, recorded), templates.parse(risks, STEP))
+    assert [f.severity for f in version_findings(risks, page)] == ["warn"]
+    assert "templates.py check --path <file> --render" in version_findings(risks, page)[0].fix
+
+
+@pytest.mark.parametrize("recorded", ["1.9.0", "3.0.0", "two"])
+def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_path, capsys, recorded):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(at_version(work, "1.0.0"), work_fields(catalog)).replace(
+        " 1.0.0 ", f" {recorded} ", 1)
+    found = version_findings(work, body)
+    assert [f.severity for f in found] == ["refuse"]
+    assert f"records work {recorded}; the template is at 2.3.0" in found[0].fix
+    assert "`templates.py draft work --json`" in found[0].fix
+    assert "`templates.py check work --fields <fields> --render`" in found[0].fix
+    risks = step_templates(tmp_path, risks="")["risks"]
+    page = templates.render(risks, templates.parse(risks, STEP)).replace(
+        "version: 1.0.0", f"version: {recorded}")
+    moved = at_version(risks, "2.3.0")
+    assert [f.severity for f in version_findings(moved, page)] == ["refuse"]
+    assert "`templates.py draft --path <file> --json`" in version_findings(moved, page)[0].fix
+    (tmp_path / "old.md").write_text(page, encoding="utf-8")
+    (tmp_path / "templates" / "risks.md").write_text(
+        (tmp_path / "templates" / "risks.md").read_text(encoding="utf-8").replace(
+            "version: 1.0.0", "version: 2.3.0"), encoding="utf-8")
+    code = templates.main(["check", "risks", "--body-file", str(tmp_path / "old.md"), "--render",
+                           "--templates", str(tmp_path / "templates")])
+    out = capsys.readouterr().out
+    assert code == 1 and f"records risks {recorded}; the template is at 2.3.0" in out
+
+
+def test_a_template_cannot_set_the_version_rule(tmp_path):
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='applies:\n  actions: ["issue.create"]\n'
+                                                         "rules:\n  version: warn\n"))
+    with pytest.raises(templates.TemplateError, match="rule 'version' is unknown"):
+        templates.load(tmp_path, folder=tmp_path / "templates")
 
 
 @pytest.mark.parametrize("arguments, error", [
@@ -1016,7 +1305,8 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
     assert "checker retro:judgment_problems" in lines["retro"]
     assert "checker overhaul:judgment_problems" in lines["overhaul"]
-    assert "deck.build: checker deck:_explains:" in lines["decision"]
+    assert "a node of a document: checker deck:pugh_problems:" in lines["pugh"]
+    assert "deck.build: A decision note:" in lines["decision"]
     assert ("pr.merge: checker work_tickets:merge_release_kind, title "
             "work_tickets:INTEGRATION_SUBJECT_PATTERN:") in lines["merge-message"]
     assert "pr.create, pr.edit: checker none, 3 lines:" in lines["landing"]
@@ -1033,31 +1323,31 @@ def test_every_name_an_adapter_gives_resolves(catalog):
 
 
 @pytest.mark.parametrize("top, tables, error", [
-    ('checker = "review:checked_report"\n', '[[fields]]\nname = "goal"\nkind = "text"\n'
-     'heading = "Goal"\n', "a template with fields takes no checker"),
-    ('checker = "review.checked_report"\n', "", "is no \"<module>:<name>\""),
-    ('checker = "review:checked_report"\n', '[adapter]\nread = "body"\n',
-     "[adapter] has unknown keys read"),
-    ('checker = "deck:_explains"\n', '[adapter]\nresult = "truth"\n', "needs its refusal"),
-    ('checker = "deck:_explains"\n', '[adapter]\nresult = "maybe"\n', "result is 'maybe'"),
-    ("", '[[adapter.lines]]\npattern = "x"\n', "each [[adapter.lines]] has a pattern and says"),
+    ("checker: review:checked_report\n", "fields:\n  - name: goal\n    kind: text\n    label: Goal\n"
+     "    says: The goal.\n", "a template with fields takes no checker"),
+    ("checker: review.checked_report\n", "", "is no \"<module>:<name>\""),
+    ("checker: review:checked_report\n", "adapter:\n  read: body\n",
+     "adapter has unknown keys read"),
+    ("checker: deck:_explains\n", "adapter:\n  result: truth\n", "needs its refusal"),
+    ("checker: deck:_explains\n", "adapter:\n  result: maybe\n", "result is 'maybe'"),
+    ("", "adapter:\n  lines:\n    - pattern: x\n", "each item of adapter.lines has a pattern and says"),
 ], ids=["fields-and-checker", "no-reference", "unknown-key", "truth-without-refusal",
         "unknown-result", "line-without-says"])
 def test_an_adapter_that_breaks_the_format_does_not_load(tmp_path, top, tables, error):
-    write_template(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n{top}\n'
-               f'[applies]\nactions = ["comment.create"]\n\n{tables}')
+    write_template(tmp_path, "one", f'---\n{HEAD.format(name="one")}reader: fleet\nsays: A text.\n{top}'
+               f'applies:\n  actions: ["comment.create"]\n{tables}---\n')
     with pytest.raises(templates.TemplateError, match=re.escape(error)):
         templates.load(tmp_path, tree=True)
 
 
 @pytest.mark.parametrize("applies, error", [
-    ('actions = ["pr.create"]\nbase = "next"\n', "the one base is \"integration\""),
-    ('actions = ["pr.create"]\nbranch = "main"\n', "[applies] has unknown keys branch"),
-    ('actions = ["pr.delete"]\n', "action 'pr.delete' is none of"),
+    ('  actions: ["pr.create"]\n  base: next\n', "the one base is \"integration\""),
+    ('  actions: ["pr.create"]\n  branch: main\n', "applies has unknown keys branch"),
+    ('  actions: ["pr.delete"]\n', "action 'pr.delete' is none of"),
 ])
 def test_applies_refuses_what_selection_cannot_read(tmp_path, applies, error):
-    write_template(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n\n'
-               f'[applies]\n{applies}')
+    write_template(tmp_path, "one", f'---\n{HEAD.format(name="one")}reader: fleet\nsays: A text.\n'
+               f'applies:\n{applies}---\n')
     with pytest.raises(templates.TemplateError, match=re.escape(error)):
         templates.load(tmp_path, tree=True)
 
@@ -1327,16 +1617,23 @@ UNEXPLAINED = {*parametrized(
 
 
 @pytest.mark.parametrize("name", list(test_deck.DECKS))
-def test_the_decision_adapter_gives_the_section_rule_of_deck_py(catalog, name):
+def test_the_decision_template_gives_the_section_rule_of_deck_py(catalog, name):
+    """A note with a `pugh` fence is a decision, checked by the decision template as deck.py's build
+    refuses it; a record chapter, without one, is free."""
     notes, _ = test_deck.DECKS[name]
     for note, text in notes.items():
         nodes = templates._nodes(text)
-        expected = deck._holds_pugh(nodes) and name in UNEXPLAINED
-        refused = adapter_verdict(catalog["decision"], text)
-        assert bool(refused) == expected, (name, note)
+        template, found = templates.verdict(catalog, "deck.build", text)
+        assert (template is not None) == deck._holds_pugh(nodes), (name, note)
+        refused = [finding for finding in found if finding.severity == templates.REFUSE]
+        assert bool(refused) == (template is not None and name in UNEXPLAINED), (name, note, refused)
         assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
-    template, _ = templates.verdict(catalog, "deck.build", next(iter(notes.values())))
-    assert template.name == "decision"
+
+
+def test_deck_py_reads_its_sections_from_the_decision_template(catalog):
+    decision = catalog["decision"]
+    assert deck.sections() == tuple(item.heading for item in decision.fields if item.in_body)
+    assert [item.name for item in decision.fields][-1] == "options"
 
 
 # Contract over every body SE sends: each sending function, the bodies its command sends
@@ -1716,8 +2013,10 @@ def missing_from_readme(readme: str) -> list[str]:
     after = re.search(r"\n#{1,3} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
-    for path in sorted((ROOT / "templates").glob("*.toml")):
-        says = " ".join(tomllib.loads(path.read_text(encoding="utf-8"))["says"].split())
+    for path in sorted((ROOT / "templates").iterdir()):
+        text = path.read_text(encoding="utf-8")
+        data = tomllib.loads(text) if path.suffix == ".toml" else templates.note_data(text, path.name)
+        says = " ".join(data["says"].split())
         if f"`templates/{path.name}`" not in section or says not in section:
             missing.append(path.name)
     return missing
@@ -1731,6 +2030,482 @@ def test_readme_templates_names_every_file_under_templates_with_its_says():
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    start = readme.index("| `templates/retro.toml` |")
-    end = readme.index("\n| `templates/review.toml` |", start)
-    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
+    start = readme.index("| `templates/retro.md` |")
+    end = readme.index("\n| `templates/review.md` |", start)
+    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]
+
+
+# Nesting (docs/templates.md "Nesting"): nodes, registers and the fence node
+
+
+def raid_register(catalog) -> str:
+    """The RAID register's example as an issue body, rendered."""
+    register = catalog["raid-register"]
+    return templates.render(register, register.example["fields"])
+
+
+def test_the_raid_example_passes(catalog, tmp_path, capsys):
+    register = catalog["raid-register"]
+    body = raid_register(catalog)
+    assert register.field("entries").nested is catalog["raid-entry"]
+    assert [name for name, _ in templates.entries(register.example["fields"]["entries"])] == [
+        "The release slips", "The mirror stays up"]
+    assert templates.check(register, templates.parse(register, body)) == []
+    path = tmp_path / "raid.md"
+    path.write_text(body, encoding="utf-8")
+    assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 0
+    assert templates.main(["check", "--action", "issue.create", "--tree", "--body-file", str(path)]) == 0
+    assert "free:" not in capsys.readouterr().out
+
+
+def test_a_register_with_one_bad_entry_fails_naming_the_entry(catalog, tmp_path, capsys):
+    register = catalog["raid-register"]
+    body = raid_register(catalog).replace("Type: assumption", "Type: hazard")
+    found = templates.check(register, templates.parse(register, body))
+    assert [(finding.field, finding.rule, finding.severity) for finding in found] == [
+        ("entries", "choice", templates.REFUSE)]
+    assert found[0].fix.startswith("entry 'The mirror stays up' (raid-entry): Type is 'hazard': write one of risk")
+    path = tmp_path / "raid.md"
+    path.write_text(body, encoding="utf-8")
+    assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "entry 'The mirror stays up'" in out and "The release slips" not in out
+
+
+def test_each_bad_entry_is_named_by_its_own_heading_and_its_owner_line_by_its_label(catalog):
+    register = catalog["raid-register"]
+    body = raid_register(catalog).replace("Owner: alice\n", "").replace("Status: watched", "Status: gone")
+    fixes = [finding.fix for finding in templates.check(register, templates.parse(register, body))]
+    assert fixes[0].startswith("entry 'The release slips' (raid-entry): Owner is missing: write a `Owner:` line")
+    assert fixes[1].startswith("entry 'The mirror stays up' (raid-entry): Status is 'gone'")
+    assert len(fixes) == 2
+
+
+def test_a_register_without_an_entry_refuses(catalog):
+    register = catalog["raid-register"]
+    body = templates.render(register, {**register.example["fields"], "entries": "Nothing yet."})
+    found = templates.check(register, templates.parse(register, body))
+    assert [(finding.rule, finding.severity) for finding in found] == [(templates.NODE_RULE, templates.REFUSE)]
+    assert "Entries holds no entry: write each entry as a heading of its own, `### <name>`" in found[0].fix
+
+
+def test_the_decision_template_s_options_node_is_the_pugh_block(catalog):
+    options = catalog["decision"].field("options")
+    assert (options.kind, options.node, options.pin, options.fence) == ("node", "pugh", "1.0.0", "pugh")
+    assert options.nested is catalog["pugh"] and catalog["pugh"].kind == "block"
+    assert not options.in_body and catalog["pugh"].actions == ()
+
+
+def test_a_decision_s_pugh_fence_is_checked_by_the_pugh_block(catalog):
+    decision = catalog["decision"]
+    body = templates.render(decision, decision.example["fields"])
+    one = re.sub(r"\n  - \{key: deck.*", "", body)
+    found = templates.check(decision, templates.parse(decision, one))
+    assert [(finding.field, finding.rule) for finding in found] == [("options", "checker")]
+    assert found[0].fix == "pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
+    without = re.sub(r"```pugh.*```\n", "", body, flags=re.DOTALL)
+    assert [finding.rule for finding in templates.check(decision, templates.parse(decision, without))] == [
+        "required"]
+
+
+def test_a_fence_node_reads_apart_from_the_section_that_holds_it_and_writes_back_in_place(catalog):
+    decision = catalog["decision"]
+    text = test_deck.EXAMPLE.read_text(encoding="utf-8")
+    document = templates.parse(decision, text)
+    assert "```pugh" not in document.fields["others"]
+    assert document.fields["options"].startswith("```pugh\n") and document.fields["options"].endswith("```")
+    assert templates.check(decision, document) == []
+    document.fields["others"] = "Changed."
+    written = templates.render(decision, document)
+    assert "## What others do\n\nChanged.\n\n```pugh\n" in written
+    assert written.count("```pugh") == 1
+
+
+def test_a_fence_before_the_sections_it_follows_refuses_naming_each(catalog):
+    decision = catalog["decision"]
+    notes, _ = test_deck.DECKS["after-the-fence"]
+    found = templates.check(decision, templates.parse(decision, notes["late"]))
+    assert [finding.fix for finding in found] == [
+        f"`## {heading}` comes after the `pugh` fence: write it before the fence"
+        for heading in deck.sections()]
+
+
+#: A document whose section is a node of another document, `part`.
+WHOLE = f"""---
+{HEAD.format(name="whole")}reader: owner
+says: A whole.
+{ISSUE_CREATE}rules:
+  required: refuse
+fields:
+  - name: intro
+    kind: text
+    required: true
+  - name: part
+    node: {{node}}
+    required: true
+---
+
+## Intro
+
+<!-- intro: The intro. -->
+
+## Part
+
+<!-- part: The part, a document of its own. -->
+"""
+PART = """---
+name: part
+version: 1.2.0
+kind: {kind}
+tags: ["test"]
+reader: owner
+says: A part.
+{applies}rules:
+  required: refuse
+fields:
+  - name: owner
+    kind: line
+    label: Owner
+    required: true
+    says: Who owns it.
+---
+"""
+
+
+def part(kind: str) -> str:
+    """The part template of `kind`; one that is no block or entry shapes an action of its own."""
+    return PART.format(kind=kind, applies="" if kind in templates.PART_KINDS else ISSUE_CREATE)
+
+
+def nested(tmp_path: Path, node: str = "part@1.2.0", kind: str = "block") -> dict[str, templates.Template]:
+    write_template(tmp_path, "whole", WHOLE.format(node=node))
+    write_template(tmp_path, "part", part(kind))
+    return templates.load(tmp_path, tree=True)
+
+
+def test_a_section_node_is_checked_by_its_template_under_its_field(tmp_path):
+    whole = nested(tmp_path)["whole"]
+    good = templates.render(whole, {"intro": "Why.", "part": "Owner: alice"})
+    assert templates.check(whole, templates.parse(whole, good)) == []
+    bad = templates.render(whole, {"intro": "Why.", "part": "Nobody."})
+    assert [str(finding) for finding in templates.check(whole, templates.parse(whole, bad))] == [
+        "refuse: part [required]: part: Owner is missing: write a `Owner:` line: Who owns it. "
+        "(or `Not in input` where the input does not say)"]
+
+
+def test_a_document_s_digest_covers_its_nodes_templates(tmp_path):
+    before = nested(tmp_path)
+    (tmp_path / "templates" / "part.md").write_text(part("block").replace("A part.", "B part."),
+                                                    encoding="utf-8")
+    after = templates.load(tmp_path, tree=True)
+    assert after["part"].digest != before["part"].digest
+    assert after["whole"].digest != before["whole"].digest
+    alone = templates._digest("whole", {"whole": {}}, {"whole": (tmp_path / "templates" / "whole.md").read_text(
+        encoding="utf-8")})
+    assert after["whole"].digest != alone
+
+
+@pytest.mark.parametrize("node, kind, error", [
+    ("gone@1.0.0", "block", "names gone, which is no template"),
+    ("part@1.0.0", "block", "pins part 1.0.0, but part is at 1.2.0; pin part@1.2.0"),
+    ("part", "block", "write the template and the version it pins"),
+    ("part@1.2.0", "entry", "part is an entry; a node names a block or document template"),
+    ("part@1.2.0", "interface", "part is an interface; a node names a block or document template"),
+    ("whole@1.0.0", "block", "nests whole in a cycle"),
+], ids=["no-template", "other-version", "no-pin", "entry-as-node", "interface-as-node", "cycle"])
+def test_a_node_that_does_not_resolve_does_not_load(tmp_path, node, kind, error):
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        nested(tmp_path, node, kind)
+
+
+@pytest.mark.parametrize("entry, kind, error", [
+    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "is a node or a register, not both"),
+    ("    entries: part@1.2.0\n", "block", "part is a block; a register names an entry template"),
+    ("    node: part@1.2.0\n    fence: pugh\n    says: It.\n", "document",
+     "part is a document; a node fence names a block template"),
+    ("    kind: register\n", "block", "has kind register without its template"),
+    ("    kind: text\n    fence: pugh\n    says: It.\n", "block", "has a fence but is no node"),
+    ('    node: part@1.2.0\n    choices: ["a"]\n', "block", "is a node, checked by its template; take out choices"),
+    ("    node: part@1.2.0\n    kind: text\n", "block", "is a node (node:) and takes no kind text"),
+], ids=["both", "entries-of-a-block", "fence-of-a-document", "kind-alone", "fence-alone", "choices",
+        "other-kind"])
+def test_a_node_field_written_wrong_does_not_load(tmp_path, entry, kind, error):
+    write_template(tmp_path, "part", part(kind))
+    text = WHOLE.format(node="x").replace("    node: x\n", entry)
+    if "fence" in entry:  # a fence has no section of its own
+        text = text.replace("\n## Part\n\n<!-- part: The part, a document of its own. -->\n", "\n")
+    write_template(tmp_path, "whole", text)
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.load(tmp_path, tree=True)
+
+
+def test_only_a_block_or_an_entry_leaves_applies_out(tmp_path):
+    write_template(tmp_path, "part", part("entry"))
+    assert templates.load(tmp_path, tree=True)["part"].actions == ()
+    write_template(tmp_path, "part", PART.format(kind="document", applies=""))
+    with pytest.raises(templates.TemplateError, match="applies.actions is required"):
+        templates.load(tmp_path, tree=True)
+
+
+# Fields honest about their source (docs/templates.md "Fill"): "Not in input" and quotes
+
+
+def every_field_not_in_input(template: templates.Template) -> dict[str, object]:
+    """Every field of `template` filled with "Not in input", each in the form its kind takes."""
+    forms = {"list": ["Not in input"], "issue": ["Not in input"],
+             "checklist": [{"done": False, "text": "Not in input"}],
+             "object": [{"key": "Not in input", "value": ""}]}
+    return {item.name: forms.get(item.kind, templates.NOT_IN_INPUT) for item in template.fields}
+
+
+def test_not_in_input_passes_every_field_of_every_template_whatever_its_rules(catalog):
+    for template in catalog.values():
+        if template.is_adapter:
+            continue
+        for values in (every_field_not_in_input(template),
+                       {item.name: templates.NOT_IN_INPUT for item in template.fields}):
+            values = templates.answer(template, values)
+            title = next((values[item.name] for item in template.fields if item.source == "title"),
+                         None)
+            body = templates.render(template, values)
+            found = templates.check(template, templates.parse(template, body, title))
+            assert found == [], (template.name, found)
+            assert body.count(templates.NOT_IN_INPUT) == sum(not item.source for item in template.fields)
+
+
+def test_not_in_input_reads_back_from_a_section_of_any_kind(tmp_path):
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
+    template = templates.load(tmp_path, tree=True)["obj"]
+    body = templates.render(template, {"meta": "Not in input."})
+    assert "## Meta\n\nNot in input.\n" in body
+    document = templates.parse(template, body)
+    assert document.fields == {"meta": "Not in input."}
+    assert templates.check(template, document) == []
+    assert templates.render(template, document) == body
+
+
+def test_a_required_field_left_empty_still_refuses_beside_not_in_input(catalog):
+    work = catalog["work"]
+    values = every_field_not_in_input(work)
+    values["goal"] = ""
+    found = templates.check(work, templates.parse(work, templates.render(work, templates.answer(work, values)),
+                                                  values["title"]))
+    assert [(item.field, item.rule) for item in found if item.severity == "refuse"] == [("goal", "required")]
+    assert "Not in input" in found[0].fix
+
+
+def test_the_schema_offers_not_in_input_among_a_choice_s_values(catalog):
+    shaped = templates.schema(catalog["work"])["properties"]["package_kind"]
+    assert templates.NOT_IN_INPUT in shaped["enum"]
+
+
+QUOTE_TEMPLATE = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "A finding: what was seen, in the reporter's words."
+applies:
+  actions: ["file.write"]
+  paths: ["findings/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: seen
+    kind: text
+    required: true
+    quote: true
+  - name: impact
+    kind: list
+    required: true
+---
+
+## Seen
+
+<!-- seen: What the reporter saw, quoted word for word: "..." or a > line. -->
+
+## Impact
+
+<!-- impact: One item per effect. -->
+"""
+
+RAW = ("Ticket from Alice, Monday:\n\nThe export stops at row 1000 and the\nfile is cut off. "
+       "It happens on every run since the update.\n")
+
+
+def quote_template(root: Path) -> templates.Template:
+    write_template(root, "finding", QUOTE_TEMPLATE.format(name="finding"))
+    return templates.load(root, folder=root / "templates")["finding"]
+
+
+def quote_findings(template: templates.Template, seen: object, raw: str | None = RAW) -> list[templates.Finding]:
+    body = templates.render(template, {"seen": seen, "impact": ["Exports are incomplete."]})
+    return [item for item in templates.check(template, templates.parse(template, body), raw=raw)
+            if item.rule == templates.QUOTE_RULE]
+
+
+@pytest.mark.parametrize("seen", [
+    'Alice reports: "The export stops at row 1000".',
+    '"stops at row 1000 and the file is cut off"',  # a line break in the input is a space
+    "The reporter wrote:\n\n> It happens on every run since the update.",
+    "“every run since the update”",
+    "Not in input",
+])
+def test_a_quote_the_raw_input_holds_word_for_word_passes(tmp_path, seen):
+    assert quote_findings(quote_template(tmp_path), seen) == []
+
+
+@pytest.mark.parametrize("seen, named", [
+    ('Alice reports: "The export stops at row 2000".', '"The export stops at row 2000"'),
+    ('"The export stops" and "the screen goes black"', '"the screen goes black"'),
+    ('"the export stops at row 1000"', '"the export stops at row 1000"'),  # case counts
+    ("> It fails on every run.", '"It fails on every run."'),
+])
+def test_an_invented_quote_is_refused_naming_it(tmp_path, seen, named):
+    found = quote_findings(quote_template(tmp_path), seen)
+    assert [(item.field, item.severity) for item in found] == [("seen", "refuse")]
+    assert named in found[0].fix and "does not hold" in found[0].fix
+
+
+def test_a_quote_field_without_a_quote_is_refused_with_or_without_the_raw_input(tmp_path):
+    template = quote_template(tmp_path)
+    for raw in (RAW, None):
+        found = quote_findings(template, "The export breaks.", raw)
+        assert [item.severity for item in found] == ["refuse"]
+        assert "quotes nothing" in found[0].fix
+    assert quote_findings(template, '"anything at all"', None) == []
+
+
+def test_a_field_s_quote_key_loads_and_shows_in_its_shape(tmp_path):
+    template = quote_template(tmp_path)
+    assert template.field("seen").quote and not template.field("impact").quote
+    assert templates.field_shape(template.field("seen"))["quote"] is True
+    assert "quote" not in templates.field_shape(template.field("impact"))
+
+
+# Fill (docs/templates.md "Fill"): one command takes template, prompt, raw input and fields
+
+
+FILLED = {"seen": 'Alice wrote: "The export stops at row 1000".', "impact": ["Exports are incomplete."]}
+
+
+def fill_project(root: Path) -> tuple[templates.Template, Path, list[str]]:
+    """The quote template in `root`'s templates/, a raw input file, and the options that read them."""
+    template = quote_template(root)
+    raw = root / "ticket.txt"
+    raw.write_text(RAW, encoding="utf-8")
+    return template, raw, ["--templates", str(root / "templates"), "--root", str(root)]
+
+
+def test_a_fill_from_a_raw_input_file_writes_a_document_that_passes_check(tmp_path, capsys):
+    template, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    code = templates.main(["fill", "finding", "--path", str(target), "--prompt", "File Alice's ticket.",
+                           "--input", str(raw), "--fields-json", json.dumps(FILLED), *where])
+    out = capsys.readouterr()
+    assert code == 0, out
+    assert out.out == "wrote findings/export.md: finding 1.0.0\n"
+    written = target.read_text(encoding="utf-8")
+    assert written == templates.render(template, FILLED)
+    assert written.startswith(f"---\n{recorded(template)}---\n")
+    assert templates.main(["check", "--path", str(target), *where]) == 0
+    assert capsys.readouterr().out == "finding: no findings\n"
+
+
+def test_a_fill_with_an_invented_quote_is_refused_and_writes_nothing(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    invented = {**FILLED, "seen": 'Alice wrote: "The export crashes the server".'}
+    code = templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(invented), *where])
+    out = capsys.readouterr().out
+    assert code == 1 and not target.exists()
+    assert 'refuse: seen [quote]: Seen quotes "The export crashes the server", which the raw input ' \
+           "does not hold" in out
+    assert out.splitlines()[-1] == "templates.py fill: nothing was written; fix every finding and fill again"
+
+
+def test_a_fill_names_every_finding_at_once(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    code = templates.main(["fill", "finding", "--path", str(tmp_path / "findings" / "x.md"),
+                           "--input-text", RAW, "--fields-json", json.dumps({"seen": "No quote."}),
+                           *where])
+    out = capsys.readouterr().out
+    assert code == 1 and "[quote]" in out and "impact [required]" in out
+
+
+def test_a_fill_takes_not_in_input_for_a_field_the_raw_input_does_not_answer(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "gap.md"
+    fields = {"seen": FILLED["seen"], "impact": "Not in input"}
+    assert templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(fields), *where]) == 0
+    assert "## Impact\n\nNot in input\n" in target.read_text(encoding="utf-8")
+
+
+def test_a_fill_keeps_the_head_of_the_file_it_fills_again(tmp_path, capsys):
+    template, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    target.parent.mkdir()
+    target.write_text("---\nid: F1\n---\n\n# Export\n\n## Seen\n\nOld.\n", encoding="utf-8")
+    assert templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(FILLED), *where]) == 0
+    written = target.read_text(encoding="utf-8")
+    assert written.startswith(f"---\nid: F1\n{recorded(template)}---\n\n# Export\n\n## Seen\n\n")
+    assert "Old." not in written and templates.parse(template, written).fields == FILLED
+
+
+def test_a_fill_without_fields_answers_the_instructions_guidance_and_empty_draft(tmp_path, capsys):
+    template, _, where = fill_project(tmp_path)
+    (tmp_path / "guidance").mkdir()
+    (tmp_path / "guidance" / "quote-first.md").write_text(
+        "---\nname: quote-first\ndescription: 'Quote before you summarise.'\n---\n\nQuote first.\n",
+        encoding="utf-8")
+    code = templates.main(["fill", "finding", "--prompt", "File Alice's ticket.", *where])
+    answer = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert list(answer)[:5] == ["template", "prompt", "says", "rules", "guidance"]
+    assert answer["template"] == "finding" and answer["prompt"] == "File Alice's ticket."
+    assert any("Not in input" in rule for rule in answer["rules"])
+    assert any(rule.startswith("Seen: quote the raw input word for word") for rule in answer["rules"])
+    assert [note["name"] for note in answer["guidance"]] == ["quote-first"]
+    assert answer["guidance"][0]["text"] == "Quote first."
+    assert answer["draft"] == templates.draft(template)
+    assert {key: answer[key] for key in ("fields", "field_says", "field_shape", "schema")} == {
+        key: value for key, value in templates.draft_fields(template).items()
+        if key in ("fields", "field_says", "field_shape", "schema")}
+
+
+def test_a_fill_of_an_issue_template_prints_or_writes_the_markdown_to_file(tmp_path, capsys, catalog):
+    work = catalog["work"]
+    values = work_fields(catalog)
+    fields = tmp_path / "fields.json"
+    fields.write_text(json.dumps(values), encoding="utf-8")
+    raw = ["--input-text", "The person asked for one fill command.", "--tree"]
+    assert templates.main(["fill", "work", "--fields", str(fields), *raw]) == 0
+    assert capsys.readouterr().out == templates.render(work, values)
+    out = tmp_path / "issue.md"
+    assert templates.main(["fill", "work", "--fields", str(fields), "--out", str(out), *raw]) == 0
+    assert capsys.readouterr().out == f"wrote {out}: work {work.version}\n"
+    assert out.read_text(encoding="utf-8") == templates.render(work, values)
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["finding", "--fields-json", "{}"], "give the raw input"),
+    (["finding", "--input-text", "x", "--fields-json", "{}"], "writes its file: give --path"),
+    (["--path", "notes/x.md", "--input-text", "x", "--fields-json", "{}"], "no template claims notes/x.md"),
+    (["finding", "--path", "findings/x.md", "--out", "y.md", "--input-text", "x", "--fields-json", "{}"],
+     "--out"),
+    (["finding", "--path", "notes/x.md", "--input-text", "x", "--fields-json", "{}"],
+     "finding claims no path notes/x.md"),
+    (["finding", "--input", "missing.txt", "--fields-json", "{}"], "cannot read --input"),
+])
+def test_fill_usage_errors_exit_2_and_write_nothing(tmp_path, capsys, arguments, error):
+    _, _, where = fill_project(tmp_path)
+    for index, argument in enumerate(arguments):
+        if argument in ("--path", "--input", "--out"):
+            arguments[index + 1] = str(tmp_path / arguments[index + 1])
+    code = templates.main(["fill", *arguments, *where])
+    assert code == 2 and error in capsys.readouterr().err
+    assert not (tmp_path / "findings").exists() and not (tmp_path / "y.md").exists()

@@ -33,7 +33,8 @@ pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash"
 # (se_modules.py hooks-core) runs the real script with this interpreter; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
 # `refresh-moves` exists, else has nothing to move, and is logged apart; its hooks at start say
-# nothing, as where they are in place; every other call is logged.
+# nothing, as where they are in place; its components at start print `components-say` where it
+# exists and stop the start where `components-stop` does; every other call is logged.
 FAKE_UV = """#!/bin/sh
 case "$*" in *"se_start.py "*" start-refresh"*)
   echo refresh >> "$HOME/refreshes"
@@ -43,6 +44,10 @@ esac
 echo "uv $*" >> "$HOME/calls"
 case "$*" in *"se_modules.py --local "*" hooks-core"*) shift 5; exec "@PYTHON@" "$@" ;; esac
 case "$*" in *"se_start.py "*" start-hooks"*) exit 0 ;; esac
+case "$*" in *"se_start.py "*" start-components"*)
+  [ -f "$HOME/components-say" ] && cat "$HOME/components-say"
+  [ -f "$HOME/components-stop" ] && exit 1; exit 0 ;;
+esac
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" sync kern"*)
@@ -150,7 +155,7 @@ def machine_in(tmp_path: Path) -> tuple[Path, Path, Path]:
     # se_modules.py app-binary: name, version, download base, build folder, package.
     (home / "app-binary").write_text(f"{NAME} {APP_VERSION} {APP_BASE} {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
                                      newline="\n")
-    (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
+    (project / "se.toml").write_text('[components.obs]\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8", newline="\n")
     return home, project, tmp_path
 
@@ -199,7 +204,8 @@ def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quie
     assert log[0] == UV_INSTALL
     assert "uv python install 3.11" in log
     sync = [line for line in log if line.startswith("uv run")]
-    assert sync == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_modules.py --root {sh(project)} sync"]
+    assert sync == [f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_start.py --root {sh(project)} "
+                    "start-components"]
     (home / "calls").unlink()
     second = run(home, path, project)
     assert second.returncode == 0 and second.stdout == ""
@@ -473,7 +479,7 @@ def start_steps(home: Path) -> dict[str, bool]:
     """Which of the steps a compaction skips this start ran, read from the fake uv's logs."""
     log = calls(home)
     return {"refresh": (home / "refreshes").exists(),
-            "modules": any("se_modules.py" in line and " sync" in line for line in log),
+            "modules": any(" start-components" in line for line in log),
             "identity": any("work_tickets.py" in line and " identity " in line for line in log),
             "hooks": any(" start-hooks" in line for line in log),
             "file gate": any("se_templates.py gate --runtime " in line for line in log)}
@@ -493,6 +499,60 @@ def test_a_start_after_a_compaction_skips_the_refresh_modules_identity_and_hooks
     assert greeting_call(home)
 
 
+# The components at start (se_start.py start-components, docs/components.md "Required and optional
+# at start"): a required one missing stops the start, its message shown as it is.
+STOP = ("SE cannot start: the required component obs is missing (project -> obs).\n"
+        "No remote's owner offers a repository obs marked as a component (read: origin).\n"
+        "Add a remote of an owner that offers it: git remote add <remote> <address>\n")
+
+
+def test_a_required_component_missing_stops_the_start_and_the_session_is_shown_why(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    (home / "components-say").write_text(STOP, encoding="utf-8", newline="\n")
+    (home / "components-stop").touch()
+
+    result = run(home, path, project, "--hook", stdin=START)
+
+    assert result.returncode == 1 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    greeting = greeting_call(home)
+    assert all(f"--note {line}" in greeting for line in STOP.splitlines()), greeting
+    steps = start_steps(home)
+    assert steps["modules"] and not steps["identity"] and not steps["hooks"] and not steps["file gate"]
+    assert not any("app-binary" in line for line in calls(home)), "no core starts"
+    plain = run(home, path, project)
+    assert plain.returncode == 1 and plain.stdout == STOP, "without --hook the lines as they are"
+
+
+def test_an_optional_component_missing_is_a_line_and_the_start_goes_on(machine):
+    home, project, base = machine
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    line = "optional component project -> obs -> style not found on any remote's owner"
+    (home / "components-say").write_text(line + "\n", encoding="utf-8", newline="\n")
+
+    result = run(home, path, project, "--hook", stdin=START)
+
+    assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
+    assert f"--note {line}" in greeting_call(home)
+    assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks", "file gate"), True)
+
+
+def test_a_component_check_that_fails_without_a_word_stops_naming_the_command(machine):
+    home, project, base = machine
+    (home / "components-stop").touch()
+
+    result = run(home, fake_bin(base), project)
+
+    assert result.returncode == 1
+    assert result.stdout.endswith(f"se bootstrap: SE cannot start: checking the components of {sh(project)}/se.toml "
+                                  f"failed; run: uv run python {sh(SCRIPT.parent)}/se_start.py --root {sh(project)} "
+                                  "start-components\n"), result.stdout
+
+
 @pytest.mark.parametrize("source", ['"source":"startup"', '"source":"resume"', '"source":"clear"', None])
 def test_every_other_start_runs_every_step(machine, source):
     home, project, base = machine
@@ -507,8 +567,8 @@ def test_every_other_start_runs_every_step(machine, source):
 
 def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml(machine):
     """se_hook.sh guards the file tools only where the start left templates-files (README "Templates"):
-    `se_templates.py gate --runtime` writes or removes it from se.toml (tests/test_se_templates.py); a
-    project without se.toml loses a line an earlier start left."""
+    `se_templates.py gate --runtime` writes it where a template claims a path and removes it otherwise
+    (tests/test_se_templates.py); a project without se.toml loses a line an earlier start left."""
     home, project, base = machine
     path = fake_bin(base)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
@@ -517,7 +577,7 @@ def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_i
         f"{sh(project)}"]
     line = project / ".se" / ".runtime" / "templates-files"
     line.parent.mkdir(parents=True, exist_ok=True)
-    line.write_text("write\n", encoding="utf-8")
+    line.write_text("claimed\n", encoding="utf-8")
     (project / "se.toml").unlink()
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
@@ -902,7 +962,7 @@ def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machi
 
 
 # kern for the installed SE (scripts/bootstrap.sh kern_place, README "Modules"): an SE that pins kern
-# by [modules.kern] gets its clone synced before the core starts where it is missing or off the
+# by [components.kern] gets its clone synced before the core starts where it is missing or off the
 # commit se.lock locks; at that commit, no process starts.
 LOCKED = "b" * 40
 
@@ -910,10 +970,10 @@ LOCKED = "b" * 40
 def pinning_se(base: Path, head: str | None) -> Path:
     """A copy of SE's start scripts in a folder of its own that pins kern, its clone at `head`."""
     root = binary_root(base)
-    (root / "se.toml").write_text('[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+    (root / "se.toml").write_text('[components.kern]\ngo = "components/go.mod"\n',
                                   encoding="utf-8", newline="\n")
-    (root / "se.lock").write_text(f'[modules.obs]\nversion = "4.0.1"\nref = "{"a" * 40}"\n\n'
-                                  f'[modules.kern]\nversion = "0.14.1"\nref = "{LOCKED}"\n',
+    (root / "se.lock").write_text(f'[components.obs]\nversion = "4.0.1"\nref = "{"a" * 40}"\n\n'
+                                  f'[components.kern]\nversion = "0.14.1"\nref = "{LOCKED}"\n',
                                   encoding="utf-8", newline="\n")
     if head is not None:
         (root / ".se" / "modules" / "kern" / ".git").mkdir(parents=True)

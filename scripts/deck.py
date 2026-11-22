@@ -9,8 +9,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       obs's screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
-      not ask, outside a record built with the answers, on a decision without `## Current situation`
-      and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
+      not ask, outside a record built with the answers, on a decision without `## Current situation`,
+      `## The problem` and `## What others do`, in that order, before its fence (the decision skill's note shape), and on
       any obs warning. It writes the obs Document the deck was built from beside it, `<deck>.document.json`
       (its chapters, their versions and answers): read that, never the built page. It warns, building all
       the same, of each option without `success` and each mark off the datum without `because` (the
@@ -36,12 +36,13 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
 1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
-malformed, or a decision does not explain its problem before its options; 2: setup error, or no answers within --timeout.
+malformed, or a decision does not explain its problem and how others solve it before its options; 2: setup error, or no answers within --timeout.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import shutil
@@ -52,6 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import se_components  # noqa: E402
+import templates  # noqa: E402
 from build_docs import child_environment, html_adapter, obs_dir, obs_document  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
@@ -222,11 +224,29 @@ def _warnings(chapters: list[dict]) -> list[str]:
     return warnings
 
 
-SECTIONS = ["Current situation", "The problem"]  # The decision skill's note shape, before the fence.
+DECISION = Path(__file__).resolve().parents[1] / "templates" / "decision.md"
+
+
+@functools.cache
+def sections() -> tuple[str, ...]:
+    """The ``##`` sections a decision note writes before its ``pugh`` fence, in order: the headings of
+    the decision template's fields listed before its options node (templates/decision.md)."""
+    data = templates.note_data(DECISION.read_text(encoding="utf-8"), "templates/decision.md")
+    headings = []
+    for entry in data["fields"]:
+        if entry.get("fence"):
+            break
+        headings.append(entry["heading"])
+    return tuple(headings)
+
+
+def _named_sections() -> str:
+    *first, last = (f"`## {heading}`" for heading in sections())
+    return f"{', '.join(first)} and {last}" if first else last
 
 
 def _explains(content: list[dict]) -> bool:
-    """Whether the ``##`` sections before the chapter's first ``pugh`` fence include SECTIONS, in order."""
+    """Whether the ``##`` sections before the chapter's first ``pugh`` fence include ``sections()``, in order."""
     headings = []
     for node in content:
         if _holds_pugh([node]):
@@ -234,7 +254,55 @@ def _explains(content: list[dict]) -> bool:
         if node["type"] == "section" and node["attrs"].get("level") == 2:
             headings.append("".join(child.get("text", "") for child in node["children"]).strip())
     found = iter(headings)
-    return all(section in found for section in SECTIONS)
+    return all(section in found for section in sections())
+
+
+def pugh_problems(text: str) -> list[str]:
+    """What SE asks of a ``pugh`` fence, the pugh block template's check (templates/pugh.md): ``text`` holds
+    one, whose matrix names its ``criteria`` and at least two options under ``candidates``. Everything
+    else in the fence is obs's contract, checked at the build (obs's spec/capabilities/pugh-decisions.md)."""
+    span = templates._fence_span(text, "pugh")
+    if span is None:
+        return ["no `pugh` fence: write the options as obs's ```pugh fence"]
+    lines = text[span[0]:span[1]].splitlines()[1:]
+    if lines and templates.FENCE.match(lines[-1]):
+        lines = lines[:-1]
+    problems = []
+    for key, least in (("criteria", 1), ("candidates", 2)):
+        count = _items(lines, key)
+        if count is None:
+            problems.append(f"the `pugh` fence has no `{key}:`; write its {key}, as the decision skill's fence says")
+        elif count < least:
+            problems.append(f"the `pugh` fence's `{key}` lists {count}; write at least {least}")
+    return problems
+
+
+def _items(lines: list[str], key: str) -> int | None:
+    """How many items the top-level ``key`` of a fence's YAML lists: its ``- `` items at their first
+    indent, or the entries of a flow list on its own line; None where the fence has no such key."""
+    start = next((index for index, line in enumerate(lines) if re.match(rf"{key}[ \t]*:", line)), None)
+    if start is None:
+        return None
+    flow = lines[start].split(":", 1)[1].strip()
+    if flow:
+        inner = flow.strip()[1:-1] if flow.startswith("[") and flow.endswith("]") else flow
+        depth, count, seen = 0, 0, False
+        for char in inner:
+            depth += char in "[{"
+            depth -= char in "]}"
+            if char == "," and depth == 0:
+                count, seen = count + seen, False
+            elif not char.isspace():
+                seen = True
+        return count + seen
+    count, indent = 0, None
+    for line in lines[start + 1:]:
+        if line.strip() and not line[:1].isspace() and not line.startswith("- "):
+            break
+        item = re.match(r"([ \t]*)- ", line)
+        if item and indent in (None, len(item.group(1))):
+            indent, count = len(item.group(1)), count + 1
+    return count
 
 
 def _refusal(chapters: list[dict], recorded: bool) -> str | None:
@@ -249,8 +317,8 @@ def _refusal(chapters: list[dict], recorded: bool) -> str | None:
     unexplained = [chapter["id"] for chapter in decisions if not _explains(chapter["content"])]
     if unexplained:
         return (f"decision(s) {', '.join(unexplained)} do not explain the problem before the options; write "
-                "`## Current situation` and `## The problem` before the `pugh` fence, as the decision skill's "
-                "note shape (src/skills/decision/SKILL.md) says")
+                f"{_named_sections()} before the `pugh` fence, as the decision skill's note shape "
+                "(src/skills/decision/SKILL.md) and the decision template (templates/decision.md) say")
     if not any("bless" in chapter for chapter in chapters):
         return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
     return None

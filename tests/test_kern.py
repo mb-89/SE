@@ -1,4 +1,4 @@
-"""kern, the Go core, as SE uses it from kern's repository at the pin se.toml [modules.kern] reads
+"""kern, the Go core, as SE uses it from kern's repository at the pin se.toml [components.kern] reads
 from components/go.mod: the check main requires, the release of `se` on it, the battery every
 application calls, and kern's application template in the pinned clone."""
 
@@ -303,10 +303,10 @@ def kern_at_pin(folder: Path, files: dict[str, str]) -> tuple[subprocess.Complet
     return result, output.read_text(encoding="utf-8")
 
 
-LOCKED = '[modules.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
+LOCKED = '[components.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
 REQUIRES = "module se/components\n\nrequire (\n\tgolang.org/x/sys v0.41.0\n\tkern v{}\n)\n\nreplace kern => ../.se/modules/kern\n"
-SE_PIN = '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n'
-APP_PIN = '[modules.kern]\nurl = "../kern.git"\ngo = true\n'
+SE_PIN = '[components.kern]\ngo = "components/go.mod"\n'
+APP_PIN = '[components.kern]\ngo = true\n'
 
 
 def test_the_action_places_kern_at_the_commit_se_lock_locks_for_the_go_mod_se_toml_names(tmp_path) -> None:
@@ -330,15 +330,15 @@ def test_the_action_refuses_a_lock_off_the_require_naming_both_lines(tmp_path) -
                                                     "components/go.mod": REQUIRES.format("0.15.0")})
     assert result.returncode == 1 and output == ""
     assert result.stdout == (
-        '::error::kern-at-pin: off/se.lock [modules.kern] version = "0.14.1" but off/components/go.mod says '
+        '::error::kern-at-pin: off/se.lock [components.kern] version = "0.14.1" but off/components/go.mod says '
         "require kern v0.15.0: run se_modules.py sync kern and commit se.lock\n")
-    result, _ = kern_at_pin(tmp_path / "unnamed", {"se.toml": '[modules.kern]\nurl = "../kern.git"\n', "se.lock": LOCKED})
-    assert result.returncode == 1 and "unnamed/se.toml [modules.kern] names no go" in result.stdout
+    result, _ = kern_at_pin(tmp_path / "unnamed", {"se.toml": '[components.kern]\n', "se.lock": LOCKED})
+    assert result.returncode == 1 and "unnamed/se.toml [components.kern] names no go" in result.stdout
 
 
 def test_the_action_leaves_a_folder_carrying_kerns_source_as_it_is(tmp_path) -> None:
     """An application made before kern left SE: its se.lock locks no kern, its kern/ carries kern."""
-    for name, lock in (("none", {}), ("other", {"se.lock": '[modules.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n'})):
+    for name, lock in (("none", {}), ("other", {"se.lock": '[components.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n'})):
         result, output = kern_at_pin(tmp_path / name, {"se.toml": APP_PIN, **lock, "kern/go.mod": "module kern\n",
                                                        "go.mod": "module app\n\nrequire kern v0.0.0\n\nreplace kern => ./kern\n"})
         assert result.returncode == 0 and output == "", result.stdout + result.stderr

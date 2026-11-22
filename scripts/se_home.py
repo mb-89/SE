@@ -23,6 +23,10 @@ door (`scripts/git_door.py`):
   `resolve_module(root, url)` resolves it against `root`'s origin, a relative path origin
   (`../app.git`) taken from `root` first, so the URL names the same repository from any directory,
   such as the module cache a clone runs in.
+- `remotes(root)`: the checkout's remotes as the component finder reads them
+  (docs/components.md "Finding a component"): `origin` first, then the others in the order git
+  lists them, each with its configured address; `beside(url, name)` is that address with `<name>`
+  in place of its repository, as the remote reaches it.
 
 kern's Go helper (`kern/home`) answers the same: both suites read one table of origins and answers,
 kern's `home/testdata/origins.json`, read from kern's clone at its pin (`se_modules.kern_dir`).
@@ -132,6 +136,27 @@ def find(root: Path) -> Home | None:
         return home(root)
     except NoHome:
         return None
+
+
+def remotes(root: Path) -> list[tuple[str, str]]:
+    """(name, address) of each remote of `root`'s checkout: `origin` first, then the others in the
+    order git lists them; a remote whose address git cannot give is left out."""
+    listed = git_door.run("remote", root=root)
+    names = [line.strip() for line in listed.stdout.splitlines() if line.strip()] if listed.returncode == 0 else []
+    found = []
+    for name in sorted(names, key=lambda name: name != "origin"):
+        result = git_door.run("remote", "get-url", name, root=root)
+        url = result.stdout.strip() if result.returncode == 0 else ""
+        if url:
+            found.append((name, anchored(root, url)))
+    return found
+
+
+def beside(url: str, name: str) -> str:
+    """The repository `<name>` beside the one `url` names, reached the same way: `url` with
+    `<name>` in place of its repository, `.git` kept where `url` has it."""
+    suffix = ".git" if url.rstrip("/").endswith(".git") else ""
+    return module_url(url.rstrip("/"), f"../{name}{suffix}")
 
 
 def is_relative(url: str) -> bool:

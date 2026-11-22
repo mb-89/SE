@@ -1,13 +1,13 @@
 ---
 schema_version: "1.0"
 name: decision-note-has-matrix
-description: A decision brought to the person is written as one note with its situation, its problem and a pugh fence, in that order.
+description: A decision brought to the person is written as one note with its situation, its problem, what others do and a pugh fence, in that order.
 tags: [decision]
 runs: 3
 max_turns: 20
 timeout_seconds: 600
 allowed_tools: [Skill, Read]
-expected_outcome: One Write of a Markdown note holding "## Current situation", "## The problem" and a pugh fence, in that order.
+expected_outcome: One Write of a Markdown note holding "## Current situation", "## The problem", "## What others do" and a pugh fence, in that order.
 ---
 
 I have to decide this one myself, so prepare it for me as a decision note and write it to

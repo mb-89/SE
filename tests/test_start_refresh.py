@@ -93,7 +93,7 @@ def kern_at_its_lock(se: Path) -> None:
     """The installed SE's kern clone at the commit its se.lock locks, as a placed one stands, so
     the start places nothing (bootstrap.sh kern_place reads its HEAD file)."""
     import tomllib
-    ref = tomllib.loads((se / "se.lock").read_text(encoding="utf-8"))["modules"]["kern"]["ref"]
+    ref = tomllib.loads((se / "se.lock").read_text(encoding="utf-8"))["components"]["kern"]["ref"]
     head = se / ".se" / "modules" / "kern" / ".git" / "HEAD"
     head.parent.mkdir(parents=True)
     head.write_text(f"{ref}\n", encoding="utf-8", newline="\n")

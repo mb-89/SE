@@ -1,7 +1,7 @@
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
-what the command does. The template comes from the clone of kern se.toml [modules.kern] pins
+what the command does. The template comes from the clone of kern se.toml [components.kern] pins
 (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. The application pins the kern SE pins:
 its go.mod requires kern at that version and replaces the module by `./.se/modules/kern`, its se.lock
 locks the commit SE's se.lock locks, and SE's clone at that commit is copied there, ignored, so the
@@ -28,6 +28,10 @@ TEMPLATE_NAME = re.compile(r"(?<!se new )\bapp\b")
 # where the archive lost its mode.
 RUNME = "RUNME.sh"
 TEMPLATE_IDENTITY = 'identity = "<name> <name>"'
+# The application's pin of kern in se.toml: se 6 lists it under [components], found by its name, so
+# a template that still writes [modules.kern] with its url gets [components.kern] with its go alone.
+KERN_TABLE = "[components.kern]"
+TEMPLATE_KERN_TABLE = re.compile(r"(?m)^\[modules\.kern\][ \t]*\n(?:url[ \t]*=.*\n)?")
 # go.mod's replace of kern, with the comment lines above it, as the template writes it: the one
 # replace of the template, by kern's source one folder up.
 KERN_REPLACE = re.compile(r"(?m)(?:^//.*\n)*^replace (?P<module>\S+) => \.\./?[ \t]*\n?")
@@ -44,7 +48,7 @@ def app_replace(match: re.Match) -> str:
     """The application's replace of kern's module, by its clone at the pin."""
     module = match["module"]
     return (f"// kern at the version required above, in its clone that `se_modules.py sync kern` places\n"
-            f"// there (se.toml [modules.kern]).\nreplace {module} => ./{KERN_PLACE}\n")
+            f"// there (se.toml [components.kern]).\nreplace {module} => ./{KERN_PLACE}\n")
 
 
 class NewError(Exception):
@@ -204,6 +208,8 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     _fill(path / "go.mod", KERN_REQUIRE, lambda match: f"{match['lead']}v{version}", tag)
     _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
+    if KERN_TABLE not in (path / "se.toml").read_text(encoding="utf-8"):
+        _fill(path / "se.toml", TEMPLATE_KERN_TABLE, KERN_TABLE + "\n", tag)
     (path / modules.LOCK).write_text(modules.lock_text({modules.KERN: (version, commit)}),
                                      encoding="utf-8", newline="\n")
     write_workflows(se_root, "HEAD", path)

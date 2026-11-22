@@ -474,7 +474,7 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
 
 
 # The file gate's filter (README "Templates"): the file tools reach se_templates.py gate only where SE's
-# start left `write` in templates-files, and only for a file in the project; the fake uv logs each run.
+# start left `claimed` in templates-files, and only for a file in the project; the fake uv logs each run.
 
 def file_event(tool: str, **given) -> str:
     return json.dumps({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": tool,
@@ -495,12 +495,12 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
              file_event("MultiEdit", file_path=inside, edits=[]),
              file_event("mcp__github__push_files", owner="o", repo="r", files=[]),
              file_event("mcp__github__create_or_update_file", owner="o", repo="r", path="s.md")]
-    for event in calls:  # files unset: no line, every call costs what it did
+    for event in calls:  # no template claims a path: no line, every call costs what it did
         result = hook(home, project, "PreToolUse", event=event)
         assert result.returncode == 0 and result.stdout == ""
     assert gate_runs(home) == 0 and (home / "calls").read_text(encoding="utf-8").count("hook ") == 5
     line = project / ".se" / ".runtime" / "templates-files"
-    line.write_text("write\n", encoding="utf-8", newline="\n")
+    line.write_text("claimed\n", encoding="utf-8", newline="\n")
     for event in calls:
         assert hook(home, project, "PreToolUse", event=event).returncode == 0
     assert gate_runs(home) == 5
@@ -509,6 +509,6 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
                   file_event("mcp__github__get_file_contents", owner="o", repo="r", path="s.md")):
         assert hook(home, project, "PreToolUse", event=event).returncode == 0
     assert gate_runs(home) == 5
-    line.write_text("check\n", encoding="utf-8", newline="\n")
+    line.write_text("write\n", encoding="utf-8", newline="\n")  # the retired switch's line
     assert hook(home, project, "PreToolUse", event=calls[0]).returncode == 0
     assert gate_runs(home) == 5

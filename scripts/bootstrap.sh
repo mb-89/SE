@@ -7,7 +7,8 @@
 #   git      required; cannot be installed without admin rights, so it names the one line to run
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
-#   modules  the current project's se.toml modules, synced by se_modules.py
+#   modules  the current project's se.toml components and theirs, resolved from what is placed first
+#            (se_start.py start-components); a required one missing stops the start
 #   identity in --hook mode: the project's commit identity, set as setup.sh sets it
 #   hooks    in --hook mode: the project's core.hooksPath where it is unset, set as setup.sh sets it
 #   SE       in --hook mode: an installed SE that is a git checkout behind SE's latest release within
@@ -18,7 +19,7 @@
 #            (se_modules.py app-binary) — kern's core plus the application's Go components where it
 #            has any (the `se` binary for SE), else the bare kern — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
 #            from its folder where no release matches, on the installed SE's kern, placed first at
-#            the pin its se.toml [modules.kern] reads: kern_place), started detached for the project, and handed
+#            the pin its se.toml [components.kern] reads: kern_place), started detached for the project, and handed
 #            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
 #            skips this step (below)
 # --binary (RUNME.conf's `get se` line, run by SE's RUNME): the plain run's git, uv and Python steps,
@@ -224,19 +225,19 @@ kern_build() { # <bin> <build folder> <package>
   local part="$1.part$$"
   (cd "$2" && go build -o "$part" "$3") && mv -f "$part" "$1"
 }
-# kern for the installed SE (its se.toml [modules.kern], README "Modules"), which a build of its
+# kern for the installed SE (its se.toml [components.kern], README "Modules"), which a build of its
 # binary builds on: synced where its clone in .se/modules/kern is missing or not at the commit
 # se.lock locks, both read from the files alone, so an SE at its pin starts no process here. Where
 # that fails, the start goes on without it and the greeting names the cause. A project that is SE's
 # own checkout syncs it in the modules step.
 kern_place() {
-  [ -f "$se_root/se.toml" ] && grep -q '^\[modules\.kern\]' "$se_root/se.toml" || return 0
+  [ -f "$se_root/se.toml" ] && grep -q '^\[components\.kern\]' "$se_root/se.toml" || return 0
   local locked="" head="" inside=false line out
   if [ -f "$se_root/se.lock" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       line="${line%$'\r'}"
       case "$line" in
-        "[modules.kern]") inside=true ;;
+        "[components.kern]") inside=true ;;
         "["*) inside=false ;;
         "ref = \""*) $inside && { locked="${line#ref = \"}"; locked="${locked%\"}"; } ;;
       esac
@@ -393,11 +394,19 @@ if $binary; then
   finish 0
 fi
 
-# Modules: the project's se.toml modules, fetched at their pins.
-if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[modules\.' "$project/se.toml"; then
-  if ! out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" --root "$project" sync 2>&1)"; then
-    say "$out"
-    need "syncing the modules of $project/se.toml failed; run this again when the cause above is fixed"
+# Components (docs/components.md "Required and optional at start"): the tree of the project's
+# se.toml [components] resolved before the core starts, from what is placed first, the rest found
+# and placed at its pins (se_start.py start-components). Its lines are shown as they are: an
+# optional component missing is one line and the start goes on; a required one missing stops the
+# start here, its message the greeting's, and nothing after it runs (no identity, hooks or core).
+if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[components\.' "$project/se.toml"; then
+  out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_start.py" \
+    --root "$project" start-components 2>/dev/null)"
+  stopped=$?
+  while IFS= read -r line; do [ -n "$line" ] && notes+=("$line"); done <<<"$out"
+  if [ "$stopped" != 0 ]; then
+    [ -n "$out" ] && finish 1
+    need "SE cannot start: checking the components of $project/se.toml failed; run: uv run python $se_root/scripts/se_start.py --root $project start-components"
   fi
 fi
 # The commit identity (README "Install"): at a session's start the project's checkout gets its
@@ -416,10 +425,10 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")
 fi
-# The file gate's switch (README "Templates"): where se.toml [templates] files is write at
-# origin/<integration branch>, the line write in <project>/.se/.runtime/templates-files, as kern.path is
-# written, so se_hook.sh guards the file tools with builtins alone; removed otherwise. A switch
-# changed during a session takes effect at the next session's start.
+# The file gate's line (README "Templates"): where a template claims a path, the line claimed in
+# <project>/.se/.runtime/templates-files, as kern.path is written, so se_hook.sh guards the file
+# tools with builtins alone; removed otherwise. A template added during a session is guarded from
+# the next session's start.
 if $hook && ! $compact; then
   if [ -f "$project/se.toml" ]; then
     uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_templates.py" gate \

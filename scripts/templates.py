@@ -6,33 +6,56 @@ where se.toml `[templates] enforce` is on (README "Templates"); this module owns
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
-**Template files.** One TOML file per template, `templates/<name>.toml`; `templates/terms.toml` is no template but the
-list of inside terms (below). A template declares:
+**Template files.** One Markdown note per template, `templates/<name>.md` (docs/templates.md "The
+template"); `templates/terms.toml` is no template but the list of inside terms (below). A note
+opens with its front matter between `---` lines, then its skeleton.
 
-- `name`, `reader` (`owner` or `fleet`: who reads what it shapes) and `says`, one line;
-- `[applies] actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
+The front matter is YAML in the subset `front_data` reads, so every YAML reader reads it alike:
+`key: value` lines and `- ` list items, nested by indenting with spaces; `#` starts a comment
+line; a value is JSON where it opens with `"`, `[` or `{` (a quoted string, a list, a mapping, on
+one line), a single-quoted string, `true`, `false`, a whole number or plain words. Plain words
+another reader takes for something else (`off`, `yes`, `null`, `1.5`), or that hold `: ` or ` #`,
+are refused until quoted. It declares:
+
+- `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
+  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
+  words, the template's one link to guidance, which `scripts/se_guidance.py` reads
+  (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
+  shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
+  inherited;
+- `applies.actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
   `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
-  so a template without it does not load; `paths`, the globs of the files a `file.write` template claims,
+  so a template without it does not load, except that a block or an entry (PART_KINDS) that only
+  a node checks leaves `applies` out and shapes no action of its own; `paths`, the globs of the files a `file.write` template claims,
   relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
-  with `actions = ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
+  with `actions: ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
   expression a whole line matches) and `title`, and the filters `labels` (every one present) and
-  `base = "integration"` (a pull request into the integration branch); `fallback` (selection,
+  `base: integration` (a pull request into the integration branch); `fallback` (selection,
   below);
-- `extends`, another template whose fields, rules, actors and `[applies]` it inherits; `remove` names
+- `extends`, another template whose fields, rules, actors and `applies` it inherits; `remove` names
   inherited fields it drops, a field of the same name replaces the inherited one, and `order`
   lists its final field order (every field once) where the inherited order does not fit;
 - `keep_unknown` (default true): whether `render` keeps the sections the template does not declare;
-- `[rules]`, each writing rule it uses marked `refuse`, `warn` or `off`; a rule it does not name is
+- `rules`, each writing rule it uses marked `refuse`, `warn` or `"off"`; a rule it does not name is
   off. A warn-only rule marked `refuse` does not load;
-- `actors`, the names a step or a check may name (rule `actor`), and `[example]`, a `title` and
+- `actors`, the names a step or a check may name (rule `actor`), and `example`, a `title` and
   `fields` that pass the template, which the tests render and parse back;
-- `[scope]` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
+- `scope` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
   heading level of its fields. Only that section is read; the text above the marker is data, never
-  checked or read into a field, and kept as it is.
+  checked or read into a field, and kept as it is;
+- `fields`, a list of the fields (below), in order.
 
-**Adapters.** A template without `[[fields]]` is an adapter: a text SE already writes and already
-checks elsewhere. It names that check, `checker = "<module>:<function>"` (a script beside this
-one), and the engine calls it instead of field rules of its own; `[adapter]` says how:
+**The skeleton**, the note's body, is the empty document: one section per field that has one (not
+the title, not a label line), in the order `fields` lists them, each its heading at the template's
+level (`##`, or the scope's) and one comment alone, `<!-- <field>: <instruction> -->`. The section
+owns the field's `heading` and its `says`, the instruction, so the front matter repeats neither; a
+title or label field keeps its `says` in the front matter. An inherited field's section stays in
+the note it is declared in. Outside the sections the body holds nothing but blank lines; an
+adapter's body is empty.
+
+**Adapters.** A template without `fields` is an adapter: a text SE already writes and already
+checks elsewhere. It names that check, `checker: <module>:<function>` (a script beside this
+one), and the engine calls it instead of field rules of its own; `adapter` says how:
 
 - what the checker gets: the body, or `extract` (`"<module>:<function>"`, called with the body and
   `extract_with`), or `json_after` (the data of the last fenced block after the last line that is
@@ -46,21 +69,22 @@ one), and the engine calls it instead of field rules of its own; `[adapter]` say
 - what it answers (`result`): `problems` (a list of texts, each a refusal), `raises` (its error is
   the refusal) or `truth` (false refuses with `refusal`);
 - besides or instead: `title_rule`, a `"<module>:<NAME>"` pattern the title must match from its
-  start, and `[[adapter.lines]]`, each a `pattern` a whole line (with `first`, the first line)
+  start, and `lines`, each a `pattern` a whole line (with `first`, the first line)
   must match, and what it `says`.
 
 The engine never adds its template marker to an adapter's body: `render` gives it back as it
 stands, and its findings name the field `body`.
 
-**Fields**, `[[fields]]`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
+**Fields**, the items of `fields`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
 fills it), `says` (what belongs there, the fix's wording and the draft's comment), `exact_heading`
 (only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
-back as it stands). Besides: `source = "title"` (the field is the issue's title, never in the body),
+back as it stands). Besides: `source: title` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
-`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
+`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`
+and `fence` (Nesting, below), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
-should have, 0 for none), `actor`, `one_sentence`, `not_picked` and `shape`, a title's (rule
-`title-shape`).
+should have, 0 for none), `actor`, `one_sentence`, `not_picked`, `shape`, a title's (rule
+`title-shape`), and `quote` (rule `quote`: the value quotes the raw input word for word).
 
 A field may name code as `"<module>:<NAME>"`, a script beside this one, as an adapter's keys do;
 `load` resolves it and refuses one that does not resolve, naming the template file and the key.
@@ -73,7 +97,28 @@ keys of that mapping.
 `list` a list of strings, its items without their numbers or bullets (with `markers`, a line that
 is one whole HTML comment is an item of its own, kept as it is); `object` a mapping of `Key: value`
 lines; `issue` a list of entries, one per line (`#12`, a link, `None`); `checklist` a list of
-`{"done": bool, "text": str}`; `code` the text of its first fenced block.
+`{"done": bool, "text": str}`; `code` the text of its first fenced block; `node` and `register`
+(Nesting) their text as it stands.
+
+**Nesting** (docs/templates.md "Nesting"): a field may be a node, a part of the document that
+another template checks, which the field pins at its version, `<template>@<version>` (NODE_PIN):
+
+- `node: <template>@<version>` (kind `node`): the field's text is one document of that template,
+  a block or a document. With `fence: <info word>` the node has no section: its text is the
+  document's first fence of that info word, wherever it sits, and its `says` stays in the front
+  matter; it must come after the sections of the fields listed before it and before those listed
+  after it. Without `fence` it is a section like any other.
+- `entries: <template>@<version>` (kind `register`): the field's section is a register, each of its
+  headings at the shallowest level it holds an entry (`entries`), its text up to the next one a
+  document of that template, an entry. A register without an entry refuses.
+
+`load` refuses a node that names no template, pins another version than the template's, names a
+template of another kind (an entry for a register, a block for a fence, a block or a document for
+any other node; never a file's or a scoped template), or nests in a cycle; each node field then
+holds its template as `nested`. `check` checks each node by its template, by that template's rules,
+and gives each finding under the node's field, its fix naming the template, and for a register
+the entry by its heading (`nested_findings`). A node records no provenance of its own: the
+document's template digest covers its nodes' (Writing).
 
 **Reading.** `parse` skips front matter and accepts a field's heading at `#` to `####`, in any case
 and with a trailing colon, and `_No response_` as empty, except where a field sets `exact_heading`.
@@ -82,17 +127,21 @@ in. Emptiness is judged without HTML comments.
 
 **Files.** For a `file.write` template the text is a file: its front matter and its page title, the
 first `#` line above the first field, are its head. `parse` never reads the page title as a field,
-even where its text is a field's heading; `render` keeps the head as it stands, writes
-`template: <name>` into the front matter (a new block where the file has none) and writes neither
-marker, its fields as `## ` headings below the title.
+even where its text is a field's heading; `render` keeps the head as it stands and writes neither
+marker, its fields as `## ` headings below the title. Into the front matter it writes the marker's
+three as the lines a file records its template by (`Template.front_lines`): `template:
+<repository>/<name>`, `version: <version>` and `overlay: <digest>`, each in its place where the
+front matter holds it, a missing one after the last of them (a new block where the file has none).
 
 **Writing.** `render` writes SE's fleet marker once, then the template marker,
 `<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
 alone, after the scope's marker), then `## ` headings. The marker says what the engine knows:
 the repository `se` for SE's own templates and `project` for any other `templates/` or
-`--templates` folder, the version `0.0.0`, as no template declares one yet, and
+`--templates` folder, the template's `version`, and
 `sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
-by a NUL byte (`Template.marker_line`). Selection reads the name alone. A section the template does not
+by a NUL byte (`Template.marker_line`); a template with nodes takes `sha256:<hex>` of that digest
+and then its nodes' digests, each so ended (`_nest`); the digest stands where docs/templates.md "The document"
+puts the overlay's until templates have overlays. Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
@@ -102,13 +151,13 @@ path=)`), in this order; for `file.write` the order below it:
 1. Free where `repo` is given and is not in `home`, the repositories SE writes to (origin and
    se.toml `[outside]`, `home_repositories`).
 2. The allowed templates: those that name the action, whose `labels` the text carries and, with
-   `base = "integration"`, whose pull request goes into the integration branch.
+   `base: integration`, whose pull request goes into the integration branch.
 3. A marker only narrows the choice within the allowed set: a body's own
    template marker naming an allowed template wins. Such a line naming a template outside the
    allowed set, or an adapter's marker of an adapter outside it, is a refused finding (rule
    `template`), and selection goes on without it. SE's other markers (`se:fleet`, `se:handled` in a
    comment, `se:open-points`, `se:refs-*`) name no template and select nothing on their own.
-4. By `[applies] order` (then name), the first allowed template with conditions that all hold
+4. By `applies.order` (then name), the first allowed template with conditions that all hold
    (`marker`, `marker_pattern`: the body has that line; `title`: the title matches).
 5. The first allowed template without conditions, or with `fallback = true`.
 6. None: free. For a pull request into the integration branch this tries `landing` and
@@ -118,9 +167,10 @@ path=)`), in this order; for `file.write` the order below it:
 For a file, `path` (relative to the project root) selects:
 
 1. The allowed templates: the `file.write` templates whose `paths` match it; none, and the file is free.
-2. The front matter's `template: <name>` naming an allowed template chooses it, as a body's template marker
-   does; one naming another template is a refused finding (rule `template`).
-3. By `[applies] order` (then name), the first allowed template whose conditions all hold, matched
+2. The front matter's `template: <name>` (or `<repository>/<name>`, as `render` writes it) naming an
+   allowed template chooses it, as a body's template marker does; one naming another template is a
+   refused finding (rule `template`).
+3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
    template: <name>`.
@@ -129,15 +179,36 @@ For a file, `path` (relative to the project root) selects:
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
 `choice`, `not-picked` (no `Not picked:` line), `duplicate` (the same text in two fields) and
 `dangling` (an SE command that does not exist, through `references.dangling` as
-`work_tickets.refuse_dangling` calls it); an adapter refuses with `checker`, `line` and `title`.
+`work_tickets.refuse_dangling` calls it); a node's place and a register without entries always
+refuse (NODE_RULE, never a template's to set); an adapter refuses with `checker`, `line` and `title`.
+A `quote` field always refuses (QUOTE_RULE, never a template's to set) a value that quotes nothing
+and, given the raw input (`check(raw=)`, as `fill` gives it), a quote the raw input does not hold
+word for word (`quoted`). A quote is a span in `"..."` or `“...”` on one line, or a run of `>`
+lines (`quotes`); whitespace and line breaks aside, case counts.
 Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, taken as
 `work_tickets.goal_summary` takes it, runs past `first_sentence_chars`: a work issue's Goal's
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
 Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
 
+**Not in input** (NOT_IN_INPUT, docs/templates.md "Fill"): every field takes the value `Not in input`
+where the raw input does not answer it, whatever its kind and rules (`not_in_input`): the text
+alone, or a list of that one item, a checklist of that one entry, an object of that one key without
+a value; case and a closing period aside. `check` applies none of the field's rules to it, so a
+required field so filled passes and shows the gap; `parse` reads the section back as that text and
+`render` writes it so, and the schema's `enum` of a choice holds it beside the choices. The fix of a
+`required` refusal names it.
+
+**Version** (rule `version`, `provenance`): `check` reads a document against the version it records,
+its template marker's or, for a file, the front matter's `version:` where its `template:` names the
+template. None recorded, or the template's own, passes; another minor or patch version warns;
+another major version, or one that is no semantic version, refuses, naming both versions and the
+fill that writes the document again. The move sets the severity, never the template's `rules`.
+`render` records the template's version now, so the filing commands also read the version of the
+text as it was given (`work_tickets.template_findings`).
+
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
-`origin/<integration branch>` through `git_door` where that ref holds templates, else from the working
+`origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
 tree; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
 `check(template, document)` gives `Finding`s; `select(...)` gives a `Selection`, its template (None: free)
 and its findings; `verdict(templates, action, body, title, ...)` both at once; `draft(template)`;
@@ -169,9 +240,32 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
 `first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
-(`schema`). `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all three, reads
-the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
+(`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
+alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
+adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
+the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
+`fill` writes a file; none calls GitHub or starts a model.
+
+`templates.py fill (<template> | --path FILE) [--prompt TEXT | --prompt-file FILE] [--input FILE |
+--input-text TEXT] [--fields FILE | --fields-json TEXT] [--title TEXT] [--out FILE] [--root DIR]` is
+docs/templates.md "Fill": one command takes the template, the prompt, the raw input and the agent's
+fields.
+
+- Without fields it answers the instructions first (`instructions`): the template, the prompt, its
+  `says`, the rules of honest fields (HONEST, and one per `quote` field), the guidance its tags
+  resolve in `--root`'s trees (`guidance`, through `scripts/se_guidance.py`), then the empty draft
+  as Markdown (`draft`) and `draft --json`'s fields, field_says, field_shape and schema. Exit 0.
+- With fields it needs the raw input, and checks the document the fields render against the
+  template and that input (`fill`: `check(raw=)`, so a `quote` field's quotes must be in it).
+  A refusal prints every finding, at most 10 lines, then `templates.py fill: nothing was written;
+  fix every finding and fill again`, exit 1, and writes nothing; warnings go to stderr.
+- Where nothing refuses, a file template (`file.write`) writes the file `--path` names, which its
+  `paths` must claim; a file that exists keeps its head and its undeclared sections, its fields
+  the values alone. `--path` without a template selects as `check --path` does, so a new file
+  names its template. Another template's document goes to `--out`, else to stdout as it stands.
+  A write prints `wrote <path>: <template> <version>`, exit 0.
+- Filing a document as an issue, a comment or a message stays the filing commands' and the
+  tracker's tools': the engine calls no GitHub. A usage error exits 2 and writes nothing.
 """
 
 from __future__ import annotations
@@ -189,6 +283,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
+TEMPLATE_SUFFIX = ".md"  # a template is the note templates/<name>.md
 
 FLEET_MARKER = "<!-- se:fleet -->"
 TEMPLATE_MARKER = "<!-- se:template {repository}/{name} {version} {digest} -->"
@@ -196,23 +291,40 @@ TEMPLATE_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:template [\w.-]+(?:/[\w.-]
                                      r"sha256:[0-9a-f]+ -->[ \t]*$", re.MULTILINE)
 SE_REPOSITORY = "se"  # the repository of SE's own templates in the marker
 PROJECT_REPOSITORY = "project"  # that of a project's own, or a --templates folder's
-UNVERSIONED = "0.0.0"  # the version a template that declares none is written with
 
 ISSUE_ACTIONS = ("issue.create", "issue.edit")
 FILE_ACTION = "file.write"
 ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
            "deck.build", FILE_ACTION)
 READERS = ("owner", "fleet")
-KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
+KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register")
+#: The kinds of a node field (`node:`, `entries:`): its text is checked by another template.
+NODE_KINDS = ("node", "register")
+#: A node's or a register's pin, `<template>@<version>` (docs/templates.md "Nesting").
+NODE_PIN = re.compile(r"^([\w-]+)@((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$")
+#: The rule of a document's nodes: where a fence node sits, and a register without entries. It
+#: always refuses, never a template's to set, as a node's own findings are its template's.
+NODE_RULE = "node"
 REFUSE, WARN, OFF = "refuse", "warn", "off"
+#: The rule of a document's recorded version against its template's (`provenance`): its severity is
+#: the move's, never a template's to set.
+VERSION_RULE = "version"
+#: The rule of a `quote` field's quotes against the raw input (`quoted`): it always refuses, never
+#: a template's to set.
+QUOTE_RULE = "quote"
+#: A quote in a field's value: a span in straight or curly double quotes on one line, or a run of
+#: `>` lines.
+QUOTE_SPANS = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
+QUOTE_LINE = re.compile(r"^[ \t]*>[ \t]?(.*?)[ \t]*$")
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
-ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no [rules]
+ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
               "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
-              "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
-TEMPLATE_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
+              "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
+              "quote", "node", "entries", "fence"}
+TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
@@ -222,7 +334,10 @@ RESULTS = ("problems", "raises", "truth")
 REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?([\w-]+)['\"]?[ \t]*$", re.MULTILINE)
+FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?(?:[\w.-]+/)*([\w-]+)['\"]?[ \t]*$",
+                            re.MULTILINE)
+#: The three front matter keys a claimed file records its template by (`Template.front_lines`).
+PROVENANCE_KEYS = ("template", "version", "overlay")
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -233,6 +348,9 @@ CHECKBOX = re.compile(r"^[-*+][ \t]+\[([ xX])\](?:[ \t]+(.*?))?[ \t]*$")
 NO_RESPONSE = "_no response_"
 PLACEHOLDERS = {"", NO_RESPONSE, "tbd", "tba", "...", "…", "-", "?", "n/a", ">", "1."}
 NONE = "none"
+#: The value every field takes where the raw input does not answer it (docs/templates.md "Fill"):
+#: it passes whatever the field's rules, and shows the gap instead of an invented value.
+NOT_IN_INPUT = "Not in input"
 NOT_PICKED = re.compile(r"^[ \t>*_-]*not picked[*_]*:[*_]*[ \t]*\S", re.IGNORECASE | re.MULTILINE)
 BOARD = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(status|labels?|priority|assignee|milestone)\**[ \t]*:",
                    re.IGNORECASE | re.MULTILINE)
@@ -277,13 +395,21 @@ class Field:
     one_sentence: bool = False
     not_picked: bool = False
     shape: str = ""
+    quote: bool = False
+    #: A node's or a register's template and the version it pins (`node:`, `entries:`).
+    node: str = ""
+    pin: str = ""
+    #: A node with no section: the info word of the fence that is its text (`fence:`).
+    fence: str = ""
     #: What `shape` names, loaded: a pattern or a function (the module docstring: Fields).
     rule: object = dataclass_field(default=None, compare=False, repr=False)
+    #: The template `node` names, loaded (`load`): it checks the field's text.
+    nested: object = dataclass_field(default=None, compare=False, repr=False)
 
     @property
     def in_body(self) -> bool:
-        """Whether the field has a section of its own (not the title, not a label line)."""
-        return not self.source and not self.label
+        """Whether the field has a section of its own (not the title, a label line or a fence)."""
+        return not self.source and not self.label and not self.fence
 
 
 @dataclass(frozen=True)
@@ -319,7 +445,9 @@ class Template:
     adapter: dict = dataclass_field(default_factory=dict)
     paths: tuple[str, ...] = ()
     repository: str = SE_REPOSITORY
-    version: str = UNVERSIONED
+    version: str = ""
+    kind: str = "document"
+    tags: tuple[str, ...] = ()
     digest: str = ""
 
     @property
@@ -327,6 +455,13 @@ class Template:
         """The template's marker line, `<!-- se:template <repository>/<name> <version> <digest> -->`."""
         return TEMPLATE_MARKER.format(repository=self.repository, name=self.name,
                                       version=self.version, digest=self.digest)
+
+    @property
+    def front_lines(self) -> tuple[tuple[str, str], ...]:
+        """What a claimed file's front matter records: `template: <repository>/<name>`, `version`
+        and `overlay`, the marker's three in turn."""
+        return tuple(zip(PROVENANCE_KEYS, (f"{self.repository}/{self.name}", self.version,
+                                           self.digest)))
 
     @property
     def is_file(self) -> bool:
@@ -386,6 +521,8 @@ class Document:
     source: str = ""
     misses: dict[str, str] = dataclass_field(default_factory=dict)
     read: dict[str, object] = dataclass_field(default_factory=dict)
+    #: The template version the body records, in its marker line or its front matter; "" for none.
+    recorded: str = ""
 
 
 # Loading
@@ -393,13 +530,12 @@ class Document:
 
 def _template_files(root: Path, tree: bool, folder: Path | None = None) -> dict[str, str]:
     """`templates/<file>` -> its text, at origin's integration branch where that holds templates, else
-    from the working tree; with `folder`, the `*.toml` files of that folder alone."""
+    from the working tree; with `folder`, the template notes and the term list of that folder alone."""
     if folder is not None:
         if not folder.is_dir():
             raise TemplateError(f"templates: --templates {folder} is no folder; name the folder that holds "
                             "the templates")
-        return {path.name: path.read_text(encoding="utf-8")
-                for path in sorted(folder.glob("*.toml"))}
+        return _folder_files(folder)
     if not tree:
         files = _git_files(root)
         if files:
@@ -407,7 +543,17 @@ def _template_files(root: Path, tree: bool, folder: Path | None = None) -> dict[
     folder = root / TEMPLATES
     if not folder.is_dir():
         raise TemplateError(f"templates: {folder} does not exist; run from an SE checkout")
-    return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.glob("*.toml"))}
+    return _folder_files(folder)
+
+
+def _template_file(name: str) -> bool:
+    """Whether a file of `templates/` is read: a template note, or the term list."""
+    return name.endswith(TEMPLATE_SUFFIX) or name == TERMS_FILE
+
+
+def _folder_files(folder: Path) -> dict[str, str]:
+    return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.iterdir())
+            if path.is_file() and _template_file(path.name)}
 
 
 def _integration_branch(root: Path) -> str:
@@ -420,6 +566,8 @@ def _integration_branch(root: Path) -> str:
 
 
 def _git_files(root: Path) -> dict[str, str]:
+    """`templates/<file>` -> its text at origin's integration branch; none where that ref holds no
+    template note (no `templates/`, or a term list alone)."""
     door = _sibling("git_door")
     ref = f"origin/{_integration_branch(root)}"
     listed = door.run("ls-tree", "-r", "--name-only", ref, "--", TEMPLATES, root=root)
@@ -427,11 +575,11 @@ def _git_files(root: Path) -> dict[str, str]:
         return {}
     files = {}
     for path in listed.stdout.splitlines():
-        if path.startswith(f"{TEMPLATES}/") and path.endswith(".toml") and path.count("/") == 1:
+        if path.startswith(f"{TEMPLATES}/") and path.count("/") == 1 and _template_file(path.split("/", 1)[1]):
             shown = door.run("show", f"{ref}:{path}", root=root)
             if shown.returncode == 0:
                 files[path.split("/", 1)[1]] = shown.stdout
-    return files
+    return files if any(name.endswith(TEMPLATE_SUFFIX) for name in files) else {}
 
 
 def _sibling(name: str):
@@ -442,6 +590,193 @@ def _sibling(name: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+
+#: A front matter line: its key and what follows it.
+YAML_KEY = re.compile(r'^("(?:[^"\\]|\\.)*"|[A-Za-z_][\w.-]*):(?:[ \t]+(.*?))?[ \t]*$')
+YAML_INT = re.compile(r"^-?(?:0|[1-9][0-9]*)$")
+#: Plain words another YAML reader takes for something else than a string: quote them.
+YAML_AMBIGUOUS = re.compile(r"^(?:null|~|y|n|yes|no|on|off|true|false|-?[0-9][0-9_]*\.[0-9_]*"
+                            r"|[-+]?\.(?:inf|nan)|0[xo][0-9a-f]+)$", re.IGNORECASE)
+YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+#: A section of a template's skeleton: its heading, then the comment `<!-- <field>: <instruction> -->`.
+INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*(.*?)[ \t\r\n]*-->[ \t\r\n]*\Z",
+                         re.DOTALL)
+SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+#: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
+PART_KINDS = ("block", "entry")
+
+
+def _yaml_lines(text: str, where: str, first: int) -> list[tuple[int, int, str]]:
+    """The front matter's lines that hold data, as (line number, indentation, text)."""
+    lines = []
+    for number, line in enumerate(text.splitlines(), first):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "\t" in line[:len(line) - len(line.lstrip())]:
+            raise TemplateError(f"{where}:{number}: front matter is indented with a tab; indent with spaces")
+        lines.append((number, len(line) - len(line.lstrip(" ")), stripped))
+    return lines
+
+
+def _yaml_scalar(text: str, where: str) -> object:
+    """One value of the front matter: JSON where it opens with `"`, `[` or `{`, a single-quoted
+    string, `true`, `false`, a whole number, or a plain string."""
+    if text[:1] in "\"[{":
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            raise TemplateError(f"{where}: {text} is no JSON value ({error.msg}); write a quoted "
+                                "string, a list or a mapping as JSON") from error
+    if text[:1] == "'":
+        if len(text) < 2 or not text.endswith("'") or "'" in text[1:-1].replace("''", ""):
+            raise TemplateError(f"{where}: {text} is no single-quoted string; double a quote inside it")
+        return text[1:-1].replace("''", "'")
+    if text in ("true", "false"):
+        return text == "true"
+    if YAML_INT.match(text):
+        return int(text)
+    if (YAML_AMBIGUOUS.match(text) or text[0] in YAML_INDICATORS or ": " in text or " #" in text
+            or text.endswith(":")):
+        raise TemplateError(f"{where}: {text} is a plain value another YAML reader may read "
+                            "otherwise; quote it as a JSON string")
+    return text
+
+
+def _yaml_block(lines: list[tuple[int, int, str]], index: int, indent: int,
+                where: str) -> tuple[object, int]:
+    """The mapping or the list that starts at `lines[index]`, at `indent`, and where it ends."""
+    number, own, text = lines[index]
+    if own != indent:
+        raise TemplateError(f"{where}:{number}: indented {own} spaces where {indent} are expected")
+    if text == "-" or text.startswith("- "):
+        items: list[object] = []
+        while index < len(lines) and lines[index][1] == indent and (
+                lines[index][2] == "-" or lines[index][2].startswith("- ")):
+            number, _, text = lines[index]
+            rest = text[1:].strip()
+            if not rest:
+                raise TemplateError(f"{where}:{number}: an empty list item; write its value after `- `")
+            if YAML_KEY.match(rest) and rest[:1] not in "[{":
+                lines = [*lines[:index], (number, indent + 2, rest), *lines[index + 1:]]
+                value, index = _yaml_block(lines, index, indent + 2, where)
+                items.append(value)
+                continue
+            items.append(_yaml_scalar(rest, f"{where}:{number}"))
+            index += 1
+        if index < len(lines) and lines[index][1] > indent:
+            raise TemplateError(f"{where}:{lines[index][0]}: indented deeper than its list's items")
+        return items, index
+    mapping: dict[str, object] = {}
+    while index < len(lines) and lines[index][1] == indent:
+        number, _, text = lines[index]
+        match = YAML_KEY.match(text)
+        if match is None or text.startswith("- "):
+            raise TemplateError(f"{where}:{number}: {text} is no `key: value` line")
+        key = json.loads(match.group(1)) if match.group(1).startswith('"') else match.group(1)
+        if key in mapping:
+            raise TemplateError(f"{where}:{number}: {key} is given twice")
+        if match.group(2):
+            mapping[key] = _yaml_scalar(match.group(2), f"{where}:{number}")
+            index += 1
+            if index < len(lines) and lines[index][1] > indent:
+                raise TemplateError(f"{where}:{lines[index][0]}: indented below a key that has its value")
+            continue
+        if index + 1 >= len(lines) or lines[index + 1][1] <= indent:
+            raise TemplateError(f"{where}:{number}: {key} has no value; write it after the colon, "
+                                "or indent its mapping or list below it")
+        mapping[key], index = _yaml_block(lines, index + 1, lines[index + 1][1], where)
+    if index < len(lines) and lines[index][1] > indent:
+        raise TemplateError(f"{where}:{lines[index][0]}: indented deeper than the keys above it")
+    return mapping, index
+
+
+def front_data(text: str, where: str, first: int = 2) -> dict[str, object]:
+    """The front matter `text` (without its `---` lines) as data, in the YAML subset the module
+    docstring names (Template files); `first` is its first line's number in the file."""
+    lines = _yaml_lines(text, where, first)
+    if not lines:
+        return {}
+    data, index = _yaml_block(lines, 0, 0, where)
+    if not isinstance(data, dict):
+        raise TemplateError(f"{where}:{lines[0][0]}: the front matter is a list; write `key: value` lines")
+    if index < len(lines):
+        raise TemplateError(f"{where}:{lines[index][0]}: {lines[index][2]} is outside the front matter's keys")
+    return data
+
+
+def note_data(text: str, where: str) -> dict[str, object]:
+    """A template note as the data `_build` reads: its front matter, each field of its skeleton
+    given its `heading` and its `says` from its section (the module docstring: Template files)."""
+    text = text.replace("\r\n", "\n")
+    if not text.startswith("---\n"):
+        raise TemplateError(f"{where}: a template opens with its front matter between `---` lines")
+    end = text.find("\n---\n", 3)
+    if end < 0 and text.endswith("\n---"):
+        end = len(text) - 4
+    if end < 0:
+        raise TemplateError(f"{where}: the front matter has no closing `---` line")
+    data = front_data(text[4:end + 1], where)
+    body = text[end + 5:]
+    first = text.count("\n", 0, end + 5) + 1
+    fields = data.get("fields", [])
+    if not isinstance(fields, list) or not all(isinstance(entry, dict) for entry in fields):
+        raise TemplateError(f"{where}: fields is a list of mappings, one per field")
+    scope = data.get("scope", {})
+    level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
+    sections = _skeleton(body, where, first, level)
+    in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
+               and not entry.get("fence")]
+    for entry in in_body:
+        for key in ("heading", "says"):
+            if key in entry:
+                raise TemplateError(f"{where}: field {entry.get('name', '?')} has its section in the "
+                                    f"skeleton, which owns its {key}; take {key} out of the front matter")
+    named = [entry.get("name") for entry in in_body]
+    listed = [name for name, _, _ in sections]
+    if listed != named:
+        raise TemplateError(f"{where}: the skeleton's sections are {', '.join(listed) or 'none'}; they "
+                            f"are one per field with a section, in the front matter's order: "
+                            f"{', '.join(map(str, named)) or 'none'}")
+    for entry, (_, heading, says) in zip(in_body, sections):
+        entry["heading"], entry["says"] = heading, says
+    return data
+
+
+def _skeleton(body: str, where: str, first: int, level: int) -> list[tuple[str, str, str]]:
+    """The skeleton's sections as (field, heading, instruction); outside them only blank lines."""
+    sections: list[tuple[str, str, str, int]] = []
+    current: list[str] | None = None
+    heading_line = 0
+    texts: list[list[str]] = []
+    hashes = "#" * level
+    for number, line in enumerate(body.splitlines(), first):
+        match = HEADING.match(line)
+        if match and len(match.group(1)) == level:
+            current = []
+            texts.append(current)
+            sections.append(("", match.group(2), "", number))
+            continue
+        if match:
+            raise TemplateError(f"{where}:{number}: {line} is no section of the skeleton; its sections "
+                                f"are `{hashes} <heading>` lines")
+        if current is None:
+            if line.strip():
+                raise TemplateError(f"{where}:{number}: text before the skeleton's first section; "
+                                    "a comment on the template goes in the front matter, after `#`")
+            continue
+        current.append(line)
+    made = []
+    for (_, heading, _, number), lines in zip(sections, texts):
+        instruction = INSTRUCTION.match("\n".join(lines))
+        if instruction is None:
+            raise TemplateError(f"{where}:{number}: section {heading} holds one comment alone, "
+                                "`<!-- <field>: <instruction> -->`")
+        made.append((instruction.group(1), heading, " ".join(instruction.group(2).split())))
+    return [(name, heading, says) for name, heading, says in made]
 
 
 def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -> dict[str, Template]:
@@ -455,24 +790,26 @@ def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -
     terms: tuple[Term, ...] = ()
     for name, text in files.items():
         where = str(folder / name) if folder is not None else f"{TEMPLATES}/{name}"
-        try:
-            data = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as error:
-            raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
         if name == TERMS_FILE:
+            try:
+                data = tomllib.loads(text)
+            except tomllib.TOMLDecodeError as error:
+                raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
             terms = tuple(Term(str(item["term"]), str(item.get("plain", "")))
                           for item in data.get("terms", []))
             continue
+        data = note_data(text, where)
         template_name = data.get("name")
-        if template_name != name.removesuffix(".toml"):
-            raise TemplateError(f"{where}: name = {template_name!r} must be the file's name, "
-                            f"{name.removesuffix('.toml')!r}")
+        if template_name != name.removesuffix(TEMPLATE_SUFFIX):
+            raise TemplateError(f"{where}: name: {template_name!r} must be the file's name, "
+                            f"{name.removesuffix(TEMPLATE_SUFFIX)!r}")
         data["path"] = where
         raw[template_name] = data
         texts[template_name] = text
     built = {name: _build(name, raw, terms, ()) for name in sorted(raw)}
-    return {name: replace(template, repository=repository,
-                          digest=_digest(name, raw, texts)) for name, template in built.items()}
+    digests = {name: _digest(name, raw, texts) for name in built}
+    return _nest({name: replace(template, repository=repository, digest=digests[name])
+                  for name, template in built.items()}, digests)
 
 
 def _digest(name: str, raw: dict[str, dict], texts: dict[str, str]) -> str:
@@ -502,18 +839,31 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         parent = _build(base, raw, terms, (*seen, name))
     applies = data.get("applies")
     if isinstance(applies, dict) and set(applies) - APPLIES_KEYS:
-        raise TemplateError(f"{where}: [applies] has unknown keys "
+        raise TemplateError(f"{where}: applies has unknown keys "
                         f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
                         f"{', '.join(sorted(APPLIES_KEYS))}")
-    if not isinstance(applies, dict) or not applies.get("actions"):
+    if applies is None and parent is None and data.get("kind") in PART_KINDS:
+        applies = {"actions": []}  # a part a node checks, shaping no action of its own
+    elif not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
-            raise TemplateError(f"{where}: [applies] actions is required; name the actions the template "
-                            f"shapes ({', '.join(ACTIONS)})")
+            raise TemplateError(f"{where}: applies.actions is required; name the actions the template "
+                            f"shapes ({', '.join(ACTIONS)})"
+                            + (", or leave applies out of a block or an entry that only a node "
+                               "checks" if data.get("kind") in PART_KINDS else ""))
         applies = {"actions": list(parent.actions), **(applies or {})}
     actions = tuple(applies["actions"])
     for action in actions:
         if action not in ACTIONS:
             raise TemplateError(f"{where}: action {action!r} is none of {', '.join(ACTIONS)}")
+    version, kind, tags = data.get("version"), data.get("kind"), data.get("tags")
+    if not isinstance(version, str) or not SEMVER.match(version):
+        raise TemplateError(f"{where}: version is {version!r}; write the template's semantic version, "
+                            "such as 1.2.0")
+    if kind not in TEMPLATE_KINDS:
+        raise TemplateError(f"{where}: kind is {kind!r}; one of {', '.join(TEMPLATE_KINDS)}")
+    if not isinstance(tags, list) or not all(isinstance(tag, str) and tag.strip() for tag in tags):
+        raise TemplateError(f"{where}: tags is a list of words, the template's link to guidance, "
+                            "such as [\"issue\"]")
     reader = data.get("reader", parent.reader if parent else "")
     if reader not in READERS:
         raise TemplateError(f"{where}: reader {reader!r} is none of {', '.join(READERS)}")
@@ -547,27 +897,27 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
     adapter = _adapter(data, where, fields, parent)
     base_branch = str(applies.get("base", parent.base if parent else ""))
     if base_branch not in ("", "integration"):
-        raise TemplateError(f"{where}: [applies] base is {base_branch!r}; the one base is "
+        raise TemplateError(f"{where}: applies.base is {base_branch!r}; the one base is "
                         "\"integration\", the integration branch")
     paths = applies.get("paths", list(parent.paths) if parent else [])
     if not isinstance(paths, list) or not all(isinstance(glob, str) and glob.strip()
                                               for glob in paths):
-        raise TemplateError(f"{where}: [applies] paths is a list of globs relative to the project "
+        raise TemplateError(f"{where}: applies.paths is a list of globs relative to the project "
                         "root, such as \"book/*/steps/*.md\"")
     if paths and set(actions) != {FILE_ACTION}:
-        raise TemplateError(f"{where}: [applies] paths claims files and goes only with "
-                        f"actions = [\"{FILE_ACTION}\"]; take out paths, or the other actions")
+        raise TemplateError(f"{where}: applies.paths claims files and goes only with "
+                        f"actions: [\"{FILE_ACTION}\"]; take out paths, or the other actions")
     if FILE_ACTION in actions and not paths:
-        raise TemplateError(f"{where}: action {FILE_ACTION} needs [applies] paths, the globs of the "
+        raise TemplateError(f"{where}: action {FILE_ACTION} needs applies.paths, the globs of the "
                         "files the template claims")
     marker_pattern = str(applies.get("marker_pattern", ""))
     try:
         re.compile(marker_pattern)
     except re.error as error:
-        raise TemplateError(f"{where}: [applies] marker_pattern is no regular expression "
+        raise TemplateError(f"{where}: applies.marker_pattern is no regular expression "
                         f"({error})") from error
     return Template(
-        name=name, reader=reader, says=str(data.get("says", parent.says if parent else "")),
+        name=name, version=version, kind=kind, tags=tuple(tags), reader=reader, says=str(data.get("says", parent.says if parent else "")),
         actions=actions, fields=tuple(fields), rules=rules,
         order=int(applies.get("order", parent.order if parent else 100)),
         marker=str(applies.get("marker", "")), title_pattern=str(applies.get("title", "")),
@@ -605,19 +955,19 @@ def glob_pattern(glob: str) -> re.Pattern:
 
 
 def _adapter(data: dict, where: str, fields: list[Field], parent: Template | None) -> dict:
-    """An adapter's `[adapter]` table, checked as far as it can be without importing its
+    """An adapter's `adapter` mapping, checked as far as it can be without importing its
     checker; a template with fields takes none."""
     adapter = data.get("adapter", {})
     if fields:
         if "checker" in data or adapter:
-            raise TemplateError(f"{where}: a template with fields takes no checker or [adapter]; an "
-                            "adapter is a template without [[fields]]")
+            raise TemplateError(f"{where}: a template with fields takes no checker or adapter; an "
+                            "adapter is a template without fields")
         return {}
     if parent is not None:
         raise TemplateError(f"{where}: an adapter extends no template")
     if not isinstance(adapter, dict) or set(adapter) - ADAPTER_KEYS:
         extra = sorted(set(adapter) - ADAPTER_KEYS) if isinstance(adapter, dict) else ["?"]
-        raise TemplateError(f"{where}: [adapter] has unknown keys {', '.join(extra)}; the keys are "
+        raise TemplateError(f"{where}: adapter has unknown keys {', '.join(extra)}; the keys are "
                         f"{', '.join(sorted(ADAPTER_KEYS))} (scripts/templates.py's docstring)")
     references = [data.get("checker", ""), adapter.get("extract", ""), adapter.get("when", ""),
                   adapter.get("title_rule", "")]
@@ -626,23 +976,23 @@ def _adapter(data: dict, where: str, fields: list[Field], parent: Template | Non
             raise TemplateError(f"{where}: {reference!r} is no \"<module>:<name>\" of a script "
                             "beside scripts/templates.py")
     if adapter.get("result", "problems") not in RESULTS:
-        raise TemplateError(f"{where}: [adapter] result is {adapter.get('result')!r}; one of "
+        raise TemplateError(f"{where}: adapter.result is {adapter.get('result')!r}; one of "
                         f"{', '.join(RESULTS)}")
     if adapter.get("missing", REFUSE) not in (REFUSE, WARN, "pass"):
-        raise TemplateError(f"{where}: [adapter] missing is {adapter.get('missing')!r}; one of "
+        raise TemplateError(f"{where}: adapter.missing is {adapter.get('missing')!r}; one of "
                         "refuse, warn, pass")
     if adapter.get("result") == "truth" and not adapter.get("refusal"):
-        raise TemplateError(f"{where}: [adapter] result \"truth\" needs its refusal, the fix a "
+        raise TemplateError(f"{where}: adapter.result \"truth\" needs its refusal, the fix a "
                         "false answer gives")
     for line in adapter.get("lines", []):
         if set(line) - {"pattern", "first", "says"} or not line.get("pattern") or \
                 not line.get("says"):
-            raise TemplateError(f"{where}: each [[adapter.lines]] has a pattern and says, and may "
+            raise TemplateError(f"{where}: each item of adapter.lines has a pattern and says, and may "
                             "set first")
         try:
             re.compile(line["pattern"])
         except re.error as error:
-            raise TemplateError(f"{where}: [[adapter.lines]] pattern {line['pattern']!r} is no "
+            raise TemplateError(f"{where}: adapter.lines pattern {line['pattern']!r} is no "
                             f"regular expression ({error})") from error
     return dict(adapter)
 
@@ -652,6 +1002,7 @@ def _field(entry: dict, where: str) -> Field:
     name = entry.get("name", "?")
     if unknown:
         raise TemplateError(f"{where}: field {name} has unknown keys {', '.join(sorted(unknown))}")
+    entry = _node_entry(dict(entry), where)
     if entry.get("kind") not in KINDS:
         raise TemplateError(f"{where}: field {name} has kind {entry.get('kind')!r}; one of "
                         f"{', '.join(KINDS)}")
@@ -684,6 +1035,94 @@ def _field(entry: dict, where: str) -> Field:
     if made.kind == "choice" and not made.choices:
         raise TemplateError(f"{where}: field {name} is a choice without choices")
     return made
+
+
+def _node_entry(entry: dict, where: str) -> dict:
+    """A field entry's `node:` or `entries:` pin as the field's kind (`node`, `register`), `node`
+    and `pin`; `fence` goes with `node:` alone. The template it names is checked at `load`."""
+    name = entry.get("name", "?")
+    given = [key for key in ("node", "entries") if key in entry]
+    if len(given) > 1:
+        raise TemplateError(f"{where}: field {name} is a node or a register, not both; keep `node:` "
+                            "or `entries:`")
+    if not given:
+        if entry.get("kind") in NODE_KINDS:
+            raise TemplateError(f"{where}: field {name} has kind {entry['kind']} without its "
+                                "template; write `node: <template>@<version>` or `entries: "
+                                "<template>@<version>`")
+        if "fence" in entry:
+            raise TemplateError(f"{where}: field {name} has a fence but is no node; write `node: "
+                                "<template>@<version>` beside it")
+        return entry
+    key = given[0]
+    kind = "node" if key == "node" else "register"
+    pin = NODE_PIN.match(str(entry.pop(key)))
+    if pin is None:
+        raise TemplateError(f"{where}: field {name} {key}: write the template and the version it "
+                            "pins, `<template>@<version>`, such as raid-entry@1.0.0")
+    if entry.get("kind", kind) != kind:
+        raise TemplateError(f"{where}: field {name} is a {kind} ({key}:) and takes no kind "
+                            f"{entry['kind']}; leave kind out")
+    fence = entry.get("fence", "")
+    if fence and (kind != "node" or not re.fullmatch(r"[\w-]+", str(fence))):
+        raise TemplateError(f"{where}: field {name} fence: a node's fence is its info word, such "
+                            "as pugh, and goes with `node:` alone")
+    extra = sorted(set(entry) & {"choices", "numbered", "continue_numbers", "markers", "lang",
+                                 "verbatim", "quote", "shape", "label", "source"})
+    if extra:
+        raise TemplateError(f"{where}: field {name} is a {kind}, checked by its template; take out "
+                            f"{', '.join(extra)}")
+    entry.update(kind=kind, node=pin.group(1), pin=pin.group(2))
+    return entry
+
+
+def _nest(templates: dict[str, Template], digests: dict[str, str]) -> dict[str, Template]:
+    """`templates` with each node field's `nested` template loaded and each digest followed by its
+    nodes' (the module docstring: Nesting); a node naming no template, another version than it
+    pins, a template of the wrong kind, or a cycle does not load."""
+    done: dict[str, Template] = {}
+
+    def resolved(name: str, seen: tuple[str, ...]) -> Template:
+        if name in done:
+            return done[name]
+        template = templates[name]
+        fields, chain = [], hashlib.sha256(digests[name].encode("utf-8") + b"\0")
+        for item in template.fields:
+            if not item.node:
+                fields.append(item)
+                continue
+            where = f"{template.path}: field {item.name}"
+            target = templates.get(item.node)
+            if target is None:
+                raise TemplateError(f"{where} names {item.node}, which is no template in {TEMPLATES}/")
+            if item.node in seen or item.node == name:
+                raise TemplateError(f"{where} nests {item.node} in a cycle "
+                                    f"({' -> '.join((*seen, name, item.node))})")
+            if target.version != item.pin:
+                raise TemplateError(f"{where} pins {item.node} {item.pin}, but {item.node} is at "
+                                    f"{target.version}; pin {item.node}@{target.version}")
+            wanted = ("entry",) if item.kind == "register" else ("block",) if item.fence else \
+                ("block", "document")
+            if target.kind not in wanted or target.is_file or target.scope:
+                raise TemplateError(f"{where}: {item.node} is {_a(target.kind)}"
+                                    + (" that shapes files" if target.is_file else
+                                       " read after a marker" if target.scope else "")
+                                    + f"; a {'register' if item.kind == 'register' else 'node'}"
+                                    + f"{' fence' if item.fence else ''} names "
+                                    + _a(" or ".join(wanted)) + " template, part of a document")
+            nested = resolved(item.node, (*seen, name))
+            chain.update(nested.digest.encode("utf-8") + b"\0")
+            fields.append(replace(item, nested=nested))
+        nodes = [item for item in fields if item.node]
+        done[name] = replace(template, fields=tuple(fields),
+                             digest=f"sha256:{chain.hexdigest()}" if nodes else template.digest)
+        return done[name]
+
+    return {name: resolved(name, ()) for name in sorted(templates)}
+
+
+def _a(word: str) -> str:
+    return f"{'an' if word[:1] in 'aeiou' else 'a'} {word}"
 
 
 def _named(reference: str, where: str, key: str):
@@ -796,11 +1235,17 @@ def _items(text: str, pattern: re.Pattern, markers: bool) -> list[tuple[str, str
 
 def value_of(item: Field, raw: str) -> object:
     """A field's value read from its section's raw text (the module docstring: field kinds)."""
-    if item.verbatim:
+    if item.fence:  # the fence; one that holds only "Not in input" is that text
+        inner = raw.strip("\n").splitlines()[1:]
+        inner = inner[:-1] if inner and FENCE.match(inner[-1]) else inner
+        return "\n".join(inner).strip() if not_in_input("\n".join(inner)) else raw.strip("\n")
+    if item.verbatim or item.node:
         return raw.strip("\n")
     text = _uncomment(raw, keep_markers=item.markers)
     if text.strip().casefold() == NO_RESPONSE:
         text = ""
+    if not_in_input(text):
+        return text.strip()
     if item.kind in ("line", "choice"):
         return next((line.strip() for line in text.splitlines() if line.strip()), "")
     if item.kind == "text":
@@ -848,14 +1293,15 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
     if template.is_file:
         return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
-    document = Document(template=template.name, fields={}, source=text)
+    document = Document(template=template.name, fields={}, source=text,
+                        recorded=marked_version(template, body))
     if template.scope:
         parts, region = _scoped(template, text)
     else:
         region = text
         preamble, sections = _split(text, template, 0)
         parts = [Part("preamble", raw=preamble), *sections]
-    document.parts = parts
+    document.parts = parts = _fenced(template, parts)
     preamble = next((part.raw for part in parts if part.kind == "preamble"), "")
     for item in template.fields:
         if item.source == "title":
@@ -867,7 +1313,7 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
             if match:
                 document.fields[item.name] = match.group(1)
     for part in parts:
-        if part.kind == "field":
+        if part.kind in ("field", "node"):
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
     for item in template.fields:
@@ -878,6 +1324,48 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
                 document.misses[item.name] = near
     document.source = region
     return document
+
+
+def _fenced(template: Template, parts: list[Part]) -> list[Part]:
+    """`parts` with each fence node's fence (its field's `fence`) taken out of the part that holds
+    the first such fence: that part's text before it, then a `node` part, the fence, then a `text`
+    part, what followed it in that part (the module docstring: Nesting)."""
+    for item in template.fields:
+        if not item.fence:
+            continue
+        for index, part in enumerate(parts):
+            if part.kind not in ("preamble", "field", "unknown") or not part.raw:
+                continue
+            span = _fence_span(part.raw, item.fence)
+            if span is None:
+                continue
+            start, end = span
+            parts = [*parts[:index], replace(part, raw=part.raw[:start]),
+                     Part("node", raw=part.raw[start:end], name=item.name),
+                     Part("text", raw=part.raw[end:]), *parts[index + 1:]]
+            break
+    return parts
+
+
+def _fence_span(text: str, info: str) -> tuple[int, int] | None:
+    """Where the first fence whose info word is `info` starts and ends in `text`, its closing
+    line's end included; None where none opens. An unclosed fence runs to the end."""
+    offset, fence, start = 0, None, None
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        marker = FENCE.match(bare)
+        if fence is None and marker:
+            fence = marker.group(1)
+            words = bare.strip()[len(fence):].split()
+            if words and words[0] == info:
+                start = offset
+        elif fence is not None and marker and marker.group(1).startswith(fence) and \
+                not bare.strip()[len(marker.group(1)):].strip():
+            fence = None
+            if start is not None:
+                return start, offset + len(line)
+        offset += len(line)
+    return (start, len(text)) if start is not None else None
 
 
 def _title_end(template: Template, text: str) -> int:
@@ -913,10 +1401,11 @@ def _parse_file(template: Template, body: str) -> Document:
     title, rest = rest[:end], rest[end:]
     preamble, sections = _split(rest, template, 0)
     document = Document(template=template.name, fields={}, source=rest,
-                        parts=[Part("front", raw=head), Part("head", raw=title),
-                               Part("preamble", raw=preamble), *sections])
-    for part in sections:
-        if part.kind == "field":
+                        parts=_fenced(template, [Part("front", raw=head), Part("head", raw=title),
+                                                 Part("preamble", raw=preamble), *sections]),
+                        recorded=front_version(template, head))
+    for part in document.parts:
+        if part.kind in ("field", "node"):
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
     for item in template.fields:
@@ -935,16 +1424,50 @@ def front_matter_template(body: str) -> str | None:
     return found.group(1) if found else None
 
 
-def _with_template(front: str, name: str) -> str:
-    """Front matter `front` with its `template:` line naming `name`, every other byte kept; a new
-    block where `front` is empty."""
+def _front_key(key: str) -> re.Pattern:
+    """A front matter line of `key`, its value the first group, unquoted."""
+    return re.compile(rf"^{key}[ \t]*:[ \t]*['\"]?([^'\"\r\n]*?)['\"]?[ \t]*$", re.MULTILINE)
+
+
+def front_version(template: Template, front: str) -> str:
+    """The version front matter `front` records for `template`: its `version:` line, read only where
+    its `template:` line names `template`, else ""."""
+    if not front or FRONT_TEMPLATE.search(front) is None or \
+            FRONT_TEMPLATE.search(front).group(1) != template.name:
+        return ""
+    found = _front_key("version").search(front)
+    return found.group(1).strip() if found else ""
+
+
+def marked_version(template: Template, body: str) -> str:
+    """The version the body's template marker naming `template` records, else ""."""
+    for match in TEMPLATE_MARKER_PATTERN.finditer(body):
+        if match.group(1) == template.name:
+            return match.group(0).split()[3]
+    return ""
+
+
+def _with_template(front: str, template: Template) -> str:
+    """Front matter `front` recording `template` (`Template.front_lines`), every other byte kept: a
+    line of the three already there is written in its place, a missing one after the last of them,
+    else before the closing `---`; a new block where `front` is empty."""
+    lines = template.front_lines
     if not front:
-        return f"---\ntemplate: {name}\n---\n\n"
-    if FRONT_TEMPLATE.search(front):
-        return FRONT_TEMPLATE.sub(f"template: {name}", front, count=1)
+        return "---\n" + "".join(f"{key}: {value}\n" for key, value in lines) + "---\n\n"
     newline = "\r\n" if "\r\n" in front else "\n"
-    closing = front.rstrip("\r\n").rfind("\n") + 1
-    return front[:closing] + f"template: {name}{newline}" + front[closing:]
+    after = None  # just after the last of the three written so far
+    for key, value in lines:
+        closing = front.rstrip("\r\n").rfind("\n") + 1
+        line = f"{key}: {value}"
+        found = (FRONT_TEMPLATE if key == "template" else _front_key(key)).search(front, 0, closing)
+        if found:
+            front = front[:found.start()] + line + front[found.end():]
+            after = found.start() + len(line) + len(newline)
+        else:
+            at = closing if after is None else after
+            front = front[:at] + line + newline + front[at:]
+            after = at + len(line) + len(newline)
+    return front
 
 
 def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
@@ -1000,7 +1523,8 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
 
 def _format(item: Field, value: object, first: int) -> str:
     """A field's value as Markdown; `first` is the number a numbered list starts at."""
-    if item.verbatim or item.kind in ("line", "choice", "text"):
+    if item.verbatim or item.node or item.kind in ("line", "choice", "text") or (
+            isinstance(value, str) and not_in_input(value)):
         return str(value)
     if item.kind == "list":
         lines, number = [], first
@@ -1063,26 +1587,29 @@ def render(template: Template, document: Document | dict) -> str:
     elif not parts:
         parts = [Part("front"), Part("head"), Part("preamble")] if template.is_file else \
             [Part("preamble")]
-    # Fields with a value but no section yet go after the nearest earlier field that has one.
-    placed = {part.name for part in parts if part.kind == "field"}
+    # Fields with a value but no section yet, and fence nodes not yet in the text, go after the
+    # nearest earlier field that has one.
+    placed = {part.name for part in parts if part.kind in ("field", "node")}
     for item in template.fields:
-        if not item.in_body or item.name in placed or values.get(item.name) in (None, "", [], {}):
+        if not (item.in_body or item.fence) or item.name in placed or \
+                values.get(item.name) in (None, "", [], {}):
             continue
         names = [other.name for other in template.fields]
         earlier = names[:names.index(item.name)]
-        index = max((i for i, part in enumerate(parts) if part.kind == "field"
+        index = max((i for i, part in enumerate(parts) if part.kind in ("field", "node")
                      and part.name in earlier), default=None)
         if index is None:
             index = max((i for i, part in enumerate(parts)
                          if part.kind in ("preamble", "scope")), default=-1)
-        parts.insert(index + 1, Part("field", name=item.name, heading=f"{hashes} {item.heading}",
+        parts.insert(index + 1, Part("node" if item.fence else "field", name=item.name,
+                                     heading="" if item.fence else f"{hashes} {item.heading}",
                                      raw=None))
         placed.add(item.name)
     out: list[str] = []
     number = 1
     for part in parts:
         if part.kind == "front":
-            out.append(_with_template(part.raw, template.name))
+            out.append(_with_template(part.raw, template))
         elif part.kind == "head":
             out.append(_without_markers(part.raw))
         elif part.kind == "prefix":
@@ -1102,8 +1629,19 @@ def render(template: Template, document: Document | dict) -> str:
                 out.append("\n" + _end(preamble) if preamble.strip() else "\n")
             else:
                 out.append(preamble if preamble.strip() else "\n")
-        elif part.kind in ("suffix", "data"):
+        elif part.kind in ("suffix", "data", "text"):
             out.append(part.raw + ("\n" if part.kind == "data" and part.raw.strip() else ""))
+        elif part.kind == "node":
+            if part.name not in values:
+                continue
+            value = values[part.name]
+            if part.raw is not None and document.read.get(part.name, object()) == value:
+                out.append(part.raw)
+            else:
+                if not_in_input(value):  # a fence still, so the gap shows where the node goes
+                    value = f"```{template.field(part.name).fence}\n{value}\n```"
+                out.append(f"{value}\n\n" if out and out[-1].endswith("\n\n") or not out
+                           else f"\n{value}\n\n")
         elif part.kind == "unknown":
             if template.keep_unknown:
                 out.append(part.heading + "\n" + part.raw)
@@ -1153,7 +1691,7 @@ def draft(template: Template) -> str:
         return f"<!-- {template.name}: {template.says} -->\n<!-- {_checked_by(template)} -->\n"
     lines = []
     if template.is_file:
-        lines += ["---", f"template: {template.name}", "---", ""]
+        lines += ["---", *(f"{key}: {value}" for key, value in template.front_lines), "---", ""]
     elif template.scope:
         lines += [template.scope.get("after", ""), template.marker_line,
                   f"## {template.scope.get('section', '')}", ""]
@@ -1184,7 +1722,7 @@ def draft_fields(template: Template) -> dict[str, object]:
 
 #: The keys `field_shape` gives, each where the field sets it.
 SHAPE_KEYS = ("kind", "heading", "required", "none_ok", "choices", "max_words",
-              "first_sentence_chars", "numbered", "label", "source")
+              "first_sentence_chars", "numbered", "label", "source", "quote")
 #: The only keywords `schema` writes: none that strict tool use on the Claude API refuses.
 SCHEMA_KEYWORDS = ("$schema", "type", "properties", "required", "additionalProperties", "items",
                    "enum", "description")
@@ -1212,7 +1750,7 @@ def _property(item: Field) -> dict[str, object]:
     """One field's property of `schema`, by its kind."""
     strings = {"type": "array", "items": {"type": "string"}}
     if item.kind == "choice":
-        made: dict[str, object] = {"type": "string", "enum": list(item.choices)}
+        made: dict[str, object] = {"type": "string", "enum": [*item.choices, NOT_IN_INPUT]}
     elif item.kind in ("list", "issue"):
         made = strings
     elif item.kind == "checklist":
@@ -1261,7 +1799,7 @@ def _checked_by(template: Template) -> str:
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
-    return [f"{template.name} ({template.reader}): {', '.join(template.actions)}: "
+    return [f"{template.name} ({template.reader}): {', '.join(template.actions) or 'a node of a document'}: "
             + (f"{', '.join(template.paths)}: " if template.paths else "")
             + (f"{_checked_by(template)}: " if template.is_adapter else "") + template.says
             for template in sorted(templates.values(), key=lambda item: (item.order, item.name))]
@@ -1433,6 +1971,20 @@ def _squash(text: str) -> str:
     return " ".join(COMMENT.sub("", text).split()).casefold()
 
 
+def not_in_input(value: object) -> bool:
+    """Whether `value` is NOT_IN_INPUT, in any form a kind gives it: the text alone, a list of that
+    one item or one checklist entry, or an object of that one key without a value; case, a closing
+    period or colon and comments aside."""
+    if isinstance(value, dict):
+        return len(value) == 1 and not_in_input(next(iter(value))) and not str(
+            next(iter(value.values())) or "").strip()
+    if isinstance(value, list):
+        entries = [entry for entry in value if not WHOLE_COMMENT.match(str(entry))]
+        return len(entries) == 1 and not_in_input(
+            entries[0].get("text", "") if isinstance(entries[0], dict) else entries[0])
+    return isinstance(value, str) and _squash(value).rstrip(".:").strip() == NOT_IN_INPUT.casefold()
+
+
 def _emptiness(item: Field, value: object) -> str:
     """Why a value does not fill its field, or "" where it does."""
     if value is None:
@@ -1467,6 +2019,41 @@ def first_sentence(text: str) -> str:
     return FIRST_SENTENCE_END.split(text, maxsplit=1)[0]
 
 
+def quotes(text: str) -> list[str]:
+    """The quotes of `text`, in order: each span in double quotes ("..." or “...”) on one line, and
+    each run of `>` lines as one quote, its lines joined by a space; comments dropped."""
+    text = COMMENT.sub("", text)
+    found: list[str] = []
+    run: list[str] = []
+    for line in [*text.splitlines(), ""]:
+        quoted = QUOTE_LINE.match(line)
+        if quoted:
+            run.append(quoted.group(1))
+            continue
+        if run and " ".join(run).strip():
+            found.append(" ".join(" ".join(run).split()))
+        run = []
+        found += [" ".join((match.group(1) or match.group(2)).split())
+                  for match in QUOTE_SPANS.finditer(line)]
+    return [quote for quote in found if quote]
+
+
+def quoted(item: Field, text: str, raw: str | None) -> list[str]:
+    """The fixes of a `quote` field's value `text` against the raw input (rule `quote`): it quotes
+    nothing; or, where `raw` is given, a quote the raw input does not hold word for word, whitespace
+    and line breaks aside, case counting."""
+    found = quotes(text)
+    heading = item.heading or item.name
+    if not found:
+        return [f"{heading} quotes nothing: quote the raw input word for word, in \"...\" or as a "
+                f"`>` line (or write `{NOT_IN_INPUT}` where the input does not say)"]
+    if raw is None:
+        return []
+    held = " ".join(COMMENT.sub("", raw).split())
+    return [f"{heading} quotes \"{quote}\", which the raw input does not hold: quote it word for word, "
+            f"or drop the quote" for quote in found if quote not in held]
+
+
 def _entries(value: object) -> list[str]:
     if isinstance(value, list):
         return [entry.get("text", "") if isinstance(entry, dict) else str(entry)
@@ -1475,12 +2062,13 @@ def _entries(value: object) -> list[str]:
 
 
 def check(template: Template, document: Document, *, root: Path = ROOT,
-          bare_scripts: bool = True) -> list[Finding]:
+          bare_scripts: bool = True, raw: str | None = None) -> list[Finding]:
     """Every finding of `document` against `template`, refusals first, in field order; an adapter's
-    are its own check's."""
+    are its own check's. `raw`, the raw input a fill takes, is what a `quote` field's quotes must
+    hold (`quoted`); without it a quote field must only quote."""
     if template.is_adapter:
         return adapter_findings(template, document)
-    found: list[Finding] = []
+    found: list[Finding] = provenance(template, document)
 
     def add(rule: str, item: str, fix: str) -> None:
         severity = template.severity(rule)
@@ -1494,9 +2082,12 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         if item.source == "title" and item.name not in values:
             continue  # no title given: the body alone is checked
         value = values.get(item.name)
+        if not_in_input(value):
+            continue  # every field takes it, whatever its rules: the gap shows
         why = _emptiness(item, value)
         where = (f"the title" if item.source == "title" else
-                 f"a `{item.label}:` line" if item.label else f"`{hashes} {item.heading}`")
+                 f"a `{item.label}:` line" if item.label else
+                 f"a `{item.fence}` fence" if item.fence else f"`{hashes} {item.heading}`")
         if why == "missing" and item.name in document.misses:
             if item.required:
                 add("required", item.name, f"{item.heading} is missing: the heading "
@@ -1505,17 +2096,22 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         if why and item.required:
             text = {"missing": "is missing", "empty": "is empty", "placeholder": "holds a placeholder",
                     "says": "repeats its own description"}[why]
-            add("required", item.name, f"{item.heading or item.name} {text}: write {where}: "
-                f"{item.says}")
+            add("required", item.name, f"{item.heading or item.label or item.name} {text}: write {where}: "
+                f"{item.says} (or `{NOT_IN_INPUT}` where the input does not say)")
             continue
         if why:
             continue
         filled[item.name] = value
         text = _plain(value)
+        if item.node:  # its own template checks it, by its own rules
+            found += nested_findings(item, text, root=root, bare_scripts=bare_scripts, raw=raw)
+            continue
+        if item.quote:
+            found += [Finding(item.name, QUOTE_RULE, REFUSE, fix) for fix in quoted(item, text, raw)]
         if item.kind == "choice":
             word = re.split(r"[\s,.;:]+", text.strip().casefold(), maxsplit=1)[0]
             if word not in item.choices:
-                add("choice", item.name, f"{item.heading} is {text.strip()!r}: write one of "
+                add("choice", item.name, f"{item.heading or item.label} is {text.strip()!r}: write one of "
                     f"{', '.join(item.choices)}")
         if item.not_picked and not NOT_PICKED.search(COMMENT.sub("", text)):
             add("not-picked", item.name, f"{item.heading} names no alternative: add a line "
@@ -1573,6 +2169,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
                     "say in each what only it says")
             else:
                 seen[key] = template.field(item.name).heading or item.name
+    found += _fence_order(template, document)
     if document.source:
         for finding in _sibling("references").dangling(document.source, root, paths=False,
                                                          created=True, bare_scripts=bare_scripts):
@@ -1581,6 +2178,114 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+def nested_findings(item: Field, text: str, *, root: Path = ROOT, bare_scripts: bool = True,
+                    raw: str | None = None) -> list[Finding]:
+    """The findings of node field `item`'s `text` by the template it names, each under the field:
+    a node's as one document, a register's entry by entry, each fix naming its entry (`entries`);
+    a register without an entry refuses (rule `node`)."""
+    nested: Template = item.nested
+    if nested is None:
+        raise TemplateError(f"templates: field {item.name} names {item.node}, which is not loaded; "
+                            "load the templates with load()")
+
+    def checked(body: str, title: str | None) -> list[Finding]:
+        return check(nested, parse(nested, body, title), root=root, bare_scripts=bare_scripts, raw=raw)
+
+    def under(finding: Finding, where: str) -> Finding:
+        fix = finding.fix.removeprefix(f"{nested.name}: ")
+        return Finding(item.name, finding.rule, finding.severity, f"{where}: {fix}")
+
+    if item.kind == "node":
+        return [under(finding, nested.name) for finding in checked(text, None)]
+    listed = entries(text)
+    if not listed:
+        return [Finding(item.name, NODE_RULE, REFUSE, f"{item.heading or item.name} holds no entry: "
+                        f"write each entry as a heading of its own, `### <name>`, then its "
+                        f"{nested.name} fields")]
+    title = next((field.name for field in nested.fields if field.source == "title"), None)
+    found = []
+    for name, body in listed:
+        found += [under(finding, f"entry {name!r} ({nested.name})")
+                  for finding in checked(body, name if title else None)]
+    return found
+
+
+def entries(text: str) -> list[tuple[str, str]]:
+    """A register's entries, (name, text): each heading at the shallowest level `text` holds outside
+    its fences, its text up to the next such heading; the text before the first is none."""
+    found: list[tuple[int, str, list[str]]] = []
+    fence: str | None = None
+    lines: list[tuple[int, str]] = []  # (heading level or 0, line)
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        marker = FENCE.match(bare)
+        heading = None
+        if fence is None and marker:
+            fence = marker.group(1)
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence):
+                fence = None
+        else:
+            heading = HEADING.match(bare)
+        lines.append((len(heading.group(1)) if heading else 0, line))
+    levels = [level for level, _ in lines if level]
+    if not levels:
+        return []
+    top = min(levels)
+    for level, line in lines:
+        if level == top:
+            found.append((level, HEADING.match(line.rstrip("\r\n")).group(2), []))
+        elif found:
+            found[-1][2].append(line)
+    return [(name, "".join(body)) for _, name, body in found]
+
+
+def _fence_order(template: Template, document: Document) -> list[Finding]:
+    """Where a fence node sits: after the sections of the fields listed before it, before those of
+    the fields listed after it (rule `node`); none where the fence is missing."""
+    found: list[Finding] = []
+    names = [item.name for item in template.fields]
+    at = {part.name: index for index, part in enumerate(document.parts)
+          if part.kind in ("field", "node")}
+    for item in template.fields:
+        if not item.fence or item.name not in at:
+            continue
+        here = names.index(item.name)
+        for other in template.fields:
+            if not other.in_body or other.name not in at:
+                continue
+            before = names.index(other.name) < here
+            if before != (at[other.name] < at[item.name]):
+                found.append(Finding(item.name, NODE_RULE, REFUSE, (
+                    f"`{'#' * template.level} {other.heading}` comes after the `{item.fence}` fence: "
+                    "write it before the fence") if before else (
+                    f"`{'#' * template.level} {other.heading}` comes before the `{item.fence}` fence: "
+                    "write it after the fence")))
+    return found
+
+
+def provenance(template: Template, document: Document) -> list[Finding]:
+    """The finding of the version `document` records against `template`'s own (rule `version`,
+    docs/templates.md "The document"): none where it records none or the same; a minor or patch
+    move warns; a major move, or a recorded version that is none, refuses, naming both versions and
+    the fill that brings the document up."""
+    recorded, current = document.recorded, template.version
+    if not recorded or not current or recorded == current:
+        return []
+    named = f"the document records {template.name} {recorded}; the template is at {current}"
+    where = "--path <file>" if template.is_file else template.name
+    given = "" if template.is_file else " --body-file <file>"
+    if SEMVER.match(recorded) and recorded.split(".")[0] == current.split(".")[0]:
+        return [Finding("template", VERSION_RULE, WARN, f"{named}, another minor or patch version: "
+                        f"render it again to record {current}: `templates.py check {where}{given} "
+                        "--render`")]
+    why = (f"and {recorded} is no semantic version" if not SEMVER.match(recorded) else
+           "another major version, which the document no longer fits")
+    return [Finding("template", VERSION_RULE, REFUSE, f"{named}, {why}: fill it again at {current}: "
+                    f"`templates.py draft {where} --json` gives its fields, and `templates.py check "
+                    f"{where} --fields <fields> --render` writes it")]
 
 
 class _Refused(Exception):
@@ -1655,7 +2360,7 @@ def _dropped(value: object, drop: dict) -> object:
 
 def adapter_findings(template: Template, document: Document) -> list[Finding]:
     """An adapter's findings: its lines, its title rule, then its checker's answer, called as
-    `[adapter]` says (the module docstring: adapters)."""
+    `adapter` says (the module docstring: adapters)."""
     spec, body = template.adapter, document.source
     title = document.fields.get("title")
     found: list[Finding] = []
@@ -1691,7 +2396,7 @@ def adapter_findings(template: Template, document: Document) -> list[Finding]:
             value = body
     except _MISCONFIGURED as error:
         raise TemplateError(f"{template.path}: its reading failed ({type(error).__name__}: {error}); "
-                        "fix [adapter]") from error
+                        "fix its adapter") from error
     except Exception as error:  # the extractor's own refusal, such as a QueueError
         refuse("checker", str(error))
         return found
@@ -1717,7 +2422,7 @@ def adapter_findings(template: Template, document: Document) -> list[Finding]:
         answer = checker(*arguments, **keywords)
     except _MISCONFIGURED as error:
         raise TemplateError(f"{template.path}: {template.checker} failed ({type(error).__name__}: {error}); "
-                        "fix [adapter]") from error
+                        "fix its adapter") from error
     except Exception as error:  # the checker's refusal
         if result != "raises":
             raise
@@ -1777,10 +2482,6 @@ ENFORCE_VALUES = (OFF, WARN, REFUSE)
 #: se.toml `[templates] gate`: the values SE's template gate on GitHub writes knows (se_templates.py gate),
 #: `off` the default.
 GATE_VALUES = (OFF, WARN, REFUSE)
-#: se.toml `[templates] files`: whether SE's checks before work is done check the files a template claims
-#: (se_templates.py check-files), and with `write` also the gate at each write; `off` the default.
-CHECK, WRITE = "check", "write"
-FILES_VALUES = (OFF, CHECK, WRITE)
 #: se.toml `[templates] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
@@ -1795,7 +2496,6 @@ class Enforcement:
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
     gate: str = OFF
-    files: str = OFF
 
 
 def enforcement(root: Path) -> Enforcement:
@@ -1827,15 +2527,11 @@ def enforcement(root: Path) -> Enforcement:
     if gate not in GATE_VALUES:
         raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
                         f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
-    files = table.get("files", OFF)
-    if files not in FILES_VALUES:
-        raise TemplateError(f"templates: [templates] files = {files!r} in {where} is none of "
-                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Templates\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
-    return Enforcement(enforce, refusals, where, gate, files)
+    return Enforcement(enforce, refusals, where, gate)
 
 
 def filled(template: Template, *, body: str | None = None, fields: dict | None = None,
@@ -1988,6 +2684,63 @@ def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
     return counts[key]
 
 
+# Fill
+
+
+#: What every fill tells the agent first, beside a rule per `quote` field (`instructions`).
+HONEST = (f"Fill each field from the raw input alone. Where the raw input does not answer a field, "
+          f"write `{NOT_IN_INPUT}`: every field takes it, whatever its rules; never invent a value.")
+
+
+def guidance(template: Template, root: Path = ROOT) -> list[dict[str, str]]:
+    """The guidance notes `scripts/se_guidance.py` resolves for `template` by its tags in `root`'s
+    trees, general before specific: each its `name`, `path` and `text`. A tree that does not load
+    gives none of its notes, as `se_guidance.py collect` leaves them out."""
+    module = _sibling("se_guidance")
+    loaded = module.load(root)
+    chosen = module.Template(template.name, frozenset(template.tags), template.path)
+    return [{"name": note.name, "path": note.where, "text": note.body.strip()}
+            for note in module.for_template(loaded.notes, chosen)]
+
+
+def instructions(template: Template, prompt: str = "", root: Path = ROOT) -> dict[str, object]:
+    """What a fill without fields answers, its instructions first: the template and the prompt,
+    the template's `says`, the rules of honest fields (HONEST, and one per `quote` field), its
+    guidance (`guidance`), then the empty draft as Markdown (`draft`) and as data (`draft_fields`)."""
+    rules = [HONEST, *(f"{item.heading or item.name}: quote the raw input word for word, in \"...\" or "
+                       "as a `>` line; a quote the raw input does not hold is refused"
+                       for item in template.fields if item.quote)]
+    data = draft_fields(template)
+    return {"template": template.name, "prompt": prompt, "says": template.says, "rules": rules,
+            "guidance": guidance(template, root), "version": template.version,
+            "draft": draft(template),
+            **{key: data[key] for key in ("fields", "field_says", "field_shape", "schema")}}
+
+
+def fill(template: Template, values: dict[str, object], raw: str, *, title: str | None = None,
+         existing: str | None = None) -> tuple[str, list[Finding]]:
+    """The document `values` fill `template` with, and every finding of it checked against the raw
+    input `raw` (`check(raw=)`). `title` fills the title field where the template has one.
+    `existing`, the text of the file a file template fills again, keeps its head (front matter and
+    page title) and the sections the template does not declare; its fields are the values alone."""
+    if template.is_adapter:
+        raise TemplateError(f"templates: {template.name} is an adapter and has no fields to fill; the "
+                            "command that writes it writes its body")
+    values = answer(template, values)
+    title_field = next((item.name for item in template.fields if item.source == "title"), None)
+    if title is not None and title_field:
+        values[title_field] = title
+    if existing:
+        document = parse(template, existing)
+        document.fields = dict(values)
+        rendered = render(template, document)
+    else:
+        rendered = render(template, values)
+    named = values.get(title_field) if title_field else None
+    document = parse(template, rendered, named if isinstance(named, str) else None)
+    return rendered, check(template, document, raw=raw)
+
+
 # Command
 
 
@@ -2137,6 +2890,75 @@ def _check(templates: dict[str, Template], options: argparse.Namespace):
     return template, rendered, parse(template, rendered, values.get(title) if title else None), met
 
 
+FILL = "templates.py fill"
+
+
+def _text_option(options: argparse.Namespace, text: str, path: str, name: str) -> str | None:
+    """The text an option pair gives: `--<name>-text`/`--<name>` as text, or the file it names."""
+    given, file = getattr(options, text), getattr(options, path)
+    if file is None:
+        return given
+    try:
+        return file.read_text(encoding="utf-8")
+    except OSError as error:
+        raise TemplateError(f"{FILL}: cannot read --{name} {file} ({error})") from error
+
+
+def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
+    """`fill`: the instructions without fields; else the document checked against the raw input,
+    written to `--path` (a file template), to `--out` or to stdout, or refused, writing nothing."""
+    if (options.template is None) == (options.path is None) and options.template is None:
+        raise TemplateError(f"{FILL}: name a template, or give --path to take the template that claims "
+                            "the file")
+    root = _root(options.path if options.path is not None else Path.cwd() / FILL, options.root)
+    relative = None
+    if options.path is not None:
+        relative, chosen = _claimed(templates, options, FILL)
+        if options.template is not None:
+            template = _template(templates, options.template)
+            if not template.claims(relative):
+                raise TemplateError(f"{FILL}: {template.name} claims no path {relative}; give a path "
+                                    f"its paths match ({', '.join(template.paths) or 'none'})")
+        elif chosen.template is None:
+            found = "; ".join(item.fix for item in chosen.findings)
+            raise TemplateError(f"{FILL}: no template claims {relative}" + (f": {found}" if found else ""))
+        else:
+            template = chosen.template
+        if options.out is not None:
+            raise TemplateError(f"{FILL}: --path is where the file goes; give it without --out")
+    else:
+        template = _template(templates, options.template)
+    prompt = _text_option(options, "prompt", "prompt_file", "prompt-file") or ""
+    if options.fields is None and options.fields_json is None:
+        print(json.dumps(instructions(template, prompt, root), indent=2))
+        return 0
+    raw = _text_option(options, "input_text", "input", "input")
+    if raw is None:
+        raise TemplateError(f"{FILL}: give the raw input the fields come from: --input FILE or "
+                            "--input-text TEXT")
+    if template.is_file and options.path is None:
+        raise TemplateError(f"{FILL}: {template.name} writes its file: give --path, a file its paths "
+                            f"match ({', '.join(template.paths)})")
+    values = (fields_data(options.fields_json, "--fields-json", FILL) if options.fields is None
+              else fields_file(options.fields, FILL))
+    existing = _file_text(options.path, FILL, missing_ok=True) if options.path is not None else None
+    rendered, found = fill(template, values, raw, title=options.title, existing=existing)
+    if any(item.severity == REFUSE for item in found):
+        print("\n".join([*_capped(found), f"{FILL}: nothing was written; fix every finding and fill "
+                                         "again"]))
+        return 1
+    if found:
+        print("\n".join(_capped(found)), file=sys.stderr)
+    target = options.path if options.path is not None else options.out
+    if target is None:
+        print(rendered, end="")
+        return 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(rendered, encoding="utf-8")
+    print(f"wrote {relative if relative is not None else target}: {template.name} {template.version}")
+    return 0
+
+
 def _capped(findings: list[Finding]) -> list[str]:
     lines = [str(finding) for finding in findings]
     if len(lines) > 10:
@@ -2146,7 +2968,8 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, list")
+    parser = argparse.ArgumentParser(prog="templates.py",
+                                     description="SE's templates: check, draft, schema, list, fill")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -2167,13 +2990,31 @@ def main(arguments: list[str] | None = None) -> int:
     drafting = commands.add_parser("draft", help="print the empty template")
     drafting.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
+    schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
+    schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
-    for command in (checking, drafting):
+    filling = commands.add_parser("fill", help="fill a template from the raw input: check the fields, "
+                                  "render the document and write it, or answer the instructions")
+    filling.add_argument("template", nargs="?", help="the template; without it, --path selects one")
+    prompts = filling.add_mutually_exclusive_group()
+    prompts.add_argument("--prompt", help="what the agent was asked to write, as text")
+    prompts.add_argument("--prompt-file", type=Path, help="the prompt as a file")
+    raws = filling.add_mutually_exclusive_group()
+    raws.add_argument("--input", type=Path, help="the raw input the fields come from, as a file")
+    raws.add_argument("--input-text", help="the raw input as text")
+    values = filling.add_mutually_exclusive_group()
+    values.add_argument("--fields", type=Path, help="the field values as a JSON file; without them "
+                        "the answer is the instructions and the empty draft")
+    values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    filling.add_argument("--title", help="the title, where the template has a title field")
+    filling.add_argument("--out", type=Path, help="write the document of a template that claims no "
+                         "file here (default: stdout)")
+    for command in (checking, drafting, schemas, filling):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")
         command.add_argument("--root", type=Path, help="the project root of --path's globs "
                              "(default: the git checkout holding it, else the working directory)")
-    for command in (checking, drafting, listing):
+    for command in (checking, drafting, schemas, listing, filling):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -2188,14 +3029,17 @@ def main(arguments: list[str] | None = None) -> int:
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
-        if options.command == "draft":
+        if options.command == "fill":
+            return _fill(templates, options)
+        if options.command in ("draft", "schema"):
+            command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
-                raise TemplateError("templates.py draft: name a template, or give --path to take the template "
+                raise TemplateError(f"{command}: name a template, or give --path to take the template "
                                 "that claims the file, not both")
             if options.root is not None and options.path is None:
-                raise TemplateError("templates.py draft: --root is the root of --path; give --path")
+                raise TemplateError(f"{command}: --root is the root of --path; give --path")
             if options.path is not None:
-                relative, chosen = _claimed(templates, options, "templates.py draft")
+                relative, chosen = _claimed(templates, options, command)
                 if chosen.template is None:
                     if chosen.findings:
                         print("\n".join(_capped(list(chosen.findings))))
@@ -2205,8 +3049,11 @@ def main(arguments: list[str] | None = None) -> int:
                 template = chosen.template
             else:
                 template = _template(templates, options.template)
-            print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template), end=""
-                  if not options.json else "\n")
+            if options.command == "schema":
+                print(json.dumps(schema(template), indent=2))
+            else:
+                print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template),
+                      end="" if not options.json else "\n")
             return 0
         template, rendered, document, met = _check(templates, options)
     except TemplateError as error:

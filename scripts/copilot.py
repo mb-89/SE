@@ -7,11 +7,12 @@ self-test that needs no Copilot, and the verdict over a Copilot smoke run's JSON
 
 `install` is what `scripts/setup.sh <repo> --copilot` (and `setup.ps1 -Repo <repo> -Copilot`) runs
 after the hooks: it merges SE's marketplace and plugin into the repository's
-`.github/copilot/settings.json`, keeping every other key; pins `[modules.se]` in its `se.toml` as a
-version range, keeping an existing pin; ignores `.se/` in git; and runs `se_modules.py sync se`.
+`.github/copilot/settings.json`, keeping every other key; pins `[components.se]` in its `se.toml` as a
+version range, keeping an existing pin; adds the remote `se` where no remote reaches SE's owner;
+ignores `.se/` in git; and runs `se_modules.py sync se`.
 
-`self-test` installs this SE, as a plugin install copies it, beside an empty project folder that is
-not SE, and checks there what needs no Copilot: the generated layout, the hook registrations, the
+`self-test` installs this SE, as a plugin install copies it with kern placed as SE's start places
+it (`copy_plugin`), beside an empty project folder that is not SE, and checks there what needs no Copilot: the generated layout, the hook registrations, the
 MCP door's launcher, and the door started as Copilot starts a plugin's server (in the plugin folder,
 its parent in the project), once with COPILOT_SESSION_CWD and once without, each with its handshake
 and one status call that must name the project; and, where a Copilot CLI is at hand,
@@ -44,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import git_door  # noqa: E402
 import se_home  # noqa: E402
+import se_modules  # noqa: E402
 import se_plugin  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,19 +122,45 @@ def version_range(root: Path = ROOT) -> str:
 
 
 def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
+    """`[components.se]` in the repository's se.toml at `wanted`, an existing pin kept; it names no
+    address, as se_modules.py finds SE by its name (README "Modules")."""
     path = repo / "se.toml"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
-        modules = tomllib.loads(text).get("modules", {})
+        components = tomllib.loads(text).get("components", {})
     except tomllib.TOMLDecodeError as error:
         raise InstallError(f"{path}: cannot read it as TOML ({error})") from error
-    if isinstance(modules, dict) and "se" in modules:
-        return "se.toml: keeps its [modules.se] pin"
-    block = f'[modules.se]\nurl = "{(found or home()).url}.git"\nversion = "{wanted}"\n'
+    if isinstance(components, dict) and "se" in components:
+        return "se.toml: keeps its [components.se] pin"
+    block = f'[components.se]\nversion = "{wanted}"\n'
     if text and not text.endswith("\n"):
         text += "\n"
     path.write_text(text + ("\n" if text else "") + block, encoding="utf-8")
-    return f"se.toml: pins [modules.se] at version {wanted}"
+    return f"se.toml: pins [components.se] at version {wanted}"
+
+
+#: The remote `install` adds where none of the repository's remotes reaches SE's owner.
+SE_REMOTE = "se"
+
+
+def reach_se(repo: Path, found: se_home.Home) -> str:
+    """A remote of SE's owner, so se_modules.py finds SE under it: where none of the repository's
+    remotes is under that owner on that host, the remote `se` at SE's home is added
+    (docs/components.md "Finding a component")."""
+    if git_door.run("rev-parse", "--git-dir", root=repo).returncode != 0:
+        return (f"remotes: {repo} is no git checkout; add a remote of {found.owner} on {found.host} "
+                "before se_modules.py sync se")
+    remotes = se_home.remotes(repo)
+    owners = {(home.host, home.owner.lower()) for _, url in remotes if (home := se_home.parse(url))}
+    if (found.host, found.owner.lower()) in owners:
+        return f"remotes: one already reaches SE's owner {found.owner}"
+    if SE_REMOTE in {name for name, _ in remotes}:
+        raise InstallError(f"the remote {SE_REMOTE} of {repo} is not under SE's owner {found.owner}: add a "
+                           f"remote of {found.owner} on {found.host} by hand, so SE is found by its name")
+    added = git_door.run("remote", "add", SE_REMOTE, f"{found.url}.git", root=repo)
+    if added.returncode != 0:
+        raise InstallError(f"git remote add {SE_REMOTE} failed in {repo}: {added.stderr.strip()}")
+    return f"remotes: adds {SE_REMOTE} ({found.url}.git), so SE is found by its name under {found.owner}"
 
 
 def ignore_se(repo: Path) -> str:
@@ -159,7 +187,8 @@ def install(repo: Path, run_sync=sync) -> int:
         return 0
     try:
         found = home()
-        for line in (merge_settings(repo, found), pin_se(repo, version_range(), found), ignore_se(repo)):
+        for line in (merge_settings(repo, found), pin_se(repo, version_range(), found), reach_se(repo, found),
+                     ignore_se(repo)):
             print(f"copilot install: {line}")
     except InstallError as error:
         print(f"copilot install: error: {error}", file=sys.stderr)
@@ -201,6 +230,20 @@ class Report:
 
 def _json_file(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def copy_plugin(plugin: Path, report: Report) -> None:
+    """SE's working tree copied to `plugin` as a plugin install carries it, and kern's clone at SE's
+    pin placed in it, as SE's start places it in an install (`se_modules.py sync kern`): the
+    guidance check of the layout step reads kern's page limit there (se_guidance.py)."""
+    shutil.copytree(ROOT, plugin, ignore=NOT_COPIED)
+    kern = se_modules.kern_dir(ROOT)
+    if not kern.is_dir():
+        report.add("failed", "kern", f"no {kern}: place it with `uv run python scripts/se_modules.py "
+                   "sync kern`")
+        return
+    shutil.copytree(kern, se_modules.kern_dir(plugin), ignore=shutil.ignore_patterns(".git"))
+    report.add("passed", "kern", f"kern placed in the copy from {kern}, as SE's start places it")
 
 
 def check_layout(plugin: Path, report: Report) -> None:
@@ -493,7 +536,7 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
     binary, roots = None, []
     base = clean_env(dict(os.environ))
     try:
-        shutil.copytree(ROOT, plugin, ignore=NOT_COPIED)
+        copy_plugin(plugin, report)
         project.mkdir()
         home.mkdir()
         initialised = git_door.run("init", "-q", root=project)

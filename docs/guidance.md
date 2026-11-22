@@ -13,8 +13,8 @@ skips what it may skip, so the guidance that matters must stand in the agent's w
 The template system that uses guidance is designed beside this one, in
 [docs/templates.md](templates.md). This note relies on one fact of it only: a template carries
 tags and calls "collect the guidance for this template"
-([Tags and guidance](templates.md#tags-and-guidance)). Until the template notes exist, SE's TOML
-templates (README [Templates](../README.md#templates)) are the templates: each gains its tags.
+([Tags and guidance](templates.md#tags-and-guidance)). SE's templates are its template notes,
+`templates/<name>.md` (README [Templates](../README.md#templates)), each with its tags.
 
 ## Words
 
@@ -159,6 +159,24 @@ person's word) runs it, and every testing note is in the context.
 The command is one component, `guidance`, with read-only commands `collect` and `check` and the
 writing command `pin` ([docs/go-core.md](go-core.md), components). Its read-only commands are
 also tools of the MCP door, so an agent reaches it without a shell.
+
+## Implementations and projections
+
+The person decided on 22 Nov that the notes are the single source of truth, and everything else
+is generated from them: "But the truth is always in the markdown."
+
+- **Implementations live in the note.** A note may carry implementations of itself for other
+  tools, one per target: a linter's setting, a check's configuration, a test command.
+- **Tool files are projections.** One command, the guidance command's `project`, writes each
+  file the notes implement, in a part whose header says it is generated. The check refuses a file
+  that no longer matches its notes, so nobody edits it by hand.
+- **Lists are views, never files.** The rule book, all guidance or the notes for one step are
+  queries over the notes (`collect`), made when asked; no list is stored.
+
+The note "Short lines" carries `[tool.ruff] line-length = 100` for `pyproject.toml`, and
+`project` writes it there, beside the project's own settings. The block's form and the part's
+header are owned by the docstring of
+[scripts/se_guidance.py](../scripts/se_guidance.py).
 
 ## Moving SE's guidance into notes
 

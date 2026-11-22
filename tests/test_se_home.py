@@ -87,6 +87,28 @@ def test_a_relative_path_origin_resolves_from_the_checkout_not_the_working_direc
     assert Path(resolved).is_absolute()
 
 
+def test_the_remotes_come_origin_first_then_in_the_order_git_lists_them(tmp_path: Path, fake_git_door) -> None:
+    root = fake_git.init(tmp_path / "project")
+    assert se_home.remotes(root) == []
+    for name, url in (("backup", "git@example.com:bob/project.git"), ("origin", "https://example.com/alice/project"),
+                      ("mirror", "../mirror/project.git")):
+        fake_git.git("-C", str(root), "remote", "add", name, url)
+    assert se_home.remotes(root) == [
+        ("origin", "https://example.com/alice/project"), ("backup", "git@example.com:bob/project.git"),
+        ("mirror", (tmp_path / "mirror" / "project.git").as_posix())]
+
+
+@pytest.mark.parametrize(("url", "want"), [
+    ("https://example.com/alice/project", "https://example.com/alice/kern"),
+    ("https://example.com/alice/project.git", "https://example.com/alice/kern.git"),
+    ("https://example.com/alice/project/", "https://example.com/alice/kern"),
+    ("git@example.com:bob/project.git", "git@example.com:bob/kern.git"),
+    ("ssh://git@example.com/bob/project", "ssh://git@example.com/bob/kern"),
+])
+def test_the_repository_beside_a_remote_is_reached_as_the_remote_is(url: str, want: str) -> None:
+    assert se_home.beside(url, "kern") == want
+
+
 def test_without_an_origin_nothing_guesses_a_home(tmp_path: Path, fake_git_door, capsys) -> None:
     root = fake_git.init(tmp_path / "project")
 
