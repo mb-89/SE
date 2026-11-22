@@ -336,6 +336,22 @@ def test_a_clean_sync_clones_a_relative_sibling_module_beside_the_origin(world, 
     assert Path(git(world.cache, "remote", "get-url", "origin")) == world.upstream
 
 
+def test_a_relative_module_keeps_its_local_path_and_url_rewrite(world, capsys):
+    fake_git.init(world.root)
+    git(world.root, "remote", "add", "origin", "https://git.example.invalid/team/consumer.git")
+    world.manifest.write_text(world.manifest.read_text().replace(world.upstream.as_posix(), "../lib"))
+
+    write(world.local, f'[paths]\nlib = "{world.upstream.as_posix()}"\n')
+    code, out = run(world, capsys, "sync")
+    assert code == 0, out
+    assert "lib: local" in out and not world.cache.exists()
+
+    write(world.local, f'[urls]\n"https://git.example.invalid/team/" = "{world.upstream.parent.as_posix()}/"\n')
+    code, out = run(world, capsys, "sync")
+    assert code == 0, out
+    assert git(world.cache, "rev-parse", "HEAD") == world.shas[0]
+
+
 def test_sync_follows_a_changed_pin_and_fetches(world, capsys):
     assert run(world, capsys, "sync")[0] == 0
     new = commit(world.upstream, "change 4", {"version.txt": "4\n"})
