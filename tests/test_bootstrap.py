@@ -567,8 +567,8 @@ def test_every_other_start_runs_every_step(machine, source):
 
 def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml(machine):
     """se_hook.sh guards the file tools only where the start left templates-files (README "Templates"):
-    `se_templates.py gate --runtime` writes or removes it from se.toml (tests/test_se_templates.py); a
-    project without se.toml loses a line an earlier start left."""
+    `se_templates.py gate --runtime` writes it where a template claims a path and removes it otherwise
+    (tests/test_se_templates.py); a project without se.toml loses a line an earlier start left."""
     home, project, base = machine
     path = fake_bin(base)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
@@ -577,7 +577,7 @@ def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_i
         f"{sh(project)}"]
     line = project / ".se" / ".runtime" / "templates-files"
     line.parent.mkdir(parents=True, exist_ok=True)
-    line.write_text("write\n", encoding="utf-8")
+    line.write_text("claimed\n", encoding="utf-8")
     (project / "se.toml").unlink()
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0

@@ -1155,8 +1155,8 @@ What it judges:
     `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
   - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
     sub-agent end and says why.
-- Where se.toml `[templates] files` is `check`, it also refuses in any checkout it judges, worker or
-  not, while a changed file a template claims breaks it ([Templates](#templates)).
+- It also refuses in any checkout it judges, worker or not, while a changed file a template claims
+  breaks it ([Templates](#templates)).
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
@@ -1941,8 +1941,8 @@ gated push and the pull request, and the Stop hook's check.
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
 | `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [templates] files is check, se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
-| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Where se.toml [templates] files is check it also refuses, in any checkout, while a changed file a template claims breaks it (se_templates.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. It also refuses, in any checkout, while a changed file a template claims breaks it (se_templates.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin, then move the se clone (.se/modules/se) of a repository that pins se to the pin the merged se.lock names |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
 
@@ -2046,7 +2046,7 @@ document.
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--tree] template` | print a template's fields, their instructions, their shape and its schema |
 | `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template` | fill a template from the raw input: the instructions, or the checked document |
-| `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--files {off,check,write}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
+| `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
 #### Guidance
@@ -2326,23 +2326,22 @@ that writes it again ([docs/templates.md "The document"](docs/templates.md#the-d
 
 `--templates <folder>` reads the templates from another folder.
 
-Where se.toml `[templates] files` is `check` or `write` (default `off`), a claimed file that breaks
-its template cannot end a turn, be pushed or pass CI; each refusal names the file, the template and each
-finding.
+A claimed file is written only by its fill
+([docs/templates.md "Fill"](docs/templates.md#fill)), and one that breaks its template cannot end a
+turn, be pushed or pass CI; each refusal names the file, the template and each finding.
 
 - `scripts/se_templates.py check-files` with `--changed` and a ref checks every claimed file changed
   since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
 - `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
-  `check` job against the pull request's base. It reads `[templates] files` as `enforce` is read.
-- Under Copilot the Stop hook only advises. SE's own se.toml leaves it off: no template of SE's claims
-  a path yet.
-- `files = "write"` does all `check` does and holds the template at the write too: SE's template gate
-  denies a Write, Edit or MultiEdit of a claimed file whose result breaks its template, before it runs,
-  naming the template and each finding. An Edit is judged on the whole file it would leave, never on
-  its fragment; `push_files` and `create_or_update_file` are judged per path.
-  - SE's start writes the switch into `.se/.runtime/templates-files`, so `scripts/se_hook.sh` picks
-    the file tools with builtins only where it is on; a change takes effect at the next session's
-    start. `scripts/se_templates.py`'s docstring (The file tools) owns the rest.
+  `check` job against the pull request's base. Where no template claims a path, it checks nothing.
+- Under Copilot the Stop hook only advises. No template of SE's claims a path yet.
+- SE's template gate denies every Write, Edit or MultiEdit of a claimed file before it runs, and
+  each path of `push_files` and `create_or_update_file`, whatever it would leave. It names the
+  template and the fill, `templates.py fill <template> --path <file>`, which writes the file itself.
+  - SE's start writes `.se/.runtime/templates-files` where a template claims a path, so
+    `scripts/se_hook.sh` picks the file tools with builtins only there; a template added during a
+    session is guarded from the next session's start. `scripts/se_templates.py`'s docstring (The
+    file tools) owns the rest.
 
 An agent asks for a template through the MCP door's tool `templates`, `scripts/se_templates.py`: `list`
 names the templates, `draft <template>` gives `draft --json`'s answer, and `check` finds all the filing

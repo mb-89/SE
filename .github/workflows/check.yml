@@ -137,8 +137,8 @@ jobs:
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
-      # The changed files a template claims (README "Templates"): the command reads se.toml [templates] files
-      # at origin/<integration branch> itself and passes where it is off.
+      # The changed files a template claims (README "Templates"): the command passes, reading no git,
+      # where no template claims a path.
       - name: The changed files a template claims follow their templates
         if: github.event_name == 'pull_request'
         env:
