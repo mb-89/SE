@@ -10,11 +10,28 @@ This is one case of how any decision reaches the person, so it decides the mecha
 decision, not for one. Today SE shows each decision as one option table in a chat message, one
 decision per turn, and the person answers in the chat.
 
+```mermaid
+graph TD
+  SE -->|one table per message| Chat
+  Person -->|answers in| Chat
+  Chat -->|copied by hand| Issue
+```
+
 ## The problem
 
 A chat table dies with the session that showed it: answers had to be copied into issues by hand.
 And the person wants one page per decision, in their words: "fundamentally, one decision in the
 end should be a one-pager".
+
+## What others do
+
+- **Architecture decision records** (ADRs, after Michael Nygard): one short Markdown file per
+  decision with its context, the decision and a status. For example, a repository holds
+  `docs/adr/0005-use-postgres.md`, whose status line reads `Accepted`.
+- **RFC processes**: one document per proposal, discussed in its own thread and accepted by a
+  named team. For example, Python's PEP 8 was proposed, discussed and accepted as one document.
+- **Required reviews**: the approver answers on the change itself, one change at a time. For
+  example, a GitHub pull request reads "Review required" until a code owner approves it.
 
 ```pugh
 context: a person who blesses SE's decisions
@@ -60,7 +77,7 @@ checklist:
     answer: A case of how any decision reaches the person; decided for every decision.
     pass: true
   - item: Is the problem real
-    answer: The person's words ("one decision in the end should be a one-pager") and chat answers that had to be copied into issues by hand.
+    answer: The person's words ("one decision in the end should be a one-pager") and chat answers that had to be copied into issues by hand; decision records, RFC processes and required reviews each answer one decision at a time, so the problem is a known one.
     pass: true
   - item: Keep what we have
     answer: B is what we have, so it is the datum, and every option is marked against it, never against one not yet built.

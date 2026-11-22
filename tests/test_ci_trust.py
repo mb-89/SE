@@ -181,7 +181,7 @@ def test_the_suite_hash_follows_the_tests_table_and_the_se_pin(repo: Path) -> No
     assert ci_trust.suite_hash(repo, "HEAD") == before  # code changes the tree, not the suite
     commit(repo, {"se.toml": TRUSTED.replace('"-q"', '"-x"')})
     changed = ci_trust.suite_hash(repo, "HEAD")
-    commit(repo, {"se.toml": TRUSTED + '\n[modules.se]\nref = "' + "4" * 40 + '"\n'})
+    commit(repo, {"se.toml": TRUSTED + '\n[components.se]\nref = "' + "4" * 40 + '"\n'})
     assert len({before, changed, ci_trust.suite_hash(repo, "HEAD")}) == 3
 
 

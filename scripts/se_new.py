@@ -2,7 +2,7 @@
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
 what the command does. The template and kern's Go module come from the clone of kern se.toml
-[modules.kern] pins (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. kern's module path
+[components.kern] pins (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. kern's module path
 names no host, so it cannot be fetched: the application carries kern's source at the pin in `kern/`,
 its go.mod requires kern at the pin and replaces the module by that folder.
 """

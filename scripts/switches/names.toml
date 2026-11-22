@@ -76,8 +76,8 @@ name = "SE_START_REFRESHED"
 why = "set by scripts/bootstrap.sh for its own one-time re-run after a refresh (the start-refresh block): the notes it carries over"
 
 [[not_switch]]
-name = "[modules]"
-why = "the modules a repository pins: each one's url and version, values"
+name = "[components]"
+why = "the components a repository pins: each one's version and whether it is optional, values"
 
 [[not_switch]]
 name = "[outside]"

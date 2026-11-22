@@ -19,7 +19,8 @@ are refused until quoted. It declares:
 
 - `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
   writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
-  words, the template's one link to guidance; `reader` (`owner` or `fleet`: who reads what it
+  words, the template's one link to guidance, which `scripts/se_guidance.py` reads
+  (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
   shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
   inherited;
 - `applies.actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,

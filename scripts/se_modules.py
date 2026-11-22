@@ -1,6 +1,7 @@
-"""Pull dependencies into a repository as modules pinned to commits or semantic version ranges.
+"""Pull a repository's components in, found by name and pinned to commits or semantic version ranges.
 
-The format and the commands are described once in the README section "Modules".
+The format and the commands are described once in the README section "Modules"; how a component is
+found on the checkout's remotes is docs/components.md "Finding a component", which this script owns.
 """
 
 from __future__ import annotations
@@ -12,7 +13,11 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Mapping
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import deque
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -21,8 +26,17 @@ import se_home
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
-#: kern, the Go core, as se.toml [modules.kern] pins it (README "Modules").
+#: The se.toml table of a host's components (README "Modules"); se 6 renamed it from [modules].
+COMPONENTS = "components"
+#: kern, the Go core, as se.toml [components.kern] pins it (README "Modules").
 KERN = "kern"
+#: The repository topic that marks a component (docs/components.md "A component").
+TOPIC = "component"
+#: The listing of an owner's marked repositories: unset, the host's own; `off`, none (every
+#: component read directly beside its remote); `fake:<file>`, a JSON object mapping
+#: `<host>/<owner>` to the names listed or to the reason the owner cannot be listed (the tests').
+LISTING_VARIABLE = "SE_COMPONENT_LISTING"
+LISTING_TIMEOUT = 20
 
 
 def kern_dir(root: Path) -> Path:
@@ -33,7 +47,9 @@ def kern_dir(root: Path) -> Path:
 TRACKED_BRANCH = "main"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-MODULE_KEYS = {"url", "ref", "version", "path", "go"}
+#: A component's name: its repository's, 1 to 32 letters, digits and dashes (docs/components.md).
+COMPONENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,31}$")
+COMPONENT_KEYS = {"ref", "version", "path", "go", "optional"}
 VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 RANGE_RE = re.compile(r"^([\^~=]?)(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?$")
 VERSION_REMEDY = 'set version = "MAJOR.MINOR.PATCH" under [project] (README "Project settings")'
@@ -61,15 +77,32 @@ class ModuleError(Exception):
 
 @dataclass(frozen=True)
 class Module:
-    """A declared module; `ref` is its pin, for a `version` range the locked commit ("" unlocked)."""
+    """A declared component; `ref` is its pin, for a `version` range the locked commit ("" unlocked).
+    It names no address: the finder finds it by name (docs/components.md "Finding a component")."""
 
     name: str
-    url: str
     ref: str
     path: str | None = None
     version: str | None = None
     #: For a `go` pin: the `go.mod` (relative to the root) whose `require <name>` is the version.
     go: str | None = None
+    #: `optional = true`: the host works without it; an entry without it is required.
+    optional: bool = False
+
+    @property
+    def pin(self) -> str:
+        """The pin as the host's list states it."""
+        if self.go:
+            return f"{self.go} v{self.version}"
+        return self.version if self.version else f"ref {self.ref[:12]}"
+
+    def admits(self, version: Version | None, commit: str) -> bool:
+        """Whether this pin admits the release `version` at `commit`."""
+        if self.go:
+            return version is not None and version == parse_version(self.version)
+        if self.version:
+            return version is not None and matches(version, version_bounds(self.name, self.version))
+        return commit.lower() == self.ref
 
 
 # Semantic versions
@@ -135,30 +168,31 @@ def checkout_version(checkout: Path, go: bool = False) -> Version | None:
 
 
 def read_lock(root: Path) -> dict[str, tuple[str, str]]:
-    """`se.lock`: per module pinned by a range, the resolved (version, commit)."""
+    """`se.lock`: per component of the tree pinned by a range or a go.mod, the resolved (version, commit)."""
     lock = root / LOCK
     if not lock.is_file():
         return {}
     entries = {}
-    for name, table in _read_toml(lock).get("modules", {}).items():
+    for name, table in _read_toml(lock).get(COMPONENTS, {}).items():
         version = table.get("version") if isinstance(table, dict) else None
         ref = table.get("ref") if isinstance(table, dict) else None
         if parse_version(version) is None or not isinstance(ref, str) or not SHA_RE.match(ref):
-            raise ModuleError(f"{lock}: [modules.{name}] needs version and a full commit ref; delete it and run sync")
+            raise ModuleError(f"{lock}: [{COMPONENTS}.{name}] needs version and a full commit ref; delete it and run sync")
         entries[name] = (version, ref.lower())
     return entries
 
 
-def write_lock(root: Path, name: str, version: str, ref: str) -> None:
-    """Record one module's resolved version in `se.lock`, dropping modules no longer pinned by a range."""
-    ranged = {m.name for m in load_manifest(root) if m.version}
-    entries = {key: value for key, value in read_lock(root).items() if key in ranged}
-    entries[name] = (version, ref)
-    lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges in {MANIFEST}.",
+def write_lock(root: Path, entries: dict[str, tuple[str, str]]) -> None:
+    """Write `se.lock` with exactly `entries`, the (version, commit) of each component of the tree
+    pinned by a range or a go.mod; nothing is written where it holds them already."""
+    if entries == read_lock(root) and (entries or not (root / LOCK).is_file()):
+        return
+    lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges and go.mod pins "
+             f"of the components {MANIFEST} lists, and of theirs.",
              "# Written by sync and update; commit it, never edit it."]
     for key in sorted(entries):
         locked_version, locked_ref = entries[key]
-        lines += ["", f"[modules.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']
+        lines += ["", f"[{COMPONENTS}.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']
     (root / LOCK).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -185,17 +219,22 @@ GO_REQUIRE = re.compile(r"^(?:require\s+)?(?P<module>\S+)\s+v(?P<version>\S+)(?:
 def go_require(root: Path, name: str, value: object) -> tuple[str, str]:
     """(go.mod path relative to root, version) of a `go` pin: the exact version the `go.mod` that
     `value` names (`true`, the root's) requires of the module path `name` (README "Modules")."""
+    return go_require_in(lambda relative: _read_file(root / relative), str(root), name, value)
+
+
+def go_require_in(read: Callable[[str], str | None], where: str, name: str, value: object) -> tuple[str, str]:
+    """`go_require` of a host's tree that `read` gives by relative path, named `where`."""
     if value is True:
         relative = "go.mod"
     elif isinstance(value, str) and value:
         relative = _check_subpath(name, value)
     else:
         raise ModuleError(f"module {name}: go must be true or a relative path to a go.mod")
-    path = root / relative
-    if not path.is_file():
-        raise ModuleError(f"module {name}: no {relative} in {root}, which go names")
+    text = read(relative)
+    if text is None:
+        raise ModuleError(f"module {name}: no {relative} in {where}, which go names")
     block = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         bare = line.strip()
         if bare.startswith("require ("):
             block = True
@@ -214,55 +253,74 @@ def go_require(root: Path, name: str, value: object) -> tuple[str, str]:
     raise ModuleError(f"module {name}: {relative} has no require {name} v<version>; add one")
 
 
+RENAMED = (f"[modules] is [{COMPONENTS}] since se 6: rename each [modules.<name>] to "
+           f"[{COMPONENTS}.<name>] and drop its url, as a component is found by its name (README \"Modules\")")
+
+
 def load_manifest(root: Path) -> list[Module]:
-    """Read and validate the modules declared in `<root>/se.toml`."""
+    """Read and validate the components `<root>/se.toml` lists, each range's lock applied."""
     manifest = root / MANIFEST
     if not manifest.is_file():
         raise ModuleError(f"no {MANIFEST} in {root}")
-    tables = _read_toml(manifest).get("modules", {})
+    data = _read_toml(manifest)
+    if "modules" in data:
+        raise ModuleError(f"{manifest}: {RENAMED}")
+    return parse_components(data, MANIFEST, lambda relative: _read_file(root / relative), read_lock(root))
+
+
+def _read_file(path: Path) -> str | None:
+    return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def parse_components(data: dict, where: str, read: Callable[[str], str | None],
+                     locked: dict[str, tuple[str, str]]) -> list[Module]:
+    """The `[components]` of a host's se.toml `data` (its file named `where`); `read` gives a file
+    of the host's tree by its relative path (a `go` pin's go.mod), `locked` the root's se.lock."""
+    tables = data.get(COMPONENTS, {})
     if not isinstance(tables, dict):
-        raise ModuleError(f"{MANIFEST}: [modules] must be a table")
-    locked = read_lock(root)
+        raise ModuleError(f"{where}: [{COMPONENTS}] must be a table")
     modules = []
     for name, table in tables.items():
-        if not NAME_RE.match(name):
-            raise ModuleError(f"module name {name!r}: use letters, digits, '.', '_' and '-'")
+        if not COMPONENT_NAME_RE.match(name):
+            raise ModuleError(f"component name {name!r} in {where}: 1 to 32 letters, digits and '-', "
+                              "starting with a letter or digit, as its repository is named")
         if not isinstance(table, dict):
-            raise ModuleError(f"module {name}: [modules.{name}] must be a table")
-        unknown = sorted(set(table) - MODULE_KEYS)
+            raise ModuleError(f"component {name}: [{COMPONENTS}.{name}] must be a table")
+        if "url" in table:
+            raise ModuleError(
+                f"component {name}: url is refused in {where}: a component is found by its name under "
+                "the owners of the checkout's remotes (docs/components.md \"Finding a component\"); a "
+                "machine that needs another place sets [paths] or [urls] in ~/.se/local.toml")
+        unknown = sorted(set(table) - COMPONENT_KEYS)
         if unknown:
-            raise ModuleError(f"module {name}: unknown key(s) {', '.join(unknown)}")
-        url, ref, version = table.get("url"), table.get("ref"), table.get("version")
-        if not isinstance(url, str) or not url:
-            raise ModuleError(f"module {name}: url is required")
-        try:
-            # `../<name>.git`: the repository beside this one, on its origin's host (se_home.py).
-            url = se_home.resolve_module(root, url)
-        except se_home.NoHome as error:
-            raise ModuleError(f"module {name}: {error}") from error
+            raise ModuleError(f"component {name}: unknown key(s) {', '.join(unknown)}")
+        optional = table.get("optional", False)
+        if not isinstance(optional, bool):
+            raise ModuleError(f"component {name}: optional must be true or false")
+        ref, version = table.get("ref"), table.get("version")
         path = _check_subpath(name, table["path"]) if "path" in table else None
+        locked_version, locked_ref = locked.get(name, ("", ""))
         if "go" in table:
             if ref is not None or version is not None:
-                raise ModuleError(f"module {name}: go pins the version; drop ref and version")
-            gomod, exact = go_require(root, name, table["go"])
-            locked_version, locked_ref = locked.get(name, ("", ""))
-            modules.append(Module(name, url, locked_ref if locked_version == exact else "", path, exact, gomod))
+                raise ModuleError(f"component {name}: go pins the version; drop ref and version")
+            gomod, exact = go_require_in(read, where, name, table["go"])
+            modules.append(Module(name, locked_ref if locked_version == exact else "", path, exact, gomod,
+                                  optional))
             continue
         if version is not None:
             if ref is not None:
-                raise ModuleError(f"module {name}: pin either ref or version, not both")
+                raise ModuleError(f"component {name}: pin either ref or version, not both")
             if not isinstance(version, str):
-                raise ModuleError(f"module {name}: version must be a semver range string such as \"^1.4\"")
+                raise ModuleError(f"component {name}: version must be a semver range string such as \"^1.4\"")
             bounds = version_bounds(name, version)
-            locked_version, locked_ref = locked.get(name, ("", ""))
             ok = parse_version(locked_version) is not None and matches(parse_version(locked_version), bounds)
-            modules.append(Module(name, url, locked_ref if ok else "", path, version))
+            modules.append(Module(name, locked_ref if ok else "", path, version, None, optional))
             continue
         if not isinstance(ref, str) or not ref:
-            raise ModuleError(f"module {name}: ref or version is required")
+            raise ModuleError(f"component {name}: ref or version is required")
         if not SHA_RE.match(ref):
-            raise ModuleError(f"module {name}: ref must be a full commit SHA, got {ref!r}")
-        modules.append(Module(name, url, ref.lower(), path))
+            raise ModuleError(f"component {name}: ref must be a full commit SHA, got {ref!r}")
+        modules.append(Module(name, ref.lower(), path, None, None, optional))
     return modules
 
 
@@ -337,12 +395,13 @@ def hooks_core(environment: Mapping[str, str], local: LocalConfig) -> tuple[str,
 
 @dataclass(frozen=True)
 class Source:
-    """Where a module comes from on this machine."""
+    """Where a component comes from on this machine; `url` is the address the finder found ("" not
+    found yet: a placed clone is used without asking any remote)."""
 
     module: Module
     kind: str  # "local" or "pinned"
     checkout: Path
-    url: str
+    url: str = ""
     note: str = ""
 
     @property
@@ -352,14 +411,30 @@ class Source:
 
 def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
     """Use the local checkout if it exists, else the pinned clone in `.se/modules/<name>`."""
-    url = local.rewrite(module.url)
     note = ""
     local_path = local.paths.get(module.name)
     if local_path is not None:
         if local_path.is_dir():
-            return Source(module, "local", local_path, url)
+            return Source(module, "local", local_path)
         note = f"local path missing: {local_path}"
-    return Source(module, "pinned", root / MODULES_DIR / module.name, url, note)
+    return Source(module, "pinned", root / MODULES_DIR / module.name, "", note)
+
+
+def module_dirs(root: Path, local: LocalConfig) -> list[tuple[str, Path]]:
+    """Each module `<root>/se.toml` declares, in its order, with its folder on this machine (as
+    `resolve` finds it, its `path` applied), without resolving its URL: a reader of a module's
+    files (se_guidance.py) needs no origin. None where there is no se.toml."""
+    manifest = root / MANIFEST
+    tables = _read_toml(manifest).get("modules", {}) if manifest.is_file() else {}
+    if not isinstance(tables, dict):
+        raise ModuleError(f"{MANIFEST}: [modules] must be a table")
+    found = []
+    for name, table in tables.items():
+        if not isinstance(table, dict):
+            raise ModuleError(f"module {name}: [modules.{name}] must be a table")
+        path = _check_subpath(name, table["path"]) if "path" in table else None
+        found.append((name, resolve(root, Module(name, "", "", path), local).dir))
+    return found
 
 
 # What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
@@ -370,13 +445,13 @@ KERN_RELEASE = "release.toml"
 
 
 def kern_pin(root: Path) -> tuple[str, str]:
-    """(version, tag) of the kern `root` pins: the version `[modules.kern]` reads from the go.mod
+    """(version, tag) of the kern `root` pins: the version `[components.kern]` reads from the go.mod
     its `go` names (README "Modules"), and the tag the pinned clone's `release.toml` names for it,
     the last part of its `download` (kern's README "Release")."""
     manifest = root / MANIFEST
-    table = (_read_toml(manifest).get("modules", {}) if manifest.is_file() else {}).get(KERN)
+    table = (_read_toml(manifest).get(COMPONENTS, {}) if manifest.is_file() else {}).get(KERN)
     if not isinstance(table, dict) or "go" not in table:
-        raise ModuleError(f"no [modules.{KERN}] with go in {manifest}: it pins no kern")
+        raise ModuleError(f"no [{COMPONENTS}.{KERN}] with go in {manifest}: it pins no kern")
     version = go_require(root, KERN, table["go"])[1]
     return version, _kern_download(root)[1].rsplit("/", 1)[-1].replace("{version}", version)
 
@@ -526,14 +601,16 @@ def log_lines(repo: Path, revision_range: str) -> list[str]:
 
 
 def ensure_clone(source: Source) -> None:
-    """Create or reuse the module's clone in `.se/modules/<name>`, pointing at the effective url."""
+    """Create or reuse the component's clone in `.se/modules/<name>`, its origin the found address."""
     clone = source.checkout
     if (clone / ".git").exists():
-        if git(clone, "remote", "get-url", "origin") != source.url:
+        if source.url and git(clone, "remote", "get-url", "origin") != source.url:
             git(clone, "remote", "set-url", "origin", source.url)
         return
     if clone.exists() and any(clone.iterdir()):
         raise ModuleError(f"{clone} exists and is not a git clone; remove it")
+    if not source.url:
+        raise ModuleError(f"component {source.module.name}: no address found to clone it from")
     clone.parent.mkdir(parents=True, exist_ok=True)
     git(clone.parent, "clone", "--quiet", "--no-checkout", source.url, str(clone))
 
@@ -541,6 +618,11 @@ def ensure_clone(source: Source) -> None:
 def is_populated(clone: Path) -> bool:
     """A clone made with --no-checkout has no index until its first checkout."""
     return (clone / ".git" / "index").exists()
+
+
+def holds(clone: Path, sha: str) -> bool:
+    """Whether the clone `.se/modules/<name>` exists and holds the commit `sha`."""
+    return bool(sha) and (clone / ".git").exists() and has_commit(clone, sha)
 
 
 def fetch(clone: Path) -> None:
@@ -554,13 +636,19 @@ def ensure_commit(source: Source, sha: str) -> None:
         return
     fetch(clone)
     if not has_commit(clone, sha) and not (git_ok(clone, "fetch", "--quiet", "origin", sha) and has_commit(clone, sha)):
-        raise ModuleError(f"module {source.module.name}: commit {sha} not found in {source.url}")
+        raise ModuleError(f"module {source.module.name}: commit {sha} not found in {source.url or 'its clone'}")
 
 
 def tagged_versions(clone: Path) -> dict[Version, str]:
     """The clone's `vMAJOR.MINOR.PATCH` tags by version; other tags are ignored."""
     output = git(clone, "tag", "--list", "v*")
     return {version: tag for tag in output.splitlines() if (version := parse_version(tag[1:])) is not None}
+
+
+def clone_releases(clone: Path) -> dict[Version, str]:
+    """The clone's releases: each `v` tag's version and the commit it points to."""
+    return {version: git(clone, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
+            for version, tag in tagged_versions(clone).items()}
 
 
 def newest_matching(source: Source) -> tuple[str, str] | None:
@@ -574,36 +662,410 @@ def newest_matching(source: Source) -> tuple[str, str] | None:
     return version_text(best), git(source.checkout, "rev-parse", "--verify", f"refs/tags/v{version_text(best)}^{{commit}}")
 
 
-def resolve_range(root: Path, source: Source) -> Module:
-    """Fetch the module's tags, lock the highest one its range admits and return the locked module."""
-    module = source.module
-    ensure_clone(source)
-    fetch(source.checkout)
-    found = newest_matching(source)
-    if found is None and module.go:
+# Finding a component (docs/components.md "Finding a component")
+
+
+class Unlisted(Exception):
+    """The host cannot list this owner's repositories (an unknown owner, no login for a private
+    one): one line naming the remote, the owner and why, and finding goes on with the next owner."""
+
+
+class NoListing(Exception):
+    """The host offers no listing of the owner's repositories: the repository beside the remote is
+    read directly, its mark unchecked."""
+
+
+def github_listing(owner: str) -> dict[str, str]:
+    """The repositories of `owner` on github.com that carry the topic `component`, by lowercase
+    name, through GitHub's search with the person's login where the environment holds one
+    (`GH_TOKEN`, `GITHUB_TOKEN`); a refused login is retried without it."""
+    query = urllib.parse.quote(f"topic:{TOPIC} user:{owner}")
+    url = f"https://api.github.com/search/repositories?q={query}&per_page=100"
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    for login in ([token, None] if token else [None]):
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "se-modules"}
+        if login:
+            headers["Authorization"] = f"Bearer {login}"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
+                                        timeout=LISTING_TIMEOUT) as response:
+                data = json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 401 and login:
+                continue
+            if error.code in (404, 422):
+                raise Unlisted(f"github.com knows no owner {owner} it can list (HTTP {error.code})") from None
+            raise NoListing(f"github.com answered HTTP {error.code}") from None
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            raise NoListing(f"github.com could not be read: {getattr(error, 'reason', error)}") from None
+        items = data.get("items") if isinstance(data, dict) else None
+        return {str(item["name"]).lower(): str(item["name"]) for item in items or []
+                if isinstance(item, dict) and isinstance(item.get("name"), str)}
+    raise NoListing("github.com refused the login")
+
+
+def host_listing(host: str, owner: str) -> dict[str, str]:
+    """The repositories of `owner` on `host` marked `component`, by lowercase name; `Unlisted`
+    where the owner cannot be listed, `NoListing` where the host offers no listing (any host but
+    github.com, or `SE_COMPONENT_LISTING=off`)."""
+    setting = os.environ.get(LISTING_VARIABLE, "")
+    if setting == "off":
+        raise NoListing(f"{LISTING_VARIABLE}=off")
+    if setting.startswith("fake:"):
+        listed = json.loads(Path(setting[len("fake:"):]).read_text(encoding="utf-8"))
+        entry = listed.get(f"{host}/{owner}".lower())
+        if entry is None:
+            raise NoListing(f"the fake listing of {LISTING_VARIABLE} holds no {host}/{owner}")
+        if isinstance(entry, str):
+            raise Unlisted(entry)
+        return {str(name).lower(): str(name) for name in entry}
+    if host.lower() == se_home.GITHUB:
+        return github_listing(owner)
+    raise NoListing(f"SE lists no repositories on {host}")
+
+
+@dataclass(frozen=True)
+class Offer:
+    """A component as one owner offers it: where it is reached and the releases its tags name."""
+
+    name: str
+    remote: str
+    owner: str  # `<host>/<owner>`
+    url: str  # the address beside the remote, the machine's [urls] rewrite applied
+    releases: dict[Version, str]  # version -> commit, read without fetching objects
+
+
+@dataclass
+class Finding:
+    """The first offer the pin admits, or None, with the remotes read and why each offered nothing."""
+
+    offer: Offer | None
+    read: list[str]
+    reasons: list[str]
+
+
+def remote_tags(url: str, cwd: Path) -> dict[Version, str]:
+    """The `v` tags of the repository at `url`, read without fetching objects (`git ls-remote
+    --tags`): version -> commit, an annotated tag by the commit it points to."""
+    found: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in git(cwd, "ls-remote", "--tags", url).splitlines():
+        sha, _, ref = line.partition("\t")
+        tag = ref.removeprefix("refs/tags/")
+        if tag.endswith("^{}"):
+            peeled[tag[:-3]] = sha.lower()
+        else:
+            found[tag] = sha.lower()
+    found.update(peeled)
+    return {version: sha for tag, sha in found.items()
+            if tag.startswith("v") and (version := parse_version(tag[1:])) is not None}
+
+
+class Finder:
+    """Finds a component by name under the owners of the checkout's remotes, in the order of
+    docs/components.md "Finding a component": `origin` first, then the other remotes; each owner
+    once, its marked repositories listed once per run; the first offer the pin admits wins."""
+
+    def __init__(self, root: Path, local: LocalConfig,
+                 listing: Callable[[str, str], dict[str, str]] | None = None) -> None:
+        self.root, self.local = root, local
+        self.listing = listing or host_listing
+        self._remotes: list[tuple[str, str]] | None = None
+        self._listed: dict[tuple[str, str], dict[str, str] | Exception] = {}
+        self._tags: dict[str, dict[Version, str] | ModuleError] = {}
+        #: Lines the run prints once each: an owner not listed, a mark not checked.
+        self.notes: list[str] = []
+
+    def _note(self, line: str) -> None:
+        if line not in self.notes:
+            self.notes.append(line)
+
+    def remotes(self) -> list[tuple[str, str]]:
+        if self._remotes is None:
+            self._remotes = se_home.remotes(self.root)
+        return self._remotes
+
+    def _listed_names(self, host: str, owner: str) -> dict[str, str] | Exception:
+        key = (host.lower(), owner.lower())
+        if key not in self._listed:
+            try:
+                self._listed[key] = self.listing(host, owner)
+            except (Unlisted, NoListing) as error:
+                self._listed[key] = error
+        return self._listed[key]
+
+    def _releases(self, url: str) -> dict[Version, str] | ModuleError:
+        if url not in self._tags:
+            try:
+                self._tags[url] = remote_tags(url, self.root)
+            except ModuleError as error:
+                self._tags[url] = error
+        return self._tags[url]
+
+    def offers(self, name: str, read: list[str], reasons: list[str]) -> Iterator[Offer]:
+        """Each owner's offer of `name`, in the order of the remotes; `read` and `reasons` collect
+        the remotes read and why one offered nothing."""
+        seen: set[tuple[str, str]] = set()
+        for remote, address in self.remotes():
+            home = se_home.parse(address)
+            if home is None:
+                reasons.append(f"{remote}: its address names no host and owner, so it offers nothing")
+                continue
+            key = (home.host.lower(), home.owner.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            read.append(remote)
+            owner = f"{home.host}/{home.owner}"
+            listed = self._listed_names(home.host, home.owner)
+            if isinstance(listed, Unlisted):
+                self._note(f"{remote}: {home.host} cannot list the repositories of {home.owner}: {listed}")
+                reasons.append(f"{remote}: {owner} could not be listed")
+                continue
+            if isinstance(listed, NoListing):
+                self._note(f"{remote}: the mark of {owner}/{name} could not be checked ({listed}); "
+                           "its repository is read directly")
+                repository = name
+            elif name.lower() in listed:
+                repository = listed[name.lower()]
+            else:
+                reasons.append(f"{remote}: {owner} marks no repository {name} as a {TOPIC}")
+                continue
+            url = self.local.rewrite(se_home.beside(address, repository))
+            releases = self._releases(url)
+            if isinstance(releases, ModuleError):
+                reasons.append(f"{remote}: {url} could not be read: {releases}")
+                continue
+            yield Offer(repository, remote, owner, url, releases)
+
+    def find(self, name: str, admits: Callable[[Offer], bool]) -> Finding:
+        """The first offer of `name` that `admits` takes."""
+        read: list[str] = []
+        reasons: list[str] = []
+        for offer in self.offers(name, read, reasons):
+            if admits(offer):
+                return Finding(offer, read, reasons)
+            reasons.append(f"{offer.remote}: {offer.url} offers no release the pin admits")
+        return Finding(None, read, reasons)
+
+
+def missing(module: Module, path: tuple[str, ...], finding: Finding) -> str:
+    """Why a component was not found: its path from the root, the remotes read and the remedy."""
+    kind = "optional" if module.optional else "required"
+    read = ", ".join(finding.read) or "none"
+    release = f" with a release its pin {module.pin} admits" if module.version else ""
+    lines = [f"the {kind} component {module.name} is missing ({_arrow(path, module.name)}): no remote's "
+             f"owner offers a repository {module.name} marked as a {TOPIC}{release} (read: {read})"]
+    lines += [f"  {reason}" for reason in finding.reasons]
+    lines.append("  Add a remote of an owner that offers it: git remote add <remote> <address>")
+    return "\n".join(lines)
+
+
+# Resolving the tree (docs/components.md "Several hosts, one tree")
+
+
+@dataclass
+class Placed:
+    """A component of the tree: the source it is used from and the release placed there."""
+
+    module: Module  # the first entry that named it
+    path: tuple[str, ...]  # the host's path from the root
+    source: Source
+    version: str  # "" where no release names it (a ref pin, a local checkout without one)
+    commit: str  # "" for a local checkout
+    releases: dict[Version, str]  # what the source offered, for choosing again
+    pins: list[tuple[tuple[str, ...], Module]] = field(default_factory=list)
+
+
+class _Narrow(Exception):
+    """A later host's pin does not admit the release chosen, but a common one exists: resolve again
+    with that pin known from the start."""
+
+    def __init__(self, key: str, pin: tuple[tuple[str, ...], Module]) -> None:
+        super().__init__(key)
+        self.key, self.pin = key, pin
+
+
+def root_name(root: Path) -> str:
+    """The root host's component name: its repository's, from origin (se_home), else its folder's."""
+    found = se_home.find(root)
+    return found.repository if found is not None else root.resolve().name
+
+
+def _arrow(path: tuple[str, ...], name: str) -> str:
+    return " -> ".join((*path, name))
+
+
+def _components_of(placed: Placed, lock: dict[str, tuple[str, str]]) -> list[Module]:
+    """The components a placed component's own se.toml lists, read from its release (a local
+    checkout's working tree); a release whose se.toml lists none under [components] lists none."""
+    source = placed.source
+    if source.kind == "local":
+        def read(relative: str) -> str | None:
+            return _read_file(source.checkout / relative)
+    else:
+        def read(relative: str) -> str | None:
+            result = _run_git(source.checkout, ("show", f"{placed.commit}:{relative}"))
+            return result.stdout if result.returncode == 0 else None
+    text = read(MANIFEST)
+    if text is None:
+        return []
+    where = f"{MANIFEST} of {_arrow(placed.path, placed.module.name)}"
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise ModuleError(f"{where}: {error}") from error
+    return parse_components(data, where, read, lock)
+
+
+class Tree:
+    """One resolution of the root's list and its components' lists, one release per name, each
+    placed as a clone in `.se/modules/<name>` (or used from its local path)."""
+
+    def __init__(self, root: Path, local: LocalConfig, finder: Finder | None = None,
+                 unlock: frozenset[str] = frozenset()) -> None:
+        self.root, self.local = root, local
+        self.finder = finder or Finder(root, local)
+        self.unlock = unlock
+        self.lock = read_lock(root)
+        self.name = root_name(root)
+
+    def resolve(self, names: list[str] | None = None) -> tuple[list[Placed], list[str]]:
+        """The placed components, root's list first, and the lines naming optional ones missing."""
+        seeds: dict[str, list[tuple[tuple[str, ...], Module]]] = {}
+        for _ in range(64):
+            try:
+                return self._once(names or [], seeds)
+            except _Narrow as narrow:
+                seeds.setdefault(narrow.key, []).append(narrow.pin)
+        raise ModuleError("the components' pins keep choosing another release; align them")
+
+    def _once(self, names: list[str], seeds: dict) -> tuple[list[Placed], list[str]]:
+        placed: dict[str, Placed] = {}
+        lines: list[str] = []
+        queue = deque(((self.name,), module) for module in select(load_manifest(self.root), names))
+        while queue:
+            path, module = queue.popleft()
+            key = module.name.lower()
+            if key in (part.lower() for part in path):
+                self._on_path(path, module, placed)
+                continue
+            if key in placed:
+                self._again(placed[key], path, module)
+                continue
+            chosen = self._choose(path, module, [(path, module), *seeds.get(key, [])])
+            if chosen is None:
+                lines.append(f"optional component {_arrow(path, module.name)} not found on any remote's owner")
+                continue
+            placed[key] = chosen
+            queue.extend(((*path, module.name), child) for child in _components_of(chosen, self.lock))
+        return list(placed.values()), lines
+
+    def _on_path(self, path: tuple[str, ...], module: Module, placed: dict[str, Placed]) -> None:
+        """A name already on the path is that component: its pin is checked against it."""
+        key = module.name.lower()
+        if key == self.name.lower():
+            version = checkout_version(self.root, go=module.go is not None)
+            head = _run_git(self.root, ("rev-parse", "HEAD")).stdout.strip()
+            if module.admits(version, head):
+                return
+            have = version_text(version) if version else "no version"
+            raise ModuleError(f"component {module.name}: {_arrow(path, module.name)} pins {module.pin}, but "
+                              f"{module.name} is the root, at {have}; change that pin")
+        self._again(placed[key], path, module)
+
+    def _again(self, chosen: Placed, path: tuple[str, ...], module: Module) -> None:
+        """A name the tree reaches twice is one component: this pin must admit its release too."""
+        chosen.pins.append((path, module))
+        if chosen.source.kind == "local" or module.admits(parse_version(chosen.version), chosen.commit):
+            return
+        common = [version for version, commit in chosen.releases.items()
+                  if all(pin.admits(version, commit) for _, pin in chosen.pins)]
+        if common:
+            raise _Narrow(module.name.lower(), (path, module))
+        first_path, first = chosen.pins[0]
         raise ModuleError(
-            f"module {module.name}: no tag v{module.version} in {source.url}, which "
-            f"{module.go}'s require {module.name} v{module.version} names; release it or change that line"
-        )
-    if found is None:
-        raise ModuleError(
-            f"module {module.name}: no tag vMAJOR.MINOR.PATCH in {source.url} matches version "
-            f"{module.version!r} of {root / MANIFEST}; widen the range or release the module "
-            "(README \"Project settings\")"
-        )
-    write_lock(root, module.name, *found)
-    return Module(module.name, module.url, found[1], module.path, module.version, module.go)
+            f"component {module.name}: {_arrow(first_path, module.name)} pins {first.pin} and "
+            f"{_arrow(path, module.name)} pins {module.pin}, and no release of {module.name} admits "
+            "both; align the two pins")
+
+    def _choose(self, path: tuple[str, ...], module: Module,
+                pins: list[tuple[tuple[str, ...], Module]]) -> Placed | None:
+        source = resolve(self.root, module, self.local)
+        if source.kind == "local":
+            version = checkout_version(source.checkout, go=module.go is not None)
+            return Placed(module, path, source, version_text(version) if version else "", "", {}, list(pins))
+
+        def ok(version: Version | None, commit: str) -> bool:
+            return all(pin.admits(version, commit) for _, pin in pins)
+
+        clone, name = source.checkout, module.name
+        locked = self.lock.get(name) if module.version else None
+        keep = name not in self.unlock
+        if not module.version:  # a ref pin: its commit
+            if keep and holds(clone, module.ref):
+                return self._placed(module, path, source, "", module.ref, {}, pins)
+            finding = self.finder.find(name, lambda offer: True)
+            want = None
+        elif keep and locked and ok(parse_version(locked[0]), locked[1]):
+            if holds(clone, locked[1]):
+                return self._placed(module, path, source, locked[0], locked[1], clone_releases(clone), pins)
+            want = parse_version(locked[0])
+            finding = self.finder.find(name, lambda offer: want in offer.releases)
+        else:
+            want = None
+            finding = self.finder.find(
+                name, lambda offer: any(ok(version, commit) for version, commit in offer.releases.items()))
+        offer = finding.offer
+        if offer is None:
+            if module.optional:
+                return None
+            raise ModuleError(missing(module, path, finding))
+        found = Source(module, "pinned", clone, offer.url, source.note)
+        if not module.version:
+            return self._placed(module, path, found, "", module.ref, offer.releases, pins)
+        if want is not None:
+            commit = offer.releases[want]
+            if commit != locked[1]:
+                raise ModuleError(
+                    f"component {name}: the release v{locked[0]} that {offer.url} offers ({offer.remote}'s "
+                    f"owner {offer.owner}) points to {commit}, but {LOCK} records {locked[1]}; a found "
+                    f"release never replaces a locked one silently: run se_modules.py update {name} "
+                    "to lock the found one")
+            return self._placed(module, path, found, locked[0], commit, offer.releases, pins)
+        best = max(version for version, commit in offer.releases.items() if ok(version, commit))
+        return self._placed(module, path, found, version_text(best), offer.releases[best], offer.releases, pins)
+
+    def _placed(self, module: Module, path: tuple[str, ...], source: Source, version: str, commit: str,
+                releases: dict[Version, str], pins: list) -> Placed:
+        """Place the release in the clone (fetched where it lacks the commit) and record it."""
+        ensure_clone(source)
+        ensure_commit(source, commit)
+        if not releases and module.version:
+            releases = clone_releases(source.checkout)
+        moved = Module(module.name, commit, module.path, module.version, module.go, module.optional)
+        return Placed(moved, path, Source(moved, source.kind, source.checkout, source.url, source.note),
+                      version, commit, releases, list(pins))
 
 
-def pinned_source(root: Path, module: Module, local: LocalConfig) -> Source:
-    return Source(module, "pinned", root / MODULES_DIR / module.name, local.rewrite(module.url))
-
-
-def lock_range(root: Path, module: Module, local: LocalConfig) -> Module:
-    """A module pinned by a range keeps its locked commit; an unlocked one is resolved and locked."""
-    if module.version is None or module.ref:
-        return module
-    return resolve_range(root, pinned_source(root, module, local))
+def sync_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
+              finder: Finder | None = None, unlock: frozenset[str] = frozenset()) -> list[str]:
+    """`sync`: resolve the tree (the root's components named in `names`, default all, and theirs),
+    check each placed one out at its release, lock what ranges and go.mod pins chose; one line each,
+    then the finder's notes and the optional components missing."""
+    tree = Tree(root, local, finder, unlock)
+    placed, missing_lines = tree.resolve(names)
+    lines = [sync_module(item.source) + (f" (for {' -> '.join(item.path[1:])})" if len(item.path) > 1 else "")
+             for item in placed]
+    entries = dict(tree.lock) if names else {}  # a partial sync keeps the others' entries
+    for item in placed:
+        name = item.module.name
+        if item.source.kind == "pinned" and item.module.version:
+            entries[name] = (item.version, item.commit)
+        elif item.source.kind == "local" and name in tree.lock:
+            entries[name] = tree.lock[name]  # a local checkout leaves its lock as it is
+    write_lock(root, entries)
+    return [*lines, *tree.finder.notes, *missing_lines]
 
 
 def version_report(source: Source) -> str:
@@ -715,11 +1177,11 @@ def status_line(source: Source) -> str:
 
 
 def set_pin(root: Path, name: str, sha: str) -> None:
-    """Rewrite only the `ref` value of `[modules.<name>]`, keeping the file otherwise byte for byte."""
+    """Rewrite only the `ref` value of `[components.<name>]`, keeping the file otherwise byte for byte."""
     manifest = root / MANIFEST
     text = manifest.read_bytes().decode("utf-8")
     quoted = re.escape(name)
-    header = re.compile(rf"""^\s*\[\s*modules\s*\.\s*(?:{quoted}|"{quoted}"|'{quoted}')\s*\]\s*(?:#.*)?$""")
+    header = re.compile(rf"""^\s*\[\s*{COMPONENTS}\s*\.\s*(?:{quoted}|"{quoted}"|'{quoted}')\s*\]\s*(?:#.*)?$""")
     any_header = re.compile(r"^\s*\[")
     ref_line = re.compile(r"""^(\s*ref\s*=\s*)(["'])[0-9a-fA-F]{40}\2""")
     lines = text.splitlines(keepends=True)
@@ -735,7 +1197,7 @@ def set_pin(root: Path, name: str, sha: str) -> None:
             found = True
             break
     if not found:
-        raise ModuleError(f'{manifest}: write the pin of {name} as ref = "<sha>" inside [modules.{name}]')
+        raise ModuleError(f'{manifest}: write the pin of {name} as ref = "<sha>" inside [{COMPONENTS}.{name}]')
     manifest.write_bytes("".join(lines).encode("utf-8"))
     if {m.name: m.ref for m in load_manifest(root)}.get(name) != sha:
         raise ModuleError(f"{manifest}: rewriting the pin of {name} failed")
@@ -765,25 +1227,41 @@ def resolve_target(source: Source, to: str | None) -> str:
     raise ModuleError(f"module {source.module.name}: {to or TRACKED_BRANCH} not found in {source.url}")
 
 
-def update_module(root: Path, module: Module, local: LocalConfig, to: str | None) -> list[str]:
-    """Move the pin to the newest `main` commit (or to `to`), or a range's lock to its highest
-    admitted tag; report the commits between, regenerate SE's workflows in the project at the new
-    pin (regenerate_workflows) and sync."""
-    pinned = pinned_source(root, module, local)
+def update_module(root: Path, module: Module, local: LocalConfig, to: str | None,
+                  finder: Finder | None = None) -> list[str]:
+    """Find the component again, then move its pin to the newest `main` commit (or to `to`), or a
+    range's lock to its highest admitted release the first owner offers; report the commits
+    between, regenerate SE's workflows in the project at the new pin (regenerate_workflows) and
+    sync."""
     if module.go:
         raise ModuleError(
             f"module {module.name}: pinned by {module.go}'s require {module.name} v{module.version}; "
             "change that line and run sync instead"
         )
+    finder = finder or Finder(root, local)
+    pinned = Source(module, "pinned", root / MODULES_DIR / module.name)
     if module.version is not None:
         if to is not None:
             raise ModuleError(
                 f"module {module.name}: pinned by version {module.version!r}; change the range in "
                 f"{root / MANIFEST} instead of passing --to"
             )
-        new = resolve_range(root, pinned).ref
+        bounds = version_bounds(module.name, module.version)
+        finding = finder.find(module.name, lambda offer: any(matches(v, bounds) for v in offer.releases))
+        if finding.offer is None:
+            raise ModuleError(missing(module, (root_name(root),), finding))
+        best = max(v for v in finding.offer.releases if matches(v, bounds))
+        new = finding.offer.releases[best]
+        pinned = Source(module, "pinned", pinned.checkout, finding.offer.url)
+        ensure_clone(pinned)
+        ensure_commit(pinned, new)
+        write_lock(root, {**read_lock(root), module.name: (version_text(best), new)})
         label = f"highest tag matching {module.version}"
     else:
+        finding = finder.find(module.name, lambda offer: True)
+        if finding.offer is None:
+            raise ModuleError(missing(module, (root_name(root),), finding))
+        pinned = Source(module, "pinned", pinned.checkout, finding.offer.url)
         ensure_clone(pinned)
         fetch(pinned.checkout)
         new = resolve_target(pinned, to)
@@ -809,9 +1287,10 @@ def update_module(root: Path, module: Module, local: LocalConfig, to: str | None
         if module.version is None:
             set_pin(root, module.name, new)
     report.extend(regenerate_workflows(root, module, pinned.checkout, new))
-    moved = Module(module.name, module.url, new, module.path, module.version, module.go)
-    report.append(sync_module(resolve(root, moved, local)))
-    return report
+    moved = Module(module.name, new, module.path, module.version, module.go, module.optional)
+    source = resolve(root, moved, local)
+    report.append(sync_module(Source(moved, source.kind, source.checkout, pinned.url, source.note)))
+    return report + finder.notes
 
 
 def select(modules: list[Module], names: list[str]) -> list[Module]:
@@ -826,15 +1305,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, help=f"repository with {MANIFEST}; default: nearest ancestor of the current directory")
     parser.add_argument("--local", type=Path, help="machine-local configuration; default: ~/.se/local.toml")
     commands = parser.add_subparsers(dest="command", required=True)
-    sync = commands.add_parser("sync", help="bring modules to their pins, or use their local paths")
-    sync.add_argument("names", nargs="*", help="modules; default: all")
-    status = commands.add_parser("status", help="show the source of each module and its drift from the pin")
-    status.add_argument("names", nargs="*", help="modules; default: all")
-    update = commands.add_parser("update", help=f"move pins to the newest {TRACKED_BRANCH} commit and sync")
-    update.add_argument("name", nargs="?", help="module to update")
+    sync = commands.add_parser("sync", help="find the components and theirs by name, place each at its pin, "
+                               "or use their local paths")
+    sync.add_argument("names", nargs="*", help="components of the root's list; default: all")
+    status = commands.add_parser("status", help="show the source of each component and its drift from the pin")
+    status.add_argument("names", nargs="*", help="components; default: all")
+    update = commands.add_parser("update", help=f"find a component again, move its pin to the newest "
+                                 f"{TRACKED_BRANCH} commit (a range's lock to its newest release) and sync")
+    update.add_argument("name", nargs="?", help="component to update")
     update.add_argument("--to", help="branch, tag or commit instead of the newest main commit")
-    update.add_argument("--all", action="store_true", help="update every module")
-    path = commands.add_parser("path", help="print the directory a module is used from")
+    update.add_argument("--all", action="store_true", help="update every component")
+    path = commands.add_parser("path", help="print the directory a component is used from")
     path.add_argument("name")
     commands.add_parser("kern-pin", help="print the version of the kern --root pins and where its release is "
                         "published, on one line (bootstrap.sh reads it)")
@@ -879,19 +1360,19 @@ def main(argv: list[str] | None = None) -> int:
             print(resolve(root, select(modules, [args.name])[0], local).dir)
             return 0
         names = [args.name] if args.command == "update" and args.name else getattr(args, "names", [])
+        if args.command == "sync":
+            select(modules, names)
+            print("\n".join(sync_tree(root, local, names)))
+            return 0
+        finder = Finder(root, local)
         for module in select(modules, names):
             try:
-                if args.command == "sync":
-                    source = resolve(root, module, local)
-                    if source.kind == "pinned":
-                        source = resolve(root, lock_range(root, module, local), local)
-                    print(sync_module(source))
-                elif args.command == "status":
+                if args.command == "status":
                     print(status_line(resolve(root, module, local)))
                 elif args.all and module.go:
                     print(f"{module.name}: pinned by {module.go}, left as it is")
                 else:
-                    print("\n".join(update_module(root, module, local, args.to)))
+                    print("\n".join(update_module(root, module, local, args.to, finder)))
             except ModuleError as error:
                 print(f"error: {error}", file=sys.stderr)
                 failed = True

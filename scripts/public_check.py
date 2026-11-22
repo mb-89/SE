@@ -42,7 +42,7 @@ decoded with the standard library and scanned key by key and string by string, e
 its field path. It reads no history, applies no allow entry and records no verdict; an island that
 does not decode is a setup error, never a pass.
 
-Every verdict names the se commit that ran it. A checked repository that pins se (`[modules.se]`
+Every verdict names the se commit that ran it. A checked repository that pins se (`[components.se]`
 in its se.toml) is refused when this se is not at that `ref`, or when the version this se's
 se.toml sets lies outside that `version` range, so a stale clone never gives another verdict
 silently.
@@ -950,7 +950,7 @@ def se_commit() -> str | None:
 
 
 def se_pin(root: Path) -> dict | None:
-    """`[modules.se]` of the checked repository's se.toml, or None where it pins none."""
+    """`[components.se]` of the checked repository's se.toml, or None where it pins none."""
     manifest = root / MANIFEST
     if not manifest.is_file():
         return None
@@ -958,12 +958,12 @@ def se_pin(root: Path) -> dict | None:
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise SetupError(f"cannot read {MANIFEST} of the checked repository: {error}") from error
-    modules = data.get("modules")
+    modules = data.get("components")
     module = modules.get("se") if isinstance(modules, dict) else None
     if module is None:
         return None
     if not isinstance(module, dict) or not isinstance(module.get("ref", module.get("version")), str):
-        raise SetupError(f"[modules.se] in {MANIFEST} has no ref; pin a full commit SHA or a version range")
+        raise SetupError(f"[components.se] in {MANIFEST} has no ref; pin a full commit SHA or a version range")
     return module
 
 

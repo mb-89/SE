@@ -35,6 +35,10 @@ os.environ["SE_METRICS"] = os.devnull
 # as components"): a test's fakes live in its own process. A test of the routing sets its own.
 os.environ["SE_KERN"] = "off"
 
+# The suite lists no host's repositories (scripts/se_modules.py `host_listing`): a component is read
+# directly beside its remote, and a test of the finder sets its fake listing.
+os.environ[se_modules.LISTING_VARIABLE] = "off"
+
 # What a CI runner sets and a local machine does not: GitHub Actions' variables and SE's cloud agent,
 # which switch commands to their runner behaviour (`start` a cloud start, `capacity` none), the
 # and the environment's default agent, which adds a sentence to the start's hand-over.
@@ -240,7 +244,7 @@ def obs() -> Path:
         return directory
 
 
-# kern, the Go core, at the pin se.toml [modules.kern] reads from components/go.mod (README
+# kern, the Go core, at the pin se.toml [components.kern] reads from components/go.mod (README
 # "Modules"): placed before collection, as tests read its files while they are collected
 # (tests/test_se_home.py TABLE, tests/test_se_components.py's import of kern's SDK).
 KERN = se_modules.kern_dir(ROOT)

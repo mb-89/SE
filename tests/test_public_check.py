@@ -238,14 +238,14 @@ def test_clean_repository_passes(repo: Path) -> None:
 
 
 def test_a_check_at_the_pinned_se_passes(repo: Path) -> None:
-    commit(repo, {"se.toml": f'[modules.se]\nurl = "https://example.com/se.git"\nref = "{SE_HEAD}"\n'})
+    commit(repo, {"se.toml": f'[components.se]\nref = "{SE_HEAD}"\n'})
     result = run_check(cwd=repo)
     assert result.returncode == 0, result.stdout
 
 
 def test_a_stale_se_refuses_naming_both_commits_and_the_remedy(repo: Path) -> None:
     pin = "0123456" + "0" * 33
-    commit(repo, {"se.toml": f'[modules.se]\nurl = "https://example.com/se.git"\nref = "{pin}"\n'})
+    commit(repo, {"se.toml": f'[components.se]\nref = "{pin}"\n'})
     result = run_check(cwd=repo)
     assert result.returncode == 2, result.stdout
     assert (f"public-check: error (se {SE_HEAD[:7]}): se.toml pins se at 0123456, but this check "
@@ -258,13 +258,13 @@ SE_MAJOR, SE_MINOR, _ = (int(part) for part in SE_VERSION.split("."))
 
 
 def range_manifest(text: str) -> str:
-    return f'[modules.se]\nurl = "https://example.com/se.git"\nversion = "{text}"\n'
+    return f'[components.se]\nversion = "{text}"\n'
 
 
 def test_an_se_within_the_pinned_version_range_passes_whatever_its_commit(repo: Path) -> None:
     stale = "0123456" + "0" * 33
     commit(repo, {"se.toml": range_manifest(f"~{SE_MAJOR}.{SE_MINOR}"),
-                  "se.lock": f'[modules.se]\nversion = "{SE_VERSION}"\nref = "{stale}"\n'})
+                  "se.lock": f'[components.se]\nversion = "{SE_VERSION}"\nref = "{stale}"\n'})
     result = run_check(cwd=repo)
     assert result.returncode == 0, result.stdout
 
@@ -1244,11 +1244,17 @@ def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_iden
 
 
 def se_as_a_local_module(repo: Path) -> None:
-    """The machine's local list points the module se at this checkout, so `sync se` clones nothing
-    (README "Modules", ~/.se/local.toml [paths]); the repo fixture's HOME holds it."""
+    """The machine's local list points the component se at this checkout, and se's own components
+    at local checkouts, kern at its clone here and obs at a folder of its locked version, so `sync
+    se` clones nothing (README "Modules", ~/.se/local.toml [paths]); the repo fixture's HOME holds it."""
+    obs = repo.parent / "obs"
+    obs.mkdir(exist_ok=True)
+    locked = tomllib.loads((SE_ROOT / "se.lock").read_text(encoding="utf-8"))["components"]["obs"]["version"]
+    (obs / "se.toml").write_text(f'[project]\nversion = "{locked}"\n', encoding="utf-8")
     local = Path(os.environ["HOME"]) / ".se" / "local.toml"
     local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text(f"[paths]\nse = '{SE_ROOT.as_posix()}'\n", encoding="utf-8")
+    local.write_text(f"[paths]\nse = '{SE_ROOT.as_posix()}'\nkern = '{(SE_ROOT / '.se' / 'modules' / 'kern').as_posix()}'\n"
+                     f"obs = '{obs.as_posix()}'\n", encoding="utf-8")
 
 
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
@@ -1266,9 +1272,9 @@ def test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder(k
     assert data == {"model": "x",
                     "enabledPlugins": {"other@else": True, "se@se": True},
                     "extraKnownMarketplaces": {"se": {"source": {"source": "github", "repo": "alice/SE"}}}}
-    pin = tomllib.loads((repo / "se.toml").read_text(encoding="utf-8"))["modules"]["se"]
+    pin = tomllib.loads((repo / "se.toml").read_text(encoding="utf-8"))["components"]["se"]
     major, minor = tomllib.loads((SE_ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"].split(".")[:2]
-    assert pin == {"url": "https://github.com/alice/SE.git", "version": f"^{major}.{minor}"}
+    assert pin == {"version": f"^{major}.{minor}"}
     assert (repo / ".gitignore").read_text(encoding="utf-8").splitlines().count(".se/") == 1
     assert "se: local" in result.stdout, result.stdout
 

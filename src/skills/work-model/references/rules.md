@@ -708,14 +708,18 @@ example.
 
 ### dec-002 Is the problem real
 
-A decision names what shows its problem exists: a failure, a measurement or the person's words.
+A decision names what shows its problem exists (a failure, a measurement or the person's words)
+and what at least two outside tools, products or conventions do about the same problem.
 
-- **Why:** a decision about an imagined problem spends effort and adds rules for nothing.
-- **Without it:** rules and features grow for problems nobody had.
-- **Prevents:** speculative fixes; rules for a problem that never occurred.
+- **Why:** a decision about an imagined problem spends effort and adds rules for nothing; one that
+  ignores how others solve it builds again what exists.
+- **Without it:** rules and features grow for problems nobody had, and SE reinvents what a known
+  tool or convention already does.
+- **Prevents:** speculative fixes; rules for a problem that never occurred; a home-grown copy of an
+  outside solution.
 - **Implementations:**
-  - se: checklist item 2 and the note's `## The problem` section, which `deck.py build` requires
-    ([decision note](../../decision/SKILL.md#the-decision-note)).
+  - se: checklist item 2 and the note's `## The problem` and `## What others do` sections, which
+    `deck.py build` requires ([decision note](../../decision/SKILL.md#the-decision-note)).
 - **Related:** des-006
 
 ### dec-003 Keep what we have

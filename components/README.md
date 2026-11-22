@@ -7,7 +7,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
 - **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
-  `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[modules.kern]` pins
+  `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[components.kern]` pins
   and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
 
 ## The Go components

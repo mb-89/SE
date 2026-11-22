@@ -106,6 +106,9 @@ project's commands and hot files by the project's `AGENTS.md`.
        repository and this SE session.
      - Title it `work_tickets.py session-title integrator <project>` and tag it `SE`
        ([Visible sessions](../work-model/SKILL.md#visible-sessions)).
+     - Start it at your own effort or lower, never higher; it starts its workers the same way,
+       and a scheduled task that starts an integrator is set at or below your effort
+       ([effort ceiling](../work-model/SKILL.md#visible-sessions)).
    - Work issues quote the user's requirement word for word; work follows the user's priority.
    - Apply the [capability-preservation rule](../work-model/SKILL.md#rules-for-all-roles) before
      writing a work issue, and ask for a change that is
