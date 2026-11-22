@@ -197,6 +197,9 @@ uv run python <se>/scripts/se_start.py refresh
     the tree stops it the same way, such as a found release whose tag points elsewhere than
     `se.lock` records.
   - An optional component missing is one line naming its path, and the start goes on.
+  - A runtime the tree needs and the machine lacks after `RUNME.conf`'s ways stops it the same way,
+    naming the runtime, the components that need it and the remedy
+    ([docs/components.md "Runtimes"](docs/components.md#runtimes)).
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`
@@ -621,6 +624,10 @@ tree is placed in the root's `.se/modules/<name>`. A release whose `se.toml` lis
 - A name already on the path is that component: an entry that names a host above it on the path,
   the root included, is that host itself, and its pin is checked against that host's version, not
   resolved again.
+- The runtimes: each component's `se.toml` `[runtimes]` names the runtimes it needs with a range
+  of their versions (`python = "^3.12"`). `sync` and the start collect them over the tree, get
+  what the machine lacks through the root's `RUNME.conf` and stop before any component runs where
+  one is still missing ([docs/components.md "Runtimes"](docs/components.md#runtimes)).
 
 ### Project settings
 

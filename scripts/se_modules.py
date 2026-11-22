@@ -903,9 +903,9 @@ def _arrow(path: tuple[str, ...], name: str) -> str:
     return " -> ".join((*path, name))
 
 
-def _components_of(placed: Placed, lock: dict[str, tuple[str, str]]) -> list[Module]:
-    """The components a placed component's own se.toml lists, read from its release (a local
-    checkout's working tree); a release whose se.toml lists none under [components] lists none."""
+def _manifest_of(placed: Placed) -> tuple[dict, str, Callable[[str], str | None]]:
+    """A placed component's own se.toml, read from its release (a local checkout's working tree),
+    with its name for messages and the reader of its tree's files; a release without one has `{}`."""
     source = placed.source
     if source.kind == "local":
         def read(relative: str) -> str | None:
@@ -914,15 +914,34 @@ def _components_of(placed: Placed, lock: dict[str, tuple[str, str]]) -> list[Mod
         def read(relative: str) -> str | None:
             result = _run_git(source.checkout, ("show", f"{placed.commit}:{relative}"))
             return result.stdout if result.returncode == 0 else None
+    where = f"{MANIFEST} of {_arrow(placed.path, placed.module.name)}"
     text = read(MANIFEST)
     if text is None:
-        return []
-    where = f"{MANIFEST} of {_arrow(placed.path, placed.module.name)}"
+        return {}, where, read
     try:
-        data = tomllib.loads(text)
+        return tomllib.loads(text), where, read
     except tomllib.TOMLDecodeError as error:
         raise ModuleError(f"{where}: {error}") from error
+
+
+def _components_of(placed: Placed, lock: dict[str, tuple[str, str]]) -> list[Module]:
+    """The components a placed component's own se.toml lists; a release whose se.toml lists none
+    under [components] lists none."""
+    data, where, read = _manifest_of(placed)
     return parse_components(data, where, read, lock)
+
+
+def tree_runtimes(root: Path, placed: list[Placed]) -> list:
+    """The runtimes the tree needs, the root's `[runtimes]` first, then each placed component's from
+    its release (docs/components.md "Runtimes"), as `se_runtimes.Need`s."""
+    import se_runtimes  # it reads this module's version ranges
+
+    name = root_name(root)
+    needs = se_runtimes.parse(_read_toml(root / MANIFEST), MANIFEST, (name,))
+    for item in placed:
+        data, where, _ = _manifest_of(item)
+        needs += se_runtimes.parse(data, where, (*item.path, item.module.name))
+    return needs
 
 
 class Tree:
@@ -1065,12 +1084,17 @@ def sync_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
 def place_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
                finder: Finder | None = None, unlock: frozenset[str] = frozenset()) -> tuple[list[str], list[str]]:
     """Resolve the tree (the root's components named in `names`, default all, and theirs), check each
-    placed one out at its release, lock what ranges and go.mod pins chose: one line per placed
-    component, and what the run says besides, the finder's notes and the optional components
-    missing. A placed clone at its pin is used without asking any remote; a required component
-    missing raises `ModuleError` with `missing`'s message."""
+    placed one out at its release, hold the machine to the tree's runtimes (`se_runtimes.check`),
+    lock what ranges and go.mod pins chose: one line per placed component, and what the run says
+    besides, the finder's notes, the optional components missing and the runtimes got. A placed
+    clone at its pin is used without asking any remote; a required component missing raises
+    `ModuleError` with `missing`'s message, a runtime missing with `se_runtimes.check`'s, before the
+    lock is written."""
     tree = Tree(root, local, finder, unlock)
     placed, missing_lines = tree.resolve(names)
+    import se_runtimes  # it reads this module's version ranges
+
+    got = se_runtimes.check(root, tree_runtimes(root, placed))
     lines = [sync_module(item.source) + (f" (for {' -> '.join(item.path[1:])})" if len(item.path) > 1 else "")
              for item in placed]
     entries = dict(tree.lock) if names else {}  # a partial sync keeps the others' entries
@@ -1081,7 +1105,7 @@ def place_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
         elif item.source.kind == "local" and name in tree.lock:
             entries[name] = tree.lock[name]  # a local checkout leaves its lock as it is
     write_lock(root, entries)
-    return lines, [*tree.finder.notes, *missing_lines]
+    return lines, [*tree.finder.notes, *missing_lines, *got]
 
 
 def version_report(source: Source) -> str:
