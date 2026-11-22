@@ -18,7 +18,7 @@
 #   note     optional: how the host applies it, in its own words where it helps
 #
 # A tool name row (`tool_names`): a shape a host builds an MCP tool's name in, beside those the
-# tool-name limits' `measures` record; scripts/se_hook.sh and scripts/se_forms.py match every shape.
+# tool-name limits' `measures` record; scripts/se_hook.sh and scripts/se_templates.py match every shape.
 #   surface  a key of [surfaces]
 #   shape    the name, from {plugin}, {server} and {tool}
 #   source, read, mark (documented | measured | unverified), note as above
