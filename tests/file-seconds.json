@@ -1,7 +1,4 @@
 {
-  "kern/python/tests/test_kern_contract.py": 0.0,
-  "kern/python/tests/test_kern_sample.py": 0.0,
-  "kern/python/tests/test_kern_stream.py": 3.1,
   "tests/test_actions.py": 0.0,
   "tests/test_adapter_sync.py": 0.0,
   "tests/test_agent_definitions.py": 0.7,
