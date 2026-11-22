@@ -153,6 +153,28 @@ def test_check_refuses_exactly_where_file_refuses(case, capsys, worktree, gh, te
     assert "quux" not in out.lower()
 
 
+@pytest.mark.parametrize("recorded, filed_code", [("1.0.0", 0), ("1.0.1", 0), ("0.9.0", 1)])
+def test_file_reads_the_version_the_body_as_given_records(recorded, filed_code, capsys, worktree,
+                                                          gh, templates_home):
+    """`render` marks the filed body with the template's version now, so the filing reads the
+    version of the body as given: a minor or patch move files with its warning, a major one refuses."""
+    (worktree / "se.toml").write_text(f'{IDENTITY}\n[templates]\nenforce = "refuse"\n',
+                                      encoding="utf-8")
+    body = worktree / "body.md"
+    body.write_text(templates.render(WORK, FIELDS).replace(
+        f" {WORK.version} ", f" {recorded} ", 1), encoding="utf-8")
+    filed = work_tickets.main(["file", "--title", TITLE, "--body-file", str(body),
+                               "--worktree", str(worktree)])
+    refusal = capsys.readouterr().err
+    assert filed == filed_code
+    named = f"records work {recorded}; the template is at {WORK.version}"
+    assert (named in refusal) == (recorded != WORK.version)
+    if filed_code:
+        assert gh.bodies == [] and "refuses this text" in refusal
+    else:
+        assert WORK.marker_line in gh.bodies[0]
+
+
 # The gate (se_templates.py gate): SE's PreToolUse hook's judge of a write through the GitHub tools.
 
 import io  # noqa: E402

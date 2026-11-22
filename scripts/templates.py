@@ -162,6 +162,14 @@ becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Sta
 Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
 
+**Version** (rule `version`, `provenance`): `check` reads a document against the version it records,
+its template marker's or, for a file, the front matter's `version:` where its `template:` names the
+template. None recorded, or the template's own, passes; another minor or patch version warns;
+another major version, or one that is no semantic version, refuses, naming both versions and the
+fill that writes the document again. The move sets the severity, never the template's `rules`.
+`render` records the template's version now, so the filing commands also read the version of the
+text as it was given (`work_tickets.template_findings`).
+
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
 `origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
 tree; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
@@ -232,6 +240,9 @@ ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create",
 READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
+#: The rule of a document's recorded version against its template's (`provenance`): its severity is
+#: the move's, never a template's to set.
+VERSION_RULE = "version"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
 ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
@@ -425,6 +436,8 @@ class Document:
     source: str = ""
     misses: dict[str, str] = dataclass_field(default_factory=dict)
     read: dict[str, object] = dataclass_field(default_factory=dict)
+    #: The template version the body records, in its marker line or its front matter; "" for none.
+    recorded: str = ""
 
 
 # Loading
@@ -1092,7 +1105,8 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
     if template.is_file:
         return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
-    document = Document(template=template.name, fields={}, source=text)
+    document = Document(template=template.name, fields={}, source=text,
+                        recorded=marked_version(template, body))
     if template.scope:
         parts, region = _scoped(template, text)
     else:
@@ -1158,7 +1172,8 @@ def _parse_file(template: Template, body: str) -> Document:
     preamble, sections = _split(rest, template, 0)
     document = Document(template=template.name, fields={}, source=rest,
                         parts=[Part("front", raw=head), Part("head", raw=title),
-                               Part("preamble", raw=preamble), *sections])
+                               Part("preamble", raw=preamble), *sections],
+                        recorded=front_version(template, head))
     for part in sections:
         if part.kind == "field":
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
@@ -1182,6 +1197,24 @@ def front_matter_template(body: str) -> str | None:
 def _front_key(key: str) -> re.Pattern:
     """A front matter line of `key`, its value the first group, unquoted."""
     return re.compile(rf"^{key}[ \t]*:[ \t]*['\"]?([^'\"\r\n]*?)['\"]?[ \t]*$", re.MULTILINE)
+
+
+def front_version(template: Template, front: str) -> str:
+    """The version front matter `front` records for `template`: its `version:` line, read only where
+    its `template:` line names `template`, else ""."""
+    if not front or FRONT_TEMPLATE.search(front) is None or \
+            FRONT_TEMPLATE.search(front).group(1) != template.name:
+        return ""
+    found = _front_key("version").search(front)
+    return found.group(1).strip() if found else ""
+
+
+def marked_version(template: Template, body: str) -> str:
+    """The version the body's template marker naming `template` records, else ""."""
+    for match in TEMPLATE_MARKER_PATTERN.finditer(body):
+        if match.group(1) == template.name:
+            return match.group(0).split()[3]
+    return ""
 
 
 def _with_template(front: str, template: Template) -> str:
@@ -1740,7 +1773,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     are its own check's."""
     if template.is_adapter:
         return adapter_findings(template, document)
-    found: list[Finding] = []
+    found: list[Finding] = provenance(template, document)
 
     def add(rule: str, item: str, fix: str) -> None:
         severity = template.severity(rule)
@@ -1841,6 +1874,28 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+def provenance(template: Template, document: Document) -> list[Finding]:
+    """The finding of the version `document` records against `template`'s own (rule `version`,
+    docs/templates.md "The document"): none where it records none or the same; a minor or patch
+    move warns; a major move, or a recorded version that is none, refuses, naming both versions and
+    the fill that brings the document up."""
+    recorded, current = document.recorded, template.version
+    if not recorded or not current or recorded == current:
+        return []
+    named = f"the document records {template.name} {recorded}; the template is at {current}"
+    where = "--path <file>" if template.is_file else template.name
+    given = "" if template.is_file else " --body-file <file>"
+    if SEMVER.match(recorded) and recorded.split(".")[0] == current.split(".")[0]:
+        return [Finding("template", VERSION_RULE, WARN, f"{named}, another minor or patch version: "
+                        f"render it again to record {current}: `templates.py check {where}{given} "
+                        "--render`")]
+    why = (f"and {recorded} is no semantic version" if not SEMVER.match(recorded) else
+           "another major version, which the document no longer fits")
+    return [Finding("template", VERSION_RULE, REFUSE, f"{named}, {why}: fill it again at {current}: "
+                    f"`templates.py draft {where} --json` gives its fields, and `templates.py check "
+                    f"{where} --fields <fields> --render` writes it")]
 
 
 class _Refused(Exception):

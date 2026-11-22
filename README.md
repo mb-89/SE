@@ -2304,6 +2304,10 @@ line names or the conditions pick, refuses one none picks and leaves unclaimed f
 The front matter and `#` title stay as they are, but for the `template`, `version` and `overlay`
 lines the front matter records its template by.
 
+A document is checked against the template version its marker or front matter records: another
+minor or patch version warns, another major version refuses, naming both versions and the fill
+that writes it again ([docs/templates.md "The document"](docs/templates.md#the-document)).
+
 `--templates <folder>` reads the templates from another folder.
 
 Where se.toml `[templates] files` is `check` or `write` (default `off`), a claimed file that breaks
