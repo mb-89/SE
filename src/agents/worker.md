@@ -55,6 +55,8 @@ every package, so work issues and session prompts never repeat it.
   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
 - Windows PowerShell 5.1 redirection `>` writes UTF-16. Create files as UTF-8 without a BOM with
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
+- kern's and Go's rules for tests and delivery are guidance notes, named at their steps below;
+  `uv run python <se>/scripts/se_guidance.py collect --template field-report` prints them all.
 - Load the test environment the project's `AGENTS.md` names, if any, in every shell that tests.
 - A missing tool is installed with the setup command the project's `AGENTS.md` names.
 - Where the host refuses the local ticket queue (`work_tickets.py init`, `create`, `move`,
@@ -111,17 +113,13 @@ every package, so work issues and session prompts never repeat it.
    - The focused tests are those of what changed plus every one the project's `AGENTS.md` names
      for the kind of file changed (in se, the docs build for published Markdown), so a rule a
      check enforces fails in the focused step, not first in the complete suite.
-   - A failing test is yours only once it passes at base: before treating it as your own, rerun
-     that one test at the integration branch with a high repeat count (`go test -count=500 -run
-     <test>` for Go, the test in a loop of as many runs for Python). One that fails there too is a
-     flake already at base; name it, with both counts, in the field report.
+   - A failing test is yours only once it passes at base, as the guidance note
+     [`flake-at-base`](../../guidance/pull-request/field-report/flake-at-base.md) says.
    - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
      adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
      report.
-   - A new test that builds a path builds it with `filepath` (Go) or `pathlib` (Python), and
-     compares paths as `filepath.ToSlash` or `as_posix` writes them, never as text with `/`. Only
-     the Windows leg of CI (`kern-platforms`) sees a path come back as `\work\tmp\...`, so a
-     worker's run on Linux never catches it, and the landing fails.
+   - A new test that builds a path follows the guidance note
+     [`test-paths-on-windows`](../../guidance/pull-request/field-report/test-paths-on-windows.md).
    - Before delivery, run the suite once with an empty home and no system git config
      (`HOME=$(mktemp -d) GIT_CONFIG_NOSYSTEM=1`), as CI's runner has neither: a test that commits
      or merges without setting its own identity passes locally and fails there.
@@ -171,20 +169,10 @@ every package, so work issues and session prompts never repeat it.
      - A folder the branch moves with its tests to another repository is named there once, as
        the work model's [Tests](../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
        <repository> at <commit>`), never test by test.
-   - **Platform code**: where the branch changes code that Windows or macOS runs differently
-     (`*_windows.go`, `*_darwin.go`, `//go:build` tags, `runtime.GOOS`, `sys.platform` or
-     `os.name` branches, `.ps1` files, the start and hook scripts `kern-platforms` runs), only
-     the CI job `kern-platforms` tests it, on Windows, and a worker cannot run it; darwin is
-     built, not tested.
-     - Push the branch and open its work pull request first (`deliver`, or
-       [without gh](../skills/work-model/SKILL.md#without-gh) its steps), but do not notify the
-       integrator yet.
-     - Wait until that pull request's own `kern-platforms` legs are green. Fix a red leg on the
-       branch and push again, so a landing never debugs it.
-     - Link each green leg's job page in the evidence table. Then check and deliver again, and
-       notify.
-     - The check and `deliver` warn, without refusing, where such a branch's report links no
-       green job of each leg, and they name the legs and job links they read.
+   - **Platform code**: a branch that changes code Windows or macOS runs differently is
+     delivered as the guidance note
+     [`platform-code-legs`](../../guidance/pull-request/field-report/platform-code-legs.md) says,
+     after its own `kern-platforms` legs pass.
    - Then run `work_tickets.py deliver`; it merges current main first, checks the report and runs
      the guard again against the merge, pushes, creates or updates the pull request with the field
      report as its description (as `work_tickets.py pr-body` prints it), files no issue, and prints

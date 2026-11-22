@@ -3402,7 +3402,7 @@ def merge_current_main(root: Path, branch: str) -> None:
         print(f"Merged {integration_ref(root)} ({commit}) into {branch}; checking against it")
 
 
-# Platform code waits for its own platform legs (src/agents/worker.md "Platform code"): a branch
+# Platform code waits for its own platform legs (guidance note platform-code-legs): a branch
 # that changes code only Windows or macOS runs differently is delivered once its work pull
 # request's kern-platforms legs passed and its field report links them; `deliver` and
 # `field-report --check` warn otherwise, and never refuse, so a GitHub outage stops no delivery.
@@ -3541,7 +3541,7 @@ def platform_warning(root: Path, report: str, check_runs: Path | None = None) ->
         f"Warning: this branch changes platform-specific code ({', '.join(changed)}), and its "
         f"field report links no green {PLATFORM_JOB} job for {', '.join(missing)}. Wait until the "
         f"work pull request's own {PLATFORM_JOB} legs pass, link their jobs in the report, check it "
-        "again and deliver (worker step \"Platform code\"). "
+        "again and deliver (guidance note platform-code-legs). "
         + (f"The legs as read: {'; '.join(seen)}." if seen else
            f"No leg could be read: {unread}; read them with pull_request_read get_check_runs and "
            "pass its answer as field-report --check --check-runs <file>." if unread else

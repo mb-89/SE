@@ -111,7 +111,7 @@ example:
 
 ## Goal
 
-<!-- goal: What is true once this is done, the outcome a person sees. Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
+<!-- goal: What is true once this is done, the outcome a person sees. It should take two to four sentences and shall stay within 120 words. Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
 
 ## Base branch
 

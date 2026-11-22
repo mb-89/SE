@@ -1,7 +1,7 @@
 # se: systematic engineering
 
-A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its sub-agents
-are the integrator, the worker and the reviewer. With them come their skills, issue templates and the scripts they
+A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its other
+agents are the integrator, the worker and the reviewer, each in a session of its own. With them come their skills, issue templates and the scripts they
 call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
@@ -703,9 +703,11 @@ integration branch the one commit it lands as ([Landing on main](#landing-on-mai
   integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
 - else the field report's "Release kind", which the
   [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
-  refused before anything is merged. The branch prefix only proposes it (`field-report --draft`):
-  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; where the work issue's
-  "Package kind" says "breaking", the kind a breaking change takes at the project's `version`.
+  refused before anything is merged.
+  - `field-report --draft` only proposes it; the worker keeps or replaces it by what changed.
+  - It proposes the kind a breaking change takes at the project's `version` where the work
+    issue's "Package kind" says "breaking"; else by the kind of work it names (or an old name's
+    `<type>/` prefix): `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`.
 
 An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 

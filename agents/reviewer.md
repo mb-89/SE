@@ -30,8 +30,8 @@ check and write is owned by the README's
   never the pull request's description or comments before step 6.
 - You file no issue: findings become work when SE reads your comment and decides
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
-- You run a model no weaker than the worker's: SE starts you on it, and as a sub-agent you inherit
-  your caller's.
+- You run a model no weaker than the worker's: SE starts you on it, in a visible session of your
+  own ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)).
 - Paths, shell and the host's GitHub tools follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell) and
   [Without gh](../skills/work-model/SKILL.md#without-gh): where `review.py` prints a plan, run its

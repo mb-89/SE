@@ -188,7 +188,6 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     report = normalized(REPORT_TEMPLATE)
     assert "A partial-delivery blocker is only work outside the worker's box" in rules
     assert "tests of the package's own code are never blockers" in rules.casefold()
-    assert "throw-away tracker issues for live acceptance runs" in rules
     assert "Deleting or condensing authored content is recorded in the field report" in rules
     assert "## Review responses" in report
     assert "answers every review point" in report
@@ -255,8 +254,8 @@ def test_shared_rules_have_one_owner(rule):
     assert len(owners) == 1, owners
 
 
-def test_se_can_dispatch_anywhere_without_writing_repositories():
-    rule = "SE never writes any repository"
+def test_se_can_dispatch_anywhere_without_writing_integration_branches():
+    rule = "SE never writes an integration branch"
     owners = [path.relative_to(ROOT).as_posix() for path in PROSE
               if rule.casefold() in normalized(path).casefold()]
     assert owners == ["src/skills/work-model/SKILL.md"]
@@ -1154,3 +1153,56 @@ def test_the_worked_example_draws_its_current_situation_as_a_diagram():
     note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
     situation = note.split("## Current situation\n", 1)[1].split("## The problem", 1)[0]
     assert "```mermaid\n" in situation
+
+
+# The guidance the person settled on 22 Nov (SE#1672): each pair keeps one text, its winner, in one
+# owner, and none of its losing texts. The search covers the authored prose, the guidance notes,
+# the template notes and the README.
+SETTLED = sorted([*PROSE, *(ROOT / "guidance").rglob("*.md"), *(ROOT / "templates").glob("*.md"),
+                  ROOT / "README.md"])
+
+
+@pytest.mark.parametrize(("winner", "owner", "losers"), [
+    pytest.param("you make a very small change yourself, on its own branch", "src/agents/se.md",
+                 ("never implements", "You do not implement", "do not implement it yourself",
+                  "SE never writes any repository"), id="se-own-changes"),
+    pytest.param("Workers never open issues.", "src/skills/work-model/SKILL.md",
+                 ("throw-away tracker issues", "never copied into tracked files or reports",
+                  "create a framework work issue"), id="workers-open-no-issues"),
+    pytest.param("A release's kind follows what changed, never the branch name",
+                 "src/skills/work-model/SKILL.md",
+                 ("the branch prefix sets the bump", "proposes the branch prefix's",
+                  "The branch prefix only proposes"), id="release-kind"),
+    pytest.param("runs as a visible session, never inside a chat or a workflow",
+                 "src/skills/work-model/SKILL.md",
+                 ("as a sub-agent you inherit", "such as reviews and checks", "its sub-agents are"),
+                 id="reviewers-visible"),
+    pytest.param("should take two to four sentences and shall stay within 120 words",
+                 "templates/work.md", ("in two to four sentences.",), id="goal-length"),
+    pytest.param("`go test -count=500 -run <test>`",
+                 "guidance/pull-request/field-report/flake-at-base.md", (), id="go-repeat-count"),
+    pytest.param("compares paths as `filepath.ToSlash` or `as_posix` writes them",
+                 "guidance/pull-request/field-report/test-paths-on-windows.md", (),
+                 id="go-test-paths"),
+    pytest.param("is tested only by the CI job `kern-platforms`",
+                 "guidance/pull-request/field-report/platform-code-legs.md",
+                 ("worker step \"Platform code\"",), id="kern-platform-legs"),
+    pytest.param("the person's decision wins, otherwise the newer, more specific text, otherwise "
+                 "the note that owns the rule", "src/skills/work-model/SKILL.md", (),
+                 id="later-contradictions"),
+])
+def test_a_settled_contradiction_leaves_one_text(winner, owner, losers):
+    def holding(text):
+        return [path.relative_to(ROOT).as_posix() for path in SETTLED
+                if text.casefold() in normalized(path).casefold()]
+
+    assert holding(winner) == [owner]
+    assert {loser: holding(loser) for loser in losers} == {loser: [] for loser in losers}
+
+
+def test_the_worker_definition_names_the_guidance_notes_of_kern_and_go():
+    worker = normalized(AGENTS / "worker.md")
+    for note in ("flake-at-base", "test-paths-on-windows", "platform-code-legs"):
+        assert f"[`{note}`](../../guidance/pull-request/field-report/{note}.md)" in worker, note
+    for rule in ("go test -count", "filepath.ToSlash", "*_windows.go", "green leg"):
+        assert rule not in worker, rule
