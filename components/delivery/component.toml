@@ -56,7 +56,7 @@ class = "batch"
 usage = "work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL\n                        --field-report FILE"
 summary = "print the pull request description deliver writes: Fixes <issue> ..."
 group = "Delivery"
-help = "print the pull request description deliver writes: Fixes <issue> where all its acceptance shows before the merge, else Refs <issue>, then the field report between its markers"
+help = "print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers"
 class = "batch"
 
 [commands."work_tickets.py stop-check"]

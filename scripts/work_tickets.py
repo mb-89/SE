@@ -3012,8 +3012,9 @@ PLANNED_PIECE_PATTERN = re.compile(
 
 def planned_pieces(report: str) -> list[str]:
     """The pieces of the work issue a partial field report names as still to land, in its "Not
-    delivered" (`PLANNED_PIECE_PATTERN`); none for a complete report or one naming no piece, so
-    only a planned split keeps its issue open across its landings."""
+    delivered" (`PLANNED_PIECE_PATTERN`); none for a complete report or one naming no piece. Its
+    pieces keep the issue open until its last piece lands; `partial_left` covers every other
+    partial."""
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     if result is None or result.group(1) != "partial":
         return []
@@ -3021,13 +3022,47 @@ def planned_pieces(report: str) -> list[str]:
     return [match.group(1).strip() for match in PLANNED_PIECE_PATTERN.finditer(left)]
 
 
+# A top-level bullet of "Not delivered" and its bold lead, as `- **R8, the off switch:** ...`.
+TOP_BULLET_PATTERN = re.compile(r"[-*] (.*)")
+BOLD_LEAD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
+NOTHING_LEFT_NAMED = "nothing named under Not delivered"
+
+
+def partial_left(report: str) -> list[str]:
+    """What a partial field report naming no planned piece left undone: one item per top-level
+    bullet of its "Not delivered" (its bold lead without a trailing `:` or `.`, else its first
+    line), else that section's first paragraph on one line, else `NOTHING_LEFT_NAMED`; none for
+    a complete report or a planned split (`planned_pieces`). Its issue stays open at the landing,
+    as a partial is not done and only SE drops or moves what it left."""
+    result = FIELD_REPORT_RESULT_PATTERN.search(report)
+    if result is None or result.group(1) != "partial" or planned_pieces(report):
+        return []
+    left = section(markdown_sections(report), "not delivered")
+    items = []
+    for line in left.splitlines():
+        bullet = TOP_BULLET_PATTERN.fullmatch(line.rstrip())
+        if bullet is None:
+            continue
+        text = bullet.group(1).strip()
+        lead = BOLD_LEAD_PATTERN.match(text)
+        items.append(lead.group(1).strip().rstrip(":.").strip() if lead else text)
+    if items:
+        return items
+    paragraph = " ".join(left.split("\n\n", 1)[0].split()) if left.strip() else ""
+    if not paragraph or paragraph.rstrip(".").casefold() == "none":
+        return [NOTHING_LEFT_NAMED]
+    return [paragraph]
+
+
 def pull_request_body(issue: dict[str, object], report: str) -> str:
-    """The pull request description: `Fixes <issue>` where all its acceptance shows before the
-    merge and the report names no planned piece still to land (`planned_pieces`), else `Refs
-    <issue>`, so GitHub never closes an issue before its acceptance can be seen or its last piece
-    lands; then the field report `report` between its markers, without the template's comments."""
-    keyword = ("Refs" if post_merge_acceptance(str(issue.get("body", ""))) or planned_pieces(report)
-               else "Fixes")
+    """The pull request description: `Fixes <issue>` only where the report is complete and all
+    its acceptance shows before the merge, else `Refs <issue>`: for every partial report and for
+    acceptance seen only after the merge, so the pull request never says it fixes what it left,
+    and a merge of it on GitHub, outside `integrate`, would not close the issue; then the field
+    report `report` between its markers, without the template's comments."""
+    result = FIELD_REPORT_RESULT_PATTERN.search(report)
+    partial = result is not None and result.group(1) == "partial"
+    keyword = ("Refs" if partial or post_merge_acceptance(str(issue.get("body", ""))) else "Fixes")
     return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
@@ -7459,12 +7494,16 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
 
 
 def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
-                  comment: str, pending: list[str]) -> Plan:
+                  comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
-    take it out of progress and close it unless `pending` keeps it open: post-merge acceptance,
-    a review's open points or a planned split's pieces left."""
+    take it out of progress and close it unless something keeps it open: `pending`, post-merge
+    acceptance, a review's open points or a planned split's pieces left; or `left`, what a
+    partial delivery naming no planned piece left (`partial_left`), which also takes any `ready`
+    off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
+    escalate = (label_step(tracker, work_number, "ready", add=False),
+                label_step(tracker, work_number, "escalated", add=True)) if left else ()
     return Plan(f"close out #{work_number}", (
         Step("comment_pull", "add_issue_comment",
              {**pulls, "issue_number": pull_number, "body": landed}),
@@ -7473,7 +7512,8 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int,
         Step("comment_issue", "add_issue_comment",
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
-        *(() if pending else (Step("close_issue", "issue_write", {
+        *escalate,
+        *(() if pending or left else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
             "state_reason": "completed"}),)),
     ))
@@ -7717,7 +7757,7 @@ def integrate(
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
             "open_points": open_points(str(work_issue.get("body", "")), reported_tip(report)),
-            "pieces": planned_pieces(report),
+            "pieces": planned_pieces(report), "left": partial_left(report),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
             "landing_mode": mode, "took": took,
@@ -8087,6 +8127,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     pending = list(state.get("pending") or [])
     points = list(state.get("open_points") or [])
     pieces = list(state.get("pieces") or [])
+    left = list(state.get("left") or [])
     waits = ("Stays open until this acceptance is seen after the merge: "
              + "; ".join(pending) + "\n") if pending else ""
     if points:
@@ -8095,13 +8136,16 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if pieces:
         waits += ("Stays open for the planned pieces left, as the field report names them: "
                   + "; ".join(pieces) + "\n")
+    if left:
+        waits += ("Stays open for what this partial delivery left, which SE re-scopes: "
+                  + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
         f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
-                         comment, [*pending, *points, *pieces])
+                         comment, [*pending, *points, *pieces], left)
     if door is None:
         print(plan.text())
     elif getattr(door, "relayed", False):
@@ -8138,6 +8182,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if pieces:
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
+    if left:
+        print(f"escalated #{work_number}: stays open for what its partial delivery left; re-scope "
+              f"the issue or take it to the owner: {'; '.join(left)}")
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -10058,9 +10105,10 @@ def run_verified(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("pr-body", "print the pull request description deliver writes: Fixes <issue> where all "
-                    "its acceptance shows before the merge, else Refs <issue>, then the field "
-                    "report between its markers",
+@command("pr-body", "print the pull request description deliver writes: Fixes <issue> where the "
+                    "report is complete and all its acceptance shows before the merge, else Refs "
+                    "<issue> (every partial, and acceptance seen only after the merge), then the "
+                    "field report between its markers",
          OPTIONAL_WORKTREE, ISSUE_BODY,
          arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"),
          arg("--field-report", required=True, type=Path, metavar="FILE",
