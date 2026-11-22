@@ -40,7 +40,11 @@ it, how others solve it, and which solutions there are.
   model's section "Pugh decision figures" in `spec/design_input/input-model.md`, both in obs, the
   repository beside SE's (`.se/modules/obs/` in a checkout that pins it). SE asks of it:
   - `context` and `concern`: the situation and the concern the decision answers, for its
-    one-sentence summary.
+    one-sentence summary, the verdict.
+    - The verdict names only the chosen option: "In the context of …, facing …, we decided for
+      A · Deck, to achieve …, accepting …", never the options left out, since deciding for one
+      already decides against the rest.
+    - obs's Pugh figure writes it; until obs follows, it still adds "and against" the others.
   - The criteria are weighted before any option is marked.
   - Effort to build or move is a criterion only where it is exceptional; ordinary work to build
     the better system is no criterion
@@ -50,6 +54,9 @@ it, how others solve it, and which solutions there are.
     against it. Only where nothing exists is the datum the strongest rival
     ([dec-003](../work-model/references/rules.md#dec-003-keep-what-we-have)).
   - Every option says what it is and its own wins and losses.
+  - No option's text names another option, by its key, short name or letter: each says only what
+    it is, and the matrix alone compares them. The person: "Don't mention the ones that we didn't
+    decide for. We only mention the ones we decide for."
   - Every option carries `success`, its success criterion
     ([dec-010](../work-model/references/rules.md#dec-010-a-success-criterion)).
   - Every mark carries its reason, `{mark, because}`; the datum's marks, against itself, need none.
@@ -61,10 +68,11 @@ it, how others solve it, and which solutions there are.
     options names the letters of those it fails.
 
 Nothing else goes before the fence: its options are the list of solutions the reader expands.
-Any longer material goes in `##` sections after it, which obs shows as tabs. `<se>/scripts/deck.py
-build` refuses a decision note without the three sections, in order, before its fence, so the deck
-shows them above the options, and warns of an option without `success` or a mark without
-`because`.
+Any longer material goes in `##` sections after it, which obs shows as tabs.
+
+`<se>/scripts/deck.py build` refuses a decision note without the three sections, in order, before
+its fence, so the deck shows them above the options. It warns of an option without `success`, a
+mark without `because`, or an option whose text names another's key or short name.
 
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
