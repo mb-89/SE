@@ -150,6 +150,36 @@ def test_two_branches_that_change_the_se_binary_land_one_after_the_other_without
         capsys.readouterr().out)
 
 
+def test_the_closing_comment_names_the_component_release_the_landing_cut(
+        main_checkout, monkeypatch, github, capsys):
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    components_on_main(main_checkout)
+    head = work_branch(main_checkout, "fix/first", {"components/se.go": "package se // first\n"})
+    bodies: list[str] = []
+    closeout = work_tickets.closeout_plan
+    monkeypatch.setattr(work_tickets, "closeout_plan", lambda *arguments: bodies.append(
+        arguments[5]) or closeout(*arguments))  # its comment: the work issue's closing comment
+
+    land(main_checkout, monkeypatch, "fix/first", head, 7, "se patch")
+    closing = [body for body in bodies if body.startswith("Integrated in ")]
+    assert closing and all("Release: https://git.example/owner/repo/releases/tag/se-v0.2.10." in body
+                           for body in closing), bodies
+
+
+def test_release_line_names_the_project_release_and_each_component_release():
+    url = "https://git.example/owner/repo/pull/20"
+    assert work_tickets.release_line(url, None) == "Release: none."
+    assert work_tickets.release_line(url, None, []) == "Release: none."
+    assert work_tickets.release_line(url, "v1.3.0") == (
+        "Release: https://git.example/owner/repo/releases/tag/v1.3.0.")
+    assert work_tickets.release_line(url, None, ["kern-v0.14.2"]) == (
+        "Release: https://git.example/owner/repo/releases/tag/kern-v0.14.2.")
+    assert work_tickets.release_line(url, "v1.3.0", ["se-v0.2.10"]) == (
+        "Release: https://git.example/owner/repo/releases/tag/v1.3.0, "
+        "https://git.example/owner/repo/releases/tag/se-v0.2.10.")
+    assert work_tickets.release_line("PR #20", "v1.3.0", ["se-v0.2.10"]) == "Release: v1.3.0, se-v0.2.10."
+
+
 def test_a_branch_that_still_claims_a_taken_number_gets_the_next_free_one_of_its_kind(
         main_checkout, monkeypatch, github, capsys):
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)

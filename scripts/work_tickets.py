@@ -6877,13 +6877,16 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
         print("Cleanup: origin merged branch deleted")
 
 
-def release_line(pull_url: str, tag: str | None) -> str:
-    """The closing comment's release: the release page of `tag` beside the pull request at
-    `pull_url`, the tag alone without its URL, or none."""
-    if not tag:
+def release_line(pull_url: str, tag: str | None, component_tags: list[str] | None = None) -> str:
+    """The closing comment's release: the release page of `tag`, the project's release, and of
+    each of `component_tags`, the component releases the landing cut (a kern release), beside the
+    pull request at `pull_url`; each tag alone without its URL, or none."""
+    tags = [*((tag,) if tag else ()), *(component_tags or ())]
+    if not tags:
         return "Release: none."
     project, separator, _ = pull_url.rpartition("/pull/")
-    return f"Release: {project}/releases/tag/{tag}." if separator else f"Release: {tag}."
+    return "Release: " + ", ".join(
+        f"{project}/releases/tag/{name}" if separator else name for name in tags) + "."
 
 
 GOAL_SECTION = "goal"
@@ -8079,7 +8082,7 @@ def integrate(
                                                     landing, f"Integrate {branch}"):
             abandon_landing(root, target, landing)
             raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
-    assign_component_versions(root, target, landing, base, branch, report)
+    component_tags = assign_component_versions(root, target, landing, base, branch, report)
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
@@ -8142,7 +8145,8 @@ def integrate(
               file=sys.stderr, flush=True)
         state = {
             "branch": branch, "landing": landing, "target": target, "base": base,
-            "landed": landed, "head": head, "tag": tag, "tracker": tracker, "remote": remote,
+            "landed": landed, "head": head, "tag": tag, "component_tags": component_tags,
+            "tracker": tracker, "remote": remote,
             "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
@@ -8271,10 +8275,11 @@ def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, iss
 
 
 def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
-                              report: str) -> None:
+                              report: str) -> list[str]:
     """Write the next version of each component the merge on `landing` changes into it, of the
     kind the field report states or the branch claims, and say so (README "Component versions");
-    refused, the landing abandoned, where a kind names no component."""
+    refused, the landing abandoned, where a kind names no component. The release tags the push
+    to the integration branch cuts, for the closing comment's release line."""
     try:
         assignments = component_versions.assign(root, base, branch_head(root, branch), report)
     except component_versions.VersionError as error:
@@ -8283,6 +8288,8 @@ def assign_component_versions(root: Path, target: str, landing: str, base: str, 
                          "was merged") from None
     for assignment in assignments:
         print(assignment.line())
+    return [component_versions.tag_of(assignment.component, assignment.new)
+            for assignment in assignments]
 
 
 def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
@@ -8531,7 +8538,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                   + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
-        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
+        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag, list(state.get("component_tags") or []))} "
         f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
