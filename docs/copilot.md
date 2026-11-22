@@ -29,13 +29,14 @@ pricing][pricing], [requests in Copilot (legacy)][legacy], [AI credit session li
 
 So under AI credits nothing is free: one person prompt costs every model call the agent makes for
 it. What SE adds on top are the paths below, each a model turn or a session the person did not ask
-for. Each guard is on by default under Copilot only; its se.toml setting turns it off, and under
-Claude Code nothing reads it.
+for. Under Copilot, automatic session dispatch is on by default, without project configuration;
+the Stop hook never refuses by default. A project's se.toml can override either setting. Under
+Claude Code nothing reads these settings.
 
-| Path | What one person prompt can cost | Guard, and the setting that turns it off |
+| Path | What one person prompt can cost | Default and project override |
 |---|---|---|
 | The Stop hook refusing a stop, up to `[stop] refusals` (5) in a row | Each refusal is one more agent turn, its reason the prompt ([hooks][hooks]): credits for that turn's model calls, the whole conversation sent again each call. Premium requests on a legacy plan: not sourced; the docs count only the person's prompts and autopilot continuations. | The hook never refuses; it names what is undelivered as Copilot's hook warning, stderr with exit code 2. `[copilot] refuse_stop = true` |
-| A session SE starts: a worker, the integrator, a reviewer (`create_session`, or the detached `copilot -p` line) | A whole agent run the person did not prompt: every model call of it in credits; one premium request per session on a legacy plan, more with its own Stop refusals. Not measured: no session here had a token. | SE starts none: it prints the line, and the person runs it. `[copilot] start_sessions = true` |
+| A session SE starts: a worker, the integrator, a reviewer (`create_session`, or the detached `copilot -p` line) | A whole agent run the person did not prompt: every model call of it in credits; one premium request per session on a legacy plan, more with its own Stop refusals. Not measured: no session here had a token. | SE dispatches sessions automatically. `[copilot] start_sessions = false` opts the project out: SE prints the line, and the person runs it. |
 | In-chat sub-agents (`task`) | Their model calls count ([CLI billing help](#what-a-session-costs)). | None needed: SE never starts one, on either host ([Visible sessions](../src/skills/work-model/SKILL.md#visible-sessions)). |
 | SE's start context: the agent, the greeting, the skills it loads | No extra request: it rides on the calls the person's prompt makes. 28,611 bytes always handed to `se` (`host_size.py report`, 16 Nov), about 7,000 tokens at 4 bytes a token (estimate), up to 129,999 bytes with every skill loaded. | None: a constant per call, mostly cached; a guard would remove SE's procedure. |
 
@@ -45,18 +46,21 @@ Claude Code nothing reads it.
 [limits]: https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/set-session-limit
 [hooks]: https://docs.github.com/en/copilot/reference/hooks-configuration
 
-With the defaults, a session costs only the model calls of the person's own prompts.
-`[copilot] refuse_stop = true` adds up to five turns per undelivered stop, and
-`[copilot] start_sessions = true` adds every session SE starts.
+With the defaults, a prompt costs its model calls and every session SE dispatches.
+`[copilot] start_sessions = false` removes automatic dispatch for that project.
+`[copilot] refuse_stop = true` adds up to five turns per undelivered stop.
 
 ```toml
 [copilot]
 refuse_stop = false     # built in: the Stop hook never refuses under Copilot
-start_sessions = false  # built in: SE prints the line that starts a session, never starts one
+start_sessions = true   # built in: SE dispatches sessions automatically
 ```
 
 - **Where they show**: the greeting under Copilot ends with a `Copilot guards:` line naming each
   setting; `uv run python <se>/scripts/se_doctor.py` has a `copilot` row for each.
+- **Invalid configuration**: an unreadable se.toml, a `copilot` value that is not a table or a
+  non-boolean guard setting keeps both guards on and says so; SE starts no session until it is
+  fixed.
 - **To cap a session yourself**: `--max-ai-credits <n>` (at least 30) on a `copilot -p` line, or
   `/limits set max-ai-credits <n>` in a session; sub-agents share it ([limits][limits]).
 - **To measure one**: `--usage-output-file <file>` writes a session's credits, premium requests and
@@ -279,7 +283,8 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
      ([SE's own checkout](#ses-own-checkout)).
    - In a new run, `--allow-tool='se(status)'`: expect no prompt for `se-status` (#1122). Then
      `copilot --continue`: expect `se-status` to answer, the core kept or started again (#1121).
-   - Expect `se` to print that line rather than run it ([What a session costs](#what-a-session-costs)).
+   - With `[copilot] start_sessions = false`, expect `se` to print that line rather than run it;
+     by default it dispatches automatically ([What a session costs](#what-a-session-costs)).
      Run the worker launch line of the work model's "Host procedure under Copilot" once on step 3's
      issue: expect `copilot` to take `-C`, `--trust-folder`, `--no-ask-user`, `--allow-tool`, `-n`
      and `-p`, and to go on detached (#1123). Close the issue as not planned.

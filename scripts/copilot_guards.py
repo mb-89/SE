@@ -4,11 +4,11 @@ guard off. docs/copilot.md "What a session costs" owns the costs and their sourc
 
     [copilot]
     refuse_stop = false     # built in: the Stop hook never refuses; it says what is undelivered
-    start_sessions = false  # built in: SE starts no session; it prints the line that starts one
+    start_sessions = true   # built in: SE dispatches sessions automatically
 
-Each guard is on, its setting false, unless the project's se.toml sets it true; then today's
-behaviour returns. Under Claude Code nothing reads them. A pure module: the project's root in,
-the settings and the lines that name them out.
+The project's se.toml can override either default: false enables the guard, true disables it.
+Under Claude Code nothing reads them. A pure module: the project's root in, the settings and
+the lines that name them out.
 """
 
 from __future__ import annotations
@@ -22,11 +22,13 @@ GUARDS = {
     "refuse_stop": "the Stop hook never refuses a stop; it says what is undelivered",
     "start_sessions": "SE starts no session; it prints the line that starts one",
 }
+DEFAULTS = {"refuse_stop": False, "start_sessions": True}
 
 
 def settings(root: Path | None) -> dict[str, bool]:
-    """Each guard's setting in the project's se.toml `[copilot]`, false where unset. Raises
-    ValueError for a setting that is not true or false, or an se.toml that does not parse."""
+    """Each guard's setting in the project's se.toml `[copilot]`, built-in default where unset. Raises
+        ValueError for a `copilot` value that is not a table, a setting that is not true or false, or
+        an se.toml that does not parse."""
     table: object = {}
     path = root / "se.toml" if root is not None else None
     if path is not None and path.is_file():
@@ -35,19 +37,20 @@ def settings(root: Path | None) -> dict[str, bool]:
         except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
             raise ValueError(f"cannot read {path}: {error}") from error
     if not isinstance(table, dict):
-        table = {}
+        raise ValueError(f"{TABLE} in {path} must be a table; fix it or remove it for the built-in "
+                         "defaults")
     found = {}
-    for name in GUARDS:
-        value = table.get(name, False)
+    for name, default in DEFAULTS.items():
+        value = table.get(name, default)
         if not isinstance(value, bool):
             raise ValueError(f"{TABLE}.{name} in {path} must be true or false; fix it or remove it "
-                             "for the built-in false")
+                             f"for the built-in {str(default).lower()}")
         found[name] = value
     return found
 
 
 def guarded(root: Path | None, name: str) -> bool:
-    """Whether the guard `name` is on under Copilot: its setting false or unset. An unreadable
+    """Whether the guard `name` is on under Copilot: its effective setting is false. An unreadable
     setting keeps the guard on, so a typo never spends requests."""
     try:
         return not settings(root)[name]

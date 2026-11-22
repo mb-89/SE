@@ -1,5 +1,5 @@
 """The request guards under Copilot (scripts/copilot_guards.py, docs/copilot.md "What a session
-costs"): each on unless se.toml `[copilot]` sets its setting true."""
+costs"): dispatch defaults on, stop refusal off; projects can override either."""
 import sys
 from pathlib import Path
 
@@ -16,25 +16,31 @@ def project(tmp_path: Path, text: str | None) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("text", (None, "", "[project]\nversion = \"1.0.0\"\n", "[copilot]\n",
-                                  "[copilot]\nrefuse_stop = false\nstart_sessions = false\n"))
-def test_by_default_every_guard_is_on(tmp_path, text):
+@pytest.mark.parametrize("text", (None, "", "[project]\nversion = \"1.0.0\"\n", "[copilot]\n"))
+def test_by_default_dispatch_is_on_and_stop_refusal_is_off(tmp_path, text):
     root = project(tmp_path, text)
-    assert copilot_guards.settings(root) == {"refuse_stop": False, "start_sessions": False}
-    assert all(copilot_guards.guarded(root, name) for name in copilot_guards.GUARDS)
-    assert all(": on, " in line for line in copilot_guards.state(root))
+    assert copilot_guards.settings(root) == {"refuse_stop": False, "start_sessions": True}
+    assert not copilot_guards.guarded(root, "start_sessions")
+    assert "[copilot] start_sessions = true: off, today's behaviour" in copilot_guards.state(root)
     assert copilot_guards.guarded(None, "refuse_stop")
+    assert not copilot_guards.guarded(None, "start_sessions")
 
 
 @pytest.mark.parametrize("name", sorted(copilot_guards.GUARDS))
-def test_each_setting_true_turns_its_guard_off_alone(tmp_path, name):
-    root = project(tmp_path, f"[copilot]\n{name} = true\n")
-    assert [copilot_guards.guarded(root, guard) for guard in sorted(copilot_guards.GUARDS)] == [
-        guard != name for guard in sorted(copilot_guards.GUARDS)]
-    assert f"[copilot] {name} = true: off, today's behaviour" in copilot_guards.state(root)
+@pytest.mark.parametrize("value", (False, True))
+def test_each_explicit_setting_overrides_only_its_default(tmp_path, name, value):
+    root = project(tmp_path, f"[copilot]\n{name} = {str(value).lower()}\n")
+    expected = {"refuse_stop": False, "start_sessions": True}
+    expected[name] = value
+    assert copilot_guards.settings(root) == expected
+    for guard, setting in expected.items():
+        assert copilot_guards.guarded(root, guard) is not setting
+    line = next(line for line in copilot_guards.state(root) if line.startswith(f"[copilot] {name} = "))
+    assert f"= {str(value).lower()}: {'off' if value else 'on'}," in line
 
 
-@pytest.mark.parametrize("text", ('[copilot]\nstart_sessions = "yes"\n', "[copilot\n"))
+@pytest.mark.parametrize("text", ('[copilot]\nstart_sessions = "yes"\n', "[copilot\n", "copilot = false\n",
+                                  'copilot = "start_sessions"\n', "copilot = [true]\n"))
 def test_an_unreadable_setting_keeps_every_guard_on_and_says_so(tmp_path, text):
     root = project(tmp_path, text)
     with pytest.raises(ValueError):

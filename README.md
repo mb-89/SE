@@ -2045,6 +2045,11 @@ where it holds them, else the working tree (`--tree` always).
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
 choices) and the form's JSON Schema, which a model's strict tool use takes as it stands.
 
+A `file.write` form claims files by its `[applies] paths` globs, such as a milestone's steps.
+`forms.py check --path <file>` checks one against the form its front matter's `form:` line names
+or the conditions pick, refuses one none picks and leaves unclaimed files free; the front matter
+and `#` title stay as they are. `--forms <folder>` reads the forms from another folder.
+
 An agent asks for a form through the MCP door's tool `forms`, `scripts/se_forms.py`: `list`
 names the forms, `draft <form>` gives `draft --json`'s answer, and `check` finds all the filing
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the

@@ -19,10 +19,11 @@ between a line `<!-- copilot -->` and a line `<!-- /copilot -->` go only into th
 without the two marker lines; the Claude layout drops them with the markers, so it is byte for byte
 what the source without them builds (`hosts`).
 
-Every link of both layouts stays relative to its generated file (`_rewrite_links`), so it resolves
-both in SE's checkout and in an installed plugin's folder, which holds the whole repository; no
-generated file names where SE lives (AGENTS.md "Neutral home"), and the manifests carry no author,
-repository or home. A checkout with CRLF line endings (git on Windows) builds and checks the same
+Every link of both layouts uses URL separators on every platform and stays relative to its generated
+file (`_rewrite_links`), so it resolves both in SE's checkout and in an installed plugin's folder,
+which holds the whole repository; no generated file names where SE lives (AGENTS.md "Neutral home"),
+and the manifests carry no author, repository or home. A checkout with CRLF line endings (git on
+Windows) builds and checks the same
 layouts as an LF one: generated text is compared without its line endings (`same`).
 
 The outside skills each role relies on are one list, `se.toml` `[roles.<role>] skills`, never the
@@ -44,7 +45,7 @@ import argparse
 import dataclasses
 import importlib.util
 import json
-import os
+import posixpath
 import re
 import sys
 import tomllib
@@ -270,7 +271,7 @@ def _normalize(path: str) -> PurePosixPath:
 
 
 def _relative(target: PurePosixPath, start: PurePosixPath) -> str:
-    return PurePosixPath(os.path.relpath(target, start)).as_posix()
+    return posixpath.relpath(target, start)
 
 
 def _rewrite_links(text: str, source: PurePosixPath, generated: PurePosixPath, layout: Layout,

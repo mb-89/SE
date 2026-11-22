@@ -11,8 +11,10 @@ list of inside terms (below). A form declares:
 
 - `name`, `reader` (`owner` or `fleet`: who reads what it shapes) and `says`, one line;
 - `[applies] actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
-  `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`): required, so a form
-  without it does not load; `order`, the conditions `marker`, `marker_pattern` (a regular
+  `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
+  so a form without it does not load; `paths`, the globs of the files a `file.write` form claims,
+  relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
+  with `actions = ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
   expression a whole line matches) and `title`, and the filters `labels` (every one present) and
   `base = "integration"` (a pull request into the integration branch); `fallback` (selection,
   below);
@@ -76,13 +78,19 @@ and with a trailing colon, and `_No response_` as empty, except where a field se
 A heading that names no field is a section of its own, unless it is deeper than the section it sits
 in. Emptiness is judged without HTML comments.
 
+**Files.** For a `file.write` form the text is a file: its front matter and its page title, the
+first `#` line above the first field, are its head. `parse` never reads the page title as a field,
+even where its text is a field's heading; `render` keeps the head as it stands, writes
+`form: <name>` into the front matter (a new block where the file has none) and writes neither
+marker, its fields as `## ` headings below the title.
+
 **Writing.** `render` writes SE's fleet marker once, then `<!-- se:form <name> -->` (with a scope,
 the form marker alone, after the scope's marker), then `## ` headings. A section the form does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
-**Selection** (`select(forms, action, body, title, labels=, base=, integration=, repo=, home=)`),
-in this order:
+**Selection** (`select(forms, action, body, title, labels=, base=, integration=, repo=, home=,
+path=)`), in this order; for `file.write` the order below it:
 
 1. Free where `repo` is given and is not in `home`, the repositories SE writes to (origin and
    se.toml `[outside]`, `home_repositories`).
@@ -99,6 +107,16 @@ in this order:
 6. None: free form. For a pull request into the integration branch this tries `landing` and
    `housekeeping` before `field-report`; an unmarked comment, and a pull request into any other
    branch, are free.
+
+For a file, `path` (relative to the project root) selects:
+
+1. The allowed forms: the `file.write` forms whose `paths` match it; none, and the file is free.
+2. The front matter's `form: <name>` naming an allowed form chooses it, as a body's form marker
+   does; one naming another form is a refused finding (rule `form`).
+3. By `[applies] order` (then name), the first allowed form whose conditions all hold, matched
+   against every line, the front matter's too.
+4. None: a refused finding, `<path>: no form takes this file; name its form in the front matter,
+   form: <name>`.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -131,13 +149,20 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
   `free: no form applies (<action>)` and exits 0 (with `--render`, that line on stderr and the
   body as given on stdout). A form and `--action` together are a usage error.
 
-`forms.py draft <form> [--json]` prints the empty form. Its JSON holds `form`, `says`, `fields`
+- `--path FILE`, without `<form>`: the form that claims the file (`file.write`), whose text it
+  checks unless `--body`, `--body-file`, `--fields` or `--fields-json` gives one; on a file no
+  form claims it prints `free: no form claims <path>` and exits 0. `--root DIR` is the project
+  root the globs are relative to: by default the git checkout holding the path, else the working
+  directory.
+
+`forms.py draft (<form> | --path FILE [--root DIR]) [--json]` prints the empty form. Its JSON holds `form`, `says`, `fields`
 (each field's empty value) and `field_says`, then `field_shape`, each field's `kind` and, where
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
 `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
-(`schema`). `forms.py list` names every form with its actions and, for an adapter, its checker.
-`--tree` reads the working tree's `forms/`. None writes a file, calls GitHub or starts a model.
+(`schema`). `forms.py list` names every form with its actions, then the paths it claims and, for an
+adapter, its checker. `--tree` reads the working tree's `forms/`; `--forms DIR`, on all three, reads
+the forms and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
 """
 
 from __future__ import annotations
@@ -161,8 +186,9 @@ FORM_MARKER = "<!-- se:form {name} -->"
 FORM_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:form ([\w-]+) -->[ \t]*$", re.MULTILINE)
 
 ISSUE_ACTIONS = ("issue.create", "issue.edit")
+FILE_ACTION = "file.write"
 ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
-           "deck.build")
+           "deck.build", FILE_ACTION)
 READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
@@ -176,13 +202,14 @@ FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_h
 FORM_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
-                "fallback"}
+                "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
                 "title_as", "with", "none", "when", "result", "refusal", "title_rule", "lines"}
 RESULTS = ("problems", "raises", "truth")
 REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+FRONT_FORM = re.compile(r"^form[ \t]*:[ \t]*['\"]?([\w-]+)['\"]?[ \t]*$", re.MULTILINE)
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -272,6 +299,16 @@ class Form:
     fallback: bool = False
     checker: str = ""
     adapter: dict = dataclass_field(default_factory=dict)
+    paths: tuple[str, ...] = ()
+
+    @property
+    def is_file(self) -> bool:
+        """Whether the form shapes files (`file.write`), claimed by its `paths`."""
+        return FILE_ACTION in self.actions
+
+    def claims(self, path: str) -> bool:
+        """Whether one of the form's `paths` matches `path`, relative to the project root."""
+        return any(glob_pattern(glob).fullmatch(path) for glob in self.paths)
 
     @property
     def is_adapter(self) -> bool:
@@ -327,9 +364,15 @@ class Document:
 # Loading
 
 
-def _form_files(root: Path, tree: bool) -> dict[str, str]:
+def _form_files(root: Path, tree: bool, folder: Path | None = None) -> dict[str, str]:
     """`forms/<file>` -> its text, at origin's integration branch where that holds forms, else
-    from the working tree."""
+    from the working tree; with `folder`, the `*.toml` files of that folder alone."""
+    if folder is not None:
+        if not folder.is_dir():
+            raise FormError(f"forms: --forms {folder} is no folder; name the folder that holds "
+                            "the forms")
+        return {path.name: path.read_text(encoding="utf-8")
+                for path in sorted(folder.glob("*.toml"))}
     if not tree:
         files = _git_files(root)
         if files:
@@ -374,13 +417,14 @@ def _sibling(name: str):
     return module
 
 
-def load(root: Path = ROOT, *, tree: bool = False) -> dict[str, Form]:
-    """Every form of `root`'s `forms/`, by name (the module docstring: where it reads them)."""
-    files = _form_files(root, tree)
+def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -> dict[str, Form]:
+    """Every form of `root`'s `forms/`, by name (the module docstring: where it reads them); with
+    `folder`, the forms and the terms of that folder instead, for one run (`--forms`)."""
+    files = _form_files(root, tree, folder)
     raw: dict[str, dict] = {}
     terms: tuple[Term, ...] = ()
     for name, text in files.items():
-        where = f"{FORMS}/{name}"
+        where = str(folder / name) if folder is not None else f"{FORMS}/{name}"
         try:
             data = tomllib.loads(text)
         except tomllib.TOMLDecodeError as error:
@@ -463,6 +507,17 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
     if base_branch not in ("", "integration"):
         raise FormError(f"{where}: [applies] base is {base_branch!r}; the one base is "
                         "\"integration\", the integration branch")
+    paths = applies.get("paths", list(parent.paths) if parent else [])
+    if not isinstance(paths, list) or not all(isinstance(glob, str) and glob.strip()
+                                              for glob in paths):
+        raise FormError(f"{where}: [applies] paths is a list of globs relative to the project "
+                        "root, such as \"book/*/steps/*.md\"")
+    if paths and set(actions) != {FILE_ACTION}:
+        raise FormError(f"{where}: [applies] paths claims files and goes only with "
+                        f"actions = [\"{FILE_ACTION}\"]; take out paths, or the other actions")
+    if FILE_ACTION in actions and not paths:
+        raise FormError(f"{where}: action {FILE_ACTION} needs [applies] paths, the globs of the "
+                        "files the form claims")
     marker_pattern = str(applies.get("marker_pattern", ""))
     try:
         re.compile(marker_pattern)
@@ -480,7 +535,31 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         terms=terms, path=where, marker_pattern=marker_pattern,
         labels=tuple(str(label) for label in applies.get("labels", parent.labels if parent else ())),
         base=base_branch, fallback=bool(applies.get("fallback", False)),
-        checker=str(data.get("checker", "")), adapter=adapter)
+        checker=str(data.get("checker", "")), adapter=adapter,
+        paths=tuple(glob.strip().strip("/") for glob in paths))
+
+
+def glob_pattern(glob: str) -> re.Pattern:
+    """A path glob as a pattern of a whole `/`-separated path: `*` and `?` within one folder,
+    `**` across folders (`**/` also none)."""
+    out, index = [], 0
+    while index < len(glob):
+        if glob.startswith("**/", index):
+            out.append("(?:[^/]*/)*")
+            index += 3
+        elif glob.startswith("**", index):
+            out.append(".*")
+            index += 2
+        elif glob[index] == "*":
+            out.append("[^/]*")
+            index += 1
+        elif glob[index] == "?":
+            out.append("[^/]")
+            index += 1
+        else:
+            out.append(re.escape(glob[index]))
+            index += 1
+    return re.compile("".join(out))
 
 
 def _adapter(data: dict, where: str, fields: list[Field], parent: Form | None) -> dict:
@@ -720,6 +799,8 @@ def parse(form: Form, body: str, title: str | None = None) -> Document:
     if form.is_adapter:  # the body as it stands: its own check reads it
         fields = {} if title is None else {"title": title}
         return Document(form=form.name, fields=fields, source=body, read=dict(fields))
+    if form.is_file:
+        return _parse_file(form, body)
     text = FRONT_MATTER.sub("", body, count=1)
     document = Document(form=form.name, fields={}, source=text)
     if form.scope:
@@ -751,6 +832,73 @@ def parse(form: Form, body: str, title: str | None = None) -> Document:
                 document.misses[item.name] = near
     document.source = region
     return document
+
+
+def _title_end(form: Form, text: str) -> int:
+    """Where a file's head ends: just after its page title, the first `#` line above the first
+    field; 0 where a field's heading comes first or there is no `#` line."""
+    offset, fence = 0, None
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        marker = FENCE.match(bare)
+        if fence is None and marker:
+            fence = marker.group(1)
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence):
+                fence = None
+        elif heading := HEADING.match(bare):
+            level = len(heading.group(1))
+            if level == 1:
+                return offset + len(line)
+            if any(item.in_body and _matches(item, bare, level, 0, form.level)
+                   for item in form.fields):
+                return 0
+        offset += len(line)
+    return 0
+
+
+def _parse_file(form: Form, body: str) -> Document:
+    """A claimed file read into `form`'s fields: its front matter and its page title are its
+    head, kept as they stand and never a field (the module docstring: Files)."""
+    front = FRONT_MATTER.match(body)
+    head = front.group(0) if front else ""
+    rest = body[len(head):]
+    end = _title_end(form, rest)
+    title, rest = rest[:end], rest[end:]
+    preamble, sections = _split(rest, form, 0)
+    document = Document(form=form.name, fields={}, source=rest,
+                        parts=[Part("front", raw=head), Part("head", raw=title),
+                               Part("preamble", raw=preamble), *sections])
+    for part in sections:
+        if part.kind == "field":
+            document.fields[part.name] = value_of(form.field(part.name), part.raw)
+    document.read = dict(document.fields)
+    for item in form.fields:
+        if item.in_body and item.name not in document.fields:
+            near = next((line for line in rest.splitlines() if (match := HEADING.match(line))
+                         and _norm(match.group(2)) == _norm(item.heading)), None)
+            if near is not None:
+                document.misses[item.name] = near
+    return document
+
+
+def front_matter_form(body: str) -> str | None:
+    """The form a file's front matter names on its `form:` line, or None."""
+    front = FRONT_MATTER.match(body)
+    found = FRONT_FORM.search(front.group(0)) if front else None
+    return found.group(1) if found else None
+
+
+def _with_form(front: str, name: str) -> str:
+    """Front matter `front` with its `form:` line naming `name`, every other byte kept; a new
+    block where `front` is empty."""
+    if not front:
+        return f"---\nform: {name}\n---\n\n"
+    if FRONT_FORM.search(front):
+        return FRONT_FORM.sub(f"form: {name}", front, count=1)
+    newline = "\r\n" if "\r\n" in front else "\n"
+    closing = front.rstrip("\r\n").rfind("\n") + 1
+    return front[:closing] + f"form: {name}{newline}" + front[closing:]
 
 
 def _scoped(form: Form, text: str) -> tuple[list[Part], str]:
@@ -867,7 +1015,8 @@ def render(form: Form, document: Document | dict) -> str:
                  Part("scope", heading=f"## {form.scope.get('section', '')}"),
                  Part("preamble"), Part("suffix")]
     elif not parts:
-        parts = [Part("preamble")]
+        parts = [Part("front"), Part("head"), Part("preamble")] if form.is_file else \
+            [Part("preamble")]
     # Fields with a value but no section yet go after the nearest earlier field that has one.
     placed = {part.name for part in parts if part.kind == "field"}
     for item in form.fields:
@@ -886,7 +1035,11 @@ def render(form: Form, document: Document | dict) -> str:
     out: list[str] = []
     number = 1
     for part in parts:
-        if part.kind == "prefix":
+        if part.kind == "front":
+            out.append(_with_form(part.raw, form.name))
+        elif part.kind == "head":
+            out.append(_without_markers(part.raw))
+        elif part.kind == "prefix":
             out.append(_end(part.raw) if part.raw else "")
             out.append(marker + "\n")
         elif part.kind == "gap":
@@ -895,7 +1048,9 @@ def render(form: Form, document: Document | dict) -> str:
             out.append(part.heading + "\n")
         elif part.kind == "preamble":
             preamble = _labels(form, document, _without_markers(part.raw))
-            if not form.scope:
+            if form.is_file:
+                out.append(preamble)
+            elif not form.scope:
                 out.append(f"{FLEET_MARKER}\n{marker}\n")
                 preamble = preamble.lstrip("\n")
                 out.append("\n" + _end(preamble) if preamble.strip() else "\n")
@@ -951,7 +1106,9 @@ def draft(form: Form) -> str:
     if form.is_adapter:
         return f"<!-- {form.name}: {form.says} -->\n<!-- {_checked_by(form)} -->\n"
     lines = []
-    if form.scope:
+    if form.is_file:
+        lines += ["---", f"form: {form.name}", "---", ""]
+    elif form.scope:
         lines += [form.scope.get("after", ""), FORM_MARKER.format(name=form.name),
                   f"## {form.scope.get('section', '')}", ""]
     else:
@@ -1056,8 +1213,10 @@ def _checked_by(form: Form) -> str:
 
 
 def list_forms(forms: dict[str, Form]) -> list[str]:
-    """One line per form: its name, reader, actions, an adapter's checker, and what it says."""
+    """One line per form: its name, reader, actions, the paths it claims, an adapter's checker,
+    and what it says."""
     return [f"{form.name} ({form.reader}): {', '.join(form.actions)}: "
+            + (f"{', '.join(form.paths)}: " if form.paths else "")
             + (f"{_checked_by(form)}: " if form.is_adapter else "") + form.says
             for form in sorted(forms.values(), key=lambda item: (item.order, item.name))]
 
@@ -1120,11 +1279,16 @@ def _why_not(form: Form, action: str) -> str:
 
 def select(forms: dict[str, Form], action: str, body: str, title: str | None = None, *,
            labels=(), base: str | None = None, integration: str = "main",
-           repo: str | None = None, home=None) -> Selection:
+           repo: str | None = None, home=None, path: str | None = None) -> Selection:
     """The form that shapes `body` for `action`, in the order the module docstring's
-    "Selection" gives; its form None is free form."""
+    "Selection" gives; its form None is free form. For `file.write`, `path` is the file's,
+    relative to the project root."""
     if action not in ACTIONS:
         raise FormError(f"select: action {action!r} is none of {', '.join(ACTIONS)}")
+    if action == FILE_ACTION:
+        if path is None:
+            raise FormError(f"select: {FILE_ACTION} selects by the file's path; give path")
+        return _select_file(forms, body, title, path)
     if repo is not None and home is not None and not _at_home(repo, home):
         return Selection(None)
     have = {str(label).casefold() for label in labels}
@@ -1161,6 +1325,37 @@ def select(forms: dict[str, Form], action: str, body: str, title: str | None = N
     plain = next((form for form in candidates if form.fallback or (
         not form.marker and not form.marker_pattern and not form.title_pattern)), None)
     return Selection(plain, tuple(refused))
+
+
+def _select_file(forms: dict[str, Form], body: str, title: str | None, path: str) -> Selection:
+    """The form that claims the file at `path` (the module docstring: Selection, for a file)."""
+    path = path.replace("\\", "/").strip("/")
+    candidates = sorted((form for form in forms.values() if FILE_ACTION in form.actions
+                         and form.claims(path)), key=lambda form: (form.order, form.name))
+    if not candidates:
+        return Selection(None)
+    names = ", ".join(form.name for form in candidates)
+    refused: list[Finding] = []
+    named = front_matter_form(body)
+    if named is not None:
+        chosen = next((form for form in candidates if form.name == named), None)
+        if chosen is not None:
+            return Selection(chosen)
+        refused.append(Finding("body", "form", REFUSE, f"{path}: the front matter names "
+                               f"form: {named}, which does not claim this file; name one of "
+                               f"{names}"))
+    lines = {line.strip() for line in body.splitlines()}
+    for form in candidates:
+        if not form.marker and not form.marker_pattern and not form.title_pattern:
+            continue
+        if (form.marker or form.marker_pattern) and not _carries(form, lines):
+            continue
+        if form.title_pattern and not re.search(form.title_pattern, title or ""):
+            continue
+        return Selection(form, tuple(refused))
+    refused.append(Finding("body", "form", REFUSE, f"{path}: no form takes this file; name its "
+                           f"form in the front matter, form: <name> (one of {names})"))
+    return Selection(None, tuple(refused))
 
 
 def verdict(forms: dict[str, Form], action: str, body: str, title: str | None = None,
@@ -1733,8 +1928,56 @@ def _form(forms: dict[str, Form], name: str) -> Form:
     return forms[name]
 
 
+def _root(path: Path, root: Path | None) -> Path:
+    """The project root `path`'s globs are relative to: `--root`, else the git checkout holding
+    the path, else the working directory."""
+    if root is not None:
+        return root
+    for folder in path.resolve().parents:
+        if (folder / ".git").exists():
+            return folder
+    return Path.cwd()
+
+
+def _relative(path: Path, root: Path, command: str) -> str:
+    """`path` relative to `root`, with `/`, as a form's `paths` match it."""
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError as error:
+        raise FormError(f"{command}: --path {path} is not under the project root {root}; give "
+                        "--root, the folder the forms' paths are relative to") from error
+
+
+def _file_text(path: Path, command: str, *, missing_ok: bool = False) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        if missing_ok:
+            return ""
+        raise FormError(f"{command}: cannot read --path {path} ({error})") from error
+    except OSError as error:
+        raise FormError(f"{command}: cannot read --path {path} ({error})") from error
+
+
+def _claimed(forms: dict[str, Form], options: argparse.Namespace, command: str,
+             body: str | None = None) -> tuple[str, Selection]:
+    """The file `--path` names, relative to its root, and the form `select` picks for it; the
+    file's own text selects where it exists, else `body`."""
+    relative = _relative(options.path, _root(options.path, options.root), command)
+    text = _file_text(options.path, command, missing_ok=True) or body or ""
+    return relative, select(forms, FILE_ACTION, text, getattr(options, "title", None),
+                            path=relative)
+
+
 def _given(options: argparse.Namespace) -> tuple[str | None, dict[str, object] | None]:
-    """The body or the field values `check` was given, by whichever of its four options."""
+    """The body or the field values `check` was given, by whichever of its four options, else
+    the text of `--path`."""
+    if all(value is None for value in (options.body, options.body_file, options.fields,
+                                       options.fields_json)):
+        if options.path is None:
+            raise FormError("forms.py check: give the text: --body-file, --fields, --body, "
+                            "--fields-json or --path")
+        return _file_text(options.path, "forms.py check"), None
     if options.body is not None:
         return options.body, None
     if options.body_file is not None:
@@ -1762,20 +2005,30 @@ def _selected(forms: dict[str, Form], options: argparse.Namespace,
 def _check(forms: dict[str, Form], options: argparse.Namespace):
     """What `check` checks: the form (None: free), the Markdown it would file, the document and
     the refused markers selection met."""
-    if options.form is None and options.action is None:
+    if options.form is None and options.action is None and options.path is None:
         raise FormError("forms.py check: name a form, or give --action to select one as a write "
-                        "would")
+                        "would (--path for a file)")
     if options.form is not None and options.action is not None:
         raise FormError("forms.py check: give a form or --action, not both")
     if options.action is None and any(value is not None for value in
                                       (options.repo, options.labels, options.base)):
         raise FormError("forms.py check: --repo, --labels and --base select a form; give them "
                         "with --action")
+    if options.action == FILE_ACTION and options.path is None:
+        raise FormError(f"forms.py check: {FILE_ACTION} selects by the file; give --path")
+    if options.path is not None and options.action not in (None, FILE_ACTION):
+        raise FormError(f"forms.py check: --path selects a form for {FILE_ACTION}; give it "
+                        f"without --action {options.action}")
+    if options.root is not None and options.path is None:
+        raise FormError("forms.py check: --root is the root of --path; give --path")
     named = _form(forms, options.form) if options.form is not None else None
     body, values = _given(options)
     met: tuple[Finding, ...] = ()
     if named is not None:
         form: Form | None = named
+    elif options.path is not None:
+        _, chosen = _claimed(forms, options, "forms.py check", body)
+        form, met = chosen.form, chosen.findings
     else:
         chosen = _selected(forms, options, body or "")
         form, met = chosen.form, chosen.findings
@@ -1804,8 +2057,9 @@ def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="forms.py", description="SE's forms: check, draft, list")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a form")
-    checking.add_argument("form", nargs="?", help="the form; without it, --action selects one")
-    given = checking.add_mutually_exclusive_group(required=True)
+    checking.add_argument("form", nargs="?",
+                          help="the form; without it, --action or --path selects one")
+    given = checking.add_mutually_exclusive_group()
     given.add_argument("--body-file", type=Path)
     given.add_argument("--fields", type=Path)
     given.add_argument("--body", help="the body as text")
@@ -1818,21 +2072,47 @@ def main(arguments: list[str] | None = None) -> int:
     checking.add_argument("--repo", help="with --action: the repository written to")
     checking.add_argument("--labels", help="with --action: the labels, comma-separated")
     checking.add_argument("--base", help="with --action: a pull request's base branch")
-    checking.add_argument("--tree", action="store_true", help="read the working tree's forms/")
     drafting = commands.add_parser("draft", help="print the empty form")
-    drafting.add_argument("form")
+    drafting.add_argument("form", nargs="?", help="the form; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
-    drafting.add_argument("--tree", action="store_true", help="read the working tree's forms/")
     listing = commands.add_parser("list", help="name every form with its actions")
-    listing.add_argument("--tree", action="store_true", help="read the working tree's forms/")
+    for command in (checking, drafting):
+        command.add_argument("--path", type=Path,
+                             help=f"the file: the form that claims it ({FILE_ACTION})")
+        command.add_argument("--root", type=Path, help="the project root of --path's globs "
+                             "(default: the git checkout holding it, else the working directory)")
+    for command in (checking, drafting, listing):
+        command.add_argument("--tree", action="store_true", help="read the working tree's forms/")
+        command.add_argument("--forms", type=Path, help="read the forms and terms.toml from this "
+                             "folder instead of SE's forms/")
     options = parser.parse_args(arguments)
+    if options.command == "check" and options.path is None and all(
+            value is None for value in (options.body, options.body_file, options.fields,
+                                        options.fields_json)):
+        checking.error("one of the arguments --body-file --fields --body --fields-json --path "
+                       "is required")
     try:
-        forms = load(ROOT, tree=options.tree)
+        forms = load(ROOT, tree=options.tree, folder=options.forms)
         if options.command == "list":
             print("\n".join(list_forms(forms)))
             return 0
         if options.command == "draft":
-            form = _form(forms, options.form)
+            if (options.form is None) == (options.path is None):
+                raise FormError("forms.py draft: name a form, or give --path to take the form "
+                                "that claims the file, not both")
+            if options.root is not None and options.path is None:
+                raise FormError("forms.py draft: --root is the root of --path; give --path")
+            if options.path is not None:
+                relative, chosen = _claimed(forms, options, "forms.py draft")
+                if chosen.form is None:
+                    if chosen.findings:
+                        print("\n".join(_capped(list(chosen.findings))))
+                        return 1
+                    print(f"free: no form claims {relative}")
+                    return 0
+                form = chosen.form
+            else:
+                form = _form(forms, options.form)
             print(json.dumps(draft_fields(form), indent=2) if options.json else draft(form), end=""
                   if not options.json else "\n")
             return 0
@@ -1844,7 +2124,10 @@ def main(arguments: list[str] | None = None) -> int:
     refused = sum(finding.severity == REFUSE for finding in findings)
     lines = _capped(findings)
     if form is None and not findings:
-        free = f"free: no form applies ({options.action})"
+        free = (f"free: no form claims "
+                f"{_relative(options.path, _root(options.path, options.root), 'forms.py check')}"
+                if options.path is not None and options.form is None
+                else f"free: no form applies ({options.action})")
         if options.render:
             print(free, file=sys.stderr)
             print(rendered, end="")
