@@ -96,6 +96,13 @@ def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_de
             assert asks not in text, asks
 
 
+def test_no_instruction_calls_the_session_the_person_talks_to_the_dispatcher():
+    instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md"]
+    named = [path.relative_to(ROOT).as_posix() for path in instructions
+             if "dispatcher" in path.read_text(encoding="utf-8").casefold()]
+    assert named == []
+
+
 def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
     reviewer = normalized(AGENTS / "reviewer.md")
     steps = ["`review.py brief <n>`", "**The riskiest part first.**", "**Find, in two passes**",

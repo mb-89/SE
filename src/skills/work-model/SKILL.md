@@ -43,7 +43,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
-- **SE**, the main agent (formerly the dispatcher): the only session the human talks to. SE never
+- **SE**, the SE agent: the only session the human talks to. SE never
   writes any repository. It may file work issues for and dispatch into any repository by starting or
   messaging that repository's integrator.
   - Each repository has exactly one integrator, the only writer of its integration branch. The
