@@ -1,7 +1,7 @@
 # se: systematic engineering
 
-A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its sub-agents
-are the integrator, the worker and the reviewer. With them come their skills, issue templates and the scripts they
+A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its other
+agents are the integrator, the worker and the reviewer, each in a session of its own. With them come their skills, issue templates and the scripts they
 call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
@@ -707,9 +707,11 @@ integration branch the one commit it lands as ([Landing on main](#landing-on-mai
   integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
 - else the field report's "Release kind", which the
   [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
-  refused before anything is merged. The branch prefix only proposes it (`field-report --draft`):
-  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; where the work issue's
-  "Package kind" says "breaking", the kind a breaking change takes at the project's `version`.
+  refused before anything is merged.
+  - `field-report --draft` only proposes it; the worker keeps or replaces it by what changed.
+  - It proposes the kind a breaking change takes at the project's `version` where the work
+    issue's "Package kind" says "breaking"; else by the kind of work it names (or an old name's
+    `<type>/` prefix): `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`.
 
 An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 
@@ -732,6 +734,28 @@ from the project root. Where it fails, push restores `se.toml`, commits nothing 
 `integrate` also runs it on its merge, before the suite, and commits what it rewrites into the
 landing: a generated file that carries the version, added on a branch before `main` released,
 never makes the branch stale, and the suite's verdict is recorded on the merge's tree.
+
+#### Workers
+
+```toml
+[workers]
+local = 4
+cloud = 8
+```
+
+`[workers]` limits how many working agents run at once. `local` holds a local device's limit,
+default 4; `cloud` holds the cloud's (a Claude Code cloud session, a CI runner), and unset leaves
+the cloud open. Each is a whole number of at least 1; other keys are refused.
+
+- **What counts.** A worker runs while its work issue is open and labelled `in-progress`.
+  `work_tickets.py capacity` prints how many more may start: the limit less those running, on a
+  local device also its cores and memory.
+- **Who holds it.** `start` refuses a start beyond it. Without gh it reads the workers running
+  through kern's relay, or from `--running <file>`. An [integrator](src/agents/integrator.md)
+  starts no more, and after each landing starts the next startable issue, so a worker that
+  finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
+  reached.
+- **Not limited.** Integrators, reviewers and SE's own session.
 
 #### Commit checks
 
@@ -1073,7 +1097,8 @@ costs no model tokens. It reads from GitHub alone:
 - whether an integrator runs: an open landing pull request (`land/<branch>`), or in-progress work
   whose issue or branch moved within the [fleet lease](#fleet-check).
 
-- Where startable work waits, no integrator runs and the fleet is not [paused](src/skills/work-model/SKILL.md#pause), `--fire`
+- Where startable work waits, no integrator runs, the [worker limit](#workers) leaves room and the
+  fleet is not [paused](src/skills/work-model/SKILL.md#pause), `--fire`
   fires the scheduled task whose session is a fresh integrator, once, and names its session;
   `--dry-run` prints that fire and makes none. Anything else fires nothing and says why.
 - The workflow [.github/workflows/dispatch.yml](.github/workflows/dispatch.yml) runs it every four
@@ -2010,7 +2035,7 @@ settings checks and the generated docs.
 
 | Command | Usage | What it does |
 |---|---|---|
-| `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show local worker capacity or cloud unlimited capacity |
+| `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
 | `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (README "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
@@ -2028,7 +2053,7 @@ settings checks and the generated docs.
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
-| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
+| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
 | `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
@@ -2434,6 +2459,9 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - `templates.py fill` writes a claimed file to its `--path`, or the document to `--out` or stdout;
   a refusal names every finding and writes nothing. The tool's `fill` answers as `check --render`
   and writes nothing; filing stays the filing commands' and the GitHub tools'.
+- `templates.py` resolves a name for the project `--root` names, else the checkout holding
+  `--path`: its own `templates/`, the template repositories its se.toml pins, then SE's
+  ([docs/templates.md "Template repositories"](docs/templates.md#template-repositories)).
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

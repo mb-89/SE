@@ -648,7 +648,9 @@ to the fleet as a work issue.
 - **Prevents:** a person waiting on work an agent could do alone; work done outside the queue.
 - **Implementations:**
   - se: SE dispatches through integrators and never starts workers directly
-    ([catch-up](../../catch-up/SKILL.md)); otherwise by judgment.
+    ([catch-up](../../catch-up/SKILL.md)); a very small change SE makes itself still lands
+    through an integrator, and stops while the person asks SE to stay available
+    ([SE](../../../agents/se.md#boundaries)); otherwise by judgment.
 - **Related:** dec-011, wrk-002
 
 ### wrk-005 Steer before, check at the push

@@ -139,10 +139,16 @@ no se.toml switch to keep it off.
 A template repository is a plugin: public or private, found and pinned as plugins are, through
 se.toml.
 
+- se.toml lists them by name, `[templates] repositories = ["<name>", ...]`, each a component
+  `[components.<name>]` pinned by `ref` or `version` as any other and placed by `se_modules.py
+  sync` ([README "Modules"](../README.md#modules)); its templates are its `templates/`, under its
+  `path` where it sets one.
 - The engine resolves a template name in order: the project's own `templates/`, then each pinned
   template repository in the order se.toml lists them, then SE's own.
 - A repository that does not resolve, or whose pin cannot be fetched, refuses the fill with the
   name and the remedy; it never falls back to another repository's template of the same name.
+- `scripts/templates.py` (`catalog`) owns the resolution, `scripts/se_modules.py`
+  (`template_repositories`) the list and its pins.
 
 Each imported template lives with its overlay in its template repository:
 

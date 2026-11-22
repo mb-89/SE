@@ -45,9 +45,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
-- **SE**, the SE agent: the only session the human talks to. SE never
-  writes any repository. It may file work issues for and dispatch into any repository by starting or
-  messaging that repository's integrator.
+- **SE**, the SE agent: the only session the human talks to. SE never writes an integration
+  branch: its own very small changes land through an integrator, as its
+  [Boundaries](../../agents/se.agent.md#boundaries) say. It may file work issues for and dispatch into
+  any repository by starting or messaging that repository's integrator.
   - Each repository has exactly one integrator, the only writer of its integration branch. The
     integrator starts that repository's workers.
   - Workers stay in their box; a worker records cross-repository needs in its field report.
@@ -319,8 +320,8 @@ the verdict, through the same landing ([README "Landing without CI"](../../../RE
 
 A release's kind follows what changed, never the branch name: the worker declares it in the field
 report's "Release kind" (patch, minor or major, with a one-line reason), and
-[releases](../../../README.md#project-settings) bump by it. The branch prefix only proposes a
-default (`field-report --draft`).
+[releases](../../../README.md#project-settings) bump by it. `field-report --draft` only proposes a
+kind, which the worker keeps or replaces by what changed.
 
 - **Breaking means major**, as Semantic Versioning 2.0.0 (item 8) defines it: removing or
   renaming a public command, option, field or format, or making an optional field required,
@@ -344,11 +345,15 @@ Framework repositories (the process plugin and document format/converter) carry 
 that is generically useful. Application repositories carry only their content and
 application-specific code.
 
-When an application reveals a generic capability, create a framework work issue and delete the
-application's copy after the framework provides it. A framework never names, special-cases or
+When an application reveals a generic capability, it becomes a framework work issue (SE files it,
+from a worker's "Tickets for other repositories"), and the application's copy is deleted after the
+framework provides it. A framework never names, special-cases or
 depends on an application; for public repositories, the public check's local list enforces this
 boundary.
 
+- **Two texts that contradict**: the person's decision wins, otherwise the newer, more specific
+  text, otherwise the note that owns the rule; the change that finds a contradiction corrects the
+  losing text.
 - Packages are worker-sized: one separately reviewable change. Larger work is split into issues
   linked by "Blocked by", each owning its part of shared files.
 - Packages that touch the same hot file get one owner or run one after the other; the next one
@@ -465,6 +470,8 @@ session list."
 - SE and every role that starts work run it only in independent sessions the person can see in
   the host's session list, never in in-chat sub-agents (`task`), which the person cannot see and
   an interruption cancels.
+- **Reviewers too**: a [reviewer](../../agents/reviewer.agent.md) runs as a visible session, never
+  inside a chat or a workflow.
 - The role that starts them never blocks on them: it starts them, says who does what, and ends the
   turn. No blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
 - Where a host has no way to start a session, the role files or queues the work, or gives the
@@ -480,8 +487,8 @@ session list."
     [dispatcher's](../../../README.md#dispatcher), is set at or below the SE agent's effort; the
     person sets it when creating the task.
 - **Integrators' workflows**: an integrator may run a workflow (the host's multi-agent
-  orchestration, Claude Code's `Workflow`) to plan and run its own work, such as reviews and
-  checks across several pull requests. Each workflow holds fewer than 10 agents, at or below
+  orchestration, Claude Code's `Workflow`) to plan and run its own work, such as checks across
+  several pull requests. Each workflow holds fewer than 10 agents, at or below
   the effort ceiling. A work package still goes to a worker in its own visible session.
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
@@ -567,8 +574,9 @@ Pull requests built on an old `main` cause most integration trouble.
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
   pieces left ([integrator](../../agents/integrator.agent.md)), the issue stays open and the comment names
   what it waits for.
-- Capacity limits apply only to local workers (CPU cores and memory minus running workers). Cloud
-  workers have none. File clashes and the serial merge queue apply everywhere.
+- At most `[workers]` working agents run at once, 4 on a local device by default, the cloud open
+  unless set ([README "Workers"](../../../README.md#workers)); a local device also counts its CPU
+  cores and memory. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
   removed; a session is kept only while it holds an unresolved discussion with a handover issue.
 
@@ -577,7 +585,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
   - it refuses an issue that is not startable (including open blockers, an existing branch, a
-    file-ownership clash or exhausted local capacity);
+    file-ownership clash or exhausted capacity, the worker limit among it);
   - it fetches, runs
     `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> origin/main` and
     changes the issue's `ready` label to `in-progress`;
@@ -636,11 +644,12 @@ A worker splits its work issue into local tickets in its worktree:
   `docs/retro-*`, which quote what was true when they were written.
 - A partial-delivery blocker is only work outside the worker's box: another package's file, a
   user decision, or missing access. Tests of the package's own code are never blockers, including
-  failure paths exercised with the doors' fakes. Workers may create, use and close
-  throw-away tracker issues for live acceptance runs.
-- Notes are private scratch: never committed, never copied into tracked files or reports. A note
-  is resolved by a local `Disposition:` line stating the decision; future work becomes a
-  [backlog issue](#issues) or work issue, not a copy of the note. Only unresolved notes block worktree removal.
+  failure paths exercised with the doors' fakes.
+- **Workers never open issues.** A worker keeps its findings in local notes, puts them into its
+  field report (future work as a ticket under "Tickets for other repositories", or under "Not
+  delivered"), and messages one level up, its integrator; SE alone files issues from them.
+  - Notes are scratch: never committed. A note is resolved by a local `Disposition:` line stating
+    the decision. Only unresolved notes block worktree removal.
 - Rebuilds use the latest integrated state through the project's build command; every integrated
   package that changes output includes a fresh build and a check of the affected output.
 
@@ -876,10 +885,12 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - `queue` syncs the checkout and prints its reads as a plan: the pause search, the
     escalations, the open pull requests to the integration branch (delivered where `field-report
     --check` passes on the description) and the ready work issues; the cloud's capacity is
-    unlimited.
+    unlimited unless `[workers] cloud` limits it, and then the plan also lists the workers running.
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
+  - Where a [worker limit](../../../README.md#workers) holds, it refuses once that many run. It
+    reads them through kern's relay, else from `--running <file>`, their `list_issues` answer.
   - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
     Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
     `issue_read` (method `get`) answers saved as one JSON list, and refuses until it knows them.
@@ -924,7 +935,8 @@ for example:
     the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
   - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
     branch.
-  - Its warning on platform code ([worker](../../agents/worker.agent.md#procedure), "Platform code")
+  - Its warning on platform code (the guidance note
+    [`platform-code-legs`](../../../guidance/pull-request/field-report/platform-code-legs.md))
     reads the work pull request's check runs from kern's relay, for the pull request `stop-check
     --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
     `get_check_runs`.
