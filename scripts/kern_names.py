@@ -1,6 +1,6 @@
 """Read names from the core that runs in a checkout, live: SE's one reader of a kern name.
 
-The core's standing file (`<checkout>/.se/.runtime/standing.json`, kern/README.md "The host")
+The core's standing file (`<checkout>/.se/.runtime/standing.json`, kern's README "The host")
 names its bus and the client user's password; each name is one `get.<name>` on that bus, through
 kern's Python SDK (`python/kern` in the clone se.toml pins, se_modules.py `kern_dir`; standard library only). Where no core runs, or it does not
 answer within the wait, the reader answers None, and every caller falls back to its own path:

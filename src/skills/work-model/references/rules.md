@@ -206,7 +206,8 @@ door, and a run reads its inputs once, computes, then writes its outputs.
     [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
     through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
     ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
-  - kern: git only through its Go door, `kern/git`, which the same check holds.
+  - kern: git only through its Go door, `kern/git`, which kern's own repository holds to the same
+    rule in its CI.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
     through its own HTTP client, never `gh`); a box's take, local work and land.
 - **Related:** tst-001, des-009

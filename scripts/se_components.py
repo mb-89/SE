@@ -67,7 +67,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 SE_ROOT = Path(__file__).resolve().parents[1]
-#: Where SE's components live, under the checkout kern serves (kern/README.md "The host").
+#: Where SE's components live, under the checkout kern serves (kern's README "The host").
 COMPONENTS = "components"
 #: The switch of routed: off, on, or unset for kern where it serves this checkout.
 SWITCH = "SE_KERN"

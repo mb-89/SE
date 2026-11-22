@@ -37,9 +37,8 @@
 | Suite | Command | When it runs |
 |---|---|---|
 | Focused | `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test) | the tests of what changed |
-| kern, the Go core under `kern/` | `cd kern && go vet ./... && go test ./...` | its tests are declared beside the suite, `se.toml` `[tests.beside.kern]`, so the complete suite runs them too ([kern/README.md "Tests"](kern/README.md#tests)) |
-| SE's Go components under `components/` | `cd components && go vet ./... && go test ./...` | declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)) |
-| Complete | `uv run pytest -q` and kern's tests | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([README "Test budget"](README.md#test-budget)) |
+| SE's Go components under `components/` | `uv run python scripts/se_modules.py sync kern`, then `cd components && go vet ./... && go test ./...` | on kern at the pin `se.toml` `[modules.kern]` reads from `components/go.mod`, in `.se/modules/kern` (every pytest run places it first, `tests/conftest.py`); declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)); kern's own tests run in kern's repository |
+| Complete | `uv run pytest -q` and the suites beside it | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([README "Test budget"](README.md#test-budget)) |
 | Repository hygiene | `uv run python scripts/hygiene.py` | a step of the `check` job, not a test: it checks SE's own checkout through git's real door; its logic is unit-tested on the fake, each check failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`) |
 | Dangling references | the same command | it fails where the agents, the skills (the rule book among them), README.md or AGENTS.md name what the repository lacks |
 
@@ -53,10 +52,10 @@
   PowerShell cases and skips the Playwright ones; a change that moves a test file's time by
   several seconds refreshes it from its pull request's `check` run with
   `uv run python scripts/work_tickets.py file-seconds`, and that run names each file that drifted.
-- kern: the `check` job vets kern in its own step and fails where `gofmt -l` lists one of its
-  files; the job `kern-platforms` runs its vet and tests, with the tests of SE's start and hook
-  scripts, on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`);
-  darwin is built, not tested.
+- kern: the `check` job syncs kern at its pin and fails where the committed `se.lock` lags
+  `components/go.mod`'s `require kern`; the job `kern-platforms` runs the tests of SE's start and
+  hook scripts on Windows, with those of `setup.ps1` (`tests/test_public_check.py -k powershell`);
+  darwin is built, not tested. kern's vet, gofmt and Windows run are kern's repository's `check`.
 - Repository hygiene:
   - It fails on a tracked binary file, a tracked file over 200 KB, or a `TODO`/`FIXME` in
     `scripts/` or `tests/` naming no issue; a file that must break the first two goes in its allow
@@ -69,7 +68,7 @@
     hooks, `scripts/setup.sh`, `setup.ps1` and the `check` job's gate. The check reads no shell.
   - A test whose scripts or kern binaries run as child processes takes `shared_fake_git`: the
     fake behind a state file that `SE_GIT_DOOR=fake:<file>` names to both doors
-    (`scripts/git_door.py`, `kern/git`).
+    (`scripts/git_door.py`, kern's Go door `kern/git` in kern's repository).
   - A test that starts none takes `fake_git_door`, in memory: `shared_fake_git` fails one that
     ran git through it and started no child, unless `tests/conftest.py` `IN_PROCESS_STATE_FILE`
     names its file.
@@ -98,8 +97,8 @@
 - Where SE needs its own location, it derives it from the checkout's origin through
   `scripts/se_home.py`, one helper for every Python reader: the home, the tracker, the docs URL and
   module URLs relative to origin (`../obs.git`). Docs write `<owner>/<repository>`, explained once.
-  - Go asks `kern/home`, which answers the same; both suites read one table,
-    `kern/home/testdata/origins.json`.
+  - Go asks kern's `kern/home`, which answers the same; both suites read one table, kern's
+    `home/testdata/origins.json`, from kern's clone at its pin (`.se/modules/kern`).
   - Go module paths name no host (`kern`, `se/components`), and a `release.toml` names its
     download as a path under the home (`releases/download/<tag>`).
 - `uv run python scripts/hygiene.py` enforces it (its check `neutral-home`, tested in
