@@ -36,6 +36,7 @@ UNLISTED = {
     "src/skills/catch-up/references/integrator-prompt.md": "a prompt template the catch-up skill fills",
     "docs/copilot.md": "the owner's guide to installing SE into Copilot, linked from README",
     "docs/go-core.md": "the Go core's design, linked from README and AGENTS.md",
+    "docs/templates.md": "the template system's design, linked from README \"Forms\"",
     "docs/doors/copilot.md": "outside facts for whoever changes the Copilot layout",
     "docs/doors/mcp.md": "outside facts for whoever changes the MCP door",
     "docs/harvest-2026-11.md": "a dated record",

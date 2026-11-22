@@ -2127,6 +2127,9 @@ and its neighbours. It lists:
 
 ### Forms
 
+[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
+that replaces forms. Until its packages land, this section describes the forms engine as it runs.
+
 SE keeps the shape of its issues as data: one TOML file per form under `forms/`, read by one engine,
 `scripts/forms.py`, whose docstring owns the file format, the field kinds, the selection order and
 the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
