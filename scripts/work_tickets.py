@@ -8434,7 +8434,8 @@ def record_fix(root: Path, branch: str) -> str:
         raise QueueError(
             f"integrate --record-fix: the fix commits on {landing} are refused, nothing was "
             "recorded:\n" + "\n".join(f"- {problem}" for problem in problems) + "\n"
-            f"Reword or recommit them as {name} (work_tickets.py identity), push {landing} again "
+            f"Reword or recommit them as {name} (work_tickets.py identity --worktree <the checkout of "
+            f"{landing}>), push {landing} again "
             "and record again")
     checked_git(root, "switch", "-q", "-C", landing, new)
     try:

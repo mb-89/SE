@@ -663,6 +663,11 @@ def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come
         AGENTS / "worker.md")
 
 
+def test_the_worker_checks_the_identity_of_its_worktree_not_of_the_checkout_it_started_in():
+    worker = normalized(AGENTS / "worker.md")
+    assert "check the worktree's identity with `work_tickets.py identity --worktree <worktree>`" in worker
+
+
 def test_the_worker_commits_each_requirement_while_working():
     worker = normalized(AGENTS / "worker.md")
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker

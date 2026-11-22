@@ -4646,6 +4646,7 @@ def test_record_fix_refuses_a_fix_commit_that_is_no_landing_commit(
     err = capsys.readouterr().err
     assert f"- {fix[:12]}{'' if problem.startswith('is') else chr(39) + 's'} {problem}" in err
     assert "nothing was recorded" in err and "someone@" not in err
+    assert "(work_tickets.py identity --worktree <the checkout of land/feature/worker>)" in err
     assert handoff_state(main_checkout) == before
 
 
