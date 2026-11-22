@@ -18,6 +18,8 @@ import tempfile
 import textwrap
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import tomllib
 from collections import Counter
@@ -3978,14 +3980,16 @@ def concurrently(*calls: Callable[[], object]) -> list[object]:
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
-    """The startable work issues: open, `work` and `ready`, not held, unblocked, with no branch
-    yet and no file ownership an issue in progress holds. The two listings are read at once,
+    """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
+    (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
+    progress holds. The two listings are read at once,
     then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
     candidates, active = (json.loads(listing) for listing in concurrently(
         lambda: run_gh(root, [
             "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
-            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+            "--json", "number,title,body,labels,assignees", "--limit", "200", *labels,
+            *repo_arguments(repo),
         ]),
         lambda: run_gh(root, [
             "issue", "list", "--state", "open", "--label", "in-progress",
@@ -3995,6 +3999,7 @@ def ready_issues(
     active_ownership = set().union(*(issue_ownership(item) for item in active))
     startable = [candidate for candidate in candidates
                  if not issue_labels(candidate) & NOT_STARTABLE_LABELS
+                 and not waiting_on_person(candidate)
                  and not issue_ownership(candidate) & active_ownership]
 
     def ready(candidate: dict[str, object]) -> bool:
@@ -4088,6 +4093,148 @@ def queue(
     )
     refuse_while_paused("queue", pause)
     return delivered, escalations, ready, slots
+
+
+# The dispatcher (README "Dispatcher"): a check with no model that fires the scheduled task whose
+# session is a fresh integrator, where startable work waits and no integrator runs. The task's id
+# and its token come from these variables, set from repository secrets that no committed file holds.
+DISPATCH_TRIGGER_VARIABLE = "SE_DISPATCH_TRIGGER"
+DISPATCH_TOKEN_VARIABLE = "SE_DISPATCH_TOKEN"
+DISPATCH_FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/{trigger}/fire"
+DISPATCH_HEADERS = {
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "experimental-cc-routine-2026-04-01",
+    "Content-Type": "application/json",
+}
+DISPATCH_TRIGGER_PATTERN = re.compile(r"trig_[A-Za-z0-9]+\Z")
+# An issue labelled so waits on a person (the owner, or SE's decision on an escalation): not
+# startable, whatever its other labels say.
+WAITING_ON_PERSON_LABELS = frozenset({PERSON_LABEL, "escalated"})
+
+
+def waiting_on_person(issue: dict[str, object]) -> bool:
+    """Whether `issue` waits on a person: labelled WAITING_ON_PERSON_LABELS or assigned to someone."""
+    return bool(issue_labels(issue) & WAITING_ON_PERSON_LABELS) or bool(issue.get("assignees"))
+
+
+def github_time(value: object) -> datetime | None:
+    """A GitHub timestamp (`2026-11-22T09:49:51Z`) as an aware datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def branch_pushed_at(root: Path, repo: str, branch: str) -> datetime | None:
+    """When `branch`'s tip on GitHub was committed, or None where GitHub has no such branch."""
+    try:
+        found = issue_api(root, repo, "branches/" + urllib.parse.quote(branch, safe=""))
+    except QueueError as error:
+        if "404" in str(error) or "Not Found" in str(error):
+            return None
+        raise
+    commit = (found.get("commit") or {}).get("commit") or {}
+    return github_time((commit.get("committer") or {}).get("date"))
+
+
+def integrator_activity(root: Path, repo: str, now: datetime | None = None) -> list[str]:
+    """What shows that an integrator runs for `repo`, one line each, read from GitHub alone, as the
+    scheduled task's token reads nothing: an open landing pull request (`land/<branch>`) updated
+    within the fleet's lease, or in-progress work whose issue or branch moved within it (a worker
+    of a running integrator, which its delivery wakes). None: no integrator runs."""
+    now = now or datetime.now(timezone.utc)
+    lease = fleet_lease(root)
+    code = remote_repo(root) or repo
+    pulls, active = (json.loads(listing or "[]") for listing in concurrently(
+        lambda: run_gh(root, [
+            "pr", "list", "--state", "open", "--json", "number,headRefName,updatedAt",
+            "--limit", "200", *repo_arguments(code),
+        ]),
+        lambda: run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "work", "--label", IN_PROGRESS_LABEL,
+            "--json", "number,title,updatedAt", "--limit", "200",
+            *repository_label_arguments(root, False), *repo_arguments(repo),
+        ]),
+    ))
+
+    def recent(moment: datetime | None) -> bool:
+        return moment is not None and now - moment <= lease
+
+    found = [f"landing pull request #{pull['number']} ({pull['headRefName']}) is open"
+             for pull in pulls
+             if str(pull.get("headRefName", "")).startswith(LANDING_PREFIX)
+             and recent(github_time(pull.get("updatedAt")))]
+    pushed = concurrently(*(lambda issue=issue: branch_pushed_at(root, code, str(issue["title"]))
+                            for issue in active))
+    for issue, tip in zip(active, pushed):
+        if recent(github_time(issue.get("updatedAt"))) or recent(tip):
+            found.append(f"#{issue['number']} {issue['title']} is in progress")
+    return found
+
+
+def fire_scheduled_task(trigger: str, token: str, text: str) -> dict[str, object]:
+    """Fire the scheduled task `trigger` once through its API trigger; its answer."""
+    request = urllib.request.Request(
+        DISPATCH_FIRE_URL.format(trigger=trigger), method="POST",
+        data=json.dumps({"text": text}).encode("utf-8"),
+        headers={**DISPATCH_HEADERS, "Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        raise QueueError(f"dispatch: firing the scheduled task failed: HTTP {error.code} "
+                         f"{error.reason}") from None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        raise QueueError(f"dispatch: firing the scheduled task failed: {error}") from None
+
+
+def dispatch_secrets() -> tuple[str, str]:
+    """The scheduled task's id and token from the environment, refused where one is missing."""
+    trigger = os.environ.get(DISPATCH_TRIGGER_VARIABLE, "").strip()
+    token = os.environ.get(DISPATCH_TOKEN_VARIABLE, "").strip()
+    missing = [name for name, value in ((DISPATCH_TRIGGER_VARIABLE, trigger),
+                                        (DISPATCH_TOKEN_VARIABLE, token)) if not value]
+    if missing:
+        raise QueueError(f"dispatch --fire: {' and '.join(missing)} not set; set the repository "
+                         "secrets README \"Dispatcher\" names, or run --dry-run")
+    if not DISPATCH_TRIGGER_PATTERN.match(trigger):
+        raise QueueError(f"dispatch --fire: {DISPATCH_TRIGGER_VARIABLE} is not a scheduled task's "
+                         "id (trig_...)")
+    return trigger, token
+
+
+def dispatch(root: Path, repo: str, mode: str, now: datetime | None = None) -> list[str]:
+    """The dispatcher's run: the startable issues, whether an integrator runs, and the verdict.
+    `mode` is "report" (no verdict acted on), "dry-run" (prints the fire it would make) or "fire"
+    (fires the scheduled task once where startable work waits and no integrator runs). It reads
+    GitHub only, so a run that fires nothing makes no model call."""
+    pause, startable, running = concurrently(
+        lambda: pause_issues(root, repo),
+        lambda: ready_issues(root, repo),
+        lambda: integrator_activity(root, repo, now),
+    )
+    lines = [f"Startable: #{issue['number']} {issue['title']}" for issue in startable]
+    lines += [] if startable else ["Startable: none"]
+    lines += [f"Integrator runs: {line}" for line in running]
+    lines += [] if running else ["Integrator runs: none seen"]
+    if pause:
+        return [*lines, f"Fires nothing: the fleet is paused by {pause_names(pause)}"]
+    if not startable:
+        return [*lines, "Fires nothing: no startable work"]
+    if running:
+        return [*lines, "Fires nothing: an integrator runs"]
+    text = ("Startable work waits and no integrator runs: "
+            + ", ".join(f"#{issue['number']}" for issue in startable))
+    if mode == "dry-run":
+        return [*lines, f"Would fire the scheduled task once: {text}"]
+    if mode != "fire":
+        return [*lines, "Would fire the scheduled task once; pass --fire to fire it"]
+    trigger, token = dispatch_secrets()  # before anything is fired, so a missing one fires nothing
+    answer = fire_scheduled_task(trigger, token, text)
+    return [*lines, f"Fired the scheduled task once: {answer.get('claude_code_session_url') or 'no session named'}"]
 
 
 def quoted(text: str) -> str:
@@ -10687,6 +10834,24 @@ def run_ready(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+@command("dispatch", "the dispatcher (README \"Dispatcher\"): list the startable work issues "
+                     "(ready, not waiting on a person, no open blocker) and whether an integrator "
+                     "runs (an open landing pull request, or in-progress work that moved within "
+                     "the fleet lease), all read from GitHub with no model; with --fire it fires "
+                     f"the scheduled task in {DISPATCH_TRIGGER_VARIABLE} with the token in "
+                     f"{DISPATCH_TOKEN_VARIABLE} once where startable work waits, none runs and "
+                     "the fleet is not paused; with --dry-run it prints that fire and makes none",
+         OPTIONAL_WORKTREE, REPO,
+         Exclusive((arg("--fire", action="store_true", help="fire the scheduled task once where due"),
+                    arg("--dry-run", action="store_true",
+                        help="print the fire it would make, fire nothing"))))
+def run_dispatch(root: Path, args: argparse.Namespace) -> int:
+    mode = "fire" if args.fire else "dry-run" if args.dry_run else "report"
+    for line in dispatch(root, resolve_repo(root, args.repo), mode):
+        print(line)
+    return 0
+
+
 @command("capacity", "show local worker capacity or cloud unlimited capacity", *TRACKER_QUERY)
 def run_capacity(root: Path, args: argparse.Namespace) -> int:
     slots = capacity(root, resolve_repo(root, args.repo), args.all_repos)
@@ -10941,7 +11106,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
