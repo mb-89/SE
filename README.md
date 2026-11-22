@@ -1551,6 +1551,8 @@ uv run python <se>/scripts/se_workflows.py check
   and `release.yml`, and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
   `scripts/se_workflows.py`). `write` writes the files it names, or regenerates those the project
   holds; each is a generated file whose first line names its source path, the pin and SE's place.
+- SE's own workflows beside them are not shipped: `check.yml`, `docs.yml` and the forms backstop,
+  `forms.yml`, run on SE's own events ([Forms](#forms)).
 - The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
   application `se new app` made, or `--ref`.
 - SE's place, how CI reaches it: a module URL `../<name>.git` is `${{ github.repository_owner
@@ -1825,6 +1827,7 @@ Markdown to file.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `se_forms.py backstop` | `se_forms.py backstop --event-name EVENT_NAME --event EVENT [--backstop {off,on}] [--worktree WORKTREE]` | plan the label or failure a GitHub event's off-form text gets |
 | `se_forms.py check` | `se_forms.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [form]` | check a text against a form as SE's filing commands would |
 | `se_forms.py check-files` | `se_forms.py check-files [--changed REF] [--root ROOT] [--forms FORMS] [PATH ...]` | check the files a form claims, given or changed since a ref |
 | `se_forms.py draft` | `se_forms.py draft [--markdown] [--tree] form` | print a form's fields, their instructions, their shape and its schema |
@@ -2132,3 +2135,17 @@ the findings) or `refuse` (the call is denied, naming the form, every finding an
 - It fails open when it is slow: past 10 s, or where the host cancels it, the call runs.
   It fails open where it cannot judge (no Python 3.11, a payload it cannot read), and logs it in
   `.se/.runtime/forms-gate.log`; it fails closed only on a crash once it knows a form applies.
+
+SE's forms backstop marks what reaches GitHub past every hook, where se.toml `[forms] backstop` is
+`on` (default `off`): a person's write on github.com, a session without SE's hooks, a label change.
+
+The workflow `.github/workflows/forms.yml` runs on each issue and comment event and hands the event
+to `scripts/se_forms.py backstop`, whose docstring owns what it checks and its plan.
+
+- A fleet issue (the fleet marker, or labelled `work`) whose text breaks its form gets the label
+  `off-form`, and the run's summary lists the findings and the `unhold` line; a marked comment that
+  breaks its form gets a failed run, as `unhold` reads the issue's body alone.
+- Outside reporters' issues, unmarked comments and passing text are left alone. The workflow never
+  comments and never removes a label; `work_tickets.py unhold` stays the way back.
+- SE's own se.toml leaves it `off`: open issues SE's commands filed from an older form would be
+  labelled.
