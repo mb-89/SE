@@ -708,9 +708,8 @@ example.
 
 ### dec-002 Is the problem real
 
-A decision names what shows its problem exists: a failure, a measurement or the person's words.
-It also names how others solve the same problem, at least two outside tools, products or
-conventions, so a solution that exists is reused rather than built again.
+A decision names what shows its problem exists (a failure, a measurement or the person's words)
+and how at least two outside tools, products or conventions solve the same problem.
 
 - **Why:** a decision about an imagined problem spends effort and adds rules for nothing; one that
   ignores how others solve it builds again what exists.

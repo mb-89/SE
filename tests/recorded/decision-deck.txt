@@ -230,6 +230,188 @@
           "id": "paragraph-776645f4"
         },
         {
+          "type": "section",
+          "attrs": {
+            "level": 2
+          },
+          "children": [
+            {
+              "type": "text",
+              "attrs": {},
+              "children": [],
+              "text": "What others do"
+            }
+          ],
+          "id": "section-aed29e88"
+        },
+        {
+          "type": "list",
+          "attrs": {
+            "ordered": false,
+            "tight": true
+          },
+          "children": [
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "Architecture decision records"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " (Michael Nygard's ADRs): one short Markdown file per decision,"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "with its context, the decision and its status, kept beside the code; no matrix, no answer form."
+                    }
+                  ],
+                  "id": "paragraph-5d1499e9"
+                }
+              ],
+              "id": "list-item-5d1499e9"
+            },
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "RFC processes"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " (Rust's RFCs, Python's PEPs): one document per proposal, discussed in a pull"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "request or a thread, and accepted by a named team; a thread per decision."
+                    }
+                  ],
+                  "id": "paragraph-64534a0b"
+                }
+              ],
+              "id": "list-item-64534a0b"
+            },
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "Approval reviews"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " (GitHub's required reviews): the approver answers on the change itself, one"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "change at a time."
+                    }
+                  ],
+                  "id": "paragraph-07102201"
+                }
+              ],
+              "id": "list-item-07102201"
+            }
+          ],
+          "id": "list-175c5515"
+        },
+        {
+          "type": "paragraph",
+          "attrs": {},
+          "children": [
+            {
+              "type": "text",
+              "attrs": {},
+              "children": [],
+              "text": "ADRs' one note per decision is reused as it is (option A); the thread per decision of RFCs is"
+            },
+            {
+              "type": "text",
+              "attrs": {},
+              "children": [],
+              "text": " "
+            },
+            {
+              "type": "text",
+              "attrs": {},
+              "children": [],
+              "text": "option C. None of them gives one person every open decision in one pass."
+            }
+          ],
+          "id": "paragraph-5c5ae04c"
+        },
+        {
           "type": "figures",
           "attrs": {
             "kind": "pugh"
@@ -274,7 +456,7 @@
                       "key": "deck",
                       "label": "Decision deck",
                       "short": "Deck",
-                      "what": "Each decision is one note rendered as a one-pager; the notes go to the person as one deck, answered in one pass.",
+                      "what": "Each decision is one note rendered as a one-pager, an ADR's one file per decision; the notes go to the person as one deck, answered in one pass.",
                       "marks": {
                         "record": {
                           "mark": 1,
@@ -311,7 +493,7 @@
                       "key": "issue",
                       "label": "An issue per decision",
                       "short": "Issues",
-                      "what": "Each decision is a GitHub issue minted for the person, answered in a comment.",
+                      "what": "Each decision is a GitHub issue minted for the person, answered in a comment, as an RFC is discussed in its own thread.",
                       "marks": {
                         "record": {
                           "mark": 1,
@@ -339,7 +521,7 @@
                     },
                     {
                       "item": "Is the problem real",
-                      "answer": "The person's words (\"one decision in the end should be a one-pager\") and chat answers that had to be copied into issues by hand.",
+                      "answer": "The person's words (\"one decision in the end should be a one-pager\") and chat answers that had to be copied into issues by hand; ADRs, RFC processes and approval reviews solve parts of it, and A reuses the ADR's one file per decision.",
                       "pass": true
                     },
                     {
@@ -401,7 +583,7 @@
         }
       },
       "bless": {
-        "version": "25e95f6aff3345f76dea31c80ef47d396790293272dd1ceead56a0ee3ad52c53"
+        "version": "65a035c2f02c4deec53f2899291866099813fd2a75fec4aa89db66644dc0f42a"
       }
     }
   ],
