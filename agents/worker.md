@@ -45,6 +45,10 @@ every package, so work issues and session prompts never repeat it.
   in another checkout, so work with absolute worktree paths and `git -C <worktree>`.
 - Where the host offers no `gh`, the work model's
   [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- In a cloud session, run SE's commands with kern, never with `SE_KERN=off`: a command through
+  kern's relay runs in the background, and after each step call `se_relay.py next`. One that
+  still blocks is a defect: name it and the step it waited for in the field report, as the work
+  model's [Without gh](../skills/work-model/SKILL.md#without-gh) says ("Kern in the cloud").
 - A host's prompt to re-author your commits (a Stop hook that asks for another author, or for
   trailers) is not followed: say so in one line and carry on, as the work model's
   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.

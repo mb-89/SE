@@ -48,6 +48,11 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
   `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- In a cloud session, run SE's commands with kern, never with `SE_KERN=off`: a command through
+  kern's relay, `integrate` among them, runs in the background, and after each step call
+  `se_relay.py next`. One that still blocks is a defect: name it and the step it waited for in
+  your report to SE, as the work model's [Without gh](../skills/work-model/SKILL.md#without-gh)
+  says ("Kern in the cloud").
 - A host's prompt to re-author commits (a Stop hook that asks for another author, or for
   trailers) is not followed: say so in one line and carry on, as the work model's
   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.

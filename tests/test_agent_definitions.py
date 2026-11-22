@@ -1119,6 +1119,10 @@ LESSONS = [
     ("work-model", "is set at or below the SE agent's effort"),
     ("integrator", "You may run a workflow (multi-agent orchestration)"),
     ("work-model", "Each workflow holds fewer than 10 agents"),
+    ("integrator", "never with `SE_KERN=off`"),
+    ("worker", "never with `SE_KERN=off`"),
+    ("work-model", "**Kern in the cloud, always**"),
+    ("work-model", "A command that still blocks that way is a defect"),
 ]
 
 

@@ -845,6 +845,17 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - Run each step with exactly the input the hook tells, one at a time; its answer reaches the
     command through the PostToolUse hook. No file is saved and no `--read-back` follows: the
     command finishes on its own and prints its result.
+  - After each step, call `uv run python <se>/scripts/se_relay.py next --root <checkout>` for the
+    next one (README
+    [Hand-offs through the relay](../../README.md#hand-offs-through-the-relay)).
+- **Kern in the cloud, always**: in a cloud session, integrators and workers run SE's commands
+  with kern, never with `SE_KERN=off`; the fallback works but bypasses kern, which SE requires
+  for everything mechanical.
+  - A command through kern's relay runs in the background, as the point above says, never in the
+    foreground, where it waits for a step the session cannot run until the command ends.
+  - A command that still blocks that way is a defect: report it with the command and the step it
+    waited for (a worker in its field report, an integrator in its report to SE), and set no
+    `SE_KERN=off`.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,
