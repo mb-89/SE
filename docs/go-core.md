@@ -73,11 +73,22 @@ An action is a command that reaches the outside. kern builds it from the Go line
 
 The Go line's GitHub snapshot comes back as names the GitHub component writes
 ([GitHub in the cloud](#github-in-the-cloud)). Its I/O modules for the clock, the disk, processes
-and sessions come back as shared I/O components ([The core's repository](#the-cores-repository)).
-git is one of them, kern's git door: today the package `kern/git`, which `kern/host`,
-`kern/tools/release` and `components/origin` call, its fake `kern/git/gitfake` held to the same
-contract cases as real git, as `tests/test_git_door.py` holds SE's git door. It becomes an I/O
-component once a caller needs git as an action rather than a call it waits on.
+and sessions come back as shared I/O components ([The core's repository](#the-cores-repository)),
+each of which declares the forbid list of what it replaces
+([des-018](../src/skills/work-model/references/rules.md#des-018-every-io-module-declares-its-forbid-list);
+kern's README "Forbid lists"):
+
+- **The clock**, `kern/components/clock`: time as names, `time` since its start and the counters
+  `second`, `minute` and `hour`, which a component reads instead of keeping a timer of its own
+  ([des-017](../src/skills/work-model/references/rules.md#des-017-time-is-an-io-module); kern's
+  README "The host", "Time is an I/O module").
+- **The files module**, `kern/components/files`: the warm model, every managed folder held in
+  memory as names, read and searched from the model and written by compare-and-swap, a watcher
+  and a hash reconcile keeping it in step with the disk (kern's README "Files").
+- **git**, kern's git door: today the package `kern/git`, which `kern/host`, `kern/tools/release`
+  and `components/origin` call, its fake `kern/git/gitfake` held to the same contract cases as
+  real git, as `tests/test_git_door.py` holds SE's git door. It becomes an I/O component once a
+  caller needs git as an action rather than a call it waits on.
 
 ### What comes from quackitect v5
 
@@ -598,7 +609,7 @@ kern/
   kerntest/               the Go fake core
   python/kern/            the Python SDK and fake core
   contract/               the one contract suite, run against both fakes and the real core
-  components/             clock, disk, proc, git, session, github: generic, each switchable
+  components/             clock, files, disk, proc, git, session, github: generic, each switchable
   types/                  the shared JSON types
   template/               the bare application
   .github/workflows/      check.yml, release.yml, battery.yml (reusable)
