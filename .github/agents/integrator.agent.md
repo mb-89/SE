@@ -181,6 +181,10 @@ merge or a start.
    clash with running workers) gets a fresh worktree from the newest integration branch
    (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
+   Start no more workers than the worker limit leaves room for
+   ([README "Workers"](../../README.md#workers)): `capacity`, or in the cloud without gh the
+   queue's plan. The rest wait, and the next landing starts them as a worker finishes.
+
    Then write what you did into the issue you landed, as one comment: each issue you started with
    its worker session, or `Started: none startable`.
 
@@ -188,8 +192,8 @@ merge or a start.
    ([README "Dispatcher"](../../README.md#dispatcher)) only restarts a fleet where no integrator
    runs.
 
-   It also gets a worker session whose `workspace` is that worktree folder; local workers only
-   within capacity. Its `effort` is your own or lower, never higher
+   It also gets a worker session whose `workspace` is that worktree folder, only within
+   capacity. Its `effort` is your own or lower, never higher
    ([effort ceiling](../skills/work-model/SKILL.md#visible-sessions)).
 
    You start it yourself, so it is your child, titled

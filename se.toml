@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "10.6.0"
+version = "10.7.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -120,6 +120,11 @@ go = "components/go.mod"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
+# At most this many working agents run at once (README "Workers"): 4 on a local device; the cloud
+# is left open.
+[workers]
+local = 4
+
 [timeline]
 repositories = ["SE", "obs", "kern"]
 

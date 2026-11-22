@@ -4051,11 +4051,12 @@ def start(
     )
     if issue is None:
         raise QueueError(f"Issue #{number} is not startable")
-    slots = capacity(root, repo)
-    if slots is not None and slots <= 0:
-        raise QueueError(f"Issue #{number} is not startable: local capacity is exhausted")
-
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
+    slots = capacity(root, repo, cloud=in_cloud() or cloud)
+    if slots is not None and slots <= 0:
+        raise QueueError(f"Issue #{number} is not startable: capacity is exhausted, the worker "
+                         "limit or the device's cores and memory are taken")
+
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
     if cloud:
         if not agent:
@@ -4192,16 +4193,68 @@ def refuse_held_start(number: int, issue: dict[str, object], door: object | None
                      f"{held_by(held)}{remedy}")
 
 
+def running_step(root: Path, repo: str) -> Step:
+    """The read that counts the workers running, for the session's GitHub tools."""
+    return Step("running", "list_issues", {**owner_repo(repo), "state": "OPEN",
+                                           "labels": ["in-progress", repository_label(root)],
+                                           "perPage": 100},
+                note="each open issue listed with the labels work, in-progress and "
+                     f"{repository_label(root)} is a worker running")
+
+
+def running_in(root: Path, answer: object) -> int:
+    """The workers running in a `list_issues` answer (the tools' object with `issues`, or a list):
+    the open issues labelled work, in-progress and the repository's label."""
+    issues = answer.get("issues") if isinstance(answer, dict) else answer
+    if not isinstance(issues, list):
+        raise QueueError("start: the running workers read is no list_issues answer")
+    wanted = {"work", "in-progress", repository_label(root)}
+    return sum(1 for issue in issues if isinstance(issue, dict)
+               and str(issue.get("state") or "open").lower() == "open"
+               and wanted <= issue_labels(issue))
+
+
+def refuse_full_start(root: Path, number: int, repo: str, cloud: bool, door: object | None,
+                      running_file: Path | None) -> None:
+    """Refuse `start` without gh where the worker limit (`worker_limit`) is reached: the workers
+    running read through kern's relay, else from `running_file`, the `list_issues` answer of
+    `running_step`. Where no limit holds (the cloud left open) it reads nothing."""
+    limit = worker_limit(root, cloud)
+    if limit is None:
+        return
+    step = running_step(root, repo)
+    if door is not None:
+        answer = door.ask(step.tool, {key: value for key, value in step.arguments.items()
+                                      if key not in ("owner", "repo")})
+    elif running_file is not None:
+        try:
+            answer = json.loads(running_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise QueueError(f"start: cannot read the running workers {running_file}: {error}") from error
+    else:
+        raise QueueError(
+            f"start: at most {limit} workers run at once ([workers] in se.toml), so start counts "
+            f"those running: list them with your GitHub tools ({step.tool}, "
+            f"{json.dumps(step.arguments)}), save the answer unchanged and pass --running <file> "
+            f"({WITHOUT_GH})")
+    running = running_in(root, answer)
+    if running >= limit:
+        raise QueueError(f"Issue #{number} is not startable: {running} workers run, the worker "
+                         f"limit is {limit} ([workers] in se.toml); start it when one finishes")
+
+
 def start_handed_off(
     root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
     cloud_agent: str | None, issue_file: Path | None, blockers_file: Path | None = None,
+    running_file: Path | None = None,
 ) -> tuple[Path | None, str, str]:
     """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
     GitHub tools answered it (`issue_file`); held while a blocker holds it (`refuse_held_start`,
     its states from `blockers_file` off the relay); the worktree as with gh; then the label change
     and the Started comment sent through kern's relay where it serves the checkout, else printed as
-    steps for the session's GitHub tools. The worktree (None for a cloud worker), the issue's
-    URL and its branch."""
+    steps for the session's GitHub tools; refused where the worker limit is reached
+    (`refuse_full_start`, the workers running from `running_file` off the relay). The worktree
+    (None for a cloud worker), the issue's URL and its branch."""
     door = relay_door(root, repo)
     if door is not None:
         refuse_while_paused("start", door.paused(repo))
@@ -4225,6 +4278,7 @@ def start_handed_off(
                          f"{', '.join(sorted(labels & NOT_STARTABLE_LABELS))}")
     refuse_held_start(number, issue, door, blockers_file)
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
+    refuse_full_start(root, number, repo, in_cloud() or cloud, door, running_file)
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
     if cloud and not agent:
         raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
@@ -4345,16 +4399,56 @@ def ready_issues(
     return found
 
 
-def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | None:
-    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+LOCAL_WORKERS = 4  # [workers] local, unset: at most this many working agents at once on a device
+
+
+def in_cloud() -> bool:
+    """Whether this command runs in the cloud, a cloud the host table marks (`scripts/hosts.py`
+    `clouds`: a Claude Code cloud session, a CI runner); elsewhere it runs on a local device."""
+    return bool(sibling("hosts").clouds(os.environ))
+
+
+def worker_limit(root: Path, cloud: bool) -> int | None:
+    """At most this many working agents run at once (README "Workers"): `se.toml` `[workers]`
+    `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
+    table = se_table(root, "workers")
+    unknown = sorted(set(table) - {"local", "cloud"})
+    if unknown:
+        raise QueueError(f"[workers] in {root / 'se.toml'} holds unknown keys {', '.join(unknown)}; "
+                         "it holds local and cloud")
+    key = "cloud" if cloud else "local"
+    value = table.get(key, None if cloud else LOCAL_WORKERS)
+    if value is None:
         return None
-    if repo is None:
-        raise QueueError("No repository for local capacity")
-    active = json.loads(run_gh(root, [
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise QueueError(f"[workers] {key} in {root / 'se.toml'} must be a whole number of at least "
+                         f"1, not {value!r}" + ("; remove it to leave the cloud open" if cloud else ""))
+    return value
+
+
+def running_workers(root: Path, repo: str, all_repos: bool = False) -> int:
+    """The workers running: the open work issues labelled in-progress."""
+    return len(json.loads(run_gh(root, [
         "issue", "list", "--state", "open", "--label", "work", "--label", "in-progress",
         "--json", "number", "--limit", "200",
         *repository_label_arguments(root, all_repos), *repo_arguments(repo),
-    ]))
+    ])))
+
+
+def capacity(root: Path, repo: str | None, all_repos: bool = False,
+             cloud: bool | None = None) -> int | None:
+    """How many more workers may start now: the worker limit (`worker_limit`), on a local device
+    also the cores and memory, minus the workers running; None where nothing limits them (the
+    cloud with no `[workers] cloud`)."""
+    cloud = in_cloud() if cloud is None else cloud
+    limit = worker_limit(root, cloud)
+    if cloud and limit is None:
+        return None
+    if repo is None:
+        raise QueueError("No repository for the worker capacity")
+    active = running_workers(root, repo, all_repos)
+    if cloud:
+        return max(0, int(limit) - active)
     slots = max(1, (os.cpu_count() or 1) // LOCAL_CORES_PER_WORKER)
     if sys.platform == "win32":
         import ctypes
@@ -4364,8 +4458,8 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False) -> int | Non
         memory_slots = max(1, (memory.value // 1024) // LOCAL_MEMORY_MIB_PER_WORKER)
     else:
         memory_slots = slots
-    slots = min(slots, memory_slots)
-    return max(0, slots - len(active))
+    slots = min(slots, memory_slots, int(limit))
+    return max(0, slots - active)
 
 
 def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
@@ -8650,15 +8744,23 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if door is None or getattr(door, "relayed", False):
         print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
         return short
-    started = 0
-    for candidate in ready_issues(root, tracker):
-        slots = capacity(root, tracker)
-        if slots is not None and slots <= 0:
-            break
-        start(root, int(candidate["number"]), tracker, None, True)
-        started += 1
-    print(f"Started: {started}")
+    started, waiting = start_startable(root, tracker)
+    print(f"Started: {started}" + (f"; {waiting} startable wait for capacity, the next landing "
+                                   "starts them" if waiting else ""))
     return short
+
+
+def start_startable(root: Path, repo: str) -> tuple[int, int]:
+    """Start every startable work issue while capacity is left (`capacity`: the worker limit, on a
+    local device also its cores and memory), as `integrate` does after each landing, so a worker
+    that finished frees its place for the next. How many started, and how many wait."""
+    startable = ready_issues(root, repo)
+    for index, candidate in enumerate(startable):
+        slots = capacity(root, repo)
+        if slots is not None and slots <= 0:
+            return index, len(startable) - index
+        start(root, int(candidate["number"]), repo, None, True)
+    return len(startable), 0
 
 
 REF_WORKFLOW = "ref-maintenance.yml"
@@ -11003,13 +11105,18 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
              help="without gh, off kern's relay: the issues the work issue's Blocked by names, "
                   "as your GitHub tools' issue_read (method get) answered each, saved unchanged "
                   "as one JSON list; start refuses while one is open or closed as not planned, "
-                  "or its state is not known"))
+                  "or its state is not known"),
+         arg("--running", type=Path, metavar="FILE",
+             help="without gh, off kern's relay, where a worker limit holds ([workers] in "
+                  "se.toml): the open issues labelled in-progress as your GitHub tools' "
+                  "list_issues answered it, saved unchanged; start refuses while as many workers "
+                  "run as the limit"))
 def run_start(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     if hand_off():
         path, url, branch = start_handed_off(root, args.issue, repo, args.worktree_root,
                                              args.create, args.cloud_agent, args.issue_body,
-                                             args.blockers)
+                                             args.blockers, args.running)
         sent = relay_door(root, repo) is not None
     else:
         path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
@@ -11085,9 +11192,12 @@ def run_dispatch(root: Path, args: argparse.Namespace) -> int:
     dispatcher = sibling("dispatch")
     mode = "fire" if args.fire else "dry-run" if args.dry_run else "report"
     repo = resolve_repo(root, args.repo)
-    pause, startable = concurrently(lambda: pause_issues(root, repo), lambda: ready_issues(root, repo))
+    pause, startable, slots = concurrently(lambda: pause_issues(root, repo),
+                                           lambda: ready_issues(root, repo),
+                                           lambda: capacity(root, repo))
     try:
-        lines = dispatcher.dispatch(sys.modules[__name__], root, repo, mode, pause, startable)
+        lines = dispatcher.dispatch(sys.modules[__name__], root, repo, mode, pause, startable,
+                                    slots=slots)
     except dispatcher.FireError as error:
         raise QueueError(str(error)) from None
     for line in lines:
@@ -11095,7 +11205,9 @@ def run_dispatch(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("capacity", "show local worker capacity or cloud unlimited capacity", *TRACKER_QUERY)
+@command("capacity", "show how many more workers may start: the worker limit ([workers] in "
+                     "se.toml), on a local device also its cores and memory, less those running",
+         *TRACKER_QUERY)
 def run_capacity(root: Path, args: argparse.Namespace) -> int:
     slots = capacity(root, resolve_repo(root, args.repo), args.all_repos)
     print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
@@ -11105,7 +11217,9 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
 def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
     """The queue's GitHub reads as a plan for the session's tools, where gh is not signed in: the
     pause search first, then the escalations, the delivered pull requests and the startable work
-    issues, each with what keeps an item; the cloud's capacity is unlimited."""
+    issues, each with what keeps an item; the cloud's capacity is unlimited unless `[workers]`
+    `cloud` limits it, and then the workers running are read too."""
+    limit = worker_limit(root, cloud=True)
     where = owner_repo(repo)
     labels = [] if all_repos else [repository_label(root)]
     base = integration_branch(root)
@@ -11124,7 +11238,15 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
              note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
                   | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
                   "no branch yet and no file ownership an in-progress issue holds"),
-    ), then="Capacity: unlimited (cloud)")
+        *([] if limit is None else [running_step(root, repo)]),
+    ), then=capacity_line(limit))
+
+
+def capacity_line(limit: int | None) -> str:
+    """The plan's capacity in the cloud: unlimited, or the worker limit less those running."""
+    return ("Capacity: unlimited (cloud)" if limit is None else
+            f"Capacity: {limit} workers at once (cloud, [workers] in se.toml) less the workers "
+            "running that the running read lists; start no more")
 
 
 @command("queue", "list delivered pull requests (open, to the integration branch, with a complete "
@@ -11467,8 +11589,9 @@ READ_ONLY_COMMANDS = {
                      "session tool its title.",
     "ready": "Lists the ready work issues a session may start now. Use it to choose the next "
              "package to start.",
-    "capacity": "Shows how many workers may run now: the local slots, or unlimited in the cloud. "
-                "Use it before starting workers.",
+    "capacity": "Shows how many more workers may start now: the worker limit less those "
+                "running, on a local device also its cores and memory; unlimited in the cloud "
+                "unless limited. Use it before starting workers.",
     "fleet-check": "Lists every stuck or stray piece of work, each with its issue, pull request "
                    "and remedy, or says healthy. Use it to see what needs attention across the "
                    "fleet.",

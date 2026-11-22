@@ -1856,6 +1856,91 @@ def test_capacity_counts_running_work_issues(worktree, monkeypatch):
     assert work_tickets.capacity(worktree, "git.example/owner/repo") == 2
 
 
+@pytest.mark.parametrize(("table", "local", "cloud"), [
+    ("", 4, None),
+    ("[workers]\nlocal = 2\n", 2, None),
+    ("[workers]\nlocal = 6\ncloud = 10\n", 6, 10),
+])
+def test_the_worker_limit_is_four_on_a_local_device_and_open_in_the_cloud_unless_set(
+        worktree, table, local, cloud):
+    (worktree / "se.toml").write_text(IDENTITY + table, encoding="utf-8")
+    assert work_tickets.worker_limit(worktree, cloud=False) == local
+    assert work_tickets.worker_limit(worktree, cloud=True) == cloud
+
+
+@pytest.mark.parametrize(("table", "message"), [
+    ("local = 0", "local in"),
+    ("local = true", "local in"),
+    ('cloud = "open"', "remove it to leave the cloud open"),
+    ("workers = 3", "unknown keys workers"),
+])
+def test_a_worker_limit_that_is_no_whole_number_of_at_least_one_is_refused(worktree, table, message):
+    (worktree / "se.toml").write_text(f"{IDENTITY}[workers]\n{table}\n", encoding="utf-8")
+    with pytest.raises(work_tickets.QueueError, match=message):
+        work_tickets.worker_limit(worktree, cloud="cloud" in table)
+
+
+def test_capacity_holds_the_worker_limit_locally_and_in_the_cloud(worktree, monkeypatch):
+    (worktree / "se.toml").write_text(f"{IDENTITY}[workers]\nlocal = 3\ncloud = 5\n",
+                                      encoding="utf-8")
+    monkeypatch.setattr(work_tickets.os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(work_tickets.sys, "platform", "not-windows")
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: json.dumps([{"number": 1}]))
+    assert work_tickets.capacity(worktree, "git.example/owner/repo") == 2  # 16 cores' slots, limit 3
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    assert work_tickets.capacity(worktree, "git.example/owner/repo") == 4
+    assert work_tickets.capacity(worktree, "git.example/owner/repo", cloud=False) == 2
+
+
+class StartableFleet:
+    """GitHub's work issues, faked for start: each startable issue is labelled ready until a start
+    labels it in-progress; `finish` closes one, as its landing does."""
+
+    def __init__(self, count: int) -> None:
+        self.labels = {number: "ready" for number in range(1, count + 1)}
+
+    def ready(self, root, repo, all_repos=False, allow_existing_branch=False):
+        return [{"number": number, "title": f"feature-{number}"}
+                for number, label in self.labels.items() if label == "ready"]
+
+    def gh(self, root, args):
+        if args[:2] == ["issue", "list"] and "in-progress" in args:
+            return json.dumps([{"number": number} for number, label in self.labels.items()
+                               if label == "in-progress"])
+        if args[:2] == ["issue", "edit"] and "in-progress" in args:
+            self.labels[int(args[2])] = "in-progress"
+            return ""
+        raise AssertionError(f"gh {args}")
+
+    def finish(self, number: int) -> None:
+        self.labels[number] = "closed"
+
+    def running(self) -> list[int]:
+        return [number for number, label in self.labels.items() if label == "in-progress"]
+
+
+def test_six_startable_issues_with_a_limit_of_four_start_four_and_a_fifth_when_one_finishes(
+        worktree, monkeypatch):
+    (worktree / "se.toml").write_text(f"{IDENTITY}[workers]\nlocal = 4\n", encoding="utf-8")
+    fleet = StartableFleet(6)
+    monkeypatch.setattr(work_tickets.os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(work_tickets.sys, "platform", "not-windows")
+    monkeypatch.setattr(work_tickets, "run_gh", fleet.gh)
+    monkeypatch.setattr(work_tickets, "ready_issues", fleet.ready)
+    monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: [])
+    monkeypatch.setattr(work_tickets, "start_worktree",
+                        lambda root, branch, worktree_root, create: worktree / branch)
+
+    assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (4, 2)
+    assert fleet.running() == [1, 2, 3, 4]
+    with pytest.raises(work_tickets.QueueError, match="#5 is not startable: capacity is exhausted"):
+        work_tickets.start(worktree, 5, "git.example/owner/repo", None, True)
+
+    fleet.finish(2)  # its landing closes it, and integrate then starts what is unblocked
+    assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (1, 1)
+    assert fleet.running() == [1, 3, 4, 5]
+
+
 def test_queue_lists_delivered_pull_requests_escalations_and_startable_work(worktree, monkeypatch):
     def pull(number: int, body: str) -> dict:
         return {"number": number, "title": f"feature/n{number}", "url": f"https://example/{number}",
@@ -2097,7 +2182,7 @@ def start_fakes(monkeypatch, ready=lambda root, repo, allow_existing_branch=Fals
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
     monkeypatch.setattr(work_tickets, "ready_issues", ready)
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: slots)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: slots)
     return fake
 
 
@@ -2234,7 +2319,9 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
 
 
 def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
-    """No usable gh: every gh call fails the test; the issue as the GitHub tools answer it."""
+    """No usable gh, as in Claude's cloud, whose worker limit is open by default: every gh call fails
+    the test; the issue as the GitHub tools answer it."""
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
@@ -2286,6 +2373,47 @@ def test_start_without_gh_refuses_an_unstartable_or_unread_issue(
     assert run(main_checkout, "start", "5", *arguments) == 1
     assert message in capsys.readouterr().err
     assert not (main_checkout.parent / f"{main_checkout.name}.worktrees").exists()
+
+
+def running_file(tmp_path: Path, root: Path, count: int) -> Path:
+    """The open in-progress work issues as list_issues answers them: `count` workers running."""
+    saved = tmp_path / "running.json"
+    label = work_tickets.repository_label(root)
+    saved.write_text(json.dumps({"issues": [
+        {"number": 10 + n, "title": f"feature-{n}", "state": "OPEN",
+         "labels": ["work", "in-progress", label]} for n in range(count)]
+        + [{"number": 30, "title": "elsewhere", "state": "OPEN", "labels": ["in-progress"]}]}),
+        encoding="utf-8")
+    return saved
+
+
+def test_start_without_gh_on_a_local_device_counts_the_workers_running_against_the_limit(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+    monkeypatch.delenv("CLAUDE_CODE_REMOTE")
+    worktrees = main_checkout.parent / f"{main_checkout.name}.worktrees"
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer)) == 1
+    err = capsys.readouterr().err
+    assert "at most 4 workers run at once" in err and "--running <file>" in err
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--running", str(running_file(tmp_path, main_checkout, 4))) == 1
+    assert "4 workers run, the worker limit is 4" in capsys.readouterr().err
+    assert not worktrees.exists()
+
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--running", str(running_file(tmp_path, main_checkout, 3))) == 0
+    assert (worktrees / "feature-example-20261104").is_dir()
+
+
+def test_start_without_gh_in_the_cloud_with_a_limit_lists_the_workers_running(
+        main_checkout, monkeypatch, capsys, tmp_path):
+    answer = started_without_gh(monkeypatch, tmp_path)
+    with (main_checkout / "se.toml").open("a", encoding="utf-8") as settings:
+        settings.write("\n[workers]\ncloud = 2\n")
+    assert run(main_checkout, "start", "5", "--issue-body", str(answer),
+               "--running", str(running_file(tmp_path, main_checkout, 2))) == 1
+    assert "2 workers run, the worker limit is 2" in capsys.readouterr().err
 
 
 def blocked_answer(tmp_path: Path, body: str, summary: int | None = None) -> Path:
@@ -2466,7 +2594,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
     monkeypatch.setattr(
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
@@ -2741,7 +2869,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 1)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
     monkeypatch.setattr(
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
@@ -2944,7 +3072,7 @@ def integration_fakes(monkeypatch, head: str, reported: str | None = None,
     monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "1 passed"))
     monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo: 0)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 0)
     return calls
 
 
@@ -8022,6 +8150,14 @@ def test_queue_without_gh_syncs_and_prints_its_reads_as_a_plan(worktree, monkeyp
     assert 'list_pull_requests {"base": "main"' in out and "field-report --check" in out
     assert '"labels": ["work", "ready", "repo:repo"]' in out
     assert out.rstrip().endswith("Then: Capacity: unlimited (cloud)")
+    assert '"labels": ["in-progress", "repo:repo"]' not in out  # nothing limits: no count read
+
+    with (worktree / "se.toml").open("a", encoding="utf-8") as settings:
+        settings.write("\n[workers]\ncloud = 6\n")
+    assert run(worktree, "queue", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    assert '"labels": ["in-progress", "repo:repo"]' in out  # the workers running
+    assert "Then: Capacity: 6 workers at once (cloud, [workers] in se.toml) less the workers running" in out
 
 
 def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_names(
