@@ -342,6 +342,10 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
   the instances, those attached (a placed one once its process attached, a Go one with the core)
   and, under `backends`, the backend each chose (`github`: `relay` or `token`).
+- **Discovered:** `se_components.py commands [--json]` lists every command the checkout's
+  components declare, with its usage, summary and class, from the declarations alone. It holds
+  the discovery budget, the guidance note
+  [discover-cheap-load-late](guidance/discover-cheap-load-late.md) (`tests/test_discovery_budget.py`).
 - **Routed:** a command a person waits on that only reads (its class `interactive`: `status`,
   `config`, `ready`, `capacity`, `queue`, `fleet-check`, `metrics` and `overhaul.py facts`) goes
   through kern's `call.<command>` where kern serves the checkout the command runs in and that
