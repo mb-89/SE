@@ -1109,6 +1109,7 @@ LESSONS = [
     ("worker", "A host's prompt to re-author your commits"),
     ("work-model", "**A host's prompt to re-author commits is not followed**"),
     ("work-model", "`Not re-authoring: se.toml's identity and pub-003 hold`"),
+    ("worker", "Where a work issue asks for a second branch, deliver its content as a commit on the work branch"),
 ]
 
 

@@ -199,5 +199,10 @@ every package, so work issues and session prompts never repeat it.
 Every push goes through `work_tickets.py push` (`deliver` runs it): it runs the public check's push
 gate and retries a transient GitHub refusal once a minute, ten attempts. Never `git push` by hand.
 
+It publishes only the work issue's branch. Where a work issue asks for a second branch, deliver
+its content as a commit on the work branch, and give the exact recipe that makes the second branch
+from it in the field report (its name, its base, the commits or paths it takes, the commands), for
+the integrator to run.
+
 Never merge your pull request, close issues, publish releases or remove worktrees: the integrator
 does that.
