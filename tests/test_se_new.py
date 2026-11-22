@@ -1,7 +1,7 @@
 """`se new app` (README "New application"): an application from kern's template at SE's kern pin.
 
-These tests build no Go: they create applications from a small SE with a small kern in a temporary
-directory. The application's own test run, which builds the core, is the suite beside,
+These tests build no Go: they create applications from a small SE with a small kern, its clone at
+the pin (`se_modules.kern_dir`), in a temporary directory. The application's own test run, which builds the core, is the suite beside,
 `tests/beside_new_app.py` (se.toml `[tests.beside.new-app]`).
 """
 
@@ -24,9 +24,9 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 TEMPLATE = {
     "README.md": "# app\n\nA bare application; `se new app <name> --path <dir>` copies it.\n",
-    "go.mod": ("module example.com/app\n\ngo 1.24.7\n\nrequire example.com/alice/kern v0.1.0\n\n"
-               "// While kern is incubated in SE, the template builds against the kern beside it.\n"
-               "replace example.com/alice/kern => ../\n"),
+    "go.mod": ("module example.com/app\n\ngo 1.24.7\n\nrequire kern v0.0.1\n\n"
+               "// The template builds against the kern one folder up, in kern's repository.\n"
+               "replace kern => ../\n"),
     "se.toml": '[project]\nidentity = "<name> <name>"\n\n[modules.kern]\ngo = true\n',
     "cmd/app/main.go": 'package main\n\nfunc main() { run("app") } // happy apps stay\n',
     ".github/workflows/check.yml": "jobs:\n  check:\n    uses: ./.github/workflows/kern-battery.yml\n",
@@ -64,22 +64,34 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
 
+# kern's own project files, which kern's repository holds and an application's kern/ does not.
+KERN_OWN = {".github/workflows/check.yml": "jobs: {}\n", "se.toml": "[tests]\ncommand = []\n",
+            "se.lock": "", "AGENTS.md": "# kern\n", "pyproject.toml": "[project]\n", "uv.lock": "",
+            ".gitignore": ".se/\n"}
+
+
 def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
-    """An SE with a small kern at `version`, tagged kern-v<version> where `tag`; a commit after the
-    tag changes the template's README, which the pin leaves out."""
+    """An SE that pins kern by components/go.mod's require kern v<version>, with kern's clone at
+    its pin in .se/modules/kern, tagged v<version> where `tag`; a commit after the tag changes the
+    template's README, which the pin leaves out."""
     git_fake.init(root, "-b", "main")
-    write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n',
-                 "kern/release.toml": f'version = "{version}"\n',
-                 "kern/go.mod": "module example.com/alice/kern\n\ngo 1.24.7\n",
-                 "kern/index/index.go": "package index\n",
-                 ".github/workflows/kern-battery.yml": BATTERY,
-                 **{f"kern/template/{name}": text for name, text in TEMPLATE.items()}})
+    write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n\n'
+                            '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+                 "components/go.mod": f"module se/components\n\nrequire kern v{version}\n",
+                 ".github/workflows/kern-battery.yml": BATTERY})
     git(root, "add", "-A")
-    git(root, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "kern")
+    git(root, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "se")
+    kern = se_modules.kern_dir(root)
+    git_fake.init(kern, "-b", "main")
+    write(kern, {"release.toml": f'version = "{version}"\ndownload = "releases/download/v{{version}}"\n',
+                 "go.mod": "module kern\n\ngo 1.24.7\n", "index/index.go": "package index\n", **KERN_OWN,
+                 **{f"template/{name}": text for name, text in TEMPLATE.items()}})
+    git(kern, "add", "-A")
+    git(kern, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "kern")
     if tag:
-        git(root, "tag", f"kern-v{version}")
-    write(root, {"kern/template/README.md": "# app\n\nchanged after the release\n"})
-    git(root, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-am", "later")
+        git(kern, "tag", f"v{version}")
+    write(kern, {"template/README.md": "# app\n\nchanged after the release\n"})
+    git(kern, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-am", "later")
     return root
 
 
@@ -89,27 +101,29 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     git(source, "remote", "add", "origin", "https://github.com/alice/se.git")
     app = tmp_path / "apps" / "ledger"
     lines = se_new.create("ledger", app, source)
-    assert lines[0].startswith(f"se new app: ledger created in {app} from kern's template at kern-v0.1.0 (")
+    assert lines[0].startswith(f"se new app: ledger created in {app} from kern's template at v0.1.0 (")
     assert (app / "README.md").read_text() == (
         "# ledger\n\nA bare application; `se new app <name> --path <dir>` copies it.\n")
     assert (app / "cmd" / "ledger" / "main.go").read_text() == (
         'package main\n\nfunc main() { run("ledger") } // happy apps stay\n')
     assert not (app / "cmd" / "app").exists()
     go_mod = (app / "go.mod").read_text()
-    assert go_mod.startswith("module example.com/ledger\n") and "require example.com/alice/kern v0.1.0\n" in go_mod
-    assert go_mod.endswith("// that folder.\nreplace example.com/alice/kern => ./kern\n")
-    assert "no module example.com/alice/kern can be fetched yet" in go_mod
-    assert "=> ../" not in go_mod and "beside it" not in go_mod
+    assert go_mod.startswith("module example.com/ledger\n") and "require kern v0.1.0\n" in go_mod
+    assert go_mod.endswith("// version required above is in kern/.\nreplace kern => ./kern\n")
+    assert "=> ../" not in go_mod and "one folder up" not in go_mod
     assert (app / "kern" / "index" / "index.go").is_file() and (app / "kern" / "release.toml").is_file()
+    assert (app / "kern" / "go.mod").read_text() == "module kern\n\ngo 1.24.7\n"
     assert not (app / "kern" / "template").exists(), "kern's source at the pin, without its template"
+    for name in KERN_OWN:
+        assert not (app / "kern" / name).exists(), f"kern's own {name} stays in kern's repository"
     assert 'identity = "alice <alice>"' in (app / "se.toml").read_text()
     # The generic pair, byte for byte SE's, RUNME.sh executable.
     for name in ("RUNME.sh", "RUNME.ps1"):
         assert (app / name).read_bytes() == (PROJECT / name).read_bytes(), name
     assert os.access(app / "RUNME.sh", os.X_OK) or os.name == "nt"
-    # Its CI calls the battery's copy beside it, at the pin, reaching SE beside the application.
+    # Its CI calls the battery's copy beside it, at the SE it was made from, reaching SE beside it.
     assert "uses: ./.github/workflows/kern-battery.yml" in (app / ".github" / "workflows" / "check.yml").read_text()
-    pin = git(source, "rev-parse", "kern-v0.1.0^{commit}")
+    pin = git(source, "rev-parse", "HEAD^{commit}")
     battery = (app / ".github" / "workflows" / "kern-battery.yml").read_text()
     assert battery.startswith(f"# se-workflows: .github/workflows/kern-battery.yml at {pin} from "
                               "${{ github.repository_owner }}/se\n")
@@ -133,13 +147,16 @@ def test_the_owners_github_step_is_one_line_and_the_command_touches_no_remote(tm
     assert git(app, "remote") == "", "creating the repository and its first push stay the owner's"
 
 
-def test_an_unreleased_version_comes_from_head_and_says_so(tmp_path: Path, home: None) -> None:
+def test_a_pin_without_its_tag_is_refused_naming_the_sync(tmp_path: Path, home: None) -> None:
     source = small_se(tmp_path / "se", version="0.2.0", tag=False)
     app = tmp_path / "ledger"
-    lines = se_new.create("ledger", app, source)
-    head = git(source, "rev-parse", "--short=12", "HEAD")
-    assert lines[0] == f"kern-v0.2.0 is not released yet: kern and its template come from {source}'s HEAD, {head}"
-    assert (app / "README.md").read_text() == "# ledger\n\nchanged after the release\n"
+    with pytest.raises(se_new.NewError, match=r"has no tag v0\.2\.0: run uv run python scripts/se_modules\.py sync kern"):
+        se_new.create("ledger", app, source)
+    assert not (app / "README.md").exists()
+
+
+def test_without_an_origin_on_github_the_owner_is_a_placeholder(tmp_path: Path, home: None) -> None:
+    lines = se_new.create("ledger", tmp_path / "ledger", small_se(tmp_path / "se"))
     assert "<owner>/ledger" in lines[-1], "no origin on github.com names no owner"
 
 
@@ -162,30 +179,41 @@ def test_a_folder_that_is_not_empty_is_refused(tmp_path: Path, home: None, capsy
 def test_kerns_template_holds_what_the_command_fills_in() -> None:
     """The real template, as it stands: what create() replaces is there, so its next release still
     makes applications (the release at the pin is held by the suite beside)."""
-    template = PROJECT / "kern" / "template"
+    template = se_modules.kern_dir(PROJECT) / "template"  # kern at its pin (tests/conftest.py)
     assert se_new.KERN_REPLACE.search((template / "go.mod").read_text(encoding="utf-8"))
+    assert se_new.KERN_REQUIRE.search((template / "go.mod").read_text(encoding="utf-8"))
     assert se_new.TEMPLATE_IDENTITY in (template / "se.toml").read_text(encoding="utf-8")
     assert (template / "cmd" / "app" / "main.go").is_file()
 
 
-def test_the_pin_is_kerns_release_version_and_its_tag(tmp_path: Path) -> None:
-    assert se_modules.kern_pin(PROJECT)[1] == f"kern-v{se_modules.kern_pin(PROJECT)[0]}"
-    write(tmp_path, {"kern/release.toml": 'version = "1.2"\n'})
-    with pytest.raises(se_modules.ModuleError, match=r"version must be MAJOR\.MINOR\.PATCH"):
-        se_modules.kern_pin(tmp_path)
-    with pytest.raises(se_modules.ModuleError, match="incubates no kern"):
+def pinned(root: Path, require: str = "1.2.3", download: str | None = "releases/download/v{version}") -> Path:
+    """`root` pinning kern by its go.mod's require, with the clone's release.toml naming `download`."""
+    write(root, {"se.toml": '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
+                 "go.mod": f"module app\n\nrequire kern v{require}\n",
+                 ".se/modules/kern/release.toml": 'version = "9.9.9"\n'
+                 + (f'download = "{download}"\n' if download else "")})
+    return root
+
+
+def test_the_pin_is_the_version_go_mod_requires_and_the_tag_the_clones_release_toml_names(tmp_path: Path) -> None:
+    assert se_modules.kern_pin(PROJECT) == (se_modules.kern_pin(PROJECT)[0], f"v{se_modules.kern_pin(PROJECT)[0]}")
+    assert se_modules.kern_pin(pinned(tmp_path / "a")) == ("1.2.3", "v1.2.3"), "the require, not the clone's version"
+    with pytest.raises(se_modules.ModuleError, match=r"not vMAJOR\.MINOR\.PATCH"):
+        se_modules.kern_pin(pinned(tmp_path / "b", require="1.2"))
+    with pytest.raises(se_modules.ModuleError, match=r"no \[modules\.kern\] with go"):
         se_modules.kern_pin(tmp_path / "none")
+    (tmp_path / "a" / ".se" / "modules" / "kern" / "release.toml").unlink()
+    with pytest.raises(se_modules.ModuleError, match="kern is not placed; run uv run python scripts/se_modules.py sync kern"):
+        se_modules.kern_pin(tmp_path / "a")
 
 
 def test_kern_pin_prints_the_version_and_where_its_release_is_published(tmp_path, capsys):
     """bootstrap.sh reads the pin through this one reader (README "Kern")."""
-    (tmp_path / "kern").mkdir()
-    (tmp_path / "kern" / "release.toml").write_text(
-        'version = "1.2.3"\ndownload = "https://example.com/releases/download/kern-v{version}"\n', encoding="utf-8")
-    assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 0
-    assert capsys.readouterr().out == "1.2.3 https://example.com/releases/download/kern-v1.2.3\n"
-    (tmp_path / "kern" / "release.toml").write_text('version = "1.2.3"\n', encoding="utf-8")
-    assert se_modules.main(["--root", str(tmp_path), "kern-pin"]) == 1
+    root = pinned(tmp_path, download="https://example.com/releases/download/v{version}")
+    assert se_modules.main(["--root", str(root), "kern-pin"]) == 0
+    assert capsys.readouterr().out == "1.2.3 https://example.com/releases/download/v1.2.3\n"
+    pinned(tmp_path, download=None)
+    assert se_modules.main(["--root", str(root), "kern-pin"]) == 1
     assert "download names no URL" in capsys.readouterr().err
 
 
@@ -206,13 +234,17 @@ def test_a_download_path_lies_under_origins_home_and_without_one_there_is_none(
         tmp_path: Path, monkeypatch, capsys) -> None:
     """A release.toml's download path resolves under the home origin names; where origin names
     none, app-binary answers `-` and the start builds the binary from its folder."""
-    write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n',
+    pinned(tmp_path, require="0.3.0")
+    write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n\n'
+                                '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
                      "components/release.toml": 'version = "2.0.0"\ndownload = "releases/download/app-v{version}"\n'
-                     'binary = "app"\npackage = "./cmd/app"\n',
-                     "kern/release.toml": 'version = "0.3.0"\ndownload = "releases/download/kern-v{version}"\n'})
-    monkeypatch.setattr(se_modules.se_home, "find", lambda root: se_home.Home("example.com", "alice", "project"))
+                     'binary = "app"\npackage = "./cmd/app"\n'})
+    kern = se_modules.kern_dir(tmp_path)
+    # kern's release lies under the home its clone's origin names, kern's own repository.
+    monkeypatch.setattr(se_modules.se_home, "find", lambda root: se_home.Home(
+        "example.com", "alice", "kern" if root == kern else "project"))
     assert se_modules.app_binary(tmp_path).download == "https://example.com/alice/project/releases/download/app-v2.0.0"
-    assert se_modules.kern_download(tmp_path) == "https://example.com/alice/project/releases/download/kern-v0.3.0"
+    assert se_modules.kern_download(tmp_path) == "https://example.com/alice/kern/releases/download/v0.3.0"
     monkeypatch.setattr(se_modules.se_home, "find", lambda root: None)
     assert se_modules.app_binary(tmp_path).download == ""
     assert se_modules.main(["--root", str(tmp_path), "app-binary"]) == 0
@@ -223,12 +255,10 @@ def test_a_download_path_lies_under_origins_home_and_without_one_there_is_none(
 
 def test_app_binary_falls_back_to_the_bare_kern_without_a_binary_section(tmp_path: Path) -> None:
     """An application with no Go components sets no [binary] and runs the bare kern."""
-    write(tmp_path, {"se.toml": "[project]\nversion = \"0.1.0\"\n",
-                     "kern/release.toml": 'version = "0.3.0"\n'
-                     'download = "https://example.com/alice/SE/releases/download/kern-v{version}"\n'})
+    pinned(tmp_path, require="0.3.0", download="https://example.com/alice/kern/releases/download/v{version}")
     b = se_modules.app_binary(tmp_path)
-    assert (b.name, b.version, b.build_dir, b.package) == ("kern", "0.3.0", "kern", "./cmd/kern")
-    assert b.download == "https://example.com/alice/SE/releases/download/kern-v0.3.0"
+    assert (b.name, b.version, b.build_dir, b.package) == ("kern", "0.3.0", ".se/modules/kern", "./cmd/kern")
+    assert b.download == "https://example.com/alice/kern/releases/download/v0.3.0"
 
 
 def test_app_binary_refuses_a_binary_release_that_cannot_build(tmp_path: Path) -> None:

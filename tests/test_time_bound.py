@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import se_modules
 import time_bound
 
 TESTS = Path(__file__).resolve().parent
@@ -37,7 +38,7 @@ class Item:
 def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     plain = Item(TESTS / "test_example.py", ["tmp_path"])
     deck = Item(TESTS / "test_deck.py", ["decks", "obs", "tmp_path"])
-    kern = Item(TESTS.parent / "kern" / "python" / "tests" / "test_example.py")
+    kern = Item(se_modules.kern_dir(TESTS.parent) / "python" / "tests" / "test_example.py")
     time_bound.mark([plain, deck, kern], obs_wait=600)
     assert plain.bound == time_bound.BOUND == 30
     assert deck.bound == time_bound.BOUND + 600

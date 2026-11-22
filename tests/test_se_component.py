@@ -12,6 +12,7 @@ import pytest
 
 import se
 import se_component
+import se_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,7 +54,7 @@ def test_the_scaffolded_component_is_a_valid_kern_component_that_answers_its_com
     """The scaffold is a Python component over NATS: kern's SDK reads its declaration and the fake
     core runs its command, as the contract suite runs tally."""
     se_component.add(tmp_path, "my-probe")
-    sys.path.insert(0, str(ROOT / "kern" / "python"))
+    sys.path.insert(0, str(se_modules.kern_dir(ROOT) / "python"))
     try:
         from kern import declaration
         from kern.fake import Fake
@@ -71,7 +72,7 @@ def test_the_scaffolded_component_is_a_valid_kern_component_that_answers_its_com
         fake = Fake(module.my_probe)
         assert fake.run("my-probe run", "hi", "there") == "ad hoc my-probe ran: hi there"
     finally:
-        sys.path.remove(str(ROOT / "kern" / "python"))
+        sys.path.remove(str(se_modules.kern_dir(ROOT) / "python"))
 
 
 def test_se_component_add_runs_through_the_se_command(tmp_path: Path, capsys):

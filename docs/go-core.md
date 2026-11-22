@@ -184,7 +184,7 @@ from them, the Python side reads them as dicts, and the contract suite round-tri
 A name's segments become tokens: `fleet/findings` rides as `fleet.findings`. A segment, a command
 name or a verb rides percent-encoded beyond letters, digits, dashes and underscores, so a command
 with a space (`tally%20note`) and a family key with a dot (`v1%2E2`) are one token each (settled
-in step 4, [kern/README.md](../kern/README.md#a-component-in-python)).
+in step 4, kern's README "A component in Python").
 
 | subject | shape | sender, answerer |
 |---|---|---|
@@ -380,8 +380,8 @@ darwin is built, not tested. The binary is fetched into
 - **The release matches the checkout:** a session runs the release its `release.toml` names, so
   a change to the binary's code without a new version runs the old binary against the new wiring
   (`se-v0.1.0` predated the component `retro-due`, and its core refused main's wiring). SE's suite
-  refuses that change, `se.toml` `[tests.beside.release-guard]` ([kern/README.md
-  "Release"](../kern/README.md#release)): a release is built from one commit and is never changed, so
+  refuses that change, `se.toml` `[tests.beside.release-guard]` (kern's README "Release"): a
+  release is built from one commit and is never changed, so
   the files it is built from are the release's own contents, and the guard needs no download. The
   landing assigns the raised version from the kind the branch states (README ["Component
   versions"](../README.md#component-versions)), and the push to `main` cuts it; a session that
@@ -460,7 +460,7 @@ without its end. Either way the start spawns a core, and the core that serves wr
 | Stop, SubagentStop | the stop | the delivery component's `stop-check` answers within the hook, in its warm process: 24 to 57 ms after the first, against 434 to 586 ms through `uv` (README "Stop hook") |
 | SessionEnd | the end | returns the lease; the last one out stops the core after its grace |
 
-The file half is built: kern's session component ([its README](../kern/components/session/README.md)),
+The file half is built: kern's session component (its README in kern's repository),
 off by default, appends every event to `.se/.runtime/sessions/<id>.jsonl` where the ignored
 overlay `.se/wiring.toml` switches it on. The family `session/<id>/events` follows when a reader
 needs it.
@@ -513,7 +513,7 @@ A snapshot's key is `<owner>.<repo>.<number>` and a list's `<owner>.<repo>.<stat
 label, all in lower case: SE's issue 1036, its owner `alice`, stands at
 `github/issues/alice.se.1036`; neither `github/issues/1036` nor `github/issues/alice.SE.1036` names
 it
-([kern/components/github/README.md](../kern/components/github/README.md) owns the names). The core hands the agent the next
+(kern's components/github/README.md owns the names). The core hands the agent the next
 outbox step as context on the hook that follows each tool call, and `<app> github next` prints it.
 
 ### Measured against today's `integrate` hand-off
@@ -581,8 +581,8 @@ the most-run first, with their runs and sessions: the scripts that deserve to be
 The core gets a repository of its own; creating it is the owner's step, since no session here can.
 
 - **Name:** `<owner>/kern`, beside SE under the same owner (`<owner>` is the owner of the SE you
-  work from), Go module `<host>/<owner>/kern`. The binary an application builds is named after the
-  application (`se` for SE); the bare one is `kern`.
+  work from), Go module `kern`, a path that names no host (AGENTS.md "Neutral home"). The binary an
+  application builds is named after the application (`se` for SE); the bare one is `kern`.
 - **What belongs in it:** what every application needs, and nothing that names an application:
   the core, the bus, the fakes, the contract suite, the Python SDK, the template, the reusable CI,
   and the generic components.
@@ -591,7 +591,7 @@ The core gets a repository of its own; creating it is the owner's step, since no
 
 ```text
 kern/
-  go.mod                  <host>/<owner>/kern
+  go.mod                  kern
   index/                  names, store, snapshots, catalog, waves (from ff01204)
   bus/                    embedded NATS, users and permissions, standing file
   host/                   start, detach, leases, placements, idle end, hook client
@@ -604,37 +604,29 @@ kern/
   .github/workflows/      check.yml, release.yml, battery.yml (reusable)
 ```
 
-### Incubated in SE until `<owner>/kern` exists
+### Pinned from kern's own repository
 
-Until the owner creates `<owner>/kern` (step 1 of [the plan](#the-plan)), kern grows in SE under
-`kern/`, as its own Go module `kern` (the path `kern/go.mod` names, which names no host), and builds
-find it through the checkout: SE's Go components and a new application replace the module by the
-source beside them. Nothing in SE outside `kern/` and its Go components imports it. Meanwhile SE runs kern's tests beside its Python suite (`se.toml`
-`[tests.beside.kern]`, README [Test budget](../README.md#test-budget)), and SE's `check` job vets
-it. The move is one work issue, once the repository exists:
+kern grew in SE under `kern/` until `<owner>/kern` existed; its history went over with
+`git subtree split --prefix kern`, and kern's repository now holds its CI, its release and its tags
+`v<version>`. SE holds no copy of kern: it builds, tests, releases and starts on the clone of kern
+that `scripts/se_modules.py sync kern` places in `.se/modules/kern` (`se_modules.kern_dir`), the
+one answer to where kern is. kern's own tests, its vet and its Windows run are kern's `check`.
 
-1. kern's history goes over with `git subtree split --prefix kern`, pushed as the new
-   repository's `main`; `kern/` becomes its root, and nothing in it changes.
-2. kern's CI moves with it: its vet, its tests and their Windows run become the new repository's
-   `check.yml`, with a ruleset like SE's.
-3. SE then removes `kern/`, `[tests.beside.kern]` and the vet step in one pull request, and pins
-   the new repository's first tag as `[modules.kern]`, step 6's pin below.
+**Pinning it.** An application pins the core in `se.toml [modules.kern]` with `go`, the `go.mod`
+that requires it (README [Modules](../README.md#modules)): the version that `go.mod` requires of
+`kern` is the pin, resolved to the tag `v<version>` and locked in `se.lock`, so the pin has one
+owner. SE's is `components/go.mod`, which requires `kern v<version>` and replaces it by
+`../.se/modules/kern`; CI's `check` syncs kern and fails where the committed `se.lock` lags the
+require. Every session hook runs `scripts/se_hook.sh <event>`, which execs the `se` binary: bash
+builtins up to one exec, not Python, whose interpreter start alone costs about twice kern's whole
+hook, and through `uv` six to ten times (README [Kern](../README.md#kern) owns the measurements).
 
-**Pinning it.** An application pins the core in `se.toml [modules.kern]`, as SE pins obs. Its
-`go.mod` also requires it; `se_modules.py` reads the version from `go.mod` where the module says
-`go = true`, so the pin has one owner.
-
-While kern is incubated, SE pins it by `kern/release.toml`'s `version`, which
-`se_modules.kern_pin` reads; `[modules.kern]` replaces it with the move. Every session hook runs
-`scripts/se_hook.sh <event>`, which execs that kern: bash builtins up to one exec, not Python,
-whose interpreter start alone costs about twice kern's whole hook, and through `uv` six to ten
-times (README [Kern](../README.md#kern) owns the measurements).
-
-**When kern is released.** A push to `main` that changes `release.toml`'s `version` cuts the
-release ([kern/README.md "Release"](../kern/README.md#release)); nothing else does. A change under
-`kern/`, its template's included, reaches sessions and new applications (`se new app` takes the
-template at the pin) only with the next release, so the pull request that needs it out bumps
-`version`.
+**When kern is released.** kern's repository cuts its release where a push to its `main` changes
+`release.toml`'s `version` (kern's README "Release"). SE takes it by moving `components/go.mod`'s
+`require kern` and running `se_modules.py sync kern`, which writes `se.lock`. That move changes an
+input of `se`: the release guard refuses it without `**Component kinds:** se <kind>`, and the
+landing gives `se` its next version, so a new kern reaches sessions only in a new `se`
+(README [Component versions](../README.md#component-versions)).
 
 ### Switching components on and off
 
@@ -681,12 +673,12 @@ core plus the application's Go components, none yet), `components/`, `types/`, `
 `[project]`, `[tests]` budget and `[modules.kern]`, an `AGENTS.md`, a `tests/` folder whose
 battery starts the bare core, and a `check.yml` that calls the core's reusable `battery.yml`.
 
-`se new app <name> --path <dir>` copies the core's `template/` at its pin, fills in the name,
-initializes git with the project identity and makes the first commit. Creating the GitHub
-repository, its ruleset and its first push stay the owner's steps, which SE names as one line.
-While kern is incubated, kern's module (the path `kern/go.mod` names) cannot be fetched, so the
-application carries kern's source at the pin in `kern/` and its `go.mod` replaces the module by
-it; the move drops both (README [New application](../README.md#new-application)). A
+`se new app <name> --path <dir>` copies the core's `template/` from SE's pinned clone at its tag
+`v<version>`, fills in the name and the pin, initializes git with the project identity and makes
+the first commit. Creating the GitHub repository, its ruleset and its first push stay the owner's
+steps, which SE names as one line. kern's module path names no host, so no build can fetch it: the
+application carries kern's Go module at the pin in `kern/` and its `go.mod` replaces the module by
+it, until new applications pin kern as SE does (README [New application](../README.md#new-application)). A
 new application then gets components by adding instances, CI from the reusable workflow, and its
 test budget from `se.toml [tests]`, in the same shape as SE's.
 
@@ -809,12 +801,11 @@ as on Go 1.24.7.
   the core's own binary.
 - **Windows.** The detached start and the hook client run on Windows in v5; the core's CI runs its
   contract suite on Windows from step 2.
-- **How outside builds fetch kern after the move.** kern's module path `kern` names no host, so
-  no build can fetch it by its path: while incubated, every build replaces it by the source in the
-  checkout (SE's `components/go.mod`, an application's `kern/` folder, `scripts/se_new.py`). The
-  move decides how a build outside SE finds kern without a file naming its host: a `replace` by a
-  module clone `se_modules.py sync` places, a vanity path served from the home, or another way.
-  Until it is decided, an application keeps carrying kern's source at its pin.
+- **How outside builds fetch kern.** kern's module path `kern` names no host, so no build can
+  fetch it by its path. SE's builds replace it by the module clone `se_modules.py sync kern` places
+  (`components/go.mod`, the release workflow's checkout of the commit `se.lock` locks). A new
+  application still carries kern's source at its pin in `kern/` (`scripts/se_new.py`) until it pins
+  kern the same way (new-apps-pin-kern).
 - **Two languages in one application.** SE's suite stays Python against the Python fake; the Go
   side is tested in the core's repository. An application with Go components runs both in its
   `battery.yml`, under one budget.

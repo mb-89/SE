@@ -11,8 +11,8 @@ each named with its check.
 - large: no tracked file over MAX_BYTES outside LARGE_ALLOWED;
 - marker: no marker of unfinished work in `scripts/` or `tests/` that names no issue;
 - git-door: git runs only through its door (rule book des-004): `scripts/git_door.py` runs every git
-  command, `tests/fake_git.py` is its fake and `kern/git/git.go` kern's door; a git subprocess anywhere
-  else in scripts, tests, kern and the components fails, beyond GIT_ALLOWED;
+  command and `tests/fake_git.py` is its fake; a git subprocess anywhere else in scripts, tests and
+  the components fails, beyond GIT_ALLOWED (kern's Go door is held in kern's own repository);
 - references: the agents, the skills (the rule book among them), README.md and AGENTS.md name no
   missing file and no undefined subcommand (`scripts/references.py`);
 - public: the checkout passes its public check (pub-001), with its history: SE's own line (`se_line`);
@@ -61,8 +61,8 @@ MARKER = re.compile(r"\b(?:" + "TO" + "DO" + "|" + "FIX" + "ME" + r")\b")
 ISSUE = re.compile(r"#\d+|/issues/\d+")
 MARKED_DIRS = ("scripts/", "tests/")
 
-GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py", "kern/git/git.go")  # the last, kern's Go door
-GIT_SCANNED = ("scripts", "tests", "components", "kern")
+GIT_DOOR = ("scripts/git_door.py", "tests/fake_git.py")
+GIT_SCANNED = ("scripts", "tests", "components")
 GO_GIT = re.compile(r'exec\.Command(?:Context)?\((?:\w+, )?"git"')
 SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
 # Git subprocesses outside the door, each with how many its file holds and why it may: none is left.
@@ -70,7 +70,7 @@ SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
 GIT_ALLOWED: dict[str, tuple[int, str]] = {}
 
 # Tracked paths (a folder ends in `/`) that may name the home's owner, each with why: none is left,
-# as kern, the Go components, their release.toml and the wiring derive it from origin (kern/home).
+# as the Go components, their release.toml and the wiring derive it from origin (kern's home).
 # The list may only shrink: an entry that names no such file is refused.
 HOME_ALLOWED: dict[str, str] = {}
 # Workflows and actions, which no allowed folder covers: they name no home (scripts/se_workflows.py).

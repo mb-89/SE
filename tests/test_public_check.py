@@ -1642,14 +1642,15 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     # An edited report reruns, and so does a label change (the issue rule's housekeeping exemption).
     assert "types: [opened, synchronize, reopened, edited, labeled, unlabeled]" in workflow
     # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
-    steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
-             "scripts/hygiene.py", "scripts/work_tickets.py field-report --check",
-             "scripts/se_forms.py check-files --changed", "scripts/work_tickets.py suite --worktree ."]
+    steps = ["public_check.py --rev", "scripts/se_modules.py sync kern", "scripts/se_plugin.py check",
+             "scripts/work_tickets.py docs --check", "scripts/hygiene.py",
+             "scripts/work_tickets.py field-report --check", "scripts/se_forms.py check-files --changed",
+             "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
     assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"
     # The nightly run alone is full: it runs every suite beside, also one its paths skip.
-    suite = check[check.index("- name: The complete suite and kern's tests"):]
+    suite = check[check.index("- name: The complete suite and the suites beside it"):]
     suite = suite[:suite.index("\n      - ")]
     assert "EVENT: ${{ github.event_name }}" in suite
     assert 'if [ "$EVENT" = schedule ]; then full=(--full); fi' in suite
@@ -1657,11 +1658,12 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
 
 
 def field_report_script() -> str:
-    """The shell of the check workflow's field-report step, its second `run: |` block."""
+    """The shell of the check workflow's field-report step, the first `run: |` block after its name."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
-    starts = [index for index, line in enumerate(lines) if line.strip() == "run: |"]
+    named = lines.index("      - name: The pull request's field report follows the template")
+    start = next(index for index in range(named, len(lines)) if lines[index].strip() == "run: |")
     block = []
-    for line in lines[starts[1] + 1:]:
+    for line in lines[start + 1:]:
         if line.strip() and not line.startswith(" " * 10):
             break
         block.append(line[10:])
