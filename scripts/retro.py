@@ -38,6 +38,10 @@ Off by default, three additions leave that draft as it is without them:
   work issue's escalation comment names) with its link, its author's association, inside or
   outside by outside_text.py's `inside` over INSIDE, and its first FIRST_LINES lines in
   outside_text.py's envelope, as data (`refusal_records`).
+- `--sessions FILE`, the session tools' answers (each session `list_sessions` lists with its
+  `list_events` result events as `"events"`), adds each cloud session's cost, its tokens and its
+  cost in dollars from its result events, found by its title (`SE/<repo>/<role>/<topic>`, the work
+  model's Visible sessions) and summed per issue, role and repository (`cloud_costs`).
 - A class of the judgment may carry the optional keys CLASS_KEYS (`status`, `pattern`, a regular
   expression, and `limits`); the next collect counts each earlier class's pattern over what it
   already reads of each work issue of the window (title, body, comments, field report) and lists
@@ -475,11 +479,13 @@ class Collected:
     # deliveries and declined reviews (--refusals); None where not asked for.
     signals: dict | None = None
     refusals: list[dict] | None = None
+    costs: dict | None = None  # the cloud sessions' costs (--sessions)
 
     def extras(self) -> dict:
         """What the flags asked for, by name: `--json` adds it beside the block's data."""
         return {name: value for name, value in (("signals", self.signals),
-                                                ("refusals", self.refusals))
+                                                ("refusals", self.refusals),
+                                                ("costs", self.costs))
                 if value is not None}
 
     def data(self) -> dict:
@@ -644,7 +650,8 @@ def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER,
 
 def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             now: datetime, since: str | None = None, retro: int | None = None,
-            refusals: bool = False, signals: list[Path] | None = None) -> Collected | None:
+            refusals: bool = False, signals: list[Path] | None = None,
+            sessions: list[dict] | None = None) -> Collected | None:
     """The window of retro `number` read through `door`, starting at `since` or where retro
     `retro` closed where given (`read_window`); None where the door is still missing answers
     (`door.missing`). With `refusals`, the refused deliveries and declined reviews
@@ -783,7 +790,8 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         {"retro": last.number, "sizes": previous.get("sizes"), "findings": scored,
          **({"classes": patterns} if patterns else {})}
         if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc,
-        scripts, session_signals(signals, root) if signals is not None else None, records)
+        scripts, session_signals(signals, root) if signals is not None else None, records,
+        cloud_costs(sessions, closed) if sessions is not None else None)
 
 
 def remote_of(door, tracker: str) -> str:
@@ -913,6 +921,111 @@ def session_signals(paths: list[Path], root: Path) -> dict:
             "signals": {name: signal["total"] for name, signal in result["signals"].items()}}
 
 
+#: The usage fields of a result event, summed per session as its tokens.
+COST_TOKENS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+               "output_tokens")
+#: A title SE's roles give their sessions (work_tickets.py session_title): SE/<repo>/<role>[/<topic>].
+SESSION_TITLE = re.compile(r"SE/(?P<repo>[A-Za-z0-9._-]+)/(?P<role>[a-z]+)(?:/(?P<topic>.+))?")
+
+
+def result_records(event: object) -> list[dict]:
+    """The result records an event of `list_events` carries: the dicts with `total_cost_usd` or
+    `usage` at the event itself, its `data` or its `data`'s `result`."""
+    found = []
+    for item in (event, *((event.get("data"),) if isinstance(event, dict) else ())):
+        if not isinstance(item, dict):
+            continue
+        result = item.get("result")
+        for candidate in (item, result):
+            if isinstance(candidate, dict) and (candidate.get("type") in (None, "result")) and (
+                    "total_cost_usd" in candidate or isinstance(candidate.get("usage"), dict)) \
+                    and candidate not in found:
+                found.append(candidate)
+    return found
+
+
+def cloud_cost(session: dict) -> dict:
+    """One session's tokens and cost: its result events' usage and `total_cost_usd`, summed, one
+    record per turn; `cost` None where no event names one."""
+    tokens = dict.fromkeys(COST_TOKENS, 0)
+    cost: float | None = None
+    turns = 0
+    for event in session.get("events") or []:
+        for record in result_records(event):
+            turns += 1
+            usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
+            for key in COST_TOKENS:
+                value = usage.get(key)
+                tokens[key] += value if isinstance(value, int) else 0
+            value = record.get("total_cost_usd")
+            if isinstance(value, (int, float)):
+                cost = (cost or 0.0) + float(value)
+    return {"turns": turns, "tokens": tokens, "cost": cost}
+
+
+def cloud_costs(sessions: list[dict], window: list[Closed]) -> dict:
+    """The cloud sessions' costs by their titles: each session SE's roles started (SE/<repo>/
+    <role>[/<topic>]) with its tokens and cost (`cloud_cost`), and the sums per issue, role and
+    repository. A worker's (and every other role's) topic names its issue by the issue's title; a
+    reviewer's names the pull request that delivered or landed one; an integrator's names none. A
+    session of another title is counted as `other`, never guessed."""
+    by_title = {item.title: item.number for item in window}
+    by_pull = {pull: item.number for item in window
+               for pull in (item.report_pull, item.landing_pull) if pull is not None}
+    rows: list[dict] = []
+    other = 0
+    for session in sessions:
+        title = str(session.get("title") or "")
+        match = SESSION_TITLE.fullmatch(title)
+        if match is None:
+            other += 1
+            continue
+        topic = match["topic"]
+        issue = (by_pull.get(int(topic)) if match["role"] == "reviewer" and topic and topic.isdigit()
+                 else by_title.get(topic) if topic else None)
+        rows.append({"session": str(session.get("id") or ""), "title": title,
+                     "repository": match["repo"], "role": match["role"], "issue": issue,
+                     **cloud_cost(session)})
+
+    def summed(key: str) -> dict[str, dict]:
+        groups: dict[str, dict] = {}
+        for row in rows:
+            name = str(row[key]) if row[key] is not None else "none"
+            group = groups.setdefault(name, {"sessions": 0, "tokens": dict.fromkeys(COST_TOKENS, 0),
+                                             "cost": None})
+            group["sessions"] += 1
+            for kind in COST_TOKENS:
+                group["tokens"][kind] += row["tokens"][kind]
+            if row["cost"] is not None:
+                group["cost"] = round((group["cost"] or 0.0) + row["cost"], 6)
+        return dict(sorted(groups.items()))
+
+    return {"given": len(sessions), "other": other, "sessions": rows,
+            "per_issue": summed("issue"), "per_role": summed("role"),
+            "per_repository": summed("repository")}
+
+
+def cost_lines(costs: dict | None) -> list[str]:
+    """The cloud sessions' costs block (--sessions); none where not asked for."""
+    if costs is None:
+        return []
+    lines = ["", "## Session costs", "",
+             f"{len(costs['sessions'])} sessions of {costs['given']} given carry an SE title"
+             + (f"; {costs['other']} other sessions are not counted." if costs["other"] else ".")]
+    for heading, key in (("issue", "per_issue"), ("role", "per_role"),
+                         ("repository", "per_repository")):
+        lines += ["", f"| {heading} | sessions | input | cache write | cache read | output | cost |",
+                  "|---|---|---|---|---|---|---|"]
+        for name, group in costs[key].items():
+            label = f"#{name}" if key == "per_issue" and name != "none" else name
+            tokens = group["tokens"]
+            cost = "unknown" if group["cost"] is None else f"${group['cost']:.2f}"
+            lines.append(f"| {label} | {group['sessions']} | {tokens['input_tokens']} | "
+                         f"{tokens['cache_creation_input_tokens']} | "
+                         f"{tokens['cache_read_input_tokens']} | {tokens['output_tokens']} | {cost} |")
+    return lines
+
+
 def scored_findings(previous: dict | None, retro: int, window: list[Issue],
                     checks: dict[str, RuleCheck], opened: list[Issue] = ()) -> list[dict]:
     """Each finding of the previous retro's block, scored against this window: the work issues
@@ -1040,7 +1153,7 @@ def draft(found: Collected) -> str:
     lines += ["", "## Not delivered", ""]
     entries = [(item.number, text) for item in found.issues for text in item.not_delivered]
     lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
-    lines += signal_lines(found.signals) + refusal_lines(found.refusals)
+    lines += signal_lines(found.signals) + refusal_lines(found.refusals) + cost_lines(found.costs)
     block = json.dumps(found.data(), indent=2, ensure_ascii=False)
     lines += ["", JUDGE_BEGIN, "## Judgment", "",
               "The judge fills `findings`, `classes` and `went_well` in the block below, then runs "
@@ -1430,14 +1543,24 @@ def run_collect(args: argparse.Namespace) -> int:
         door = FileDoor(Path("<dir>"), tracker, remote)
     else:
         door = GhDoor(root, tracker, remote)
+    sessions = None
+    if args.sessions is not None:
+        try:
+            sessions = work_tickets.tool_items(json.loads(args.sessions.read_text(encoding="utf-8")),
+                                               "data")
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"error: {args.sessions} is not the JSON list of sessions: {error}",
+                  file=sys.stderr)
+            return 1
     found = collect(root, args.retro, door, tracker, branch, ref, datetime.now(timezone.utc),
-                    since_of(args.since), args.since_retro, args.refusals, args.signals)
+                    since_of(args.since), args.since_retro, args.refusals, args.signals, sessions)
     if found is None:
         directory = args.answers or Path("<dir>")
         window = (f" --since {args.since}" if args.since else "") + (
             f" --retro {args.since_retro}" if args.since_retro is not None else "")
         flags = (" --refusals" if args.refusals else "") + (
-            " --signals " + " ".join(str(path) for path in args.signals) if args.signals else "")
+            " --signals " + " ".join(str(path) for path in args.signals) if args.signals else "") + (
+            f" --sessions {args.sessions}" if args.sessions else "")
         then = (f"retro.py collect {args.retro}{window} --answers {directory}"
                 f"{f' --out {args.out}' if args.out else ''}{' --json' if args.json else ''}"
                 f"{flags}"
@@ -1497,6 +1620,12 @@ def make_parser() -> argparse.ArgumentParser:
                                  help="add each refused delivery and declined review of the "
                                       "window with its link, its author's association and its "
                                       "first lines")
+    collect_command.add_argument("--sessions", type=Path, metavar="FILE",
+                                 help="add each cloud session's tokens and cost, found by its "
+                                      "title (SE/<repo>/<role>/<topic>), per issue, role and "
+                                      "repository: the session tools' answers, each session "
+                                      "list_sessions lists with its list_events result events "
+                                      "(kinds [\"result\"]) as \"events\"")
     collect_command.add_argument("--answers", type=Path, metavar="DIR",
                                  help="without gh: the directory the session saves the plan's "
                                       "answers into")

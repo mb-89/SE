@@ -65,6 +65,10 @@ every package, so work issues and session prompts never repeat it.
    [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout and
    fetches and merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
    without rebasing a pushed branch.
+
+   Before the first commit, check the worktree's identity with
+   `work_tickets.py identity --worktree <worktree>`: without `--worktree` it sets that of the
+   checkout the session started in, not the worktree's.
 2. **Intake**: `work_tickets.py intake --issue <n>` writes one ticket per numbered requirement plus a
    `delivery` ticket into `.se/work/todo/` and lists the issue's comments. Read every comment: a
    comment from SE changes the requirements; edit or add tickets to match.
@@ -74,7 +78,12 @@ every package, so work issues and session prompts never repeat it.
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
-3. **Before each ticket**: re-read the body and the comments. `work_tickets.py refresh` reads the
+3. **Before each ticket**: check whether the issue changed, its `updated_at` and comment count
+   against the values you last read
+   ([Check before rereading](../skills/work-model/SKILL.md#issues)); reread it only when one
+   changed.
+
+   Then `work_tickets.py refresh` reads the
    issue's body (with its "Changes after filing") and its comments and reports what changed; apply
    the changes to the tickets (`intake` again adds tickets for added requirements), run
    `work_tickets.py sync`, then move the ticket to `held`.

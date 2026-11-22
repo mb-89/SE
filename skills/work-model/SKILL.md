@@ -24,10 +24,11 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   is the same for every package lives in the agent definitions and this skill, never in issues. A
   session prompt names only the agent, the issue and the worktree.
 - **The box**: a worker changes only its own worktree. Any other checkout it reads (for example a
-  related repository its tests use) is read-only. Everything comes in through its work issue
-  (re-read with its comments before each ticket, so it can change in flight) and goes out through
-  its pull request, whose description is its field report. What it needs outside the box goes into the field
-  report.
+  related repository its tests use) is read-only.
+  - Everything comes in through its work issue, checked for a change before each ticket so it can
+    change in flight ([Check before rereading](#issues)).
+  - Everything goes out through its pull request, whose description is its field report. What it
+    needs outside the box goes into the field report.
 - **Out**: a pushed branch, a pull request to the integration branch whose description is the
   field report, and one notification to the integrator. No field-report issue is filed: one piece
   of work is one issue, the work issue, which the integrator closes once the work is integrated.
@@ -78,6 +79,11 @@ One issue in, one issue out; the same for local sessions and cloud agents.
 
 An issue is one package of work: its title is its branch name, and it ends as one merge whose
 pull request carries its field report.
+
+- **Check before rereading**: before each step, a worker or integrator checks whether its issue
+  changed, its `updated_at` and comment count (`issue_read` method `get`, or `gh issue view --json
+  updatedAt,comments`) against the values it last read. It rereads the body and the comments only
+  when one of them changed, and then records the new values; an unchanged issue is not read again.
 
 - **The name rule**: every ticket, a work ticket or one for the person, is named by 1 to 5 words
   of lowercase letters and digits joined by single dashes, for example
@@ -835,6 +841,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     (README [Fleet check](../../README.md#fleet-check)).
   - `paused` prints its search as a plan, and `route` prints it before its own
     ([Pause](#pause)).
+  - `queue` syncs the checkout and prints its reads as a plan: the pause search, the
+    escalations, the open pull requests to the integration branch (delivered where `field-report
+    --check` passes on the description) and the ready work issues; the cloud's capacity is
+    unlimited.
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.

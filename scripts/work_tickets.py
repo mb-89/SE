@@ -1137,7 +1137,7 @@ def repo_host(repo: str) -> str | None:
 
 
 def current_branch(root: Path) -> str:
-    result = run_git(root, "branch", "--show-current")
+    result = run_git(root, "branch", "--show-current", env=own_git_environment())
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -1204,7 +1204,39 @@ def sync(root: Path) -> str:
     commit = run_git(root, "rev-parse", "--short", main_ref)
     if commit.returncode != 0 or not commit.stdout.strip():
         raise QueueError(f"Merged {main_ref} but cannot determine its commit")
+    se_module_at_lock(root)
     return commit.stdout.strip()
+
+
+#: The module name of se itself, in a repository that pins it (README "Modules").
+SE_MODULE = "se"
+
+
+def se_module_at_lock(root: Path) -> None:
+    """Move the checkout's clone of se (`.se/modules/se`) to the pin the merged se.lock names, so
+    the public check and the scripts run from it are at that pin after the merge; a repository
+    that pins no se, a local path in its place or a clone not placed yet is left as it is
+    (`se_modules.py sync se` places it)."""
+    modules = sibling("se_modules")
+    clone = root / modules.MODULES_DIR / SE_MODULE
+    if not (root / modules.MANIFEST).is_file() or not modules.is_populated(clone):
+        return
+    try:
+        module = next((item for item in modules.load_manifest(root) if item.name == SE_MODULE), None)
+        if module is None:
+            return
+        local = modules.load_local(modules.default_local_config())
+        source = modules.resolve(root, module, local)
+        if source.kind != "pinned":
+            return
+        source = modules.resolve(root, modules.lock_range(root, module, local), local)
+        before = modules.git(clone, "rev-parse", "HEAD")
+        line = modules.sync_module(source)
+    except modules.ModuleError as error:
+        raise QueueError(f"sync: cannot move {clone} to the pin se.lock names: {error}; run "
+                         "se_modules.py sync se") from None
+    if source.module.ref != before:
+        print(f"Moved {line}")
 
 
 def fetch_issue(root: Path, number: int, repo: str | None,
@@ -1765,8 +1797,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         tickets.append((ticket_id, (
             f"# {ticket_id}: {one_line(text.splitlines()[0])}\n\n"
             "## Design\n\n"
-            f"Work issue {issue['url']}, requirement {number}; re-read its body and its comments "
-            "before starting.\n\n"
+            f"Work issue {issue['url']}, requirement {number}; before starting, "
+            "check whether it changed (its updated_at and comment count) and reread it only then.\n\n"
             f"Design owner: {owner}\n\n"
             f"## Scope\n\n{text}\n\n"
             f"## Dependencies\n\n{previous}\n\n"
@@ -3246,9 +3278,12 @@ def push(root: Path, branch: str | None = None) -> str | None:
 
 # Acceptance that can only be seen after the merge: a run, release or deployment on the integration
 # branch. A pull request then names its issue without a closing keyword, and the integrator closes it.
+# A bare "on main" ("the suite passes on main") is not one: the branch's own suite shows it before
+# the merge; only a run (CI, a workflow, a job, a pipeline, a build, a check run) seen on main is.
 POST_MERGE_PATTERN = re.compile(
     r"\bafter (?:the |a |its )?(?:merge|integration)\b|\bpost-merge\b|"
-    r"\bon (?:main|the integration branch)\b|\breleased?\b(?!-)|\bdeploy(?:ed|ment|s)?\b",
+    r"\b(?:CI|workflows?|jobs?|pipelines?|builds?|check runs?)\b[^.;]*?\bon (?:main|the integration branch)\b|"
+    r"\breleased?\b(?!-)|\bdeploy(?:ed|ment|s)?\b",
     re.IGNORECASE,
 )
 
@@ -4650,9 +4685,20 @@ def check_field_report(
         print(warning)
 
 
+#: What points git at another repository than `-C <root>` names: a git hook sets these for its
+#: own checkout, so a command run from it with `--worktree <w>` would read that checkout instead.
+GIT_LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+
+
+def own_git_environment() -> dict[str, str]:
+    """The environment without GIT_LOCATION_VARIABLES, so git reads the repository `-C` names."""
+    return {key: value for key, value in os.environ.items() if key not in GIT_LOCATION_VARIABLES}
+
+
 def branch_tip(root: Path) -> str | None:
-    """The commit the branch checked out in `root` is at; None without one."""
-    result = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    """The commit the branch checked out in `root` is at, read from `root` itself, whatever
+    repository the environment's GIT_DIR names; None without one."""
+    result = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD", env=own_git_environment())
     return result.stdout.strip() if result.returncode == 0 else None
 
 
@@ -4698,7 +4744,7 @@ def work_labels(root: Path, explicit: str | None) -> list[str]:
     """WORK_LABELS and the `repo:` label of the repository the issue is for: the named one, else
     this checkout's (whose tracker may hold the issue)."""
     name = explicit.rstrip("/").rsplit("/", 1)[-1] if explicit else repository_name(root)
-    return [*WORK_LABELS, f"repo:{name}"]
+    return [*WORK_LABELS, f"repo:{name.removesuffix('.git')}"]
 
 
 def read_file(file: Path, what: str) -> str:
@@ -6831,13 +6877,16 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
         print("Cleanup: origin merged branch deleted")
 
 
-def release_line(pull_url: str, tag: str | None) -> str:
-    """The closing comment's release: the release page of `tag` beside the pull request at
-    `pull_url`, the tag alone without its URL, or none."""
-    if not tag:
+def release_line(pull_url: str, tag: str | None, component_tags: list[str] | None = None) -> str:
+    """The closing comment's release: the release page of `tag`, the project's release, and of
+    each of `component_tags`, the component releases the landing cut (a kern release), beside the
+    pull request at `pull_url`; each tag alone without its URL, or none."""
+    tags = [*((tag,) if tag else ()), *(component_tags or ())]
+    if not tags:
         return "Release: none."
     project, separator, _ = pull_url.rpartition("/pull/")
-    return f"Release: {project}/releases/tag/{tag}." if separator else f"Release: {tag}."
+    return "Release: " + ", ".join(
+        f"{project}/releases/tag/{name}" if separator else name for name in tags) + "."
 
 
 GOAL_SECTION = "goal"
@@ -8033,7 +8082,7 @@ def integrate(
                                                     landing, f"Integrate {branch}"):
             abandon_landing(root, target, landing)
             raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
-    assign_component_versions(root, target, landing, base, branch, report)
+    component_tags = assign_component_versions(root, target, landing, base, branch, report)
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
@@ -8096,7 +8145,8 @@ def integrate(
               file=sys.stderr, flush=True)
         state = {
             "branch": branch, "landing": landing, "target": target, "base": base,
-            "landed": landed, "head": head, "tag": tag, "tracker": tracker, "remote": remote,
+            "landed": landed, "head": head, "tag": tag, "component_tags": component_tags,
+            "tracker": tracker, "remote": remote,
             "pull_number": pull_number, "pull_url": str(pull.get("url") or ""),
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
@@ -8225,10 +8275,11 @@ def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, iss
 
 
 def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
-                              report: str) -> None:
+                              report: str) -> list[str]:
     """Write the next version of each component the merge on `landing` changes into it, of the
     kind the field report states or the branch claims, and say so (README "Component versions");
-    refused, the landing abandoned, where a kind names no component."""
+    refused, the landing abandoned, where a kind names no component. The release tags the push
+    to the integration branch cuts, for the closing comment's release line."""
     try:
         assignments = component_versions.assign(root, base, branch_head(root, branch), report)
     except component_versions.VersionError as error:
@@ -8237,6 +8288,8 @@ def assign_component_versions(root: Path, target: str, landing: str, base: str, 
                          "was merged") from None
     for assignment in assignments:
         print(assignment.line())
+    return [component_versions.tag_of(assignment.component, assignment.new)
+            for assignment in assignments]
 
 
 def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
@@ -8381,7 +8434,8 @@ def record_fix(root: Path, branch: str) -> str:
         raise QueueError(
             f"integrate --record-fix: the fix commits on {landing} are refused, nothing was "
             "recorded:\n" + "\n".join(f"- {problem}" for problem in problems) + "\n"
-            f"Reword or recommit them as {name} (work_tickets.py identity), push {landing} again "
+            f"Reword or recommit them as {name} (work_tickets.py identity --worktree <the checkout of "
+            f"{landing}>), push {landing} again "
             "and record again")
     checked_git(root, "switch", "-q", "-C", landing, new)
     try:
@@ -8485,7 +8539,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                   + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
-        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
+        f"{landing_url} (check: {run_url}). {release_line(landing_url, tag, list(state.get("component_tags") or []))} "
         f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
@@ -10105,7 +10159,9 @@ def run_refs_apply(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("sync", "merge the newest integration branch (se.toml project.integration_branch, "
-                 "default main) from origin, or locally without origin", WORKTREE)
+                 "default main) from origin, or locally without origin, then move the se clone "
+                 "(.se/modules/se) of a repository that pins se to the pin the merged se.lock "
+                 "names", WORKTREE)
 def run_sync(root: Path, args: argparse.Namespace) -> int:
     print(f"Merged {integration_branch(root)} {sync(root)}")
     return 0
@@ -10990,10 +11046,41 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
+    """The queue's GitHub reads as a plan for the session's tools, where gh is not signed in: the
+    pause search first, then the escalations, the delivered pull requests and the startable work
+    issues, each with what keeps an item; the cloud's capacity is unlimited."""
+    where = owner_repo(repo)
+    labels = [] if all_repos else [repository_label(root)]
+    base = integration_branch(root)
+    return Plan(f"queue of {repo}", (
+        pause_step(repo),
+        Step("escalations", "list_issues", {**where, "state": "OPEN",
+                                            "labels": ["escalated", *labels], "perPage": 100},
+             note="each issue listed is an escalation"),
+        Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
+                                                 "state": "open", "base": base, "perPage": 100},
+             note="a pull request is delivered where its description carries a complete field "
+                  "report: save the description to a file and run work_tickets.py field-report "
+                  "--check <file> on it"),
+        Step("ready", "list_issues", {**where, "state": "OPEN", "labels": ["work", "ready", *labels],
+                                      "perPage": 100},
+             note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
+                  | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
+                  "no branch yet and no file ownership an in-progress issue holds"),
+    ), then="Capacity: unlimited (cloud)")
+
+
 @command("queue", "list delivered pull requests (open, to the integration branch, with a complete "
-                  "field report), escalations and startable work issues", *TRACKER_QUERY)
+                  "field report), escalations and startable work issues. Without gh it syncs the "
+                  "checkout and prints its reads as a plan for the session's GitHub tools",
+         *TRACKER_QUERY)
 def run_queue(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
+    if hand_off():
+        sync(root)
+        print(queue_plan(root, repo, args.all_repos).text())
+        return 0
     delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")

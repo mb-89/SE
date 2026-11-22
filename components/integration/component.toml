@@ -129,7 +129,7 @@ mcp = "Shows how many workers may run now: the local slots, or unlimited in the 
 usage = "work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]"
 summary = "list delivered pull requests (open, to the integration branch, with ..."
 group = "Integration"
-help = "list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues"
+help = "list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues. Without gh it syncs the checkout and prints its reads as a plan for the session's GitHub tools"
 class = "interactive"
 
 [commands."work_tickets.py dispatch"]

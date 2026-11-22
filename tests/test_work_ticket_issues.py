@@ -4646,6 +4646,7 @@ def test_record_fix_refuses_a_fix_commit_that_is_no_landing_commit(
     err = capsys.readouterr().err
     assert f"- {fix[:12]}{'' if problem.startswith('is') else chr(39) + 's'} {problem}" in err
     assert "nothing was recorded" in err and "someone@" not in err
+    assert "(work_tickets.py identity --worktree <the checkout of land/feature/worker>)" in err
     assert handoff_state(main_checkout) == before
 
 
@@ -7962,3 +7963,75 @@ def test_session_title_refuses_what_breaks_the_scheme_naming_the_remedy(argument
 def test_the_session_title_command_reports_a_refusal(capsys):
     assert work_tickets.main(["session-title", "worker", "obs"]) == 1
     assert "names its ticket name" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("line", "post_merge"), [
+    ("- [ ] The suite passes on main.", False),
+    ("- [ ] `uv run pytest -q` passes on main with the change.", False),
+    ("- [ ] The CI run on main is green.", True),
+    ("- [ ] The `check` workflow passes on the integration branch.", True),
+    ("- [ ] The release names the fix.", True),
+    ("- [ ] The docs are deployed.", True),
+    ("- [ ] CI is green after the merge.", True),
+], ids=["bare-on-main", "command-on-main", "ci-run", "workflow", "release", "deployment", "after-merge"])
+def test_post_merge_acceptance_needs_a_run_release_or_deployment_on_main(line, post_merge):
+    body = BODY.replace("- [ ] Tooling has tests.", line)
+    assert (line.strip() in work_tickets.post_merge_acceptance(body)) is post_merge
+
+
+def test_queue_without_gh_syncs_and_prints_its_reads_as_a_plan(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    synced: list[Path] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: synced.append(root) or "abc1234")
+
+    assert run(worktree, "queue", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    assert synced == [worktree]
+    assert out.startswith("GitHub plan: queue of git.example/owner/repo\n1. list_issues ")
+    assert '"labels": ["pause"]' in out  # the pause search first
+    assert '"labels": ["escalated", "repo:repo"]' in out
+    assert 'list_pull_requests {"base": "main"' in out and "field-report --check" in out
+    assert '"labels": ["work", "ready", "repo:repo"]' in out
+    assert out.rstrip().endswith("Then: Capacity: unlimited (cloud)")
+
+
+def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_names(
+        tmp_path, monkeypatch):
+    # A git hook sets GIT_DIR for its own checkout; `--worktree <w>` still means w's branch.
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "main" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "main"))
+    seen: list[dict[str, str] | None] = []
+
+    def git(root, *arguments, env=None):
+        seen.append(env)
+        return subprocess.CompletedProcess(arguments, 0, "abc1234\n", "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+    assert work_tickets.branch_tip(tmp_path / "worker") == "abc1234"
+    work_tickets.current_branch(tmp_path / "worker")
+    assert len(seen) == 2
+    assert all(env is not None and "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
+               for env in seen)
+
+
+@pytest.mark.parametrize("repo", ["git.example/owner/obs", "owner/obs", "owner/obs/", "owner/obs.git"])
+def test_file_labels_the_issue_with_the_repository_it_files_in_through_gh_and_in_its_plan(
+        worktree, monkeypatch, capsys, repo):
+    assert work_tickets.work_labels(worktree, repo) == ["work", "ready", "repo:obs"]
+    body = worktree / "work.md"
+    body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)  # without gh: the plan
+    monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
+    monkeypatch.setattr(work_tickets, "form_check", lambda *arguments: False)
+    assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body),
+               "--repo", "git.example/owner/obs") == 0
+    plan = capsys.readouterr().out
+    create = next(line for line in plan.splitlines() if '"method": "create"' in line)
+    assert '"labels": ["work", "ready", "repo:obs"]' in create
+
+
+def test_file_without_repo_labels_the_issue_with_the_checkout_s_repository(worktree, monkeypatch):
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo.git")
+    assert work_tickets.work_labels(worktree, None) == ["work", "ready", "repo:repo"]
