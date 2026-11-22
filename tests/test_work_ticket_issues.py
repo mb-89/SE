@@ -5590,8 +5590,9 @@ def fake_push(main_checkout, monkeypatch):
     """A fake git push answering from a script of (exit code, stderr); waits are recorded, not slept.
 
     Its checkout turns the public check off, so the retry tests reach the push; the gate's own
-    tests set se.toml themselves."""
+    tests set se.toml themselves. It has the local branch `topic` the tests push, at main."""
     (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
+    assert git_door.run("branch", "topic", root=main_checkout).returncode == 0
     calls, waits, script = [], [], []
 
     def run_git_push(root, arguments):

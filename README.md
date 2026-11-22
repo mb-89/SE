@@ -518,7 +518,7 @@ version = "^1.4"                             # in place of ref: a semver range o
 
 | Key | Meaning |
 |---|---|
-| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin refuses it. |
+| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
 | `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
 | `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
 | `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
@@ -571,6 +571,11 @@ escalates. `work_tickets.py push` runs its push gate first.
 Default `true`, so a project that never set it is still checked; a project without a public check
 sets `public_check = false`, and `push` then prints one line saying the check is off and where to
 turn it on.
+
+Whatever `public_check` says, `push` (and every command that pushes through its gate) pushes only
+a local branch, never a refspec, tag or commit, and refuses one that carries commits another remote
+holds but origin does not: a project kept on two hosts shares trees, not histories. Only origin's
+remote-tracking branches count as held by origin; a local tag proves nothing about it.
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
