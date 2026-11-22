@@ -204,6 +204,14 @@ uv run python <se>/scripts/se_start.py refresh
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
+- The project's components: where the project's `se.toml` sets `[project] components`, its
+  listing command ([Project settings](#project-settings)), `check` runs it in the checkout and
+  caches its table; the greeting names, one line each, a component offered and not installed and
+  an installed one with a newer release, with installed and newest version.
+  - Each line names the command that takes it, the listing's `install <name>` or `update <name>`;
+    SE never runs it.
+  - A listing that fails, prints no table or runs past 60 seconds is one warning line, and the
+    greeting still appears; without the setting nothing runs and nothing prints.
 - The outside skills SE's agents rely on (`[roles]` of SE's `se.toml`,
   [AGENTS.md "Agents and skills"](AGENTS.md#agents-and-skills)): the greeting names, in one line,
   each one whose plugin the session lacks, with the roles that rely on it.
@@ -603,6 +611,13 @@ The check before every push knows its destination remote: it gates each commit t
 not hold yet, and a local-list line `remote:<remote name> <regex>` stops only the pushes to that
 remote, so one checkout with two remotes keeps a term from one while the other may receive it.
 The local list's line forms are [Public safety](AGENTS.md#public-safety)'s.
+
+`components` is the project's component listing command, an argument array run without a shell
+in the checkout, such as obs's `["uv", "run", "obs-components"]`.
+
+With no argument it lists, never installs: a table headed `component  kind  installed  newest  repository`, two spaces or more
+between columns, as obs-components prints it. SE's start reports its offers
+([Start and refresh](#start-and-refresh)); unset, it runs nothing.
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
