@@ -718,6 +718,28 @@ from the project root. Where it fails, push restores `se.toml`, commits nothing 
 landing: a generated file that carries the version, added on a branch before `main` released,
 never makes the branch stale, and the suite's verdict is recorded on the merge's tree.
 
+#### Commit checks
+
+```toml
+[commit_checks]
+forbids = ["go", "run", "./cmd/kern", "forbids"]
+```
+
+`[commit_checks]` names a project's own commit checks, each a name and its command, an argument
+array run without a shell. se's commit hook (`.githooks/pre-commit`, after the
+[public check](AGENTS.md#public-safety)) runs each in a copy of the staged tree, so code that
+breaks one is refused before it is committed, not first at landing.
+
+- **The staged tree.** The copy holds the index, the tree the commit records: an unstaged edit
+  and an untracked file decide nothing. The table is read from the staged `se.toml`, and the
+  check's git variables are removed, so its git never reaches the committing repository.
+- **The refusal.** A check that exits non-zero refuses the commit, naming the check, its exit
+  code and its command, with its output below; one that cannot start refuses it too. Each passing
+  one prints `commit check <name>: passed`.
+- **Every project.** A repository that runs se's hooks from se as a module runs its own table
+  ([Public safety](AGENTS.md#public-safety), "Hooks"); unset, the hook runs nothing more.
+  `scripts/commit_checks.py` owns the table and the run.
+
 #### Landing on main
 
 Every integration lands on the integration branch through a landing pull request and its check
