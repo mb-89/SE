@@ -612,6 +612,10 @@ kern grew in SE under `kern/` until `<owner>/kern` existed; its history went ove
 that `scripts/se_modules.py sync kern` places in `.se/modules/kern` (`se_modules.kern_dir`), the
 one answer to where kern is. kern's own tests, its vet and its Windows run are kern's `check`.
 
+How kern is found on the checkout's remotes, by its name and the repository topic `component`, and
+what SE's start does without it, is [components.md](components.md), the one owner of finding
+components.
+
 **Pinning it.** An application pins the core in `se.toml [modules.kern]` with `go`, the `go.mod`
 that requires it (README [Modules](../README.md#modules)): the version that `go.mod` requires of
 `kern` is the pin, resolved to the tag `v<version>` and locked in `se.lock`, so the pin has one
