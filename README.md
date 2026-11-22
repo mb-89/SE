@@ -2423,6 +2423,9 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - `templates.py fill` writes a claimed file to its `--path`, or the document to `--out` or stdout;
   a refusal names every finding and writes nothing. The tool's `fill` answers as `check --render`
   and writes nothing; filing stays the filing commands' and the GitHub tools'.
+- `templates.py` resolves a name for the project `--root` names, else the checkout holding
+  `--path`: its own `templates/`, the template repositories its se.toml pins, then SE's
+  ([docs/templates.md "Template repositories"](docs/templates.md#template-repositories)).
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

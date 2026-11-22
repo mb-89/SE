@@ -150,8 +150,9 @@ front matter holds it, a missing one after the last of them (a new block where t
 **Writing.** `render` writes SE's fleet marker once, then the template marker,
 `<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
 alone, after the scope's marker), then `## ` headings. The marker says what the engine knows:
-the repository `se` for SE's own templates and `project` for any other `templates/` or
-`--templates` folder, the template's `version`, and
+the repository `se` for SE's own templates, a template repository's component name for its
+templates (`catalog`) and `project` for any other `templates/` or `--templates` folder, the
+template's `version`, and
 `sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
 by a NUL byte (`Template.marker_line`); a template with nodes takes `sha256:<hex>` of that digest
 and then its nodes' digests, each so ended (`_nest`); the digest stands where docs/templates.md "The document"
@@ -223,7 +224,11 @@ text as it was given (`work_tickets.template_findings`).
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
 `origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
-tree; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
+tree; `catalog(root, tree=False)` resolves each name for the project at `root` (docs/templates.md
+"Template repositories"): its own `templates/` as `load` reads it, then each template repository its
+se.toml `[templates] repositories` lists (`se_modules.template_repositories`), then SE's, the first
+holding a name winning, each template's marker naming its repository (`project`, the component's
+name, `se`), and a listed repository not placed at its pin refusing the whole catalog; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
 `check(template, document)` gives `Finding`s; `select(...)` gives a `Selection`, its template (None: free)
 and its findings; `verdict(templates, action, body, title, ...)` both at once; `draft(template)`;
 `list_templates(templates)` (named so beside Python's `list`). All but `load` (which also imports the scripts
@@ -256,7 +261,9 @@ the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved),
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
 (`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
+adapter, its checker. Each command resolves its template names by `catalog` for the project
+`--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
+the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
 `fill` and `interfaces` (Interfaces, above) writes a file; none calls GitHub or starts a model.
 
@@ -823,31 +830,77 @@ def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -
     `folder`, the templates and the terms of that folder instead, for one run (`--templates`)."""
     files = _template_files(root, tree, folder)
     own = folder is None and root.resolve() == ROOT.resolve()
-    repository = SE_REPOSITORY if own else PROJECT_REPOSITORY
+    where = (lambda name: str(folder / name)) if folder is not None else (lambda name: f"{TEMPLATES}/{name}")
+    return _loaded([(SE_REPOSITORY if own else PROJECT_REPOSITORY, files, where)])
+
+
+def catalog(root: Path = ROOT, *, tree: bool = False) -> dict[str, Template]:
+    """The templates a name resolves to for the project at `root` (docs/templates.md "Template
+    repositories"): its own `templates/` (`load`'s reading), then each template repository its
+    se.toml `[templates] repositories` lists, in that order (`se_modules.template_repositories`),
+    then SE's own; the first that holds a name is its template, and its `extends` resolve the same
+    way. A listed repository that is no component, not placed at its pin or without `templates/`
+    refuses the whole catalog, naming it and the remedy: no name falls back past it to another
+    repository's template. For SE's own checkout, SE's `templates/` is the project's."""
+    own = root.resolve() == ROOT.resolve()
+    layers: list[tuple[str, dict[str, str], object]] = []
+    try:
+        files = _template_files(root, tree)
+    except TemplateError:
+        if own:
+            raise
+        files = {}  # a project without templates/ of its own
+    layers.append((SE_REPOSITORY if own else PROJECT_REPOSITORY, files,
+                   lambda name: f"{TEMPLATES}/{name}"))
+    if str(Path(__file__).parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).parent))  # se_modules imports its siblings by name
+    modules = _sibling("se_modules")
+    try:
+        repositories = modules.template_repositories(root)
+    except modules.ModuleError as error:
+        raise TemplateError(f"templates: {error}") from error
+    for repository, folder in repositories:
+        layers.append((repository, _folder_files(folder),
+                       lambda name, repository=repository: f"{repository}:{TEMPLATES}/{name}"))
+    if not own:
+        layers.append((SE_REPOSITORY, _template_files(ROOT, tree),
+                       lambda name: f"{SE_REPOSITORY}:{TEMPLATES}/{name}"))
+    return _loaded(layers)
+
+
+def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Template]:
+    """The templates of `layers`, each (its repository, `templates/<file>` -> text, how its files are
+    named in findings), first first: a name, and the term list, are the first layer's that holds it."""
     raw: dict[str, dict] = {}
     texts: dict[str, str] = {}
-    terms: tuple[Term, ...] = ()
-    for name, text in files.items():
-        where = str(folder / name) if folder is not None else f"{TEMPLATES}/{name}"
-        if name == TERMS_FILE:
-            try:
-                data = tomllib.loads(text)
-            except tomllib.TOMLDecodeError as error:
-                raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
-            terms = tuple(Term(str(item["term"]), str(item.get("plain", "")))
-                          for item in data.get("terms", []))
-            continue
-        data = note_data(text, where)
-        template_name = data.get("name")
-        if template_name != name.removesuffix(TEMPLATE_SUFFIX):
-            raise TemplateError(f"{where}: name: {template_name!r} must be the file's name, "
-                            f"{name.removesuffix(TEMPLATE_SUFFIX)!r}")
-        data["path"] = where
-        raw[template_name] = data
-        texts[template_name] = text
-    built = {name: _build(name, raw, terms, ()) for name in sorted(raw)}
+    repositories: dict[str, str] = {}
+    terms: tuple[Term, ...] | None = None
+    for repository, files, where_of in layers:
+        for name, text in files.items():
+            where = where_of(name)
+            if name == TERMS_FILE:
+                try:
+                    data = tomllib.loads(text)
+                except tomllib.TOMLDecodeError as error:
+                    raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
+                if terms is None:
+                    terms = tuple(Term(str(item["term"]), str(item.get("plain", "")))
+                                  for item in data.get("terms", []))
+                continue
+            data = note_data(text, where)
+            template_name = data.get("name")
+            if template_name != name.removesuffix(TEMPLATE_SUFFIX):
+                raise TemplateError(f"{where}: name: {template_name!r} must be the file's name, "
+                                f"{name.removesuffix(TEMPLATE_SUFFIX)!r}")
+            if template_name in raw:
+                continue  # an earlier layer holds the name: it resolves there
+            data["path"] = where
+            raw[template_name] = data
+            texts[template_name] = text
+            repositories[template_name] = repository
+    built = {name: _build(name, raw, terms or (), ()) for name in sorted(raw)}
     digests = {name: _digest(name, raw, texts) for name in built}
-    return _nest({name: replace(template, repository=repository, digest=digests[name])
+    return _nest({name: replace(template, repository=repositories[name], digest=digests[name])
                   for name, template in built.items()}, digests)
 
 
@@ -2885,7 +2938,10 @@ def fields_data(text: str, given: str, command: str = "templates.py check") -> d
 
 def _template(templates: dict[str, Template], name: str) -> Template:
     if name not in templates:
-        raise TemplateError(f"templates.py: no template {name!r}; the templates are {', '.join(sorted(templates))}")
+        raise TemplateError(f"templates.py: no template {name!r}; the templates are {', '.join(sorted(templates))}. "
+                            f"A name resolves from the project's {TEMPLATES}/, then each repository se.toml "
+                            "[templates] repositories lists, then SE's: add "
+                            f"{TEMPLATES}/{name}{TEMPLATE_SUFFIX} to one of them, or name one of these")
     return templates[name]
 
 
@@ -2898,6 +2954,13 @@ def _root(path: Path, root: Path | None) -> Path:
         if (folder / ".git").exists():
             return folder
     return Path.cwd()
+
+
+def _project(options: argparse.Namespace) -> Path:
+    """The project whose catalog resolves a name (`catalog`): `--root`, else the root of `--path`
+    (`_root`), else SE's own checkout."""
+    path, root = getattr(options, "path", None), getattr(options, "root", None)
+    return _root(path, root) if path is not None or root is not None else ROOT
 
 
 def _relative(path: Path, root: Path, command: str) -> str:
@@ -3146,8 +3209,9 @@ def main(arguments: list[str] | None = None) -> int:
     for command in (checking, drafting, schemas, filling):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")
-        command.add_argument("--root", type=Path, help="the project root of --path's globs "
-                             "(default: the git checkout holding it, else the working directory)")
+        command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
+                             "(default: the git checkout holding it, else the working directory), "
+                             "whose templates/ and template repositories resolve a name before SE's")
     for command in (checking, drafting, schemas, listing, filling):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
@@ -3161,7 +3225,9 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if options.command == "interfaces":
             return _interfaces(load(ROOT, tree=True), options.check)
-        templates = load(ROOT, tree=options.tree, folder=options.templates)
+        templates = (load(ROOT, tree=options.tree, folder=options.templates)
+                     if options.templates is not None
+                     else catalog(_project(options), tree=options.tree))
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
