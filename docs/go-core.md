@@ -680,10 +680,15 @@ battery starts the bare core, and a `check.yml` that calls the core's reusable `
 `se new app <name> --path <dir>` copies the core's `template/` from SE's pinned clone at its tag
 `v<version>`, fills in the name and the pin, initializes git with the project identity and makes
 the first commit. Creating the GitHub repository, its ruleset and its first push stay the owner's
-steps, which SE names as one line. kern's module path names no host, so no build can fetch it: the
-application carries kern's Go module at the pin in `kern/` and its `go.mod` replaces the module by
-it, until new applications pin kern as SE does (README [New application](../README.md#new-application)). A
-new application then gets components by adding instances, CI from the reusable workflow, and its
+steps, which SE names as one line.
+
+kern's module path names no host, so no build can fetch it, and the application pins kern as SE
+does, carrying no copy: its `go.mod` requires kern at the pin and replaces the module by its clone
+in `.se/modules/kern`, and its `se.lock` locks the commit SE's locks. `se new app` copies SE's clone
+there, ignored, so the application builds before it has an origin; its CI places kern at that
+commit with the action `kern-at-pin` (README [New application](../README.md#new-application)).
+
+A new application then gets components by adding instances, CI from the reusable workflow, and its
 test budget from `se.toml [tests]`, in the same shape as SE's.
 
 SE becomes one application on the core: its binary is `se`, its components live in SE's
@@ -806,10 +811,9 @@ as on Go 1.24.7.
 - **Windows.** The detached start and the hook client run on Windows in v5; the core's CI runs its
   contract suite on Windows from step 2.
 - **How outside builds fetch kern.** kern's module path `kern` names no host, so no build can
-  fetch it by its path. SE's builds replace it by the module clone `se_modules.py sync kern` places
-  (`components/go.mod`, the release workflow's checkout of the commit `se.lock` locks). A new
-  application still carries kern's source at its pin in `kern/` (`scripts/se_new.py`) until it pins
-  kern the same way (new-apps-pin-kern).
+  fetch it by its path. SE's builds and every new application's replace it by the module clone
+  `se_modules.py sync kern` places, and CI checks out the commit `se.lock` locks there with the
+  action `kern-at-pin`, which the battery and the release workflow both call.
 - **Two languages in one application.** SE's suite stays Python against the Python fake; the Go
   side is tested in the core's repository. An application with Go components runs both in its
   `battery.yml`, under one budget.
