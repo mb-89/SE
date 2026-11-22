@@ -30,7 +30,7 @@ import build_docs  # noqa: E402
 import deck  # noqa: E402
 
 NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nThis is one case of how %s is chosen.\n"
-        "\n## The problem\n\nIt is chosen by hand.\n")
+        "\n## The problem\n\nIt is chosen by hand.\n\n## What others do\n\nOthers pick it by a rule.\n")
 
 
 def _folder(tmp_path: Path, notes: dict[str, str], manifest: str | None = None) -> Path:
@@ -85,8 +85,10 @@ DECKS = {
     "send": ({"cache": NOTE % ("Cache", "a cache"), "queue": NOTE % ("Queue", "a queue")}, None),
     "no-situation": ({"bare": NOTE.replace("## Current situation\n\n", "") % ("Bare", "a bare") + PUGH}, None),
     "no-problem": ({"bare": NOTE.replace("\n## The problem\n\n", "\n") % ("Bare", "a bare") + PUGH}, None),
+    "no-others": ({"bare": NOTE.replace("\n## What others do\n\n", "\n") % ("Bare", "a bare") + PUGH}, None),
     "after-the-fence": ({"late": (NOTE % ("Late", "a late")).split("\n## Current")[0] + PUGH
-                         + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"}, None),
+                         + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"
+                         + "\n## What others do\n\nThey rule it.\n"}, None),
     "worked-example": ({"decision-deck": EXAMPLE.read_text(encoding="utf-8")}, None),
     # Option A names neither its success nor the reason for its mark; B, the datum, needs no reasons.
     "unargued": ({"bare": NOTE % ("Bare", "a bare") + PUGH.replace("wins: Known.,", "wins: Known., success: Kept.,")},
@@ -131,13 +133,13 @@ def test_build_refuses_a_deck_that_asks_nothing_or_a_silent_decision(decks, name
     assert not destination.exists()
 
 
-@pytest.mark.parametrize("name", ["no-situation", "no-problem", "after-the-fence"])
+@pytest.mark.parametrize("name", ["no-situation", "no-problem", "no-others", "after-the-fence"])
 def test_build_refuses_a_decision_that_does_not_explain_the_problem_before_its_options(decks, name):
     result, destination = decks[name]
     assert result.returncode == 1, result.stderr
     note = "late" if name == "after-the-fence" else "bare"
     assert f"decision(s) {note} do not explain" in result.stderr
-    assert "`## Current situation` and `## The problem` before the `pugh` fence" in result.stderr
+    assert "`## Current situation`, `## The problem` and `## What others do` before the `pugh` fence" in result.stderr
     assert not destination.exists()
 
 

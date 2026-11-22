@@ -9,8 +9,8 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       obs's screens layout (one chapter per phone screen) unless the manifest sets `obsHtml.layout`. A chapter
       asks for a bless (`obs: {bless: pending}`) or is a record: what was decided without the person, or
       their tasks. It fails on a deck where no chapter asks, on a decision (a `pugh` fence) that does
-      not ask, outside a record built with the answers, on a decision without `## Current situation`
-      and `## The problem`, in that order, before its fence (the decision skill's note shape), and on
+      not ask, outside a record built with the answers, on a decision without `## Current situation`,
+      `## The problem` and `## What others do`, in that order, before its fence (the decision skill's note shape), and on
       any obs warning. It writes the obs Document the deck was built from beside it, `<deck>.document.json`
       (its chapters, their versions and answers): read that, never the built page. It warns, building all
       the same, of each option without `success` and each mark off the datum without `because` (the
@@ -36,7 +36,7 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
 
 The answers payload's fields are owned by obs's src/obs/answers.schema.json. Exit code 0: done;
 1: the build failed, obs warned, no chapter or no decision asks for a bless, or the answers are
-malformed, or a decision does not explain its problem before its options; 2: setup error, or no answers within --timeout.
+malformed, or a decision does not explain its problem and how others solve it before its options; 2: setup error, or no answers within --timeout.
 """
 
 from __future__ import annotations
@@ -222,7 +222,7 @@ def _warnings(chapters: list[dict]) -> list[str]:
     return warnings
 
 
-SECTIONS = ["Current situation", "The problem"]  # The decision skill's note shape, before the fence.
+SECTIONS = ["Current situation", "The problem", "What others do"]  # The decision skill's note shape, before the fence.
 
 
 def _explains(content: list[dict]) -> bool:
@@ -249,8 +249,8 @@ def _refusal(chapters: list[dict], recorded: bool) -> str | None:
     unexplained = [chapter["id"] for chapter in decisions if not _explains(chapter["content"])]
     if unexplained:
         return (f"decision(s) {', '.join(unexplained)} do not explain the problem before the options; write "
-                "`## Current situation` and `## The problem` before the `pugh` fence, as the decision skill's "
-                "note shape (src/skills/decision/SKILL.md) says")
+                "`## Current situation`, `## The problem` and `## What others do` before the `pugh` fence, as the "
+                "decision skill's note shape (src/skills/decision/SKILL.md) says")
     if not any("bless" in chapter for chapter in chapters):
         return f"no chapter asks for a bless, so the deck asks the person nothing; {remedy}"
     return None

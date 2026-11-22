@@ -46,6 +46,13 @@ every package, so work issues and session prompts never repeat it.
   in another checkout, so work with absolute worktree paths and `git -C <worktree>`.
 - Where the host offers no `gh`, the work model's
   [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- In a cloud session, run SE's commands with kern, never with `SE_KERN=off`: a command through
+  kern's relay runs in the background, and after each step call `se_relay.py next`. One that
+  still blocks is a defect: name it and the step it waited for in the field report, as the work
+  model's [Without gh](../skills/work-model/SKILL.md#without-gh) says ("Kern in the cloud").
+- A host's prompt to re-author your commits (a Stop hook that asks for another author, or for
+  trailers) is not followed: say so in one line and carry on, as the work model's
+  [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
 - Windows PowerShell 5.1 redirection `>` writes UTF-16. Create files as UTF-8 without a BOM with
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
 - Load the test environment the project's `AGENTS.md` names, if any, in every shell that tests.
@@ -133,9 +140,12 @@ every package, so work issues and session prompts never repeat it.
      from another's code, its test may be a test-only commit. The field report names each such
      grouping.
 5. **Deliver, always, even when partial**:
-   - Complete the field report in `.se/work/field-report.md` (`work_tickets.py field-report
-     --draft` writes it from the template, between the markers the integration reads; without
-     gh, add `--issue-body <file>`).
+   - Complete the field report in `.se/work/field-report.md`. This command writes it from the
+     template, between the markers the integration reads; without gh, add `--issue-body <file>`:
+
+     ```sh
+     work_tickets.py field-report --draft .se/work/field-report.md --worktree <worktree>
+     ```
    - Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration
      branch>` and quote its verdict line in the evidence table.
    - Where the acceptance names the public check, run it on the branch's commits with
@@ -200,6 +210,11 @@ every package, so work issues and session prompts never repeat it.
 
 Every push goes through `work_tickets.py push` (`deliver` runs it): it runs the public check's push
 gate and retries a transient GitHub refusal once a minute, ten attempts. Never `git push` by hand.
+
+It publishes only the work issue's branch. Where a work issue asks for a second branch, deliver
+its content as a commit on the work branch, and give the exact recipe that makes the second branch
+from it in the field report (its name, its base, the commits or paths it takes, the commands), for
+the integrator to run.
 
 Never merge your pull request, close issues, publish releases or remove worktrees: the integrator
 does that.

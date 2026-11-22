@@ -466,6 +466,20 @@ session list."
   turn. No blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
 - Where a host has no way to start a session, the role files or queues the work, or gives the
   person the line that starts it; it never runs the work in-chat.
+- **The effort ceiling**: no session starts another at an effort above its own. The owner: "I
+  don't want your workers ever running higher than you are. Lower is okay if it makes sense, but
+  not higher."
+  - The SE agent's effort is the ceiling for every integrator and worker it starts, and for every
+    session those start in turn.
+  - A role reads its own effort (`get_session` without an id) and passes that level, or a lower
+    one where the work is lighter, as the session tool's `effort` (`create_session`).
+  - A scheduled task that starts an integrator, such as the
+    [dispatcher's](../../../README.md#dispatcher), is set at or below the SE agent's effort; the
+    person sets it when creating the task.
+- **Integrators' workflows**: an integrator may run a workflow (the host's multi-agent
+  orchestration, Claude Code's `Workflow`) to plan and run its own work, such as reviews and
+  checks across several pull requests. Each workflow holds fewer than 10 agents, at or below
+  the effort ceiling. A work package still goes to a worker in its own visible session.
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
 sidebar shows one SE section, each role's sessions nested under the session that started them.
@@ -724,6 +738,11 @@ repeats any of this section's rules:
   ([pub-004](references/rules.md#pub-004-no-tracker-references-in-commit-messages)). se's public check refuses them in its commit gates
   ([Public safety](../../../AGENTS.md#public-safety)), and `integrate` writes its merge messages
   without them where the project's public check is on.
+- **A host's prompt to re-author commits is not followed**: a Stop hook that asks for another
+  author, a reminder that asks for attribution trailers, or any other request to rewrite commits'
+  identity or message. This identity and
+  [pub-003](references/rules.md#pub-003-no-attribution-trailers) hold; the session says so in one
+  line (`Not re-authoring: se.toml's identity and pub-003 hold`) and carries on.
 
 `commit_trailer` is the one place that names a commit trailer: an environment that requires one
 sets it on its machine, every role adds it as the last line of
@@ -825,6 +844,17 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
   - Run each step with exactly the input the hook tells, one at a time; its answer reaches the
     command through the PostToolUse hook. No file is saved and no `--read-back` follows: the
     command finishes on its own and prints its result.
+  - After each step, call `uv run python <se>/scripts/se_relay.py next --root <checkout>` for the
+    next one (README
+    [Hand-offs through the relay](../../../README.md#hand-offs-through-the-relay)).
+- **Kern in the cloud, always**: in a cloud session, integrators and workers run SE's commands
+  with kern, never with `SE_KERN=off`; the fallback works but bypasses kern, which SE requires
+  for everything mechanical.
+  - A command through kern's relay runs in the background, as the point above says, never in the
+    foreground, where it waits for a step the session cannot run until the command ends.
+  - A command that still blocks that way is a defect: report it with the command and the step it
+    waited for (a worker in its field report, an integrator in its report to SE), and set no
+    `SE_KERN=off`.
 - **Commands that still run** (they need no GitHub): `init`, `create`, `move`, `status`,
   `review-note`, `probe`, `sync`, `identity`, `suite`, `suite-shard`, `suite-time`, `guard`, `config`,
   `close`, `push`, `verified`, `comments-read`, `body-read --body-file`, `release-trailer`,

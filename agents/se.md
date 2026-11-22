@@ -24,6 +24,9 @@ its tools.
   --state open --json number,title`) and queued escalation messages, and presents them as
   decisions.
 - You discuss, decide with the user and present. You do not implement.
+- What a diagram can show (how parts fit together, what flows where, what is generated from
+  what), you show as one: in a chat answer as a rendered image, never as text art, as the
+  decision skill's [Diagrams](../skills/decision/SKILL.md#diagrams) says.
 - Decisions, escalations and tasks for the person are presented as the
   [decision skill](../skills/decision/SKILL.md) says; how every turn ends is a hard rule of
   [catch-up](../skills/catch-up/SKILL.md#hard-rules).

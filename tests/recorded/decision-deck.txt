@@ -178,6 +178,23 @@
           "id": "paragraph-7635060f"
         },
         {
+          "type": "figures",
+          "attrs": {
+            "kind": "mermaid"
+          },
+          "children": [
+            {
+              "type": "mermaid",
+              "attrs": {
+                "source": "graph TD\n  SE -->|one table per message| Chat\n  Person -->|answers in| Chat\n  Chat -->|copied by hand| Issue\n",
+                "svg": "<svg the build machine drew from the source>"
+              },
+              "children": []
+            }
+          ],
+          "id": "figures-b10d9bf6"
+        },
+        {
           "type": "section",
           "attrs": {
             "level": 2
@@ -228,6 +245,193 @@
             }
           ],
           "id": "paragraph-776645f4"
+        },
+        {
+          "type": "section",
+          "attrs": {
+            "level": 2
+          },
+          "children": [
+            {
+              "type": "text",
+              "attrs": {},
+              "children": [],
+              "text": "What others do"
+            }
+          ],
+          "id": "section-aed29e88"
+        },
+        {
+          "type": "list",
+          "attrs": {
+            "ordered": false,
+            "tight": true
+          },
+          "children": [
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "Architecture decision records"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " (ADRs, after Michael Nygard): one short Markdown file per"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "decision with its context, the decision and a status. For example, a repository holds"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "code",
+                      "attrs": {},
+                      "children": [],
+                      "text": "docs/adr/0005-use-postgres.md"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": ", whose status line reads "
+                    },
+                    {
+                      "type": "code",
+                      "attrs": {},
+                      "children": [],
+                      "text": "Accepted"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "."
+                    }
+                  ],
+                  "id": "paragraph-1eafb8b3"
+                }
+              ],
+              "id": "list-item-1eafb8b3"
+            },
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "RFC processes"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": ": one document per proposal, discussed in its own thread and accepted by a"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "named team. For example, Python's PEP 8 was proposed, discussed and accepted as one document."
+                    }
+                  ],
+                  "id": "paragraph-2bb5df8d"
+                }
+              ],
+              "id": "list-item-2bb5df8d"
+            },
+            {
+              "type": "list-item",
+              "attrs": {},
+              "children": [
+                {
+                  "type": "paragraph",
+                  "attrs": {},
+                  "children": [
+                    {
+                      "type": "strong",
+                      "attrs": {},
+                      "children": [
+                        {
+                          "type": "text",
+                          "attrs": {},
+                          "children": [],
+                          "text": "Required reviews"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": ": the approver answers on the change itself, one change at a time. For"
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": " "
+                    },
+                    {
+                      "type": "text",
+                      "attrs": {},
+                      "children": [],
+                      "text": "example, a GitHub pull request reads \"Review required\" until a code owner approves it."
+                    }
+                  ],
+                  "id": "paragraph-ceaf29c8"
+                }
+              ],
+              "id": "list-item-ceaf29c8"
+            }
+          ],
+          "id": "list-175c5515"
         },
         {
           "type": "figures",
@@ -339,7 +543,7 @@
                     },
                     {
                       "item": "Is the problem real",
-                      "answer": "The person's words (\"one decision in the end should be a one-pager\") and chat answers that had to be copied into issues by hand.",
+                      "answer": "The person's words (\"one decision in the end should be a one-pager\") and chat answers that had to be copied into issues by hand; decision records, RFC processes and required reviews each answer one decision at a time, so the problem is a known one.",
                       "pass": true
                     },
                     {
@@ -401,7 +605,7 @@
         }
       },
       "bless": {
-        "version": "25e95f6aff3345f76dea31c80ef47d396790293272dd1ceead56a0ee3ad52c53"
+        "version": "767438fd36f3e4b7fb48aa212b98fa2df7f4757d6a6cfe010666ee5987df645b"
       }
     }
   ],
@@ -504,6 +708,7 @@
     "manifest",
     "markdown",
     "markdown-frontmatter",
+    "mermaid",
     "profiles",
     "pugh-decisions"
   ],
