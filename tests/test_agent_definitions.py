@@ -87,8 +87,8 @@ def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_de
     front = (AGENTS / "se.md").read_text(encoding="utf-8").split("---")[1]
     assert "claude.disallowedTools: AskUserQuestion" in front
     se, catch_up, work_model = normalized(AGENTS / "se.md"), normalized(SKILL), normalized(WORK_MODEL)
-    assert "a decision reaches the person only as a deck" in se
-    assert "other open points as text at the end of the turn" in se
+    assert "A decision reaches the person only as a deck" in se
+    assert "The other open points go as text at the end of the turn" in se
     for text in (se, catch_up, work_model):
         for asks in ("may ask the human with `ask_user`", "asked with the `ask_user` tool",
                      "where there is no `ask_user`, ask", "If `ask_user` does not reach",
@@ -391,10 +391,19 @@ def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
     for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs: {bless: pending}`",
                  "**`## Current situation`:**", "**`## The problem`:**", "Nothing else goes before the fence",
-                 "The `pugh` fence", "The datum is the strongest rival",
+                 "The `pugh` fence", "The datum is what exists today wherever something exists",
+                 "never an option not yet built", "Only where nothing exists is the datum the strongest rival",
                  '"Keep what we have" is an option', "the letters of those it fails",
                  "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
         assert rule in text, rule
+
+
+def test_the_rule_book_puts_the_datum_on_what_exists_today():
+    rules = normalized(RULE_BOOK)
+    rule = rules.split("### dec-003 Keep what we have", 1)[1].split("###", 1)[0]
+    assert "the datum every option is marked against is what exists today" in rule
+    assert "never an option not yet built" in rule
+    assert "only where nothing exists is it the strongest rival" in rule
 
 
 def test_the_decision_skill_points_to_obs_for_the_fence_contract_and_restates_none_of_it():
