@@ -92,6 +92,30 @@ def test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path: Path, m
     assert len(peer.sent) == before, "no beat after the step answered"
 
 
+def test_a_beat_that_woke_as_the_step_ended_lands_before_the_step_returns(tmp_path: Path, monkeypatch) -> None:
+    """Forces CI's interleaving: the step's work ends just after a beat woke, and that beat's say
+    and lease land 0.05 s later, under the test's BEAT. The stream test above still sees nothing
+    after the step answered, as the step returns only once its beat has ended."""
+    armed, woke = threading.Event(), threading.Event()
+    say, run_step = runner.Runner._say, runner.Runner._run_step
+
+    def held_say(self, call, line=None):  # the first beat to wake once the step's work is done
+        if line is None and armed.is_set() and not woke.is_set():
+            woke.set()
+            time.sleep(0.05)
+        return say(self, call, line)
+
+    def run_step_until_a_beat_woke(self, *args):  # the step ends while that beat is on its way
+        answer = run_step(self, *args)
+        armed.set()
+        assert woke.wait(5), "no beat woke after the step's work"
+        return answer
+
+    monkeypatch.setattr(runner.Runner, "_say", held_say)
+    monkeypatch.setattr(runner.Runner, "_run_step", run_step_until_a_beat_woke)
+    test_a_step_says_its_lines_at_once_and_beats_while_it_runs(tmp_path, monkeypatch)
+
+
 HOLD = """name = "hold"
 contract = 1
 help = "Holds a call until its continuation runs."
