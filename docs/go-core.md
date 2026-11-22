@@ -431,6 +431,38 @@ The greeting stays `se_start.py status`'s, within its 1 s budget; it reads `get.
 200 ms wait and says `core: starting` where none answers yet. Nothing waits for Python components:
 their names read as `not provided` until they attach.
 
+### Discover cheaply, load late
+
+The rule is the guidance note
+[discover-cheap-load-late](../guidance/discover-cheap-load-late.md): every listing reads
+declarations alone, and code loads on first use. The core already reads declarations at start
+without running a component; what it still does eagerly is start every placed process.
+
+- **The process starts on first use.** A placed instance's process starts at its first call or its
+  first changed input, not at the core's start, and stops after it has been idle. Until then its
+  commands are listed and offered from its declaration as now. This is kern's first package below.
+- **The budget.** Each listing answers within the interactive class's second, interpreter included,
+  with 200 fixture components of 5 commands each whose code trips when loaded. SE's test is
+  `tests/test_discovery_budget.py`; its numbers live in the note.
+
+The inventory, measured on 22 Nov in a Claude Code cloud container (4 cores, 5 runs each,
+`python -c pass` 14 to 26 ms), in the order the packages land:
+
+| # | where | loads eagerly today | measured | package |
+|---|---|---|---|---|
+| 1 | kern, `host/core.go` `spawnPlaced` | every placed instance's process at the core's start: SE's wiring places 11 Python processes, each a `uv run` and its script's import | 46 to 61 ms of `uv run` each, plus the imports below | kern: `components-start-on-first-call` |
+| 2 | kern, `help`, `mcp --tools` and `components list` | nothing: the verb table is static, the tools come from the declarations, `components list` reads its cache | no budget test yet | kern: `listings-hold-the-discovery-budget` |
+| 3 | SE, `scripts/work_tickets.py` | every command, `--help` and a call routed to kern included, imports the 11,700-line script and builds the parser of every command first | `--help` 241 to 273 ms, `status --help` 261 to 311 ms | SE: `work-tickets-loads-per-command` |
+| 4 | SE, `review.py` and `se_start.py` | the same, smaller: the whole script before the one command | `--help` 127 to 256 ms and 110 to 140 ms | SE: the same package, script by script |
+| 5 | obs, `obs-document components` | the document build's modules (jsonschema, the vault, comments, sync) before it dispatches `components` | 212 to 305 ms to import `obs.document`, 47 to 52 ms for `obs.components` alone | obs: `components-verb-loads-late` |
+| 6 | SE, `se_components.py commands` | nothing: it reads the declarations alone | SE's 75 commands 107 to 132 ms; 1,000 fixture commands 142 to 182 ms | this package |
+
+- **Not a discovery:** `work_tickets.py docs` imports every script of `se_components.py`
+  `SCRIPTS` (149 to 254 ms) to write the declarations from their parsers. That is generating,
+  which the rule allows.
+- **Packages 1 and 2** are kern's, filed from this package's field report; **5** is obs's, filed
+  the same way; **3 and 4** are SE's, filed by SE.
+
 ## Nobody starts the index by hand
 
 The SE plugin's hooks start the core and post every event to it. Each hook is one command,
