@@ -1,3 +1,6 @@
 #!/bin/sh
-# Public-safety check of the staged content.
-exec "$(dirname "$0")/se-script" public_check.py --staged
+# Public-safety check of the staged content, then the project's own commit checks on the staged
+# tree (se.toml [commit_checks], scripts/commit_checks.py): a failure of either refuses the commit.
+hooks="$(dirname "$0")"
+"$hooks/se-script" public_check.py --staged || exit $?
+exec "$hooks/se-script" commit_checks.py
