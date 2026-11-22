@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "bash": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project python scripts/copilot_probe.py PreToolUse || true",
+        "powershell": "uv run --no-project python scripts/copilot_probe.py PreToolUse; exit 0",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "PATH=\"$HOME/.local/bin:$PATH\" uv run --no-project python scripts/copilot_probe.py preToolUse || true",
+        "powershell": "uv run --no-project python scripts/copilot_probe.py preToolUse; exit 0",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}
