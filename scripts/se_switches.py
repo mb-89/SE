@@ -45,7 +45,7 @@ REQUIRED = ("name", "kind", "reader", "default", "layers", "help")
 TOML_LAYERS = ("local", "se.toml")
 #: What the drift list reads under se's checkout, and the names it counts as read there: a name
 #: in quotes, or a shell's or PowerShell's variable.
-DRIFT_DIRS = ("scripts", "kern", "components")
+DRIFT_DIRS = ("scripts", "components")
 DRIFT_SUFFIXES = (".py", ".go", ".sh", ".ps1")
 QUOTED_NAME = re.compile(r"""["'`](SE_[A-Z][A-Z0-9_]*)["'`]|\$\{?(SE_[A-Z][A-Z0-9_]*)|"""
                          r"""\$env:(SE_[A-Z][A-Z0-9_]*)""")

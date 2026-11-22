@@ -79,10 +79,10 @@ def test_one_planted_reach_of_each_kind_is_listed_with_its_kind_word_and_line():
         Reach("scripts/tool.py", 5, "call", "reach_out"),
         Reach("scripts/tool.py", 6, "literal", "example.com/endpoint"),
     ]
-    assert reaches("kern/tool.go", GO, WIDGET) == [
-        Reach("kern/tool.go", 4, "import", "example.com/widget"),
-        Reach("kern/tool.go", 6, "command", "tool"),
-        Reach("kern/tool.go", 7, "literal", "example.com/endpoint"),
+    assert reaches("components/tool.go", GO, WIDGET) == [
+        Reach("components/tool.go", 4, "import", "example.com/widget"),
+        Reach("components/tool.go", 6, "command", "tool"),
+        Reach("components/tool.go", 7, "literal", "example.com/endpoint"),
     ]
 
 
@@ -122,13 +122,15 @@ def test_the_ground_is_hygienes_and_a_contract_test_is_scanned(tmp_path, capsys)
                                                        contract_tests=["tests/test_door.py"])})
     needle = "x = 'needle'\n"
     write(tmp_path / "root", {name: needle for name in (
-        "scripts/door.py", "tests/test_door.py", "components/c.py", "kern/k.go", "scripts/notes.md",
-        "scripts/.venv/v.py", "tests/testdata/t.py", "scripts/__pycache__/p.py", "docs/d.py")})
-    write(tmp_path / "root", {"kern/k.go": 'var x = "needle"\n'})
+        "scripts/door.py", "tests/test_door.py", "components/c.py", "components/k.go", "scripts/notes.md",
+        "scripts/.venv/v.py", "tests/testdata/t.py", "scripts/__pycache__/p.py", "docs/d.py",
+        "kern/k.go", ".se/modules/kern/k.go")})
+    write(tmp_path / "root", {"components/k.go": 'var x = "needle"\n'})
     code, out, _ = run(capsys, "--root", str(tmp_path / "root"), "--doors", str(doors))
     assert code == 0
     assert [line for line in out.splitlines() if ": literal " in line] == [
-        "components/c.py:1: literal needle", "kern/k.go:1: literal needle", "tests/test_door.py:1: literal needle"]
+        "components/c.py:1: literal needle", "components/k.go:1: literal needle",
+        "tests/test_door.py:1: literal needle"], "kern's code is kern's repository's to scan"
 
 
 def test_a_file_that_does_not_parse_or_is_not_utf8_is_not_read_and_the_exit_is_0(tmp_path, capsys):
@@ -184,7 +186,7 @@ def test_the_git_declaration_is_hygienes_git_door():
     assert sorted(git.files) == sorted(hygiene.GIT_DOOR)
     assert git.commands == (GIT,)
     assert dict(git.baseline) == dict(hygiene.GIT_ALLOWED) == {}
-    assert sorted(git.contract_tests) == ["kern/git/contract_test.go", "tests/test_git_door.py"]
+    assert sorted(git.contract_tests) == ["tests/test_git_door.py"]
 
 
 def test_the_declaration_refuses_a_list_that_is_not_strings():
@@ -227,12 +229,12 @@ def test_the_git_reaches_equal_hygienes_on_the_tree_of_its_git_door_test(tmp_pat
             f"subprocess.run(['{GIT}', '-C', root, 'status'])\n"
             f"subprocess.run('{GIT} status', shell=True)\n"
             "git_door.run('status', root=root)\n"),
-        "kern/tool.go": f'cmd := exec.CommandContext(ctx, "{GIT}", "-C", dir)\n',
+        "components/tool.go": f'cmd := exec.CommandContext(ctx, "{GIT}", "-C", dir)\n',
         "scripts/git_door.py": f"subprocess.run(['{GIT}', *argv])\n",
         "tests/testdata/skipped.py": f"subprocess.run(['{GIT}', 'log'])\n",
     })
     report = report_git_lines(tmp_path)
-    assert report == hygiene_git_lines(tmp_path) == {"kern/tool.go": [1], "scripts/tool.py": [3, 4]}
+    assert report == hygiene_git_lines(tmp_path) == {"components/tool.go": [1], "scripts/tool.py": [3, 4]}
     assert sorted(hygiene.git_door_findings(tmp_path, {})) == [
         f"{name}:{lines[0]}: {len(lines)} {GIT} subprocess(es) outside the door, 0 allowed; run {GIT} through "
         "scripts/git_door.py (tests: the fake_git_door fixture)" for name, lines in report.items()]

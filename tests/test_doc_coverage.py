@@ -27,10 +27,8 @@ from test_agent_definitions import ANCHOR_LINK, anchors
 
 ROOT = Path(__file__).resolve().parents[1]
 
-NOTES = ("src/agents/*.md", "src/skills/**/*.md", "docs/**/*.md", "kern/README.md",
-         "kern/components/*/README.md", "components/README.md")
-LINKED = ("README.md", "AGENTS.md", "docs/**/*.md", "kern/README.md", "kern/components/*/README.md",
-          "components/README.md", "tests/evals/README.md")
+NOTES = ("src/agents/*.md", "src/skills/**/*.md", "docs/**/*.md", "components/README.md")
+LINKED = ("README.md", "AGENTS.md", "docs/**/*.md", "components/README.md", "tests/evals/README.md")
 
 UNLISTED = {
     "src/agents/reviewer.md": "the reviewer's role definition; the other three roles are chapters, "
@@ -43,9 +41,6 @@ UNLISTED = {
     "docs/harvest-2026-11.md": "a dated record",
     "docs/obs-3-range-trial-2026-11.md": "a dated record",
     "docs/retro-2026-11-12-to-13.md": "a dated record",
-    "kern/README.md": "a guide read beside the Go core's code",
-    "kern/components/github/README.md": "a guide read beside its component's code",
-    "kern/components/session/README.md": "a guide read beside its component's code",
     "components/README.md": "a guide read beside SE's Go components",
 }
 
