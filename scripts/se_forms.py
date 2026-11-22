@@ -148,6 +148,27 @@ and CI's `check` job run it (README "Forms").
   line, exit code 0; a usage error, exit code 2. `changed_refusal` gives stop-check and push the
   same lines.
 
+**The backstop.** `se_forms.py backstop --event-name NAME --event FILE [--backstop off|on]
+[--worktree DIR]` reads one GitHub event, as `.github/workflows/forms.yml` hands it over from
+`$GITHUB_EVENT_PATH`, and prints one JSON plan, `{"repo", "number", "add_labels", "summary",
+"failed"}`; it never calls GitHub and exits 0, 2 on a usage error (README "Forms").
+
+- What it checks (BACKSTOP_EVENTS): `issues` opened (`issue.create`), edited, reopened or labeled
+  (`issue.edit`), for an issue whose body carries the fleet marker or whose labels hold `work`,
+  its labels from the event; `issue_comment` created or edited (`comment.create`,
+  `comment.edit`), for a comment whose body carries a form's marker (`<!-- se:review -->`, a
+  `<!-- se:form <name> -->` line), as selection reads it. Every other event, an outside
+  reporter's issue and an unmarked comment among them, gives an empty plan.
+- The check is `check`'s for the event's repository, through the gate's selection (`gate_form`):
+  the form, the private terms of `--worktree`'s local list (default: the directory it runs in;
+  a finding names the field and the list, never the term), the name rule and SE's commands.
+- The plan: an issue whose text refuses and that lacks `off-form` gets `add_labels: ["off-form"]`;
+  its summary is `refusal`'s, at most REFUSAL_LINES lines, and the `unhold` line. A comment whose
+  text refuses gets none and `failed: true`, as `unhold` reads the issue's body, never its
+  comments. The plan never removes a label and never holds a comment to write.
+- The switch: se.toml `[forms] backstop` of `--worktree`'s checkout, `off` (the default) or `on`,
+  another value a usage error naming the file; `--backstop`, for tests, sets it for the run.
+
 Standard library only; it imports `forms` and `work_tickets` as the scripts beside it."""
 
 from __future__ import annotations
@@ -161,6 +182,7 @@ import re
 import sys
 import threading
 import time
+import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -600,7 +622,7 @@ COMPONENTS = (sibling("se_components").Group(
     "SE's forms: list names them, draft gives a form's fields, their instructions and their shape, "
     "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
     "to file.",
-    ("list", "draft", "check", "gate", "check-files")),)
+    ("list", "draft", "check", "gate", "check-files", "backstop")),)
 #: The commands that go through kern where it runs (se_components.routed): all three only read.
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
@@ -680,10 +702,24 @@ def make_parser() -> argparse.ArgumentParser:
     files.add_argument("--root", type=Path, help="the project root of the forms' paths (default: "
                                                  "the git checkout holding the working directory)")
     files.add_argument("--forms", type=Path, help="read the forms from this folder instead")
-    for command in (listing, drafting, checking, gating, files):
+    backstop = commands.add_parser(
+        "backstop", help="plan the label or failure a GitHub event's off-form text gets",
+        description="Read one GitHub issues or issue_comment event and print the JSON plan "
+                    "forms.yml applies (the module docstring: The backstop). It never calls "
+                    "GitHub and exits 0.")
+    backstop.add_argument("--event-name", required=True, help="the event's name, as "
+                                                              "$GITHUB_EVENT_NAME holds it")
+    backstop.add_argument("--event", type=Path, required=True,
+                          help="the event as a JSON file, as $GITHUB_EVENT_PATH names it")
+    backstop.add_argument("--backstop", choices=BACKSTOP_VALUES,
+                          help="for tests only: the switch for this run, whatever se.toml says")
+    backstop.add_argument("--worktree", type=Path, default=Path("."),
+                          help="the checkout whose se.toml and private terms are read "
+                               "(default: .)")
+    for command in (listing, drafting, checking, gating, files, backstop):
         command.set_defaults(run={"list": run_list, "draft": run_draft, "check": run_check,
-                                  "gate": run_gate, "check-files": run_check_files}[
-                                      command.prog.split()[-1]])
+                                  "gate": run_gate, "check-files": run_check_files,
+                                  "backstop": run_backstop}[command.prog.split()[-1]])
     return top
 
 
@@ -1405,6 +1441,98 @@ def run_check_files(options: argparse.Namespace) -> int:
         raise Usage(str(error)) from error
     print("\n".join(lines))
     return code
+
+
+#: The backstop (the module docstring: The backstop): each event's types and their action.
+BACKSTOP_EVENTS = {
+    "issues": {"opened": "issue.create", "edited": "issue.edit", "reopened": "issue.edit",
+               "labeled": "issue.edit"},
+    "issue_comment": {"created": "comment.create", "edited": "comment.edit"},
+}
+BACKSTOP_VALUES = ("off", "on")
+BACKSTOP_COMMAND = "se_forms.py backstop"
+
+
+def backstop_switch(root: Path) -> str:
+    """se.toml `[forms] backstop` of the checkout `root`: `off` (the default) or `on`."""
+    path = root / "se.toml"
+    try:
+        table = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise Usage(f"{BACKSTOP_COMMAND}: cannot read {path} ({error}); fix it") from error
+    section = table.get("forms", {})
+    value = section.get("backstop", "off") if isinstance(section, dict) else "off"
+    if value not in BACKSTOP_VALUES:
+        raise Usage(f"{BACKSTOP_COMMAND}: [forms] backstop = {value!r} in {path} is none of "
+                    f"{', '.join(BACKSTOP_VALUES)}; set one of them (README \"Forms\")")
+    return value
+
+
+def backstop_plan(name: str, event: dict, root: Path, switch: str) -> dict:
+    """The backstop's plan for the GitHub event `event` of the kind `name` (the module
+    docstring: The backstop)."""
+    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+    repository_of_event = event.get("repository") if isinstance(event.get("repository"), dict) else {}
+    issue = event.get("issue") if isinstance(event.get("issue"), dict) else {}
+    number = issue.get("number") if isinstance(issue.get("number"), int) else None
+    plan = {"repo": str(repository_of_event.get("full_name") or ""), "number": number,
+            "add_labels": [], "summary": "", "failed": False}
+    action = BACKSTOP_EVENTS.get(name, {}).get(str(event.get("action") or ""))
+    if switch == "off" or action is None or number is None or not plan["repo"]:
+        return plan
+    labels = [str(label.get("name") if isinstance(label, dict) else label)
+              for label in issue.get("labels") or ()]
+    comment = name == "issue_comment"
+    if comment:
+        given = event.get("comment") if isinstance(event.get("comment"), dict) else {}
+        body = str(given.get("body") or "")
+        title, with_labels = None, None
+    else:
+        body = str(issue.get("body") or "")
+        if forms.FLEET_MARKER not in body and "work" not in labels:
+            return plan
+        title, with_labels = str(issue.get("title") or ""), labels
+    write = argparse.Namespace(action=action, body=body, title=title, labels=with_labels,
+                               base=None)
+    catalog = forms.load(forms.ROOT)
+    form, met = gate_form(catalog, write, root)
+    if form is None:
+        return plan
+    rendered, title = filed(form, body, None, title)
+    found = [*met, *findings(form, root, plan["repo"], title, rendered)]
+    if not any(item.severity == forms.REFUSE for item in found):
+        return plan
+    where = f"{'a comment on' if comment else 'issue'} #{number} in {plan['repo']}"
+    lines = refusal(form, found)
+    lines[0] = lines[0].replace(COMMAND, f"{BACKSTOP_COMMAND}, {where}", 1).replace(
+        "and run it again:", "on GitHub:")
+    if comment:
+        plan["failed"] = True
+    else:
+        if work_tickets.OFF_FORM_LABEL not in labels:
+            plan["add_labels"] = [work_tickets.OFF_FORM_LABEL]
+        lines.append(work_tickets.unhold_hint(number).capitalize())
+    plan["summary"] = "\n".join(lines)
+    return plan
+
+
+def run_backstop(options: argparse.Namespace) -> int:
+    """The backstop's plan for one event file, printed as JSON (the module docstring)."""
+    try:
+        event = json.loads(options.event.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise Usage(f"{BACKSTOP_COMMAND}: cannot read the event {options.event} ({error})") \
+            from error
+    if not isinstance(event, dict):
+        raise Usage(f"{BACKSTOP_COMMAND}: the event {options.event} is no JSON object")
+    root = options.worktree.resolve()
+    switch = options.backstop or backstop_switch(root)
+    try:
+        plan = backstop_plan(options.event_name, event, root, switch)
+    except sibling("forms").FormError as error:
+        raise Usage(f"{BACKSTOP_COMMAND}: {error}") from error
+    print(json.dumps(plan, indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

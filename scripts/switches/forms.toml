@@ -50,6 +50,18 @@ help = "README.md#forms"
 note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a form claims that breaks it (scripts/se_forms.py check-files); write: as check, and the form gate also denies a Write, Edit or MultiEdit, or a GitHub file write, whose result breaks the claiming form (scripts/se_forms.py gate)"
 
 [[switch]]
+name = "[forms] backstop"
+kind = "se.toml"
+reader = "scripts/se_forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.backstop"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): the forms workflow marks nothing; on: an off-form fleet issue gets the label off-form, an off-form marked comment a failed run (scripts/se_forms.py backstop, .github/workflows/forms.yml)"
+
+[[switch]]
 name = "SE_FORMS_GATE"
 kind = "environment"
 reader = "scripts/se_forms.py"

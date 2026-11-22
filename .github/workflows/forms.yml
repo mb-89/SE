@@ -1,0 +1,48 @@
+# The forms backstop (README "Forms"): a fleet issue or a marked comment whose text breaks its form
+# is marked by the run its write starts, whatever wrote it: an issue gets the label off-form, a
+# comment a failed run, and the run's summary lists the findings. se_forms.py backstop reads the
+# event file and decides, by se.toml [forms] backstop on the default branch; it never calls GitHub.
+# Anyone can open an issue, so no event text reaches a run: line through an expression: the command
+# reads the event file, and only the plan's number and labels are passed on. The workflow never
+# comments and never removes a label; work_tickets.py unhold is the way back. A label added with
+# the run's token starts no run of its own.
+name: forms
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  backstop:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: astral-sh/setup-uv@v7
+      - name: Check the text against its form
+        run: |
+          uv run python scripts/se_forms.py backstop --event-name "$GITHUB_EVENT_NAME" \
+            --event "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json"
+      - name: Mark what breaks its form
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          plan="$RUNNER_TEMP/plan.json"
+          number=$(jq -r '.number // empty' "$plan")
+          while read -r label; do
+            [[ "$number" =~ ^[0-9]+$ && "$label" =~ ^[a-z0-9-]+$ ]] || { echo "forms: the plan's number or label is malformed" >&2; exit 1; }
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label "$label"
+          done < <(jq -r '.add_labels[]' "$plan")
+          jq -r '.summary' "$plan" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(jq -r '.failed' "$plan")" = true ]; then
+            echo "forms: this comment breaks its form; the run's summary lists the findings" >&2
+            exit 1
+          fi
