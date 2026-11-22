@@ -2175,16 +2175,20 @@ and its neighbours. It lists:
 
 ### Templates
 
-[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
-that replaces templates. Until its packages land, this section describes the templates engine as it runs.
+[docs/templates.md](docs/templates.md) owns the template system: its names, the template, the
+document and the packages that build it. This section holds the commands of the engine as it runs
+today.
 
-SE keeps the shape of its issues as data: one TOML file per template under `templates/`, read by one engine,
-`scripts/templates.py`, whose docstring owns the file format, the field kinds, the selection order and
-the two severities. They are the owner of issue shapes; the templates in `.github/ISSUE_TEMPLATE/`
+One TOML file per template under `templates/` is read by one engine, `scripts/templates.py`, whose
+docstring owns the file format, the field kinds, the selection order, the two severities and the
+marker a rendered document carries, `<!-- se:template <repository>/<name> <version> <digest> -->`.
+
+The templates own the shape of issues; the GitHub issue templates in `.github/ISSUE_TEMPLATE/`
 are advice beside them.
 
-The overhaul and retro templates are filed as they stand and pass the work template, and the work
-template has a section for every part the template requires; the tests check both.
+The texts `overhaul.py` and `retro.py` file pass the work template as they stand, and the GitHub
+issue template `work.md` has a section for every part the work template requires; the tests check
+both.
 
 | Template | What it shapes |
 |---|---|
