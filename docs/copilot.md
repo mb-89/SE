@@ -189,8 +189,12 @@ hooks as without the flag, then `scripts/copilot.py install`:
 - merges into `<repo>/.github/copilot/settings.json`, keeping every other key,
   `{"extraKnownMarketplaces":{"se":{"source":{"source":"github","repo":"<owner>/<repository>"}}},"enabledPlugins":{"se@se":true}}`
   (on a host other than GitHub, `{"source":"git","url":"<home>.git"}`);
-- pins `[modules.se]` in `<repo>/se.toml` at `^MAJOR.MINOR` of the SE that ran it, keeping an
-  existing pin, ignores `.se/` in git, and runs `se_modules.py --root <repo> sync se`.
+- pins `[components.se]` in `<repo>/se.toml` at `^MAJOR.MINOR` of the SE that ran it, keeping an
+  existing pin;
+- adds the remote `se` at SE's home where none of `<repo>`'s remotes is under SE's owner, since
+  `se_modules.py` finds SE by name under the owners of the remotes
+  ([components.md "Finding a component"](components.md#finding-a-component));
+- ignores `.se/` in git, and runs `se_modules.py --root <repo> sync se`.
 
 Without `--copilot` nothing of this happens. `copilot.py install --repo <repo> --no-sync` pins
 without cloning. The marketplace `se@se` names is the generated `.claude-plugin/marketplace.json`.
