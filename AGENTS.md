@@ -206,8 +206,9 @@ pass it; they refuse:
   - an `allow:<path> local-term:<n>` line in the local list, for one of its own terms;
   - an `off:` line in the local list, for a public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
-  `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
-  every pushed commit the destination remote does not hold yet.
+  `.githooks`: pre-commit checks the staged content and then runs the project's own
+  [commit checks](README.md#commit-checks) on the staged tree, commit-msg the message and
+  identity, pre-push every pushed commit the destination remote does not hold yet.
   - A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>` (or
     `scripts/setup.sh <path>`) and so runs se's check without copying it.
   - A commit already published, such as main's merged into a branch, was gated where it was
