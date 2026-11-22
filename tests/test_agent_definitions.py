@@ -982,3 +982,10 @@ def test_visible_sessions_states_the_scheme_and_how_sessions_are_named_found_and
         assert rule in text, rule
     assert "`session-title`" in between(WORK_MODEL, "- **Commands that still run**",
                                         "- **Commands that hand off**")
+
+
+def test_integrator_starts_the_next_startable_issue_after_each_landing_and_records_it():
+    integrator = normalized(AGENTS / "integrator.md")
+    assert "**Start what is unblocked**, after each landing, before the next delivered pull request." in integrator
+    assert "write what you did into the issue you landed" in integrator
+    assert "`Started: none startable`" in integrator
