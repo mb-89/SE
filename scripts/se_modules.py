@@ -362,6 +362,23 @@ def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
     return Source(module, "pinned", root / MODULES_DIR / module.name, url, note)
 
 
+def module_dirs(root: Path, local: LocalConfig) -> list[tuple[str, Path]]:
+    """Each module `<root>/se.toml` declares, in its order, with its folder on this machine (as
+    `resolve` finds it, its `path` applied), without resolving its URL: a reader of a module's
+    files (se_guidance.py) needs no origin. None where there is no se.toml."""
+    manifest = root / MANIFEST
+    tables = _read_toml(manifest).get("modules", {}) if manifest.is_file() else {}
+    if not isinstance(tables, dict):
+        raise ModuleError(f"{MANIFEST}: [modules] must be a table")
+    found = []
+    for name, table in tables.items():
+        if not isinstance(table, dict):
+            raise ModuleError(f"module {name}: [modules.{name}] must be a table")
+        path = _check_subpath(name, table["path"]) if "path" in table else None
+        found.append((name, resolve(root, Module(name, "", "", path), local).dir))
+    return found
+
+
 # What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
 # then builds the binary from its folder, as where no release matches.
 NO_BASE = "-"
