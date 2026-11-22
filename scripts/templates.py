@@ -24,7 +24,8 @@ are refused until quoted. It declares:
   shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
   inherited;
 - `applies.actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
-  `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
+  `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`,
+  `message.send`, a message one session sends another): required,
   so a template without it does not load, except that a block or an entry (PART_KINDS) that only
   a node checks leaves `applies` out and shapes no action of its own; `paths`, the globs of the files a `file.write` template claims,
   relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
@@ -43,7 +44,8 @@ are refused until quoted. It declares:
 - `scope` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is;
-- `fields`, a list of the fields (below), in order.
+- `fields`, a list of the fields (below), in order;
+- `message` (an interface's alone, below): the one line its document is.
 
 **The skeleton**, the note's body, is the empty document: one section per field that has one (not
 the title, not a label line), in the order `fields` lists them, each its heading at the template's
@@ -51,7 +53,19 @@ level (`##`, or the scope's) and one comment alone, `<!-- <field>: <instruction>
 owns the field's `heading` and its `says`, the instruction, so the front matter repeats neither; a
 title or label field keeps its `says` in the front matter. An inherited field's section stays in
 the note it is declared in. Outside the sections the body holds nothing but blank lines; an
-adapter's body is empty.
+adapter's body, and an interface's, is empty.
+
+**Interfaces** (`kind: interface`, docs/templates.md "Nesting"): a text code sends and reads, whose
+document is data. Its body is empty and its fields are the whole template: each field keeps its
+`says`, and its `heading` where its document has sections, in the front matter (INTERFACE). A
+message interface declares `message`, the one line it is, its fields as `{<field>}`, each field
+once, each a `line` or a `choice` (scripts/interfaces.py owns the line's format); `parse` reads that
+line, `render` writes it unmarked, `draft` gives it with one instruction comment per field. An
+interface with fields has a generated file beside the code that uses it,
+`scripts/interfaces/<name>.json` (`interface_files`, which scripts/interfaces.py describes):
+`templates.py interfaces` writes them from the working tree's `templates/` and removes those no
+template makes (`write_interfaces`), `--check` writes nothing and names each that differs
+(`interfaces_drift`), exit 1. An interface without fields is an adapter, as `merge-message` is.
 
 **Adapters.** A template without `fields` is an adapter: a text SE already writes and already
 checks elsewhere. It names that check, `checker: <module>:<function>` (a script beside this
@@ -244,7 +258,7 @@ fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude A
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
 adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
-`fill` writes a file; none calls GitHub or starts a model.
+`fill` and `interfaces` (Interfaces, above) writes a file; none calls GitHub or starts a model.
 
 `templates.py fill (<template> | --path FILE) [--prompt TEXT | --prompt-file FILE] [--input FILE |
 --input-text TEXT] [--fields FILE | --fields-json TEXT] [--title TEXT] [--out FILE] [--root DIR]` is
@@ -294,8 +308,9 @@ PROJECT_REPOSITORY = "project"  # that of a project's own, or a --templates fold
 
 ISSUE_ACTIONS = ("issue.create", "issue.edit")
 FILE_ACTION = "file.write"
+MESSAGE_ACTION = "message.send"
 ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
-           "deck.build", FILE_ACTION)
+           "deck.build", FILE_ACTION, MESSAGE_ACTION)
 READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register")
 #: The kinds of a node field (`node:`, `entries:`): its text is checked by another template.
@@ -325,7 +340,7 @@ FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_h
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
               "quote", "node", "entries", "fence"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
@@ -449,6 +464,8 @@ class Template:
     kind: str = "document"
     tags: tuple[str, ...] = ()
     digest: str = ""
+    #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
+    message: str = ""
 
     @property
     def marker_line(self) -> str:
@@ -605,6 +622,8 @@ INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n
                          re.DOTALL)
 SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+#: The kind whose document is data only: its body is empty, its fields the whole template.
+INTERFACE = "interface"
 #: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
 PART_KINDS = ("block", "entry")
 
@@ -727,6 +746,8 @@ def note_data(text: str, where: str) -> dict[str, object]:
         raise TemplateError(f"{where}: fields is a list of mappings, one per field")
     scope = data.get("scope", {})
     level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
+    if data.get("kind") == INTERFACE:
+        return _interface_data(data, body, where, first)
     sections = _skeleton(body, where, first, level)
     in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
                and not entry.get("fence")]
@@ -743,6 +764,24 @@ def note_data(text: str, where: str) -> dict[str, object]:
                             f"{', '.join(map(str, named)) or 'none'}")
     for entry, (_, heading, says) in zip(in_body, sections):
         entry["heading"], entry["says"] = heading, says
+    return data
+
+
+def _interface_data(data: dict[str, object], body: str, where: str, first: int) -> dict[str, object]:
+    """An interface note's data: its body is empty, its fields the whole template, each with its
+    `says` (and, but in a message, its `heading`) in the front matter."""
+    for number, line in enumerate(body.splitlines(), first):
+        if line.strip():
+            raise TemplateError(f"{where}:{number}: an interface's body is empty; its fields, in the "
+                                "front matter, are the whole template")
+    message = data.get("message")
+    for entry in data.get("fields", []):
+        if not str(entry.get("says", "")).strip():
+            raise TemplateError(f"{where}: field {entry.get('name', '?')} of an interface says what "
+                                "belongs there in the front matter, `says`")
+        if message and "heading" in entry:
+            raise TemplateError(f"{where}: field {entry.get('name', '?')} is a part of the message "
+                                "line, which has no headings; take heading out")
     return data
 
 
@@ -870,8 +909,9 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
     inherited = list(parent.fields) if parent else []
     removed = set(data.get("remove", []))
     fields = [item for item in inherited if item.name not in removed]
+    message = data.get("message", "")
     for entry in data.get("fields", []):
-        made = _field(entry, where)
+        made = _field(entry, where, sectioned=not message)
         index = next((i for i, item in enumerate(fields) if item.name == made.name), None)
         if index is None:
             fields.append(made)
@@ -895,6 +935,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
             raise TemplateError(f"{where}: rule {rule} only warns, never refuses; mark it warn")
     example = data.get("example", {})
     adapter = _adapter(data, where, fields, parent)
+    _message(message, kind, fields, parent, where)
     base_branch = str(applies.get("base", parent.base if parent else ""))
     if base_branch not in ("", "integration"):
         raise TemplateError(f"{where}: applies.base is {base_branch!r}; the one base is "
@@ -928,7 +969,28 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         labels=tuple(str(label) for label in applies.get("labels", parent.labels if parent else ())),
         base=base_branch, fallback=bool(applies.get("fallback", False)),
         checker=str(data.get("checker", "")), adapter=adapter,
-        paths=tuple(glob.strip().strip("/") for glob in paths))
+        paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message))
+
+
+def _message(message: object, kind: object, fields: list[Field], parent: Template | None,
+             where: str) -> None:
+    """Refuse a `message` that is not an interface's one line naming each of its fields once."""
+    if not message:
+        return
+    if not isinstance(message, str) or "\n" in message:
+        raise TemplateError(f"{where}: message is one line, its fields as {{<field>}}")
+    if kind != INTERFACE or parent is not None or not fields:
+        raise TemplateError(f"{where}: message is an interface's own line: kind interface, with "
+                            "fields, extending no template")
+    named = _sibling("interfaces").placeholders(message)
+    names = [item.name for item in fields]
+    if sorted(named) != sorted(names):
+        raise TemplateError(f"{where}: message names {', '.join(named) or 'no field'}; it names each "
+                            f"field once: {', '.join(names)}")
+    for item in fields:
+        if item.kind not in ("line", "choice") or item.source or item.label or item.node:
+            raise TemplateError(f"{where}: field {item.name} of a message is a line or a choice, "
+                                "one line of the message")
 
 
 def glob_pattern(glob: str) -> re.Pattern:
@@ -997,7 +1059,7 @@ def _adapter(data: dict, where: str, fields: list[Field], parent: Template | Non
     return dict(adapter)
 
 
-def _field(entry: dict, where: str) -> Field:
+def _field(entry: dict, where: str, *, sectioned: bool = True) -> Field:
     unknown = set(entry) - FIELD_KEYS
     name = entry.get("name", "?")
     if unknown:
@@ -1030,7 +1092,7 @@ def _field(entry: dict, where: str) -> Field:
         raise TemplateError(f"{where}: field {name} first_sentence_chars is {chars!r}; write a whole "
                         "number, 0 for none")
     made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices))}, rule=rule)
-    if made.in_body and not made.heading:
+    if sectioned and made.in_body and not made.heading:
         raise TemplateError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
     if made.kind == "choice" and not made.choices:
         raise TemplateError(f"{where}: field {name} is a choice without choices")
@@ -1290,6 +1352,9 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
     if template.is_adapter:  # the body as it stands: its own check reads it
         fields = {} if title is None else {"title": title}
         return Document(template=template.name, fields=fields, source=body, read=dict(fields))
+    if template.message:  # one line, read as scripts/interfaces.py reads it
+        found = _sibling("interfaces").fields_of(template.message, body) or {}
+        return Document(template=template.name, fields=dict(found), source=body, read=dict(found))
     if template.is_file:
         return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
@@ -1572,6 +1637,8 @@ def render(template: Template, document: Document | dict) -> str:
     if not isinstance(document, Document):
         document = Document(template=template.name, fields=answer(template, document))
     values = document.fields
+    if template.message:  # one line, never marked: scripts/interfaces.py writes it so
+        return _sibling("interfaces").line(template.message, values) + "\n"
     marker = template.marker_line
     hashes = "#" * template.level
     parts = list(document.parts)
@@ -1689,6 +1756,9 @@ def draft(template: Template) -> str:
     writes and checks it."""
     if template.is_adapter:
         return f"<!-- {template.name}: {template.says} -->\n<!-- {_checked_by(template)} -->\n"
+    if template.message:
+        return "\n".join([template.message, *(f"<!-- {item.name}: {item.says} -->"
+                                               for item in template.fields)]) + "\n"
     lines = []
     if template.is_file:
         lines += ["---", *(f"{key}: {value}" for key, value in template.front_lines), "---", ""]
@@ -1772,6 +1842,51 @@ def schema(template: Template) -> dict[str, object]:
             "properties": {item.name: _property(item) for item in template.fields},
             "required": [item.name for item in template.fields if item.required],
             "additionalProperties": False}
+
+
+def interface_files(templates: dict[str, Template]) -> dict[str, str]:
+    """The generated file of each interface template with fields, by its file name, as its text
+    (scripts/interfaces.py owns what it holds and who uses it)."""
+    made = {}
+    for template in sorted(templates.values(), key=lambda item: item.name):
+        if template.kind != INTERFACE or template.is_adapter:
+            continue
+        data = {"template": f"{template.repository}/{template.name}", "version": template.version,
+                "says": template.says, **({"message": template.message} if template.message else {}),
+                "schema": schema(template)}
+        made[f"{template.name}.json"] = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return made
+
+
+def interfaces_drift(templates: dict[str, Template], folder: Path) -> list[str]:
+    """One line per generated file in `folder` that differs from its template, is missing or that
+    no template makes."""
+    wanted = interface_files(templates)
+    present = {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.glob("*.json"))} \
+        if folder.is_dir() else {}
+    return ([f"{folder.name}/{name}: missing" for name in wanted if name not in present]
+            + [f"{folder.name}/{name}: differs from templates/{name.removesuffix('.json')}.md"
+               for name in wanted if name in present and present[name] != wanted[name]]
+            + [f"{folder.name}/{name}: no interface template makes it" for name in present
+               if name not in wanted])
+
+
+def write_interfaces(templates: dict[str, Template], folder: Path) -> list[str]:
+    """Write the generated files into `folder` and remove those no template makes; the names of
+    the files it changed."""
+    wanted = interface_files(templates)
+    folder.mkdir(parents=True, exist_ok=True)
+    changed = []
+    for path in sorted(folder.glob("*.json")):
+        if path.name not in wanted:
+            path.unlink()
+            changed.append(path.name)
+    for name, text in wanted.items():
+        path = folder / name
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8", newline="\n")
+            changed.append(name)
+    return changed
 
 
 def answer(template: Template, values: dict[str, object]) -> dict[str, object]:
@@ -2087,7 +2202,8 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         why = _emptiness(item, value)
         where = (f"the title" if item.source == "title" else
                  f"a `{item.label}:` line" if item.label else
-                 f"a `{item.fence}` fence" if item.fence else f"`{hashes} {item.heading}`")
+                 f"a `{item.fence}` fence" if item.fence else
+                 f"the message's {{{item.name}}}" if template.message else f"`{hashes} {item.heading}`")
         if why == "missing" and item.name in document.misses:
             if item.required:
                 add("required", item.name, f"{item.heading} is missing: the heading "
@@ -2959,6 +3075,19 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
     return 0
 
 
+def _interfaces(templates: dict[str, Template], check_only: bool) -> int:
+    folder = _sibling("interfaces").GENERATED
+    if check_only:
+        drift = interfaces_drift(templates, folder)
+        print("\n".join([*drift, "run `uv run python scripts/templates.py interfaces`"]) if drift
+              else f"{folder.name}: every generated schema matches its template")
+        return 1 if drift else 0
+    changed = write_interfaces(templates, folder)
+    print("\n".join(f"wrote {folder.name}/{name}" for name in changed) or
+          f"{folder.name}: every generated schema matches its template")
+    return 0
+
+
 def _capped(findings: list[Finding]) -> list[str]:
     lines = [str(finding) for finding in findings]
     if len(lines) > 10:
@@ -2969,7 +3098,7 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill")
+                                     description="SE's templates: check, draft, schema, list, fill, interfaces")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -2993,6 +3122,11 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
+    interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
+                                      "interface template beside the code that uses it "
+                                      "(scripts/interfaces/), from the working tree's templates/")
+    interfacing.add_argument("--check", action="store_true",
+                             help="write nothing; exit 1 naming each file that differs")
     filling = commands.add_parser("fill", help="fill a template from the raw input: check the fields, "
                                   "render the document and write it, or answer the instructions")
     filling.add_argument("template", nargs="?", help="the template; without it, --path selects one")
@@ -3025,6 +3159,8 @@ def main(arguments: list[str] | None = None) -> int:
         checking.error("one of the arguments --body-file --fields --body --fields-json --path "
                        "is required")
     try:
+        if options.command == "interfaces":
+            return _interfaces(load(ROOT, tree=True), options.check)
         templates = load(ROOT, tree=options.tree, folder=options.templates)
         if options.command == "list":
             print("\n".join(list_templates(templates)))

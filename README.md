@@ -2287,7 +2287,10 @@ both.
 | Template | What it shapes |
 |---|---|
 | `templates/decision.md` | A decision note: the situation, the problem and what others do, then the options' pugh fence. |
+| `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
+| `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
@@ -2323,6 +2326,12 @@ where it holds them, else the working tree (`--tree` always).
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
+
+The interface templates (`delivery-notice`, `escalation`, `handover`) shape the texts SE's sessions
+pass to each other. `templates.py interfaces` writes each one's schema beside the code that uses
+it, `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
+`work_tickets.py deliver` and `escalate` write their messages through it
+(`scripts/interfaces.py`).
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
