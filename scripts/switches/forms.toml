@@ -47,7 +47,7 @@ key = "forms.files"
 off = ["off"]
 other = "on"
 help = "README.md#forms"
-note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a form claims that breaks it (scripts/se_forms.py check-files)"
+note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a form claims that breaks it (scripts/se_forms.py check-files); write: as check, and the form gate also denies a Write, Edit or MultiEdit, or a GitHub file write, whose result breaks the claiming form (scripts/se_forms.py gate)"
 
 [[switch]]
 name = "[forms] backstop"

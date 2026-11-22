@@ -34,6 +34,11 @@
 # `input` or `script` in which `gh` stands as a word followed by a space (shelled below), so
 # `se_forms.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
 # only, so every other call costs what it did. SE_FORMS_GATE=off skips it.
+# Where the project's se.toml `[forms] files` is `write`, which SE's start leaves as the line
+# `write` in <project>/.se/.runtime/forms-files (scripts/bootstrap.sh), the gate also runs for
+# Claude Code's Write, Edit and MultiEdit of a file in the project and for the GitHub tools that
+# write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools); without that line
+# they cost what they did.
 #
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
@@ -94,7 +99,7 @@ GATE_TOOLS=(issue_write add_issue_comment update_issue_comment create_pull_reque
 # Whether the payload's tool is a guarded GitHub write: its last part after `__` (Claude Code,
 # a plugin's server too), else `/` (VS Code) or `-` (Copilot CLI), one of GATE_TOOLS, and its server
 # part, or the payload's mcp_server.name, holding github. Builtins only.
-guarded() { # <payload>
+guarded() { # <payload> [tool ...]: the tools, GATE_TOOLS where none is given
   local name server tool known
   [[ $1 =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] || return 1
   name="${BASH_REMATCH[1]}"
@@ -113,10 +118,36 @@ guarded() { # <payload>
     server="${BASH_REMATCH[1]}"
   fi
   [[ $server == *[gG][iI][tT][hH][uU][bB]* ]] || return 1
-  for known in "${GATE_TOOLS[@]}"; do
+  shift
+  [ $# -gt 0 ] || set -- "${GATE_TOOLS[@]}"
+  for known in "$@"; do
     [ "$tool" = "$known" ] && return 0
   done
   return 1
+}
+FILE_TOOLS=(Write Edit MultiEdit)
+GITHUB_FILE_TOOLS=(push_files create_or_update_file)
+# Whether the payload is a file tool's call the gate judges: only where the start left `write` in
+# forms-files; Claude Code's own file tools by their whole name, whose file_path lies in the
+# project, and the GitHub file tools as guarded reads them. Builtins only.
+files_write=false
+if [ "$event" = PreToolUse ] && read -r level 2>/dev/null <"$project/.se/.runtime/forms-files" &&
+  [ "${level%$'\r'}" = write ]; then
+  files_write=true
+fi
+filed() { # <payload>
+  $files_write || return 1
+  local name path known
+  [[ $1 =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] || return 1
+  name="${BASH_REMATCH[1]}"
+  for known in "${FILE_TOOLS[@]}"; do
+    [ "$name" = "$known" ] || continue
+    [[ $1 =~ \"file_path\"[[:space:]]*:[[:space:]]*\"(([^\"\\]|\\.)*)\" ]] || return 1
+    path="${BASH_REMATCH[1]//\\\\/\\}"
+    [[ $path == "$project"/* || $path == "$project"\\* ]]
+    return
+  done
+  guarded "$1" "${GITHUB_FILE_TOOLS[@]}"
 }
 # `gh ` at the start of a shell command's string, or after a space, `;`, `&`, `|`, `(` or `/` (or a
 # `\n` or `\t` JSON writes): Claude Code's Bash and PowerShell, Copilot's bash, powershell and
@@ -152,7 +183,7 @@ Stop | SubagentStop) ;;
   gate_off=false
   case "${SE_FORMS_GATE:-}" in [oO][fF][fF]) gate_off=true ;; esac
   if [ "$event" = PreToolUse ] && ! $gate_off &&
-    { guarded "$payload" || shelled "$payload"; }; then
+    { guarded "$payload" || shelled "$payload" || filed "$payload"; }; then
     said="$(gate "$payload")"
     [ -n "$bin" ] && [ -x "$bin" ] && "$bin" hook "$event" --root "$project" >/dev/null 2>&1 <<<"$payload"
     [ -n "$said" ] && printf '%s\n' "$said"

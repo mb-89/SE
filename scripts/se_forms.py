@@ -40,7 +40,8 @@ and says `free: no form applies (<action>)` (on stderr with `--render`, the text
 **The gate.** `se_forms.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
 Copilot's with `toolName` and `toolArgs`) and answers on stdout one JSON object or nothing; it
 exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), with
-`--no-python-downloads`, and the hook prints its answer as its whole stdout.
+`--no-python-downloads`, and the hook prints its answer as its whole stdout. The file tools are
+judged by their own rules (The file tools, below).
 
 - The tool table (GATE_TOOLS): the tool is the last part of the name, after `__` (Claude Code,
   `mcp__<server>__<tool>`, a plugin's `mcp__plugin_<plugin>_<server>__<tool>`), else after `/`
@@ -101,6 +102,30 @@ exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), 
   GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
   tool call for the host's own hook timeout.
 
+**The file tools.** Where the project's se.toml `[forms] files` is `write`, the gate also judges
+a file tool's call by the file it would leave (FILE_TOOLS, GITHUB_FILE_TOOLS); `scripts/se_hook.sh`
+runs it for one only where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) left
+`write` in `<project>/.se/.runtime/forms-files` (FILES_RUNTIME).
+
+- Claude Code's `Write`, `Edit` and `MultiEdit`, by their whole name: the project is the checkout
+  holding `file_path`, whose se.toml decides; a path outside it is free. The result is built in
+  memory and the file never written: `Write` its `content`; `Edit` the file on disk with
+  `old_string` replaced by `new_string` (each one with `replace_all`); `MultiEdit` each of its
+  `edits` in turn. A call the tool itself refuses (an `old_string` not in the file, or there more
+  than once without `replace_all`, or a file that does not exist) passes.
+- The GitHub tools `push_files` (each of its `files`) and `create_or_update_file`: each path
+  relative to the target repository's root, where the target is at home as for a GitHub write
+  (Which se.toml decides) and that se.toml's `files` is `write`.
+- The check: the forms check-files reads (Claimed files); a path no form claims passes, one that
+  breaks its form is denied with check-files' lines, each refused finding and the line naming
+  `forms.py draft --path`. Each refusal is counted (`forms.count_refusal`, its target the form,
+  the repository or project, `file.write` and the path); there is no hold for a file. `[forms]
+  gate` does not change it; `SE_FORMS_GATE=off` turns it off as it turns the gate off.
+- The failure rule and the bound are the gate's: an error before it knows that a form claims the
+  file passes and logs, one after it denies with GATE_FAILED.
+- For tests only, `--files`, `--forms` and `--root` set the switch, the forms' folder and the
+  project root for the run; the hook never passes them.
+
 **Claimed files.** `se_forms.py check-files [PATH ...] [--changed REF] [--root DIR] [--forms DIR]`
 checks the files a `file.write` form claims by its `[applies] paths`, each as `forms.py check
 --path` checks one. It is neither the door's nor the gate's: `work_tickets.py stop-check`, `push`
@@ -115,7 +140,8 @@ and CI's `check` job run it (README "Forms").
   it holds them, `forms.load`); where the root has none, SE's own.
 - The switch: with `--changed` it reads se.toml `[forms] files` of the root (`forms.enforcement`,
   at `origin/<integration branch>`, so a branch cannot switch its own check off): `off` (the
-  default) checks nothing and says so in one line; `check` checks. Given PATHs are always checked.
+  default) checks nothing and says so in one line; `check` and `write` check. Given PATHs are
+  always checked.
 - Its answer: per file that breaks its form, one line a refused finding, `<path> (<form>):
   <field>: <fix>`, at most CHECK_FILES_LINES lines in all with a count of the rest, then the line
   that names `forms.py draft --path`; exit code 1. Where nothing is claimed or nothing refuses, one
@@ -187,6 +213,13 @@ GATE_TOOLS = {
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
 GATE_FAILED = "SE's form gate failed on this write ({kind}), so it was not sent"
+#: The file tools (the module docstring: The file tools), guarded where `[forms] files` is
+#: `write`: Claude Code's own, by their whole name, and the GitHub tools that write files.
+FILE_TOOLS = ("Write", "Edit", "MultiEdit")
+GITHUB_FILE_TOOLS = ("push_files", "create_or_update_file")
+#: The switch's line SE's start writes for se_hook.sh (`gate --runtime`): there only where
+#: `[forms] files` is `write`.
+FILES_RUNTIME = Path(".se") / ".runtime" / "forms-files"
 #: The shell reader (the module docstring: The shell reader). The input keys of a shell tool.
 SHELL_KEYS = ("command", "input", "script")
 #: `gh` as a word followed by a space, as se_hook.sh's filter finds it (`\n` and `\t` as JSON
@@ -642,11 +675,21 @@ def make_parser() -> argparse.ArgumentParser:
                           help="the project whose private terms are checked (default: .)")
     checking.add_argument("--tree", **tree)
     gating = commands.add_parser(
-        "gate", help="SE's hook: judge one GitHub write's body against its form",
+        "gate",
+        help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its form",
         description="Read a PreToolUse payload on stdin and answer a deny, the findings, or "
                     "nothing (the module docstring: The gate). It exits 0.")
     gating.add_argument("--gate", choices=sibling("forms").GATE_VALUES,
                         help="for tests only: the switch for this run, whatever se.toml says")
+    gating.add_argument("--files", choices=sibling("forms").FILES_VALUES,
+                        help="for tests only: [forms] files for this run, whatever se.toml says")
+    gating.add_argument("--forms", type=Path,
+                        help="for tests only: read the forms that claim files from this folder")
+    gating.add_argument("--root", type=Path,
+                        help="for tests only: the project root of a file tool's path")
+    gating.add_argument("--runtime", type=Path, metavar="ROOT",
+                        help="SE's start: write ROOT/.se/.runtime/forms-files where se.toml "
+                             "[forms] files is write, remove it otherwise; reads no payload")
     files = commands.add_parser(
         "check-files", help="check the files a form claims, given or changed since a ref",
         description="Check each claimed file as forms.py check --path does: the PATHs given, or "
@@ -866,12 +909,14 @@ class Write:
     def __init__(self, payload: dict) -> None:
         self.cwd = str(payload.get("cwd") or "")
         self.session = str(payload.get("session_id") or payload.get("sessionId") or "")
-        name = str(payload.get("tool_name") or payload.get("toolName") or "")
+        name = self.name = str(payload.get("tool_name") or payload.get("toolName") or "")
         server = payload.get("mcp_server")
         self.tool, part = tool_parts(name)
         if isinstance(server, dict) and server.get("name"):
             part = str(server["name"])
-        self.guarded = self.tool in GATE_TOOLS and GATE_SERVER in part.casefold()
+        github = GATE_SERVER in part.casefold()
+        self.guarded = self.tool in GATE_TOOLS and github
+        self.files = name in FILE_TOOLS or (self.tool in GITHUB_FILE_TOOLS and github)
         given = payload.get("tool_input")
         if given is None and "toolArgs" in payload:
             given = payload["toolArgs"]
@@ -992,16 +1037,20 @@ def gate_form(catalog: dict, write: Write, root: Path):
 
 
 def instead(write: Write) -> str:
+    if write.files:
+        return (f"write it as uv run python {HERE / 'forms.py'} draft --path <file> gives it, "
+                "and fill every field")
     if write.action in sibling("forms").ISSUE_ACTIONS:
         return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
                 "ticket)")
     return "check it with the se server's forms tool (se_forms.py check) and send it again"
 
 
-def judge(text: str, switch: str | None, seen: dict) -> str:
+def judge(text: str, switch: str | None, seen: dict,
+          given: argparse.Namespace | None = None) -> str:
     """The gate's answer for the payload `text`: a JSON object, or "" (it passes); `seen` gets
     the project, where the log goes. A shell call is judged write by write, its first deny the
-    answer."""
+    answer. `given` holds the test-only `--files`, `--forms` and `--root`."""
     project: Path | None = None
     try:
         payload = json.loads(text)
@@ -1009,10 +1058,12 @@ def judge(text: str, switch: str | None, seen: dict) -> str:
             raise ValueError("the payload is no JSON object")
         write = Write(payload)
         project = seen["project"] = checkout(write.cwd)
-        calls = [write] if write.guarded else shell_writes(write, project)
+        calls = [] if write.files else [write] if write.guarded else shell_writes(write, project)
     except Exception as error:  # it cannot judge: the write passes, and the log says why
         log_line(project, error)
         return ""
+    if write.files:
+        return judge_files(write, project, given)
     answers = [answer for answer in (judge_one(call, project, switch) for call in calls) if answer]
     return next((answer for answer in answers if '"deny"' in answer), answers[0] if answers else "")
 
@@ -1082,15 +1133,137 @@ def judged(write: Write, form, found: list, root: Path, gate, switch: str) -> st
     return deny(forms.report(command, form, found, refused=True, hold=offer, gate=True))
 
 
+def left_by(write: Write, path: Path) -> str | None:
+    """The text Claude Code's file tool `write` would leave at `path`, built in memory; None where
+    the tool itself refuses the call (an `old_string` it does not find once) or it is not one."""
+    given = write.input
+    if write.name == "Write":
+        content = given.get("content")
+        return content if isinstance(content, str) else None
+    edits = [given] if write.name == "Edit" else given.get("edits")
+    if not isinstance(edits, list) or not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    for edit in edits:
+        old, new = (edit.get(key) if isinstance(edit, dict) else None
+                    for key in ("old_string", "new_string"))
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            return None
+        found = text.count(old)
+        every = edit.get("replace_all") is True
+        if found == 0 or (found > 1 and not every):
+            return None
+        text = text.replace(old, new) if every else text.replace(old, new, 1)
+    return text
+
+
+def github_files(write: Write) -> list[tuple[str, str]]:
+    """The (path, content) pairs a GitHub file tool's call writes, each path relative to the
+    target repository's root; those without a string path and content are left out."""
+    given = write.input
+    listed = given.get("files") if write.tool == "push_files" else [given]
+    pairs = []
+    for item in listed if isinstance(listed, list) else ():
+        if isinstance(item, dict) and isinstance(item.get("path"), str) \
+                and isinstance(item.get("content"), str):
+            pairs.append((item["path"].strip("/"), item["content"]))
+    return pairs
+
+
+def judge_files(write: Write, project: Path | None, given: argparse.Namespace | None) -> str:
+    """The answer for a file tool's call (the module docstring: The file tools)."""
+    forms = sibling("forms")
+    level = getattr(given, "files", None)
+    folder = getattr(given, "forms", None)
+    try:
+        if level is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == forms.OFF:
+            return ""
+        if write.name in FILE_TOOLS:
+            raw = str(write.input.get("file_path") or "")
+            if not raw:
+                return ""
+            path = Path(raw) if Path(raw).is_absolute() else Path(write.cwd) / raw
+            root = getattr(given, "root", None) or checkout(str(path.parent))
+            if root is None or not path.resolve().is_relative_to(root.resolve()):
+                return ""
+            claims = [(path.resolve().relative_to(root.resolve()).as_posix(), None)]
+            what, repo = f"{write.name} of {claims[0][0]}", str(root)
+        else:
+            if write.repo.startswith("/") or write.repo.endswith("/"):
+                return ""
+            root = getattr(given, "root", None) or deciding(write, project)
+            if root is None:
+                return ""
+            claims = github_files(write)
+            what, repo = f"{write.tool} in {write.repo}", write.repo
+        if (level or forms.enforcement(root).files) != forms.WRITE:
+            return ""
+        catalog, source = claim_forms(root, folder)
+        claims = [(relative, text) for relative, text in claims
+                  if any(form.is_file and form.claims(relative) for form in catalog.values())]
+        if not claims:
+            return ""
+    except Exception as error:  # it cannot judge: the write passes, and the log says why
+        log_line(project, error)
+        return ""
+    try:
+        if write.name in FILE_TOOLS:
+            text = left_by(write, path)
+            if text is None:
+                return ""
+            claims = [(claims[0][0], text)]
+        return judged_files(write, what, repo, catalog, root, claims, source)
+    except Exception as error:
+        raise Judged(error, write) from error
+
+
+def judged_files(write: Write, what: str, repo: str, catalog: dict, root: Path,
+                 claims: list[tuple[str, str]], source: Path | None) -> str:
+    """The deny for the claimed files `claims` (path, the text the call leaves) where one breaks
+    its form, each refusal counted for the cap; "" where every one passes."""
+    forms = sibling("forms")
+    lines, code, refused = text_lines(catalog, root, claims, source)
+    if not code:
+        return ""
+    environ = {"SE_SESSION": write.session} if write.session else None
+    for form, relative in refused:
+        forms.count_refusal(forms.target(form, repo, forms.FILE_ACTION, title=relative), environ)
+    return deny("\n".join([f"{what}: a file a form claims would break it; fix every finding and "
+                           "write it again:", *(f"  {line}" for line in lines[:-1]), lines[-1]]))
+
+
+def run_runtime(root: Path) -> int:
+    """`gate --runtime`: write FILES_RUNTIME under `root` where its se.toml's `[forms] files`
+    (at origin/<integration branch>) is `write`, remove it otherwise; exit 0, 1 where it fails."""
+    forms = sibling("forms")
+    path = root / FILES_RUNTIME
+    try:
+        try:
+            level = forms.enforcement(root).files
+        except forms.FormError:
+            level = forms.OFF
+        if level == forms.WRITE:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{forms.WRITE}\n", encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError as error:
+        print(f"se_forms.py gate --runtime: {path}: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def run_gate(options: argparse.Namespace) -> int:
     """The hook's gate (the module docstring: The gate): its answer, or nothing, exit 0."""
+    if options.runtime is not None:
+        return run_runtime(options.runtime)
     started = time.monotonic()
     answer: list[str] = []
     seen: dict = {"project": None}
 
     def work() -> None:
         try:
-            answer.append(judge(sys.stdin.read(), options.gate, seen))
+            answer.append(judge(sys.stdin.read(), options.gate, seen, options))
         except Judged as failed:
             kind = type(failed.error).__name__
             answer.append(deny(f"{GATE_FAILED.format(kind=kind)}: {instead(failed.write)}; or "
@@ -1182,14 +1355,26 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
     line (1), or the one line that says what passed (0). `claimed_only` skips, before reading
     them, the files no form claims (--changed)."""
     forms = sibling("forms")
-    refusing: list[str] = []
-    checked = 0
+    texts: list[tuple[str, str]] = []
     for path in paths:
         relative = forms._relative(path, root, CHECK_FILES)
         if claimed_only and not any(form.is_file and form.claims(relative)
                                     for form in catalog.values()):
             continue
-        text = forms._file_text(path, CHECK_FILES)
+        texts.append((relative, forms._file_text(path, CHECK_FILES)))
+    lines, code, _ = text_lines(catalog, root, texts, source)
+    return lines, code
+
+
+def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: Path | None
+               ) -> tuple[list[str], int, list[tuple[str, str]]]:
+    """file_lines' answer for `texts` (each file's path relative to `root`, and its text), with
+    the (form, path) of each file that refuses; the gate judges a file tool's result by it."""
+    forms = sibling("forms")
+    refusing: list[str] = []
+    refused: list[tuple[str, str]] = []
+    checked = 0
+    for relative, text in texts:
         chosen = forms.select(catalog, forms.FILE_ACTION, text, None, path=relative)
         if chosen.form is None and not chosen.findings:
             continue
@@ -1197,6 +1382,8 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
         found = list(chosen.findings)
         if chosen.form is not None:
             found += forms.check(chosen.form, forms.parse(chosen.form, text), root=root)
+        if any(item.severity == forms.REFUSE for item in found):
+            refused.append((chosen.form.name if chosen.form else "", relative))
         for item in found:
             if item.severity != forms.REFUSE:
                 continue
@@ -1207,16 +1394,16 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
                                 f"{forms._line(chosen.form, item)}")
     if not refusing:
         if not checked:
-            return [f"{CHECK_FILES}: no form claims a file checked"], 0
-        return [f"{CHECK_FILES}: {checked} claimed "
-                + ("file passes its form" if checked == 1 else "files pass their forms")], 0
+            return [f"{CHECK_FILES}: no form claims a file checked"], 0, refused
+        passed = "file passes its form" if checked == 1 else "files pass their forms"
+        return [f"{CHECK_FILES}: {checked} claimed {passed}"], 0, refused
     room = CHECK_FILES_LINES - 1
     if len(refusing) > room:
         refusing = refusing[:room - 1] + [f"... and {len(refusing) - room + 1} more findings"]
     draft = f"uv run python {HERE / 'forms.py'} draft --path <file> --root {root}"
     if source is not None:
         draft += f" --forms {source}"
-    return [*refusing, f"The empty form of each: {draft}"], 1
+    return [*refusing, f"The empty form of each: {draft}"], 1, refused
 
 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
@@ -1224,7 +1411,7 @@ def changed_refusal(root: Path, ref: str) -> list[str] | None:
     lines where se.toml `[forms] files` is `check` and a changed claimed file breaks its form;
     None where the switch is off or every such file passes. Errors raise."""
     forms = sibling("forms")
-    if forms.enforcement(root).files != forms.CHECK:
+    if forms.enforcement(root).files not in (forms.CHECK, forms.WRITE):
         return None
     catalog, source = claim_forms(root, None)
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
@@ -1240,7 +1427,7 @@ def run_check_files(options: argparse.Namespace) -> int:
     try:
         if options.changed:
             switch = forms.enforcement(root)
-            if switch.files != forms.CHECK:
+            if switch.files not in (forms.CHECK, forms.WRITE):
                 print(f"{CHECK_FILES}: [forms] files is {switch.files} in {switch.where}; "
                       "nothing checked")
                 return 0
