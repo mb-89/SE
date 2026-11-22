@@ -362,34 +362,43 @@ def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
     return Source(module, "pinned", root / MODULES_DIR / module.name, url, note)
 
 
-KERN_RELEASE = Path("kern") / "release.toml"
 # What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
 # then builds the binary from its folder, as where no release matches.
 NO_BASE = "-"
+#: kern's release.toml in its clone: its release tag (`download`'s last part) and download base.
+KERN_RELEASE = "release.toml"
 
 
 def kern_pin(root: Path) -> tuple[str, str]:
-    """(version, tag) of the kern a repository that incubates it pins: the version
-    `kern/release.toml` owns (kern/README.md "Release") and its release tag `kern-v<version>`.
-    kern's own go.mod names no version of kern; `[modules.kern]` replaces this with the move."""
-    path = root / KERN_RELEASE
+    """(version, tag) of the kern `root` pins: the version `[modules.kern]` reads from the go.mod
+    its `go` names (README "Modules"), and the tag the pinned clone's `release.toml` names for it,
+    the last part of its `download` (kern's README "Release")."""
+    manifest = root / MANIFEST
+    table = (_read_toml(manifest).get("modules", {}) if manifest.is_file() else {}).get(KERN)
+    if not isinstance(table, dict) or "go" not in table:
+        raise ModuleError(f"no [modules.{KERN}] with go in {manifest}: it pins no kern")
+    version = go_require(root, KERN, table["go"])[1]
+    return version, _kern_download(root)[1].rsplit("/", 1)[-1].replace("{version}", version)
+
+
+def _kern_download(root: Path) -> tuple[Path, str]:
+    """(release.toml, its `download`) of the pinned kern clone, `{version}` unfilled."""
+    path = kern_dir(root) / KERN_RELEASE
     if not path.is_file():
-        raise ModuleError(f"no {KERN_RELEASE.as_posix()} in {root}: it incubates no kern")
-    version = _read_toml(path).get("version")
-    if parse_version(version) is None:
-        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
-    return version, f"kern-v{version}"
+        raise ModuleError(f"no {path}: kern is not placed; run uv run python scripts/se_modules.py "
+                          f"sync {KERN} in {root}")
+    download = _read_toml(path).get("download")
+    if not isinstance(download, str) or not download:
+        raise ModuleError(f"{path}: download names no URL (kern's README \"Release\")")
+    return path, download
 
 
 def kern_download(root: Path) -> str:
-    """Where the release of the kern `root` pins is published: `kern/release.toml`'s `download`
-    with `{version}` filled in (kern/README.md "Release"), as bootstrap.sh fetches it; "" where it
-    is relative to a home `root`'s origin names none (`release_base`)."""
+    """Where the release of the kern `root` pins is published: the pinned clone's `release.toml`
+    `download`, its version filled in, under the home the clone's origin names (kern's own
+    repository), as bootstrap.sh fetches it; "" where that origin names none (`release_base`)."""
     version, _ = kern_pin(root)
-    download = _read_toml(root / KERN_RELEASE).get("download")
-    if not isinstance(download, str) or not download:
-        raise ModuleError(f"{root / KERN_RELEASE}: download names no URL (kern/README.md \"Release\")")
-    return release_base(root, download, version)
+    return release_base(kern_dir(root), _kern_download(root)[1], version)
 
 
 def release_base(root: Path, download: str, version: str) -> str:
@@ -422,14 +431,14 @@ def app_binary(root: Path) -> AppBinary:
     components, where it has any, else the bare kern (SE's docs/go-core.md "How the binary
     arrives"). `se.toml` `[binary] release = "<path>"` names where that binary's release.toml
     lives; its `version`, `download`, `binary` and `package` own the binary's facts
-    (components/release.toml for SE). An application that sets no `[binary]` runs the bare kern,
-    read from `kern/release.toml` (kern-pin)."""
+    (components/release.toml for SE). An application that sets no `[binary]` runs the bare kern
+    of its pinned clone, read from the clone's `release.toml` (kern-pin), built there."""
     manifest = root / MANIFEST
     binary = _read_toml(manifest).get("binary", {}) if manifest.is_file() else {}
     release = binary.get("release") if isinstance(binary, dict) else None
     if not release:
         version, _ = kern_pin(root)
-        return AppBinary("kern", version, kern_download(root), "kern", "./cmd/kern")
+        return AppBinary("kern", version, kern_download(root), (MODULES_DIR / KERN).as_posix(), "./cmd/kern")
     if not isinstance(release, str):
         raise ModuleError(f"{manifest}: [binary] release must be a path to a release.toml")
     _check_subpath("binary", release)
@@ -440,11 +449,11 @@ def app_binary(root: Path) -> AppBinary:
     version, name = doc.get("version"), doc.get("binary")
     download, package = doc.get("download"), doc.get("package")
     if parse_version(version) is None:
-        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
+        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern's README \"Release\")")
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise ModuleError(f"{path}: binary must name the application's binary (e.g. \"se\")")
     if not isinstance(download, str) or not download:
-        raise ModuleError(f"{path}: download names no URL (kern/README.md \"Release\")")
+        raise ModuleError(f"{path}: download names no URL (kern's README \"Release\")")
     if not isinstance(package, str) or not package:
         raise ModuleError(f"{path}: package names no Go package (e.g. \"./cmd/se\")")
     return AppBinary(name, version, release_base(root, download, version),
