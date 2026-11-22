@@ -73,14 +73,34 @@ def test_non_se_roles_ban_input_prompts_and_escalate(role):
 
 
 def test_only_se_talks_to_the_human():
-    dispatcher = normalized(AGENTS / "se.md")
-    assert "only session the human talks to" in dispatcher
-    assert "only role that may ask the human with `ask_user`" in dispatcher
+    se = normalized(AGENTS / "se.md")
+    assert "only session the human talks to" in se
+    assert "You never ask with a question dialog" in se
     for role in ("worker", "integrator", "reviewer"):
         assert "ask the human" not in normalized(AGENTS / f"{role}.md")
     rules = normalized(WORK_MODEL)
     assert "Only SE talks to the human" in rules
     assert "to the human at the top level" not in rules
+
+
+def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_deck():
+    front = (AGENTS / "se.md").read_text(encoding="utf-8").split("---")[1]
+    assert "claude.disallowedTools: AskUserQuestion" in front
+    se, catch_up, work_model = normalized(AGENTS / "se.md"), normalized(SKILL), normalized(WORK_MODEL)
+    assert "A decision reaches the person only as a deck" in se
+    assert "The other open points go as text at the end of the turn" in se
+    for text in (se, catch_up, work_model):
+        for asks in ("may ask the human with `ask_user`", "asked with the `ask_user` tool",
+                     "where there is no `ask_user`, ask", "If `ask_user` does not reach",
+                     "SE asks the person in the chat"):
+            assert asks not in text, asks
+
+
+def test_no_instruction_calls_the_session_the_person_talks_to_the_dispatcher():
+    instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md"]
+    named = [path.relative_to(ROOT).as_posix() for path in instructions
+             if "dispatcher" in path.read_text(encoding="utf-8").casefold()]
+    assert named == []
 
 
 def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
@@ -378,10 +398,37 @@ def test_the_decision_skill_owns_the_shape_of_the_decision_note():
     text = normalized(DECISION)
     for rule in ("## The decision note", "One Obsidian Markdown note per decision", "`obs: {bless: pending}`",
                  "**`## Current situation`:**", "**`## The problem`:**", "Nothing else goes before the fence",
-                 "The `pugh` fence", "The datum is the strongest rival",
+                 "The `pugh` fence", "The datum is what exists today wherever something exists",
+                 "never an option not yet built", "Only where nothing exists is the datum the strongest rival",
                  '"Keep what we have" is an option', "the letters of those it fails",
                  "## Tasks for the person", "never an option in a decision", '"Task 1 of 2"'):
         assert rule in text, rule
+
+
+def test_the_rule_book_puts_the_datum_on_what_exists_today():
+    rules = normalized(RULE_BOOK)
+    rule = rules.split("### dec-003 Keep what we have", 1)[1].split("###", 1)[0]
+    assert "the datum every option is marked against is what exists today" in rule
+    assert "never an option not yet built" in rule
+    assert "only where nothing exists is it the strongest rival" in rule
+
+
+def test_a_verdict_given_in_the_chat_answers_its_decision_in_an_open_deck():
+    section = normalized(DECISION).split("## Bringing decisions to the person", 1)[1].split("## The record", 1)[0]
+    assert "A verdict the person gives in the chat for a decision of an open deck is that decision's answer" in section
+    assert "records it as it records a deck answer" in section
+
+
+def test_effort_is_a_criterion_only_where_it_is_exceptional():
+    assert "Effort to build or move is a criterion only where it is exceptional" in normalized(DECISION)
+    rule = normalized(RULE_BOOK).split("### dec-006 Right before cheap", 1)[1].split("###", 1)[0]
+    assert "effort to build or move is a criterion only where it is exceptional" in rule
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
+    criteria = fence.split("criteria:\n", 1)[1].split("datum:", 1)[0]
+    assert "Cost to build" not in criteria and "key: cost" not in criteria
+    right = fence.split("- item: Right before cheap\n", 1)[1].split("- item:", 1)[0]
+    assert "not exceptional" in right
 
 
 def test_the_decision_skill_points_to_obs_for_the_fence_contract_and_restates_none_of_it():
@@ -547,7 +594,7 @@ def test_the_host_procedure_branches_on_the_tools_the_session_has():
     assert "-RedirectStandardOutput <worktree>\\.se\\worker.log -WindowStyle Hidden`" in section
     assert "give the person that one line to run" in section
     assert "**No message tool**: read the queue at each turn (`work_tickets.py queue`)" in section
-    assert "**No ask tool** (`ask_user`): SE asks the person in the chat" in section
+    assert "**Ask tool** (`ask_user`): SE never uses it" in section
     assert "Out of scope: the Copilot cloud agent, and VS Code's Claude and Local harnesses." in section
 
 

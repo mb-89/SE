@@ -115,6 +115,9 @@ def test_front_matter_keys_go_only_to_their_layout(checkout):
     assert "disallowedTools: AskUserQuestion" in claude_front
     assert "tools:" not in claude_front and "copilot." not in claude_front
     assert "name: se\n" in (checkout / "agents" / "se.md").read_text(encoding="utf-8")
+    for role in ("se", "integrator", "worker", "reviewer"):
+        built = (checkout / "agents" / f"{role}.md").read_text(encoding="utf-8").split("---")[1]
+        assert "disallowedTools: AskUserQuestion" in built, role
 
 
 @pytest.mark.parametrize("layout", (".github/agents", ".github/skills", "agents", "skills"))
