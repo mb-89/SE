@@ -1137,7 +1137,7 @@ def repo_host(repo: str) -> str | None:
 
 
 def current_branch(root: Path) -> str:
-    result = run_git(root, "branch", "--show-current")
+    result = run_git(root, "branch", "--show-current", env=own_git_environment())
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -4653,9 +4653,20 @@ def check_field_report(
         print(warning)
 
 
+#: What points git at another repository than `-C <root>` names: a git hook sets these for its
+#: own checkout, so a command run from it with `--worktree <w>` would read that checkout instead.
+GIT_LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+
+
+def own_git_environment() -> dict[str, str]:
+    """The environment without GIT_LOCATION_VARIABLES, so git reads the repository `-C` names."""
+    return {key: value for key, value in os.environ.items() if key not in GIT_LOCATION_VARIABLES}
+
+
 def branch_tip(root: Path) -> str | None:
-    """The commit the branch checked out in `root` is at; None without one."""
-    result = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    """The commit the branch checked out in `root` is at, read from `root` itself, whatever
+    repository the environment's GIT_DIR names; None without one."""
+    result = run_git(root, "rev-parse", "--verify", "--quiet", "HEAD", env=own_git_environment())
     return result.stdout.strip() if result.returncode == 0 else None
 
 

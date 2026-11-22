@@ -7994,3 +7994,22 @@ def test_queue_without_gh_syncs_and_prints_its_reads_as_a_plan(worktree, monkeyp
     assert 'list_pull_requests {"base": "main"' in out and "field-report --check" in out
     assert '"labels": ["work", "ready", "repo:repo"]' in out
     assert out.rstrip().endswith("Then: Capacity: unlimited (cloud)")
+
+
+def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_names(
+        tmp_path, monkeypatch):
+    # A git hook sets GIT_DIR for its own checkout; `--worktree <w>` still means w's branch.
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "main" / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "main"))
+    seen: list[dict[str, str] | None] = []
+
+    def git(root, *arguments, env=None):
+        seen.append(env)
+        return subprocess.CompletedProcess(arguments, 0, "abc1234\n", "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+    assert work_tickets.branch_tip(tmp_path / "worker") == "abc1234"
+    work_tickets.current_branch(tmp_path / "worker")
+    assert len(seen) == 2
+    assert all(env is not None and "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
+               for env in seen)
