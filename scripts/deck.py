@@ -52,7 +52,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import se_components  # noqa: E402
-from build_docs import child_environment, obs_dir, obs_document  # noqa: E402
+from build_docs import child_environment, html_adapter, obs_dir, obs_document  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
 BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
@@ -258,13 +258,14 @@ def _refusal(chapters: list[dict], recorded: bool) -> str | None:
 
 def serve(artifact: Path, wait: bool, timeout: str | None) -> int:
     """Serve ``artifact`` with the html adapter's serve command, from obs as obs-document --serve runs it."""
-    obs = obs_dir()
-    adapters = json.loads((obs / "adapters.json").read_text(encoding="utf-8"))["adapters"]
-    command = json.loads((obs / adapters["html"]).read_text(encoding="utf-8"))["serve"]
+    adapter, refusal = html_adapter(obs_dir())
+    if adapter is None:
+        print(f"deck: {refusal}", file=sys.stderr)
+        return 2
     sys.stdout.flush()
-    return subprocess.run([*command, str(artifact.resolve()), *(["--wait"] if wait else []),
+    return subprocess.run([*adapter["serve"], str(artifact.resolve()), *(["--wait"] if wait else []),
                            *(["--timeout", timeout] if timeout is not None else [])],
-                          cwd=obs, env=child_environment(), check=False).returncode
+                          cwd=adapter["folder"], env=child_environment(), check=False).returncode
 
 
 def _changes(name: str, change: dict) -> list[str]:

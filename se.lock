@@ -6,5 +6,5 @@ version = "0.14.1"
 ref = "4b2b08a8d6c864aeecc4865b84f1522eb1042384"
 
 [modules.obs]
-version = "4.0.1"
-ref = "1f069ff5b93ab99171158ff5f734e5e466bc8598"
+version = "5.0.0"
+ref = "02261cc136bae7b1bdabfdc5bf2532b711be2a18"
