@@ -1113,6 +1113,9 @@ LESSONS = [
     ("worker", "work_tickets.py field-report --draft .se/work/field-report.md"),
     ("decision", "**`## What others do`:**"),
     ("decision", "at least two outside tools, products or conventions"),
+    ("decision", "a concrete example the person can follow"),
+    ("decision", "never as something the project uses"),
+    ("decision", "No option refers to the outside tools or says which of them it borrows from"),
     ("work-model", "no session starts another at an effort above its own"),
     ("integrator", "Its `effort` is your own or lower, never higher"),
     ("catch-up", "a scheduled task that starts an integrator is set at or below your effort"),
@@ -1130,3 +1133,13 @@ LESSONS = [
 def test_the_built_layouts_carry_what_22_nov_showed(source, lesson):
     for path in BUILT[source]:
         assert lesson in normalized(path), f"{path.relative_to(ROOT).as_posix()}: {lesson}"
+
+
+def test_the_worked_example_shows_what_others_do_and_its_options_name_none_of_them():
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    before, fence = note.split("```pugh\n", 1)
+    others = before.split("## What others do\n", 1)[1]
+    assert others.count("\n- **") >= 2 and others.count("For example") >= 2
+    options = fence.split("candidates:\n", 1)[1].split("checklist:\n", 1)[0]
+    for outside in ("ADR", "RFC", "PEP", "Nygard", "required review", "decision record"):
+        assert outside not in options, outside

@@ -28,10 +28,13 @@ it, how others solve it, and which solutions there are.
 - **`## The problem`:** what is wrong with it, and what shows it: a failure, a measurement, the
   person's words.
 - **`## What others do`:** how the rest of the world solves the same problem: at least two outside
-  tools, products or conventions, each named with how it solves it, and whether one of them can be
-  reused as it is. An option taken from one of them says so where it says what it is.
-  - The person asks for it in every design decision: "Again, check the outside world. Is there
-    something similar like this already present? Can we reuse something?"
+  tools, products or conventions, each with what it does and a concrete example the person can
+  follow. The person asks for it in every design decision: "Again, check the outside world. Is
+  there something similar like this already present? Can we reuse something?"
+  - The section is factual. It names a tool only as an example, never as something the project
+    uses; where the project does not use it, nothing implies that it does.
+  - No option refers to the outside tools or says which of them it borrows from, the recommended
+    one least of all: each option says what it is in its own words.
 - **The `pugh` fence**, the matrix and its checklist. Its fields, marks and letters are obs's
   contract, owned by obs's capability note `spec/capabilities/pugh-decisions.md` and its input
   model's section "Pugh decision figures" in `spec/design_input/input-model.md`, both in obs, the
