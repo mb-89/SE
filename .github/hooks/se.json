@@ -13,6 +13,18 @@
         "timeoutSec": 120
       }
     ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "bash": "bash scripts/se_hook.sh PreToolUse || true",
+        "powershell": "bash scripts/se_hook.sh PreToolUse; exit 0",
+        "cwd": ".",
+        "env": {
+          "SE_HOOK_HOST": "copilot"
+        },
+        "timeoutSec": 30
+      }
+    ],
     "Stop": [
       {
         "type": "command",

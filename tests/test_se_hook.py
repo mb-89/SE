@@ -132,10 +132,24 @@ def copilot_hook(home: Path, event: str, payload: str, **variables: str) -> subp
 def test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_snake_case(machine):
     home, project = machine
     install(home, project)
-    result = copilot_hook(home, "PreToolUse", COPILOT_TOOL % sh(project))
+    result = copilot_hook(home, "PostToolUse", COPILOT_TOOL % sh(project))
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
-    handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","tool_name":"bash","toolArgs":"{}"}' % sh(project)
-    assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{handed}\n"
+    handed = '{"session_id":"s1","timestamp":1,"cwd":"%s","tool_name":"bash","tool_input":"{}"}' % sh(project)
+    assert (home / "calls").read_text(encoding="utf-8") == f"hook PostToolUse --root {sh(project)} <<{handed}\n"
+
+
+@pytest.mark.parametrize("variables", ({}, {"SE_HOOK_HOST": "copilot"}))
+def test_a_copilot_pretooluse_posts_nothing_to_kern(machine, variables):
+    """Copilot registers PreToolUse for the form gate alone: kern never had those events from it."""
+    home, project = machine
+    install(home, project)
+    claude_shaped = '{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"%s","tool_name":"bash"}'
+    for payload in (COPILOT_TOOL % sh(project), claude_shaped % sh(project)):
+        if not variables and payload.startswith('{"hook_event_name"'):
+            continue  # Claude's shape without the hook file's variable is Claude Code's
+        result = copilot_hook(home, "PreToolUse", payload, **variables)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert not (home / "calls").exists()
 
 
 def test_without_a_project_variable_or_a_cwd_the_project_is_the_working_directory(machine, tmp_path):
@@ -468,6 +482,32 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
     assert result.returncode == passed and "advice" in result.stderr
     start = plugin_hook(kind, "SessionStart", repository, plugin_root(kind, plugin))
     assert start.returncode == 0
+
+
+# Copilot's form-gate hook, as both hooks files register it: a crash of se_hook.sh still exits 0.
+REPOSITORY_HOOKS = ROOT / ".github" / "hooks" / "se.json"
+
+
+@pytest.mark.parametrize("kind", PLUGIN_FORMS)
+@pytest.mark.parametrize("where", ("repository", "plugin"))
+def test_copilots_pretooluse_hook_fails_open_when_its_script_crashes(plugin_and_repository, kind, where):
+    plugin, repository = plugin_and_repository
+    crash = "echo crashed >&2; kill -SEGV $$\n"
+    for root in (plugin, repository):
+        (root / "scripts" / "se_hook.sh").write_text(crash, encoding="utf-8", newline="\n")
+    if where == "plugin":
+        result = plugin_hook(kind, "PreToolUse", repository, plugin_root(kind, plugin))
+    else:
+        [entry] = json.loads(REPOSITORY_HOOKS.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+        if kind == "bash":
+            env, command = {"PATH": "/usr/bin:/bin", "HOME": sh(repository)}, [BASH, "-c", entry["bash"]]
+        else:
+            env = {**os.environ, "PATH": os.path.dirname(BASH) + os.pathsep + os.environ.get("PATH", "")}
+            command = [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]]
+        result = subprocess.run(command, cwd=repository, env=env, input="{}", capture_output=True,
+                                text=True, timeout=60)
+    assert (result.returncode, result.stdout) == (0, ""), result.stderr
+    assert "crashed" in result.stderr
 
 
 # The file gate's filter (README "Forms"): the file tools reach se_forms.py gate only where SE's

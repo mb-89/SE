@@ -273,6 +273,67 @@ def test_copilots_payload_is_read_from_its_tool_args(capsys, monkeypatch, projec
     assert "work form" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
 
 
+# Under Copilot (README "Forms"): its PascalCase registration sends Claude's shape with the hook
+# file's SE_HOOK_HOST=copilot, its camelCase one `toolName` and `toolArgs` as a JSON string; a deny
+# carries Copilot's top-level fields beside Claude Code's, a warning only logs.
+COPILOT_NAMES = ("github-mcp-server-issue_write", "github/issue_write", "github-mcp-server/issue_write")
+
+
+def copilot_denial(out: str) -> str:
+    answer = json.loads(out)
+    assert set(answer) == {"permissionDecision", "permissionDecisionReason", "hookSpecificOutput"}
+    assert answer["permissionDecision"] == "deny"
+    assert answer["permissionDecisionReason"] == denial(out)
+    return answer["permissionDecisionReason"]
+
+
+def copilot_payload(shape: str, tool: str, cwd: Path, **given) -> str:
+    if shape == "claude":
+        return payload(tool, cwd, **given)
+    return json.dumps({"sessionId": SESSION, "cwd": str(cwd), "toolName": tool,
+                       "toolArgs": json.dumps({"owner": OWNER, "repo": REPO_NAME, **given})})
+
+
+@pytest.mark.parametrize("shape", ("claude", "camel"))
+@pytest.mark.parametrize("tool", COPILOT_NAMES)
+def test_under_copilot_an_off_form_write_is_denied_in_both_answer_shapes(
+        capsys, monkeypatch, project, gh, shape, tool):
+    if shape == "claude":
+        monkeypatch.setenv("SE_HOOK_HOST", "copilot")
+    else:
+        monkeypatch.delenv("SE_HOOK_HOST", raising=False)
+    given = {"method": "create", "title": TITLE, "labels": ["work"]}
+    thin = copilot_payload(shape, tool, project, body=THIN, **given)
+    assert "the work form refuses" in copilot_denial(gate(capsys, monkeypatch, thin, "--gate", "refuse"))
+    good = copilot_payload(shape, tool, project, body=GOOD_WORK, **given)
+    assert gate(capsys, monkeypatch, good, "--gate", "refuse") == ""
+
+
+def test_under_claude_code_the_deny_stays_claudes_shape_alone(capsys, monkeypatch, project, gh):
+    monkeypatch.delenv("SE_HOOK_HOST", raising=False)
+    text = payload("github-mcp-server-issue_write", project, method="create", title=TITLE,
+                   labels=["work"], body=THIN)
+    assert set(json.loads(gate(capsys, monkeypatch, text, "--gate", "refuse"))) == {"hookSpecificOutput"}
+
+
+def test_under_copilot_warn_only_logs_and_never_asks(capsys, monkeypatch, project, gh):
+    monkeypatch.setenv("SE_HOOK_HOST", "copilot")
+    text = payload("github-mcp-server-issue_write", project, method="create", title=TITLE,
+                   labels=["work"], body=THIN)
+    assert gate(capsys, monkeypatch, text, "--gate", "warn") == ""
+    [line] = (project / ".se" / ".runtime" / "forms-gate.log").read_text(encoding="utf-8").splitlines()
+    assert "warned, sent anyway:" in line and "It is so." not in line
+
+
+def test_under_copilot_a_shell_calls_gh_write_is_denied_in_both_shapes(capsys, monkeypatch, project, gh):
+    monkeypatch.setenv("SE_HOOK_HOST", "copilot")
+    thin = body_file(project, THIN, "thin.md")
+    command = f"gh issue create -t {TITLE} -l work --body-file {thin}"
+    for tool in ("bash", "powershell"):
+        text = shell_payload(command, project, tool=tool)
+        assert "work form" in copilot_denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+
+
 def test_free_writes_and_the_switch_off_print_nothing(capsys, monkeypatch, project, gh):
     given = {"method": "create", "title": TITLE, "labels": ["work"]}
     thin = payload("mcp__github__issue_write", project, body=THIN, **given)
@@ -438,6 +499,27 @@ def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path
         result = hooked(tmp_path, text, CLAUDE_PROJECT_DIR=sh(root), **variables)
         assert result.returncode == 0 and result.stdout == '{"kern": "answer"}\n'
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
+
+
+@pytest_hook
+@pytest.mark.parametrize("shape", ("claude", "camel"))
+def test_under_copilot_the_hook_runs_the_gate_and_posts_nothing_to_kern(tmp_path, shared_fake_git, shape):
+    """Copilot's hooks file sets SE_HOOK_HOST=copilot and names no project variable: the deny in
+    both shapes is the hook's whole stdout, and no call, guarded or not, reaches the fake kern."""
+    root = hook_project(tmp_path, "refuse")
+    given = {"method": "create", "title": TITLE, "labels": ["work"], "body": THIN}
+    thin = copilot_payload(shape, "github-mcp-server-issue_write", root, **given)
+    result = hooked(tmp_path, thin, SE_HOOK_HOST="copilot")
+    assert result.returncode == 0 and result.stdout.count("\n") == 1
+    assert "the work form refuses" in copilot_denial(result.stdout)
+    for text in (copilot_payload(shape, "github-mcp-server-get_me", root),
+                 copilot_payload(shape, "github-mcp-server-issue_write", root,
+                                 **{**given, "body": GOOD_WORK})):
+        result = hooked(tmp_path, text, SE_HOOK_HOST="copilot")
+        assert (result.returncode, result.stdout) == (0, "")
+    assert not (tmp_path / "hook-home" / "calls").exists()
+    pythons = (tmp_path / "hook-home" / "pythons").read_text(encoding="utf-8")
+    assert pythons.count(" gate") == 2
 
 
 # The shell reader: a gh write in a shell call is held to its form as the GitHub tools' call is.

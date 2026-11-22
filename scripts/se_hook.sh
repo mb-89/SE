@@ -40,6 +40,12 @@
 # write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools); without that line
 # they cost what they did.
 #
+# Under Copilot (SE_HOOK_HOST=copilot, which its hooks files set, or a camelCase payload), a PreToolUse
+# posts nothing to kern, which has never had those events from Copilot: a guarded call runs the gate
+# alone, told the host so it answers in Copilot's shape, and every other call ends after the builtin
+# tests. Copilot's hooks files register PreToolUse only where the build reads `[forms] gate` as on
+# (scripts/se_plugin.py `copilot_hooks`).
+#
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
 # variable, else the checkout holding the payload's cwd, else the working directory.
@@ -184,11 +190,13 @@ Stop | SubagentStop) ;;
   case "${SE_FORMS_GATE:-}" in [oO][fF][fF]) gate_off=true ;; esac
   if [ "$event" = PreToolUse ] && ! $gate_off &&
     { guarded "$payload" || shelled "$payload" || filed "$payload"; }; then
-    said="$(gate "$payload")"
-    [ -n "$bin" ] && [ -x "$bin" ] && "$bin" hook "$event" --root "$project" >/dev/null 2>&1 <<<"$payload"
+    said="$(SE_HOOK_HOST="$se_payload_host" gate "$payload")"
+    [ "$se_payload_host" != copilot ] && [ -n "$bin" ] && [ -x "$bin" ] &&
+      "$bin" hook "$event" --root "$project" >/dev/null 2>&1 <<<"$payload"
     [ -n "$said" ] && printf '%s\n' "$said"
     exit 0
   fi
+  [ "$event" = PreToolUse ] && [ "$se_payload_host" = copilot ] && exit 0
   [ -n "$bin" ] && [ -x "$bin" ] || exit 0
   exec "$bin" hook "$event" --root "$project" 2>/dev/null <<<"$payload"
   ;;

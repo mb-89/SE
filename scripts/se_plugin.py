@@ -93,6 +93,12 @@ COPILOT_HOOKS = {
     # It also fires for the se agent; stop-check lets any checkout without a work issue end.
     "Stop": ("scripts/se_hook.sh Stop", 60),
 }
+# The form gate's hook (README "Forms"), registered only where the build reads se.toml `[forms] gate`
+# as one of GATE_ON (`copilot_hooks`), so the gate's own switch decides whether every Copilot tool call
+# starts a hook: se_hook.sh runs se_forms.py gate for a guarded call and answers within the 30 s.
+GATE_EVENT = "PreToolUse"
+GATE_HOOK = ("scripts/se_hook.sh PreToolUse", 30)
+GATE_ON = ("warn", "refuse")
 # The events whose hook may end with WARN, Copilot's warning: the person sees the hook's stderr and the
 # run goes on (docs/copilot.md "What a session costs"). The Stop hook advises so under Copilot rather
 # than refusing; every other exit code still fails open.
@@ -417,6 +423,27 @@ def copilot_manifest(root: Path) -> PurePosixPath:
     return COPILOT_MANIFEST_PLACES[_plugin_settings(root).get("copilot_manifest", "github")]
 
 
+def forms_gate(root: Path) -> bool:
+    """`se.toml` `[forms] gate` in the working tree at build time: whether it is one of GATE_ON;
+    unset, off. A value outside off, warn and refuse is refused, as scripts/forms.py refuses it."""
+    with (root / "se.toml").open("rb") as handle:
+        table = tomllib.load(handle).get("forms", {})
+    gate = table.get("gate", "off") if isinstance(table, dict) else None
+    if gate not in ("off", *GATE_ON):
+        raise SourceError(f"{root / 'se.toml'}: [forms] gate is one of \"off\", \"warn\" and \"refuse\" "
+                          '(README "Forms")')
+    return gate in GATE_ON
+
+
+def copilot_hooks(root: Path) -> dict[str, tuple[str, int]]:
+    """The events of Copilot's hooks files: COPILOT_HOOKS, and GATE_EVENT after SessionStart where
+    `forms_gate` is on."""
+    if not forms_gate(root):
+        return dict(COPILOT_HOOKS)
+    first, *rest = COPILOT_HOOKS.items()
+    return dict([first, (GATE_EVENT, GATE_HOOK), *rest])
+
+
 def powershell_hooks(root: Path) -> str:
     """`se.toml` `[plugin] powershell_hooks`: how a PowerShell hook line starts its bash script
     (POWERSHELL_HOOKS); unset, `"bash"`."""
@@ -529,10 +556,12 @@ def _copilot_hook(command: str, seconds: int, plugin: bool = False, setting: str
             "cwd": ".", "env": {"SE_HOOK_HOST": "copilot"}, "timeoutSec": seconds}
 
 
-def _copilot_hooks(plugin: bool, setting: str = "bash") -> bytes:
+def _copilot_hooks(plugin: bool, setting: str = "bash",
+                   events: dict[str, tuple[str, int]] | None = None) -> bytes:
+    events = COPILOT_HOOKS if events is None else events
     return _json({"version": 1, "hooks": {event: [_copilot_hook(command, seconds, plugin, setting,
                                                                 event in WARN_EVENTS)]
-                                         for event, (command, seconds) in COPILOT_HOOKS.items()}})
+                                         for event, (command, seconds) in events.items()}})
 
 
 def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
@@ -563,8 +592,9 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
     layout = LAYOUTS[0]
     if layout.hooks:
         setting = powershell_hooks(root)
-        files[COPILOT_HOOKS_FILE] = _copilot_hooks(plugin=False, setting=setting)
-        files[PLUGIN_HOOKS_FILE] = _copilot_hooks(plugin=True, setting=setting)
+        events = copilot_hooks(root)
+        files[COPILOT_HOOKS_FILE] = _copilot_hooks(plugin=False, setting=setting, events=events)
+        files[PLUGIN_HOOKS_FILE] = _copilot_hooks(plugin=True, setting=setting, events=events)
     files[COPILOT_MCP_FILE] = _json({"mcpServers": {MCP_SERVER: {
         **mcp_server(LAUNCHER), "tools": ["*"], "env": SESSION_CWD_ENV}}})
     files[copilot_manifest(root)] = _json({

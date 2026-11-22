@@ -38,8 +38,8 @@ the Markdown to file (the warnings then on stderr). Where no form applies to `--
 and says `free: no form applies (<action>)` (on stderr with `--render`, the text as given after).
 
 **The gate.** `se_forms.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
-Copilot's with `toolName` and `toolArgs`) and answers on stdout one JSON object or nothing; it
-exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), with
+Copilot's with `toolName` and `toolArgs`, renamed through scripts/hosts.py `payload`, a tool input
+given as a JSON string parsed) and answers on stdout one JSON object or nothing; it exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), with
 `--no-python-downloads`, and the hook prints its answer as its whole stdout. The file tools are
 judged by their own rules (The file tools, below).
 
@@ -90,7 +90,10 @@ judged by their own rules (The file tools, below).
   project's local list.
 - The answers: with `refuse` and a refused finding, a `deny` whose reason is `forms.report`'s, its
   tail naming the forms tool (`gate=True`); with `warn` and any finding, `additionalContext` with
-  the findings; else nothing. Never an `allow`, which would skip the person's prompt.
+  the findings; else nothing. Never an `allow`, which would skip the person's prompt, nor an `ask`.
+- Under Copilot (scripts/hosts.py `hook_host`: SE_HOOK_HOST=copilot, else a camelCase payload;
+  `for_host`): a deny also carries `permissionDecision` and `permissionDecisionReason` at its top,
+  and a warning is one line in GATE_LOG, its first line and never the body, and no answer.
 - The cap and the hold: each refusal is counted (`forms.count_refusal`) under `forms.target`
   (form, repository, action, the issue's number or the title) in the payload's `session_id`. From
   `[forms] refusals` on, the refusal offers the hold; an issue write labelled `off-form` and not
@@ -907,9 +910,10 @@ class Write:
     """One guarded GitHub write as the gate reads it from a payload."""
 
     def __init__(self, payload: dict) -> None:
+        payload = sibling("hosts").payload(payload)
         self.cwd = str(payload.get("cwd") or "")
-        self.session = str(payload.get("session_id") or payload.get("sessionId") or "")
-        name = self.name = str(payload.get("tool_name") or payload.get("toolName") or "")
+        self.session = str(payload.get("session_id") or "")
+        name = self.name = str(payload.get("tool_name") or "")
         server = payload.get("mcp_server")
         self.tool, part = tool_parts(name)
         if isinstance(server, dict) and server.get("name"):
@@ -918,9 +922,7 @@ class Write:
         self.guarded = self.tool in GATE_TOOLS and github
         self.files = name in FILE_TOOLS or (self.tool in GITHUB_FILE_TOOLS and github)
         given = payload.get("tool_input")
-        if given is None and "toolArgs" in payload:
-            given = payload["toolArgs"]
-            given = json.loads(given) if isinstance(given, str) else given
+        given = json.loads(given) if isinstance(given, str) else given
         self.input = given if isinstance(given, dict) else {}
         action, body, title, labels, base = GATE_TOOLS.get(self.tool, ("", None, None, None, None))
         if self.tool == "issue_write" and str(self.input.get("method") or "") == "create":
@@ -976,8 +978,9 @@ class Judged(Exception):
         self.write = write
 
 
-def log_line(where: Path | None, error: BaseException | str) -> None:
-    """One line in GATE_LOG of `where` (else of SE's own checkout): the error, never the body."""
+def log_line(where: Path | None, error: BaseException | str, verdict: str = "passed unjudged") -> None:
+    """One line in GATE_LOG of `where` (else of SE's own checkout): the verdict and the error (or
+    the warning's first line), never the body."""
     folder = where or HERE.parent
     if isinstance(error, BaseException):
         first = (str(error).splitlines() or [""])[0][:200]
@@ -987,7 +990,7 @@ def log_line(where: Path | None, error: BaseException | str) -> None:
         path = folder / GATE_LOG
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as log:
-            log.write(f"{stamp} passed unjudged: {error}\n")
+            log.write(f"{stamp} {verdict}: {error}\n")
     except OSError:
         pass
 
@@ -996,6 +999,22 @@ def deny(reason: str) -> str:
     return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                               "permissionDecision": "deny",
                                               "permissionDecisionReason": reason}})
+
+
+def for_host(answer: str, host: str, project: Path | None) -> str:
+    """`answer` as `host` reads it: Claude Code's as it is; under Copilot a deny also carries
+    `permissionDecision` and `permissionDecisionReason` at its top, and a warning, which Copilot's
+    hook does not read, is one line in GATE_LOG and no answer."""
+    if host != "copilot" or not answer:
+        return answer
+    said = json.loads(answer)["hookSpecificOutput"]
+    if said.get("permissionDecision") == "deny":
+        return json.dumps({"permissionDecision": "deny",
+                           "permissionDecisionReason": said["permissionDecisionReason"],
+                           "hookSpecificOutput": said})
+    first = (str(said.get("additionalContext") or "").splitlines() or [""])[0][:200]
+    log_line(project, first, verdict="warned, sent anyway")
+    return ""
 
 
 def context(text: str) -> str:
@@ -1263,7 +1282,8 @@ def run_gate(options: argparse.Namespace) -> int:
 
     def work() -> None:
         try:
-            answer.append(judge(sys.stdin.read(), options.gate, seen, options))
+            text = seen["text"] = sys.stdin.read()
+            answer.append(judge(text, options.gate, seen, options))
         except Judged as failed:
             kind = type(failed.error).__name__
             answer.append(deny(f"{GATE_FAILED.format(kind=kind)}: {instead(failed.write)}; or "
@@ -1278,9 +1298,22 @@ def run_gate(options: argparse.Namespace) -> int:
     if runner.is_alive() or not answer:
         log_line(seen["project"], f"slow: no answer within {GATE_SECONDS:g} s")
         return 0
-    if answer[0]:
-        print(answer[0])
+    said = answer[0]
+    if said:
+        said = for_host(said, gate_host(seen.get("text", "")), seen["project"])
+    if said:
+        print(said)
     return 0
+
+
+def gate_host(text: str) -> str:
+    """The host the gate answers (scripts/hosts.py `hook_host`): the hook file's SE_HOOK_HOST,
+    else `copilot` for a camelCase payload, else `claude`."""
+    try:
+        event = json.loads(text)
+    except ValueError:
+        event = None
+    return sibling("hosts").hook_host(os.environ, event if isinstance(event, dict) else None)
 
 
 def project_root(given: Path | None) -> Path:

@@ -2149,6 +2149,10 @@ the findings) or `refuse` (the call is denied, naming the form, every finding an
 - It fails open when it is slow: past 10 s, or where the host cancels it, the call runs.
   It fails open where it cannot judge (no Python 3.11, a payload it cannot read), and logs it in
   `.se/.runtime/forms-gate.log`; it fails closed only on a crash once it knows a form applies.
+- Under Copilot the same gate runs where the build reads `[forms] gate` as `warn` or `refuse`: only
+  then do Copilot's hooks files register `PreToolUse` ([docs/copilot.md "Hooks"](docs/copilot.md#hooks)).
+  A deny there carries Copilot's fields beside Claude Code's, a warning only logs, and a hook that
+  cannot run exits 0, so it never blocks a call.
 
 SE's forms backstop marks what reaches GitHub past every hook, where se.toml `[forms] backstop` is
 `on` (default `off`): a person's write on github.com, a session without SE's hooks, a label change.

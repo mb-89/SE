@@ -160,6 +160,21 @@ another repository shows no greeting, start SE by hand inside it:
 First check the repository for a `scripts/bootstrap.sh` or `scripts/se_hook.sh` of its own: a
 relative `bash scripts/...` there runs that one, not SE's, so always name SE's by its full path.
 
+Both hooks files register `SessionStart` and `Stop`, and `PreToolUse` for the form gate where the
+build reads se.toml `[forms] gate` as `warn` or `refuse` ([README "Forms"](../README.md#forms)).
+Its hook, `se_hook.sh PreToolUse` within 30 s, ends in `|| true` and `exit 0`: Copilot denies a call
+whose hook exits non-zero, so a hook that cannot run passes the call.
+
+- The gate reads Claude's shape, which the PascalCase registration sends with `SE_HOOK_HOST=copilot`,
+  and Copilot's camelCase one, `toolArgs` as a JSON string (`scripts/hosts.sh` `SE_PAYLOAD_KEYS`).
+- A deny is one object with `permissionDecision` and `permissionDecisionReason` at its top and
+  Claude Code's `hookSpecificOutput`. It never answers `ask`; `warn` writes one line to
+  `.se/.runtime/forms-gate.log` and answers nothing, as Copilot reads no context from this hook.
+- It posts nothing to kern; every other tool call costs one `bash` start and its builtin tests.
+- The tool names it matches are those `scripts/host-limits.toml` records: `{server}-{tool}` (Copilot
+  CLI), `{server}/{tool}` (VS Code), a server part holding `github`, and a shell tool whose input
+  holds `command`.
+
 ### VS Code
 
 VS Code's own parser takes SE as a Claude-format plugin: it checks `.claude-plugin/plugin.json`

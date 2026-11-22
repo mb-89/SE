@@ -13,6 +13,18 @@
         "timeoutSec": 120
       }
     ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "bash": "if [ -n \"$PLUGIN_ROOT\" ] && [ ! -f .github/hooks/se.json ]; then bash \"$PLUGIN_ROOT/scripts/se_hook.sh\" PreToolUse || true; fi",
+        "powershell": "if ($env:PLUGIN_ROOT -and -not (Test-Path .github/hooks/se.json)) { bash \"$($env:PLUGIN_ROOT.Replace([char]92,[char]47))/scripts/se_hook.sh\" PreToolUse }; exit 0",
+        "cwd": ".",
+        "env": {
+          "SE_HOOK_HOST": "copilot"
+        },
+        "timeoutSec": 30
+      }
+    ],
     "Stop": [
       {
         "type": "command",

@@ -22,8 +22,9 @@ SE_CLOUD_MARKS=(claude:CLAUDE_CODE_REMOTE=true ci:GITHUB_ACTIONS=true)
 # payload on as it is, so the delivery check knows the host in whichever process judges it.
 SE_PAYLOAD_HOST=(se_host)
 # Copilot's camelCase payload fields and the snake_case name Claude Code's payload, kern and
-# stop-check read, each `<camelCase>:<snake_case>`. A payload with any of them is Copilot's.
-SE_PAYLOAD_KEYS=(sessionId:session_id hookEventName:hook_event_name transcriptPath:transcript_path agentTranscriptPath:agent_transcript_path stopReason:stop_reason stopHookActive:stop_hook_active toolName:tool_name initialPrompt:initial_prompt)
+# stop-check read, each `<camelCase>:<snake_case>`. A payload with any of them is Copilot's. Its
+# `toolArgs` may hold the tool's input as a JSON string; scripts/se_forms.py gate parses it.
+SE_PAYLOAD_KEYS=(sessionId:session_id hookEventName:hook_event_name transcriptPath:transcript_path agentTranscriptPath:agent_transcript_path stopReason:stop_reason stopHookActive:stop_hook_active toolName:tool_name toolArgs:tool_input initialPrompt:initial_prompt)
 
 # The hook payload on stdin of the script that sources this, in snake_case whatever host wrote it;
 # builtins only, as a hook's cost is kern's own start. Sets se_payload_host to the host the hook file

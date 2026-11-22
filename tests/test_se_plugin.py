@@ -146,8 +146,12 @@ def copilot_hooks(checkout: Path) -> dict:
 # How each Copilot hook ends: SessionStart fails open whatever its exit; Stop passes Copilot's warning
 # exit code 2 through, its advice under Copilot (docs/copilot.md "What a session costs"), and fails
 # open on every other.
-WARNS = {"SessionStart": (" || true", ""),
+WARNS = {"SessionStart": (" || true", ""), "PreToolUse": (" || true", ""),
          "Stop": (" || [ $? -ne 2 ] || exit 2", "; if ($LASTEXITCODE -eq 2) { exit 2 }")}
+# The events SE's se.toml builds, `[forms] gate` on: the form gate's PreToolUse among them, and the
+# timeout each one names, the gate's Copilot's default of 30 s.
+COPILOT_EVENTS = (("SessionStart", "scripts/bootstrap.sh --hook", 120),
+                  ("PreToolUse", "scripts/se_hook.sh PreToolUse", 30), ("Stop", "scripts/se_hook.sh Stop", 60))
 
 
 def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
@@ -155,15 +159,15 @@ def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(ch
     hook"); PascalCase events, so Copilot sends Claude-shaped payloads with their `session_id`, and
     each hook names its host; each fails open within its timeout, in bash and in PowerShell."""
     hooks = copilot_hooks(checkout)
-    assert sorted(hooks) == ["SessionStart", "Stop"]
-    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
+    assert list(hooks) == [event for event, _, _ in COPILOT_EVENTS]
+    for event, command, seconds in COPILOT_EVENTS:
         [hook] = hooks[event]
         assert hook["type"] == "command" and hook["cwd"] == "."
         assert hook["env"] == {"SE_HOOK_HOST": "copilot"}
         bash_end, powershell_end = WARNS[event]
         assert hook["bash"] == f"bash {command}{bash_end}"
         assert hook["powershell"] == f"bash {command}{powershell_end}; exit 0"
-        assert 30 < hook["timeoutSec"] <= 120, "an explicit timeout above Copilot's default of 30 s"
+        assert hook["timeoutSec"] == seconds
         assert (checkout / command.split()[0]).is_file()
 
 
@@ -184,8 +188,8 @@ def test_a_plugin_install_runs_the_plugins_own_scripts_guarded_and_fail_open(che
     data = json.loads((checkout / ".github" / "plugin" / "hooks.json").read_text(encoding="utf-8"))
     assert data["version"] == 1
     repository = copilot_hooks(checkout)
-    assert sorted(data["hooks"]) == sorted(repository) == ["SessionStart", "Stop"]
-    for event, command in (("SessionStart", "scripts/bootstrap.sh --hook"), ("Stop", "scripts/se_hook.sh Stop")):
+    assert list(data["hooks"]) == list(repository) == [event for event, _, _ in COPILOT_EVENTS]
+    for event, command, _ in COPILOT_EVENTS:
         [hook], [local] = data["hooks"][event], repository[event]
         script, arguments = command.split(" ", 1)
         bash_end, powershell_end = WARNS[event]
@@ -900,3 +904,36 @@ def test_a_listed_draft_holds_to_the_rules_of_every_skill(tmp_path, capsys):
 
 def test_ses_own_se_toml_includes_no_draft():
     assert se_plugin.draft_skills(ROOT) == []
+
+
+def built_with_gate(tmp_path: Path, gate: str | None) -> dict:
+    """The build of SE's sources with se.toml `[forms] gate` set to `gate`, or unset (None)."""
+    tree = tmp_path / str(gate)
+    shutil.copytree(ROOT / "src", tree / "src")
+    text = re.sub(r'(?m)^gate = "\w+"\n', "", (ROOT / "se.toml").read_text(encoding="utf-8"))
+    if gate is not None:
+        text = text.replace("[forms]\n", f'[forms]\ngate = "{gate}"\n', 1)
+    (tree / "se.toml").write_text(text, encoding="utf-8")
+    return se_plugin.expected(tree)
+
+
+def test_the_form_gates_switch_decides_copilots_pretooluse_and_off_builds_mains_files(tmp_path):
+    """README "Forms": `[forms] gate` warn or refuse registers the gate's PreToolUse in both Copilot
+    hooks files; off or unset, both are byte for byte what COPILOT_HOOKS alone writes, main's."""
+    mains = {se_plugin.COPILOT_HOOKS_FILE: se_plugin._copilot_hooks(plugin=False),
+             se_plugin.PLUGIN_HOOKS_FILE: se_plugin._copilot_hooks(plugin=True)}
+    assert list(se_plugin.COPILOT_HOOKS) == ["SessionStart", "Stop"]
+    for gate in ("off", None):
+        files = built_with_gate(tmp_path, gate)
+        assert {path: files[path] for path in HOOKS_FILES} == mains, gate
+    for gate in ("warn", "refuse"):
+        files = built_with_gate(tmp_path, gate)
+        for path in HOOKS_FILES:
+            hooks = json.loads(files[path])["hooks"]
+            assert list(hooks) == ["SessionStart", "PreToolUse", "Stop"], (gate, path)
+            [hook] = hooks["PreToolUse"]
+            assert "se_hook.sh" in hook["bash"] and "PreToolUse" in hook["bash"], hook
+            assert "|| true" in hook["bash"] and hook["powershell"].endswith("exit 0"), hook
+            assert (hook["timeoutSec"], hook["env"]) == (30, {"SE_HOOK_HOST": "copilot"})
+    with pytest.raises(se_plugin.SourceError, match=r"\[forms\] gate"):
+        built_with_gate(tmp_path, "loud")
