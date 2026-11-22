@@ -4213,6 +4213,73 @@ def test_integrate_keeps_a_planned_splits_issue_open_and_comments_the_pieces_lef
     assert github.calls == []
 
 
+def partial_without_pieces(report: str, left: str = "- Requirement 2: blocked by the host.") -> str:
+    """`report` as a partial delivery whose "Not delivered" names no planned piece."""
+    return report.replace("**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone", "## Not delivered\n\n" + left)
+
+
+def test_partial_left_is_what_a_partial_without_planned_pieces_left():
+    def left(text: str) -> list[str]:
+        return work_tickets.partial_left(partial_without_pieces(COMPLETE_REPORT, text))
+
+    assert left("- **R8, the off switch:** kern cannot.\n  More on it.\n"
+                "* **R9.** Later.\n- Requirement 2: blocked by the host.\n  - a sub-bullet") == [
+        "R8, the off switch", "R9", "Requirement 2: blocked by the host."]
+    assert left("Some context first.\n\n- **R8:** the off switch.") == ["R8"]
+    assert left("The off switch waits on kern,\nas decided.\n\nA second paragraph.") == [
+        "The off switch waits on kern, as decided."]
+    assert left("None") == ["nothing named under Not delivered"]
+    assert work_tickets.partial_left(COMPLETE_REPORT.replace(
+        "**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone\n", "## Not delivered\n\n")) == [
+        "nothing named under Not delivered"]
+    assert work_tickets.partial_left(COMPLETE_REPORT) == []
+    assert work_tickets.partial_left(planned_split(COMPLETE_REPORT)) == []
+
+
+def test_pr_body_names_a_partial_without_planned_pieces_with_refs():
+    issue = {"number": 5, "url": URL, "body": BODY}
+    body = work_tickets.pull_request_body(issue, partial_without_pieces(COMPLETE_REPORT))
+    assert body.startswith(f"Refs {URL}\n")
+
+
+def test_integrate_read_back_keeps_a_partial_without_pieces_open_and_hands_the_rest_to_se(
+        main_checkout, monkeypatch, github, capsys):
+    """A partial naming no planned piece lands: the close-out keeps the issue open, takes `ready`
+    off, labels it `escalated` and names what the delivery left, for SE; a hand-off file written
+    before `left` existed still closes the issue."""
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    (main_checkout.parent / "saved" / "pr.md").write_text(
+        partial_without_pieces(reported_at(head), "- **R8, the off switch:** kern cannot yet."),
+        encoding="utf-8")
+    assert run(main_checkout, *arguments) == 0
+    handoff = main_checkout / ".se" / "handoff" / "feature-worker.json"
+    state = json.loads(handoff.read_text(encoding="utf-8"))
+    assert state["left"] == ["R8, the off switch"]
+    session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert '"state_reason": "completed"' not in out
+    assert "<the issue's labels without in-progress>" in out
+    assert out.index("<the issue's labels without ready>") < out.index(
+        "<the issue's labels with escalated>")
+    assert "Stays open for what this partial delivery left, which SE re-scopes: R8, the off switch" in out
+    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
+            "take it to the owner: R8, the off switch") in out
+    assert github.calls == []
+
+    del state["left"]  # a hand-off written before the change
+    handoff.write_text(json.dumps(state), encoding="utf-8")
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+    out = capsys.readouterr().out
+    assert '"state": "closed", "state_reason": "completed"' in out
+    assert "escalated" not in out
+
+
 def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_pushes_main(
         main_checkout, monkeypatch, github, capsys):
     fast_forward_landings(main_checkout)
@@ -6228,6 +6295,49 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     output = capsys.readouterr().out
     assert "Issue #5: OPEN on GitHub after the merge" in output
     assert "Close #5 once its post-merge acceptance is seen" in output
+
+
+def test_integrate_keeps_a_partial_without_pieces_open_through_gh(main_checkout, monkeypatch, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = git_run(worker, "rev-parse", "HEAD", check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    report = {"body": partial_without_pieces(reported_at(head))}
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: (
+        {"body": BODY} if number == 5 else report))
+    closed: set[str] = set()
+    bodies: list[str] = []
+
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                               "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["issue", "close"]:
+            closed.add(args[2])
+        if args[:2] == ["issue", "view"]:
+            return "CLOSED\n" if args[2] in closed else "OPEN\n"
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call for call in calls if call[:2] == ["issue", "close"]] == []
+    edits = [call[2:5] for call in calls if call[:2] == ["issue", "edit"]]
+    assert ["5", "--remove-label", "ready"] in edits and ["5", "--add-label", "escalated"] in edits
+    line = "Requirement 2: blocked by the host."
+    assert len(bodies) == 1 and (
+        "Stays open for what this partial delivery left, which SE re-scopes: " + line) in bodies[0]
+    output = capsys.readouterr().out
+    assert "Issue #5: OPEN on GitHub after the merge" in output
+    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
+            "take it to the owner: " + line) in output
 
 
 def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(
