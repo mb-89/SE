@@ -3,7 +3,9 @@
 Installs se's git hooks (public-safety check) into a repository: se itself by default, or -Repo,
 such as a project that uses se as a module. Also adds the public check's local list
 (.public-check.local, never checked in) to the repository's .gitignore, and sets the repository's
-commit identity as work_tickets.py sync does, so its first commit already carries it.
+commit identity as work_tickets.py sync does, so its first commit already carries it. In se's own
+checkout it then installs obs's adapter component html, which the docs and decks build with
+(`build_docs.py --install-html`).
 
 With -Copilot (opt-in) it then installs SE for GitHub Copilot there: `copilot.py install`
 (docs/copilot.md, "Another repository"). Without it nothing else changes. Twin of setup.sh.
@@ -44,6 +46,10 @@ if ($lines -notcontains $localList -and $lines -notcontains "/$localList") {
 }
 Invoke-SeScript work_tickets.py identity --worktree $target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($target -eq $seRoot) {
+    Invoke-SeScript build_docs.py --install-html
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 if ($Copilot) {
     Invoke-SeScript copilot.py install --repo $target
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

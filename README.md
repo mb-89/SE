@@ -482,6 +482,11 @@ module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
+obs builds it, and every decision deck, with the adapter component `html`, which it finds among
+the machine's installed components, else in its own tree. `build_docs.py --install-html` runs
+`obs-components install html` and fails, naming that command, where obs finds no `html`; the setup
+scripts in se's checkout, the `check` job and the docs workflow run it before they build.
+
 The build reads a copy of the repository in which no note asks for a verdict, so the worked
 decision note shows as a page to read, with no Send; the note itself still asks, for the decks
 built from it.

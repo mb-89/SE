@@ -396,3 +396,12 @@ def test_an_install_that_installs_nothing_builds_with_the_html_of_obss_tree(obs,
     assert build_docs.install_html(obs) == 0
     assert f"obs builds with the html it finds at {obs}" in capsys.readouterr().out
 
+
+def test_setup_and_ci_install_html_before_they_build():
+    workflows = ROOT / ".github" / "workflows"
+    for workflow, build_step in (("docs.yml", "scripts/build_docs.py --destination"),
+                                 ("check.yml", "work_tickets.py suite")):
+        text = (workflows / workflow).read_text(encoding="utf-8")
+        assert text.index("build_docs.py --install-html") < text.index(build_step), workflow
+    for setup in ("setup.sh", "setup.ps1"):
+        assert "build_docs.py --install-html" in (ROOT / "scripts" / setup).read_text(encoding="utf-8")

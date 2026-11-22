@@ -153,6 +153,11 @@ jobs:
       # The budget's reference run (README "Test budget"): over a limit here, check fails. The
       # nightly run is full: it runs every suite beside, also one whose paths the change does not
       # touch.
+      # The suite's docs and deck builds run through obs's adapter component html (README
+      # "Documentation"), installed first.
+      - name: Install obs's adapter component html
+        if: needs.trust.outputs.trusted != 'true'
+        run: uv run python scripts/build_docs.py --install-html
       - name: The complete suite and the suites beside it, within their budgets
         if: needs.trust.outputs.trusted != 'true'
         env:
