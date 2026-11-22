@@ -8013,3 +8013,24 @@ def test_the_branch_tip_and_branch_are_read_from_the_worktree_whatever_git_dir_n
     assert len(seen) == 2
     assert all(env is not None and "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
                for env in seen)
+
+
+@pytest.mark.parametrize("repo", ["git.example/owner/obs", "owner/obs", "owner/obs/", "owner/obs.git"])
+def test_file_labels_the_issue_with_the_repository_it_files_in_through_gh_and_in_its_plan(
+        worktree, monkeypatch, capsys, repo):
+    assert work_tickets.work_labels(worktree, repo) == ["work", "ready", "repo:obs"]
+    body = worktree / "work.md"
+    body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)  # without gh: the plan
+    monkeypatch.setattr(work_tickets, "relay_door", lambda root, repo: None)
+    monkeypatch.setattr(work_tickets, "form_check", lambda *arguments: False)
+    assert run(worktree, "file", "--title", "feature/filed-20261106", "--body-file", str(body),
+               "--repo", "git.example/owner/obs") == 0
+    plan = capsys.readouterr().out
+    create = next(line for line in plan.splitlines() if '"method": "create"' in line)
+    assert '"labels": ["work", "ready", "repo:obs"]' in create
+
+
+def test_file_without_repo_labels_the_issue_with_the_checkout_s_repository(worktree, monkeypatch):
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo.git")
+    assert work_tickets.work_labels(worktree, None) == ["work", "ready", "repo:repo"]

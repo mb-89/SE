@@ -4744,7 +4744,7 @@ def work_labels(root: Path, explicit: str | None) -> list[str]:
     """WORK_LABELS and the `repo:` label of the repository the issue is for: the named one, else
     this checkout's (whose tracker may hold the issue)."""
     name = explicit.rstrip("/").rsplit("/", 1)[-1] if explicit else repository_name(root)
-    return [*WORK_LABELS, f"repo:{name}"]
+    return [*WORK_LABELS, f"repo:{name.removesuffix('.git')}"]
 
 
 def read_file(file: Path, what: str) -> str:
