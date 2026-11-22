@@ -35,6 +35,7 @@ UNLISTED = {
                               "so whether it joins them is the owner's call",
     "src/skills/catch-up/references/integrator-prompt.md": "a prompt template the catch-up skill fills",
     "docs/copilot.md": "the owner's guide to installing SE into Copilot, linked from README",
+    "docs/components.md": "the design of finding components, linked from docs/go-core.md",
     "docs/go-core.md": "the Go core's design, linked from README and AGENTS.md",
     "docs/guidance.md": "the guidance system's design, read by the workers of its packages",
     "docs/templates.md": "the template system's design, linked from README \"Forms\"",
