@@ -154,6 +154,16 @@ def test_the_self_tests_static_checks_pass_on_this_checkout() -> None:
     assert report.lines and report.lines[0].startswith("passed hooks:"), report.lines
 
 
+def test_the_self_tests_plugin_copy_passes_its_layout_check(tmp_path) -> None:
+    """The copy holds SE's guidance tree, whose check reads kern's page limit: the copy places kern
+    as SE's start places it in an install, so `se_plugin.py check` of the copy passes."""
+    plugin = tmp_path / "plugin" / "se"
+    report = copilot.Report([])
+    copilot.copy_plugin(plugin, report)
+    copilot.check_layout(plugin, report)
+    assert [line.split(":")[0] for line in report.lines] == ["passed kern", "passed layout"], report.lines
+
+
 def test_the_self_test_passes_on_no_session_variable_of_its_own() -> None:
     env = {"PATH": "/bin", "CLAUDE_PROJECT_DIR": "/a", "COPILOT_SESSION_CWD": "/b", "COPILOT_X": "1",
            "SE_SESSION_CWD": "/c", "PLUGIN_ROOT": "/d", "CLAUDE_PLUGIN_ROOT": "/e"}
