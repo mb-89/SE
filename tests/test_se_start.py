@@ -24,6 +24,7 @@ se_start = importlib.util.module_from_spec(_spec)
 sys.modules["se_start"] = se_start
 _spec.loader.exec_module(se_start)
 se_modules = se_start.se_modules
+import se_runtimes  # noqa: E402  (scripts/ is on the path, tests/conftest.py)
 
 SE_URL = "https://git.example.org/team/se.git"
 LIB_URL = "https://git.example.org/team/lib.git"
@@ -1347,12 +1348,15 @@ def tree(tmp_path, isolated_git, monkeypatch):
             listing.write_text(json.dumps(owners), encoding="utf-8")
             monkeypatch.setenv(se_modules.LISTING_VARIABLE, f"fake:{listing}")
 
-        def release(self, name: str, version: str) -> str:
-            """`team/<name>.git` with one commit, tagged `v<version>`, marked as a component."""
+        def release(self, name: str, version: str, manifest: str = "") -> str:
+            """`team/<name>.git` with one commit, tagged `v<version>`, marked as a component; its
+            se.toml holds `manifest` where one is given."""
             repo = folders / "team" / f"{name}.git"
             repo.mkdir(parents=True)
             fake_git.init(repo, "-b", "main")
             write(repo / "version.txt", f"{version}\n")
+            if manifest:
+                write(repo / "se.toml", manifest)
             git(repo, "add", "-A")
             git(repo, "commit", "-q", "-m", f"{name} {version}")
             git(repo, "tag", f"v{version}")
@@ -1363,6 +1367,12 @@ def tree(tmp_path, isolated_git, monkeypatch):
 
         def start(self) -> tuple[list[str], bool]:
             return se_start.start_components(root, local)
+
+        def machine(self, have: dict, get: dict | None = None) -> Path:
+            """The fake machine the runtime check reads (SE_RUNTIMES=fake:): what it has, what RUNME gets."""
+            file = write(tmp_path / "machine.json", json.dumps({"have": have, "get": get or {}}))
+            monkeypatch.setenv(se_runtimes.VARIABLE, f"fake:{file}")
+            return file
 
     found = Tree()
     found.list({"git.example.org/team": []})
@@ -1422,6 +1432,86 @@ def test_a_start_with_every_component_placed_at_its_locked_commit_asks_no_remote
 
     asked = [call for call in door_fake.calls if {"ls-remote", "fetch", "clone"} & set(call)]
     assert asked == [], "a placed tree asks no remote"
+
+
+# The tree's runtimes (docs/components.md "Runtimes"): the union over the tree, checked before any
+# component runs, what RUNME.conf gets got through RUNME.
+
+
+def test_a_tree_needing_two_runtimes_one_missing_stops_the_start_before_any_component_runs_naming_it(tree):
+    tree.release("lib", "1.0.0", '[runtimes]\ngo = "^1.22"\n')
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[runtimes]\nuv = "^0.5"\n\n[components.lib]\nversion = "^1"\n')
+    tree.machine({"uv": "0.5.4"})
+
+    lines, stopped = tree.start()
+
+    assert stopped, "the core never starts"
+    assert lines[0] == ("SE cannot start: the component tree needs 1 runtime this machine lacks; no component "
+                        "runs until each is present:")
+    assert lines[1:] == ["  go ^1.22 (for se -> lib): missing; RUNME.conf names no way to get it: add a line "
+                         "get go <way> <what> (RUNME.sh's header), or install go yourself"]
+    assert not (tree.root / se_modules.LOCK).exists(), "nothing locked"
+
+
+def test_a_runtime_runme_conf_gets_is_got_through_runme_and_the_start_goes_on(tree):
+    tree.release("lib", "1.0.0", '[runtimes]\ngo = "^1.22"\n')
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.lib]\nversion = "^1"\n')
+    write(tree.root / "RUNME.conf", "path ~/.local/bin\nget go apt golang\nget go unix ./get-go.sh\nrun se\n")
+    tree.machine({}, {"go": "1.23.0"})
+
+    lines, stopped = tree.start()
+
+    assert not stopped
+    assert lines == ["runtime go 1.23.0: got through RUNME.conf (for se -> lib)"]
+    conf = (tree.root / se_runtimes.GET_DIR / "RUNME.conf").read_text(encoding="utf-8").splitlines()
+    assert conf[0] == f"path {(Path.home() / '.local' / 'bin').as_posix()}"
+    assert conf[1:3] == ["need go command go", "get go apt golang"]
+    assert conf[3].startswith("get go unix cd ") and conf[3].endswith(" && ./get-go.sh"), "a command runs in the root"
+    assert conf[-1] == "run true"
+
+
+def test_a_runtime_runme_cannot_get_or_at_a_version_its_range_refuses_is_named_with_the_remedy(tree):
+    tree.release("lib", "1.0.0", '[runtimes]\ngo = "^1.22"\npython = "^3.12"\n')
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[runtimes]\npython = "^3.11"\n\n[components.lib]\nversion = "^1"\n')
+    write(tree.root / "RUNME.conf", "get go apt golang\nrun se\n")
+    tree.machine({"python": "3.11.4"})
+
+    lines, stopped = tree.start()
+
+    assert stopped
+    assert lines[1:] == [
+        "  python ^3.11 and ^3.12 (for se, se -> lib): found 3.11.4, outside the range; install a python it admits",
+        "  go ^1.22 (for se -> lib): missing; RUNME could not get it: go is missing; run: golang"]
+
+
+def test_two_ranges_of_one_runtime_that_admit_no_common_version_stop_the_start_naming_both(tree):
+    tree.release("lib", "1.0.0", '[runtimes]\npython = "^3.12"\n')
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[runtimes]\npython = "~3.11.2"\n\n[components.lib]\nversion = "^1"\n')
+    tree.machine({"python": "3.12.1"})
+
+    lines, stopped = tree.start()
+
+    assert stopped
+    assert lines == ["SE cannot start: runtime python: se -> lib needs ^3.12 and se needs ~3.11.2, and no "
+                     "version of python admits both; align the two ranges"]
+
+
+@pytest.mark.parametrize(("table", "refusal"), [
+    ('[runtimes]\ncobol = "^1"\n', "SE cannot start: se.toml: runtime 'cobol' is none SE knows; known: go, node, "
+                                    "python, uv (se_runtimes.py PROBES adds one)"),
+    ('[runtimes]\ngo = ">=1.22"\n', "SE cannot start: se.toml: runtime go: module go: version must be a semver range "
+                                     "such as ^1.4, ~1.4.2 or 1.4.2, got '>=1.22'"),
+    ('[[runtimes]]\ngo = "^1"\n', 'SE cannot start: se.toml: [runtimes] must be a table of <runtime> = "<version range>"'),
+])
+def test_a_runtimes_table_it_cannot_read_stops_the_start_naming_it(tree, table, refusal):
+    tree.components(table)
+    tree.machine({"go": "1.23.0"})
+
+    assert tree.start() == ([refusal], True)
 
 
 def test_start_components_prints_the_stop_and_exits_1(tree, capsys):
