@@ -331,8 +331,8 @@ IMPLEMENTATION_REFUSALS = {
         "file relative to the project's root"),
     "a target whose comments are unknown": (
         implementation("data.json", "{}\n"),
-        "guidance/work/n.md: implements data.json, a file whose comment syntax se_guidance.py "
-        "does not know, so it cannot say it is generated; use a file of #-comments"),
+        "guidance/work/n.md: implements data.json, a file whose comment syntax the guidance "
+        "command does not know, so it cannot say it is generated; use a file of #-comments"),
     "a TOML file that does not parse": (
         implementation("ruff.toml", "line-length = \n"),
         "ruff.toml: its projection is not TOML (Invalid value (at line 2, column 15)); fix the "
