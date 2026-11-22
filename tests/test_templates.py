@@ -2024,3 +2024,55 @@ def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]
+
+
+# Fields honest about their source (docs/templates.md "Fill"): "Not in input" and quotes
+
+
+def every_field_not_in_input(template: templates.Template) -> dict[str, object]:
+    """Every field of `template` filled with "Not in input", each in the form its kind takes."""
+    forms = {"list": ["Not in input"], "issue": ["Not in input"],
+             "checklist": [{"done": False, "text": "Not in input"}],
+             "object": [{"key": "Not in input", "value": ""}]}
+    return {item.name: forms.get(item.kind, templates.NOT_IN_INPUT) for item in template.fields}
+
+
+def test_not_in_input_passes_every_field_of_every_template_whatever_its_rules(catalog):
+    for template in catalog.values():
+        if template.is_adapter:
+            continue
+        for values in (every_field_not_in_input(template),
+                       {item.name: templates.NOT_IN_INPUT for item in template.fields}):
+            values = templates.answer(template, values)
+            title = next((values[item.name] for item in template.fields if item.source == "title"),
+                         None)
+            body = templates.render(template, values)
+            found = templates.check(template, templates.parse(template, body, title))
+            assert found == [], (template.name, found)
+            assert body.count(templates.NOT_IN_INPUT) == sum(not item.source for item in template.fields)
+
+
+def test_not_in_input_reads_back_from_a_section_of_any_kind(tmp_path):
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
+    template = templates.load(tmp_path, tree=True)["obj"]
+    body = templates.render(template, {"meta": "Not in input."})
+    assert "## Meta\n\nNot in input.\n" in body
+    document = templates.parse(template, body)
+    assert document.fields == {"meta": "Not in input."}
+    assert templates.check(template, document) == []
+    assert templates.render(template, document) == body
+
+
+def test_a_required_field_left_empty_still_refuses_beside_not_in_input(catalog):
+    work = catalog["work"]
+    values = every_field_not_in_input(work)
+    values["goal"] = ""
+    found = templates.check(work, templates.parse(work, templates.render(work, templates.answer(work, values)),
+                                                  values["title"]))
+    assert [(item.field, item.rule) for item in found if item.severity == "refuse"] == [("goal", "required")]
+    assert "Not in input" in found[0].fix
+
+
+def test_the_schema_offers_not_in_input_among_a_choice_s_values(catalog):
+    shaped = templates.schema(catalog["work"])["properties"]["package_kind"]
+    assert templates.NOT_IN_INPUT in shaped["enum"]

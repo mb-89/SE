@@ -162,6 +162,14 @@ becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Sta
 Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
 
+**Not in input** (NOT_IN_INPUT, docs/templates.md "Fill"): every field takes the value `Not in input`
+where the raw input does not answer it, whatever its kind and rules (`not_in_input`): the text
+alone, or a list of that one item, a checklist of that one entry, an object of that one key without
+a value; case and a closing period aside. `check` applies none of the field's rules to it, so a
+required field so filled passes and shows the gap; `parse` reads the section back as that text and
+`render` writes it so, and the schema's `enum` of a choice holds it beside the choices. The fix of a
+`required` refusal names it.
+
 **Version** (rule `version`, `provenance`): `check` reads a document against the version it records,
 its template marker's or, for a file, the front matter's `version:` where its `template:` names the
 template. None recorded, or the template's own, passes; another minor or patch version warns;
@@ -274,6 +282,9 @@ CHECKBOX = re.compile(r"^[-*+][ \t]+\[([ xX])\](?:[ \t]+(.*?))?[ \t]*$")
 NO_RESPONSE = "_no response_"
 PLACEHOLDERS = {"", NO_RESPONSE, "tbd", "tba", "...", "…", "-", "?", "n/a", ">", "1."}
 NONE = "none"
+#: The value every field takes where the raw input does not answer it (docs/templates.md "Fill"):
+#: it passes whatever the field's rules, and shows the gap instead of an invented value.
+NOT_IN_INPUT = "Not in input"
 NOT_PICKED = re.compile(r"^[ \t>*_-]*not picked[*_]*:[*_]*[ \t]*\S", re.IGNORECASE | re.MULTILINE)
 BOARD = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**(status|labels?|priority|assignee|milestone)\**[ \t]*:",
                    re.IGNORECASE | re.MULTILINE)
@@ -1058,6 +1069,8 @@ def value_of(item: Field, raw: str) -> object:
     text = _uncomment(raw, keep_markers=item.markers)
     if text.strip().casefold() == NO_RESPONSE:
         text = ""
+    if not_in_input(text):
+        return text.strip()
     if item.kind in ("line", "choice"):
         return next((line.strip() for line in text.splitlines() if line.strip()), "")
     if item.kind == "text":
@@ -1293,7 +1306,8 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
 
 def _format(item: Field, value: object, first: int) -> str:
     """A field's value as Markdown; `first` is the number a numbered list starts at."""
-    if item.verbatim or item.kind in ("line", "choice", "text"):
+    if item.verbatim or item.kind in ("line", "choice", "text") or (
+            isinstance(value, str) and not_in_input(value)):
         return str(value)
     if item.kind == "list":
         lines, number = [], first
@@ -1505,7 +1519,7 @@ def _property(item: Field) -> dict[str, object]:
     """One field's property of `schema`, by its kind."""
     strings = {"type": "array", "items": {"type": "string"}}
     if item.kind == "choice":
-        made: dict[str, object] = {"type": "string", "enum": list(item.choices)}
+        made: dict[str, object] = {"type": "string", "enum": [*item.choices, NOT_IN_INPUT]}
     elif item.kind in ("list", "issue"):
         made = strings
     elif item.kind == "checklist":
@@ -1726,6 +1740,20 @@ def _squash(text: str) -> str:
     return " ".join(COMMENT.sub("", text).split()).casefold()
 
 
+def not_in_input(value: object) -> bool:
+    """Whether `value` is NOT_IN_INPUT, in any form a kind gives it: the text alone, a list of that
+    one item or one checklist entry, or an object of that one key without a value; case, a closing
+    period or colon and comments aside."""
+    if isinstance(value, dict):
+        return len(value) == 1 and not_in_input(next(iter(value))) and not str(
+            next(iter(value.values())) or "").strip()
+    if isinstance(value, list):
+        entries = [entry for entry in value if not WHOLE_COMMENT.match(str(entry))]
+        return len(entries) == 1 and not_in_input(
+            entries[0].get("text", "") if isinstance(entries[0], dict) else entries[0])
+    return isinstance(value, str) and _squash(value).rstrip(".:").strip() == NOT_IN_INPUT.casefold()
+
+
 def _emptiness(item: Field, value: object) -> str:
     """Why a value does not fill its field, or "" where it does."""
     if value is None:
@@ -1787,6 +1815,8 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         if item.source == "title" and item.name not in values:
             continue  # no title given: the body alone is checked
         value = values.get(item.name)
+        if not_in_input(value):
+            continue  # every field takes it, whatever its rules: the gap shows
         why = _emptiness(item, value)
         where = (f"the title" if item.source == "title" else
                  f"a `{item.label}:` line" if item.label else f"`{hashes} {item.heading}`")
@@ -1799,7 +1829,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
             text = {"missing": "is missing", "empty": "is empty", "placeholder": "holds a placeholder",
                     "says": "repeats its own description"}[why]
             add("required", item.name, f"{item.heading or item.name} {text}: write {where}: "
-                f"{item.says}")
+                f"{item.says} (or `{NOT_IN_INPUT}` where the input does not say)")
             continue
         if why:
             continue
