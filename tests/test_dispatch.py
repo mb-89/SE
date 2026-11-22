@@ -13,6 +13,7 @@ SPEC = importlib.util.spec_from_file_location("work_tickets", PROJECT / "scripts
 work_tickets = importlib.util.module_from_spec(SPEC)
 sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
+dispatcher = work_tickets.sibling("dispatch")
 
 pytestmark = pytest.mark.usefixtures("fake_git_door")
 
@@ -33,16 +34,21 @@ def worktree(tmp_path: Path) -> Path:
     return root
 
 
+def run_dispatch(worktree, mode, fleet):
+    return dispatcher.dispatch(work_tickets, worktree, REPO, mode, fleet.pause, fleet.startable)
+
+
 class Fleet:
     """What dispatch reads, faked: the pause switch, the startable issues, the integrator's signs;
     every fire is recorded, and a fire raises where `fires` is False."""
 
     def __init__(self, monkeypatch, startable=(), running=(), paused=(), fires=True):
         self.fired: list[tuple[str, str, str]] = []
-        monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: list(paused))
-        monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: list(startable))
-        monkeypatch.setattr(work_tickets, "integrator_activity",
-                            lambda root, repo, now=None: list(running))
+        self.pause, self.startable = list(paused), list(startable)
+        monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: self.pause)
+        monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: self.startable)
+        monkeypatch.setattr(dispatcher, "integrator_activity",
+                            lambda wt, root, repo, now=None: list(running))
 
         def fire(trigger, token, text):
             if not fires:
@@ -50,7 +56,7 @@ class Fleet:
             self.fired.append((trigger, token, text))
             return {"claude_code_session_url": "https://example.com/session_1"}
 
-        monkeypatch.setattr(work_tickets, "fire_scheduled_task", fire)
+        monkeypatch.setattr(dispatcher, "fire", fire)
 
 
 STARTABLE = [{"number": 7, "title": "feature-seven"}]
@@ -58,16 +64,16 @@ TRIGGER = "https://example.com/v1/routines/trig_01abc/fire"
 
 
 def test_no_startable_issue_fires_nothing_and_makes_no_model_call(worktree, monkeypatch):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
-    monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
-    Fleet(monkeypatch, fires=False)
-    assert work_tickets.dispatch(worktree, REPO, "fire") == [
+    monkeypatch.setenv(dispatcher.TRIGGER_VARIABLE, TRIGGER)
+    monkeypatch.setenv(dispatcher.TOKEN_VARIABLE, "secret")
+    fleet = Fleet(monkeypatch, fires=False)
+    assert run_dispatch(worktree, "fire", fleet) == [
         "Startable: none", "Integrator runs: none seen", "Fires nothing: no startable work"]
 
 
 def test_dry_run_with_startable_work_and_no_integrator_prints_exactly_one_fire(
         worktree, monkeypatch, capsys):
-    monkeypatch.delenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, raising=False)
+    monkeypatch.delenv(dispatcher.TRIGGER_VARIABLE, raising=False)
     Fleet(monkeypatch, startable=STARTABLE, fires=False)
     assert work_tickets.main(["dispatch", "--dry-run", "--worktree", str(worktree),
                               "--repo", REPO]) == 0
@@ -79,10 +85,10 @@ def test_dry_run_with_startable_work_and_no_integrator_prints_exactly_one_fire(
 
 
 def test_fire_fires_once_with_the_secrets_and_names_the_session(worktree, monkeypatch):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
-    monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
+    monkeypatch.setenv(dispatcher.TRIGGER_VARIABLE, TRIGGER)
+    monkeypatch.setenv(dispatcher.TOKEN_VARIABLE, "secret")
     fleet = Fleet(monkeypatch, startable=STARTABLE)
-    lines = work_tickets.dispatch(worktree, REPO, "fire")
+    lines = run_dispatch(worktree, "fire", fleet)
     assert fleet.fired == [(TRIGGER, "secret",
                             "Startable work waits and no integrator runs: #7")]
     assert lines[-1] == "Fired the scheduled task once: https://example.com/session_1"
@@ -91,24 +97,24 @@ def test_fire_fires_once_with_the_secrets_and_names_the_session(worktree, monkey
 
 @pytest.mark.parametrize("kind", ["running", "paused"])
 def test_a_running_integrator_or_the_pause_fires_nothing(worktree, monkeypatch, kind):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
-    monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
+    monkeypatch.setenv(dispatcher.TRIGGER_VARIABLE, TRIGGER)
+    monkeypatch.setenv(dispatcher.TOKEN_VARIABLE, "secret")
     held = {"running": ["#3 feature-three is in progress"]} if kind == "running" else {
         "paused": [{"number": 9, "title": "pause", "url": "https://example.com/9"}]}
-    Fleet(monkeypatch, startable=STARTABLE, fires=False, **held)
-    assert work_tickets.dispatch(worktree, REPO, "fire")[-1].startswith("Fires nothing: ")
+    fleet = Fleet(monkeypatch, startable=STARTABLE, fires=False, **held)
+    assert run_dispatch(worktree, "fire", fleet)[-1].startswith("Fires nothing: ")
 
 
 @pytest.mark.parametrize("trigger", [None, "trig_01abc", "http://example.com/v1/routines/trig_1/fire"])
 def test_fire_without_a_fire_url_is_refused_before_anything_fires(worktree, monkeypatch, trigger):
     if trigger is None:
-        monkeypatch.delenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, raising=False)
+        monkeypatch.delenv(dispatcher.TRIGGER_VARIABLE, raising=False)
     else:
-        monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, trigger)
-    monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
-    Fleet(monkeypatch, startable=STARTABLE, fires=False)
-    with pytest.raises(work_tickets.QueueError, match=work_tickets.DISPATCH_TRIGGER_VARIABLE):
-        work_tickets.dispatch(worktree, REPO, "fire")
+        monkeypatch.setenv(dispatcher.TRIGGER_VARIABLE, trigger)
+    monkeypatch.setenv(dispatcher.TOKEN_VARIABLE, "secret")
+    fleet = Fleet(monkeypatch, startable=STARTABLE, fires=False)
+    with pytest.raises(dispatcher.FireError, match=dispatcher.TRIGGER_VARIABLE):
+        run_dispatch(worktree, "fire", fleet)
 
 
 def test_integrator_activity_counts_recent_landings_and_moving_work_only(worktree, monkeypatch):
@@ -139,7 +145,7 @@ def test_integrator_activity_counts_recent_landings_and_moving_work_only(worktre
 
     monkeypatch.setattr(work_tickets, "run_gh", gh)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: REPO)
-    assert work_tickets.integrator_activity(worktree, REPO, NOW) == [
+    assert dispatcher.integrator_activity(work_tickets, worktree, REPO, NOW) == [
         "landing pull request #1 (land/feature-one) is open",
         "#4 feature-four is in progress",
         "#5 feature-five is in progress",
@@ -167,7 +173,7 @@ def test_the_workflow_runs_dispatch_on_a_four_hourly_cron_with_no_model():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert 'cron: "' in text and "*/4 * * *" in text
     assert "work_tickets.py dispatch" in text
-    for name in (work_tickets.DISPATCH_TRIGGER_VARIABLE, work_tickets.DISPATCH_TOKEN_VARIABLE):
+    for name in (dispatcher.TRIGGER_VARIABLE, dispatcher.TOKEN_VARIABLE):
         assert f"secrets.{name}" in text
     assert "--dry-run" in text and "--fire" in text
     # No model: the workflow calls no Claude action and holds no host but GitHub's own.
@@ -188,12 +194,20 @@ def test_fire_posts_once_to_the_fire_url_with_the_token_and_the_text(monkeypatch
         def read(self):
             return b'{"claude_code_session_url": "https://example.com/session_1"}'
 
-    monkeypatch.setattr(work_tickets.urllib.request, "urlopen",
+    monkeypatch.setattr(dispatcher.urllib.request, "urlopen",
                         lambda request, timeout: sent.append(request) or Answer())
-    answer = work_tickets.fire_scheduled_task(TRIGGER, "secret", "Startable: #7")
+    answer = dispatcher.fire(TRIGGER, "secret", "Startable: #7")
     assert answer == {"claude_code_session_url": "https://example.com/session_1"}
     (request,) = sent
     assert (request.full_url, request.get_method()) == (TRIGGER, "POST")
     assert request.get_header("Authorization") == "Bearer secret"
     assert request.get_header("Anthropic-version") == "2023-06-01"
     assert json.loads(request.data) == {"text": "Startable: #7"}
+
+
+def test_the_command_reports_a_refused_fire_as_an_error_and_fires_nothing(worktree, monkeypatch, capsys):
+    monkeypatch.delenv(dispatcher.TRIGGER_VARIABLE, raising=False)
+    monkeypatch.delenv(dispatcher.TOKEN_VARIABLE, raising=False)
+    Fleet(monkeypatch, startable=STARTABLE, fires=False)
+    assert work_tickets.main(["dispatch", "--fire", "--worktree", str(worktree), "--repo", REPO]) != 0
+    assert dispatcher.TRIGGER_VARIABLE in capsys.readouterr().err
