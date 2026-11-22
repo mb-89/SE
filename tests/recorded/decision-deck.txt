@@ -262,13 +262,6 @@
                       "weight": 2,
                       "better": "higher",
                       "kind": "judged"
-                    },
-                    {
-                      "key": "cost",
-                      "label": "Cost to build",
-                      "weight": 1,
-                      "better": "higher",
-                      "kind": "judged"
                     }
                   ],
                   "datum": {
@@ -294,10 +287,6 @@
                         "volume": {
                           "mark": 1,
                           "because": "every open decision comes in one deck and one pass"
-                        },
-                        "cost": {
-                          "mark": -1,
-                          "because": "the deck command and its answers bundle must be built"
                         }
                       },
                       "wins": "The answered artifact is the record and outlives the session; the person sees every open decision at once.",
@@ -312,8 +301,7 @@
                       "marks": {
                         "record": 0,
                         "effort": 0,
-                        "volume": 0,
-                        "cost": 0
+                        "volume": 0
                       },
                       "wins": "Works today with nothing to build.",
                       "losses": "The answer lives in the chat until someone copies it; one decision per turn.",
@@ -336,10 +324,6 @@
                         "volume": {
                           "mark": -1,
                           "because": "each decision is one more issue in the work queue"
-                        },
-                        "cost": {
-                          "mark": 0,
-                          "because": "issues exist today and need nothing built"
                         }
                       },
                       "wins": "The question and its answer are on GitHub from the start.",
@@ -370,17 +354,17 @@
                     },
                     {
                       "item": "Fair criteria",
-                      "answer": "Each criterion names its benefit; the record counts once (survival), and volume is not effort. The two effort-type criteria stay apart because their benefits differ, the person's attention on every decision against our one-time work to build; weights were set before the marks.",
+                      "answer": "Each criterion names its benefit; the record counts once (survival), and volume is not the person's effort per decision; weights were set before the marks.",
                       "pass": true
                     },
                     {
                       "item": "Right before cheap",
-                      "answer": "A wins on the record, the person's effort and volume; it loses only on the cost to build, so effort decides nothing alone.",
+                      "answer": "No criterion weighs the cost to build A, the deck command and its answers bundle, since that effort is ordinary work and not exceptional; A wins on the record, the person's effort and volume.",
                       "pass": true
                     },
                     {
                       "item": "What if",
-                      "answer": "B wins only where the cost to build outweighs the other three together (weight above 8); that world happens if decks stop reaching the person, so the tripwire is a deck the person could not open and the fallback is B. C beats A only where the cost to build outweighs twice effort and volume together, the same world in which B, cheaper still, wins; so C has no world of its own.",
+                      "answer": "B wins only in a world where a deck cannot reach the person at all; the tripwire is a deck the person could not open and the fallback is B. C beats A only where the person's effort and volume count for less than nothing, so C has no world of its own.",
                       "pass": true
                     },
                     {
@@ -417,7 +401,7 @@
         }
       },
       "bless": {
-        "version": "ff4ac4b1a9eeb808e2d4fc205e79a7abf0d5cb32fb9628059678376c46e2f014"
+        "version": "25e95f6aff3345f76dea31c80ef47d396790293272dd1ceead56a0ee3ad52c53"
       }
     }
   ],

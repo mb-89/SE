@@ -758,11 +758,14 @@ is counted twice.
 
 ### dec-006 Right before cheap
 
-Being right and consistent outweighs effort, and effort never decides alone.
+Being right and consistent outweighs effort: effort to build or move is a criterion only where it
+is exceptional, and effort never decides alone.
 
-- **Why:** effort is paid once, and a wrong or inconsistent choice is paid for on every later use.
+- **Why:** effort is paid once, and a wrong or inconsistent choice is paid for on every later use;
+  weighing ordinary effort makes a matrix favour saving work over the better system.
 - **Without it:** the cheapest option wins, and its inconsistencies are paid for again and again.
-- **Prevents:** a shortcut that leaves the system inconsistent; a decision won on effort alone.
+- **Prevents:** a shortcut that leaves the system inconsistent; a decision won on effort alone; a
+  cost to move that keeps a worse system in place.
 - **Implementations:**
   - se: checklist item 6 of the [decision skill](../../decision/SKILL.md#the-checklist).
 - **Related:** dec-005, gen-005

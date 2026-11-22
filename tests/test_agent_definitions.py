@@ -406,6 +406,18 @@ def test_the_rule_book_puts_the_datum_on_what_exists_today():
     assert "only where nothing exists is it the strongest rival" in rule
 
 
+def test_effort_is_a_criterion_only_where_it_is_exceptional():
+    assert "Effort to build or move is a criterion only where it is exceptional" in normalized(DECISION)
+    rule = normalized(RULE_BOOK).split("### dec-006 Right before cheap", 1)[1].split("###", 1)[0]
+    assert "effort to build or move is a criterion only where it is exceptional" in rule
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    fence = note.split("```pugh\n", 1)[1].split("```", 1)[0]
+    criteria = fence.split("criteria:\n", 1)[1].split("datum:", 1)[0]
+    assert "Cost to build" not in criteria and "key: cost" not in criteria
+    right = fence.split("- item: Right before cheap\n", 1)[1].split("- item:", 1)[0]
+    assert "not exceptional" in right
+
+
 def test_the_decision_skill_points_to_obs_for_the_fence_contract_and_restates_none_of_it():
     text = normalized(DECISION)
     assert "obs's capability note `spec/capabilities/pugh-decisions.md`" in text

@@ -34,6 +34,9 @@ it, and which solutions there are.
   - `context` and `concern`: the situation and the concern the decision answers, for its
     one-sentence summary.
   - The criteria are weighted before any option is marked.
+  - Effort to build or move is a criterion only where it is exceptional; ordinary work to build
+    the better system is no criterion
+    ([dec-006](../work-model/references/rules.md#dec-006-right-before-cheap)).
   - "Keep what we have" is an option whenever something exists. The datum is what exists today
     wherever something exists, never an option not yet built; every other option is marked
     against it. Only where nothing exists is the datum the strongest rival
