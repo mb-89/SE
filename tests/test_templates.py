@@ -816,6 +816,29 @@ def test_check_takes_fields_from_a_draft(tmp_path, capsys, catalog):
     assert "title-shape" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("name", [*ISSUE_TEMPLATES, *ADAPTERS])
+def test_schema_prints_the_schema_draft_json_gives(capsys, catalog, name):
+    assert templates.main(["draft", name, "--json", "--tree"]) == 0
+    drafted = json.loads(capsys.readouterr().out)["schema"]
+    assert templates.main(["schema", name, "--tree"]) == 0
+    printed = capsys.readouterr().out
+    assert json.loads(printed) == drafted == templates.schema(catalog[name])
+    assert printed == json.dumps(drafted, indent=2) + "\n"
+
+
+def test_schema_takes_the_template_that_claims_a_file_and_refuses_both_or_neither(tmp_path, capsys):
+    step_templates(tmp_path, risks='marker_pattern: "id: S5B"')
+    (tmp_path / "book" / "m1" / "steps").mkdir(parents=True)
+    step = tmp_path / "book" / "m1" / "steps" / "51-S5B.md"
+    step.write_text(STEP, encoding="utf-8")
+    where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
+    assert templates.main(["schema", "--path", str(step), *where]) == 0
+    assert json.loads(capsys.readouterr().out)["required"] == ["risks"]
+    assert templates.main(["schema", "--tree"]) == 2
+    assert "templates.py schema: name a template, or give --path" in capsys.readouterr().err
+    assert templates.main(["schema", "nothing", "--tree"]) == 2
+
+
 def schema_errors(schema: dict, value: object, where: str = "$") -> list[str]:
     """What `value` breaks of `schema`, read with the eight keywords `templates.schema` writes: SE
     adds no validator dependency."""

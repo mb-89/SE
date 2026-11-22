@@ -2217,7 +2217,8 @@ template and `templates.py list` names every template with its actions. They rea
 where it holds them, else the working tree (`--tree` always).
 
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
-choices) and the template's JSON Schema, which a model's strict tool use takes as it stands.
+choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
+`templates.py schema <template>` prints that schema alone, generated from the template.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`

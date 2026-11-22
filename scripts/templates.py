@@ -190,8 +190,9 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
 `first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
-(`schema`). `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all three, reads
+(`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
+alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
+adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
 """
 
@@ -2374,7 +2375,7 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, list")
+    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, schema, list")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -2395,13 +2396,15 @@ def main(arguments: list[str] | None = None) -> int:
     drafting = commands.add_parser("draft", help="print the empty template")
     drafting.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
+    schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
+    schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
-    for command in (checking, drafting):
+    for command in (checking, drafting, schemas):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")
         command.add_argument("--root", type=Path, help="the project root of --path's globs "
                              "(default: the git checkout holding it, else the working directory)")
-    for command in (checking, drafting, listing):
+    for command in (checking, drafting, schemas, listing):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -2416,8 +2419,8 @@ def main(arguments: list[str] | None = None) -> int:
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
-        if options.command == "draft":
-            command = "templates.py draft"
+        if options.command in ("draft", "schema"):
+            command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
                 raise TemplateError(f"{command}: name a template, or give --path to take the template "
                                 "that claims the file, not both")
@@ -2434,8 +2437,11 @@ def main(arguments: list[str] | None = None) -> int:
                 template = chosen.template
             else:
                 template = _template(templates, options.template)
-            print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template),
-                  end="" if not options.json else "\n")
+            if options.command == "schema":
+                print(json.dumps(schema(template), indent=2))
+            else:
+                print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template),
+                      end="" if not options.json else "\n")
             return 0
         template, rendered, document, met = _check(templates, options)
     except TemplateError as error:
