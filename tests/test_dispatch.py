@@ -54,10 +54,11 @@ class Fleet:
 
 
 STARTABLE = [{"number": 7, "title": "feature-seven"}]
+TRIGGER = "https://example.com/v1/routines/trig_01abc/fire"
 
 
 def test_no_startable_issue_fires_nothing_and_makes_no_model_call(worktree, monkeypatch):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, "trig_01abc")
+    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
     monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
     Fleet(monkeypatch, fires=False)
     assert work_tickets.dispatch(worktree, REPO, "fire") == [
@@ -78,11 +79,11 @@ def test_dry_run_with_startable_work_and_no_integrator_prints_exactly_one_fire(
 
 
 def test_fire_fires_once_with_the_secrets_and_names_the_session(worktree, monkeypatch):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, "trig_01abc")
+    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
     monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
     fleet = Fleet(monkeypatch, startable=STARTABLE)
     lines = work_tickets.dispatch(worktree, REPO, "fire")
-    assert fleet.fired == [("trig_01abc", "secret",
+    assert fleet.fired == [(TRIGGER, "secret",
                             "Startable work waits and no integrator runs: #7")]
     assert lines[-1] == "Fired the scheduled task once: https://example.com/session_1"
     assert not any("secret" in line or "trig_01abc" in line for line in lines)
@@ -90,7 +91,7 @@ def test_fire_fires_once_with_the_secrets_and_names_the_session(worktree, monkey
 
 @pytest.mark.parametrize("kind", ["running", "paused"])
 def test_a_running_integrator_or_the_pause_fires_nothing(worktree, monkeypatch, kind):
-    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, "trig_01abc")
+    monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, TRIGGER)
     monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
     held = {"running": ["#3 feature-three is in progress"]} if kind == "running" else {
         "paused": [{"number": 9, "title": "pause", "url": "https://example.com/9"}]}
@@ -98,8 +99,12 @@ def test_a_running_integrator_or_the_pause_fires_nothing(worktree, monkeypatch, 
     assert work_tickets.dispatch(worktree, REPO, "fire")[-1].startswith("Fires nothing: ")
 
 
-def test_fire_without_the_secrets_is_refused_before_anything_fires(worktree, monkeypatch):
-    monkeypatch.delenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, raising=False)
+@pytest.mark.parametrize("trigger", [None, "trig_01abc", "http://example.com/v1/routines/trig_1/fire"])
+def test_fire_without_a_fire_url_is_refused_before_anything_fires(worktree, monkeypatch, trigger):
+    if trigger is None:
+        monkeypatch.delenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, raising=False)
+    else:
+        monkeypatch.setenv(work_tickets.DISPATCH_TRIGGER_VARIABLE, trigger)
     monkeypatch.setenv(work_tickets.DISPATCH_TOKEN_VARIABLE, "secret")
     Fleet(monkeypatch, startable=STARTABLE, fires=False)
     with pytest.raises(work_tickets.QueueError, match=work_tickets.DISPATCH_TRIGGER_VARIABLE):
@@ -168,3 +173,27 @@ def test_the_workflow_runs_dispatch_on_a_four_hourly_cron_with_no_model():
     # No model: the workflow calls no Claude action and holds no host but GitHub's own.
     assert "claude" not in text.lower() and "anthropic" not in text.lower()
     assert "http" not in text.lower()
+
+
+def test_fire_posts_once_to_the_fire_url_with_the_token_and_the_text(monkeypatch):
+    sent = []
+
+    class Answer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"claude_code_session_url": "https://example.com/session_1"}'
+
+    monkeypatch.setattr(work_tickets.urllib.request, "urlopen",
+                        lambda request, timeout: sent.append(request) or Answer())
+    answer = work_tickets.fire_scheduled_task(TRIGGER, "secret", "Startable: #7")
+    assert answer == {"claude_code_session_url": "https://example.com/session_1"}
+    (request,) = sent
+    assert (request.full_url, request.get_method()) == (TRIGGER, "POST")
+    assert request.get_header("Authorization") == "Bearer secret"
+    assert request.get_header("Anthropic-version") == "2023-06-01"
+    assert json.loads(request.data) == {"text": "Startable: #7"}

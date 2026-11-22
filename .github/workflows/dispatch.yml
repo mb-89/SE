@@ -4,9 +4,10 @@
 # task whose session is a fresh integrator, once. No model runs here: a run that finds nothing to
 # start costs no model tokens.
 #
-# The scheduled task's id and its token come from the repository secrets SE_DISPATCH_TRIGGER and
-# SE_DISPATCH_TOKEN. While either is unset the run is a dry run: it prints the fire it would make
-# and fires nothing. A run by hand is a dry run unless `dry_run` is unticked.
+# The scheduled task's fire URL (its API trigger's, naming the task's id) and its token come from
+# the repository secrets SE_DISPATCH_TRIGGER and SE_DISPATCH_TOKEN. While either is unset the run
+# is a dry run: it prints the fire it would make and fires nothing. A run by hand is a dry run
+# unless `dry_run` is unticked.
 #
 # Switch it off by disabling this workflow (the Actions tab, or `gh workflow disable dispatch.yml`),
 # or pause the whole fleet with an open issue labelled `pause`, which dispatch honours.

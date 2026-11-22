@@ -136,7 +136,7 @@ class = "interactive"
 usage = "work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire | --dry-run]"
 summary = "the dispatcher (README \"Dispatcher\"): list the startable work issues ..."
 group = "Integration"
-help = "the dispatcher (README \"Dispatcher\"): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none"
+help = "the dispatcher (README \"Dispatcher\"): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none"
 class = "batch"
 
 [commands."work_tickets.py fleet-check"]

@@ -4096,17 +4096,17 @@ def queue(
 
 
 # The dispatcher (README "Dispatcher"): a check with no model that fires the scheduled task whose
-# session is a fresh integrator, where startable work waits and no integrator runs. The task's id
-# and its token come from these variables, set from repository secrets that no committed file holds.
+# session is a fresh integrator, where startable work waits and no integrator runs. The task's
+# fire URL (its API trigger's, which names the task's id) and its token come from these variables,
+# set from repository secrets: no committed file names the task, its token or the service's host.
 DISPATCH_TRIGGER_VARIABLE = "SE_DISPATCH_TRIGGER"
 DISPATCH_TOKEN_VARIABLE = "SE_DISPATCH_TOKEN"
-DISPATCH_FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/{trigger}/fire"
 DISPATCH_HEADERS = {
     "anthropic-version": "2023-06-01",
     "anthropic-beta": "experimental-cc-routine-2026-04-01",
     "Content-Type": "application/json",
 }
-DISPATCH_TRIGGER_PATTERN = re.compile(r"trig_[A-Za-z0-9]+\Z")
+DISPATCH_TRIGGER_PATH = re.compile(r"/\S*/trig_[A-Za-z0-9]+/fire\Z")
 # An issue labelled so waits on a person (the owner, or SE's decision on an escalation): not
 # startable, whatever its other labels say.
 WAITING_ON_PERSON_LABELS = frozenset({PERSON_LABEL, "escalated"})
@@ -4175,9 +4175,9 @@ def integrator_activity(root: Path, repo: str, now: datetime | None = None) -> l
 
 
 def fire_scheduled_task(trigger: str, token: str, text: str) -> dict[str, object]:
-    """Fire the scheduled task `trigger` once through its API trigger; its answer."""
+    """Fire the scheduled task once through its API trigger's fire URL `trigger`; its answer."""
     request = urllib.request.Request(
-        DISPATCH_FIRE_URL.format(trigger=trigger), method="POST",
+        trigger, method="POST",
         data=json.dumps({"text": text}).encode("utf-8"),
         headers={**DISPATCH_HEADERS, "Authorization": f"Bearer {token}"},
     )
@@ -4192,7 +4192,8 @@ def fire_scheduled_task(trigger: str, token: str, text: str) -> dict[str, object
 
 
 def dispatch_secrets() -> tuple[str, str]:
-    """The scheduled task's id and token from the environment, refused where one is missing."""
+    """The scheduled task's fire URL and token from the environment, refused where one is
+    missing or the URL is not an API trigger's."""
     trigger = os.environ.get(DISPATCH_TRIGGER_VARIABLE, "").strip()
     token = os.environ.get(DISPATCH_TOKEN_VARIABLE, "").strip()
     missing = [name for name, value in ((DISPATCH_TRIGGER_VARIABLE, trigger),
@@ -4200,9 +4201,10 @@ def dispatch_secrets() -> tuple[str, str]:
     if missing:
         raise QueueError(f"dispatch --fire: {' and '.join(missing)} not set; set the repository "
                          "secrets README \"Dispatcher\" names, or run --dry-run")
-    if not DISPATCH_TRIGGER_PATTERN.match(trigger):
+    url = urllib.parse.urlsplit(trigger)
+    if url.scheme != "https" or not url.netloc or not DISPATCH_TRIGGER_PATH.match(url.path):
         raise QueueError(f"dispatch --fire: {DISPATCH_TRIGGER_VARIABLE} is not a scheduled task's "
-                         "id (trig_...)")
+                         "fire URL (an https URL ending in /trig_<id>/fire, as its API trigger shows it)")
     return trigger, token
 
 
@@ -10838,7 +10840,7 @@ def run_ready(root: Path, args: argparse.Namespace) -> int:
                      "(ready, not waiting on a person, no open blocker) and whether an integrator "
                      "runs (an open landing pull request, or in-progress work that moved within "
                      "the fleet lease), all read from GitHub with no model; with --fire it fires "
-                     f"the scheduled task in {DISPATCH_TRIGGER_VARIABLE} with the token in "
+                     f"the scheduled task whose fire URL is in {DISPATCH_TRIGGER_VARIABLE} with the token in "
                      f"{DISPATCH_TOKEN_VARIABLE} once where startable work waits, none runs and "
                      "the fleet is not paused; with --dry-run it prints that fire and makes none",
          OPTIONAL_WORKTREE, REPO,
