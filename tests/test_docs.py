@@ -356,3 +356,43 @@ def test_the_docs_workflow_places_se_from_its_checkout_before_the_build():
     assert "working-directory" not in steps[place]
     assert first("actions/setup-go") < place and first("actions/cache") < place
     assert place < first("scripts/build_docs.py")
+
+
+def test_no_script_passes_adapter_config():
+    passing = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "scripts").rglob("*.py")
+                     if "--adapter-config" in path.read_text(encoding="utf-8"))
+    assert passing == []
+
+
+def test_obs_finds_the_html_adapter_component_and_its_serve_command(obs, tmp_path, monkeypatch):
+    monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))  # no component installed on this machine
+    adapter, refusal = build_docs.html_adapter(obs)
+    assert refusal == ""
+    assert adapter["name"] == "html" and adapter["serve"]
+    assert Path(adapter["folder"]) == obs  # while html still lives in obs's tree
+
+
+def test_an_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
+    monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
+    (tmp_path / "components.json").write_text(json.dumps({"components": [
+        {"name": "html", "kind": "style", "version": "1.0.0", "commit": "0" * 40}]}), encoding="utf-8")
+    adapter, refusal = build_docs.html_adapter(obs)
+    assert adapter is None
+    assert "--adapter: html" in refusal and "not an adapter" in refusal
+
+
+def test_an_install_that_finds_no_html_fails_naming_the_command(obs, monkeypatch, capsys):
+    monkeypatch.setattr(build_docs, "HTML_INSTALL", ("python", "-c", "raise SystemExit(1)"))
+    missing = "--adapter: html: no adapter component 'html' is installed. Run obs-components install html"
+    monkeypatch.setattr(build_docs, "html_adapter", lambda folder: (None, missing))
+    assert build_docs.install_html(obs) == 1
+    assert "Install it with `obs-components install html`" in capsys.readouterr().err
+
+
+def test_an_install_that_installs_nothing_builds_with_the_html_of_obss_tree(obs, tmp_path, monkeypatch,
+                                                                             capsys):
+    monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
+    monkeypatch.setattr(build_docs, "HTML_INSTALL", ("python", "-c", "raise SystemExit(1)"))
+    assert build_docs.install_html(obs) == 0
+    assert f"obs builds with the html it finds at {obs}" in capsys.readouterr().out
+
