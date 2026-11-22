@@ -1838,6 +1838,9 @@ checkout.
 
 #### Forms
 
+[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
+that replaces forms. Until its packages land, this section describes the forms engine as it runs.
+
 `components/forms`: SE's forms: list names them, draft gives a form's fields, their instructions and
 their shape, and check finds everything SE's filing commands would refuse in a text, or gives the
 Markdown to file.
