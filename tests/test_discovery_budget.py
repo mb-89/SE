@@ -1,6 +1,7 @@
 """The discovery budget (guidance note discover-cheap-load-late): SE's command list,
 `se_components.py commands`, reads the components' declarations alone and loads none of their code,
-within the budget `tests/discovery-budget.toml` holds, however many commands there are.
+within the budget the note states in its `toml` block, read from the note itself, however many
+commands there are.
 
 Each fixture component's `__init__.py` is a tripwire: loading it records the component's name, and
 the budget fails on any record, naming the component, and on a listing slower than the budget. The
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import time
@@ -21,7 +23,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_components.py"
-BUDGET = tomllib.loads((ROOT / "tests" / "discovery-budget.toml").read_text(encoding="utf-8"))
+NOTE = ROOT / "guidance" / "discover-cheap-load-late.md"
+BUDGET = tomllib.loads(re.search(r"^```toml\n(.*?)^```$",  # a CRLF checkout reads as LF
+                                 NOTE.read_text(encoding="utf-8").replace("\r\n", "\n"),
+                                 re.MULTILINE | re.DOTALL).group(1))
 RUNS = 3
 
 Listing = Callable[[Path], list[str]]

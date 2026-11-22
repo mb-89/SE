@@ -34,13 +34,14 @@ thus fails, however fast its machine.
 - **kern and obs** hold their own listings to the same numbers in their suites: kern's `help`,
   `mcp --tools` and `components list`, obs's `components list`.
 
-```implements tests/discovery-budget.toml
-# The discovery budget (guidance note discover-cheap-load-late): fixture components, the commands
-# each declares, and the seconds a listing of all of them may take, the interpreter's start included.
+The budget: fixture components, the commands each declares, and the seconds a listing of all of
+them may take, the interpreter's start included. SE's test reads it from this block.
+
+```toml
 components = 200
 commands_per_component = 5
 budget_seconds = 1.0
 ```
 
-The places that load eagerly today, each with the package that changes it, are the inventory of
-[docs/go-core.md "Discover cheaply, load late"](../../../docs/go-core.md#discover-cheaply-load-late).
+The places that load eagerly today, each with the package that changes it, are the inventory in
+SE's design of the Go core, `docs/go-core.md`, its section "Discover cheaply, load late".
