@@ -178,6 +178,12 @@ pass it; they refuse:
 - The local list: without it the check warns and runs the public list only, as on a public CI
   host. `#` starts a comment line; every other line is one of
   - a case-insensitive regex, a term this source keeps private; hits name only its line number;
+  - `remote:<remote name> <regex>`, a term only of a push to that remote;
+    - the pre-push hook and `work_tickets.py push` name the destination
+      (`public_check.py --remote`), and its gate is every commit that remote does not hold yet,
+      so a commit fetched from another remote is checked on its way there;
+    - a check for another remote than origin records no verdict, as its terms are not origin's;
+    - a line naming no remote of the checkout is warned about, by its line;
   - `off:<label>  # reason`, which switches the public entries of that label off for this source;
   - `allow:<path> local-term:<n>  # reason`, which allows this list's term of line `<n>` in that
     file, on any line, as no committed entry may say where a private term sits.
@@ -196,9 +202,9 @@ pass it; they refuse:
   - an `off:` line in the local list, for a public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content, commit-msg the message and identity, pre-push
-  every pushed commit no remote holds yet. A repository that uses se as a module runs
-  `scripts/setup.ps1 -Repo <path>` (or `scripts/setup.sh <path>`) and so runs se's check without
-  copying it.
+  every pushed commit the destination remote does not hold yet.
+  - A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>` (or
+    `scripts/setup.sh <path>`) and so runs se's check without copying it.
   - A commit already published, such as main's merged into a branch, was gated where it was
     pushed and by CI's gate, so a push gates only its own.
   - They also set the clone's commit identity as `work_tickets.py sync` does
