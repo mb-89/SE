@@ -99,6 +99,11 @@ The check of a document checks each node by its own template, so a document is v
 every node in it is. A node records no provenance of its own: the document's names the template,
 which names its nodes' templates at their versions.
 
+A field names its node `node: <template>@<version>`, and a register its entries `entries:
+<template>@<version>`; a block that is a fence, such as the Pugh block, takes the fence's word
+too. The docstring of `scripts/templates.py` (Nesting) owns the rest. SE ships the RAID register
+and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
+
 ## Fill
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
@@ -171,18 +176,21 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twelve template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's fifteen template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's eleven templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's fourteen templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
 | `templates/ticket.md` | `ticket` | document | SE |
 | `templates/work.md` | `work`, `extends` ticket | document | SE |
 | `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
+| `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
+| `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
+| `templates/raid-entry.md` | `raid-entry` | entry | SE |
 | `templates/field-report.md` | `field-report` | document | SE |
 | `templates/landing.md` | `landing` | document | SE |
 | `templates/housekeeping.md` | `housekeeping` | document | SE |

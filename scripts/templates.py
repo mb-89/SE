@@ -25,7 +25,8 @@ are refused until quoted. It declares:
   inherited;
 - `applies.actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
   `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
-  so a template without it does not load; `paths`, the globs of the files a `file.write` template claims,
+  so a template without it does not load, except that a block or an entry (PART_KINDS) that only
+  a node checks leaves `applies` out and shapes no action of its own; `paths`, the globs of the files a `file.write` template claims,
   relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
   with `actions: ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
   expression a whole line matches) and `title`, and the filters `labels` (every one present) and
@@ -79,7 +80,8 @@ fills it), `says` (what belongs there, the fix's wording and the draft's comment
 (only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
 back as it stands). Besides: `source: title` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
-`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
+`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`
+and `fence` (Nesting, below), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
 should have, 0 for none), `actor`, `one_sentence`, `not_picked`, `shape`, a title's (rule
 `title-shape`), and `quote` (rule `quote`: the value quotes the raw input word for word).
@@ -95,7 +97,28 @@ keys of that mapping.
 `list` a list of strings, its items without their numbers or bullets (with `markers`, a line that
 is one whole HTML comment is an item of its own, kept as it is); `object` a mapping of `Key: value`
 lines; `issue` a list of entries, one per line (`#12`, a link, `None`); `checklist` a list of
-`{"done": bool, "text": str}`; `code` the text of its first fenced block.
+`{"done": bool, "text": str}`; `code` the text of its first fenced block; `node` and `register`
+(Nesting) their text as it stands.
+
+**Nesting** (docs/templates.md "Nesting"): a field may be a node, a part of the document that
+another template checks, which the field pins at its version, `<template>@<version>` (NODE_PIN):
+
+- `node: <template>@<version>` (kind `node`): the field's text is one document of that template,
+  a block or a document. With `fence: <info word>` the node has no section: its text is the
+  document's first fence of that info word, wherever it sits, and its `says` stays in the front
+  matter; it must come after the sections of the fields listed before it and before those listed
+  after it. Without `fence` it is a section like any other.
+- `entries: <template>@<version>` (kind `register`): the field's section is a register, each of its
+  headings at the shallowest level it holds an entry (`entries`), its text up to the next one a
+  document of that template, an entry. A register without an entry refuses.
+
+`load` refuses a node that names no template, pins another version than the template's, names a
+template of another kind (an entry for a register, a block for a fence, a block or a document for
+any other node; never a file's or a scoped template), or nests in a cycle; each node field then
+holds its template as `nested`. `check` checks each node by its template, by that template's rules,
+and gives each finding under the node's field, its fix naming the template, and for a register
+the entry by its heading (`nested_findings`). A node records no provenance of its own: the
+document's template digest covers its nodes' (Writing).
 
 **Reading.** `parse` skips front matter and accepts a field's heading at `#` to `####`, in any case
 and with a trailing colon, and `_No response_` as empty, except where a field sets `exact_heading`.
@@ -116,7 +139,8 @@ alone, after the scope's marker), then `## ` headings. The marker says what the 
 the repository `se` for SE's own templates and `project` for any other `templates/` or
 `--templates` folder, the template's `version`, and
 `sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
-by a NUL byte (`Template.marker_line`); the digest stands where docs/templates.md "The document"
+by a NUL byte (`Template.marker_line`); a template with nodes takes `sha256:<hex>` of that digest
+and then its nodes' digests, each so ended (`_nest`); the digest stands where docs/templates.md "The document"
 puts the overlay's until templates have overlays. Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
@@ -155,7 +179,8 @@ For a file, `path` (relative to the project root) selects:
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
 `choice`, `not-picked` (no `Not picked:` line), `duplicate` (the same text in two fields) and
 `dangling` (an SE command that does not exist, through `references.dangling` as
-`work_tickets.refuse_dangling` calls it); an adapter refuses with `checker`, `line` and `title`.
+`work_tickets.refuse_dangling` calls it); a node's place and a register without entries always
+refuse (NODE_RULE, never a template's to set); an adapter refuses with `checker`, `line` and `title`.
 A `quote` field always refuses (QUOTE_RULE, never a template's to set) a value that quotes nothing
 and, given the raw input (`check(raw=)`, as `fill` gives it), a quote the raw input does not hold
 word for word (`quoted`). A quote is a span in `"..."` or `“...”` on one line, or a run of `>`
@@ -272,7 +297,14 @@ FILE_ACTION = "file.write"
 ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
            "deck.build", FILE_ACTION)
 READERS = ("owner", "fleet")
-KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
+KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register")
+#: The kinds of a node field (`node:`, `entries:`): its text is checked by another template.
+NODE_KINDS = ("node", "register")
+#: A node's or a register's pin, `<template>@<version>` (docs/templates.md "Nesting").
+NODE_PIN = re.compile(r"^([\w-]+)@((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$")
+#: The rule of a document's nodes: where a fence node sits, and a register without entries. It
+#: always refuses, never a template's to set, as a node's own findings are its template's.
+NODE_RULE = "node"
 REFUSE, WARN, OFF = "refuse", "warn", "off"
 #: The rule of a document's recorded version against its template's (`provenance`): its severity is
 #: the move's, never a template's to set.
@@ -291,7 +323,7 @@ WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number",
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
-              "quote"}
+              "quote", "node", "entries", "fence"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
@@ -364,13 +396,20 @@ class Field:
     not_picked: bool = False
     shape: str = ""
     quote: bool = False
+    #: A node's or a register's template and the version it pins (`node:`, `entries:`).
+    node: str = ""
+    pin: str = ""
+    #: A node with no section: the info word of the fence that is its text (`fence:`).
+    fence: str = ""
     #: What `shape` names, loaded: a pattern or a function (the module docstring: Fields).
     rule: object = dataclass_field(default=None, compare=False, repr=False)
+    #: The template `node` names, loaded (`load`): it checks the field's text.
+    nested: object = dataclass_field(default=None, compare=False, repr=False)
 
     @property
     def in_body(self) -> bool:
-        """Whether the field has a section of its own (not the title, not a label line)."""
-        return not self.source and not self.label
+        """Whether the field has a section of its own (not the title, a label line or a fence)."""
+        return not self.source and not self.label and not self.fence
 
 
 @dataclass(frozen=True)
@@ -566,6 +605,8 @@ INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n
                          re.DOTALL)
 SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+#: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
+PART_KINDS = ("block", "entry")
 
 
 def _yaml_lines(text: str, where: str, first: int) -> list[tuple[int, int, str]]:
@@ -687,7 +728,8 @@ def note_data(text: str, where: str) -> dict[str, object]:
     scope = data.get("scope", {})
     level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
     sections = _skeleton(body, where, first, level)
-    in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")]
+    in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
+               and not entry.get("fence")]
     for entry in in_body:
         for key in ("heading", "says"):
             if key in entry:
@@ -765,8 +807,9 @@ def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -
         raw[template_name] = data
         texts[template_name] = text
     built = {name: _build(name, raw, terms, ()) for name in sorted(raw)}
-    return {name: replace(template, repository=repository,
-                          digest=_digest(name, raw, texts)) for name, template in built.items()}
+    digests = {name: _digest(name, raw, texts) for name in built}
+    return _nest({name: replace(template, repository=repository, digest=digests[name])
+                  for name, template in built.items()}, digests)
 
 
 def _digest(name: str, raw: dict[str, dict], texts: dict[str, str]) -> str:
@@ -799,10 +842,14 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         raise TemplateError(f"{where}: applies has unknown keys "
                         f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
                         f"{', '.join(sorted(APPLIES_KEYS))}")
-    if not isinstance(applies, dict) or not applies.get("actions"):
+    if applies is None and parent is None and data.get("kind") in PART_KINDS:
+        applies = {"actions": []}  # a part a node checks, shaping no action of its own
+    elif not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
             raise TemplateError(f"{where}: applies.actions is required; name the actions the template "
-                            f"shapes ({', '.join(ACTIONS)})")
+                            f"shapes ({', '.join(ACTIONS)})"
+                            + (", or leave applies out of a block or an entry that only a node "
+                               "checks" if data.get("kind") in PART_KINDS else ""))
         applies = {"actions": list(parent.actions), **(applies or {})}
     actions = tuple(applies["actions"])
     for action in actions:
@@ -955,6 +1002,7 @@ def _field(entry: dict, where: str) -> Field:
     name = entry.get("name", "?")
     if unknown:
         raise TemplateError(f"{where}: field {name} has unknown keys {', '.join(sorted(unknown))}")
+    entry = _node_entry(dict(entry), where)
     if entry.get("kind") not in KINDS:
         raise TemplateError(f"{where}: field {name} has kind {entry.get('kind')!r}; one of "
                         f"{', '.join(KINDS)}")
@@ -987,6 +1035,94 @@ def _field(entry: dict, where: str) -> Field:
     if made.kind == "choice" and not made.choices:
         raise TemplateError(f"{where}: field {name} is a choice without choices")
     return made
+
+
+def _node_entry(entry: dict, where: str) -> dict:
+    """A field entry's `node:` or `entries:` pin as the field's kind (`node`, `register`), `node`
+    and `pin`; `fence` goes with `node:` alone. The template it names is checked at `load`."""
+    name = entry.get("name", "?")
+    given = [key for key in ("node", "entries") if key in entry]
+    if len(given) > 1:
+        raise TemplateError(f"{where}: field {name} is a node or a register, not both; keep `node:` "
+                            "or `entries:`")
+    if not given:
+        if entry.get("kind") in NODE_KINDS:
+            raise TemplateError(f"{where}: field {name} has kind {entry['kind']} without its "
+                                "template; write `node: <template>@<version>` or `entries: "
+                                "<template>@<version>`")
+        if "fence" in entry:
+            raise TemplateError(f"{where}: field {name} has a fence but is no node; write `node: "
+                                "<template>@<version>` beside it")
+        return entry
+    key = given[0]
+    kind = "node" if key == "node" else "register"
+    pin = NODE_PIN.match(str(entry.pop(key)))
+    if pin is None:
+        raise TemplateError(f"{where}: field {name} {key}: write the template and the version it "
+                            "pins, `<template>@<version>`, such as raid-entry@1.0.0")
+    if entry.get("kind", kind) != kind:
+        raise TemplateError(f"{where}: field {name} is a {kind} ({key}:) and takes no kind "
+                            f"{entry['kind']}; leave kind out")
+    fence = entry.get("fence", "")
+    if fence and (kind != "node" or not re.fullmatch(r"[\w-]+", str(fence))):
+        raise TemplateError(f"{where}: field {name} fence: a node's fence is its info word, such "
+                            "as pugh, and goes with `node:` alone")
+    extra = sorted(set(entry) & {"choices", "numbered", "continue_numbers", "markers", "lang",
+                                 "verbatim", "quote", "shape", "label", "source"})
+    if extra:
+        raise TemplateError(f"{where}: field {name} is a {kind}, checked by its template; take out "
+                            f"{', '.join(extra)}")
+    entry.update(kind=kind, node=pin.group(1), pin=pin.group(2))
+    return entry
+
+
+def _nest(templates: dict[str, Template], digests: dict[str, str]) -> dict[str, Template]:
+    """`templates` with each node field's `nested` template loaded and each digest followed by its
+    nodes' (the module docstring: Nesting); a node naming no template, another version than it
+    pins, a template of the wrong kind, or a cycle does not load."""
+    done: dict[str, Template] = {}
+
+    def resolved(name: str, seen: tuple[str, ...]) -> Template:
+        if name in done:
+            return done[name]
+        template = templates[name]
+        fields, chain = [], hashlib.sha256(digests[name].encode("utf-8") + b"\0")
+        for item in template.fields:
+            if not item.node:
+                fields.append(item)
+                continue
+            where = f"{template.path}: field {item.name}"
+            target = templates.get(item.node)
+            if target is None:
+                raise TemplateError(f"{where} names {item.node}, which is no template in {TEMPLATES}/")
+            if item.node in seen or item.node == name:
+                raise TemplateError(f"{where} nests {item.node} in a cycle "
+                                    f"({' -> '.join((*seen, name, item.node))})")
+            if target.version != item.pin:
+                raise TemplateError(f"{where} pins {item.node} {item.pin}, but {item.node} is at "
+                                    f"{target.version}; pin {item.node}@{target.version}")
+            wanted = ("entry",) if item.kind == "register" else ("block",) if item.fence else \
+                ("block", "document")
+            if target.kind not in wanted or target.is_file or target.scope:
+                raise TemplateError(f"{where}: {item.node} is {_a(target.kind)}"
+                                    + (" that shapes files" if target.is_file else
+                                       " read after a marker" if target.scope else "")
+                                    + f"; a {'register' if item.kind == 'register' else 'node'}"
+                                    + f"{' fence' if item.fence else ''} names "
+                                    + _a(" or ".join(wanted)) + " template, part of a document")
+            nested = resolved(item.node, (*seen, name))
+            chain.update(nested.digest.encode("utf-8") + b"\0")
+            fields.append(replace(item, nested=nested))
+        nodes = [item for item in fields if item.node]
+        done[name] = replace(template, fields=tuple(fields),
+                             digest=f"sha256:{chain.hexdigest()}" if nodes else template.digest)
+        return done[name]
+
+    return {name: resolved(name, ()) for name in sorted(templates)}
+
+
+def _a(word: str) -> str:
+    return f"{'an' if word[:1] in 'aeiou' else 'a'} {word}"
 
 
 def _named(reference: str, where: str, key: str):
@@ -1099,7 +1235,11 @@ def _items(text: str, pattern: re.Pattern, markers: bool) -> list[tuple[str, str
 
 def value_of(item: Field, raw: str) -> object:
     """A field's value read from its section's raw text (the module docstring: field kinds)."""
-    if item.verbatim:
+    if item.fence:  # the fence; one that holds only "Not in input" is that text
+        inner = raw.strip("\n").splitlines()[1:]
+        inner = inner[:-1] if inner and FENCE.match(inner[-1]) else inner
+        return "\n".join(inner).strip() if not_in_input("\n".join(inner)) else raw.strip("\n")
+    if item.verbatim or item.node:
         return raw.strip("\n")
     text = _uncomment(raw, keep_markers=item.markers)
     if text.strip().casefold() == NO_RESPONSE:
@@ -1161,7 +1301,7 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
         region = text
         preamble, sections = _split(text, template, 0)
         parts = [Part("preamble", raw=preamble), *sections]
-    document.parts = parts
+    document.parts = parts = _fenced(template, parts)
     preamble = next((part.raw for part in parts if part.kind == "preamble"), "")
     for item in template.fields:
         if item.source == "title":
@@ -1173,7 +1313,7 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
             if match:
                 document.fields[item.name] = match.group(1)
     for part in parts:
-        if part.kind == "field":
+        if part.kind in ("field", "node"):
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
     for item in template.fields:
@@ -1184,6 +1324,48 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
                 document.misses[item.name] = near
     document.source = region
     return document
+
+
+def _fenced(template: Template, parts: list[Part]) -> list[Part]:
+    """`parts` with each fence node's fence (its field's `fence`) taken out of the part that holds
+    the first such fence: that part's text before it, then a `node` part, the fence, then a `text`
+    part, what followed it in that part (the module docstring: Nesting)."""
+    for item in template.fields:
+        if not item.fence:
+            continue
+        for index, part in enumerate(parts):
+            if part.kind not in ("preamble", "field", "unknown") or not part.raw:
+                continue
+            span = _fence_span(part.raw, item.fence)
+            if span is None:
+                continue
+            start, end = span
+            parts = [*parts[:index], replace(part, raw=part.raw[:start]),
+                     Part("node", raw=part.raw[start:end], name=item.name),
+                     Part("text", raw=part.raw[end:]), *parts[index + 1:]]
+            break
+    return parts
+
+
+def _fence_span(text: str, info: str) -> tuple[int, int] | None:
+    """Where the first fence whose info word is `info` starts and ends in `text`, its closing
+    line's end included; None where none opens. An unclosed fence runs to the end."""
+    offset, fence, start = 0, None, None
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        marker = FENCE.match(bare)
+        if fence is None and marker:
+            fence = marker.group(1)
+            words = bare.strip()[len(fence):].split()
+            if words and words[0] == info:
+                start = offset
+        elif fence is not None and marker and marker.group(1).startswith(fence) and \
+                not bare.strip()[len(marker.group(1)):].strip():
+            fence = None
+            if start is not None:
+                return start, offset + len(line)
+        offset += len(line)
+    return (start, len(text)) if start is not None else None
 
 
 def _title_end(template: Template, text: str) -> int:
@@ -1219,11 +1401,11 @@ def _parse_file(template: Template, body: str) -> Document:
     title, rest = rest[:end], rest[end:]
     preamble, sections = _split(rest, template, 0)
     document = Document(template=template.name, fields={}, source=rest,
-                        parts=[Part("front", raw=head), Part("head", raw=title),
-                               Part("preamble", raw=preamble), *sections],
+                        parts=_fenced(template, [Part("front", raw=head), Part("head", raw=title),
+                                                 Part("preamble", raw=preamble), *sections]),
                         recorded=front_version(template, head))
-    for part in sections:
-        if part.kind == "field":
+    for part in document.parts:
+        if part.kind in ("field", "node"):
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
     document.read = dict(document.fields)
     for item in template.fields:
@@ -1341,7 +1523,7 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
 
 def _format(item: Field, value: object, first: int) -> str:
     """A field's value as Markdown; `first` is the number a numbered list starts at."""
-    if item.verbatim or item.kind in ("line", "choice", "text") or (
+    if item.verbatim or item.node or item.kind in ("line", "choice", "text") or (
             isinstance(value, str) and not_in_input(value)):
         return str(value)
     if item.kind == "list":
@@ -1405,19 +1587,22 @@ def render(template: Template, document: Document | dict) -> str:
     elif not parts:
         parts = [Part("front"), Part("head"), Part("preamble")] if template.is_file else \
             [Part("preamble")]
-    # Fields with a value but no section yet go after the nearest earlier field that has one.
-    placed = {part.name for part in parts if part.kind == "field"}
+    # Fields with a value but no section yet, and fence nodes not yet in the text, go after the
+    # nearest earlier field that has one.
+    placed = {part.name for part in parts if part.kind in ("field", "node")}
     for item in template.fields:
-        if not item.in_body or item.name in placed or values.get(item.name) in (None, "", [], {}):
+        if not (item.in_body or item.fence) or item.name in placed or \
+                values.get(item.name) in (None, "", [], {}):
             continue
         names = [other.name for other in template.fields]
         earlier = names[:names.index(item.name)]
-        index = max((i for i, part in enumerate(parts) if part.kind == "field"
+        index = max((i for i, part in enumerate(parts) if part.kind in ("field", "node")
                      and part.name in earlier), default=None)
         if index is None:
             index = max((i for i, part in enumerate(parts)
                          if part.kind in ("preamble", "scope")), default=-1)
-        parts.insert(index + 1, Part("field", name=item.name, heading=f"{hashes} {item.heading}",
+        parts.insert(index + 1, Part("node" if item.fence else "field", name=item.name,
+                                     heading="" if item.fence else f"{hashes} {item.heading}",
                                      raw=None))
         placed.add(item.name)
     out: list[str] = []
@@ -1444,8 +1629,19 @@ def render(template: Template, document: Document | dict) -> str:
                 out.append("\n" + _end(preamble) if preamble.strip() else "\n")
             else:
                 out.append(preamble if preamble.strip() else "\n")
-        elif part.kind in ("suffix", "data"):
+        elif part.kind in ("suffix", "data", "text"):
             out.append(part.raw + ("\n" if part.kind == "data" and part.raw.strip() else ""))
+        elif part.kind == "node":
+            if part.name not in values:
+                continue
+            value = values[part.name]
+            if part.raw is not None and document.read.get(part.name, object()) == value:
+                out.append(part.raw)
+            else:
+                if not_in_input(value):  # a fence still, so the gap shows where the node goes
+                    value = f"```{template.field(part.name).fence}\n{value}\n```"
+                out.append(f"{value}\n\n" if out and out[-1].endswith("\n\n") or not out
+                           else f"\n{value}\n\n")
         elif part.kind == "unknown":
             if template.keep_unknown:
                 out.append(part.heading + "\n" + part.raw)
@@ -1603,7 +1799,7 @@ def _checked_by(template: Template) -> str:
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
-    return [f"{template.name} ({template.reader}): {', '.join(template.actions)}: "
+    return [f"{template.name} ({template.reader}): {', '.join(template.actions) or 'a node of a document'}: "
             + (f"{', '.join(template.paths)}: " if template.paths else "")
             + (f"{_checked_by(template)}: " if template.is_adapter else "") + template.says
             for template in sorted(templates.values(), key=lambda item: (item.order, item.name))]
@@ -1890,7 +2086,8 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
             continue  # every field takes it, whatever its rules: the gap shows
         why = _emptiness(item, value)
         where = (f"the title" if item.source == "title" else
-                 f"a `{item.label}:` line" if item.label else f"`{hashes} {item.heading}`")
+                 f"a `{item.label}:` line" if item.label else
+                 f"a `{item.fence}` fence" if item.fence else f"`{hashes} {item.heading}`")
         if why == "missing" and item.name in document.misses:
             if item.required:
                 add("required", item.name, f"{item.heading} is missing: the heading "
@@ -1899,19 +2096,22 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         if why and item.required:
             text = {"missing": "is missing", "empty": "is empty", "placeholder": "holds a placeholder",
                     "says": "repeats its own description"}[why]
-            add("required", item.name, f"{item.heading or item.name} {text}: write {where}: "
+            add("required", item.name, f"{item.heading or item.label or item.name} {text}: write {where}: "
                 f"{item.says} (or `{NOT_IN_INPUT}` where the input does not say)")
             continue
         if why:
             continue
         filled[item.name] = value
         text = _plain(value)
+        if item.node:  # its own template checks it, by its own rules
+            found += nested_findings(item, text, root=root, bare_scripts=bare_scripts, raw=raw)
+            continue
         if item.quote:
             found += [Finding(item.name, QUOTE_RULE, REFUSE, fix) for fix in quoted(item, text, raw)]
         if item.kind == "choice":
             word = re.split(r"[\s,.;:]+", text.strip().casefold(), maxsplit=1)[0]
             if word not in item.choices:
-                add("choice", item.name, f"{item.heading} is {text.strip()!r}: write one of "
+                add("choice", item.name, f"{item.heading or item.label} is {text.strip()!r}: write one of "
                     f"{', '.join(item.choices)}")
         if item.not_picked and not NOT_PICKED.search(COMMENT.sub("", text)):
             add("not-picked", item.name, f"{item.heading} names no alternative: add a line "
@@ -1969,6 +2169,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
                     "say in each what only it says")
             else:
                 seen[key] = template.field(item.name).heading or item.name
+    found += _fence_order(template, document)
     if document.source:
         for finding in _sibling("references").dangling(document.source, root, paths=False,
                                                          created=True, bare_scripts=bare_scripts):
@@ -1977,6 +2178,92 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+def nested_findings(item: Field, text: str, *, root: Path = ROOT, bare_scripts: bool = True,
+                    raw: str | None = None) -> list[Finding]:
+    """The findings of node field `item`'s `text` by the template it names, each under the field:
+    a node's as one document, a register's entry by entry, each fix naming its entry (`entries`);
+    a register without an entry refuses (rule `node`)."""
+    nested: Template = item.nested
+    if nested is None:
+        raise TemplateError(f"templates: field {item.name} names {item.node}, which is not loaded; "
+                            "load the templates with load()")
+
+    def checked(body: str, title: str | None) -> list[Finding]:
+        return check(nested, parse(nested, body, title), root=root, bare_scripts=bare_scripts, raw=raw)
+
+    def under(finding: Finding, where: str) -> Finding:
+        fix = finding.fix.removeprefix(f"{nested.name}: ")
+        return Finding(item.name, finding.rule, finding.severity, f"{where}: {fix}")
+
+    if item.kind == "node":
+        return [under(finding, nested.name) for finding in checked(text, None)]
+    listed = entries(text)
+    if not listed:
+        return [Finding(item.name, NODE_RULE, REFUSE, f"{item.heading or item.name} holds no entry: "
+                        f"write each entry as a heading of its own, `### <name>`, then its "
+                        f"{nested.name} fields")]
+    title = next((field.name for field in nested.fields if field.source == "title"), None)
+    found = []
+    for name, body in listed:
+        found += [under(finding, f"entry {name!r} ({nested.name})")
+                  for finding in checked(body, name if title else None)]
+    return found
+
+
+def entries(text: str) -> list[tuple[str, str]]:
+    """A register's entries, (name, text): each heading at the shallowest level `text` holds outside
+    its fences, its text up to the next such heading; the text before the first is none."""
+    found: list[tuple[int, str, list[str]]] = []
+    fence: str | None = None
+    lines: list[tuple[int, str]] = []  # (heading level or 0, line)
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        marker = FENCE.match(bare)
+        heading = None
+        if fence is None and marker:
+            fence = marker.group(1)
+        elif fence is not None:
+            if marker and marker.group(1).startswith(fence):
+                fence = None
+        else:
+            heading = HEADING.match(bare)
+        lines.append((len(heading.group(1)) if heading else 0, line))
+    levels = [level for level, _ in lines if level]
+    if not levels:
+        return []
+    top = min(levels)
+    for level, line in lines:
+        if level == top:
+            found.append((level, HEADING.match(line.rstrip("\r\n")).group(2), []))
+        elif found:
+            found[-1][2].append(line)
+    return [(name, "".join(body)) for _, name, body in found]
+
+
+def _fence_order(template: Template, document: Document) -> list[Finding]:
+    """Where a fence node sits: after the sections of the fields listed before it, before those of
+    the fields listed after it (rule `node`); none where the fence is missing."""
+    found: list[Finding] = []
+    names = [item.name for item in template.fields]
+    at = {part.name: index for index, part in enumerate(document.parts)
+          if part.kind in ("field", "node")}
+    for item in template.fields:
+        if not item.fence or item.name not in at:
+            continue
+        here = names.index(item.name)
+        for other in template.fields:
+            if not other.in_body or other.name not in at:
+                continue
+            before = names.index(other.name) < here
+            if before != (at[other.name] < at[item.name]):
+                found.append(Finding(item.name, NODE_RULE, REFUSE, (
+                    f"`{'#' * template.level} {other.heading}` comes after the `{item.fence}` fence: "
+                    "write it before the fence") if before else (
+                    f"`{'#' * template.level} {other.heading}` comes before the `{item.fence}` fence: "
+                    "write it after the fence")))
+    return found
 
 
 def provenance(template: Template, document: Document) -> list[Finding]:
