@@ -19,6 +19,7 @@ import se
 import se_home
 import se_modules
 import se_new
+import se_workflows
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +38,8 @@ TEMPLATE = {
 BATTERY = ("name: kern-battery\non:\n  workflow_call:\njobs:\n  trust:\n    steps:\n"
            "      - uses: actions/checkout@v7\n        with:\n          repository: ${{ job.workflow_repository }}\n"
            "          ref: ${{ job.workflow_sha }}\n")
+# The action the battery calls, as SE ships it.
+KERN_AT_PIN = "name: kern at the pin\nruns:\n  using: composite\n  steps: []\n"
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -78,7 +81,8 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n\n'
                             '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
                  "components/go.mod": f"module se/components\n\nrequire kern v{version}\n",
-                 ".github/workflows/kern-battery.yml": BATTERY})
+                 ".github/workflows/kern-battery.yml": BATTERY,
+                 ".github/actions/kern-at-pin/action.yml": KERN_AT_PIN})
     git(root, "add", "-A")
     git(root, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "se")
     kern = se_modules.kern_dir(root)
@@ -129,6 +133,9 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
                               "${{ github.repository_owner }}/se\n")
     assert f"          repository: ${{{{ github.repository_owner }}}}/se\n          ref: {pin}\n" in battery
     assert "alice" not in battery and "job.workflow" not in battery
+    action = (app / ".github" / "actions" / "kern-at-pin" / "action.yml").read_text()
+    assert action == se_workflows.header(".github/actions/kern-at-pin/action.yml", pin,
+                                         "${{ github.repository_owner }}/se") + KERN_AT_PIN, "the action the battery calls"
     # One commit on main, as the project identity, and nothing left over.
     assert git(app, "log", "--format=%an <%ae>|%cn <%ce>|%s") == (
         "alice <alice>|alice <alice>|Start ledger, a bare application on kern 0.1.0")

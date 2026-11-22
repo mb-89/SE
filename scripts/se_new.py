@@ -117,8 +117,9 @@ def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
     path.write_text(filled, encoding="utf-8")
 
 
-# The workflows the template's CI calls, written beside it as generated copies (scripts/se_workflows.py).
-APP_WORKFLOWS = (".github/workflows/kern-battery.yml",)
+# The workflows the template's CI calls, and the action the battery calls, written beside it as
+# generated copies (scripts/se_workflows.py).
+APP_WORKFLOWS = (".github/workflows/kern-battery.yml", ".github/actions/kern-at-pin/action.yml")
 
 
 def se_repository(se_root: Path) -> str:
