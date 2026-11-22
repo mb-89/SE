@@ -13,6 +13,10 @@ A reference is `Refs`, `Closes`, `Fixes` or `Lands`, then `#<n>` or this reposit
   names such an issue; or
 - it was opened by the repository owner's account and carries the label `housekeeping`.
 
+The event carries the pull request as it was opened; where that refuses, the pull request is read
+again as it is now (the issues API), as `gh pr create --label` sets its labels, and an edit its
+description, after the opened event.
+
 A pull request into another branch is not checked. Exit code 0 passed, 1 refused, 2 setup error
 (no event, no token, the API failing). A single server error (HTTP 5xx) on a read is read again once,
 RETRY_SECONDS later, so one hiccup of GitHub does not fail the required check; a second fails it.
@@ -161,12 +165,23 @@ def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
         return 0, [f"pr-issues: pull request #{number} targets {base}, not {branch}: not checked"]
     author = str((pull.get("user") or {}).get("login", ""))
     owner = str(((event.get("repository") or {}).get("owner") or {}).get("login", ""))
-    if author and author.lower() == owner.lower() and HOUSEKEEPING_LABEL in labels(pull):
-        return 0, [f"pr-issues: pull request #{number} is the owner's {HOUSEKEEPING_LABEL}: exempt"]
-    lines = [f"pr-issues: pull request #{number} into {branch} names:"]
-    if names_work_issue(api, str(pull.get("body") or ""), lines, lands=True):
-        lines.append("pr-issues: passed, it names an open work issue")
-        return 0, lines
+    lines: list[str] = []
+    for reading in ("event", "live"):
+        if reading == "live":
+            # The event is the pull request as it was opened: `gh pr create --label` adds its
+            # labels, and an edit its body, a moment later. Read it as it is now before refusing.
+            current = api.issue(int(number)) if isinstance(number, int) else None
+            if current is None:
+                break
+            pull = {**pull, "body": current.get("body"), "labels": current.get("labels")}
+            lines.append(f"pr-issues: pull request #{number} as it is now:")
+        if author and author.lower() == owner.lower() and HOUSEKEEPING_LABEL in labels(pull):
+            return 0, [*lines, f"pr-issues: pull request #{number} is the owner's "
+                               f"{HOUSEKEEPING_LABEL}: exempt"]
+        lines.append(f"pr-issues: pull request #{number} into {branch} names:")
+        if names_work_issue(api, str(pull.get("body") or ""), lines, lands=True):
+            lines.append("pr-issues: passed, it names an open work issue")
+            return 0, lines
     lines.append(f"::error::pr-issues: pull request #{number} names no open issue of "
                  f"{api.repository} labelled {WORK_LABEL} (Refs|Closes|Fixes #<n> or the issue's "
                  f"URL; a landing: Lands <work pull request>): {REMEDY}")

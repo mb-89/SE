@@ -104,7 +104,7 @@ def test_a_pull_request_naming_no_issue_is_refused_with_the_remedy(
     assert code == 1, out
     assert "::error::pr-issues: pull request #900 names no open issue of carol/SE labelled work" in out
     assert "Refs <issue url>" in out
-    assert github.requests == []
+    assert github.requests == [f"/repos/{REPO}/issues/900"]  # read once as it is now, not found
 
 
 def test_a_closed_or_unlabelled_issue_does_not_count(
@@ -233,3 +233,24 @@ def test_pr_issues_takes_the_short_and_the_full_form_of_its_own_repository_only(
         capsys: pytest.CaptureFixture[str]) -> None:
     github.issue(8, "work")
     assert run(github, tmp_path, body, capsys=capsys)[0] == (0 if passed else 1)
+
+
+def test_a_pull_request_created_with_its_label_passes_on_its_opened_event(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # gh pr create --label opens the pull request, then labels it: the opened event has no label.
+    github.items[900] = {"number": 900, "state": "open", "body": "Tidy the docs.",
+                         "labels": [{"name": "housekeeping"}],
+                         "pull_request": {"url": f"{PULL_URL}/900"}}
+    code, out = run(github, tmp_path, "Tidy the docs.", author="carol", capsys=capsys)
+    assert code == 0, out
+    assert "as it is now" in out and "is the owner's housekeeping: exempt" in out
+
+
+def test_a_pull_request_whose_description_names_its_issue_after_opening_passes(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    github.issue(5, "work")
+    github.items[900] = {"number": 900, "state": "open", "body": f"Refs {ISSUE_URL}/5",
+                         "labels": [], "pull_request": {"url": f"{PULL_URL}/900"}}
+    code, out = run(github, tmp_path, "", capsys=capsys)
+    assert code == 0, out
+    assert "Refs #5: open work issue" in out
