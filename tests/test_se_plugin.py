@@ -25,6 +25,9 @@ def checkout(tmp_path_factory):
     root = tmp_path_factory.mktemp("se")
     shutil.copy(ROOT / "se.toml", root)
     shutil.copytree(ROOT / "src", root / "src")
+    # The guidance notes the agents link, built as skills, and the templates they reach.
+    shutil.copytree(ROOT / "guidance", root / "guidance")
+    shutil.copytree(ROOT / "templates", root / "templates")
     shutil.copytree(ROOT / "scripts", root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / ".github" / "ISSUE_TEMPLATE", root / ".github" / "ISSUE_TEMPLATE")
     shutil.copy(ROOT / ".github" / "pull_request_template.md", root / ".github")
@@ -355,7 +358,8 @@ def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
 def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
     files = se_plugin.expected(checkout)
     skills = [path for path in files if path.name == "SKILL.md"]
-    assert len(skills) == 2 * len(list((checkout / "src" / "skills").iterdir()))
+    assert len(skills) == 2 * (len(list((checkout / "src" / "skills").iterdir()))
+                               + len(se_plugin.notes(checkout)))
     for path in skills:
         fields = agent_lint.fields(files[path].decode())
         name = agent_lint.scalar(fields["name"])
@@ -410,8 +414,9 @@ def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp
     """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layouts from it."""
     crlf = tmp_path / "crlf"
     shutil.copytree(checkout / "src", crlf / "src")
+    shutil.copytree(checkout / "guidance", crlf / "guidance")
     shutil.copy(checkout / "se.toml", crlf)
-    for path in (crlf / "src").rglob("*.md"):
+    for path in [*(crlf / "src").rglob("*.md"), *(crlf / "guidance").rglob("*.md")]:
         path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
     assert se_plugin.expected(crlf) == se_plugin.expected(checkout)
 
@@ -658,6 +663,7 @@ def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_conten
     assert se_plugin.COPILOT_MANIFEST in files and se_plugin.COPILOT_MCP_FILE in files
     stripped = tmp_path / "stripped"
     shutil.copytree(checkout / "src", stripped / "src")
+    shutil.copytree(checkout / "guidance", stripped / "guidance")
     (stripped / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
         'version = "', 'version = "0.0.', 1), encoding="utf-8")
     parts = 0

@@ -1,6 +1,6 @@
 ---
 name: se
-description: 'The session the human talks to: discusses and decides with the user, writes design and work issues, starts worker and integrator sessions, files tickets for other repositories and presents escalations. Never writes main, never implements.'
+description: 'The session the human talks to: discusses and decides with the user, writes design and work issues, starts worker and integrator sessions, files tickets for other repositories and presents escalations. Makes very small changes itself on its own branch, never writes main.'
 disallowedTools: AskUserQuestion
 ---
 <!-- Generated from src/agents/se.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
@@ -23,7 +23,12 @@ its tools.
   - The other open points go as text at the end of the turn. Each turn starts by listing open escalations (`gh issue list --label escalated
   --state open --json number,title`) and queued escalation messages, and presents them as
   decisions.
-- You discuss, decide with the user and present. You do not implement.
+- You discuss, decide with the user and present.
+- **Your own changes**: you make a very small change yourself, on its own branch, named and
+  delivered as a worker's is (its work issue, a pull request whose description is its field
+  report), and that repository's integrator lands it; you never write the integration branch.
+  When the person asks you to stay available, you stop doing so and hand such changes to an
+  integrator as work issues.
 - What a diagram can show (how parts fit together, what flows where, what is generated from
   what), you show as one: in a chat answer as a rendered image, never as text art, as the
   decision skill's [Diagrams](../skills/decision/SKILL.md#diagrams) says.

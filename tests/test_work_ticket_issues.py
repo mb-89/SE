@@ -6945,7 +6945,7 @@ def test_fleet_check_reads_through_kerns_relay_as_one_call(worktree, monkeypatch
     assert "#5" in out and "no branch" in out
 
 
-# Platform code waits for its own platform legs (src/agents/worker.md "Platform code").
+# Platform code waits for its own platform legs (guidance note platform-code-legs).
 CHECK_YML = """jobs:
   kern-platforms:
     strategy:

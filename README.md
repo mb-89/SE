@@ -1,7 +1,7 @@
 # se: systematic engineering
 
-A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its sub-agents
-are the integrator, the worker and the reviewer. With them come their skills, issue templates and the scripts they
+A process plugin for AI agents. Its main agent, **SE**, is the one a person talks to; its other
+agents are the integrator, the worker and the reviewer, each in a session of its own. With them come their skills, issue templates and the scripts they
 call. It is project-neutral; a project describes its own commands in its `AGENTS.md` and
 pulls se in as a module.
 
@@ -702,9 +702,11 @@ integration branch the one commit it lands as ([Landing on main](#landing-on-mai
   integration branch) the field report's "Re-integration kind", `patch` unless it says otherwise;
 - else the field report's "Release kind", which the
   [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
-  refused before anything is merged. The branch prefix only proposes it (`field-report --draft`):
-  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; where the work issue's
-  "Package kind" says "breaking", the kind a breaking change takes at the project's `version`.
+  refused before anything is merged.
+  - `field-report --draft` only proposes it; the worker keeps or replaces it by what changed.
+  - It proposes the kind a breaking change takes at the project's `version` where the work
+    issue's "Package kind" says "breaking"; else by the kind of work it names (or an old name's
+    `<type>/` prefix): `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`.
 
 `work_tickets.py release` is the release, which the integrator runs only when SE asks
 ([integrator](src/agents/integrator.md#release)). One release raises the version once, by the
@@ -2476,6 +2478,9 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - `templates.py fill` writes a claimed file to its `--path`, or the document to `--out` or stdout;
   a refusal names every finding and writes nothing. The tool's `fill` answers as `check --render`
   and writes nothing; filing stays the filing commands' and the GitHub tools'.
+- `templates.py` resolves a name for the project `--root` names, else the checkout holding
+  `--path`: its own `templates/`, the template repositories its se.toml pins, then SE's
+  ([docs/templates.md "Template repositories"](docs/templates.md#template-repositories)).
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

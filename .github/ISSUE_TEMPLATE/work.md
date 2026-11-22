@@ -16,7 +16,8 @@ labels: work
 
 ## Goal
 
-<!-- The user-visible outcome and why it matters, in two to four sentences. Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
+<!-- The user-visible outcome and why it matters, as long as the work template's Goal says
+(`templates/work.md`). Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
 
 ## Approach
 
@@ -34,7 +35,8 @@ labels: work
 produces findings, proposed tickets or probe results, apply the `discovery` label. Discovery
 packages record evidence instead of test-command wording. Write "breaking" here for a breaking
 change: its integration records the major release kind, which the next release raises the version
-by (README "Project settings"); otherwise the branch prefix proposes the kind. -->
+by (README "Project settings"); otherwise what changed sets the kind, as the field report's Release
+kind declares it, never the branch name. -->
 
 ## Blocked by
 
