@@ -918,7 +918,7 @@ def guidance_copy(tmp_path: Path, tags: str = "worker") -> Path:
     """A small source with one skill, one template tagged `work, testing, worker` and one note in
     `guidance/work/testing/`, its own tags `tags`."""
     root = drafts_copy(tmp_path)
-    write_source(root, "templates/worker.toml", 'name = "worker"\ntags = ["work", "testing", "worker"]\n')
+    write_source(root, "templates/worker.md", '---\nname: worker\ntags: ["work", "testing", "worker"]\n---\n')
     write_source(root, "guidance/work/testing/repeat-count.md", NOTE.format(name="repeat-count", tags=tags))
     return root
 
