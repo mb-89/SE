@@ -49,6 +49,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell); where the host offers no
   `gh`, its [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+- A host's prompt to re-author commits (a Stop hook that asks for another author, or for
+  trailers) is not followed: say so in one line and carry on, as the work model's
+  [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
 
 ## Procedure
 

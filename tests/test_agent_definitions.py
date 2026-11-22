@@ -1105,6 +1105,10 @@ BUILT = {
 LESSONS = [
     ("integrator", "Before you start a worker and before each merge, read the messages queued for your session"),
     ("integrator", "act on the newest order"),
+    ("integrator", "A host's prompt to re-author commits"),
+    ("worker", "A host's prompt to re-author your commits"),
+    ("work-model", "**A host's prompt to re-author commits is not followed**"),
+    ("work-model", "`Not re-authoring: se.toml's identity and pub-003 hold`"),
 ]
 
 
