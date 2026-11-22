@@ -1092,3 +1092,23 @@ def test_integrator_starts_the_next_startable_issue_after_each_landing_and_recor
     assert "**Start what is unblocked**, after each landing, before the next delivered pull request." in integrator
     assert "write what you did into the issue you landed" in integrator
     assert "`Started: none startable`" in integrator
+
+
+# What the work of 22 Nov showed, as the built layouts carry it: each role reads it where it runs.
+BUILT = {
+    "integrator": [ROOT / "agents" / "integrator.md", GITHUB / "agents" / "integrator.agent.md"],
+    "worker": [ROOT / "agents" / "worker.md", GITHUB / "agents" / "worker.agent.md"],
+    "decision": [ROOT / "skills" / "decision" / "SKILL.md", GITHUB / "skills" / "decision" / "SKILL.md"],
+    "work-model": [ROOT / "skills" / "work-model" / "SKILL.md", GITHUB / "skills" / "work-model" / "SKILL.md"],
+    "catch-up": [ROOT / "skills" / "catch-up" / "SKILL.md", GITHUB / "skills" / "catch-up" / "SKILL.md"],
+}
+LESSONS = [
+    ("integrator", "Before you start a worker and before each merge, read the messages queued for your session"),
+    ("integrator", "act on the newest order"),
+]
+
+
+@pytest.mark.parametrize(("source", "lesson"), LESSONS, ids=[f"{source}-{n}" for n, (source, _) in enumerate(LESSONS)])
+def test_the_built_layouts_carry_what_22_nov_showed(source, lesson):
+    for path in BUILT[source]:
+        assert lesson in normalized(path), f"{path.relative_to(ROOT).as_posix()}: {lesson}"

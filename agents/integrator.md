@@ -76,6 +76,11 @@ Before each step, check whether the work issue changed, its `updated_at` and com
 against the values you last read, and reread it only when one changed
 ([Check before rereading](../skills/work-model/SKILL.md#issues)).
 
+Before you start a worker and before each merge, read the messages queued for your session (in
+Claude Code, `ReadNotifications`), and act on the newest order. A message SE sends while your turn
+runs reaches you only at the turn's end unless you read it, so an older order must not drive a
+merge or a start.
+
 1. **Review** the field report in the pull request's description, the worker's queue
    (`work_tickets.py status --worktree <its worktree>`: only `done/`, every acceptance item checked
    with evidence) and `git diff <integration branch>...<branch>`.
