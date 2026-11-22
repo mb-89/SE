@@ -1,10 +1,11 @@
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
-what the command does. The template and kern's Go module come from the clone of kern se.toml
-[modules.kern] pins (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. kern's module path
-names no host, so it cannot be fetched: the application carries kern's source at the pin in `kern/`,
-its go.mod requires kern at the pin and replaces the module by that folder.
+what the command does. The template comes from the clone of kern se.toml [modules.kern] pins
+(scripts/se_modules.py `kern_dir`), at its tag `v<version>`. The application pins the kern SE pins:
+its go.mod requires kern at that version and replaces the module by `./.se/modules/kern`, its se.lock
+locks the commit SE's se.lock locks, and SE's clone at that commit is copied there, ignored, so the
+application builds before it has an origin; `se_modules.py sync kern` keeps it there afterwards.
 """
 
 from __future__ import annotations
@@ -32,16 +33,18 @@ TEMPLATE_IDENTITY = 'identity = "<name> <name>"'
 KERN_REPLACE = re.compile(r"(?m)(?:^//.*\n)*^replace (?P<module>\S+) => \.\./?[ \t]*\n?")
 # go.mod's require of kern, whose version the application gets as the pin.
 KERN_REQUIRE = re.compile(r"(?m)^(?P<lead>(?:require[ \t]+|[ \t]+)kern[ \t]+)v\S+")
-# What of kern's repository is no part of kern's Go module: its template (unpacked as the
-# application) and the files of kern's own project; everything else goes into the application's kern/.
-KERN_OWN = {"template", ".github", "se.toml", "se.lock", "AGENTS.md", "pyproject.toml", "uv.lock", ".gitignore"}
+# The folder of kern's repository that is the application.
+TEMPLATE = "template"
+# Where the application's kern is: its clone at the pin (se_modules.py `kern_dir`), which git ignores.
+KERN_PLACE = ".se/modules/kern"
+IGNORED = ".se/modules/"
 
 
 def app_replace(match: re.Match) -> str:
-    """The application's replace of kern's module, by the source it carries in kern/."""
+    """The application's replace of kern's module, by its clone at the pin."""
     module = match["module"]
-    return (f"// kern's module path names no host, so it cannot be fetched: kern's source at the\n"
-            f"// version required above is in kern/.\nreplace {module} => ./kern\n")
+    return (f"// kern at the version required above, in its clone that `se_modules.py sync kern` places\n"
+            f"// there (se.toml [modules.kern]).\nreplace {module} => ./{KERN_PLACE}\n")
 
 
 class NewError(Exception):
@@ -81,30 +84,59 @@ def source_ref(kern: Path, tag: str) -> str:
 
 
 def unpack(kern: Path, ref: str, path: Path, name: str) -> None:
-    """kern's template at `ref` of the clone `kern` into `path`, the name filled in; kern's Go
-    module beside it in `path/kern`: every file but the template and kern's own project files."""
-    archive = _git(kern, "archive", "--format=tar", ref, binary=True)
+    """kern's template at `ref` of the clone `kern` into `path`, the name filled in: the template
+    alone, none of kern's own source."""
+    archive = _git(kern, "archive", "--format=tar", ref, TEMPLATE, binary=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         for member in tar.getmembers():
-            if not member.isfile():
-                continue
             parts = PurePosixPath(member.name).parts
-            data = tar.extractfile(member).read()
-            if parts[0] == "template":
-                relative = [TEMPLATE_NAME.sub(name, part) for part in parts[1:]]
-                try:
-                    data = TEMPLATE_NAME.sub(name, data.decode("utf-8")).encode("utf-8")
-                except UnicodeDecodeError:
-                    pass
-            elif parts[0] in KERN_OWN:
+            if not member.isfile() or parts[0] != TEMPLATE:
                 continue
-            else:
-                relative = ["kern", *parts]
+            relative = [TEMPLATE_NAME.sub(name, part) for part in parts[1:]]
+            data = tar.extractfile(member).read()
+            try:
+                data = TEMPLATE_NAME.sub(name, data.decode("utf-8")).encode("utf-8")
+            except UnicodeDecodeError:
+                pass
             target = path.joinpath(*relative)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             if member.mode & 0o111 or relative[-1:] == [RUNME]:
                 target.chmod(0o755)
+
+
+def kern_lock(se_root: Path, version: str, kern: Path, ref: str) -> str:
+    """The commit SE's se.lock locks for kern `version`, the commit of the tag `ref` in the clone
+    `kern`; refused, naming the sync, where the lock is missing, off the pin or off the tag."""
+    modules = _sibling("se_modules")
+    try:
+        locked = modules.read_lock(se_root).get(modules.KERN)
+    except modules.ModuleError as error:
+        raise NewError(str(error)) from error
+    sync = f"run uv run python scripts/se_modules.py sync kern in {se_root}"
+    if locked is None or locked[0] != version:
+        found = f"locks kern {locked[0]}" if locked else "locks no kern"
+        raise NewError(f"{se_root / modules.LOCK} {found}, but the pin is kern {version}: {sync}")
+    tagged = _git(kern, "rev-parse", f"{ref}^{{commit}}")
+    if tagged != locked[1]:
+        raise NewError(f"{se_root / modules.LOCK} locks kern {version} at {locked[1][:12]}, but its tag "
+                       f"{ref.removeprefix('refs/tags/')} is {tagged[:12]} in {kern}: {sync}")
+    return locked[1]
+
+
+def place_kern(kern: Path, commit: str, path: Path) -> None:
+    """SE's clone of kern, at `commit`, into the application's `.se/modules/kern`, ignored by git:
+    the application builds on it before it has an origin, and `se_modules.py sync` there later
+    points its origin at kern beside the application."""
+    place = path / KERN_PLACE
+    place.parent.mkdir(parents=True, exist_ok=True)
+    _git(place.parent, "clone", "--quiet", "--no-checkout", str(kern), str(place))
+    _git(place, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", commit)
+    ignore = path / ".gitignore"
+    text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""
+    if not {IGNORED, f"/{IGNORED}", ".se/", "/.se/"} & {line.strip() for line in text.splitlines()}:
+        ignore.write_text(text + ("" if not text or text.endswith("\n") else "\n") + IGNORED + "\n",
+                          encoding="utf-8")
 
 
 def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
@@ -166,13 +198,16 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
         raise NewError(str(error)) from error
     kern = modules.kern_dir(se_root)
     ref = source_ref(kern, tag)
-    commit = _git(kern, "rev-parse", "--short=12", ref)
+    commit = kern_lock(se_root, version, kern, ref)
     path.mkdir(parents=True, exist_ok=True)
     unpack(kern, ref, path, name)
     _fill(path / "go.mod", KERN_REQUIRE, lambda match: f"{match['lead']}v{version}", tag)
     _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
+    (path / modules.LOCK).write_text(modules.lock_text({modules.KERN: (version, commit)}),
+                                     encoding="utf-8", newline="\n")
     write_workflows(se_root, "HEAD", path)
+    place_kern(kern, commit, path)
     _git(path, "init", "-q", "-b", "main")
     _git(path, "config", "user.name", identity[0])
     _git(path, "config", "user.email", identity[1])
@@ -182,8 +217,10 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     first = _git(path, "rev-parse", "--short=12", "HEAD")
     owner = github_owner(se_root)
     return [
-        f"se new app: {name} created in {path} from kern's template at {tag} ({commit}), "
+        f"se new app: {name} created in {path} from kern's template at {tag} ({commit[:12]}), "
         f"first commit {first}",
+        f"kern {version} placed in {path / KERN_PLACE}, which git ignores; run uv run python "
+        f"<se>/scripts/se_modules.py sync kern there to keep it at the pin",
         f"Owner's step: create the GitHub repository {owner}/{name}, empty, with a ruleset on main "
         f"that requires the check \"check / battery\", then run: git -C {path} remote add origin "
         f"https://github.com/{owner}/{name}.git && git -C {path} push -u origin main",

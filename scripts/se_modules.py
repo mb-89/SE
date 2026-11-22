@@ -154,12 +154,17 @@ def write_lock(root: Path, name: str, version: str, ref: str) -> None:
     ranged = {m.name for m in load_manifest(root) if m.version}
     entries = {key: value for key, value in read_lock(root).items() if key in ranged}
     entries[name] = (version, ref)
+    (root / LOCK).write_text(lock_text(entries), encoding="utf-8", newline="\n")
+
+
+def lock_text(entries: dict[str, tuple[str, str]]) -> str:
+    """`se.lock`'s text for (version, commit) per module, as sync writes it."""
     lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges in {MANIFEST}.",
              "# Written by sync and update; commit it, never edit it."]
     for key in sorted(entries):
         locked_version, locked_ref = entries[key]
         lines += ["", f"[modules.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']
-    (root / LOCK).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return "\n".join(lines) + "\n"
 
 
 def _read_toml(path: Path) -> dict:
