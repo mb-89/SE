@@ -137,6 +137,12 @@ limit_seconds = 90
 url = "../obs.git"
 version = "^4.0"
 
+# kern, the Go core SE's binary is built on (docs/go-core.md "Pinning it"): its pin is the version
+# components/go.mod requires, so a move of that line is a change of se's inputs (README "Modules").
+[modules.kern]
+url = "../kern.git"
+go = "components/go.mod"
+
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
 [timeline]
