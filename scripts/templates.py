@@ -22,6 +22,8 @@ list of inside terms (below). A template declares:
   inherited fields it drops, a field of the same name replaces the inherited one, and `order`
   lists its final field order (every field once) where the inherited order does not fit;
 - `keep_unknown` (default true): whether `render` keeps the sections the template does not declare;
+- `tags` (optional), the tags of the guidance the template gets; this engine never reads them,
+  `scripts/se_guidance.py` does (docs/guidance.md "Resolution");
 - `[rules]`, each writing rule it uses marked `refuse`, `warn` or `off`; a rule it does not name is
   off. A warn-only rule marked `refuse` does not load;
 - `actors`, the names a step or a check may name (rule `actor`), and `[example]`, a `title` and
@@ -213,7 +215,7 @@ FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_h
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
 TEMPLATE_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "tags"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
