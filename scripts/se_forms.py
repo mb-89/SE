@@ -131,8 +131,8 @@ def sibling(name: str):
 COMPONENTS = (sibling("se_components").Group(
     "forms", "Forms",
     "SE's forms: list names them, draft gives a form's fields, their instructions and their shape, "
-    "check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
-    "to file, and gate is SE's hook's judge of a write through the GitHub tools.",
+    "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
+    "to file.",
     ("list", "draft", "check", "gate")),)
 #: The commands that go through kern where it runs (se_components.routed): all three only read.
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})

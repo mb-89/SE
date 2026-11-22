@@ -1800,8 +1800,8 @@ checkout.
 #### Forms
 
 `components/forms`: SE's forms: list names them, draft gives a form's fields, their instructions and
-their shape, check finds everything SE's filing commands would refuse in a text, or gives the
-Markdown to file, and gate is SE's hook's judge of a write through the GitHub tools.
+their shape, and check finds everything SE's filing commands would refuse in a text, or gives the
+Markdown to file.
 
 | Command | Usage | What it does |
 |---|---|---|
