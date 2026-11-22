@@ -1,15 +1,16 @@
 """Component versions assigned at the landing (README "Component versions").
 
-A work branch that changes kern or the `se` binary states the release kind of each in its field
-report, `**Component kinds:** se patch, kern minor`, and leaves their `release.toml` versions alone;
+A work branch that changes the `se` binary states its release kind in its field report,
+`**Component kinds:** se patch`, and leaves its `release.toml` version alone;
 `work_tickets.py integrate` writes the next version of that kind, from the integration branch's
 versions at that moment, into the landing's merge. A branch that still claims a number in its
 `release.toml` is landed too: the claim gives the kind, and the number is replaced by the next free
-one of that kind.
+one of that kind. The binary's folder is its inputs: for SE `components/`, where `go.mod`'s
+`require kern` is the kern it is built on (se.toml [modules.kern]), so a move of that pin is a
+change of `se`. kern releases from kern's own repository.
 
 Every other file that pins a component's release tag, `PINS`, moves with its number in the same
-merge, so the landing never leaves a pin at the old tag. None does today: kern's application
-template calls the battery's local copy, which names a commit (scripts/se_workflows.py).
+merge, so the landing never leaves a pin at the old tag. None does today.
 
 The logic is pure, `claimed_kind`, `assigned_versions` and `moved_pins`: versions, kinds and file
 texts in, versions and file texts out; `assign` is the wiring that reads them through git's door
@@ -31,7 +32,6 @@ KINDS_PATTERN = re.compile(r"\*\*Component kinds:\*\*[ \t]*([^\n<]*)")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)  # the template's own example is no statement
 # What kern's release guard reads on a work branch (kern/tools/release, KindsVariable).
 ENVIRONMENT = "SE_COMPONENT_KINDS"
-KERN_RELEASE = "kern/release.toml"
 VERSION_LINE = re.compile(r"""^(\s*version\s*=\s*)(["'])[^"'\n]*\2""", re.MULTILINE)
 
 Version = tuple[int, int, int]
@@ -40,7 +40,6 @@ Version = tuple[int, int, int]
 # the checkout root: the landing moves each pin with the number it assigns (`moved_pins`), and
 # tests/test_component_versions.py fails where another file pins a current tag (`unlisted_pins`).
 PINS: dict[str, tuple[str, ...]] = {
-    "kern": (),
     "se": (),
 }
 
@@ -61,7 +60,7 @@ def text(version: Version) -> str:
 
 
 def parse_kinds(value: str) -> dict[str, str]:
-    """`se patch, kern minor` as {component: kind}; refused naming an entry it cannot read."""
+    """`se patch, app minor` as {component: kind}; refused naming an entry it cannot read."""
     kinds: dict[str, str] = {}
     for entry in filter(None, (part.strip() for part in value.split(" — ")[0].split(","))):
         parts = entry.split()
@@ -85,12 +84,12 @@ def kinds_problems(report_body: str) -> list[str]:
         stated_kinds(report_body)
     except VersionError as error:
         return [f"header (above the first section): {error}; write **Component kinds:** "
-                "<component> patch|minor|major, comma-separated, as se patch, kern minor"]
+                "<component> patch|minor|major, comma-separated, as se patch"]
     return []
 
 
 def environment_value(kinds: dict[str, str]) -> str:
-    """The kinds as the release guard reads them: `se=patch,kern=minor`."""
+    """The kinds as the release guard reads them: `app=minor,se=patch`."""
     return ",".join(f"{name}={kind}" for name, kind in sorted(kinds.items()))
 
 
@@ -116,7 +115,7 @@ def assigned_versions(main: dict[str, Version], kinds: dict[str, str]) -> dict[s
 
 @dataclass(frozen=True)
 class Component:
-    name: str     # the binary: kern, or the release.toml's `binary`
+    name: str     # the binary, the release.toml's `binary` (kern where it names none)
     path: str     # its release.toml, relative to the checkout root
     folders: tuple[str, ...]  # what a change to marks the component changed
     tag: str = "{version}"  # its release tag, `{version}` unfilled: the download URL's last part
@@ -201,14 +200,9 @@ def release_tag(content: str) -> str:
 
 
 def components(root: Path, ref: str) -> list[Component]:
-    """The binaries the checkout releases at `ref`: kern where it incubates it
-    (`kern/release.toml`) and the binary se.toml `[binary] release` names (SE's `se`)."""
+    """The binary the checkout releases at `ref`: the one se.toml `[binary] release` names (SE's
+    `se`), its folder its inputs."""
     found: list[Component] = []
-    tag = release_tag
-    kern = show(root, ref, KERN_RELEASE)
-    core = ("kern",) if kern is not None else ()
-    if kern is not None:
-        found.append(Component("kern", KERN_RELEASE, core, tag(kern)))
     manifest = show(root, ref, "se.toml")
     binary = tomllib.loads(manifest).get("binary", {}) if manifest else {}
     release = binary.get("release") if isinstance(binary, dict) else None
@@ -216,7 +210,7 @@ def components(root: Path, ref: str) -> list[Component]:
     if content is not None:
         name = tomllib.loads(content).get("binary") or "kern"
         folder = Path(release).parent.as_posix()
-        found.append(Component(str(name), release, (folder, *core), tag(content)))
+        found.append(Component(str(name), release, (folder,), release_tag(content)))
     return found
 
 
