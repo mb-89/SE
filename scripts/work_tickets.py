@@ -10993,10 +10993,41 @@ def run_capacity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
+    """The queue's GitHub reads as a plan for the session's tools, where gh is not signed in: the
+    pause search first, then the escalations, the delivered pull requests and the startable work
+    issues, each with what keeps an item; the cloud's capacity is unlimited."""
+    where = owner_repo(repo)
+    labels = [] if all_repos else [repository_label(root)]
+    base = integration_branch(root)
+    return Plan(f"queue of {repo}", (
+        pause_step(repo),
+        Step("escalations", "list_issues", {**where, "state": "OPEN",
+                                            "labels": ["escalated", *labels], "perPage": 100},
+             note="each issue listed is an escalation"),
+        Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
+                                                 "state": "open", "base": base, "perPage": 100},
+             note="a pull request is delivered where its description carries a complete field "
+                  "report: save the description to a file and run work_tickets.py field-report "
+                  "--check <file> on it"),
+        Step("ready", "list_issues", {**where, "state": "OPEN", "labels": ["work", "ready", *labels],
+                                      "perPage": 100},
+             note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
+                  | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
+                  "no branch yet and no file ownership an in-progress issue holds"),
+    ), then="Capacity: unlimited (cloud)")
+
+
 @command("queue", "list delivered pull requests (open, to the integration branch, with a complete "
-                  "field report), escalations and startable work issues", *TRACKER_QUERY)
+                  "field report), escalations and startable work issues. Without gh it syncs the "
+                  "checkout and prints its reads as a plan for the session's GitHub tools",
+         *TRACKER_QUERY)
 def run_queue(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
+    if hand_off():
+        sync(root)
+        print(queue_plan(root, repo, args.all_repos).text())
+        return 0
     delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")

@@ -7976,3 +7976,21 @@ def test_the_session_title_command_reports_a_refusal(capsys):
 def test_post_merge_acceptance_needs_a_run_release_or_deployment_on_main(line, post_merge):
     body = BODY.replace("- [ ] Tooling has tests.", line)
     assert (line.strip() in work_tickets.post_merge_acceptance(body)) is post_merge
+
+
+def test_queue_without_gh_syncs_and_prints_its_reads_as_a_plan(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    synced: list[Path] = []
+    monkeypatch.setattr(work_tickets, "sync", lambda root: synced.append(root) or "abc1234")
+
+    assert run(worktree, "queue", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    assert synced == [worktree]
+    assert out.startswith("GitHub plan: queue of git.example/owner/repo\n1. list_issues ")
+    assert '"labels": ["pause"]' in out  # the pause search first
+    assert '"labels": ["escalated", "repo:repo"]' in out
+    assert 'list_pull_requests {"base": "main"' in out and "field-report --check" in out
+    assert '"labels": ["work", "ready", "repo:repo"]' in out
+    assert out.rstrip().endswith("Then: Capacity: unlimited (cloud)")

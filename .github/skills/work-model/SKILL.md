@@ -835,6 +835,10 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     (README [Fleet check](../../../README.md#fleet-check)).
   - `paused` prints its search as a plan, and `route` prints it before its own
     ([Pause](#pause)).
+  - `queue` syncs the checkout and prints its reads as a plan: the pause search, the
+    escalations, the open pull requests to the integration branch (delivered where `field-report
+    --check` passes on the description) and the ready work issues; the cloud's capacity is
+    unlimited.
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
