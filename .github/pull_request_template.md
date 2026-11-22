@@ -41,7 +41,7 @@ requirements they share, and why (one function changed together, or a test-only 
 
 <!-- Follow the [capability-preservation rule](skills/work-model/SKILL.md#rules-for-all-roles).
      Each removed or renamed public item and each newly required field gets its own line
-     "**Breaking:** <item>", which makes the Release kind major
+     "**Breaking:** <item>", which makes the Release kind major (minor below 1.0.0)
      ([work model](skills/work-model/SKILL.md#release-kind)). "None" otherwise.
      Name each deleted or renamed test; a folder moved with its tests to another repository is one
      line "Moved: <folder> to <repository> at <commit>" (with "as <path>" below its root there),

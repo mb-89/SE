@@ -697,14 +697,18 @@ integration branch the one commit it lands as ([Landing on main](#landing-on-mai
 - else the field report's "Release kind", which the
   [work model](src/skills/work-model/SKILL.md#release-kind) owns; a missing or unknown kind is
   refused before anything is merged. The branch prefix only proposes it (`field-report --draft`):
-  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; `major` where the work
-  issue's "Package kind" says "breaking".
+  `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`; where the work issue's
+  "Package kind" says "breaking", the kind a breaking change takes at the project's `version`.
 
 An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
 
 One push bumps once, by its integrations' highest kind: it rewrites only `version`, runs
 `release_build` where set, commits `Release v<new>` with what that regenerated, tags it and pushes
 the tag with the branch.
+
+Below 1.0.0 a major bumps the minor part (0.3.1 to 0.4.0), so no kind reaches 1.0.0: the person
+sets `version = "1.0.0"` by hand, as the statement that the interface is stable, and push tags it
+as it is.
 
 A version without its tag yet is tagged as it is, which is how a project
 starts versioning. Without `version` push releases nothing and says so; a malformed one is refused,
