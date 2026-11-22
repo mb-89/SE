@@ -923,7 +923,8 @@ for example:
     the tools answered it, saved to `<file>`, its comments as the GitHub tools read them now).
   - That check runs after `sync` and before `push`: it fills the report's Branch tip from the
     branch.
-  - Its warning on platform code ([worker](../../agents/worker.md#procedure), "Platform code")
+  - Its warning on platform code (the guidance note
+    [`platform-code-legs`](../../../guidance/pull-request/field-report/platform-code-legs.md))
     reads the work pull request's check runs from kern's relay, for the pull request `stop-check
     --pull` recorded, or from `--check-runs <file>`, the answer of `pull_request_read`
     `get_check_runs`.

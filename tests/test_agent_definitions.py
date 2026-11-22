@@ -1154,3 +1154,11 @@ def test_the_worked_example_draws_its_current_situation_as_a_diagram():
     note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
     situation = note.split("## Current situation\n", 1)[1].split("## The problem", 1)[0]
     assert "```mermaid\n" in situation
+
+
+def test_the_worker_definition_names_the_guidance_notes_of_kern_and_go():
+    worker = normalized(AGENTS / "worker.md")
+    for note in ("flake-at-base", "test-paths-on-windows", "platform-code-legs"):
+        assert f"[`{note}`](../../guidance/pull-request/field-report/{note}.md)" in worker, note
+    for rule in ("go test -count", "filepath.ToSlash", "*_windows.go", "green leg"):
+        assert rule not in worker, rule
