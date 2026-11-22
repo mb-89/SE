@@ -37,8 +37,10 @@ def decision_deck(tmp_path: Path) -> str:
 
 
 def timeline_page(_: Path) -> str:
-    """The Timeline page built from the tracked snapshot of planned days."""
-    return timeline.render(timeline.model(json.loads(TIMELINE_FIXTURE.read_text(encoding="utf-8"))))
+    """The notes obs builds the Timeline from, made from the tracked snapshot of planned days (the page is
+    obs-html's bundle around them)."""
+    files = timeline.vault(json.loads(TIMELINE_FIXTURE.read_text(encoding="utf-8")))
+    return "".join(f"=== {path}\n{text}" for path, text in files.items())
 
 
 def doctor_report(_: Path) -> str:

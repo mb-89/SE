@@ -5,9 +5,9 @@ help = "The pages SE renders: timeline.py builds the Timeline from GitHub, deck.
 
 [commands."timeline.py"]
 usage = "timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT]\n            [--config CONFIG]"
-summary = "Build the Timeline: one static HTML page of the repositories in ..."
+summary = "Build the Timeline: one obs table of the repositories in se.toml ..."
 group = "Render"
-help = "Build the Timeline: one static HTML page of the repositories in se.toml `[timeline]`."
+help = "Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first."
 class = "batch"
 
 [commands."deck.py build"]

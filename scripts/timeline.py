@@ -1,6 +1,6 @@
-"""Build the Timeline: one static HTML page of the repositories in se.toml `[timeline]`.
+"""Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first.
 
-The page builds itself from GitHub, so nobody maintains it: one read, then pure.
+The page builds itself from GitHub, so nobody maintains it: one read, then pure, then obs.
 
 - Read: for each repository, one batched pass on GitHub's GraphQL API, which needs a token
   (`GITHUB_TOKEN`, in the workflow its own): each request carries a page of its issues (open and
@@ -9,47 +9,57 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure.
   network).
 - A repository GitHub refuses to the token (a private one the workflow's token cannot read, a name
   that does not exist) is one gap, not a failed build: the snapshot keeps it under `unreadable`
-  with GitHub's answer, the page shows no lane for it and names it, with that answer, above the
-  map, and the command warns on stderr. Only where no repository can be read does the build fail.
-- Compute: the page comes from the snapshot alone. Pull requests and field reports (label
+  with GitHub's answer, the page has no rows of it and names it, with that answer, above the
+  table, and the command warns on stderr. Only where no repository can be read does the build fail.
+- Compute: the rows come from the snapshot alone. Pull requests and field reports (label
   `field-report`) are left out. An issue goes to exactly one place:
   - closed as not planned or duplicate: hidden;
-  - closed otherwise: Done, on the day (UTC) it closed;
-  - open and `backlogged`: Backlog, a section below the map;
+  - closed otherwise: Done, dated the day (UTC) it closed;
+  - open and `backlogged`: Backlog;
   - open and `in-progress`: Today;
   - open and `ready`: Next;
   - open and `se-person`: Needs you;
   - any other open issue: hidden.
-  An open issue of Today, Next or Needs you whose body plans it (`planned`, a line `Planned:
-  yyyy-mm-dd`) goes to that day instead: after today, a planned day; today or before, Today, marked
-  "late" when the day has passed.
-  An open issue labelled `se-person` and not `backlogged` is marked "needs you" wherever it shows.
-  A release is a tag `v<major>.<minor>.<patch>`, a marker on the day (UTC) it was tagged.
+  An open issue is dated the day it was opened. A release is a tag `v<major>.<minor>.<patch>`, a
+  Done row dated the day (UTC) it was tagged.
+- Status, from state and labels alone: done; waiting for your input (`backlogged`: a backlog idea
+  waits for the person before it is work); needs you (`se-person`); in progress; ready.
+- Mark, what only the build knows: an open issue of Today, Next or Needs you whose body plans it (a
+  line `Planned: yyyy-mm-dd`) is marked `planned <day>`, or `late, planned <day>` once the day has
+  passed; it stays in its place.
 - Ages, a setting off when absent: `[timeline] ages = true` in the `--config` file (se.toml by
   default) also reads each issue's last label events in the same request and keeps `person_since`,
-  when it was last labelled `se-person`; each "needs you" mark then says how long it has waited,
-  in whole UTC calendar days to the read (`needs you, 3 days`, `needs you, 1 day`, `needs you,
-  today`). An issue with no such event, or a snapshot saved without it, keeps the bare mark. Absent
-  or false, the query, the snapshot and the page are those without the setting; any other value is
-  refused.
-- Show: top to bottom, one lane per repository: each past day with an event is one stop per lane
-  (a filled dot, a count and a short label, the release if there was one), then the Today line,
-  each planned day with an issue as one hollow stop per lane, Needs you and Next; tapping a stop lists its issues, tapping an issue shows the first paragraph of its Goal and
-  its link.
+  when it was last labelled `se-person`; the mark of an issue that needs you (`se-person`, not
+  `backlogged`) then says how long it has waited, in whole UTC calendar days to the read (`needs
+  you, 3 days`, `needs you, 1 day`, `needs you, today`). An issue with no such event, or a snapshot
+  saved without it, has no age. Absent or false, the query, the snapshot and the rows are those
+  without the setting; any other value is refused.
+- Show: the rows are obs notes, one per row, under a manifest whose one `base` table lists them in
+  the scrolling layout (`vault`); obs builds the page (`build`). The table groups them by place
+  (Today, Needs you, Next, Backlog, Done), newest first in each, and pages them, `PAGE_SIZE` a page;
+  obs's table filter offers each column's values, the repository and the place among them. Opening
+  a row shows the first paragraph of its Goal and its link. The text above the table names the day
+  of the snapshot; obs refuses a time of day in a page.
+- Live: the table declares obs's live source (`live_source`): when the page opens, it asks GitHub's
+  public REST list of each repository's issues, with no token, for what changed since an hour
+  before the snapshot, and an issue that changed moves to the place and status its state and labels
+  give; obs's line under the table then says "Showing current data". Where GitHub does not answer,
+  the page shows the snapshot. The mark is never read live.
 
-Exit code 0: written, a gap included; 1: GitHub refused the read of every repository; 2: setup error. The README section
-"Documentation" says where the page is published.
+Exit code 0: written, a gap included; 1: GitHub refused the read of every repository, or obs failed;
+2: setup error. The README section "Documentation" says where the page is published.
 """
 
 from __future__ import annotations
 
 import argparse
-import html
 import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import tomllib
 import urllib.error
 import urllib.request
@@ -120,7 +130,7 @@ query($owner: String!, $name: String!, $issues: String, $tags: String,
   repository(owner: $owner, name: $name) {
     issues(first: 100, after: $issues) @include(if: $withIssues) {
       pageInfo { hasNextPage endCursor }
-      nodes { number title url state stateReason closedAt body labels(first: 30) { nodes { name } } }
+      nodes { number title url state stateReason createdAt closedAt body labels(first: 30) { nodes { name } } }
     }
     refs(refPrefix: "refs/tags/", first: 100, after: $tags) @include(if: $withTags) {
       pageInfo { hasNextPage endCursor }
@@ -239,6 +249,7 @@ def read_repository(name: str, post: Poster, ages: bool) -> dict:
             "url": issue["url"],
             "state": issue["state"].lower(),
             "state_reason": (issue.get("stateReason") or "").lower() or None,
+            "created_at": issue.get("createdAt"),
             "closed_at": issue.get("closedAt"),
             "labels": sorted(label["name"] for label in issue["labels"]["nodes"]),
             "body": issue.get("body") or "",
@@ -253,6 +264,10 @@ def read_repository(name: str, post: Poster, ages: bool) -> dict:
 
 
 # --- Compute ----------------------------------------------------------------------------------
+
+# The places an entry goes to, in the table's order, each with the name the page shows: open work
+# first, then the ideas waiting for the person, then what is done.
+PLACES = {"today": "Today", "needs-you": "Needs you", "next": "Next", "backlog": "Backlog", "done": "Done"}
 
 
 def place(issue: dict) -> str | None:
@@ -275,6 +290,22 @@ def place(issue: dict) -> str | None:
 
 def needs_you(issue: dict) -> bool:
     return issue["state"] == "open" and PERSON in issue["labels"] and BACKLOGGED not in issue["labels"]
+
+
+def status(issue: dict) -> str:
+    """What an entry waits for, from its state and labels alone, so the live read derives it again."""
+    labels = set(issue["labels"])
+    if issue["state"] == "closed":
+        return "done"
+    if BACKLOGGED in labels:
+        return "waiting for your input"
+    if PERSON in labels:
+        return "needs you"
+    if IN_PROGRESS in labels:
+        return "in progress"
+    if READY in labels:
+        return "ready"
+    return "open"
 
 
 def goal(body: str) -> str:
@@ -317,135 +348,6 @@ def waiting_days(since: str | None, read_at: str) -> int | None:
     return max(0, (date.fromisoformat(day(read_at)) - date.fromisoformat(day(since))).days)
 
 
-def model(snapshot: dict, ages: bool = False) -> dict:
-    """The page's content from the snapshot alone: lanes, past days, the open places and the backlog.
-
-    With ``ages`` ([timeline] ages) each entry that needs you also gets `waiting_days`.
-    """
-    lanes = list(snapshot["repositories"])
-    today = day(snapshot["read_at"])
-    days: dict[str, dict[str, dict]] = {}
-    ahead: dict[str, dict[str, dict]] = {}
-    places: dict[str, dict[str, list]] = {key: {lane: [] for lane in lanes}
-                                          for key in ("today", "needs-you", "next", "backlog")}
-
-    def stop(date: str, lane: str, into: dict = days) -> dict:
-        return into.setdefault(date, {}).setdefault(lane, {"issues": [], "releases": []})
-
-    for lane, data in snapshot["repositories"].items():
-        for issue in data["issues"]:
-            where = place(issue)
-            if where is None:
-                continue
-            entry = {**issue, "needs_you": needs_you(issue), "goal": goal(issue["body"]), "late": False}
-            if ages and entry["needs_you"]:
-                entry["waiting_days"] = waiting_days(issue.get("person_since"), snapshot["read_at"])
-            plan = planned(issue["body"]) if where in ("today", "next", "needs-you") else None
-            if where == "done":
-                stop(day(issue["closed_at"]), lane)["issues"].append(entry)
-            elif plan and plan > today:
-                stop(plan, lane, ahead)["issues"].append(entry)
-            elif plan:
-                entry["late"] = plan < today
-                places["today"][lane].append(entry)
-            else:
-                places[where][lane].append(entry)
-        for release in data["releases"]:
-            if release.get("published_at"):
-                stop(day(release["published_at"]), lane)["releases"].append(release)
-    for stops in [*days.values(), *ahead.values()]:
-        for entry in stops.values():
-            entry["issues"].sort(key=lambda issue: issue["number"])
-            entry["releases"].sort(key=lambda release: (release["published_at"],
-                                                        [int(part) for part in re.findall(r"\d+", release["tag"])]))
-    for lists in places.values():
-        for entries in lists.values():
-            entries.sort(key=lambda issue: -issue["number"])
-    return {"read_at": snapshot["read_at"], "today": today, "lanes": lanes,
-            "unreadable": dict(snapshot.get("unreadable") or {}),
-            "days": dict(sorted(days.items())), "planned": dict(sorted(ahead.items())), "places": places}
-
-
-# --- Show -------------------------------------------------------------------------------------
-
-STYLE = """
-:root {
-  color-scheme: light dark;
-  --font-content: Georgia, "Times New Roman", serif;
-  --font-interface: Arial, "Helvetica Neue", sans-serif;
-  --canvas: #ffffff; --surface: #fafafa; --text: #000000; --muted: #555555;
-  --border: #bdbdbd; --soft: #eeeeee; --accent: #00508f; --accent-soft: #e3f1ff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas: #1f1f1f; --surface: #292929; --text: #dddddd; --muted: #bdbdbd;
-    --border: #5c5c5c; --soft: #383838; --accent: #8cc8ff; --accent-soft: #15334d;
-  }
-}
-* { box-sizing: border-box; }
-html { background: var(--canvas); color: var(--text); }
-body { margin: 0 auto; max-width: 48rem; padding: 0 1rem 3rem; font: 1rem/1.45 var(--font-content);
-  overflow-wrap: anywhere; }
-h1, h2, .row, .lanes, .meta, .issue > summary, .backlog summary { font-family: var(--font-interface); }
-h1 { font-size: 1.5rem; margin: 1.25rem 0 0.25rem; }
-h2 { font-size: 1.1rem; margin: 2rem 0 0.5rem; }
-.meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem; }
-a { color: var(--accent); }
-.lanes, .row > summary { display: grid; grid-template-columns: 4.5rem repeat(var(--lanes), minmax(0, 1fr));
-  column-gap: 0.5rem; align-items: center; }
-.lanes { position: sticky; top: 0; z-index: 1; background: var(--canvas); border-bottom: 1px solid var(--border);
-  padding: 0.4rem 0; font-size: 0.85rem; font-weight: bold; }
-.row > summary { list-style: none; cursor: pointer; min-height: 2.4rem; }
-.row > summary::-webkit-details-marker { display: none; }
-.when { color: var(--muted); font-size: 0.8rem; }
-.year { font: bold 0.8rem var(--font-interface); color: var(--muted); padding: 0.75rem 0 0.25rem; }
-.lane { position: relative; display: flex; align-items: center; gap: 0.35rem; min-width: 0; min-height: 2.4rem;
-  padding-left: 1.15rem; font-size: 0.85rem; }
-.lane::before { content: ""; position: absolute; left: 0.3rem; top: 0; bottom: 0; border-left: 2px solid var(--border); }
-.dot { position: absolute; left: 0; width: 0.75rem; height: 0.75rem; border-radius: 50%;
-  background: var(--canvas); border: 2px solid var(--text); }
-.release .dot { border-radius: 0.1rem; transform: rotate(45deg); background: var(--text); }
-.count { font-weight: bold; white-space: nowrap; flex-shrink: 0; }
-.label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.release .label { color: var(--text); font-weight: bold; }
-.row[open] > summary, .row > summary:hover { background: var(--soft); }
-.list { padding: 0.25rem 0 0.75rem 5rem; }
-.list h3 { font: bold 0.85rem var(--font-interface); margin: 0.5rem 0 0.25rem; }
-.list ul, .backlog ul { list-style: none; margin: 0; padding: 0; }
-.issue > summary { cursor: pointer; padding: 0.2rem 0; font-size: 0.9rem; }
-.issue p { margin: 0.25rem 0 0.25rem 1rem; }
-.issue .link { margin-left: 1rem; font: 0.85rem var(--font-interface); }
-.mark { display: inline-block; font: bold 0.7rem var(--font-interface); color: var(--accent);
-  border: 1px solid var(--accent); border-radius: 0.25rem; padding: 0 0.25rem; margin-left: 0.25rem; }
-.release-line { font: 0.85rem var(--font-interface); margin: 0.25rem 0; }
-.today > summary { border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
-  background: var(--accent-soft); }
-.today .when, .today .dot { color: var(--accent); border-color: var(--accent); font-weight: bold; }
-.past .dot { background: var(--text); }
-.open .dot { border-style: dashed; }
-.planned .when { font-style: italic; }
-.lane .mark { flex-shrink: 0; margin-left: 0; }
-.needs .dot { border-color: var(--accent); }
-.gap { font: 0.9rem var(--font-interface); border-left: 3px solid var(--accent); padding: 0.25rem 0.5rem;
-  margin: 0 0 1rem; }
-.backlog h3 { font: bold 0.95rem var(--font-interface); margin: 1rem 0 0.25rem; }
-@media (max-width: 30rem) {
-  .lanes, .row > summary { grid-template-columns: 3.9rem repeat(var(--lanes), minmax(0, 1fr)); }
-  .list { padding-left: 0.5rem; }
-}
-"""
-
-SCRIPT = "document.getElementById('today')?.scrollIntoView({block: 'center'});"
-
-
-def esc(text: object) -> str:
-    return html.escape(str(text), quote=True)
-
-
-def lane_name(name: str) -> str:
-    return name.split("/", 1)[1]
-
-
 def needs_you_mark(waiting: int | None) -> str:
     """The "needs you" mark's text: bare without an age, else how long it has waited."""
     if waiting is None:
@@ -455,121 +357,213 @@ def needs_you_mark(waiting: int | None) -> str:
     return f"needs you, {waiting} day" + ("" if waiting == 1 else "s")
 
 
-def marks(issue: dict) -> str:
-    return ((f'<span class="mark">{needs_you_mark(issue.get("waiting_days"))}</span>' if issue["needs_you"] else "")
-            + ('<span class="mark">late</span>' if issue.get("late") else ""))
-
-
-def issue_item(issue: dict) -> str:
-    mark = marks(issue)
-    paragraph = f"<p>{esc(issue['goal'])}</p>" if issue["goal"] else ""
-    return (f'<li><details class="issue"><summary>#{issue["number"]} {esc(issue["title"])}{mark}</summary>'
-            f'{paragraph}<a class="link" href="{esc(issue["url"])}">Open #{issue["number"]} on GitHub</a>'
-            f"</details></li>")
-
-
-def stop_cell(issues: list[dict], releases: list[dict]) -> str:
-    """One lane's stop: a dot, the count and a short label (the release if there was one)."""
-    if not issues and not releases:
-        return '<span class="lane"></span>'
-    if releases:
-        label = releases[-1]["tag"] + (f" +{len(releases) - 1}" if len(releases) > 1 else "")
-    else:
-        label = issues[-1]["title"]
-    marked = ' needs' if any(issue["needs_you"] for issue in issues) else ""
-    late = any(issue.get("late") for issue in issues)
-    kind = " release" if releases else ""
-    count = f'<span class="count">{len(issues)}</span>' if issues else ""
-    mark = '<span class="mark">late</span>' if late else ""
-    return (f'<span class="lane{kind}{marked}{" late" if late else ""}"><span class="dot"></span>{count}'
-            f'{mark}<span class="label">{esc(label)}</span></span>')
-
-
-def issue_list(lanes: list[str], stops: dict[str, dict]) -> str:
+def mark(issue: dict, where: str, today: str, ages: bool, read_at: str) -> str:
+    """What the build alone knows of an open entry: its planned day ("planned", or "late" once passed)
+    and, with ``ages``, how long it has needed you. Never read live, so it never moves a row."""
     parts = []
-    for lane in lanes:
-        entry = stops.get(lane)
-        if not entry or not (entry["issues"] or entry["releases"]):
-            continue
-        parts.append(f"<h3>{esc(lane_name(lane))}</h3>")
-        for release in entry["releases"]:
-            parts.append(f'<p class="release-line">Release <a href="{esc(release["url"])}">{esc(release["tag"])}</a></p>')
-        if entry["issues"]:
-            parts.append("<ul>" + "".join(issue_item(issue) for issue in entry["issues"]) + "</ul>")
-    return '<div class="list">' + "".join(parts) + "</div>"
+    plan = planned(issue["body"]) if where in ("today", "next", "needs-you") else None
+    if plan:
+        parts.append(f"late, planned {plan}" if plan < today else f"planned {plan}")
+    if ages and needs_you(issue):
+        waited = waiting_days(issue.get("person_since"), read_at)
+        if waited is not None:
+            parts.append(needs_you_mark(waited))
+    return "; ".join(parts)
 
 
-def row(css: str, when: str, lanes: list[str], stops: dict[str, dict], ident: str = "") -> str:
-    cells = "".join(stop_cell(stops.get(lane, {}).get("issues", []), stops.get(lane, {}).get("releases", []))
-                    for lane in lanes)
-    anchor = f' id="{ident}"' if ident else ""
-    return (f'<details class="row {css}"{anchor}><summary><span class="when">{when}</span>{cells}</summary>'
-            f"{issue_list(lanes, stops)}</details>")
+def lane_name(name: str) -> str:
+    return name.split("/", 1)[1]
+
+
+def version(tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
+
+
+def rows(snapshot: dict, ages: bool = False) -> list[dict]:
+    """The table's rows from the snapshot alone, in its order: by place (`PLACES`), newest first in
+    each, the newest by its date (the day an issue closed or was opened, a release was tagged), then
+    the higher number or version. A hidden issue has no row.
+
+    Each row holds its columns (repository, place, date, number, subject, status, mark), what the live
+    read compares (state, state_reason, labels), its note's `path`, its `url` and its `goal`.
+    """
+    read_at = snapshot["read_at"]
+    today = day(read_at)
+    found = []
+    for name, data in snapshot["repositories"].items():
+        lane = lane_name(name)
+        for issue in data["issues"]:
+            where = place(issue)
+            if where is None:
+                continue
+            stamp = issue["closed_at"] if where == "done" else issue.get("created_at")
+            found.append(({
+                "repository": lane, "number": issue["number"], "place": PLACES[where],
+                "date": day(stamp) if stamp else "", "subject": issue["title"], "status": status(issue),
+                "mark": mark(issue, where, today, ages, read_at), "state": issue["state"],
+                "state_reason": issue.get("state_reason"), "labels": sorted(issue["labels"]),
+                "path": f"entries/{lane}-{issue['number']}.md", "url": issue["url"], "goal": goal(issue["body"]),
+            }, (0, (issue["number"],))))
+        for release in data["releases"]:
+            if not release.get("published_at"):
+                continue
+            found.append(({
+                "repository": lane, "number": release["tag"], "place": PLACES["done"],
+                "date": day(release["published_at"]), "subject": f"Release {release['tag']}", "status": "done",
+                "mark": "", "state": "closed", "state_reason": None, "labels": [],
+                "path": f"entries/{lane}-{release['tag']}.md", "url": release["url"], "goal": "",
+            }, (1, version(release["tag"]))))
+    order = list(PLACES.values())
+    found.sort(key=lambda pair: (pair[0]["date"], pair[1]), reverse=True)
+    found.sort(key=lambda pair: order.index(pair[0]["place"]))
+    return [row for row, _ in found]
+
+
+# --- Show -------------------------------------------------------------------------------------
+
+# The columns, in the table's order, with the names the page shows.
+COLUMNS = {"repository": "Repo", "place": "Place", "date": "Date", "number": "Item",
+           "subject": "Title", "status": "Status", "mark": "Mark"}
+PAGE_SIZE = 20
+# The live read (obs's live data: adapters/html/spec/generic-tables.md, Current data): GitHub's
+# public REST list of a repository's issues, which needs no token and answers any page's origin.
+ISSUES_URL = ("https://api.github.com/repos/{name}/issues"
+              "?state=all&since={{since}}&sort=updated&direction=asc&per_page=100")
+
+
+def live_source(names: list[str]) -> dict:
+    """The Base's `obsHtml.liveSource` for the repositories ``names`` (each with at least one row).
+
+    Its `derive` repeats `place` and `status` for an issue as GitHub's REST list gives it, so obs's
+    check proves every saved row; the mark is the build's alone. An issue a read changes or adds
+    moves to its place in the open page; a pull request is left out.
+    """
+    hidden = [{"where": [{"field": "labels", "equals": FIELD_REPORT}], "value": "hidden"},
+              *({"where": [{"field": "state_reason", "equals": reason}], "value": "hidden"} for reason in HIDDEN_REASONS)]
+    return {
+        "name": "GitHub",
+        "key": ["repository", "number"],
+        "notePath": "entries/{repository}-{number}.md",
+        "fields": {"number": "number", "subject": "title", "state": {"path": "state", "lowercase": True},
+                   "state_reason": "state_reason", "labels": "labels[].name", "pullRequest": "pull_request.url"},
+        "derive": {
+            "place": [*hidden,
+                      {"where": [{"field": "state", "equals": "closed"}], "value": PLACES["done"]},
+                      {"where": [{"field": "labels", "equals": BACKLOGGED}], "value": PLACES["backlog"]},
+                      {"where": [{"field": "labels", "equals": IN_PROGRESS}], "value": PLACES["today"]},
+                      {"where": [{"field": "labels", "equals": READY}], "value": PLACES["next"]},
+                      {"where": [{"field": "labels", "equals": PERSON}], "value": PLACES["needs-you"]},
+                      {"value": "hidden"}],
+            "status": [{"where": [{"field": "state", "equals": "closed"}], "value": "done"},
+                       {"where": [{"field": "labels", "equals": BACKLOGGED}], "value": "waiting for your input"},
+                       {"where": [{"field": "labels", "equals": PERSON}], "value": "needs you"},
+                       {"where": [{"field": "labels", "equals": IN_PROGRESS}], "value": "in progress"},
+                       {"where": [{"field": "labels", "equals": READY}], "value": "ready"},
+                       {"value": "open"}],
+            "date": [{"where": [{"field": "state", "equals": "closed"}], "path": "closed_at"}, {"path": "created_at"}],
+        },
+        "bodyPath": "body",
+        "exclude": [{"field": "pullRequest", "exists": True}],
+        "changes": [{"provider": "web", "next": "link", "maxPages": 3, "requests": [
+            {"set": {"repository": lane_name(name)}, "url": ISSUES_URL.format(name=name)} for name in names]}],
+    }
+
+
+def base(names: list[str]) -> dict:
+    """The one table: every entry, grouped by place in `PLACES` order, newest first, paged by obs."""
+    definition = {
+        "filters": {"and": ["place != null", 'place != "hidden"']},
+        "properties": {key: {"displayName": name} for key, name in COLUMNS.items()},
+        "views": [{"type": "table", "name": "Timeline", "order": list(COLUMNS),
+                   "groupBy": {"property": "place", "direction": "ASC"},
+                   "sort": [{"property": "date", "direction": "DESC"}, {"property": "rank", "direction": "ASC"}],
+                   "obsHtml": {"pageSize": PAGE_SIZE, "groupOrder": list(PLACES.values())}}],
+    }
+    if names:
+        definition["obsHtml"] = {"liveSource": live_source(names)}
+    return definition
+
+
+def text(value: object) -> str:
+    """``value`` as Markdown text that shows as written: every ASCII punctuation mark escaped, so issue
+    text never becomes a link, a tag, markup or HTML."""
+    return re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", " ".join(str(value).split()))
+
+
+def frontmatter(fields: dict) -> str:
+    """YAML frontmatter, each value as JSON (which YAML reads as it is); an empty value is left out."""
+    lines = [f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in fields.items()
+             if value not in (None, "", [])]
+    return "---\n" + "\n".join(lines) + "\n---\n"
 
 
 def short_date(iso: str) -> str:
-    date = datetime.fromisoformat(iso)
-    return f"{date.day} {date.strftime('%b')}"
+    when = date.fromisoformat(iso)
+    return f"{when.day} {when.strftime('%b')} {when.year}"
 
 
-def render(page: dict) -> str:
-    """The Timeline as one HTML file."""
-    lanes = page["lanes"]
-    parts = [f'<div class="lanes"><span></span>{"".join(f"<span>{esc(lane_name(lane))}</span>" for lane in lanes)}</div>']
-    year = None
+def vault(snapshot: dict, ages: bool = False) -> dict[str, str]:
+    """The Timeline as obs notes, by vault path: the manifest with the table, and one note per row."""
+    table = rows(snapshot, ages)
+    names = [name for name in snapshot["repositories"] if any(row["repository"] == lane_name(name) for row in table)]
+    lanes = [lane_name(name) for name in snapshot["repositories"]]
+    shown = ", ".join(lanes[:-1]) + f" and {lanes[-1]}" if len(lanes) > 1 else "".join(lanes)
+    gaps = "".join(f"Not shown: {text(name)} could not be read ({text(reason)}).\n\n"
+                   for name, reason in (snapshot.get("unreadable") or {}).items())
+    live = ("When the page opens, it asks GitHub for what changed since; where GitHub answers, the "
+            "line under the table says it shows current data. " if names else "")
+    files = {"manifest.md": (
+        frontmatter({"title": "Timeline"}).replace("\n---\n", "\nobsHtml:\n  layout: scrolling\n  heading: compact\n"
+                                                   "  pages: [{page: abstract}]\n---\n")
+        + f"\nThe issues and releases of {text(shown)}, newest first in each place, from the snapshot "
+          f"read on {short_date(day(snapshot['read_at']))}. {live}A backlog idea waits for your input "
+          "before it is work.\n\n" + gaps
+        + "```base\n" + json.dumps(base(names), indent=1) + "\n```\n")}
+    for rank, row in enumerate(table):
+        link = f"[Open {text(row['number'] if isinstance(row['number'], str) else '#' + str(row['number']))} on GitHub](<{row['url']}>)"
+        files[row["path"]] = (frontmatter({key: row[key] for key in (*COLUMNS, "state", "state_reason", "labels")}
+                                          | {"rank": rank})
+                              + "\n" + (text(row["goal"]) + "\n\n" if row["goal"] else "") + link + "\n")
+    return files
 
-    def dated(css: str, days: dict[str, dict]) -> None:
-        nonlocal year
-        for date, stops in days.items():
-            if date[:4] != year:
-                year = date[:4]
-                parts.append(f'<div class="year">{year}</div>')
-            parts.append(row(css, short_date(date), lanes, stops))
 
-    dated("past", page["days"])
+# obs's core configuration for the build: issue text is data, so the long-paragraph lint reads it at
+# its widest, and what obs still warns of is printed without failing the build.
+CORE_CONFIG = {
+    "input": {"manifestFilename": "manifest.md", "projectConfigFilename": "cfg.json",
+              "longParagraphs": {"warningLines": 30, "lineCharacters": 200}},
+    "execution": {"commandTimeoutSeconds": 15},
+}
 
-    def open_row(key: str, title: str, css: str, ident: str = "") -> str:
-        stops = {lane: {"issues": issues, "releases": []} for lane, issues in page["places"][key].items()}
-        return row(f"open {css}", title, lanes, stops, ident=ident)
 
-    parts.append(open_row("today", "Today", "today", "today"))
-    dated("open planned", page["planned"])
-    parts.append(open_row("needs-you", "Needs you", "needs"))
-    parts.append(open_row("next", "Next", "next"))
-    backlog = []
-    for lane in lanes:
-        issues = page["places"]["backlog"][lane]
-        if issues:
-            backlog.append(f"<h3>{esc(lane_name(lane))} ({len(issues)})</h3><ul>"
-                           + "".join(issue_item(issue) for issue in issues) + "</ul>")
-    if not backlog:
-        backlog.append('<p class="meta">Nothing is backlogged.</p>')
-    read_at = page["read_at"].replace("T", " ").replace("+00:00", " UTC")
-    gaps = "".join(f'<p class="gap">Not shown: {esc(name)} could not be read ({esc(reason)}).</p>\n'
-                   for name, reason in page.get("unreadable", {}).items())
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Timeline</title>
-<style>{STYLE}</style>
-</head>
-<body style="--lanes: {len(lanes)}">
-<h1>Timeline</h1>
-<p class="meta">Built from the issues and releases of {", ".join(esc(lane) for lane in lanes)} at {esc(read_at)}.
-Tap a day to list its issues, an issue for its goal.</p>
-{gaps}<main class="map">
-{chr(10).join(parts)}
-</main>
-<section class="backlog">
-<h2>Backlog</h2>
-{"".join(backlog)}
-</section>
-<script>{SCRIPT}</script>
-</body>
-</html>
-"""
+def build(files: dict[str, str], destination: Path, read_at: str) -> int:
+    """Build the notes ``files`` into ``destination`` with obs, as made at ``read_at`` (its generation
+    time, so a live read asks for what changed since the snapshot). 0 built, 1 obs failed."""
+    build_docs = sibling("build_docs")
+    obs = build_docs.obs_dir()
+    environment = build_docs.child_environment()
+    environment["SOURCE_DATE_EPOCH"] = str(int(datetime.fromisoformat(read_at.replace("Z", "+00:00")).timestamp()))
+    with tempfile.TemporaryDirectory() as scratch:
+        folder = Path(scratch) / "timeline"
+        for path, content in files.items():
+            (folder / path).parent.mkdir(parents=True, exist_ok=True)
+            (folder / path).write_text(content, encoding="utf-8")
+        config = Path(scratch) / "obs-config.json"
+        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html",
+             "--adapter-config", str(obs / "adapters.json"), "--config", str(config),
+             "--source", str(folder / "manifest.md"), "--destination", str(destination.resolve())],
+            cwd=ROOT, capture_output=True, text=True, env=environment)
+        output = (result.stdout + result.stderr).replace(str(folder), "<timeline notes>")
+    for line in output.splitlines():
+        if "warning" in line.casefold():
+            print(f"timeline: obs {line}", file=sys.stderr)
+    if result.returncode:
+        print(f"timeline: obs-document failed with exit code {result.returncode}:\n{output}", file=sys.stderr)
+        return 1
+    return 0
 
 
 # --- Command ----------------------------------------------------------------------------------
@@ -635,14 +629,13 @@ def main(argv: list[str] | None = None, post: Poster | None = None, now: datetim
             return 1
     if args.save_snapshot:
         args.save_snapshot.write_text(json.dumps(snapshot, indent=1), encoding="utf-8")
-    args.destination.parent.mkdir(parents=True, exist_ok=True)
-    page = model(snapshot, ages=ages)
-    args.destination.write_text(render(page), encoding="utf-8")
-    for name, reason in page["unreadable"].items():
+    code = build(vault(snapshot, ages=ages), args.destination, snapshot["read_at"])
+    if code:
+        return code
+    for name, reason in (snapshot.get("unreadable") or {}).items():
         print(f"timeline: warning: {name} could not be read, so the page names it as a gap: {reason}",
               file=sys.stderr)
-    done = sum(len(stop["issues"]) for stops in page["days"].values() for stop in stops.values())
-    print(f"timeline: wrote {args.destination} ({len(page['days'])} days, {done} done issues)")
+    print(f"timeline: wrote {args.destination} ({len(rows(snapshot, ages))} rows)")
     return 0
 
 
