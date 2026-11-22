@@ -5,7 +5,10 @@ machine, account or internal host. The rule is owned by AGENTS.md, section "Publ
 Scans tracked file names and contents (binary files as bytes), commit messages and author and
 committer identities against the public term list (public-check-terms.toml, beside this script)
 and the source's local list (.public-check.local at its root, never checked in), which adds the
-source's own terms and switches public entries off for it. Output names the location and the
+source's own terms and switches public entries off for it; its `remote:<remote name> <regex>` line
+is a term only of a push to that remote (--remote, which the pre-push hook and work_tickets.py
+push pass), whose gate is every commit that remote does not hold yet, and a refusal there names
+the commit whose tree it read. Output names the location and the
 pattern label only, never the matched text. A tracked local list, and the retired machine-level
 list (~/.se/private-terms.txt, SE_PRIVATE_TERMS), stop the check with their remedy.
 
@@ -331,11 +334,15 @@ class LocalList:
     terms: list[Pattern] = field(default_factory=list)
     off: set[str] = field(default_factory=set)
     allow: list[AllowEntry] = field(default_factory=list)
+    remotes: dict[int, str] = field(default_factory=dict)  # a `remote:` term's line: its remote
 
 
 LOCAL_OFF = re.compile(r"off:(\S+)")
 LOCAL_ALLOW = "allow:"
-LOCAL_FORMS = (f"'<regex>', 'off:<public label>  # reason' or '{LOCAL_ALLOW_FORM}  # reason'")
+LOCAL_REMOTE = re.compile(r"remote:(\S*)\s*")
+LOCAL_REMOTE_FORM = "remote:<remote name> <regex>"
+LOCAL_FORMS = (f"'<regex>', '{LOCAL_REMOTE_FORM}', 'off:<public label>  # reason' or "
+               f"'{LOCAL_ALLOW_FORM}  # reason'")
 UNTRACK_REMEDY = (
     f"run git rm --cached {LOCAL_FILE}, then ignore it (scripts/setup.sh or setup.ps1 adds it to "
     ".gitignore)"
@@ -369,9 +376,11 @@ def check_untracked(root: Path, rev: str | None) -> None:
                          f"{UNTRACK_REMEDY}")
 
 
-def load_local(root: Path) -> LocalList | None:
+def load_local(root: Path, remote: str | None = None) -> LocalList | None:
     """The local list at the source's root, or None where it has none. Hits name only its line
-    number, never the term."""
+    number, never the term. A `remote:<remote name> <regex>` line is a term only of a push to
+    that remote (`remote`, None where the check names no destination), and so is the
+    `allow:` line of its term; every other term applies to every check."""
     path = root / LOCAL_FILE
     if not path.is_file():
         return None
@@ -394,6 +403,13 @@ def load_local(root: Path) -> LocalList | None:
         if text.startswith(LOCAL_ALLOW):
             local.allow.append(local_allow(number, text[len(LOCAL_ALLOW):], public))
             continue
+        scoped = LOCAL_REMOTE.match(text)
+        if scoped:
+            text = text[scoped.end():]
+            if not scoped.group(1) or not text:
+                raise SetupError(f"{LOCAL_FILE}:{number}: write '{LOCAL_REMOTE_FORM}', the "
+                                 "remote as git names it")
+            local.remotes[number] = scoped.group(1)
         try:
             regex = re.compile(text, re.IGNORECASE)
         except re.error as error:
@@ -407,7 +423,19 @@ def load_local(root: Path) -> LocalList | None:
             raise SetupError(f"{LOCAL_FILE}:{entry.line}: {entry.label.split(':')[1]} is no term's "
                              f"line; write '{LOCAL_ALLOW_FORM}  # reason', <n> the line of one of "
                              "this list's terms")
+    other = {f"local-term:{number}" for number, name in local.remotes.items() if name != remote}
+    local.terms = [pattern for pattern in local.terms if pattern.label not in other]
+    local.allow = [entry for entry in local.allow if entry.label not in other]
     return local
+
+
+def unknown_remotes(root: Path, local: LocalList) -> list[str]:
+    """A warning for each `remote:` line whose remote this checkout lacks, by line only: its term
+    stops no push, so a misspelt name would let it through to the remote meant."""
+    names = set(git(root, "remote").decode().split())
+    return [f"{LOCAL_FILE}:{number}: no remote of this checkout is named {name!r}, so its term "
+            "applies to no push" for number, name in sorted(local.remotes.items())
+            if name not in names]
 
 
 def local_allow(number: int, body: str, public: set[str]) -> AllowEntry:
@@ -959,8 +987,11 @@ def se_modules():
 
 def record_verdict(args: argparse.Namespace, passed: bool) -> None:
     """A check of `--rev` records its verdict on that tree (scripts/verdicts.py), which the push to
-    the integration branch needs; one of `--built` records none."""
+    the integration branch needs; one of `--built` records none, nor one for a push to another
+    remote than origin, as its `remote:` terms are not origin's."""
     if not args.rev or args.no_history or args.built is not None:
+        return
+    if args.remote not in (None, "origin"):
         return
     root = Path(args.repo).resolve()
     try:
@@ -1051,6 +1082,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--digests", action="store_true",
                         help="print the digest of every public-label hit in a tracked file, for "
                              f"a '{DIGEST_FORM}' entry in {ALLOW_FILE}; never of a local term")
+    parser.add_argument("--remote", metavar="NAME",
+                        help="the remote a push goes to: the local list's 'remote:NAME <regex>' "
+                             "lines apply too, and without --range or --push the gate is the "
+                             "commits of --rev that remote does not hold yet "
+                             "('<rev> --not --remotes=NAME')")
     parser.add_argument("--branch", help="with --push: the branch pushed")
     parser.add_argument("--default-branch", help="with --push: the repository's default branch")
     return parser.parse_args(argv)
@@ -1068,16 +1104,20 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
     if args.push is not None:
         args.revisions = push_range(root, args.push, args.rev, args.branch, args.default_branch)
         print(f"public-check: gating {args.revisions}, the commits pushed to {args.branch}")
+    elif args.remote is not None and not args.revisions:
+        args.revisions = f"{args.rev} --not --remotes={args.remote}"
+        print(f"public-check: gating {args.revisions}, the commits {args.remote} does not hold yet")
     check_machine_list()
     check_untracked(root, args.rev)
     report = Report()
-    local = load_local(root)
+    local = load_local(root, args.remote)
     has_local = local is not None
     if local is None:
         local = LocalList()
         report.warnings.append(f"no local list ({LOCAL_FILE}); only the public list was checked")
     else:
         report.off = sorted(local.off)
+        report.warnings += unknown_remotes(root, local)
     patterns = [p for p in GENERIC_PATTERNS if p.label not in local.off] + local.terms
     if args.message_file is not None:
         scan_message_file(root, args.message_file, patterns, report)
@@ -1092,7 +1132,12 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
         allow = load_allow(root)
         files = worktree_files(root)
     allow += local.allow
+    found = len(report.hits)
     scan_files(files, patterns, allow, report, args.digests)
+    if args.remote is not None:  # a push's refusal names the commit whose tree it read
+        tree = git(root, "rev-parse", "--verify", f"{args.rev}^{{commit}}").decode().strip()
+        for hit in report.hits[found:]:
+            hit.location = f"commit {tree[:12]} {hit.location}"
     if args.revisions and args.history:
         raise SetupError("--range and --history exclude each other: a gate or a full check")
     revisions = args.revisions or args.history or ("" if args.staged else args.rev or "HEAD")
@@ -1106,7 +1151,10 @@ def check(args: argparse.Namespace, commit: str | None) -> Report:
 
 
 def check_push_options(args: argparse.Namespace) -> None:
-    """--push needs --rev, --branch and --default-branch, and takes no other history."""
+    """--push needs --rev, --branch and --default-branch, and takes no other history; --remote
+    needs --rev, the commit pushed."""
+    if args.remote is not None and not args.rev:
+        raise SetupError("--remote needs --rev: it names the commit pushed to that remote")
     if args.push is None:
         for option, value in (("--branch", args.branch), ("--default-branch", args.default_branch)):
             if value is not None:

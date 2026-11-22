@@ -689,3 +689,88 @@ def test_the_integration_branch_is_pushed_whatever_work_issue_the_checkout_recor
     assert work_tickets.main(["push", "main", "--worktree", str(checkout)]) == 0
 
     assert origin_main(checkout) == git(checkout, "rev-parse", "HEAD")
+
+
+TERM = "example-hush"  # the made-up term of the remote tests' local lists; no output may print it
+
+
+def with_a_mirror(checkout: Path, tmp_path: Path, local_list: str) -> str:
+    """A second made-up remote `mirror` beside origin, the local list `local_list` (ignored, as
+    setup ignores it), and branch `topic` with one commit whose file and message hold TERM;
+    se's hooks on. Returns that commit."""
+    fake_git.init(tmp_path / "mirror.git", "--bare", "-b", "main")
+    git(checkout, "remote", "add", "mirror", str(tmp_path / "mirror.git"))
+    git(checkout, "fetch", "-q", "mirror")
+    (checkout / ".git" / "info").mkdir(exist_ok=True)
+    (checkout / ".git" / "info" / "exclude").write_text(".public-check.local\n", encoding="utf-8")
+    (checkout / ".public-check.local").write_text(local_list, encoding="utf-8")
+    git(checkout, "switch", "-q", "-c", "topic")
+    (checkout / "topic.txt").write_text(f"built for {TERM}Corp\n", encoding="utf-8")
+    git(checkout, "add", "-A")
+    git(checkout, "commit", "-q", "-m", f"Port the {TERM} tool")
+    work_issue(checkout, "topic")
+    git(checkout, "config", "core.hooksPath", str(PROJECT / ".githooks"))
+    return git(checkout, "rev-parse", "HEAD")
+
+
+def push_topic(checkout: Path, remote: str, capfd) -> tuple[int, str]:
+    pushed = git_door.run("push", "-q", remote, "topic", root=checkout)
+    captured = capfd.readouterr()
+    return pushed.returncode, pushed.stdout + pushed.stderr + captured.out + captured.err
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the hooks run git in a child
+@pytest.mark.parametrize("pusher", ["push", "hook"])
+def test_a_remote_line_stops_a_push_to_its_remote_and_lets_the_commit_go_to_the_other(
+        checkout, tmp_path, capfd, pusher):
+    """`remote:mirror <term>` applies to pushes to mirror only: the commit reaches origin, and
+    once origin holds it, it is still checked on its way to mirror, which does not; the refusal
+    names the commit and the local list's line, never the term."""
+    head = with_a_mirror(checkout, tmp_path, f"# made up\nremote:mirror {TERM}\\w*\n")
+
+    if pusher == "push":
+        assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0, capfd.readouterr()
+    else:
+        assert push_topic(checkout, "origin", capfd)[0] == 0
+    assert git(tmp_path / "origin.git", "rev-parse", "topic") == head
+    code, output = push_topic(checkout, "mirror", capfd)
+
+    assert code != 0
+    assert f"commit {head[:12]} topic.txt:1:11: local-term:2" in output
+    assert f"commit {head[:12]} message:1: local-term:2" in output
+    assert TERM not in output.lower()
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/topic",
+                        root=tmp_path / "mirror.git").returncode != 0
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the hooks run git in a child
+@pytest.mark.parametrize("remote", ["origin", "mirror"])
+def test_a_line_without_remote_stops_the_push_to_every_remote(checkout, tmp_path, capfd, remote):
+    with_a_mirror(checkout, tmp_path, f"{TERM}\\w*\n")
+
+    code, output = push_topic(checkout, remote, capfd)
+
+    assert code != 0
+    assert "topic.txt:1:11: local-term:1" in output and TERM not in output.lower()
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # its child process runs git
+def test_push_gates_its_branch_for_origin_with_the_remote_lines_for_origin(checkout, tmp_path,
+                                                                        capsys):
+    head = with_a_mirror(checkout, tmp_path, f"remote:origin {TERM}\\w*\n")
+
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 1
+
+    error = capsys.readouterr().err
+    assert f"commit {head[:12]} topic.txt:1:11: local-term:1" in error and TERM not in error.lower()
+
+
+@pytest.mark.parametrize(("remote", "recorded"), [(None, True), ("origin", True), ("mirror", False)])
+def test_only_a_check_for_origin_records_the_verdict_origin_pushes_need(checkout, remote, recorded):
+    """A refusal for another remote's `remote:` term would otherwise stand as origin's verdict."""
+    public_check = work_tickets.sibling("public_check")
+    commit(checkout, name="file.txt", text="clean\n")
+    public_check.main(["--repo", str(checkout), "--rev", "HEAD", "--range", "HEAD~1..HEAD",
+                       *(["--remote", remote] if remote else [])])
+    tree = git(checkout, "rev-parse", "HEAD^{tree}")
+    assert (verdicts.verdict(checkout, "public-check", tree) is not None) is recorded

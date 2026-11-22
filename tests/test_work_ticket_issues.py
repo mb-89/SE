@@ -5681,7 +5681,8 @@ def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeyp
     ))
     assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
     assert calls == []
-    assert gate[0][-4:] == ["--rev", "topic", "--range", "topic --not --remotes"]
+    assert gate[0][-6:] == ["--rev", "topic", "--remote", "origin",
+                            "--range", "topic --not --remotes=origin"]
     error = capsys.readouterr().err
     assert "Public check failed" in error
     assert error.rstrip().endswith(
