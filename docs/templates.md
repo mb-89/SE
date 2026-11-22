@@ -42,8 +42,9 @@ A template is one Markdown note in a template repository, `templates/<name>.md`:
 - A template whose document is data only (an interface) has an empty body; its fields are the
   whole template.
 
-The field kinds, the rules with their severities, `extends` and the selection order carry over
-from the TOML engine of today as they are; the engine's docstring keeps owning them.
+The field kinds, the rules with their severities, `extends` and the selection order carried over
+from the TOML files the notes replaced, as they were; the engine's docstring owns them, and the
+front matter's YAML subset with them.
 
 ## The schema
 
@@ -167,28 +168,30 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twelve TOML templates, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's twelve template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
-### SE's TOML templates
+### SE's templates
 
-| File today | Template | Kind | Owner |
+SE's eleven templates are notes; the term list stays a TOML list until the guidance packages land.
+
+| File | Template | Kind | Owner |
 |---|---|---|---|
-| `templates/ticket.toml` | `ticket` | document | SE |
-| `templates/work.toml` | `work`, `extends` ticket | document | SE |
-| `templates/decision.toml` | `decision`, whose options node is the `pugh` block | document | SE |
-| `templates/field-report.toml` | `field-report` | document | SE |
-| `templates/landing.toml` | `landing` | document | SE |
-| `templates/housekeeping.toml` | `housekeeping` | document | SE |
-| `templates/merge-message.toml` | `merge-message` | interface | SE |
-| `templates/review.toml` | `review`: prose, then its data node | document | SE |
-| `templates/retro.toml` | `retro`: its judged node | document | SE |
-| `templates/overhaul.toml` | `overhaul`: its judged node | document | SE |
-| `templates/routed.toml` | `routed`: the routing section of an outside issue | block | SE |
+| `templates/ticket.md` | `ticket` | document | SE |
+| `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
+| `templates/field-report.md` | `field-report` | document | SE |
+| `templates/landing.md` | `landing` | document | SE |
+| `templates/housekeeping.md` | `housekeeping` | document | SE |
+| `templates/merge-message.md` | `merge-message` | interface | SE |
+| `templates/review.md` | `review`: prose, then its data node | document | SE |
+| `templates/retro.md` | `retro`: its judged node | document | SE |
+| `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
+| `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
-A TOML template that is an adapter today (`checker` and `[adapter]`) stays one: its template names the
-check its code already owns, and the move only renames it.
+An adapter (`checker` and `adapter`) stays one: its template names the check its code already
+owns.
 
 SE's free texts become interface templates: the worker's delivery notice, an escalation, the
 handover, a design note's outline.

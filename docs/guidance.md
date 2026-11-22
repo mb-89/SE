@@ -13,8 +13,8 @@ skips what it may skip, so the guidance that matters must stand in the agent's w
 The template system that uses guidance is designed beside this one, in
 [docs/templates.md](templates.md). This note relies on one fact of it only: a template carries
 tags and calls "collect the guidance for this template"
-([Tags and guidance](templates.md#tags-and-guidance)). Until the template notes exist, SE's TOML
-templates (README [Templates](../README.md#templates)) are the templates: each gains its tags.
+([Tags and guidance](templates.md#tags-and-guidance)). SE's templates are its template notes,
+`templates/<name>.md` (README [Templates](../README.md#templates)), each with its tags.
 
 ## Words
 

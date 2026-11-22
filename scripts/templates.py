@@ -6,35 +6,55 @@ where se.toml `[templates] enforce` is on (README "Templates"); this module owns
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
-**Template files.** One TOML file per template, `templates/<name>.toml`; `templates/terms.toml` is no template but the
-list of inside terms (below). A template declares:
+**Template files.** One Markdown note per template, `templates/<name>.md` (docs/templates.md "The
+template"); `templates/terms.toml` is no template but the list of inside terms (below). A note
+opens with its front matter between `---` lines, then its skeleton.
 
-- `name`, `reader` (`owner` or `fleet`: who reads what it shapes) and `says`, one line;
-- `[applies] actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
+The front matter is YAML in the subset `front_data` reads, so every YAML reader reads it alike:
+`key: value` lines and `- ` list items, nested by indenting with spaces; `#` starts a comment
+line; a value is JSON where it opens with `"`, `[` or `{` (a quoted string, a list, a mapping, on
+one line), a single-quoted string, `true`, `false`, a whole number or plain words. Plain words
+another reader takes for something else (`off`, `yes`, `null`, `1.5`), or that hold `: ` or ` #`,
+are refused until quoted. It declares:
+
+- `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
+  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
+  words, the template's one link to guidance, which `scripts/se_guidance.py` reads
+  (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
+  shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
+  inherited;
+- `applies.actions`, the actions it shapes (ACTIONS: `issue.create`, `issue.edit`, `pr.create`,
   `pr.edit`, `pr.merge`, `comment.create`, `comment.edit`, `deck.build`, `file.write`): required,
   so a template without it does not load; `paths`, the globs of the files a `file.write` template claims,
   relative to the project root (`*` and `?` within a folder, `**` across folders), which goes only
-  with `actions = ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
+  with `actions: ["file.write"]` and which `file.write` needs; `order`, the conditions `marker`, `marker_pattern` (a regular
   expression a whole line matches) and `title`, and the filters `labels` (every one present) and
-  `base = "integration"` (a pull request into the integration branch); `fallback` (selection,
+  `base: integration` (a pull request into the integration branch); `fallback` (selection,
   below);
-- `extends`, another template whose fields, rules, actors and `[applies]` it inherits; `remove` names
+- `extends`, another template whose fields, rules, actors and `applies` it inherits; `remove` names
   inherited fields it drops, a field of the same name replaces the inherited one, and `order`
   lists its final field order (every field once) where the inherited order does not fit;
 - `keep_unknown` (default true): whether `render` keeps the sections the template does not declare;
-- `tags` (optional), the tags of the guidance the template gets; this engine never reads them,
-  `scripts/se_guidance.py` does (docs/guidance.md "Resolution");
-- `[rules]`, each writing rule it uses marked `refuse`, `warn` or `off`; a rule it does not name is
+- `rules`, each writing rule it uses marked `refuse`, `warn` or `"off"`; a rule it does not name is
   off. A warn-only rule marked `refuse` does not load;
-- `actors`, the names a step or a check may name (rule `actor`), and `[example]`, a `title` and
+- `actors`, the names a step or a check may name (rule `actor`), and `example`, a `title` and
   `fields` that pass the template, which the tests render and parse back;
-- `[scope]` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
+- `scope` (optional): `after`, a marker line, `section`, the heading under it, and `level`, the
   heading level of its fields. Only that section is read; the text above the marker is data, never
-  checked or read into a field, and kept as it is.
+  checked or read into a field, and kept as it is;
+- `fields`, a list of the fields (below), in order.
 
-**Adapters.** A template without `[[fields]]` is an adapter: a text SE already writes and already
-checks elsewhere. It names that check, `checker = "<module>:<function>"` (a script beside this
-one), and the engine calls it instead of field rules of its own; `[adapter]` says how:
+**The skeleton**, the note's body, is the empty document: one section per field that has one (not
+the title, not a label line), in the order `fields` lists them, each its heading at the template's
+level (`##`, or the scope's) and one comment alone, `<!-- <field>: <instruction> -->`. The section
+owns the field's `heading` and its `says`, the instruction, so the front matter repeats neither; a
+title or label field keeps its `says` in the front matter. An inherited field's section stays in
+the note it is declared in. Outside the sections the body holds nothing but blank lines; an
+adapter's body is empty.
+
+**Adapters.** A template without `fields` is an adapter: a text SE already writes and already
+checks elsewhere. It names that check, `checker: <module>:<function>` (a script beside this
+one), and the engine calls it instead of field rules of its own; `adapter` says how:
 
 - what the checker gets: the body, or `extract` (`"<module>:<function>"`, called with the body and
   `extract_with`), or `json_after` (the data of the last fenced block after the last line that is
@@ -48,16 +68,16 @@ one), and the engine calls it instead of field rules of its own; `[adapter]` say
 - what it answers (`result`): `problems` (a list of texts, each a refusal), `raises` (its error is
   the refusal) or `truth` (false refuses with `refusal`);
 - besides or instead: `title_rule`, a `"<module>:<NAME>"` pattern the title must match from its
-  start, and `[[adapter.lines]]`, each a `pattern` a whole line (with `first`, the first line)
+  start, and `lines`, each a `pattern` a whole line (with `first`, the first line)
   must match, and what it `says`.
 
 The engine never adds its template marker to an adapter's body: `render` gives it back as it
 stands, and its findings name the field `body`.
 
-**Fields**, `[[fields]]`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
+**Fields**, the items of `fields`: `name`, `kind`, `heading`, `required`, `none_ok` (the value "None"
 fills it), `says` (what belongs there, the fix's wording and the draft's comment), `exact_heading`
 (only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
-back as it stands). Besides: `source = "title"` (the field is the issue's title, never in the body),
+back as it stands). Besides: `source: title` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
 `numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
@@ -92,7 +112,7 @@ marker, its fields as `## ` headings below the title.
 `<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
 alone, after the scope's marker), then `## ` headings. The marker says what the engine knows:
 the repository `se` for SE's own templates and `project` for any other `templates/` or
-`--templates` folder, the version `0.0.0`, as no template declares one yet, and
+`--templates` folder, the template's `version`, and
 `sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
 by a NUL byte (`Template.marker_line`). Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
@@ -104,13 +124,13 @@ path=)`), in this order; for `file.write` the order below it:
 1. Free where `repo` is given and is not in `home`, the repositories SE writes to (origin and
    se.toml `[outside]`, `home_repositories`).
 2. The allowed templates: those that name the action, whose `labels` the text carries and, with
-   `base = "integration"`, whose pull request goes into the integration branch.
+   `base: integration`, whose pull request goes into the integration branch.
 3. A marker only narrows the choice within the allowed set: a body's own
    template marker naming an allowed template wins. Such a line naming a template outside the
    allowed set, or an adapter's marker of an adapter outside it, is a refused finding (rule
    `template`), and selection goes on without it. SE's other markers (`se:fleet`, `se:handled` in a
    comment, `se:open-points`, `se:refs-*`) name no template and select nothing on their own.
-4. By `[applies] order` (then name), the first allowed template with conditions that all hold
+4. By `applies.order` (then name), the first allowed template with conditions that all hold
    (`marker`, `marker_pattern`: the body has that line; `title`: the title matches).
 5. The first allowed template without conditions, or with `fallback = true`.
 6. None: free. For a pull request into the integration branch this tries `landing` and
@@ -122,7 +142,7 @@ For a file, `path` (relative to the project root) selects:
 1. The allowed templates: the `file.write` templates whose `paths` match it; none, and the file is free.
 2. The front matter's `template: <name>` naming an allowed template chooses it, as a body's template marker
    does; one naming another template is a refused finding (rule `template`).
-3. By `[applies] order` (then name), the first allowed template whose conditions all hold, matched
+3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
    template: <name>`.
@@ -139,7 +159,7 @@ Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnam
 without a name) and `title-shape`.
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
-`origin/<integration branch>` through `git_door` where that ref holds templates, else from the working
+`origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
 tree; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
 `check(template, document)` gives `Finding`s; `select(...)` gives a `Selection`, its template (None: free)
 and its findings; `verdict(templates, action, body, title, ...)` both at once; `draft(template)`;
@@ -171,8 +191,9 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
 `first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
-(`schema`). `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all three, reads
+(`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
+alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
+adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
 """
 
@@ -191,6 +212,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
+TEMPLATE_SUFFIX = ".md"  # a template is the note templates/<name>.md
 
 FLEET_MARKER = "<!-- se:fleet -->"
 TEMPLATE_MARKER = "<!-- se:template {repository}/{name} {version} {digest} -->"
@@ -198,7 +220,6 @@ TEMPLATE_MARKER_PATTERN = re.compile(r"^[ \t]*<!-- se:template [\w.-]+(?:/[\w.-]
                                      r"sha256:[0-9a-f]+ -->[ \t]*$", re.MULTILINE)
 SE_REPOSITORY = "se"  # the repository of SE's own templates in the marker
 PROJECT_REPOSITORY = "project"  # that of a project's own, or a --templates folder's
-UNVERSIONED = "0.0.0"  # the version a template that declares none is written with
 
 ISSUE_ACTIONS = ("issue.create", "issue.edit")
 FILE_ACTION = "file.write"
@@ -208,14 +229,14 @@ READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
-ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no [rules]
+ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
               "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
-TEMPLATE_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "tags"}
+TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
@@ -321,7 +342,9 @@ class Template:
     adapter: dict = dataclass_field(default_factory=dict)
     paths: tuple[str, ...] = ()
     repository: str = SE_REPOSITORY
-    version: str = UNVERSIONED
+    version: str = ""
+    kind: str = "document"
+    tags: tuple[str, ...] = ()
     digest: str = ""
 
     @property
@@ -395,13 +418,12 @@ class Document:
 
 def _template_files(root: Path, tree: bool, folder: Path | None = None) -> dict[str, str]:
     """`templates/<file>` -> its text, at origin's integration branch where that holds templates, else
-    from the working tree; with `folder`, the `*.toml` files of that folder alone."""
+    from the working tree; with `folder`, the template notes and the term list of that folder alone."""
     if folder is not None:
         if not folder.is_dir():
             raise TemplateError(f"templates: --templates {folder} is no folder; name the folder that holds "
                             "the templates")
-        return {path.name: path.read_text(encoding="utf-8")
-                for path in sorted(folder.glob("*.toml"))}
+        return _folder_files(folder)
     if not tree:
         files = _git_files(root)
         if files:
@@ -409,7 +431,17 @@ def _template_files(root: Path, tree: bool, folder: Path | None = None) -> dict[
     folder = root / TEMPLATES
     if not folder.is_dir():
         raise TemplateError(f"templates: {folder} does not exist; run from an SE checkout")
-    return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.glob("*.toml"))}
+    return _folder_files(folder)
+
+
+def _template_file(name: str) -> bool:
+    """Whether a file of `templates/` is read: a template note, or the term list."""
+    return name.endswith(TEMPLATE_SUFFIX) or name == TERMS_FILE
+
+
+def _folder_files(folder: Path) -> dict[str, str]:
+    return {path.name: path.read_text(encoding="utf-8") for path in sorted(folder.iterdir())
+            if path.is_file() and _template_file(path.name)}
 
 
 def _integration_branch(root: Path) -> str:
@@ -422,6 +454,8 @@ def _integration_branch(root: Path) -> str:
 
 
 def _git_files(root: Path) -> dict[str, str]:
+    """`templates/<file>` -> its text at origin's integration branch; none where that ref holds no
+    template note (no `templates/`, or a term list alone)."""
     door = _sibling("git_door")
     ref = f"origin/{_integration_branch(root)}"
     listed = door.run("ls-tree", "-r", "--name-only", ref, "--", TEMPLATES, root=root)
@@ -429,11 +463,11 @@ def _git_files(root: Path) -> dict[str, str]:
         return {}
     files = {}
     for path in listed.stdout.splitlines():
-        if path.startswith(f"{TEMPLATES}/") and path.endswith(".toml") and path.count("/") == 1:
+        if path.startswith(f"{TEMPLATES}/") and path.count("/") == 1 and _template_file(path.split("/", 1)[1]):
             shown = door.run("show", f"{ref}:{path}", root=root)
             if shown.returncode == 0:
                 files[path.split("/", 1)[1]] = shown.stdout
-    return files
+    return files if any(name.endswith(TEMPLATE_SUFFIX) for name in files) else {}
 
 
 def _sibling(name: str):
@@ -444,6 +478,190 @@ def _sibling(name: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+
+#: A front matter line: its key and what follows it.
+YAML_KEY = re.compile(r'^("(?:[^"\\]|\\.)*"|[A-Za-z_][\w.-]*):(?:[ \t]+(.*?))?[ \t]*$')
+YAML_INT = re.compile(r"^-?(?:0|[1-9][0-9]*)$")
+#: Plain words another YAML reader takes for something else than a string: quote them.
+YAML_AMBIGUOUS = re.compile(r"^(?:null|~|y|n|yes|no|on|off|true|false|-?[0-9][0-9_]*\.[0-9_]*"
+                            r"|[-+]?\.(?:inf|nan)|0[xo][0-9a-f]+)$", re.IGNORECASE)
+YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+#: A section of a template's skeleton: its heading, then the comment `<!-- <field>: <instruction> -->`.
+INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*(.*?)[ \t\r\n]*-->[ \t\r\n]*\Z",
+                         re.DOTALL)
+SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+
+
+def _yaml_lines(text: str, where: str, first: int) -> list[tuple[int, int, str]]:
+    """The front matter's lines that hold data, as (line number, indentation, text)."""
+    lines = []
+    for number, line in enumerate(text.splitlines(), first):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "\t" in line[:len(line) - len(line.lstrip())]:
+            raise TemplateError(f"{where}:{number}: front matter is indented with a tab; indent with spaces")
+        lines.append((number, len(line) - len(line.lstrip(" ")), stripped))
+    return lines
+
+
+def _yaml_scalar(text: str, where: str) -> object:
+    """One value of the front matter: JSON where it opens with `"`, `[` or `{`, a single-quoted
+    string, `true`, `false`, a whole number, or a plain string."""
+    if text[:1] in "\"[{":
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as error:
+            raise TemplateError(f"{where}: {text} is no JSON value ({error.msg}); write a quoted "
+                                "string, a list or a mapping as JSON") from error
+    if text[:1] == "'":
+        if len(text) < 2 or not text.endswith("'") or "'" in text[1:-1].replace("''", ""):
+            raise TemplateError(f"{where}: {text} is no single-quoted string; double a quote inside it")
+        return text[1:-1].replace("''", "'")
+    if text in ("true", "false"):
+        return text == "true"
+    if YAML_INT.match(text):
+        return int(text)
+    if (YAML_AMBIGUOUS.match(text) or text[0] in YAML_INDICATORS or ": " in text or " #" in text
+            or text.endswith(":")):
+        raise TemplateError(f"{where}: {text} is a plain value another YAML reader may read "
+                            "otherwise; quote it as a JSON string")
+    return text
+
+
+def _yaml_block(lines: list[tuple[int, int, str]], index: int, indent: int,
+                where: str) -> tuple[object, int]:
+    """The mapping or the list that starts at `lines[index]`, at `indent`, and where it ends."""
+    number, own, text = lines[index]
+    if own != indent:
+        raise TemplateError(f"{where}:{number}: indented {own} spaces where {indent} are expected")
+    if text == "-" or text.startswith("- "):
+        items: list[object] = []
+        while index < len(lines) and lines[index][1] == indent and (
+                lines[index][2] == "-" or lines[index][2].startswith("- ")):
+            number, _, text = lines[index]
+            rest = text[1:].strip()
+            if not rest:
+                raise TemplateError(f"{where}:{number}: an empty list item; write its value after `- `")
+            if YAML_KEY.match(rest) and rest[:1] not in "[{":
+                lines = [*lines[:index], (number, indent + 2, rest), *lines[index + 1:]]
+                value, index = _yaml_block(lines, index, indent + 2, where)
+                items.append(value)
+                continue
+            items.append(_yaml_scalar(rest, f"{where}:{number}"))
+            index += 1
+        if index < len(lines) and lines[index][1] > indent:
+            raise TemplateError(f"{where}:{lines[index][0]}: indented deeper than its list's items")
+        return items, index
+    mapping: dict[str, object] = {}
+    while index < len(lines) and lines[index][1] == indent:
+        number, _, text = lines[index]
+        match = YAML_KEY.match(text)
+        if match is None or text.startswith("- "):
+            raise TemplateError(f"{where}:{number}: {text} is no `key: value` line")
+        key = json.loads(match.group(1)) if match.group(1).startswith('"') else match.group(1)
+        if key in mapping:
+            raise TemplateError(f"{where}:{number}: {key} is given twice")
+        if match.group(2):
+            mapping[key] = _yaml_scalar(match.group(2), f"{where}:{number}")
+            index += 1
+            if index < len(lines) and lines[index][1] > indent:
+                raise TemplateError(f"{where}:{lines[index][0]}: indented below a key that has its value")
+            continue
+        if index + 1 >= len(lines) or lines[index + 1][1] <= indent:
+            raise TemplateError(f"{where}:{number}: {key} has no value; write it after the colon, "
+                                "or indent its mapping or list below it")
+        mapping[key], index = _yaml_block(lines, index + 1, lines[index + 1][1], where)
+    if index < len(lines) and lines[index][1] > indent:
+        raise TemplateError(f"{where}:{lines[index][0]}: indented deeper than the keys above it")
+    return mapping, index
+
+
+def front_data(text: str, where: str, first: int = 2) -> dict[str, object]:
+    """The front matter `text` (without its `---` lines) as data, in the YAML subset the module
+    docstring names (Template files); `first` is its first line's number in the file."""
+    lines = _yaml_lines(text, where, first)
+    if not lines:
+        return {}
+    data, index = _yaml_block(lines, 0, 0, where)
+    if not isinstance(data, dict):
+        raise TemplateError(f"{where}:{lines[0][0]}: the front matter is a list; write `key: value` lines")
+    if index < len(lines):
+        raise TemplateError(f"{where}:{lines[index][0]}: {lines[index][2]} is outside the front matter's keys")
+    return data
+
+
+def note_data(text: str, where: str) -> dict[str, object]:
+    """A template note as the data `_build` reads: its front matter, each field of its skeleton
+    given its `heading` and its `says` from its section (the module docstring: Template files)."""
+    text = text.replace("\r\n", "\n")
+    if not text.startswith("---\n"):
+        raise TemplateError(f"{where}: a template opens with its front matter between `---` lines")
+    end = text.find("\n---\n", 3)
+    if end < 0 and text.endswith("\n---"):
+        end = len(text) - 4
+    if end < 0:
+        raise TemplateError(f"{where}: the front matter has no closing `---` line")
+    data = front_data(text[4:end + 1], where)
+    body = text[end + 5:]
+    first = text.count("\n", 0, end + 5) + 1
+    fields = data.get("fields", [])
+    if not isinstance(fields, list) or not all(isinstance(entry, dict) for entry in fields):
+        raise TemplateError(f"{where}: fields is a list of mappings, one per field")
+    scope = data.get("scope", {})
+    level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
+    sections = _skeleton(body, where, first, level)
+    in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")]
+    for entry in in_body:
+        for key in ("heading", "says"):
+            if key in entry:
+                raise TemplateError(f"{where}: field {entry.get('name', '?')} has its section in the "
+                                    f"skeleton, which owns its {key}; take {key} out of the front matter")
+    named = [entry.get("name") for entry in in_body]
+    listed = [name for name, _, _ in sections]
+    if listed != named:
+        raise TemplateError(f"{where}: the skeleton's sections are {', '.join(listed) or 'none'}; they "
+                            f"are one per field with a section, in the front matter's order: "
+                            f"{', '.join(map(str, named)) or 'none'}")
+    for entry, (_, heading, says) in zip(in_body, sections):
+        entry["heading"], entry["says"] = heading, says
+    return data
+
+
+def _skeleton(body: str, where: str, first: int, level: int) -> list[tuple[str, str, str]]:
+    """The skeleton's sections as (field, heading, instruction); outside them only blank lines."""
+    sections: list[tuple[str, str, str, int]] = []
+    current: list[str] | None = None
+    heading_line = 0
+    texts: list[list[str]] = []
+    hashes = "#" * level
+    for number, line in enumerate(body.splitlines(), first):
+        match = HEADING.match(line)
+        if match and len(match.group(1)) == level:
+            current = []
+            texts.append(current)
+            sections.append(("", match.group(2), "", number))
+            continue
+        if match:
+            raise TemplateError(f"{where}:{number}: {line} is no section of the skeleton; its sections "
+                                f"are `{hashes} <heading>` lines")
+        if current is None:
+            if line.strip():
+                raise TemplateError(f"{where}:{number}: text before the skeleton's first section; "
+                                    "a comment on the template goes in the front matter, after `#`")
+            continue
+        current.append(line)
+    made = []
+    for (_, heading, _, number), lines in zip(sections, texts):
+        instruction = INSTRUCTION.match("\n".join(lines))
+        if instruction is None:
+            raise TemplateError(f"{where}:{number}: section {heading} holds one comment alone, "
+                                "`<!-- <field>: <instruction> -->`")
+        made.append((instruction.group(1), heading, " ".join(instruction.group(2).split())))
+    return [(name, heading, says) for name, heading, says in made]
 
 
 def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -> dict[str, Template]:
@@ -457,18 +675,19 @@ def load(root: Path = ROOT, *, tree: bool = False, folder: Path | None = None) -
     terms: tuple[Term, ...] = ()
     for name, text in files.items():
         where = str(folder / name) if folder is not None else f"{TEMPLATES}/{name}"
-        try:
-            data = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as error:
-            raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
         if name == TERMS_FILE:
+            try:
+                data = tomllib.loads(text)
+            except tomllib.TOMLDecodeError as error:
+                raise TemplateError(f"{where}: not TOML ({error}); fix the file") from error
             terms = tuple(Term(str(item["term"]), str(item.get("plain", "")))
                           for item in data.get("terms", []))
             continue
+        data = note_data(text, where)
         template_name = data.get("name")
-        if template_name != name.removesuffix(".toml"):
-            raise TemplateError(f"{where}: name = {template_name!r} must be the file's name, "
-                            f"{name.removesuffix('.toml')!r}")
+        if template_name != name.removesuffix(TEMPLATE_SUFFIX):
+            raise TemplateError(f"{where}: name: {template_name!r} must be the file's name, "
+                            f"{name.removesuffix(TEMPLATE_SUFFIX)!r}")
         data["path"] = where
         raw[template_name] = data
         texts[template_name] = text
@@ -504,18 +723,27 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         parent = _build(base, raw, terms, (*seen, name))
     applies = data.get("applies")
     if isinstance(applies, dict) and set(applies) - APPLIES_KEYS:
-        raise TemplateError(f"{where}: [applies] has unknown keys "
+        raise TemplateError(f"{where}: applies has unknown keys "
                         f"{', '.join(sorted(set(applies) - APPLIES_KEYS))}; the keys are "
                         f"{', '.join(sorted(APPLIES_KEYS))}")
     if not isinstance(applies, dict) or not applies.get("actions"):
         if parent is None:
-            raise TemplateError(f"{where}: [applies] actions is required; name the actions the template "
+            raise TemplateError(f"{where}: applies.actions is required; name the actions the template "
                             f"shapes ({', '.join(ACTIONS)})")
         applies = {"actions": list(parent.actions), **(applies or {})}
     actions = tuple(applies["actions"])
     for action in actions:
         if action not in ACTIONS:
             raise TemplateError(f"{where}: action {action!r} is none of {', '.join(ACTIONS)}")
+    version, kind, tags = data.get("version"), data.get("kind"), data.get("tags")
+    if not isinstance(version, str) or not SEMVER.match(version):
+        raise TemplateError(f"{where}: version is {version!r}; write the template's semantic version, "
+                            "such as 1.2.0")
+    if kind not in TEMPLATE_KINDS:
+        raise TemplateError(f"{where}: kind is {kind!r}; one of {', '.join(TEMPLATE_KINDS)}")
+    if not isinstance(tags, list) or not all(isinstance(tag, str) and tag.strip() for tag in tags):
+        raise TemplateError(f"{where}: tags is a list of words, the template's link to guidance, "
+                            "such as [\"issue\"]")
     reader = data.get("reader", parent.reader if parent else "")
     if reader not in READERS:
         raise TemplateError(f"{where}: reader {reader!r} is none of {', '.join(READERS)}")
@@ -549,27 +777,27 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
     adapter = _adapter(data, where, fields, parent)
     base_branch = str(applies.get("base", parent.base if parent else ""))
     if base_branch not in ("", "integration"):
-        raise TemplateError(f"{where}: [applies] base is {base_branch!r}; the one base is "
+        raise TemplateError(f"{where}: applies.base is {base_branch!r}; the one base is "
                         "\"integration\", the integration branch")
     paths = applies.get("paths", list(parent.paths) if parent else [])
     if not isinstance(paths, list) or not all(isinstance(glob, str) and glob.strip()
                                               for glob in paths):
-        raise TemplateError(f"{where}: [applies] paths is a list of globs relative to the project "
+        raise TemplateError(f"{where}: applies.paths is a list of globs relative to the project "
                         "root, such as \"book/*/steps/*.md\"")
     if paths and set(actions) != {FILE_ACTION}:
-        raise TemplateError(f"{where}: [applies] paths claims files and goes only with "
-                        f"actions = [\"{FILE_ACTION}\"]; take out paths, or the other actions")
+        raise TemplateError(f"{where}: applies.paths claims files and goes only with "
+                        f"actions: [\"{FILE_ACTION}\"]; take out paths, or the other actions")
     if FILE_ACTION in actions and not paths:
-        raise TemplateError(f"{where}: action {FILE_ACTION} needs [applies] paths, the globs of the "
+        raise TemplateError(f"{where}: action {FILE_ACTION} needs applies.paths, the globs of the "
                         "files the template claims")
     marker_pattern = str(applies.get("marker_pattern", ""))
     try:
         re.compile(marker_pattern)
     except re.error as error:
-        raise TemplateError(f"{where}: [applies] marker_pattern is no regular expression "
+        raise TemplateError(f"{where}: applies.marker_pattern is no regular expression "
                         f"({error})") from error
     return Template(
-        name=name, reader=reader, says=str(data.get("says", parent.says if parent else "")),
+        name=name, version=version, kind=kind, tags=tuple(tags), reader=reader, says=str(data.get("says", parent.says if parent else "")),
         actions=actions, fields=tuple(fields), rules=rules,
         order=int(applies.get("order", parent.order if parent else 100)),
         marker=str(applies.get("marker", "")), title_pattern=str(applies.get("title", "")),
@@ -607,19 +835,19 @@ def glob_pattern(glob: str) -> re.Pattern:
 
 
 def _adapter(data: dict, where: str, fields: list[Field], parent: Template | None) -> dict:
-    """An adapter's `[adapter]` table, checked as far as it can be without importing its
+    """An adapter's `adapter` mapping, checked as far as it can be without importing its
     checker; a template with fields takes none."""
     adapter = data.get("adapter", {})
     if fields:
         if "checker" in data or adapter:
-            raise TemplateError(f"{where}: a template with fields takes no checker or [adapter]; an "
-                            "adapter is a template without [[fields]]")
+            raise TemplateError(f"{where}: a template with fields takes no checker or adapter; an "
+                            "adapter is a template without fields")
         return {}
     if parent is not None:
         raise TemplateError(f"{where}: an adapter extends no template")
     if not isinstance(adapter, dict) or set(adapter) - ADAPTER_KEYS:
         extra = sorted(set(adapter) - ADAPTER_KEYS) if isinstance(adapter, dict) else ["?"]
-        raise TemplateError(f"{where}: [adapter] has unknown keys {', '.join(extra)}; the keys are "
+        raise TemplateError(f"{where}: adapter has unknown keys {', '.join(extra)}; the keys are "
                         f"{', '.join(sorted(ADAPTER_KEYS))} (scripts/templates.py's docstring)")
     references = [data.get("checker", ""), adapter.get("extract", ""), adapter.get("when", ""),
                   adapter.get("title_rule", "")]
@@ -628,23 +856,23 @@ def _adapter(data: dict, where: str, fields: list[Field], parent: Template | Non
             raise TemplateError(f"{where}: {reference!r} is no \"<module>:<name>\" of a script "
                             "beside scripts/templates.py")
     if adapter.get("result", "problems") not in RESULTS:
-        raise TemplateError(f"{where}: [adapter] result is {adapter.get('result')!r}; one of "
+        raise TemplateError(f"{where}: adapter.result is {adapter.get('result')!r}; one of "
                         f"{', '.join(RESULTS)}")
     if adapter.get("missing", REFUSE) not in (REFUSE, WARN, "pass"):
-        raise TemplateError(f"{where}: [adapter] missing is {adapter.get('missing')!r}; one of "
+        raise TemplateError(f"{where}: adapter.missing is {adapter.get('missing')!r}; one of "
                         "refuse, warn, pass")
     if adapter.get("result") == "truth" and not adapter.get("refusal"):
-        raise TemplateError(f"{where}: [adapter] result \"truth\" needs its refusal, the fix a "
+        raise TemplateError(f"{where}: adapter.result \"truth\" needs its refusal, the fix a "
                         "false answer gives")
     for line in adapter.get("lines", []):
         if set(line) - {"pattern", "first", "says"} or not line.get("pattern") or \
                 not line.get("says"):
-            raise TemplateError(f"{where}: each [[adapter.lines]] has a pattern and says, and may "
+            raise TemplateError(f"{where}: each item of adapter.lines has a pattern and says, and may "
                             "set first")
         try:
             re.compile(line["pattern"])
         except re.error as error:
-            raise TemplateError(f"{where}: [[adapter.lines]] pattern {line['pattern']!r} is no "
+            raise TemplateError(f"{where}: adapter.lines pattern {line['pattern']!r} is no "
                             f"regular expression ({error})") from error
     return dict(adapter)
 
@@ -1657,7 +1885,7 @@ def _dropped(value: object, drop: dict) -> object:
 
 def adapter_findings(template: Template, document: Document) -> list[Finding]:
     """An adapter's findings: its lines, its title rule, then its checker's answer, called as
-    `[adapter]` says (the module docstring: adapters)."""
+    `adapter` says (the module docstring: adapters)."""
     spec, body = template.adapter, document.source
     title = document.fields.get("title")
     found: list[Finding] = []
@@ -1693,7 +1921,7 @@ def adapter_findings(template: Template, document: Document) -> list[Finding]:
             value = body
     except _MISCONFIGURED as error:
         raise TemplateError(f"{template.path}: its reading failed ({type(error).__name__}: {error}); "
-                        "fix [adapter]") from error
+                        "fix its adapter") from error
     except Exception as error:  # the extractor's own refusal, such as a QueueError
         refuse("checker", str(error))
         return found
@@ -1719,7 +1947,7 @@ def adapter_findings(template: Template, document: Document) -> list[Finding]:
         answer = checker(*arguments, **keywords)
     except _MISCONFIGURED as error:
         raise TemplateError(f"{template.path}: {template.checker} failed ({type(error).__name__}: {error}); "
-                        "fix [adapter]") from error
+                        "fix its adapter") from error
     except Exception as error:  # the checker's refusal
         if result != "raises":
             raise
@@ -2148,7 +2376,7 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, list")
+    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, schema, list")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -2169,13 +2397,15 @@ def main(arguments: list[str] | None = None) -> int:
     drafting = commands.add_parser("draft", help="print the empty template")
     drafting.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     drafting.add_argument("--json", action="store_true")
+    schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
+    schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
-    for command in (checking, drafting):
+    for command in (checking, drafting, schemas):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")
         command.add_argument("--root", type=Path, help="the project root of --path's globs "
                              "(default: the git checkout holding it, else the working directory)")
-    for command in (checking, drafting, listing):
+    for command in (checking, drafting, schemas, listing):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -2190,14 +2420,15 @@ def main(arguments: list[str] | None = None) -> int:
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
-        if options.command == "draft":
+        if options.command in ("draft", "schema"):
+            command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
-                raise TemplateError("templates.py draft: name a template, or give --path to take the template "
+                raise TemplateError(f"{command}: name a template, or give --path to take the template "
                                 "that claims the file, not both")
             if options.root is not None and options.path is None:
-                raise TemplateError("templates.py draft: --root is the root of --path; give --path")
+                raise TemplateError(f"{command}: --root is the root of --path; give --path")
             if options.path is not None:
-                relative, chosen = _claimed(templates, options, "templates.py draft")
+                relative, chosen = _claimed(templates, options, command)
                 if chosen.template is None:
                     if chosen.findings:
                         print("\n".join(_capped(list(chosen.findings))))
@@ -2207,8 +2438,11 @@ def main(arguments: list[str] | None = None) -> int:
                 template = chosen.template
             else:
                 template = _template(templates, options.template)
-            print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template), end=""
-                  if not options.json else "\n")
+            if options.command == "schema":
+                print(json.dumps(schema(template), indent=2))
+            else:
+                print(json.dumps(draft_fields(template), indent=2) if options.json else draft(template),
+                      end="" if not options.json else "\n")
             return 0
         template, rendered, document, met = _check(templates, options)
     except TemplateError as error:
