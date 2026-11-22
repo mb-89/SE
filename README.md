@@ -604,8 +604,9 @@ tree is placed in the root's `.se/modules/<name>`. A release whose `se.toml` lis
 - One version per name: a name the tree reaches twice is one component, and each host's pin must
   admit its release; where they admit a common one the newest is taken, else `sync` fails naming
   both paths and both pins.
-- A name already on the path is that component: an entry `se` in kern's list is the root when SE
-  is the root, and its pin is checked against the root's version, not resolved again.
+- A name already on the path is that component: an entry that names a host above it on the path,
+  the root included, is that host itself, and its pin is checked against that host's version, not
+  resolved again.
 
 ### Project settings
 
