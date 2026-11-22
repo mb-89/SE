@@ -391,7 +391,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 |---|---|---|
 | `status` | whether the core runs, and its health | kern |
 | `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due` and `fleet/findings` | `components/cmd/se` `Greeting` |
-| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
+| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
 | `forms` | `list`, `draft`, `check` | `components/forms` |
@@ -960,6 +960,22 @@ the doors.
 `work_tickets.py settings-check` compares it with what the live doors read and prints each
 difference in one line. It is advisory: it exits 0 unless `--strict` is given, and nothing runs it
 on its own.
+
+### Source parity
+
+The same tree may be held by more than one remote or checkout
+([More than one remote](src/skills/work-model/SKILL.md#more-than-one-remote)).
+`work_tickets.py parity` compares two commits' trees, such as `origin/main` and
+`mirror/main`, path by path, by mode and object id, and only reads (`git ls-tree`).
+
+- **The lockfile rule:** a tracked file named `se.lock` or `uv.lock` is a dependency lockfile at any
+  depth (`kern/template/uv.lock` too), since it records what resolved, which may differ where the
+  source does not. Its content, presence and absence pass, and the command names it on one line,
+  `lockfiles excluded:`. `work_tickets.py` `PARITY_LOCKFILES` owns the list; nothing else is excluded.
+- **Every other path fails:** a path that differs is listed as `changed:`, or `only in <ref>:` for
+  the side that holds it. Generated outputs (the layouts, `components/*/component.toml`) compare
+  like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
+  without (`tests/test_parity.py`).
 
 ### Retro due
 
@@ -1818,6 +1834,7 @@ settings checks and the generated docs.
 | `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build) and the command reference with its declarations (docs); a second run writes nothing |
 | `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
+| `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
 | `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues |
 | `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list startable ready work issues |
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |

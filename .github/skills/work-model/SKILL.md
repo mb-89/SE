@@ -424,7 +424,7 @@ The checks that hold it:
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
 | No issue or comment text names another remote | a filing's form check (`<se>/scripts/work_tickets.py` `form_findings`) refuses each private term in the title and body, at the filing commands and the form gate ([README "Forms"](../../../README.md#forms)) |
-| Trees compare equal apart from lock files | the parity check, work issue `parity-excludes-lockfiles` (#1530) |
+| Trees compare equal apart from lock files | `<se>/scripts/work_tickets.py parity` names every path two commits' trees differ in apart from `se.lock` and `uv.lock` at any depth ([README "Source parity"](../../../README.md#source-parity), `tests/test_parity.py`) |
 | Every change lands through SE's landing step | with `[integrate] landing = "fast-forward"`, the public check's identity gate refuses a commit the host made, so a merge-button commit turns `check` red ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | A generic commit identity on every remote | the commit gates of the hooks and of `check` ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)) |
 

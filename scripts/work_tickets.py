@@ -11054,6 +11054,72 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
     return 0
 
 
+#: Source parity's one lockfile rule (README "Source parity"): a tracked file whose name, its last
+#: path component, is one of these is a dependency lockfile at any depth (`se.lock`,
+#: `kern/template/uv.lock`), and parity leaves its content, its presence and its absence alone.
+#: Nothing else is excluded or normalized: every other path, generated outputs among them, compares
+#: by mode and object id.
+PARITY_LOCKFILES = frozenset({"se.lock", "uv.lock"})
+
+
+def is_parity_lockfile(path: str) -> bool:
+    """Whether source parity excludes the tracked file `path` (slash-separated) as a lockfile."""
+    return path.rsplit("/", 1)[-1] in PARITY_LOCKFILES
+
+
+def tree_entries(root: Path, rev: str) -> dict[str, str]:
+    """Each tracked file of the commit `rev` names, by path, with its `<mode> <object>`, read with
+    `git ls-tree -r`; it reads nothing else and writes nothing."""
+    entries: dict[str, str] = {}
+    for record in checked_git(root, "ls-tree", "-r", "-z", "--full-tree", rev).split("\0"):
+        if record:
+            meta, _, path = record.partition("\t")
+            mode, _, rest = meta.partition(" ")
+            entries[path] = f"{mode} {rest.partition(' ')[2]}"
+    return entries
+
+
+def parity_differences(left: dict[str, str], right: dict[str, str]
+                       ) -> tuple[list[tuple[str, str]], list[str]]:
+    """How two trees differ: each non-lockfile path as (`changed`, `only left` or `only right`,
+    path), sorted by path, and the lockfiles that differ, excluded by PARITY_LOCKFILES."""
+    differences: list[tuple[str, str]] = []
+    lockfiles: list[str] = []
+    for path in sorted(set(left) | set(right)):
+        if left.get(path) == right.get(path):
+            continue
+        if is_parity_lockfile(path):
+            lockfiles.append(path)
+        else:
+            kind = "changed" if path in left and path in right else \
+                "only left" if path in left else "only right"
+            differences.append((kind, path))
+    return differences, lockfiles
+
+
+@command("parity", "compare two commits' trees, such as one branch on two remotes: every tracked "
+                   "path that differs, apart from dependency lockfiles (se.lock and uv.lock at any "
+                   "depth), is listed as changed, only left or only right, and fails with exit "
+                   "code 1; lockfile differences are named and pass. It only reads",
+         OPTIONAL_WORKTREE,
+         arg("left", help="a commit, branch or remote ref, such as origin/main"),
+         arg("right", help="the commit to compare it with, such as mirror/main"))
+def run_parity(root: Path, args: argparse.Namespace) -> int:
+    differences, lockfiles = parity_differences(tree_entries(root, args.left),
+                                                tree_entries(root, args.right))
+    for kind, path in differences:
+        side = args.left if kind == "only left" else args.right if kind == "only right" else ""
+        print(f"{'only in ' + side if side else 'changed'}: {path}")
+    if lockfiles:
+        print("lockfiles excluded: " + ", ".join(lockfiles))
+    if differences:
+        print(f"{args.left} and {args.right} differ in {len(differences)} path(s) apart from "
+              "lockfiles")
+        return 1
+    print(f"{args.left} and {args.right} match apart from lockfiles")
+    return 0
+
+
 README = Path(__file__).resolve().parents[1] / "README.md"
 REFERENCE_BEGIN, REFERENCE_END = generated_markers("`work_tickets.py docs`")
 
@@ -11081,7 +11147,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
       "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
-      "settings-check", "docs", "format")),
+      "settings-check", "parity", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
 COMPONENT_SOURCE = "its command registry"
@@ -11110,6 +11176,9 @@ READ_ONLY_COMMANDS = {
     "settings-check": "Compares the fleet's settings the repository records (fleet/settings.toml) "
                       "with the live ones, one line per difference; advisory. Use it to see "
                       "whether main's ruleset, the scheduled tasks or the cloud environment drifted.",
+    "parity": "Compares two commits' trees, such as one branch on two remotes, path by path apart "
+              "from dependency lockfiles (se.lock, uv.lock). Use it to check that two remotes "
+              "hold the same source.",
     "metrics": "Prints what the commands cost from the line each run records: top spenders by "
                "wall time and GitHub calls, and each overrun of a budget. Use it to find what is "
                "slow.",
