@@ -159,8 +159,8 @@ class GuardReports:
     """Fails each test phase that tried to reach beyond this machine (tests/network_guard.py
     `fail`) and explains a test past its time bound (tests/time_bound.py `explain`). A plugin
     `pytest_configure` registers, not a hook of this conftest's own: pytest calls a conftest's
-    `pytest_runtest_makereport` only for the tests under its folder, and the complete run also
-    collects kern/python/tests."""
+    `pytest_runtest_makereport` only for the tests under its folder, and a run may name a test
+    file outside it."""
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_makereport(self, item: pytest.Item, call):
@@ -171,8 +171,7 @@ class GuardReports:
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Every collected test gets its time bound (tests/time_bound.py), those of kern/python/tests
-    in the complete run too."""
+    """Every collected test gets its time bound (tests/time_bound.py), one outside tests/ too."""
     time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
 
 
@@ -288,9 +287,9 @@ def place_kern() -> None:
         result = subprocess.run([sys.executable, str(ROOT / "scripts" / "se_modules.py"), "sync", se_modules.KERN],
                                 cwd=ROOT, capture_output=True, text=True,
                                 env={**os.environ, git_door.VARIABLE: "real"})
-        if result.returncode:
-            raise pytest.UsageError(f"se_modules.py sync kern failed, so no test finds kern:\n"
-                                    f"{result.stderr}{result.stdout}")
+        if result.returncode:  # fails open: a test that reads kern then fails, naming the file
+            print(f"warning: se_modules.py sync kern failed, so the tests that read kern fail:\n"
+                  f"{result.stderr}{result.stdout}", file=sys.stderr)
     finally:
         os.rmdir(lock)
 
