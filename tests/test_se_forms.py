@@ -440,6 +440,192 @@ def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
 
 
+# The shell reader: a gh write in a shell call is held to its form as the GitHub tools' call is.
+
+MARKED_THIN = "<!-- se:form work -->\n" + THIN
+
+
+def shell_payload(command: str, cwd: Path, tool: str = "Bash", key: str = "command") -> str:
+    return json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(cwd),
+                       "tool_name": tool, "tool_input": {key: command}})
+
+
+# One row each of the gh writes the reader reads: the command with {file} for the body file, the
+# off-form body, the form's own body and the form that refuses.
+GH_ROWS = {
+    "issue create": (f"gh issue create --title {TITLE} --label work --body-file {{file}}",
+                     THIN, GOOD_WORK, "work"),
+    "issue edit": ("gh issue edit 7 --body-file {file}", MARKED_THIN, GOOD_WORK, "work"),
+    "issue comment": ("gh issue comment 7 -F {file}", THIN_REVIEW, GOOD_REVIEW, "review"),
+    "pr create": ("gh pr create -B main -t 'A change' --body-file {file}", REPORTS["unfilled"],
+                  REPORTS["complete"], "field-report"),
+    "pr edit": ("gh pr edit 5 --base main --body-file {file}", REPORTS["unfilled"],
+                REPORTS["complete"], "field-report"),
+    "pr comment": ("gh pr comment 5 --body-file {file}", THIN_REVIEW, GOOD_REVIEW, "review"),
+    "pr review": ("gh pr review 5 -c --body-file={file}", THIN_REVIEW, GOOD_REVIEW, "review"),
+    "api issues": (f"gh api repos/{OWNER}/{REPO_NAME}/issues -f title={TITLE} -F body=@{{file}} "
+                   "-f 'labels[]=work'", THIN, GOOD_WORK, "work"),
+    "api issue": (f"gh api -X PATCH /repos/{OWNER}/{REPO_NAME}/issues/7 -F body=@{{file}}",
+                  MARKED_THIN, GOOD_WORK, "work"),
+    "api comments": (f"gh api repos/{OWNER}/{REPO_NAME}/issues/7/comments -F body=@{{file}}",
+                     THIN_REVIEW, GOOD_REVIEW, "review"),
+    "api comment": ("gh api --method PATCH repos/{owner}/{repo}/issues/comments/9 "
+                    "-F body=@{file}", THIN_REVIEW, GOOD_REVIEW, "review"),
+    "api pulls": (f"gh api repos/{OWNER}/{REPO_NAME}/pulls -f base=main -f title=x "
+                  "-F body=@{file}", REPORTS["unfilled"], REPORTS["complete"], "field-report"),
+    "api pull": (f"gh api -X PATCH repos/{OWNER}/{REPO_NAME}/pulls/5 -f base=main "
+                 "-F body=@{file}", REPORTS["unfilled"], REPORTS["complete"], "field-report"),
+}
+
+
+def body_file(folder: Path, text: str, name: str = "body.md") -> Path:
+    path = folder / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("row", GH_ROWS)
+def test_each_gh_write_is_denied_off_form_and_passes_its_form(row, capsys, monkeypatch, project,
+                                                              gh):
+    command, thin, good, form = GH_ROWS[row]
+    path = body_file(project, thin, "thin.md")
+    reason = denial(gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)),
+                                                            project), "--gate", "refuse"))
+    assert f"the {form} form refuses" in reason
+    path = body_file(project, good, "good.md")
+    assert gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)), project),
+                "--gate", "refuse") == ""
+
+
+@pytest.mark.parametrize("command", [
+    f"gh issue create --title {TITLE} --label work --body {{quoted}}",
+    f"cd /tmp && env A=1 timeout -s KILL 30 nohup command gh issue create -R {OWNER}/{REPO_NAME} "
+    f"-l bug,work -t {TITLE} -b {{quoted}} 2>&1 | tail -n 3",
+    f"ls; /usr/local/bin/gh issue create --title={TITLE} --label=work --body-file thin.md",
+    f"gh issue create --title {TITLE} -l work --body-file - < thin.md",
+    f"gh issue create --title {TITLE} -l work --body-file - <<< {{quoted}}",
+])
+def test_a_gh_write_is_read_behind_prefixes_separators_and_quotes(command, capsys, monkeypatch,
+                                                                  project, gh):
+    import shlex
+    body_file(project, THIN, "thin.md")
+    text = command.replace("{quoted}", shlex.quote(THIN))
+    assert "the work form refuses" in denial(
+        gate(capsys, monkeypatch, shell_payload(text, project), "--gate", "refuse"))
+
+
+def test_gh_api_input_is_read_as_json_and_reads_pass(capsys, monkeypatch, project, gh):
+    data = body_file(project, json.dumps({"title": TITLE, "body": THIN, "labels": ["work"]}),
+                     "issue.json")
+    api = f"gh api repos/{OWNER}/{REPO_NAME}/issues --input {data}"
+    assert "the work form refuses" in denial(
+        gate(capsys, monkeypatch, shell_payload(api, project), "--gate", "refuse"))
+    data.write_text(json.dumps({"title": TITLE, "body": GOOD_WORK, "labels": ["work"]}),
+                    encoding="utf-8")
+    assert gate(capsys, monkeypatch, shell_payload(api, project), "--gate", "refuse") == ""
+    for command in ("gh issue list", f"gh api repos/{OWNER}/{REPO_NAME}/issues",
+                    f"gh api -X GET repos/{OWNER}/{REPO_NAME}/issues -f state=open",
+                    "gh issue view 7 --json body", "gh api graphql -f query='mutation {x}'",
+                    f"gh api repos/{OWNER}/{REPO_NAME}/labels -f name=x"):
+        assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
+
+
+UNREADABLE = {
+    "a command substitution": (f"--body \"$(cat thin.md)\"", "the shell computes it"),
+    "backticks": ("--body \"`cat thin.md`\"", "the shell computes it"),
+    "a variable": ("--body \"$BODY\"", "the shell computes it"),
+    "a pipe": ("--body-file - ", "a pipe into --body-file -"),
+    "an unquoted heredoc with $": ("--body-file - <<EOF\n## Situation\n\n$HOME\nEOF",
+                                   "an unquoted heredoc"),
+    "a computed path": ("--body-file \"$file\"", "its file's path"),
+    "a missing file": ("--body-file later.md", "later.md does not exist before the command runs"),
+    "--editor": ("--editor", "gh writes it itself (--editor)"),
+    "--template": ("--template Bug", "gh writes it itself (--template)"),
+}
+
+
+@pytest.mark.parametrize("case", UNREADABLE)
+def test_a_body_the_gate_cannot_read_is_denied_naming_body_file(case, capsys, monkeypatch, project,
+                                                                gh):
+    tail, why = UNREADABLE[case]
+    command = f"gh issue create --title {TITLE} --label work {tail}"
+    if case == "a pipe":
+        command = "cat thin.md | " + command
+    reason = denial(gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse"))
+    assert reason.startswith("gh issue create: SE cannot read this body (") and why in reason
+    assert reason.endswith("against the work form. Write the body to a file and pass "
+                           "--body-file <file>.")
+
+
+def test_gh_fill_into_the_integration_branch_is_denied_and_a_quoted_heredoc_is_read(
+        capsys, monkeypatch, project, gh):
+    for command in ("gh pr create --fill", "gh pr create -B main --fill-first",
+                    f"gh api repos/{OWNER}/{REPO_NAME}/pulls -f title=x -f body=\"$(cat r.md)\""):
+        reason = denial(gate(capsys, monkeypatch, shell_payload(command, project),
+                             "--gate", "refuse"))
+        assert "against the field-report form" in reason, command
+    assert "-F body=@<file>" in reason
+    assert gate(capsys, monkeypatch, shell_payload("gh pr create -B other --fill", project),
+                "--gate", "refuse") == ""
+    quoted = f"gh issue create -t {TITLE} -l work --body-file - <<'EOF'\n{{body}}EOF\necho done"
+    assert "the work form refuses" in denial(gate(
+        capsys, monkeypatch, shell_payload(quoted.replace("{body}", THIN), project),
+        "--gate", "refuse"))
+    assert gate(capsys, monkeypatch, shell_payload(quoted.replace("{body}", GOOD_WORK), project),
+                "--gate", "refuse") == ""
+
+
+def test_other_commands_and_writes_elsewhere_print_nothing(capsys, monkeypatch, project, gh):
+    thin = body_file(project, THIN, "thin.md")
+    for command in ("ls -la", "git status", "echo through high enough ",
+                    f"gh issue create -R someone/elsewhere -t x -l work --body-file {thin}",
+                    f"gh api repos/someone/elsewhere/issues -F body=@{thin}",
+                    "echo 'unclosed"):
+        assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
+    text = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
+    assert gate(capsys, monkeypatch, text, "--gate", "off") == ""
+    assert "work form" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    copilot = json.dumps({"sessionId": SESSION, "cwd": str(project), "toolName": "powershell",
+                          "toolArgs": json.dumps({"input": json.loads(text)["tool_input"][
+                              "command"]})})
+    assert "work form" in denial(gate(capsys, monkeypatch, copilot, "--gate", "refuse"))
+
+
+def test_an_unreadable_comment_passes_and_logs_one_line(capsys, monkeypatch, project, gh):
+    command = "gh issue comment 7 --body \"$(cat review.md)\""
+    assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
+    lines = (project / ".se" / ".runtime" / "forms-gate.log").read_text(
+        encoding="utf-8").splitlines()
+    assert len(lines) == 1 and "gh issue comment" in lines[0] and "cannot read" in lines[0]
+
+
+def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
+    thin = body_file(project, THIN, "thin.md")
+    plain = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
+    held = shell_payload(f"gh issue create -t {TITLE} -l work -l off-form --body-file {thin}",
+                         project)
+    assert "off-form" not in denial(gate(capsys, monkeypatch, plain, "--gate", "refuse"))
+    assert "off-form" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
+    assert gate(capsys, monkeypatch, held, "--gate", "refuse") == ""
+
+
+@pytest_hook
+def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
+    root = hook_project(tmp_path, "refuse")
+    thin = body_file(root, THIN, "thin.md")
+    command = f"gh issue create -R {OWNER}/{REPO_NAME} -t {TITLE} -l work --body-file {thin}"
+    result = hooked(tmp_path, shell_payload(command, root), CLAUDE_PROJECT_DIR=sh(root))
+    assert result.returncode == 0 and "the work form refuses" in denial(result.stdout)
+    pythons = tmp_path / "hook-home" / "pythons"
+    assert pythons.read_text(encoding="utf-8").count(" gate") == 1
+    for text in (shell_payload("echo through high enough ", root),
+                 shell_payload("ls -la", root), shell_payload("git status", root, tool="bash"),
+                 shell_payload("cat ./thigh", root, key="script")):
+        result = hooked(tmp_path, text, CLAUDE_PROJECT_DIR=sh(root))
+        assert result.returncode == 0 and result.stdout == '{"kern": "answer"}\n'
+    assert pythons.read_text(encoding="utf-8").count(" gate") == 1
+
+
 # check-files: the files a form claims (the module docstring: Claimed files).
 
 STEP_FORM = '''name = "step-risks"

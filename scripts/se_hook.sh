@@ -30,8 +30,10 @@
 # (GATE_TOOLS below, the table of scripts/se_forms.py's docstring) runs `se_forms.py gate` with the
 # payload, through uv without a Python download, else python3 where it is 3.11 or later; its answer,
 # a JSON deny or nothing, is the hook's whole stdout, and kern still gets the payload, its answer
-# discarded. The test is builtins only, so every other call costs what it did. SE_FORMS_GATE=off
-# skips it.
+# discarded. The gate also runs for a shell call: a tool whose input holds a string `command`,
+# `input` or `script` in which `gh` stands as a word followed by a space (shelled below), so
+# `se_forms.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
+# only, so every other call costs what it did. SE_FORMS_GATE=off skips it.
 #
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project
@@ -116,6 +118,19 @@ guarded() { # <payload>
   done
   return 1
 }
+# `gh ` at the start of a shell command's string, or after a space, `;`, `&`, `|`, `(` or `/` (or a
+# `\n` or `\t` JSON writes): Claude Code's Bash and PowerShell, Copilot's bash, powershell and
+# execute, whose toolArgs may hold the input as an escaped JSON string. Builtins only.
+GH_WORD='(^|[ ;&|(/]|\\[nt])gh '
+shelled() { # <payload>
+  [[ $1 == *"gh "* ]] || return 1
+  if [[ $1 =~ \"(command|input|script)\"[[:space:]]*:[[:space:]]*\"(([^\"\\]|\\.)*)\" ]] &&
+    [[ ${BASH_REMATCH[2]} =~ $GH_WORD ]]; then
+    return 0
+  fi
+  [[ $1 =~ \\\"(command|input|script)\\\"[[:space:]]*:[[:space:]]*\\\"(.*) ]] &&
+    [[ ${BASH_REMATCH[2]} =~ $GH_WORD ]]
+}
 # The gate's answer for the payload: uv where bootstrap.sh installs it, else python3 at 3.11 or
 # later; without either it passes and says so in the project's log, as the gate itself does.
 gate() { # <payload>
@@ -136,7 +151,8 @@ Stop | SubagentStop) ;;
 *)
   gate_off=false
   case "${SE_FORMS_GATE:-}" in [oO][fF][fF]) gate_off=true ;; esac
-  if [ "$event" = PreToolUse ] && ! $gate_off && guarded "$payload"; then
+  if [ "$event" = PreToolUse ] && ! $gate_off &&
+    { guarded "$payload" || shelled "$payload"; }; then
     said="$(gate "$payload")"
     [ -n "$bin" ] && [ -x "$bin" ] && "$bin" hook "$event" --root "$project" >/dev/null 2>&1 <<<"$payload"
     [ -n "$said" ] && printf '%s\n' "$said"

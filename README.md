@@ -2119,6 +2119,11 @@ the findings) or `refuse` (the call is denied, naming the form, every finding an
 
 - `scripts/se_hook.sh` picks the guarded calls with bash builtins and runs `se_forms.py gate` for
   them alone, whose docstring owns the table, the answers and the failure rule.
+- A shell call that names `gh` is guarded too: the gate reads each `gh issue`, `gh pr` and `gh api`
+  write in it as the same write through the GitHub tools; its docstring owns the commands it reads.
+  - A body it cannot read, such as one from `$(...)` or `--fill`, is refused where a form applies,
+    naming `--body-file`.
+  - It does not see `gh api graphql`, `curl` or another program that calls GitHub's API.
 - It reads `[forms] gate` as `enforce` is read, from the se.toml of the project whose home holds
   the target, else of SE itself; a write elsewhere, without a body or that no form covers runs as
   before. `SE_FORMS_GATE=off` turns it off for a machine.
