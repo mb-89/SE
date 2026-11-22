@@ -1217,6 +1217,11 @@ se's own suite writes such a report, `se.xml`, from `tests/conftest.py`.
     setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker
 ```
 
+CI's suite step keeps that report as the artifact `test-reports` (`suite --keep-test-reports DIR`,
+also from a failed run), with the runner's `cpu` and each test's `started`, its seconds from the
+session's start. `work_tickets.py test-seconds` prints, per run, its wall, cpu and when each worker
+started and finished, then the slowest tests' medians over CI's recent runs.
+
 Without reports the gate reads pytest's lines
 (it adds `--durations=<N>` to a pytest command), and where neither names a test it says so and names
 that remedy.
@@ -1767,9 +1772,10 @@ settings checks and the generated docs.
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
 | `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
-| `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
+| `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
+| `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
 
 #### Review
 

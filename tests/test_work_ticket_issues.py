@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from xml.etree import ElementTree
 
 import git_door
 import pytest
@@ -5024,6 +5025,72 @@ def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(workt
     parts = out.split("Parts:\n", 1)[1].split("Slowest tests:", 1)[0]
     assert parts.startswith("  se: ") and " / 1 worker = " in parts
     assert "    slow setup " in parts and ", worker gw0)" in parts
+
+
+def reporting_suite_reports(monkeypatch, tmp_path: Path) -> dict[str, bytes]:
+    """The reports REPORTING_SUITE writes, byte for byte, by name."""
+    written = tmp_path / "written"
+    written.mkdir()
+    monkeypatch.setenv("SE_TEST_REPORTS", str(written))
+    exec(REPORTING_SUITE, {})
+    monkeypatch.delenv("SE_TEST_REPORTS")
+    return {path.name: path.read_bytes() for path in written.iterdir()}
+
+
+def test_suite_keeps_its_test_reports_where_asked_also_when_it_fails(worktree, monkeypatch, capsys, tmp_path):
+    expected = reporting_suite_reports(monkeypatch, tmp_path)
+    capsys.readouterr()
+    failing = REPORTING_SUITE.replace('print("13 passed")', 'print("1 failed")\nraise SystemExit(1)')
+    for name, script, code in (("passed", REPORTING_SUITE, 0), ("failed", failing, 1)):
+        fake_suite(worktree, monkeypatch, 5.0)
+        (worktree / "suite.py").write_text(script, encoding="utf-8")
+        kept = tmp_path / name / "reports"
+        assert run(worktree, "suite", "--keep-test-reports", str(kept)) == code
+        assert {path.name: path.read_bytes() for path in kept.iterdir()} == expected
+        out = capsys.readouterr().out
+        assert out.splitlines()[0] == f"Test reports kept in {kept}: browser.xml, unit.xml"
+
+    assert run(worktree, "suite", "--compare", "main", "--keep-test-reports", str(tmp_path / "x")) == 1
+    error = capsys.readouterr().err
+    assert "--keep-test-reports" in error and "--compare" in error
+    assert not (tmp_path / "x").exists()
+
+
+def test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before(worktree, monkeypatch, capsys, tmp_path):
+    outputs = []
+    for extra in ([], ["--keep-test-reports", str(tmp_path / "kept")]):
+        fake_suite(worktree, monkeypatch, 5.0)
+        (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+        assert run(worktree, "suite", *extra) == 0
+        outputs.append(capsys.readouterr())
+        assert (tmp_path / "kept").exists() == bool(extra)
+    without, kept = outputs
+    line = f"Test reports kept in {tmp_path / 'kept'}: browser.xml, unit.xml\n"
+    assert line in kept.out and kept.out.replace(line, "", 1) == without.out
+    assert kept.err == without.err
+
+
+def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypatch, capsys, tmp_path):
+    """se's conftest writes the host's cpu and each test's start into se.xml (README "Test budget")."""
+    root = Path(__file__).resolve().parents[1]
+    command = [sys.executable, "-m", "pytest", "-q", "-n", "1", "-p", "no:cacheprovider",
+               "--rootdir", str(root), str(root / "tests" / "test_se_home.py")]
+    (worktree / "se.toml").write_text(f"[tests]\ncommand = {json.dumps(command)}\n", encoding="utf-8")
+    readings = iter([0.0, 5.0])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+    assert run(worktree, "suite", "--keep-test-reports", str(tmp_path / "kept")) == 0
+    assert "Test reports kept in" in capsys.readouterr().out
+    suite = ElementTree.parse(tmp_path / "kept" / "se.xml").getroot().find("testsuite")
+    named = {prop.get("name"): prop.get("value") for prop in suite.findall("properties/property")}
+    assert re.fullmatch(r".+ x\d+", named["cpu"])
+    wall = float(suite.get("time"))
+    cases = suite.findall("testcase")
+    started = [float({prop.get("name"): prop.get("value") for prop in case.iter("property")}["started"])
+               for case in cases]
+    assert cases and len(started) == len(cases)
+    assert all(0 <= value <= wall for value in started)
+    assert started == sorted(started)  # one worker: each case starts no earlier than the one before
 
 
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):

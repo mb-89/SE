@@ -5736,6 +5736,7 @@ class SuiteRun:
     stdout: str
     output: str  # stdout and stderr, stripped
     parts: list[SuitePart]
+    kept: list[str] | None = None  # the reports copied with keep_reports; None: none asked
 
     def refuse_failed(self, budget: SuiteBudget) -> str:
         """The run's result line; refuses a run whose tests failed, with its output."""
@@ -5750,8 +5751,12 @@ class SuiteRun:
         return summary
 
 
-def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
-    """Run the suite command once in `checkout` and time it; its JUnit reports become its parts."""
+def time_suite(checkout: Path, command: list[str], keep_reports: Path | None = None) -> SuiteRun:
+    """Run the suite command once in `checkout` and time it; its JUnit reports become its parts.
+
+    With `keep_reports`, each XML report the run wrote is copied there at its path under the
+    run's report folder, before the folder goes and whatever the run's result (keep_test_reports);
+    the run's `kept` names them."""
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
         result = subprocess.run(
@@ -5760,9 +5765,28 @@ def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
             env={**os.environ, TEST_REPORTS_VARIABLE: reports},
         )
         seconds = clock() - started
+        kept = keep_test_reports(Path(reports), keep_reports) if keep_reports is not None else None
         parts = report_parts(Path(reports))
     return SuiteRun(seconds, result.returncode, result.stdout,
-                    (result.stdout + result.stderr).strip(), parts)
+                    (result.stdout + result.stderr).strip(), parts, kept)
+
+
+def keep_test_reports(reports: Path, directory: Path) -> list[str]:
+    """Copy each XML report under `reports` to `directory` at its relative path, creating it; the
+    copied paths under `directory`, sorted, as POSIX paths."""
+    directory.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for report in sorted(reports.rglob("*.xml")):
+        relative = report.relative_to(reports)
+        (directory / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(report, directory / relative)
+        kept.append(relative.as_posix())
+    return sorted(kept)
+
+
+def kept_reports_line(directory: Path, kept: list[str]) -> str:
+    """The line `suite --keep-test-reports` prints right after the timed run."""
+    return f"Test reports kept in {directory}: {', '.join(kept) or 'none written'}"
 
 
 @dataclass(frozen=True)
@@ -6121,7 +6145,8 @@ CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside ke
 
 
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
-              full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None) -> str:
+              full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None,
+              keep_reports: Path | None = None) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -6131,6 +6156,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
     warns above the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
     its seconds per file there (with_file_seconds), and its `file seconds:` lines follow the Parts.
+    With `keep_reports` the run's JUnit reports are copied there (time_suite), also from a failed
+    or over-limit run, and the line `Test reports kept in <DIR>: ...` is printed right after the
+    timed run; without it nothing is copied and nothing more is printed.
 
     The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
     refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
@@ -6156,7 +6184,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     limit, target = budget.whole_limit, budget.whole_target  # the whole suite's (`[tests] shards`)
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {limit:g} s)")
     result = time_suite(root, with_file_seconds(with_durations(budget.command, slowest_count),
-                                                record_file_seconds))
+                                                record_file_seconds), keep_reports)
+    if keep_reports is not None:
+        print(kept_reports_line(keep_reports, result.kept or []))
     seconds, output, parts = result.seconds, result.output, result.parts
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
@@ -9863,14 +9893,22 @@ def stated_component_kinds(root: Path) -> None:
                   "(CI's nightly run)"),
          arg("--record-file-seconds", type=Path, metavar="PATH",
              help="have a pytest suite write each test file's seconds to PATH, as CI's suite step "
-                  "does for its artifact file-seconds, which file-seconds reads"))
+                  "does for its artifact file-seconds, which file-seconds reads"),
+         arg("--keep-test-reports", type=Path, metavar="DIR",
+             help="copy the run's JUnit reports to DIR, also from a failed run, and name them in "
+                  "one line, as CI's suite step does for its artifact test-reports, which "
+                  "test-seconds reads; without it nothing is copied"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
+    if args.compare and args.keep_test_reports is not None:
+        raise QueueError("suite: --keep-test-reports keeps one budget run's reports; --compare "
+                         "times several runs, so they cannot be given together")
     stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
     record = args.record_file_seconds.resolve() if args.record_file_seconds else None
-    print(f"Suite: {run_suite(root, args.slowest, full=args.full, record_file_seconds=record)}")
+    print(f"Suite: {run_suite(root, args.slowest, full=args.full, record_file_seconds=record,
+                              keep_reports=args.keep_test_reports)}")
     return 0
 
 
@@ -9926,10 +9964,7 @@ def moved_file_seconds(old: Mapping[str, float], new: Mapping[str, float]) -> li
 
 def run_has_file_seconds(root: Path, repo: str, run: str) -> bool:
     """Whether CI's run `run` kept the artifact file-seconds, unexpired."""
-    listed = json.loads(run_gh(root, ["api", f"repos/{api_repo(repo)}/actions/runs/{run}/artifacts"])
-                        or "{}")
-    return any(artifact.get("name") == FILE_SECONDS_ARTIFACT and not artifact.get("expired")
-               for artifact in listed.get("artifacts") or [])
+    return run_has_artifact(root, repo, run, FILE_SECONDS_ARTIFACT)
 
 
 def newest_file_seconds_run(root: Path, repo: str) -> str:
@@ -10000,6 +10035,181 @@ def run_file_seconds(root: Path, args: argparse.Namespace) -> int:
             source, where = download_file_seconds(root, args.run, Path(directory))
             lines = write_file_seconds(root, source, where)
     print("\n".join(lines))
+    return 0
+
+
+# The test reports CI keeps (README "Test budget"): CI's suite step copies the suite's JUnit reports
+# (`suite --keep-test-reports`) into its run's artifact test-reports, with the runner's cpu and each
+# test's `started` (tests/conftest.py), and `test-seconds` prints each run's workers and the median
+# seconds of the slowest tests over CI's recent runs. It writes nothing.
+TEST_REPORTS_ARTIFACT = "test-reports"
+TEST_SECONDS_RUNS = 5
+TEST_SECONDS_SLOWEST = 20
+
+
+@dataclass(frozen=True)
+class KeptWorker:
+    """One worker of a report: its first start, busy seconds and last end; None where the report
+    names no `started`."""
+
+    name: str
+    first: float | None
+    busy: float
+    last: float | None
+
+    def line(self) -> str:
+        if self.first is None or self.last is None:
+            return f"    {self.name}: busy {self.busy:.1f} s"
+        return (f"    {self.name}: first test at {self.first:.1f} s, busy {self.busy:.1f} s, "
+                f"last done at {self.last:.1f} s")
+
+
+@dataclass(frozen=True)
+class KeptRun:
+    """One run's report as test-seconds reads it."""
+
+    name: str
+    wall: float
+    cpu: str | None
+    cases: dict[str, float]
+    workers: tuple[KeptWorker, ...]
+
+    def lines(self) -> list[str]:
+        head = (f"  {self.name}: {self.wall:.1f} s wall; {sum(self.cases.values()):.1f} s test time / "
+                f"{len(self.workers)} workers; cpu {self.cpu or 'not reported'}")
+        return [head, *(worker.line() for worker in self.workers)]
+
+
+def read_test_seconds(report: Path, name: str) -> KeptRun:
+    """A JUnit report as test-seconds reads it; refuses one that cannot be read, naming it."""
+    try:
+        root = ElementTree.parse(report).getroot()
+    except (ElementTree.ParseError, OSError) as error:
+        raise QueueError(f"test-seconds: {name} is no JUnit report ({error})") from error
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    times = [float(suite.get("time")) for suite in suites if suite.get("time")]
+    wall = float(root.get("time")) if root.get("time") else sum(times)
+    cpu = next((prop.get("value") for suite in suites for prop in suite.findall("properties/property")
+                if prop.get("name") == "cpu"), None)
+    cases: dict[str, float] = {}
+    spans: dict[str, list[tuple[float, float | None]]] = {}
+    for case in root.iter("testcase"):
+        test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
+        seconds = float(case.get("time") or 0)
+        cases[test] = cases.get(test, 0.0) + seconds
+        properties = {prop.get("name"): prop.get("value") for prop in case.iter("property")}
+        started = properties.get("started")
+        spans.setdefault(properties.get("worker") or "main", []).append(
+            (seconds, float(started) if started is not None else None))
+    workers = []
+    for worker, cases_of in sorted(spans.items()):
+        starts = [start for _, start in cases_of if start is not None]
+        complete = len(starts) == len(cases_of)
+        workers.append(KeptWorker(
+            worker, min(starts) if complete else None, sum(seconds for seconds, _ in cases_of),
+            max(start + seconds for seconds, start in cases_of) if complete else None))  # type: ignore[operator]
+    return KeptRun(name, wall, cpu, cases, tuple(workers))
+
+
+def slower_median(values: list[float]) -> float:
+    """The median, the slower middle value with an even count, as ci_suite_time takes it."""
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def test_seconds_lines(runs: list[KeptRun], slowest: int) -> list[str]:
+    """The table test-seconds prints: each run with its workers, then the slowest tests' medians."""
+    lines = [f"Test seconds of {len(runs)} runs:"]
+    for run in runs:
+        lines.extend(run.lines())
+    seconds_of: dict[str, list[float]] = {}
+    for run in runs:
+        for test, seconds in run.cases.items():
+            seconds_of.setdefault(test, []).append(seconds)
+    ranked = sorted(seconds_of.items(), key=lambda item: (-slower_median(item[1]), item[0]))
+    lines.append(f"Slowest tests, median of {len(runs)} runs:")
+    lines.extend(f"  {slower_median(values):.2f} s ({min(values):.2f}-{max(values):.2f} s, "
+                 f"{len(values)} of {len(runs)} runs) {test}" for test, values in ranked[:slowest])
+    return lines
+
+
+def run_has_artifact(root: Path, repo: str, run: str, artifact: str) -> bool:
+    """Whether CI's run `run` kept the artifact `artifact`, unexpired."""
+    listed = json.loads(run_gh(root, ["api", f"repos/{api_repo(repo)}/actions/runs/{run}/artifacts"])
+                        or "{}")
+    return any(item.get("name") == artifact and not item.get("expired")
+               for item in listed.get("artifacts") or [])
+
+
+def newest_test_reports_runs(root: Path, repo: str, count: int) -> list[tuple[str, str]]:
+    """The newest `count` passing `check` runs of a push to the integration branch that kept
+    test-reports, among the last FILE_SECONDS_RUNS, newest first: each run's id and commit."""
+    branch = integration_branch(root)
+    listed = json.loads(run_gh(root, [
+        "run", "list", "--repo", api_repo(repo), "--workflow", CHECK_WORKFLOW.name, "--branch", branch,
+        "--event", "push", "--status", "success", "--limit", str(FILE_SECONDS_RUNS),
+        "--json", "databaseId,headSha"]) or "[]")
+    found = []
+    for entry in listed:
+        if len(found) == count:
+            break
+        run = str(entry.get("databaseId"))
+        if run_has_artifact(root, repo, run, TEST_REPORTS_ARTIFACT):
+            found.append((run, str(entry.get("headSha") or "")))
+    if not found:
+        raise QueueError(f"test-seconds: none of the last {len(listed)} passing {CHECK_NAME} runs of a push "
+                         f"to {branch} kept the artifact {TEST_REPORTS_ARTIFACT}; name a run with --run "
+                         f"or a downloaded report with --report")
+    return found
+
+
+def download_test_reports(root: Path, repo: str, run: str, directory: Path) -> Path:
+    """Run `run`'s se.xml from its artifact test-reports, downloaded into `directory` through gh."""
+    run_gh(root, ["run", "download", run, "--repo", api_repo(repo), "--name", TEST_REPORTS_ARTIFACT,
+                  "--dir", str(directory)])
+    found = sorted(directory.rglob("se.xml")) or sorted(directory.rglob("*.xml"))
+    if not found:
+        raise QueueError(f"test-seconds: run {run}'s artifact {TEST_REPORTS_ARTIFACT} holds no XML report")
+    return found[0]
+
+
+@command("test-seconds", "print each test's seconds from CI's kept test reports: per run its wall, "
+                         "cpu and when each worker started and finished, then the slowest tests' "
+                         "median over the runs; by default the artifact test-reports of the newest "
+                         "passing check runs of a push to the integration branch that kept it; "
+                         "writes nothing",
+         OPTIONAL_WORKTREE,
+         arg("--runs", type=positive_int, default=TEST_SECONDS_RUNS, metavar="N",
+             help=f"how many of the newest runs that kept it to read (default {TEST_SECONDS_RUNS})"),
+         arg("--run", action="append", default=[], metavar="ID",
+             help="a check run to read instead, repeatable; one without the artifact is refused"),
+         arg("--report", action="append", default=[], type=Path, metavar="FILE",
+             help="a report already downloaded (without gh, through the host's GitHub tools), "
+                  "repeatable"),
+         arg("--slowest", type=positive_int, default=TEST_SECONDS_SLOWEST, metavar="N",
+             help=f"how many slowest tests to list (default {TEST_SECONDS_SLOWEST})"))
+def run_test_seconds(root: Path, args: argparse.Namespace) -> int:
+    if args.report:
+        runs = [read_test_seconds(path, str(path)) for path in args.report]
+    else:
+        repo = remote_repo(root)
+        if repo is None:
+            raise QueueError("test-seconds: the checkout's origin names no repository, so no CI run is "
+                             "known; name downloaded reports with --report")
+        if args.run:
+            for run in args.run:
+                if not run_has_artifact(root, repo, run, TEST_REPORTS_ARTIFACT):
+                    raise QueueError(f"test-seconds: run {run} has no artifact {TEST_REPORTS_ARTIFACT}; name a "
+                                     f"{CHECK_NAME} run whose step \"Keep the suite's test reports\" ran")
+            named = [(run, f"run {run}") for run in args.run]
+        else:
+            named = [(run, f"run {run} (commit {commit[:7]})")
+                     for run, commit in newest_test_reports_runs(root, repo, args.runs)]
+        runs = []
+        for run, name in named:
+            with tempfile.TemporaryDirectory(prefix="se-test-reports-") as directory:
+                runs.append(read_test_seconds(download_test_reports(root, repo, run, Path(directory)), name))
+    print("\n".join(test_seconds_lines(runs, args.slowest)))
     return 0
 
 
@@ -10731,7 +10941,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
