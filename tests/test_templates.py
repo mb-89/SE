@@ -290,7 +290,7 @@ def test_select_takes_the_marker_then_the_conditions_then_the_plain_template(cat
         templates.select(catalog, "issue.delete", "", "")
 
 
-def test_select_without_a_template_for_the_action_is_free_template(tmp_path):
+def test_select_without_a_template_for_the_action_is_free(tmp_path):
     write_template(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.edit"]\n'))
     assert templates.select(templates.load(tmp_path, tree=True), "issue.create", "", "").template is None
 
