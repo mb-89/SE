@@ -210,7 +210,7 @@ def test_the_query_names_every_field_the_snapshot_reads():
 
 def test_the_repositories_come_from_se_toml_beside_the_home():
     home = timeline.sibling("se_home").Home("example.com", "alice", "project")
-    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs"]
+    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs", "alice/kern"]
 
 
 def test_a_bare_repository_takes_the_owner_of_the_config_checkout_origin(tmp_path, fake_git_door):
