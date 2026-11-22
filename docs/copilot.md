@@ -204,6 +204,8 @@ without cloning. The marketplace `se@se` names is the generated `.claude-plugin/
 `uv run python scripts/copilot.py self-test` needs neither Copilot nor a person. It copies SE, as
 a plugin install does, beside an empty git project that is not SE, and checks there:
 
+- kern's clone at SE's pin, placed in the copy as SE's start places it in an install, which the
+  guidance check of `se_plugin.py check` reads;
 - the layout the Copilot manifest names, and `se_plugin.py check` of the copy;
 - the hook registrations of `.github/hooks/se.json`;
 - the launcher the manifest runs, with `${PLUGIN_ROOT}` the copy;
@@ -249,7 +251,7 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
 1. **Copilot CLI, SE's checkout.** In a checkout of SE, with the CLI installed
    (`npm install -g @github/copilot@1.0.112`), run `uv run python scripts/copilot.py self-test`;
    then `copilot --agent se`, trusting the folder ([trust](#remedies)), and say `status`.
-   - Expect `copilot self-test: 10 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
+   - Expect `copilot self-test: 11 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
      [open point](#what-a-token-less-copilot-cli-showed), `mcp-root`.
    - Expect the greeting `SE <version> started: ...` once (#1121: the agents, skills and
      `SessionStart` load with `SE_HOOK_HOST`; #1123: the greeting reaches the session, and where

@@ -11,8 +11,8 @@ after the hooks: it merges SE's marketplace and plugin into the repository's
 version range, keeping an existing pin; adds the remote `se` where no remote reaches SE's owner;
 ignores `.se/` in git; and runs `se_modules.py sync se`.
 
-`self-test` installs this SE, as a plugin install copies it, beside an empty project folder that is
-not SE, and checks there what needs no Copilot: the generated layout, the hook registrations, the
+`self-test` installs this SE, as a plugin install copies it with kern placed as SE's start places
+it (`copy_plugin`), beside an empty project folder that is not SE, and checks there what needs no Copilot: the generated layout, the hook registrations, the
 MCP door's launcher, and the door started as Copilot starts a plugin's server (in the plugin folder,
 its parent in the project), once with COPILOT_SESSION_CWD and once without, each with its handshake
 and one status call that must name the project; and, where a Copilot CLI is at hand,
@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import git_door  # noqa: E402
 import se_home  # noqa: E402
+import se_modules  # noqa: E402
 import se_plugin  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -229,6 +230,20 @@ class Report:
 
 def _json_file(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def copy_plugin(plugin: Path, report: Report) -> None:
+    """SE's working tree copied to `plugin` as a plugin install carries it, and kern's clone at SE's
+    pin placed in it, as SE's start places it in an install (`se_modules.py sync kern`): the
+    guidance check of the layout step reads kern's page limit there (se_guidance.py)."""
+    shutil.copytree(ROOT, plugin, ignore=NOT_COPIED)
+    kern = se_modules.kern_dir(ROOT)
+    if not kern.is_dir():
+        report.add("failed", "kern", f"no {kern}: place it with `uv run python scripts/se_modules.py "
+                   "sync kern`")
+        return
+    shutil.copytree(kern, se_modules.kern_dir(plugin), ignore=shutil.ignore_patterns(".git"))
+    report.add("passed", "kern", f"kern placed in the copy from {kern}, as SE's start places it")
 
 
 def check_layout(plugin: Path, report: Report) -> None:
@@ -521,7 +536,7 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
     binary, roots = None, []
     base = clean_env(dict(os.environ))
     try:
-        shutil.copytree(ROOT, plugin, ignore=NOT_COPIED)
+        copy_plugin(plugin, report)
         project.mkdir()
         home.mkdir()
         initialised = git_door.run("init", "-q", root=project)
