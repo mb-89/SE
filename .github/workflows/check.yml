@@ -2,7 +2,7 @@
 # on every pull request and every push to the integration branch, every check the integration runs:
 # the public check's commit gate, the generated layouts, the README's command reference, the
 # hygiene of SE's own checkout, a pull request's field report and the complete suite within its
-# budget, SE's Go components on kern at the pin se.toml [modules.kern] reads from components/go.mod,
+# budget, SE's Go components on kern at the pin se.toml [components.kern] reads from components/go.mod,
 # and, through the job kern-platforms, SE's start, hook and setup scripts and its worktree removal
 # tests on Windows (darwin is built by the release, not tested); on a pull request also the work
 # model's issue rule. kern's own tests run in kern's repository, in its check.
@@ -82,7 +82,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/pr_issues.py
       - uses: astral-sh/setup-uv@v7
-      # kern at the version components/go.mod requires (se.toml [modules.kern], README "Modules"),
+      # kern at the version components/go.mod requires (se.toml [components.kern], README "Modules"),
       # in .se/modules/kern, which go.mod's replace names; a committed se.lock that lags the require
       # fails here. First, as the command reference (kern's SDK) and the suite read it.
       - name: kern at the pin components/go.mod requires

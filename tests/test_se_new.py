@@ -76,7 +76,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True) -> Path:
     template's README, which the pin leaves out."""
     git_fake.init(root, "-b", "main")
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n\n'
-                            '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+                            '[components.kern]\ngo = "components/go.mod"\n',
                  "components/go.mod": f"module se/components\n\nrequire kern v{version}\n",
                  ".github/workflows/kern-battery.yml": BATTERY})
     git(root, "add", "-A")
@@ -188,7 +188,7 @@ def test_kerns_template_holds_what_the_command_fills_in() -> None:
 
 def pinned(root: Path, require: str = "1.2.3", download: str | None = "releases/download/v{version}") -> Path:
     """`root` pinning kern by its go.mod's require, with the clone's release.toml naming `download`."""
-    write(root, {"se.toml": '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
+    write(root, {"se.toml": '[components.kern]\ngo = true\n',
                  "go.mod": f"module app\n\nrequire kern v{require}\n",
                  ".se/modules/kern/release.toml": 'version = "9.9.9"\n'
                  + (f'download = "{download}"\n' if download else "")})
@@ -200,7 +200,7 @@ def test_the_pin_is_the_version_go_mod_requires_and_the_tag_the_clones_release_t
     assert se_modules.kern_pin(pinned(tmp_path / "a")) == ("1.2.3", "v1.2.3"), "the require, not the clone's version"
     with pytest.raises(se_modules.ModuleError, match=r"not vMAJOR\.MINOR\.PATCH"):
         se_modules.kern_pin(pinned(tmp_path / "b", require="1.2"))
-    with pytest.raises(se_modules.ModuleError, match=r"no \[modules\.kern\] with go"):
+    with pytest.raises(se_modules.ModuleError, match=r"no \[components\.kern\] with go"):
         se_modules.kern_pin(tmp_path / "none")
     (tmp_path / "a" / ".se" / "modules" / "kern" / "release.toml").unlink()
     with pytest.raises(se_modules.ModuleError, match="kern is not placed; run uv run python scripts/se_modules.py sync kern"):
@@ -236,7 +236,7 @@ def test_a_download_path_lies_under_origins_home_and_without_one_there_is_none(
     none, app-binary answers `-` and the start builds the binary from its folder."""
     pinned(tmp_path, require="0.3.0")
     write(tmp_path, {"se.toml": '[binary]\nrelease = "components/release.toml"\n\n'
-                                '[modules.kern]\nurl = "../kern.git"\ngo = true\n',
+                                '[components.kern]\ngo = true\n',
                      "components/release.toml": 'version = "2.0.0"\ndownload = "releases/download/app-v{version}"\n'
                      'binary = "app"\npackage = "./cmd/app"\n'})
     kern = se_modules.kern_dir(tmp_path)

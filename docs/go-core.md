@@ -18,7 +18,7 @@ number below was measured on 13 Nov, those of Go 1.25 on 14 Nov, in a Claude Cod
 
 | word | meaning |
 |---|---|
-| **module** | a pinned repository: `se.toml [modules.<name>]`, synced by `se_modules.py` |
+| **module** | a pinned repository: `se.toml [components.<name>]`, synced by `se_modules.py` |
 | **component** | a part that plugs into the core: it declares inputs, outputs, config and commands |
 | **command** | what a component or a script offers a person or an agent |
 | **core** | the index (names, store, snapshots, catalog), its bus and its host process |
@@ -616,7 +616,7 @@ How kern is found on the checkout's remotes, by its name and the repository topi
 what SE's start does without it, is [components.md](components.md), the one owner of finding
 components.
 
-**Pinning it.** An application pins the core in `se.toml [modules.kern]` with `go`, the `go.mod`
+**Pinning it.** An application pins the core in `se.toml [components.kern]` with `go`, the `go.mod`
 that requires it (README [Modules](../README.md#modules)): the version that `go.mod` requires of
 `kern` is the pin, resolved to the tag `v<version>` and locked in `se.lock`, so the pin has one
 owner. SE's is `components/go.mod`, which requires `kern v<version>` and replaces it by
@@ -674,7 +674,7 @@ A switched-off instance keeps its names and their place in the catalog; what it 
 
 A bare application contains the core pinned, an empty `wiring.toml`, `cmd/<name>/main.go` (the
 core plus the application's Go components, none yet), `components/`, `types/`, `se.toml` with its
-`[project]`, `[tests]` budget and `[modules.kern]`, an `AGENTS.md`, a `tests/` folder whose
+`[project]`, `[tests]` budget and `[components.kern]`, an `AGENTS.md`, a `tests/` folder whose
 battery starts the bare core, and a `check.yml` that calls the core's reusable `battery.yml`.
 
 `se new app <name> --path <dir>` copies the core's `template/` from SE's pinned clone at its tag
