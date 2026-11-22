@@ -43,3 +43,10 @@ summary = "check the files a form claims, given or changed since a ref"
 group = "Forms"
 help = "check the files a form claims, given or changed since a ref"
 class = "batch"
+
+[commands."se_forms.py backstop"]
+usage = "se_forms.py backstop --event-name EVENT_NAME --event EVENT [--backstop {off,on}]\n                     [--worktree WORKTREE]"
+summary = "plan the label or failure a GitHub event's off-form text gets"
+group = "Forms"
+help = "plan the label or failure a GitHub event's off-form text gets"
+class = "batch"
