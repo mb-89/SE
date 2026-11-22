@@ -41,7 +41,7 @@ Off by default, three additions leave that draft as it is without them:
 - `--sessions FILE`, the session tools' answers (each session `list_sessions` lists with its
   `list_events` result events as `"events"`), adds each cloud session's cost, its tokens and its
   cost in dollars from its result events, found by its title (`SE/<repo>/<role>/<topic>`, the work
-  model's Visible sessions) and summed per issue, role and repository (`session_costs`).
+  model's Visible sessions) and summed per issue, role and repository (`cloud_costs`).
 - A class of the judgment may carry the optional keys CLASS_KEYS (`status`, `pattern`, a regular
   expression, and `limits`); the next collect counts each earlier class's pattern over what it
   already reads of each work issue of the window (title, body, comments, field report) and lists
@@ -791,7 +791,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
          **({"classes": patterns} if patterns else {})}
         if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc,
         scripts, session_signals(signals, root) if signals is not None else None, records,
-        session_costs(sessions, closed) if sessions is not None else None)
+        cloud_costs(sessions, closed) if sessions is not None else None)
 
 
 def remote_of(door, tracker: str) -> str:
@@ -944,7 +944,7 @@ def result_records(event: object) -> list[dict]:
     return found
 
 
-def session_cost(session: dict) -> dict:
+def cloud_cost(session: dict) -> dict:
     """One session's tokens and cost: its result events' usage and `total_cost_usd`, summed, one
     record per turn; `cost` None where no event names one."""
     tokens = dict.fromkeys(COST_TOKENS, 0)
@@ -963,9 +963,9 @@ def session_cost(session: dict) -> dict:
     return {"turns": turns, "tokens": tokens, "cost": cost}
 
 
-def session_costs(sessions: list[dict], window: list[Closed]) -> dict:
+def cloud_costs(sessions: list[dict], window: list[Closed]) -> dict:
     """The cloud sessions' costs by their titles: each session SE's roles started (SE/<repo>/
-    <role>[/<topic>]) with its tokens and cost (`session_cost`), and the sums per issue, role and
+    <role>[/<topic>]) with its tokens and cost (`cloud_cost`), and the sums per issue, role and
     repository. A worker's (and every other role's) topic names its issue by the issue's title; a
     reviewer's names the pull request that delivered or landed one; an integrator's names none. A
     session of another title is counted as `other`, never guessed."""
@@ -985,7 +985,7 @@ def session_costs(sessions: list[dict], window: list[Closed]) -> dict:
                  else by_title.get(topic) if topic else None)
         rows.append({"session": str(session.get("id") or ""), "title": title,
                      "repository": match["repo"], "role": match["role"], "issue": issue,
-                     **session_cost(session)})
+                     **cloud_cost(session)})
 
     def summed(key: str) -> dict[str, dict]:
         groups: dict[str, dict] = {}
