@@ -4,7 +4,6 @@ own command, and the real RUNME.sh gets a missing one from the RUNME.conf the ch
 """
 from __future__ import annotations
 
-import os
 import platform
 import shutil
 import sys
@@ -17,8 +16,7 @@ from shell_paths import link_tools
 ROOT = Path(__file__).resolve().parents[1]
 # The tools RUNME.sh runs; nothing else is on the test's PATH, so no runtime of the machine answers.
 TOOLS = ("sh", "awk", "sed", "dirname", "cat", "chmod", "mkdir", "printf", "uname", "id")
-pytestmark = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None,
-                                reason="RUNME.sh runs in sh; the Windows leg runs RUNME in tests/test_runme.py")
+pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="RUNME.sh runs in sh")
 
 
 def test_the_probe_reads_a_runtimes_version_from_its_own_command():
