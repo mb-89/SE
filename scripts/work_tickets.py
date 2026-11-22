@@ -4077,14 +4077,16 @@ def concurrently(*calls: Callable[[], object]) -> list[object]:
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
-    """The startable work issues: open, `work` and `ready`, not held, unblocked, with no branch
-    yet and no file ownership an issue in progress holds. The two listings are read at once,
+    """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
+    (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
+    progress holds. The two listings are read at once,
     then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
     candidates, active = (json.loads(listing) for listing in concurrently(
         lambda: run_gh(root, [
             "issue", "list", "--state", "open", "--label", "work", "--label", "ready",
-            "--json", "number,title,body,labels", "--limit", "200", *labels, *repo_arguments(repo),
+            "--json", "number,title,body,labels,assignees", "--limit", "200", *labels,
+            *repo_arguments(repo),
         ]),
         lambda: run_gh(root, [
             "issue", "list", "--state", "open", "--label", "in-progress",
@@ -4094,6 +4096,7 @@ def ready_issues(
     active_ownership = set().union(*(issue_ownership(item) for item in active))
     startable = [candidate for candidate in candidates
                  if not issue_labels(candidate) & NOT_STARTABLE_LABELS
+                 and not waiting_on_person(candidate)
                  and not issue_ownership(candidate) & active_ownership]
 
     def ready(candidate: dict[str, object]) -> bool:
@@ -4187,6 +4190,16 @@ def queue(
     )
     refuse_while_paused("queue", pause)
     return delivered, escalations, ready, slots
+
+
+# An issue labelled so waits on a person (the owner, or SE's decision on an escalation): not
+# startable, whatever its other labels say.
+WAITING_ON_PERSON_LABELS = frozenset({PERSON_LABEL, "escalated"})
+
+
+def waiting_on_person(issue: dict[str, object]) -> bool:
+    """Whether `issue` waits on a person: labelled WAITING_ON_PERSON_LABELS or assigned to someone."""
+    return bool(issue_labels(issue) & WAITING_ON_PERSON_LABELS) or bool(issue.get("assignees"))
 
 
 def quoted(text: str) -> str:
@@ -10787,6 +10800,31 @@ def run_ready(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+@command("dispatch", "the dispatcher (README \"Dispatcher\", scripts/dispatch.py): list the startable "
+                     "work issues (ready, not waiting on a person, no open blocker) and whether an "
+                     "integrator runs (an open landing pull request, or in-progress work that moved "
+                     "within the fleet lease), all read from GitHub with no model; with --fire it "
+                     "fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the "
+                     "token in SE_DISPATCH_TOKEN once where startable work waits, none runs and "
+                     "the fleet is not paused; with --dry-run it prints that fire and makes none",
+         OPTIONAL_WORKTREE, REPO,
+         Exclusive((arg("--fire", action="store_true", help="fire the scheduled task once where due"),
+                    arg("--dry-run", action="store_true",
+                        help="print the fire it would make, fire nothing"))))
+def run_dispatch(root: Path, args: argparse.Namespace) -> int:
+    dispatcher = sibling("dispatch")
+    mode = "fire" if args.fire else "dry-run" if args.dry_run else "report"
+    repo = resolve_repo(root, args.repo)
+    pause, startable = concurrently(lambda: pause_issues(root, repo), lambda: ready_issues(root, repo))
+    try:
+        lines = dispatcher.dispatch(sys.modules[__name__], root, repo, mode, pause, startable)
+    except dispatcher.FireError as error:
+        raise QueueError(str(error)) from None
+    for line in lines:
+        print(line)
+    return 0
+
+
 @command("capacity", "show local worker capacity or cloud unlimited capacity", *TRACKER_QUERY)
 def run_capacity(root: Path, args: argparse.Namespace) -> int:
     slots = capacity(root, resolve_repo(root, args.repo), args.all_repos)
@@ -11041,7 +11079,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
