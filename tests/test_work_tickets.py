@@ -677,7 +677,7 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
     monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
     monkeypatch.setattr(work_tickets, "sync", lambda root: None)
-    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body: [])
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body, version: [])
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
     monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(branch))
     monkeypatch.setattr(work_tickets, "open_pull_request_number", lambda *args: None)
@@ -746,7 +746,7 @@ def stub_delivery_outside_git(monkeypatch: pytest.MonkeyPatch, pushed: list[str]
              "body": "## Acceptance\n\n- [ ] A test.\n"}
     monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: issue)
     monkeypatch.setattr(work_tickets, "check_issue_read", lambda *args: None)
-    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body: [])
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body, version: [])
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/o/r")
     monkeypatch.setattr(work_tickets, "push", lambda root, branch: pushed.append(
         git(root, "rev-parse", "HEAD").stdout.strip()))

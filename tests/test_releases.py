@@ -87,7 +87,8 @@ def integrate(root: Path, branch: str, breaking: bool = False, trailer: str | No
     commit_on(root, branch, text or branch)
     if trailer is None:
         if report is None:
-            report = declared(work_tickets.default_release_kind(branch, issue_body(breaking)))
+            report = declared(work_tickets.default_release_kind(
+                branch, issue_body(breaking), work_tickets.project_version(root)))
         trailer = work_tickets.release_trailer(root, branch, issue_body(breaking), report)
     git(root, "merge", "-q", "--no-ff", "-m", f"Integrate {branch}: work",
         *(("-m", trailer) if trailer else ()), branch)
@@ -233,6 +234,78 @@ def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
     assert push(checkout) == 0
     assert released(checkout) == ("2.0.0", "v2.0.0")
+
+
+def released_at(root: Path, version: str) -> None:
+    """Origin's main at project.version `version`, released: se.toml committed and tagged."""
+    (root / "se.toml").write_text(settings(version), encoding="utf-8")
+    git(root, "commit", "-q", "-am", f"at {version}")
+    git(root, "tag", f"v{version}")
+    git(root, "push", "-q", "origin", "main", f"v{version}")
+
+
+def released_as(root: Path, version: str) -> bool:
+    """Whether origin's main holds project.version `version` and its tag names that commit (a
+    lower tag than 1.2.3, the fixture's, is no newest tag)."""
+    origin = root.parent / "origin.git"
+    return (f'version = "{version}"' in git(origin, "show", "main:se.toml")
+            and git(origin, "rev-parse", f"v{version}^{{commit}}") == git(origin, "rev-parse", "main"))
+
+
+BREAKING_REMOVAL = "- **Breaking:** made the `kind` field required"
+
+
+@pytest.mark.parametrize(("version", "kind", "expected"), [
+    ("0.3.1", "minor", "0.4.0"),
+    ("2.3.1", "major", "3.0.0"),
+])
+def test_a_breaking_report_releases_minor_below_1_0_and_major_from_it(
+        checkout, version, kind, expected):
+    released_at(checkout, version)
+    assert work_tickets.default_release_kind("topic", issue_body(True),
+                                             work_tickets.project_version(checkout)) == kind
+    integrate(checkout, "topic", breaking=True, report=declared(kind, BREAKING_REMOVAL))
+    assert release_kind(checkout) == kind
+    assert push(checkout) == 0
+    assert released_as(checkout, expected)
+
+
+def test_below_1_0_a_breaking_report_still_refuses_patch_and_from_1_0_minor(checkout):
+    released_at(checkout, "0.3.1")
+    with pytest.raises(work_tickets.QueueError) as error:
+        work_tickets.release_trailer(checkout, "topic", issue_body(True),
+                                     declared("patch", BREAKING_REMOVAL))
+    assert ("Release kind is patch, but section \"## Removed behaviour, deleted or weakened tests, "
+            "and authored prose\" lists a breaking change, which is minor below 1.0.0: "
+            f"{BREAKING_REMOVAL}") in str(error.value)
+    assert ("Release kind is patch, but the work issue's Package kind marks a breaking change, "
+            "which is minor below 1.0.0") in str(error.value)
+    released_at(checkout, "1.0.0")
+    with pytest.raises(work_tickets.QueueError, match="breaking change, which is major"):
+        work_tickets.release_trailer(checkout, "topic", issue_body(True),
+                                     declared("minor", BREAKING_REMOVAL))
+
+
+def test_a_quoted_sentence_naming_the_breaking_marker_is_no_breaking_change(checkout):
+    quoted = ("- README.md: such a report lists each as a `**Breaking:**` line under \"Removed "
+              "behaviour\".")
+    assert work_tickets.release_trailer(checkout, "topic", issue_body(False),
+                                        declared("minor", quoted)) == "Release-kind: minor"
+    with pytest.raises(work_tickets.QueueError, match="which is major"):
+        work_tickets.release_trailer(checkout, "topic", issue_body(False),
+                                     declared("minor", f"{quoted}\n**Breaking:** removed --all"))
+
+
+def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
+    released_at(checkout, "0.3.1")
+    integrate(checkout, "topic", breaking=True, report=declared("major", BREAKING_REMOVAL))
+    assert push(checkout) == 0
+    assert released_as(checkout, "0.4.0")
+    # The person states the interface stable by setting 1.0.0 by hand; the release tags it.
+    (checkout / "se.toml").write_text(settings("1.0.0"), encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "Stable interface")
+    assert push(checkout) == 0
+    assert released_as(checkout, "1.0.0")
 
 
 @pytest.mark.parametrize(("trailer", "stated"), [

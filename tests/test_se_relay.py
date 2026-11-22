@@ -127,7 +127,7 @@ def test_integrate_reads_the_pull_request_and_issue_from_the_relay(served, monke
         "html_url": "https://github.com/alice/demo/issues/42"})
     captured = {}
 
-    def fake_report_problems(report_body, issue_body):
+    def fake_report_problems(report_body, issue_body, version):
         captured["issue_body"] = issue_body
         return []
 
@@ -152,7 +152,7 @@ def test_the_relay_reads_the_work_issue_from_the_tracker_not_origin(served, monk
     names["github/issues/alice.tracker.42"] = snapshot(42, {
         "number": 42, "title": "feat/x", "body": "Tracker's body.",
         "html_url": "https://github.com/alice/tracker/issues/42"})
-    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report_body, issue_body: [])
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report_body, issue_body, version: [])
     monkeypatch.setattr(work_tickets, "checked_git", lambda *a, **k: "")
     relay = work_tickets.relay_for(worktree)
     _, _, work_issue, _ = work_tickets.relay_pull_request(
