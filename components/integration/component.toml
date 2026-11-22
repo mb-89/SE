@@ -39,7 +39,7 @@ help = "for SE, on the person's yes: run ref-maintenance for real with the tripl
 class = "batch"
 
 [commands."work_tickets.py suite"]
-usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]\n                      [--record-file-seconds PATH]"
+usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]\n                      [--record-file-seconds PATH] [--keep-test-reports DIR]"
 summary = "run se.toml's complete suite against its [tests] time budget, as ..."
 group = "Integration"
 help = "run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README \"Test budget\")"
@@ -64,6 +64,13 @@ usage = "work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifa
 summary = "write tests/file-seconds.json, the order the suite's workers take ..."
 group = "Integration"
 help = "write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more"
+class = "batch"
+
+[commands."work_tickets.py test-seconds"]
+usage = "work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE]\n                             [--slowest N]"
+summary = "print each test's seconds from CI's kept test reports: per run its ..."
+group = "Integration"
+help = "print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing"
 class = "batch"
 
 [commands."work_tickets.py metrics"]
