@@ -46,7 +46,7 @@ note = "off: the git on PATH; set: a test's fake or refused git"
 [[switch]]
 name = "enabled"
 kind = "wiring-instance"
-reader = ".se/modules/kern/index/wiring.go"  # kern at its pin (se.toml [modules.kern])
+reader = ".se/modules/kern/index/wiring.go"  # kern at its pin (se.toml [components.kern])
 default = "on"
 layers = ["wiring", "wiring-overlay"]
 key = "enabled"
@@ -55,7 +55,7 @@ help = "docs/go-core.md#switching-components-on-and-off"
 [[switch]]
 name = "builtin"
 kind = "wiring-wire"
-reader = ".se/modules/kern/index/wiring.go"  # kern at its pin (se.toml [modules.kern])
+reader = ".se/modules/kern/index/wiring.go"  # kern at its pin (se.toml [components.kern])
 default = "off"
 layers = ["wiring", "wiring-overlay"]
 key = "builtin"

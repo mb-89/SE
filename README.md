@@ -69,7 +69,7 @@ Commits carry no co-author lines: in VS Code, set `git.addAICoAuthor` to `off`
 
 **Everything else arrives by itself.** At the first start SE runs
 [scripts/bootstrap.sh](scripts/bootstrap.sh): it installs `uv` into the user's home, Python 3.11 or
-newer through `uv`, and the project's [modules](#modules); in a session it fetches and starts
+newer through `uv`, and the project's [components](#modules); in a session it fetches and starts
 [kern](#kern). It is quiet when nothing is missing.
 
 Claude Code runs it at every session start from the plugin's hooks, Copilot from
@@ -243,11 +243,11 @@ uv run python <se>/scripts/se_start.py refresh
 - What fails stays at the version in use, with the cause and the command to try again. An se
   checkout with local changes or its own commits is a development checkout and is left alone. Run
   twice, the second `refresh` moves nothing.
-- An installed SE older than the project's se: where the project's `se.toml` uses a key the
-  installed SE does not know, the start's modules step fails, and the greeting's update check
-  names the same cause.
-  - Such a key is `go` of `[modules.kern]`, SE's pin of kern since kern left SE's tree: `se
-    bootstrap: error: module kern: unknown key(s) go`.
+- An installed SE older than the project's se: where the project's `se.toml` uses a key or
+  table the installed SE does not know, the start's modules step fails or places nothing, and the
+  greeting's update check names the same cause.
+  - Such a table is `[components]`, which replaced `[modules]` in se 6: an SE before 6 reads no
+    component of it, and an SE 6 refuses a `[modules]` table, naming the rename.
   - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
     new session, whose start moves it.
 
@@ -258,7 +258,7 @@ released as `se-v<version>` that `components/release.toml` owns. `scripts/se_mod
 is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
 no Go components. The plugin's hooks start the binary and post every session event to it:
 
-- **kern at its pin:** the `se` binary is built on the kern `se.toml` `[modules.kern]` pins
+- **kern at its pin:** the `se` binary is built on the kern `se.toml` `[components.kern]` pins
   ([Modules](#modules)), its clone in `.se/modules/kern`.
   - Before the core starts, the start syncs the installed SE's kern where that clone is missing
     or not at the commit `se.lock` locks, both read from the files alone, so an SE at its pin
@@ -484,7 +484,7 @@ se's documentation is one HTML file, published at the GitHub Pages site of SE's 
 origin; a project that publishes elsewhere sets `docs_url` in `se.toml` `[project]`.
 
 `docs.md` is its manifest: it lists se's notes as chapters and restates none of them. The obs
-module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
+component (`[components.obs]` in `se.toml`, found beside SE's repository) builds it:
 
 ```sh
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
@@ -532,43 +532,81 @@ repository the workflow's token cannot read shows as a named gap instead of fail
 
 ## Modules
 
-A repository pulls its dependencies (se itself, format tools, styles, other repositories) as modules
-pinned to commits or to semantic version ranges, from any Git host. `scripts/se_modules.py`
-implements this section; its invocation is in [Commands](#commands).
+A repository pulls the parts it builds with (se itself, kern, obs, styles, other repositories) as
+**components**, each found by its name on the checkout's remotes and pinned to a commit or a
+semantic version range ([docs/components.md](docs/components.md) owns the design).
+`scripts/se_modules.py` implements this section; its invocation is in [Commands](#commands).
 
 ### `se.toml`
 
-The consuming repository declares its modules in `se.toml` at its root:
+The host, the repository that uses them, lists its components in `se.toml` at its root, by name,
+under `[components]` (se 6 renamed it from `[modules]`, which is refused naming the rename):
 
 ```toml
-[modules.obs]
-url = "https://github.com/<owner>/obs.git"   # public form of the clone URL
+[components.obs]
 ref = "<40-hex commit SHA>"                  # the pin
-path = "skills"                              # optional: the part of the module that is used
+path = "skills"                              # optional: the part of the component that is used
 
-[modules.style]
-url = "https://github.com/<owner>/style.git"
-version = "^1.4"                             # in place of ref: a semver range of the module's tags
+[components.style]
+version = "^1.4"                             # in place of ref: a semver range of its release tags
+optional = true                              # the host works without it; absent: required
 
-[modules.kern]
-url = "../kern.git"
+[components.kern]
 go = "components/go.mod"                     # in place of ref: the version that go.mod requires
 ```
 
 | Key | Meaning |
 |---|---|
-| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
-| `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
-| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref`, `version` and `go`. |
-| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version without its tag, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
-| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, and each `go` pin's tag, with its version and commit; `sync` and `update` write it and the repository commits it. |
-| `path` | optional relative directory inside the module; without it the whole module is used. |
-| Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
-| The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
+| `ref` | the pin, a full commit SHA. Any commit on the component's `main` can be pinned, not only releases; `update` moves it. |
+| `version` | in place of `ref`, a semantic version range of the component's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a component releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). An entry pins one of `ref`, `version` and `go`. |
+| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version no owner tags, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
+| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. |
+| `path` | optional relative directory inside the component; without it the whole component is used. |
+| `url` | refused: an entry names no address, since a component is found by its name. A machine that needs another place says so in the machine-local file below. |
+| `se.lock` | next to `se.toml`, it records, as `[components.<name>]`, the release each `version` range and `go` pin of the tree chose, with its version and commit; `sync` and `update` write it and the repository commits it. |
+| Component names | the name of the component's repository, compared without case: 1 to 32 letters, digits and `-`, starting with a letter or digit. Other keys are errors. |
+| The component `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
 
-A common repository declares only modules that are public. Work-only modules on private hosts are
-declared the same way, in a work repository that consumes the common ones; a common repository never
+A common repository lists only components that are public. Work-only components on private hosts
+are listed the same way, in a work repository that uses the common ones; a common repository never
 names them.
+
+#### Finding a component
+
+`sync` and `update` find each name as [docs/components.md "Finding a component"](docs/components.md#finding-a-component)
+says, reading only the checkout's own Git configuration:
+
+- The remotes: `origin` first, then the others in the order Git lists them; each remote's host
+  and owner come from its address (`scripts/se_home.py`); a local path offers nothing.
+- The mark: on `github.com` the owner's repositories with the topic `component` are listed once
+  per run, with the login of `GH_TOKEN` or `GITHUB_TOKEN` where one is set. The repository named
+  like the component is reached as its remote is, with its name in place of the remote's.
+- An owner the host cannot list is one line, and finding goes on with the next owner. On a host
+  SE lists nothing of, or where the listing cannot be read, the repository beside the remote is
+  read directly, its mark unchecked, in one line. `SE_COMPONENT_LISTING=off` does so everywhere.
+- The releases: its `v` tags, read without fetching objects (`git ls-remote --tags`); the first
+  owner that offers a release the pin admits wins, and its highest admitted release is taken.
+
+A clone already at its locked commit is used without asking any remote. A found release whose tag
+points to another commit than `se.lock` records is refused, naming both commits and
+`se_modules.py update <name>`, so a stand-in never replaces a locked component silently.
+
+Another owner's components join by adding any one of that owner's repositories as a remote; a fork
+named like a component under such an owner stands in for it where the pin admits its release.
+
+#### The tree
+
+Resolving is recursive: each placed component's own `se.toml` `[components]`, read from its
+release (a local checkout's working tree), is resolved the same way, and every component of the
+tree is placed in the root's `.se/modules/<name>`. A release whose `se.toml` lists no
+`[components]` lists none.
+
+- One version per name: a name the tree reaches twice is one component, and each host's pin must
+  admit its release; where they admit a common one the newest is taken, else `sync` fails naming
+  both paths and both pins.
+- A name already on the path is that component: an entry that names a host above it on the path,
+  the root included, is that host itself, and its pin is checked against that host's version, not
+  resolved again.
 
 ### Project settings
 
@@ -1623,7 +1661,7 @@ commit pushed to a configured public mirror. If it is omitted, `integrate` uses 
 `identity`, else the selected checkout's configured Git identity. When it is set, `sync` writes it into the checkout's git
 config in place of the project's `identity` ([Project settings](#project-settings)).
 
-Each machine may adapt modules without touching tracked files. se only reads this file; it never
+Each machine may adapt components without touching tracked files. se only reads this file; it never
 writes it, and nothing from it is written into `se.toml`.
 
 The file is shared with `work_tickets.py`. `se_modules.py` owns `[paths]`, `[urls]` and `[hooks]`;
@@ -1633,7 +1671,7 @@ owned by the other.
 
 ```toml
 [paths]
-obs = "~/src/obs"                     # use this checkout of module obs if the directory exists
+obs = "~/src/obs"                     # use this checkout of component obs if the directory exists
 
 [urls]
 "https://github.com/" = "https://mirror.example.com/github/"   # prefix rewrite, longest wins
@@ -1641,9 +1679,9 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 
 | Setting | Meaning |
 |---|---|
-| `[paths]` | a local checkout per module name. If the directory exists, the module comes from it as it is (working tree, any commit, no git step) and is never updated. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
-| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the module's `version` range admits it. A malformed version, or none where the module pins a range, is an error naming that file. |
-| `[urls]` | prefix rewrites applied to `url` before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
+| `[paths]` | a local checkout per component name. If the directory exists, the component comes from it as it is (working tree, any commit, no git step), is never updated, and wins over finding; its own `se.toml` `[components]` is resolved from its working tree. If the directory is missing, the pin is used. Relative paths are relative to the file, `~` is expanded. |
+| A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the component's `version` range admits it. A malformed version, or none where the entry pins a range, is an error naming that file. |
+| `[urls]` | prefix rewrites applied to each address the finder reaches a component at, before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
 | `[hooks] core = "off"` | or `SE_HOOK_CORE=off` in the environment, which answers first: SE's session hooks then start no core and post to none, and nothing is uninstalled. The start still refreshes, syncs and greets, and the Stop check still answers. |
 | `SE_TEMPLATES_GATE=off` | in the environment: SE's template gate judges no GitHub write on this machine, whatever se.toml `[templates] gate` says; unset, it follows se.toml ([Templates](#templates)). |
 | `[paths] se = "<the installed SE's folder>"` | this machine's SE stays at its version, because the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)). |
@@ -1673,16 +1711,16 @@ uv run python <se>/scripts/se_modules.py path <name>
 
 | Command | What it does |
 |---|---|
-| `sync` | a module with an existing local path is used from there; any other is cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Consuming repositories ignore `.se/`. |
-| `status` | one line per module with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
-| `update` | fetches the module (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
-| `path` | prints the directory a module is used from (its `path` included), for tools that load it. |
+| `sync` | resolves the tree ([The tree](#the-tree)): a component with an existing local path is used from there; any other is found by name ([Finding a component](#finding-a-component)), cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Hosts ignore `.se/`. |
+| `status` | one line per component of the root's list with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
+| `update` | finds the component again, its lock aside, and fetches it (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
+| `path` | prints the directory a component is used from (its `path` included), for tools that load it. |
 | `--root` and `--local` | `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>` reads another machine-local file than `~/.se/local.toml`. |
 
 - `status`'s drift is:
   - for a local path, the commits ahead of and behind the pin, uncommitted changes, or a pin the
     checkout does not have yet;
-  - for a pinned module, whether the clone is at the pin and, for a `version` range, a newer
+  - for a pinned component, whether the clone is at the pin and, for a `version` range, a newer
     matching tag the clone knows ("run update").
 - `update`:
   - A `version` range moves to its highest matching tag in `se.lock` instead (`--to` is refused
@@ -1708,11 +1746,11 @@ uv run python <se>/scripts/se_workflows.py check
   holds; each is a generated file whose first line names its source path, the pin and SE's place.
 - SE's own workflows beside them are not shipped: `check.yml`, `docs.yml` and the templates backstop,
   `templates.yml`, run on SE's own events ([Templates](#templates)).
-- The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
+- The pin is `[components.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
   application `se new app` made, or `--ref`.
-- SE's place, how CI reaches it: a module URL `../<name>.git` is `${{ github.repository_owner
-  }}/<name>`, the repository beside the project on its host, so the copies name no owner; an
-  absolute URL names its own. SE is public, so the run's token reads it.
+- SE's place, how CI reaches it: where `sync` found SE, its clone's origin. One under the
+  project's own owner on its host is `${{ github.repository_owner }}/<name>`, so the copies name no
+  owner; any other names its own `<owner>/<name>`. SE is public, so the run's token reads it.
 - Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
   `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
@@ -1768,7 +1806,7 @@ python3 <se>/scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$
 in the new or empty folder its `--path` names: kern's template at SE's kern pin, the name filled in,
 and git's first commit on `main` as the [project identity](#project-settings).
 
-- **The pin:** the version SE's `[modules.kern]` reads from `components/go.mod` and its tag
+- **The pin:** the version SE's `[components.kern]` reads from `components/go.mod` and its tag
   `v<version>`, which the pinned clone's `release.toml` names, read by `se_modules.py`'s
   `kern_pin`. The template and kern's Go module come from that clone at the tag; a clone without
   the tag is refused, naming `se_modules.py sync kern`.
@@ -1778,7 +1816,7 @@ and git's first commit on `main` as the [project identity](#project-settings).
   `uv.lock`, `.gitignore`), its `go.mod` requires `kern v<version>` and replaces the module by it.
 - **What it holds:** the template's (kern's template README): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery (its copy from the SE
-  that made it, [Workflows](#workflows)), the `[tests]` budget and the `[modules.kern]` pin.
+  that made it, [Workflows](#workflows)), the `[tests]` budget and the `[components.kern]` pin.
 - **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
   components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
   release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable

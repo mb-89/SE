@@ -1,10 +1,10 @@
-# se.lock: the commits scripts/se_modules.py resolved for the version ranges in se.toml.
+# se.lock: the commits scripts/se_modules.py resolved for the version ranges and go.mod pins of the components se.toml lists, and of theirs.
 # Written by sync and update; commit it, never edit it.
 
-[modules.kern]
+[components.kern]
 version = "0.14.1"
 ref = "4b2b08a8d6c864aeecc4865b84f1522eb1042384"
 
-[modules.obs]
+[components.obs]
 version = "5.0.0"
 ref = "02261cc136bae7b1bdabfdc5bf2532b711be2a18"

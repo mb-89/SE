@@ -18,7 +18,7 @@
 #            (se_modules.py app-binary) — kern's core plus the application's Go components where it
 #            has any (the `se` binary for SE), else the bare kern — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
 #            from its folder where no release matches, on the installed SE's kern, placed first at
-#            the pin its se.toml [modules.kern] reads: kern_place), started detached for the project, and handed
+#            the pin its se.toml [components.kern] reads: kern_place), started detached for the project, and handed
 #            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
 #            skips this step (below)
 # --binary (RUNME.conf's `get se` line, run by SE's RUNME): the plain run's git, uv and Python steps,
@@ -224,19 +224,19 @@ kern_build() { # <bin> <build folder> <package>
   local part="$1.part$$"
   (cd "$2" && go build -o "$part" "$3") && mv -f "$part" "$1"
 }
-# kern for the installed SE (its se.toml [modules.kern], README "Modules"), which a build of its
+# kern for the installed SE (its se.toml [components.kern], README "Modules"), which a build of its
 # binary builds on: synced where its clone in .se/modules/kern is missing or not at the commit
 # se.lock locks, both read from the files alone, so an SE at its pin starts no process here. Where
 # that fails, the start goes on without it and the greeting names the cause. A project that is SE's
 # own checkout syncs it in the modules step.
 kern_place() {
-  [ -f "$se_root/se.toml" ] && grep -q '^\[modules\.kern\]' "$se_root/se.toml" || return 0
+  [ -f "$se_root/se.toml" ] && grep -q '^\[components\.kern\]' "$se_root/se.toml" || return 0
   local locked="" head="" inside=false line out
   if [ -f "$se_root/se.lock" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       line="${line%$'\r'}"
       case "$line" in
-        "[modules.kern]") inside=true ;;
+        "[components.kern]") inside=true ;;
         "["*) inside=false ;;
         "ref = \""*) $inside && { locked="${line#ref = \"}"; locked="${locked%\"}"; } ;;
       esac
@@ -394,7 +394,7 @@ if $binary; then
 fi
 
 # Modules: the project's se.toml modules, fetched at their pins.
-if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[modules\.' "$project/se.toml"; then
+if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[components\.' "$project/se.toml"; then
   if ! out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" --root "$project" sync 2>&1)"; then
     say "$out"
     need "syncing the modules of $project/se.toml failed; run this again when the cause above is fixed"

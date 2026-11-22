@@ -276,6 +276,15 @@ def _se_item(se_root: Path, version: Version | None, local) -> Item:
                 "record, not checked")
 
 
+def _found_at(clone: Path) -> str | None:
+    """Where a placed component was found, its clone's origin; None where it is not placed, as the
+    start reads no remote to find it (docs/components.md "Required and optional at start")."""
+    if not (clone / ".git").exists():
+        return None
+    result = git_door.run("remote", "get-url", "origin", root=clone)
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
 def _module_item(root: Path, module, local, locked) -> Item:
     source = se_modules.resolve(root, module, local)
     if source.kind == "local":
@@ -284,7 +293,7 @@ def _module_item(root: Path, module, local, locked) -> Item:
         except ModuleError:
             version = None
         return Item(module.name, "local", version, None, module.version, note=f"local path {source.checkout}")
-    url = local.rewrite(module.url)
+    url = _found_at(source.checkout)
     if module.version is not None:
         text = locked.get(module.name, ("", ""))[0]
         return Item(module.name, "range", se_modules.parse_version(text), url, module.version,
@@ -673,7 +682,7 @@ def take_outside(state: State, root: Path | None, se_root: Path) -> str:
     if item.kind == "se":
         return f"to take it, install SE {_v(outside)} again as README \"Install\" says"
     where = (root / se_modules.MANIFEST).as_posix() if root else se_modules.MANIFEST
-    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [modules.{item.name}] of {where}, "
+    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [components.{item.name}] of {where}, "
             f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
 
 
@@ -1034,10 +1043,9 @@ def refresh_copy(se_root: Path, item: Item, due: Version) -> str:
 
 def refresh_module(root: Path, local_config: Path | None, name: str, version: Version) -> str:
     """Lock a range module at tag v<version> after its checkout passed in a trial worktree."""
-    local = se_modules.load_local(local_config or se_modules.default_local_config())
     module = next(m for m in se_modules.load_manifest(root) if m.name == name)
-    source = se_modules.pinned_source(root, module, local)
-    clone = source.checkout
+    clone = root / se_modules.MODULES_DIR / name
+    source = se_modules.Source(module, "pinned", clone, _found_at(clone) or "")
     if se_modules.is_populated(clone) and se_modules.is_dirty(clone):
         raise RefreshError(f"{clone} has local changes; commit them in a local path or discard them")
     se_modules.ensure_clone(source)
@@ -1055,7 +1063,7 @@ def refresh_module(root: Path, local_config: Path | None, name: str, version: Ve
     previous = _git(clone, "rev-parse", "HEAD") if se_modules.is_populated(clone) else None
     _git(clone, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", sha)
     try:
-        se_modules.write_lock(root, name, _v(version), sha)
+        se_modules.write_lock(root, {**se_modules.read_lock(root), name: (_v(version), sha)})
     except (OSError, ModuleError):
         if previous:
             se_modules.git_ok(clone, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", previous)
