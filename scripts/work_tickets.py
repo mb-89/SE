@@ -5141,19 +5141,24 @@ def held_labels(labels: list[str]) -> list[str]:
 
 
 def template_findings(root: Path, repo: str, chosen, title: str, body: str,
-                  given: str | None = None) -> tuple[list, list]:
+                  given: str | None = None, recorded: str | None = None) -> tuple[list, list]:
     """The checks a filing runs against the template `chosen` (README "Templates"), one owner for
     `template_check` and `unhold`: the private terms of the title and the body (and of the text as
-    `given`, where it is another), then the template's own checks of the body. Gives the private
-    findings and every finding."""
+    `given`, where it is another), then the template's own checks of the body, and the version the
+    text as `recorded` was filled from, where it is another than the body that `render` marked
+    with the template's version now (`templates.provenance`). Gives the private findings and every
+    finding."""
     templates = sibling("templates")
     try:
         private = templates.private_findings(chosen, title, body, root)
         if given is not None:
             private += [finding for finding in templates.private_findings(chosen, title, given, root)
                         if finding not in private]
-        return private, private + templates.check(chosen, templates.parse(chosen, body, title),
-                                              root=SE_ROOT, bare_scripts=own_scripts(repo))
+        moved = (templates.provenance(chosen, templates.parse(chosen, recorded, title))
+                 if recorded is not None and recorded != body and not chosen.is_adapter else [])
+        return private, private + moved + templates.check(
+            chosen, templates.parse(chosen, body, title), root=SE_ROOT,
+            bare_scripts=own_scripts(repo))
     except templates.TemplateError as error:
         raise QueueError(str(error)) from error
 
@@ -5246,7 +5251,7 @@ def template_check(root: Path, repo: str, command: str, title: str, body: str, t
         return False
     chosen = template_of(template)
     private, found = template_findings(root, repo, chosen, title, body,
-                                   given if hold and given != body else None)
+                                   given if hold and given != body else None, recorded=given)
     refused = [finding for finding in found if finding.severity == templates.REFUSE]
     if gate.enforce == templates.WARN:
         if found:

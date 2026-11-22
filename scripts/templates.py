@@ -104,9 +104,11 @@ in. Emptiness is judged without HTML comments.
 
 **Files.** For a `file.write` template the text is a file: its front matter and its page title, the
 first `#` line above the first field, are its head. `parse` never reads the page title as a field,
-even where its text is a field's heading; `render` keeps the head as it stands, writes
-`template: <name>` into the front matter (a new block where the file has none) and writes neither
-marker, its fields as `## ` headings below the title.
+even where its text is a field's heading; `render` keeps the head as it stands and writes neither
+marker, its fields as `## ` headings below the title. Into the front matter it writes the marker's
+three as the lines a file records its template by (`Template.front_lines`): `template:
+<repository>/<name>`, `version: <version>` and `overlay: <digest>`, each in its place where the
+front matter holds it, a missing one after the last of them (a new block where the file has none).
 
 **Writing.** `render` writes SE's fleet marker once, then the template marker,
 `<!-- se:template <repository>/<name> <version> <digest> -->` (with a scope, the template marker
@@ -114,7 +116,8 @@ alone, after the scope's marker), then `## ` headings. The marker says what the 
 the repository `se` for SE's own templates and `project` for any other `templates/` or
 `--templates` folder, the template's `version`, and
 `sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
-by a NUL byte (`Template.marker_line`). Selection reads the name alone. A section the template does not
+by a NUL byte (`Template.marker_line`); the digest stands where docs/templates.md "The document"
+puts the overlay's until templates have overlays. Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
@@ -140,8 +143,9 @@ path=)`), in this order; for `file.write` the order below it:
 For a file, `path` (relative to the project root) selects:
 
 1. The allowed templates: the `file.write` templates whose `paths` match it; none, and the file is free.
-2. The front matter's `template: <name>` naming an allowed template chooses it, as a body's template marker
-   does; one naming another template is a refused finding (rule `template`).
+2. The front matter's `template: <name>` (or `<repository>/<name>`, as `render` writes it) naming an
+   allowed template chooses it, as a body's template marker does; one naming another template is a
+   refused finding (rule `template`).
 3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
@@ -157,6 +161,14 @@ Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, t
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
 Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
+
+**Version** (rule `version`, `provenance`): `check` reads a document against the version it records,
+its template marker's or, for a file, the front matter's `version:` where its `template:` names the
+template. None recorded, or the template's own, passes; another minor or patch version warns;
+another major version, or one that is no semantic version, refuses, naming both versions and the
+fill that writes the document again. The move sets the severity, never the template's `rules`.
+`render` records the template's version now, so the filing commands also read the version of the
+text as it was given (`work_tickets.template_findings`).
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `templates/` at
 `origin/<integration branch>` through `git_door` where that ref holds a template note, else from the working
@@ -228,6 +240,9 @@ ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create",
 READERS = ("owner", "fleet")
 KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code")
 REFUSE, WARN, OFF = "refuse", "warn", "off"
+#: The rule of a document's recorded version against its template's (`provenance`): its severity is
+#: the move's, never a template's to set.
+VERSION_RULE = "version"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
 ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
@@ -245,7 +260,10 @@ RESULTS = ("problems", "raises", "truth")
 REFERENCE = re.compile(r"^[a-z_][a-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 FRONT_MATTER = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?([\w-]+)['\"]?[ \t]*$", re.MULTILINE)
+FRONT_TEMPLATE = re.compile(r"^template[ \t]*:[ \t]*['\"]?(?:[\w.-]+/)*([\w-]+)['\"]?[ \t]*$",
+                            re.MULTILINE)
+#: The three front matter keys a claimed file records its template by (`Template.front_lines`).
+PROVENANCE_KEYS = ("template", "version", "overlay")
 HEADING = re.compile(r"^(#{1,4})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -354,6 +372,13 @@ class Template:
                                       version=self.version, digest=self.digest)
 
     @property
+    def front_lines(self) -> tuple[tuple[str, str], ...]:
+        """What a claimed file's front matter records: `template: <repository>/<name>`, `version`
+        and `overlay`, the marker's three in turn."""
+        return tuple(zip(PROVENANCE_KEYS, (f"{self.repository}/{self.name}", self.version,
+                                           self.digest)))
+
+    @property
     def is_file(self) -> bool:
         """Whether the template shapes files (`file.write`), claimed by its `paths`."""
         return FILE_ACTION in self.actions
@@ -411,6 +436,8 @@ class Document:
     source: str = ""
     misses: dict[str, str] = dataclass_field(default_factory=dict)
     read: dict[str, object] = dataclass_field(default_factory=dict)
+    #: The template version the body records, in its marker line or its front matter; "" for none.
+    recorded: str = ""
 
 
 # Loading
@@ -1078,7 +1105,8 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
     if template.is_file:
         return _parse_file(template, body)
     text = FRONT_MATTER.sub("", body, count=1)
-    document = Document(template=template.name, fields={}, source=text)
+    document = Document(template=template.name, fields={}, source=text,
+                        recorded=marked_version(template, body))
     if template.scope:
         parts, region = _scoped(template, text)
     else:
@@ -1144,7 +1172,8 @@ def _parse_file(template: Template, body: str) -> Document:
     preamble, sections = _split(rest, template, 0)
     document = Document(template=template.name, fields={}, source=rest,
                         parts=[Part("front", raw=head), Part("head", raw=title),
-                               Part("preamble", raw=preamble), *sections])
+                               Part("preamble", raw=preamble), *sections],
+                        recorded=front_version(template, head))
     for part in sections:
         if part.kind == "field":
             document.fields[part.name] = value_of(template.field(part.name), part.raw)
@@ -1165,16 +1194,50 @@ def front_matter_template(body: str) -> str | None:
     return found.group(1) if found else None
 
 
-def _with_template(front: str, name: str) -> str:
-    """Front matter `front` with its `template:` line naming `name`, every other byte kept; a new
-    block where `front` is empty."""
+def _front_key(key: str) -> re.Pattern:
+    """A front matter line of `key`, its value the first group, unquoted."""
+    return re.compile(rf"^{key}[ \t]*:[ \t]*['\"]?([^'\"\r\n]*?)['\"]?[ \t]*$", re.MULTILINE)
+
+
+def front_version(template: Template, front: str) -> str:
+    """The version front matter `front` records for `template`: its `version:` line, read only where
+    its `template:` line names `template`, else ""."""
+    if not front or FRONT_TEMPLATE.search(front) is None or \
+            FRONT_TEMPLATE.search(front).group(1) != template.name:
+        return ""
+    found = _front_key("version").search(front)
+    return found.group(1).strip() if found else ""
+
+
+def marked_version(template: Template, body: str) -> str:
+    """The version the body's template marker naming `template` records, else ""."""
+    for match in TEMPLATE_MARKER_PATTERN.finditer(body):
+        if match.group(1) == template.name:
+            return match.group(0).split()[3]
+    return ""
+
+
+def _with_template(front: str, template: Template) -> str:
+    """Front matter `front` recording `template` (`Template.front_lines`), every other byte kept: a
+    line of the three already there is written in its place, a missing one after the last of them,
+    else before the closing `---`; a new block where `front` is empty."""
+    lines = template.front_lines
     if not front:
-        return f"---\ntemplate: {name}\n---\n\n"
-    if FRONT_TEMPLATE.search(front):
-        return FRONT_TEMPLATE.sub(f"template: {name}", front, count=1)
+        return "---\n" + "".join(f"{key}: {value}\n" for key, value in lines) + "---\n\n"
     newline = "\r\n" if "\r\n" in front else "\n"
-    closing = front.rstrip("\r\n").rfind("\n") + 1
-    return front[:closing] + f"template: {name}{newline}" + front[closing:]
+    after = None  # just after the last of the three written so far
+    for key, value in lines:
+        closing = front.rstrip("\r\n").rfind("\n") + 1
+        line = f"{key}: {value}"
+        found = (FRONT_TEMPLATE if key == "template" else _front_key(key)).search(front, 0, closing)
+        if found:
+            front = front[:found.start()] + line + front[found.end():]
+            after = found.start() + len(line) + len(newline)
+        else:
+            at = closing if after is None else after
+            front = front[:at] + line + newline + front[at:]
+            after = at + len(line) + len(newline)
+    return front
 
 
 def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
@@ -1312,7 +1375,7 @@ def render(template: Template, document: Document | dict) -> str:
     number = 1
     for part in parts:
         if part.kind == "front":
-            out.append(_with_template(part.raw, template.name))
+            out.append(_with_template(part.raw, template))
         elif part.kind == "head":
             out.append(_without_markers(part.raw))
         elif part.kind == "prefix":
@@ -1383,7 +1446,7 @@ def draft(template: Template) -> str:
         return f"<!-- {template.name}: {template.says} -->\n<!-- {_checked_by(template)} -->\n"
     lines = []
     if template.is_file:
-        lines += ["---", f"template: {template.name}", "---", ""]
+        lines += ["---", *(f"{key}: {value}" for key, value in template.front_lines), "---", ""]
     elif template.scope:
         lines += [template.scope.get("after", ""), template.marker_line,
                   f"## {template.scope.get('section', '')}", ""]
@@ -1710,7 +1773,7 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     are its own check's."""
     if template.is_adapter:
         return adapter_findings(template, document)
-    found: list[Finding] = []
+    found: list[Finding] = provenance(template, document)
 
     def add(rule: str, item: str, fix: str) -> None:
         severity = template.severity(rule)
@@ -1811,6 +1874,28 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
     order = {item.name: index for index, item in enumerate(template.fields)}
     return sorted(found, key=lambda finding: (finding.severity != REFUSE,
                                               order.get(finding.field, len(order))))
+
+
+def provenance(template: Template, document: Document) -> list[Finding]:
+    """The finding of the version `document` records against `template`'s own (rule `version`,
+    docs/templates.md "The document"): none where it records none or the same; a minor or patch
+    move warns; a major move, or a recorded version that is none, refuses, naming both versions and
+    the fill that brings the document up."""
+    recorded, current = document.recorded, template.version
+    if not recorded or not current or recorded == current:
+        return []
+    named = f"the document records {template.name} {recorded}; the template is at {current}"
+    where = "--path <file>" if template.is_file else template.name
+    given = "" if template.is_file else " --body-file <file>"
+    if SEMVER.match(recorded) and recorded.split(".")[0] == current.split(".")[0]:
+        return [Finding("template", VERSION_RULE, WARN, f"{named}, another minor or patch version: "
+                        f"render it again to record {current}: `templates.py check {where}{given} "
+                        "--render`")]
+    why = (f"and {recorded} is no semantic version" if not SEMVER.match(recorded) else
+           "another major version, which the document no longer fits")
+    return [Finding("template", VERSION_RULE, REFUSE, f"{named}, {why}: fill it again at {current}: "
+                    f"`templates.py draft {where} --json` gives its fields, and `templates.py check "
+                    f"{where} --fields <fields> --render` writes it")]
 
 
 class _Refused(Exception):

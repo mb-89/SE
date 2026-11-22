@@ -9,7 +9,7 @@ import json
 import re
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -1101,20 +1101,49 @@ def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
         templates.select(catalog, "file.write", STEP)
 
 
+def recorded(template: templates.Template) -> str:
+    """The front matter lines a claimed file records its template by."""
+    return (f"template: project/{template.name}\nversion: {template.version}\n"
+            f"overlay: {template.digest}\n")
+
+
 def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_template(tmp_path):
     template = step_templates(tmp_path, risks="")["risks"]
     document = templates.parse(template, STEP)
     assert document.fields == {"risks": ["The scan misses a tool."]}
     rendered = templates.render(template, document)
-    assert rendered == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert rendered == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(template))
     assert templates.FLEET_MARKER not in rendered and "se:template" not in rendered
     assert templates.parse(template, rendered).fields == document.fields
     assert templates.render(template, templates.parse(template, rendered)) == rendered
     bare = templates.render(template, templates.parse(template, "# Risks\n\n## Risks\n\nNone\n"))
-    assert bare == "---\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    assert bare == f"---\n{recorded(template)}---\n\n# Risks\n\n## Risks\n\nNone\n"
     fresh = templates.render(template, {"risks": ["One."]})
-    assert fresh == "---\ntemplate: risks\n---\n\n## Risks\n\n- One.\n"
+    assert fresh == f"---\n{recorded(template)}---\n\n## Risks\n\n- One.\n"
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
+
+
+def test_render_records_template_version_and_overlay_in_place_and_selection_reads_them(tmp_path):
+    template = step_templates(tmp_path, risks="")["risks"]
+    old = "---\nversion: 0.1.0\nid: S5B\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    rendered = templates.render(template, templates.parse(template, old))
+    assert rendered == ("---\nversion: 1.0.0\n"
+                        f"overlay: {template.digest}\nid: S5B\ntemplate: project/risks\n---\n\n"
+                        "# Risks\n\n## Risks\n\nNone\n")
+    crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
+                                                         "## Risks\r\n\r\nNone\r\n"))
+    assert crlf.startswith("---\r\nid: S5B\r\n" + recorded(template).replace("\n", "\r\n") + "---")
+    assert templates.select(templates.load(tmp_path, folder=tmp_path / "templates"), "file.write",
+                            rendered, path="book/m1/steps/x.md").name == "risks"
+    assert templates.draft(template).startswith(f"---\n{recorded(template)}---\n")
+
+
+def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
+    work = catalog["work"]
+    rendered = templates.render(work, work_fields(catalog))
+    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.0.0 ", " 0.9.0 "))
+    assert old != rendered
+    assert templates.render(work, templates.parse(work, old)) == rendered
 
 
 def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
@@ -1125,7 +1154,7 @@ def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
 
 
 def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, capsys):
-    step_templates(tmp_path, risks='marker_pattern: "id: S5B"')
+    risks = step_templates(tmp_path, risks='marker_pattern: "id: S5B"')["risks"]
     steps = tmp_path / "book" / "m1" / "steps"
     steps.mkdir(parents=True)
     (steps / "51-S5B.md").write_text(STEP, encoding="utf-8")
@@ -1134,7 +1163,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
     run = lambda *arguments: (templates.main([*arguments, *where]), capsys.readouterr())
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--render")
-    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(risks))
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
@@ -1144,12 +1173,93 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
     assert code == 0 and json.loads(out.out)["template"] == "risks"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"))
-    assert out.out.startswith("---\ntemplate: risks\n---\n\n## Risks\n") and "se:fleet" not in out.out
+    assert out.out.startswith(f"---\n{recorded(risks)}---\n\n## Risks\n") and "se:fleet" not in out.out
     assert run("draft", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     assert templates.main(["list", "--templates", str(tmp_path / "templates")]) == 0
     assert capsys.readouterr().out.startswith(
         "risks (owner): file.write: book/*/steps/*.md: Risks:")
+
+
+# The version a document records (docs/templates.md "The document"): its marker's or its front matter's
+
+
+def at_version(template: templates.Template, version: str) -> templates.Template:
+    """`template` as it would load once its version moved to `version`."""
+    return replace(template, version=version)
+
+
+def version_findings(template: templates.Template, body: str) -> list[templates.Finding]:
+    return [finding for finding in templates.check(template, templates.parse(template, body))
+            if finding.rule == templates.VERSION_RULE]
+
+
+def test_a_document_at_its_template_s_current_version_passes(catalog, tmp_path):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(work, work_fields(catalog))
+    assert templates.parse(work, body).recorded == "2.3.0"
+    assert version_findings(work, body) == []
+    assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
+    risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
+    page = templates.render(risks, templates.parse(risks, STEP))
+    assert "version: 2.3.0\n" in page and version_findings(risks, page) == []
+
+
+def test_a_document_that_records_no_version_passes(catalog, tmp_path):
+    work = at_version(catalog["work"], "2.3.0")
+    assert templates.parse(work, WORK_BODY).recorded == "" and version_findings(work, WORK_BODY) == []
+    risks = step_templates(tmp_path, risks="")["risks"]
+    assert version_findings(risks, STEP.replace("name: Risks\n", "template: risks\n")) == []
+    other = STEP.replace("name: Risks\n", "template: goals\nversion: 0.1.0\n")
+    assert templates.parse(risks, other).recorded == ""
+
+
+@pytest.mark.parametrize("recorded", ["2.3.1", "2.1.4", "2.4.0"])
+def test_a_minor_or_patch_move_warns(catalog, tmp_path, recorded):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(at_version(work, recorded), work_fields(catalog))
+    found = version_findings(work, body)
+    assert [(f.field, f.severity) for f in found] == [("template", "warn")]
+    assert f"records work {recorded}; the template is at 2.3.0" in found[0].fix
+    assert "templates.py check work --body-file <file> --render" in found[0].fix
+    assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
+    risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
+    page = templates.render(at_version(risks, recorded), templates.parse(risks, STEP))
+    assert [f.severity for f in version_findings(risks, page)] == ["warn"]
+    assert "templates.py check --path <file> --render" in version_findings(risks, page)[0].fix
+
+
+@pytest.mark.parametrize("recorded", ["1.9.0", "3.0.0", "two"])
+def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_path, capsys, recorded):
+    work = at_version(catalog["work"], "2.3.0")
+    body = templates.render(at_version(work, "1.0.0"), work_fields(catalog)).replace(
+        " 1.0.0 ", f" {recorded} ", 1)
+    found = version_findings(work, body)
+    assert [f.severity for f in found] == ["refuse"]
+    assert f"records work {recorded}; the template is at 2.3.0" in found[0].fix
+    assert "`templates.py draft work --json`" in found[0].fix
+    assert "`templates.py check work --fields <fields> --render`" in found[0].fix
+    risks = step_templates(tmp_path, risks="")["risks"]
+    page = templates.render(risks, templates.parse(risks, STEP)).replace(
+        "version: 1.0.0", f"version: {recorded}")
+    moved = at_version(risks, "2.3.0")
+    assert [f.severity for f in version_findings(moved, page)] == ["refuse"]
+    assert "`templates.py draft --path <file> --json`" in version_findings(moved, page)[0].fix
+    (tmp_path / "old.md").write_text(page, encoding="utf-8")
+    (tmp_path / "templates" / "risks.md").write_text(
+        (tmp_path / "templates" / "risks.md").read_text(encoding="utf-8").replace(
+            "version: 1.0.0", "version: 2.3.0"), encoding="utf-8")
+    code = templates.main(["check", "risks", "--body-file", str(tmp_path / "old.md"), "--render",
+                           "--templates", str(tmp_path / "templates")])
+    out = capsys.readouterr().out
+    assert code == 1 and f"records risks {recorded}; the template is at 2.3.0" in out
+
+
+def test_a_template_cannot_set_the_version_rule(tmp_path):
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='applies:\n  actions: ["issue.create"]\n'
+                                                         "rules:\n  version: warn\n"))
+    with pytest.raises(templates.TemplateError, match="rule 'version' is unknown"):
+        templates.load(tmp_path, folder=tmp_path / "templates")
 
 
 @pytest.mark.parametrize("arguments, error", [
