@@ -20,6 +20,9 @@ door (`scripts/git_door.py`):
   absolute, so another repository's se.toml that names them keeps working.
 - `module_url(origin, url)`: a module URL relative to origin (`../obs.git`), resolved against the
   origin URL as git resolves a relative submodule URL; an absolute URL comes back as it is.
+  `resolve_module(root, url)` resolves it against `root`'s origin, a relative path origin
+  (`../app.git`) taken from `root` first, so the URL names the same repository from any directory,
+  such as the module cache a clone runs in.
 
 kern's Go helper (`kern/home`) answers the same: both suites read one table of origins and answers,
 `kern/home/testdata/origins.json`.
@@ -31,10 +34,11 @@ code 0, or 1 with the reason where the checkout has no home.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import git_door
 
@@ -145,8 +149,10 @@ def module_url(origin_url: str, url: str) -> str:
         return url
     match = PREFIX.match(origin_url.strip())
     prefix, path = (match.group("prefix"), match.group("path")) if match else ("", origin_url.strip())
-    if not match and path.startswith("/"):
-        prefix = "/"
+    if not match:
+        # A path: a Windows one separates by `\`, and its leading `/` or `//` (a share) stays.
+        path = path.replace("\\", "/")
+        prefix = path[:len(path) - len(path.lstrip("/"))]
     segments = [part for part in path.split("/") if part]
     rest = url
     while rest.startswith(RELATIVE):
@@ -165,7 +171,16 @@ def resolve_module(root: Path, url: str) -> str:
     found = origin(root)
     if found is None:
         raise NoHome(f"{url} is relative to origin, and {root} has no origin remote")
-    return module_url(found, url)
+    return module_url(anchored(root, found), url)
+
+
+def anchored(root: Path, origin_url: str) -> str:
+    """`origin_url` as `root`'s checkout reads it: a relative path, which git reads from the
+    checkout, made absolute; any other form unchanged."""
+    url = origin_url.strip()
+    if PREFIX.match(url) or url.startswith(("/", "\\")) or PureWindowsPath(url).is_absolute():
+        return url
+    return Path(os.path.normpath(Path(root).absolute() / url)).as_posix()
 
 
 def main(argv: list[str] | None = None) -> int:
