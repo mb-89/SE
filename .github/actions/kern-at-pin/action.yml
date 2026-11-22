@@ -30,7 +30,7 @@ runs:
             sys.exit(1)
 
         folder = pathlib.Path(os.environ["FOLDER"])
-        lock, manifest, carried = folder / "se.lock", folder / "se.toml", folder / "kern" / "go.mod"
+        lock, manifest, carried = folder / "se.lock", folder / "se.toml", folder / "kern/go.mod"
         locked = kern(lock)
         if not locked:
             if carried.is_file():
