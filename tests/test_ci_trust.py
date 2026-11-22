@@ -443,11 +443,13 @@ def test_ses_check_gates_the_suite_and_kern_platforms_on_the_trust_job() -> None
     jobs = dict(re.findall(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow.split("\njobs:\n")[1]))
     assert list(jobs) == ["check", "kern-platforms", "kern-platforms-queue", "trust"]
     assert "mode: lookup" in jobs["trust"] and "fetch-depth: 0" in jobs["trust"]
+    # The job's answer is the decision step's (scripts/ci_reuse.py), which takes lookup's first.
+    assert "TRUSTED: ${{ steps.lookup.outputs.trusted }}" in jobs["trust"]
     for gated in ("kern-platforms", "kern-platforms-queue"):
-        assert "needs: trust\n    if: needs.trust.outputs.trusted != 'true'" in jobs[gated], gated
+        assert "needs: trust\n    if: needs.trust.outputs.suite == 'run'" in jobs[gated], gated
     assert "needs: [trust, kern-platforms]" in jobs["check"]
     suite = re.search(r"(?ms)- name: The complete suite.*?\n(?=      - )", jobs["check"])[0]
-    assert "if: needs.trust.outputs.trusted != 'true'" in suite
+    assert "if: needs.trust.outputs.suite == 'run'" in suite
     # The cheap gates always run: the commits, the issue rule, the layouts, the reference, the report.
     for step in ("Gate the commits", "names an open work issue", "layouts match",
                  "command reference", "field report follows"):
