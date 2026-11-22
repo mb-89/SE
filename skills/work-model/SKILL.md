@@ -418,9 +418,9 @@ The checks that hold it:
 
 | Part of the rule | Check |
 |---|---|
-| History held only by another remote is never pushed | the push gate, `work_tickets.py push`; its guard against foreign history is work issue `foreign-history-on-push` (#1533) |
-| A work branch goes only to the remote the workflow intends | `work_tickets.py deliver` and `push`; the intent rule is work issue `intended-work-publication` (#1526) |
-| Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`); its clean sync is work issue `module-origin-resolution` (#1525) |
+| History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([README "Project settings"](../../README.md#project-settings), `tests/test_push_guard.py`) |
+| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([README "Work publication"](../../README.md#work-publication), `tests/test_push_guard.py`) |
+| Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([README "Modules"](../../README.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
 | No issue or comment text names another remote | a filing's form check (`<se>/scripts/work_tickets.py` `form_findings`) refuses each private term in the title and body, at the filing commands and the form gate ([README "Forms"](../../README.md#forms)) |
