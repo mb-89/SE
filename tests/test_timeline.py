@@ -487,7 +487,9 @@ def need_browser():
 
 @pytest.fixture(scope="module")
 def page(tmp_path_factory, obs):
-    """The Timeline obs built from `large_snapshot`."""
+    """The Timeline obs built from `large_snapshot`; every test of it opens a browser, so it skips
+    before the build where none is installed."""
+    need_browser()
     destination = tmp_path_factory.mktemp("timeline") / "timeline.html"
     snap = large_snapshot()
     assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
