@@ -247,8 +247,10 @@ def test_the_trust_jobs_steps_decide_through_the_rest_api(checkout: Path, tmp_pa
     answered = outputs(env)
     assert (answered["suite"], answered["result"]) == ("reused", suite)
     assert answered["source"] == "https://github.com/alice/project/actions/runs/100"
+    # No status filter: on 22 Nov GitHub's `status=completed` with `head_sha` listed one of the
+    # head's two completed runs, and the edit ran everything; the decision filters by status itself.
     assert LocalGitHub.asked[1] == (f"/repos/alice/project/actions/workflows/77/runs?head_sha={HEAD}"
-                                    "&event=pull_request&status=completed&per_page=100")
+                                    "&event=pull_request&per_page=100")
     assert "::notice title=se reused check::tree " in capsys.readouterr().out
 
 

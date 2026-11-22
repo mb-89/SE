@@ -179,13 +179,14 @@ class Api(ci_trust.Api):
     """GitHub's REST API as ci_trust's door, with the reads the decision makes; tests replace it."""
 
     def workflow_runs(self, run_id: str, head: str) -> list[dict]:
-        """The completed pull_request runs for `head` of the workflow run `run_id` belongs to."""
+        """The pull_request runs for `head` of the workflow `run_id` belongs to, of any status: with
+        `head_sha`, GitHub's `status=completed` filter lists only some of the completed runs, so
+        `decide` filters by status itself."""
         own = self.request("GET", f"actions/runs/{run_id}") or {}
         if not own.get("workflow_id"):
             raise ReuseError(f"the run {run_id} names no workflow")
         listed = self.request("GET", f"actions/workflows/{own['workflow_id']}/runs?head_sha="
-                                     f"{urllib.parse.quote(head)}&event=pull_request&"
-                                     f"status=completed&per_page={RUNS_READ}") or {}
+                                     f"{urllib.parse.quote(head)}&event=pull_request&per_page={RUNS_READ}") or {}
         return list(listed.get("workflow_runs") or [])
 
     def jobs(self, run: dict) -> list[dict]:
