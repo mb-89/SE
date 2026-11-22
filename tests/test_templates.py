@@ -135,26 +135,36 @@ def test_every_template_loads_with_its_actions_and_the_terms(catalog):
 
 def write_template(root: Path, name: str, text: str) -> None:
     (root / "templates").mkdir(exist_ok=True)
-    (root / "templates" / f"{name}.toml").write_text(text, encoding="utf-8")
+    (root / "templates" / f"{name}.md").write_text(text, encoding="utf-8")
 
 
-MINIMAL = """name = "{name}"
-reader = "owner"
-says = "A template."
-{extra}
-[[fields]]
-name = "goal"
-kind = "text"
-heading = "Goal"
-required = true
-says = "The goal."
+#: A template note's first lines, which every template declares.
+HEAD = 'name: {name}\nversion: 1.0.0\nkind: document\ntags: ["test"]\n'
+ISSUE_CREATE = 'applies:\n  actions: ["issue.create"]\n'
+
+MINIMAL = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+{extra}fields:
+  - name: goal
+    kind: text
+    required: true
+---
+
+## Goal
+
+<!-- goal: The goal. -->
 """
 
 
 @pytest.mark.parametrize("extra, error", [
-    ("", "[applies] actions is required"),
-    ('[applies]\nactions = ["issue.create"]\n[rules]\nwords = "refuse"\n', "only warns"),
-    ('[applies]\nactions = ["issue.delete"]\n', "is none of"),
+    ("", "applies.actions is required"),
+    (f'{ISSUE_CREATE}rules:\n  words: refuse\n', "only warns"),
+    ('applies:\n  actions: ["issue.delete"]\n', "is none of"),
 ])
 def test_a_template_that_breaks_the_format_does_not_load(tmp_path, extra, error):
     write_template(tmp_path, "one", MINIMAL.format(name="one", extra=extra))
@@ -163,14 +173,13 @@ def test_a_template_that_breaks_the_format_does_not_load(tmp_path, extra, error)
 
 
 def test_a_valid_minimal_template_loads(tmp_path):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.create"]\n'))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=ISSUE_CREATE))
     assert list(templates.load(tmp_path, tree=True)) == ["one"]
 
 
 def test_an_extends_cycle_does_not_load(tmp_path):
-    applies = '[applies]\nactions = ["issue.create"]\n'
-    write_template(tmp_path, "a", MINIMAL.format(name="a", extra=f'extends = "b"\n{applies}'))
-    write_template(tmp_path, "b", MINIMAL.format(name="b", extra=f'extends = "a"\n{applies}'))
+    write_template(tmp_path, "a", MINIMAL.format(name="a", extra=f'extends: b\n{ISSUE_CREATE}'))
+    write_template(tmp_path, "b", MINIMAL.format(name="b", extra=f'extends: a\n{ISSUE_CREATE}'))
     with pytest.raises(templates.TemplateError, match="cycle"):
         templates.load(tmp_path, tree=True)
 
@@ -182,12 +191,12 @@ def commit_all(repository: Path) -> None:
 
 
 def test_load_reads_templates_at_origin_where_the_ref_holds_them(tmp_path, fake_git_door):
-    applies = '[applies]\nactions = ["issue.create"]\n'
+    applies = ISSUE_CREATE
     fake_git.init(tmp_path)
     write_template(tmp_path, "landed", MINIMAL.format(name="landed", extra=applies))
     commit_all(tmp_path)
     fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/main", "HEAD")
-    (tmp_path / "templates" / "landed.toml").unlink()
+    (tmp_path / "templates" / "landed.md").unlink()
     write_template(tmp_path, "local", MINIMAL.format(name="local", extra=applies))
     assert list(templates.load(tmp_path)) == ["landed"]
     assert list(templates.load(tmp_path, tree=True)) == ["local"]
@@ -195,7 +204,7 @@ def test_load_reads_templates_at_origin_where_the_ref_holds_them(tmp_path, fake_
 
 def test_load_reads_the_working_tree_without_the_ref(tmp_path, fake_git_door):
     fake_git.init(tmp_path)
-    write_template(tmp_path, "local", MINIMAL.format(name="local", extra='[applies]\nactions = ["issue.create"]\n'))
+    write_template(tmp_path, "local", MINIMAL.format(name="local", extra=ISSUE_CREATE))
     assert list(templates.load(tmp_path)) == ["local"]
 
 
@@ -231,15 +240,15 @@ def test_html_comments_do_not_fill_a_field(catalog):
 
 def test_the_marker_names_the_repository_the_template_its_version_and_its_digest(catalog, tmp_path):
     work = catalog["work"]
-    texts = [(ROOT / "templates" / f"{name}.toml").read_text(encoding="utf-8") for name in ("work", "ticket")]
+    texts = [(ROOT / "templates" / f"{name}.md").read_text(encoding="utf-8") for name in ("work", "ticket")]
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
-    assert work.marker_line == f"<!-- se:template se/work 0.0.0 sha256:{digest} -->"
+    assert work.marker_line == f"<!-- se:template se/work 1.0.0 sha256:{digest} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
     assert templates.TEMPLATE_MARKER_PATTERN.findall(work.marker_line) == ["work"]
     assert templates.TEMPLATE_MARKER_PATTERN.findall("<!-- se:template work -->\n<!-- se:form work -->") == []
     shutil.copytree(ROOT / "templates", tmp_path / "templates")
     own = templates.load(tmp_path, tree=True)["work"]
-    assert own.marker_line == f"<!-- se:template project/work 0.0.0 sha256:{digest} -->"
+    assert own.marker_line == f"<!-- se:template project/work 1.0.0 sha256:{digest} -->"
 
 
 def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(catalog):
@@ -264,10 +273,147 @@ def test_parse_of_render_gives_each_example_back(catalog):
         assert not templates.check(template, document), template.name
 
 
+def adapter_examples() -> dict[str, tuple[str, str | None]]:
+    """Each adapter's example, (body, title), as the SE writer it names writes it: an adapter's
+    body is its writer's, so its template keeps no copy."""
+    notes, _ = test_deck.DECKS["only-records"]
+    decision = test_deck.NOTE % ("One", "one") + test_deck.PUGH
+    return {
+        "field-report": (f"Refs {ISSUE_URL}\n\n{issue_tests.reported_at(issue_tests.TIP)}", "feat/x"),
+        "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL), "feat/x"),
+        "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
+        "merge-message": ("Release-kind: minor", merge_title()),
+        "review": (review_comment(test_review.report()), None),
+        "retro": (marked_block(retro.BLOCK_MARKER, retro_block()), None),
+        "overhaul": (marked_block(overhaul.BLOCK_MARKER, overhaul_block()), None),
+        "decision": (decision, None),
+    }
+
+
+@pytest.mark.parametrize("name", [*ISSUE_TEMPLATES, *ADAPTERS])
+def test_each_of_the_eleven_templates_renders_and_parses_its_example_back(catalog, name):
+    template = catalog[name]
+    if template.is_adapter:
+        body, title = adapter_examples()[name]
+        document = templates.parse(template, body, title)
+        assert templates.render(template, document) == body
+    else:
+        example = dict(template.example["fields"])
+        document = templates.parse(template, templates.render(template, example), example.get("title"))
+        assert document.fields == example
+    assert [finding for finding in templates.check(template, document)
+            if finding.severity == templates.REFUSE] == []
+    assert len(catalog) == 11
+
+
+def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
+    yaml = pytest.importorskip("yaml")
+    notes = sorted((ROOT / "templates").glob("*.md"))
+    assert [path.stem for path in notes] == sorted([*ISSUE_TEMPLATES, *ADAPTERS])
+    assert sorted(path.name for path in (ROOT / "templates").iterdir()) == sorted(
+        [path.name for path in notes] + [templates.TERMS_FILE])
+    for path in notes:
+        text = path.read_text(encoding="utf-8")
+        front = text.split("---\n", 2)[1]
+        assert templates.front_data(front, path.name) == yaml.safe_load(front), path.name
+        data = templates.note_data(text, path.name)
+        assert templates.SEMVER.match(data["version"]) and data["kind"] in templates.TEMPLATE_KINDS
+        assert data["tags"] and all(isinstance(tag, str) for tag in data["tags"])
+
+
+def test_a_note_s_skeleton_gives_each_field_its_heading_and_its_instruction(catalog):
+    work = catalog["work"]
+    assert (work.version, work.kind, work.tags) == ("1.0.0", "document", ("issue", "work"))
+    assert catalog["routed"].kind == "block" and catalog["merge-message"].kind == "interface"
+    goal = work.field("goal")
+    assert goal.heading == "Goal" and goal.says.startswith("What is true once this is done")
+    assert work.field("situation").says == catalog["ticket"].field("situation").says
+    assert work.field("title").says.startswith("The name, its branch too")
+    text = (ROOT / "templates" / "work.md").read_text(encoding="utf-8")
+    assert "## Goal\n\n<!-- goal: What is true once this is done" in text
+    assert "\n    heading:" not in text.split("---\n", 2)[1]
+    routed = (ROOT / "templates" / "routed.md").read_text(encoding="utf-8")
+    assert "\n### Package kind\n" in routed and "\n## " not in routed
+
+
+@pytest.mark.parametrize("front, error", [
+    ("name: one\n\tkind: x\n", "indented with a tab"),
+    ("rules:\n  terms: off\n", "off is a plain value another YAML reader may read otherwise"),
+    ("version: 1.5\n", "1.5 is a plain value"),
+    ("says: The name: a title\n", "quote it as a JSON string"),
+    ("name: one\nname: two\n", "name is given twice"),
+    ("tags: [\"a\",\n", "is no JSON value"),
+    ("applies:\nname: one\n", "applies has no value"),
+    ("name: one\n  kind: x\n", "indented below a key that has its value"),
+    ("- a\n", "the front matter is a list"),
+], ids=["tab", "off", "float", "colon", "twice", "json", "empty", "indent", "list"])
+def test_front_matter_outside_the_subset_is_refused_by_its_line(front, error):
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.front_data(front, "templates/one.md")
+
+
+def test_front_matter_reads_nested_mappings_lists_and_scalars():
+    front = ("# a comment\nname: one\nquoted: \"off\"\nsingle: 'it''s'\ncount: 3\nyes_no: true\n"
+             "list: [\"a\", \"b\"]\nmapping:\n  inner: x\n  \".\": [\"y\"]\nitems:\n  - name: a\n"
+             "    kind: text\n  - plain\n")
+    assert templates.front_data(front, "one") == {
+        "name": "one", "quoted": "off", "single": "it's", "count": 3, "yes_no": True,
+        "list": ["a", "b"], "mapping": {"inner": "x", ".": ["y"]},
+        "items": [{"name": "a", "kind": "text"}, "plain"]}
+
+
+@pytest.mark.parametrize("change, error", [
+    (lambda text: text.replace("    required: true\n---", "    required: true\n    heading: Goal\n---"),
+     "which owns its heading; take heading out of the front matter"),
+    (lambda text: text.replace("    required: true\n---", "    required: true\n    says: The goal.\n---"),
+     "which owns its says"),
+    (lambda text: text.replace("## Goal\n\n<!-- goal: The goal. -->\n", ""),
+     "the skeleton's sections are none; they are one per field with a section"),
+    (lambda text: text.replace("<!-- goal:", "<!-- aim:"), "the skeleton's sections are aim"),
+    (lambda text: text.replace("<!-- goal: The goal. -->", "The goal."), "holds one comment alone"),
+    (lambda text: text.replace("---\n\n## Goal", "---\n\nA note.\n\n## Goal"),
+     "text before the skeleton's first section"),
+    (lambda text: text.replace("## Goal", "# Goal"), "is no section of the skeleton"),
+    (lambda text: text.replace("version: 1.0.0\n", ""), "version is None"),
+    (lambda text: text.replace("version: 1.0.0", "version: \"1.0\""), "version is '1.0'"),
+    (lambda text: text.replace("kind: document", "kind: page"), "kind is 'page'; one of document"),
+    (lambda text: text.replace('tags: ["test"]\n', ""), "tags is a list of words"),
+    (lambda text: text.removeprefix("---\n"), "a template opens with its front matter"),
+], ids=["heading", "says", "no-section", "other-field", "no-comment", "text-before", "page-title",
+        "no-version", "no-semver", "kind", "tags", "no-front-matter"])
+def test_a_note_that_breaks_the_format_does_not_load(tmp_path, change, error):
+    write_template(tmp_path, "one", change(MINIMAL.format(name="one", extra=ISSUE_CREATE)))
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.load(tmp_path, tree=True)
+
+
+def test_load_reads_the_tree_where_origin_holds_no_template_note(tmp_path, fake_git_door):
+    fake_git.init(tmp_path)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "old.toml").write_text('name = "old"\n', encoding="utf-8")
+    shutil.copy(ROOT / "templates" / templates.TERMS_FILE, tmp_path / "templates" / templates.TERMS_FILE)
+    commit_all(tmp_path)
+    fake_git.git("-C", str(tmp_path), "update-ref", "refs/remotes/origin/main", "HEAD")
+    write_template(tmp_path, "local", MINIMAL.format(name="local", extra=ISSUE_CREATE))
+    assert list(templates.load(tmp_path)) == ["local"]
+
+
+OBJECT_TEMPLATE = f"""---
+{HEAD.format(name="obj")}reader: fleet
+says: x
+{ISSUE_CREATE}fields:
+  - name: meta
+    kind: object
+---
+
+## Meta
+
+<!-- meta: keys -->
+"""
+
+
 def test_an_object_field_reads_and_writes_key_value_lines(tmp_path):
-    write_template(tmp_path, "obj", 'name = "obj"\nreader = "fleet"\nsays = "x"\n[applies]\n'
-               'actions = ["issue.create"]\n[[fields]]\nname = "meta"\nkind = "object"\n'
-               'heading = "Meta"\nsays = "keys"\n')
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
     template = templates.load(tmp_path, tree=True)["obj"]
     values = {"meta": {"Owner": "SE", "Size": "small"}}
     assert templates.parse(template, templates.render(template, values)).fields == values
@@ -291,7 +437,7 @@ def test_select_takes_the_marker_then_the_conditions_then_the_plain_template(cat
 
 
 def test_select_without_a_template_for_the_action_is_free(tmp_path):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='[applies]\nactions = ["issue.edit"]\n'))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra='applies:\n  actions: ["issue.edit"]\n'))
     assert templates.select(templates.load(tmp_path, tree=True), "issue.create", "", "").template is None
 
 
@@ -448,35 +594,42 @@ def test_a_body_route_writes_with_its_default_type_passes_the_routed_template(tm
     assert "choice" not in capsys.readouterr().out
 
 
-NAMED = """name = "one"
-reader = "owner"
-says = "A template."
-[applies]
-actions = ["issue.create"]
-[rules]
-title-shape = "warn"
-[[fields]]
-name = "title"
-kind = "line"
-source = "title"
-{title}
-[[fields]]
-name = "kind"
-kind = "choice"
-heading = "Kind"
-{kind}
+NAMED = """---
+name: one
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A template.
+applies:
+  actions: ["issue.create"]
+rules:
+  title-shape: warn
+fields:
+  - name: title
+    kind: line
+    source: title
+    {title}
+  - name: kind
+    kind: choice
+    {kind}
+---
+
+## Kind
+
+<!-- kind: The kind. -->
 """
 
 
 @pytest.mark.parametrize("title, kind, error", [
-    ('shape = "work_tickets:NO_SUCH_RULE"', 'choices = ["a"]',
-     "templates/one.toml: field title shape: work_tickets:NO_SUCH_RULE does not resolve"),
-    ('shape = "no_such_script:RULE"', 'choices = ["a"]',
-     "templates/one.toml: field title shape: no_such_script:RULE does not resolve"),
-    ('shape = "work_tickets:NAME_WORDS"', 'choices = ["a"]', "is no pattern or function"),
-    ("", 'choices = ["a", "work_tickets:NO_SUCH_KINDS"]',
-     "templates/one.toml: field kind choices: work_tickets:NO_SUCH_KINDS does not resolve"),
-    ("", 'choices = ["work_tickets:NAME_EXAMPLE"]', "is no list or mapping"),
+    ("shape: work_tickets:NO_SUCH_RULE", 'choices: ["a"]',
+     "templates/one.md: field title shape: work_tickets:NO_SUCH_RULE does not resolve"),
+    ("shape: no_such_script:RULE", 'choices: ["a"]',
+     "templates/one.md: field title shape: no_such_script:RULE does not resolve"),
+    ("shape: work_tickets:NAME_WORDS", 'choices: ["a"]', "is no pattern or function"),
+    ("", 'choices: ["a", "work_tickets:NO_SUCH_KINDS"]',
+     "templates/one.md: field kind choices: work_tickets:NO_SUCH_KINDS does not resolve"),
+    ("", 'choices: ["work_tickets:NAME_EXAMPLE"]', "is no list or mapping"),
 ])
 def test_a_field_that_names_code_that_does_not_exist_does_not_load(tmp_path, title, kind, error):
     write_template(tmp_path, "one", NAMED.format(title=title, kind=kind))
@@ -485,8 +638,8 @@ def test_a_field_that_names_code_that_does_not_exist_does_not_load(tmp_path, tit
 
 
 def test_a_field_names_a_pattern_a_function_a_list_and_a_mapping(tmp_path):
-    write_template(tmp_path, "one", NAMED.format(title='shape = "work_tickets:NAME_PATTERN"',
-                                             kind='choices = ["x", "work_tickets:RELEASE_ORDER", '
+    write_template(tmp_path, "one", NAMED.format(title="shape: work_tickets:NAME_PATTERN",
+                                             kind='choices: ["x", "work_tickets:RELEASE_ORDER", '
                                                   '"work_tickets:RELEASE_KINDS"]'))
     one = templates.load(tmp_path, tree=True)["one"]
     assert one.field("kind").choices[:4] == ("x", "patch", "minor", "major")
@@ -749,9 +902,7 @@ def test_draft_json_keeps_its_old_keys_byte_for_byte(capsys, catalog):
 
 
 def test_an_object_field_takes_the_schemas_key_value_pairs(tmp_path):
-    write_template(tmp_path, "obj", 'name = "obj"\nreader = "fleet"\nsays = "x"\n[applies]\n'
-               'actions = ["issue.create"]\n[[fields]]\nname = "meta"\nkind = "object"\n'
-               'heading = "Meta"\nsays = "keys"\n')
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
     template = templates.load(tmp_path, tree=True)["obj"]
     pairs = {"meta": [{"key": "Owner", "value": "SE"}, {"key": "Size", "value": "small"}]}
     assert schema_errors(templates.schema(template), pairs) == []
@@ -849,24 +1000,28 @@ def test_a_missing_argument_exits_2():
 # Templates for files: a template claims files by their path (file.write)
 
 
-STEP_TEMPLATE = """name = "{name}"
-reader = "owner"
-says = "Risks: what could go wrong."
+STEP_TEMPLATE = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "Risks: what could go wrong."
+applies:
+  actions: ["file.write"]
+  paths: [{paths}]
+{extra}rules:
+  required: refuse
+fields:
+  - name: risks
+    kind: list
+    required: true
+    none_ok: true
+---
 
-[applies]
-actions = ["file.write"]
-paths = [{paths}]
-{extra}
-[rules]
-required = "refuse"
+## Risks
 
-[[fields]]
-name = "risks"
-kind = "list"
-heading = "Risks"
-required = true
-none_ok = true
-says = "One item per risk, or None."
+<!-- risks: One item per risk, or None. -->
 """
 
 STEP = "---\nid: S5B\nname: Risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
@@ -875,21 +1030,21 @@ STEP = "---\nid: S5B\nname: Risks\n---\n\n# Risks\n\n## Risks\n\n- The scan miss
 def step_templates(root: Path, **templates_by_name: str) -> dict[str, templates.Template]:
     for name, extra in templates_by_name.items():
         write_template(root, name, STEP_TEMPLATE.format(name=name, paths='"book/*/steps/*.md"',
-                                                extra=extra))
+                                                extra="".join(f"  {line}\n" for line in extra.splitlines())))
     return templates.load(root, folder=root / "templates")
 
 
 @pytest.mark.parametrize("applies, error", [
-    ('actions = ["issue.create"]\npaths = ["*.md"]', "goes only with"),
-    ('actions = ["file.write", "issue.create"]\npaths = ["*.md"]', "goes only with"),
-    ('actions = ["file.write"]', "needs [applies] paths"),
-    ('actions = ["file.write"]\npaths = "*.md"', "list of globs"),
+    ('  actions: ["issue.create"]\n  paths: ["*.md"]', "goes only with"),
+    ('  actions: ["file.write", "issue.create"]\n  paths: ["*.md"]', "goes only with"),
+    ('  actions: ["file.write"]', "needs applies.paths"),
+    ('  actions: ["file.write"]\n  paths: "*.md"', "list of globs"),
 ])
 def test_a_file_template_needs_its_paths_and_its_paths_need_file_write(tmp_path, applies, error):
-    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=f"[applies]\n{applies}\n"))
+    write_template(tmp_path, "one", MINIMAL.format(name="one", extra=f"applies:\n{applies}\n"))
     with pytest.raises(templates.TemplateError) as refused:
         templates.load(tmp_path, folder=tmp_path / "templates")
-    assert error in str(refused.value) and str(tmp_path / "templates" / "one.toml") in str(refused.value)
+    assert error in str(refused.value) and str(tmp_path / "templates" / "one.md") in str(refused.value)
 
 
 def test_a_file_template_loads_with_its_paths_and_its_globs_match_by_folder(tmp_path):
@@ -904,8 +1059,8 @@ def test_a_file_template_loads_with_its_paths_and_its_globs_match_by_folder(tmp_
 
 
 def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
-    catalog = step_templates(tmp_path, risks="marker_pattern = 'id: S5B'", goals="order = 1\n"
-                         "marker_pattern = 'id: S1'")
+    catalog = step_templates(tmp_path, risks='marker_pattern: "id: S5B"', goals="order: 1\n"
+                         'marker_pattern: "id: S1"')
     pick = lambda body, path="book/m1/steps/x.md": templates.select(catalog, "file.write", body,
                                                                  path=path)
     free = pick(STEP, "notes/x.md")
@@ -947,7 +1102,7 @@ def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
 
 
 def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, capsys):
-    step_templates(tmp_path, risks="marker_pattern = 'id: S5B'")
+    step_templates(tmp_path, risks='marker_pattern: "id: S5B"')
     steps = tmp_path / "book" / "m1" / "steps"
     steps.mkdir(parents=True)
     (steps / "51-S5B.md").write_text(STEP, encoding="utf-8")
@@ -1033,31 +1188,31 @@ def test_every_name_an_adapter_gives_resolves(catalog):
 
 
 @pytest.mark.parametrize("top, tables, error", [
-    ('checker = "review:checked_report"\n', '[[fields]]\nname = "goal"\nkind = "text"\n'
-     'heading = "Goal"\n', "a template with fields takes no checker"),
-    ('checker = "review.checked_report"\n', "", "is no \"<module>:<name>\""),
-    ('checker = "review:checked_report"\n', '[adapter]\nread = "body"\n',
-     "[adapter] has unknown keys read"),
-    ('checker = "deck:_explains"\n', '[adapter]\nresult = "truth"\n', "needs its refusal"),
-    ('checker = "deck:_explains"\n', '[adapter]\nresult = "maybe"\n', "result is 'maybe'"),
-    ("", '[[adapter.lines]]\npattern = "x"\n', "each [[adapter.lines]] has a pattern and says"),
+    ("checker: review:checked_report\n", "fields:\n  - name: goal\n    kind: text\n    label: Goal\n"
+     "    says: The goal.\n", "a template with fields takes no checker"),
+    ("checker: review.checked_report\n", "", "is no \"<module>:<name>\""),
+    ("checker: review:checked_report\n", "adapter:\n  read: body\n",
+     "adapter has unknown keys read"),
+    ("checker: deck:_explains\n", "adapter:\n  result: truth\n", "needs its refusal"),
+    ("checker: deck:_explains\n", "adapter:\n  result: maybe\n", "result is 'maybe'"),
+    ("", "adapter:\n  lines:\n    - pattern: x\n", "each item of adapter.lines has a pattern and says"),
 ], ids=["fields-and-checker", "no-reference", "unknown-key", "truth-without-refusal",
         "unknown-result", "line-without-says"])
 def test_an_adapter_that_breaks_the_format_does_not_load(tmp_path, top, tables, error):
-    write_template(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n{top}\n'
-               f'[applies]\nactions = ["comment.create"]\n\n{tables}')
+    write_template(tmp_path, "one", f'---\n{HEAD.format(name="one")}reader: fleet\nsays: A text.\n{top}'
+               f'applies:\n  actions: ["comment.create"]\n{tables}---\n')
     with pytest.raises(templates.TemplateError, match=re.escape(error)):
         templates.load(tmp_path, tree=True)
 
 
 @pytest.mark.parametrize("applies, error", [
-    ('actions = ["pr.create"]\nbase = "next"\n', "the one base is \"integration\""),
-    ('actions = ["pr.create"]\nbranch = "main"\n', "[applies] has unknown keys branch"),
-    ('actions = ["pr.delete"]\n', "action 'pr.delete' is none of"),
+    ('  actions: ["pr.create"]\n  base: next\n', "the one base is \"integration\""),
+    ('  actions: ["pr.create"]\n  branch: main\n', "applies has unknown keys branch"),
+    ('  actions: ["pr.delete"]\n', "action 'pr.delete' is none of"),
 ])
 def test_applies_refuses_what_selection_cannot_read(tmp_path, applies, error):
-    write_template(tmp_path, "one", f'name = "one"\nreader = "fleet"\nsays = "A text."\n\n'
-               f'[applies]\n{applies}')
+    write_template(tmp_path, "one", f'---\n{HEAD.format(name="one")}reader: fleet\nsays: A text.\n'
+               f'applies:\n{applies}---\n')
     with pytest.raises(templates.TemplateError, match=re.escape(error)):
         templates.load(tmp_path, tree=True)
 
@@ -1716,8 +1871,10 @@ def missing_from_readme(readme: str) -> list[str]:
     after = re.search(r"\n#{1,3} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
-    for path in sorted((ROOT / "templates").glob("*.toml")):
-        says = " ".join(tomllib.loads(path.read_text(encoding="utf-8"))["says"].split())
+    for path in sorted((ROOT / "templates").iterdir()):
+        text = path.read_text(encoding="utf-8")
+        data = tomllib.loads(text) if path.suffix == ".toml" else templates.note_data(text, path.name)
+        says = " ".join(data["says"].split())
         if f"`templates/{path.name}`" not in section or says not in section:
             missing.append(path.name)
     return missing
@@ -1731,6 +1888,6 @@ def test_readme_templates_names_every_file_under_templates_with_its_says():
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    start = readme.index("| `templates/retro.toml` |")
-    end = readme.index("\n| `templates/review.toml` |", start)
-    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.toml"]
+    start = readme.index("| `templates/retro.md` |")
+    end = readme.index("\n| `templates/review.md` |", start)
+    assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]

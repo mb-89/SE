@@ -2179,8 +2179,9 @@ and its neighbours. It lists:
 document and the packages that build it. This section holds the commands of the engine as it runs
 today.
 
-One TOML file per template under `templates/` is read by one engine, `scripts/templates.py`, whose
-docstring owns the file format, the field kinds, the selection order, the two severities and the
+One Markdown note per template under `templates/`, its front matter the fields and its body the
+skeleton with an instruction per section, is read by one engine, `scripts/templates.py`, whose
+docstring owns the note's format, the field kinds, the selection order, the two severities and the
 marker a rendered document carries, `<!-- se:template <repository>/<name> <version> <digest> -->`.
 
 The templates own the shape of issues; the GitHub issue templates in `.github/ISSUE_TEMPLATE/`
@@ -2192,18 +2193,18 @@ both.
 
 | Template | What it shapes |
 |---|---|
-| `templates/decision.toml` | A decision note: the situation and the problem before the options' pugh fence. |
-| `templates/field-report.toml` | A work pull request's description: the field report between its markers. |
-| `templates/housekeeping.toml` | The owner's housekeeping pull request: no field report, no field required. |
-| `templates/landing.toml` | A landing pull request: it names the work issue, the work pull request and its report. |
-| `templates/merge-message.toml` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
-| `templates/overhaul.toml` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
-| `templates/retro.toml` | A retro's report or draft: its judged block, under its marker. |
-| `templates/review.toml` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
-| `templates/routed.toml` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/decision.md` | A decision note: the situation and the problem before the options' pugh fence. |
+| `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
+| `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
+| `templates/overhaul.md` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
+| `templates/retro.md` | A retro's report or draft: its judged block, under its marker. |
+| `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
+| `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
-| `templates/ticket.toml` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
-| `templates/work.toml` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
+| `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
+| `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
 
 `check` refuses a missing, empty or placeholder field, a choice outside its set, an Approach
 without its alternative, the same text in two fields and an SE command that does not exist; the
@@ -2218,7 +2219,7 @@ where it holds them, else the working tree (`--tree` always).
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands.
 
-A `file.write` template claims files by its `[applies] paths` globs, such as a milestone's steps.
+A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
 line names or the conditions pick, refuses one none picks and leaves unclaimed files free; the
 front matter and `#` title stay as they are.

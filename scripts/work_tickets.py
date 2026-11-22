@@ -4800,7 +4800,7 @@ def checked_name(command: str, name: str) -> str:
 
 def name_refusal(name: str) -> str:
     """Why `name` breaks the name rule, with a shorter name to use; empty where `checked_name`
-    accepts it. The templates' title shape (templates/ticket.toml) names it."""
+    accepts it. The templates' title shape (templates/ticket.md) names it."""
     name = name.strip()
     if NAME_PATTERN.fullmatch(name) or OLD_NAME_PATTERN.fullmatch(name):
         return ""
@@ -6928,7 +6928,7 @@ def without_tracker_references(sentence: str) -> str:
 CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
 #: Where a Goal's list starts: its lead-in is the Goal's first sentence.
 LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
-#: How long a Goal's first sentence should keep to, as the work template warns (`templates/work.toml`
+#: How long a Goal's first sentence should keep to, as the work template warns (`templates/work.md`
 #: `first_sentence_chars`); and the longest a landing title's summary runs whole.
 SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
 #: The longest title GitHub keeps: a landing title stays within it, its branch name included.
