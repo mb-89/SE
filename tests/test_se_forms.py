@@ -685,12 +685,13 @@ def test_check_files_names_at_most_ten_lines_with_a_count_of_the_rest(capsys, tm
     assert lines[-2] == "... and 4 more findings"
 
 
+@pytest.mark.parametrize("level", ["check", "write"])  # write does all check does
 def test_check_files_changed_finds_an_untracked_claimed_file_and_skips_a_deleted_one(
-        capsys, tmp_path, fake_git_door):
+        level, capsys, tmp_path, fake_git_door):
     import fake_git
     import git_door
     steps = step_book(tmp_path, kept=GOOD_STEP, gone=GOOD_STEP)
-    (tmp_path / "se.toml").write_text('[forms]\nfiles = "check"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text(f'[forms]\nfiles = "{level}"\n', encoding="utf-8")
     fake_git.init(tmp_path, "-b", "main")
     for arguments in (("config", "user.name", "alice"), ("config", "user.email", "alice@example.com"),
                       ("add", "."), ("commit", "-q", "-m", "steps"),
@@ -750,3 +751,129 @@ def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
     result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=GOOD_WORK, **given),
                     **variables)
     assert result.returncode == 0 and result.stdout == ""
+
+
+# The file tools: where [forms] files is write, the gate judges the file a call would leave.
+
+def file_payload(tool: str, cwd: Path, **given) -> str:
+    return json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(cwd),
+                       "tool_name": tool, "tool_input": given})
+
+
+def file_gate(capsys, monkeypatch, root: Path, text: str, files: str = "write") -> str:
+    return gate(capsys, monkeypatch, text, "--gate", "refuse", "--files", files,
+                "--forms", str(root / "forms"), "--root", str(root))
+
+
+def test_a_write_or_edit_whose_result_breaks_its_form_is_denied_and_the_file_never_changes(
+        capsys, monkeypatch, tmp_path):
+    steps = step_book(tmp_path, step=GOOD_STEP)
+    step = steps / "step.md"
+    denied = {
+        "Write": {"file_path": str(step), "content": EMPTY_STEP},
+        "Edit": {"file_path": str(step), "old_string": "- The scan misses a tool.\n",
+                 "new_string": ""},
+        "MultiEdit": {"file_path": str(step), "edits": [
+            {"old_string": "scan", "new_string": "search"},
+            {"old_string": "- The search misses a tool.\n", "new_string": ""}]},
+        "Write new": {"file_path": str(steps / "new.md"), "content": EMPTY_STEP},
+    }
+    for name, given in denied.items():
+        reason = denial(file_gate(capsys, monkeypatch, tmp_path,
+                                  file_payload(name.split()[0], tmp_path, **given)))
+        relative = Path(given["file_path"]).relative_to(tmp_path).as_posix()
+        assert reason.startswith(f"{name.split()[0]} of {relative}: a file a form claims")
+        assert f"{relative} (step-risks): Risks: empty" in reason
+        assert "forms.py draft --path <file>" in reason
+    passing = [
+        file_payload("Edit", tmp_path, file_path=str(step), old_string="misses a tool",
+                     new_string="misses two tools"),
+        file_payload("Edit", tmp_path, file_path=str(step), old_string="not there", new_string=""),
+        file_payload("Edit", tmp_path, file_path=str(step), old_string="s", new_string=""),
+        file_payload("Edit", tmp_path, file_path=str(step), old_string="- The scan misses a tool.\n",
+                     new_string="- The scan misses two tools.\n", replace_all=True),
+        file_payload("Write", tmp_path, file_path=str(tmp_path / "notes.md"), content="# Notes\n"),
+        file_payload("Write", tmp_path, file_path=str(tmp_path.parent / "elsewhere.md"),
+                     content=EMPTY_STEP),
+        file_payload("Read", tmp_path, file_path=str(step)),
+    ]
+    for text in passing:
+        assert file_gate(capsys, monkeypatch, tmp_path, text) == ""
+    empty = file_payload("Write", tmp_path, file_path=str(step), content=EMPTY_STEP)
+    for files in ("check", "off"):
+        assert file_gate(capsys, monkeypatch, tmp_path, empty, files) == ""
+    assert step.read_text(encoding="utf-8") == GOOD_STEP
+    assert not (steps / "new.md").exists()
+
+
+def test_a_github_file_write_is_judged_per_path_and_names_the_claimed_one(
+        capsys, monkeypatch, tmp_path, home_repo):
+    step_book(tmp_path)
+    files = [{"path": "book/m1/steps/s1.md", "content": GOOD_STEP},
+             {"path": "book/m1/steps/s2.md", "content": EMPTY_STEP},
+             {"path": "notes.md", "content": "# Notes\n"}]
+    text = json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(tmp_path),
+                       "tool_name": "mcp__github__push_files",
+                       "tool_input": {"owner": OWNER, "repo": REPO_NAME, "branch": "b",
+                                      "files": files, "message": "m"}})
+    reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
+    assert reason.startswith(f"push_files in {OWNER}/{REPO_NAME}: a file a form claims")
+    assert "book/m1/steps/s2.md (step-risks): Risks: empty" in reason and "s1.md" not in reason
+    one = json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(tmp_path),
+                      "tool_name": "mcp__github__create_or_update_file",
+                      "tool_input": {"owner": OWNER, "repo": REPO_NAME, "branch": "b", "message": "m",
+                                     "path": "book/m1/steps/s2.md", "content": EMPTY_STEP}})
+    assert "s2.md (step-risks)" in denial(file_gate(capsys, monkeypatch, tmp_path, one))
+    assert file_gate(capsys, monkeypatch, tmp_path, one, "check") == ""
+    good = one.replace(json.dumps(EMPTY_STEP)[1:-1], json.dumps(GOOD_STEP)[1:-1])
+    assert file_gate(capsys, monkeypatch, tmp_path, good) == ""
+
+
+def test_a_file_gate_crash_after_the_claim_denies_and_one_before_passes_and_logs(
+        capsys, monkeypatch, tmp_path):
+    steps = step_book(tmp_path, step=GOOD_STEP)
+    (tmp_path / ".git").mkdir()
+    text = file_payload("Write", tmp_path, file_path=str(steps / "step.md"), content=EMPTY_STEP)
+
+    def broken(*_):
+        raise RuntimeError("the disk is gone")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(se_forms, "left_by", broken)
+        reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
+    assert reason.startswith("SE's form gate failed on this write (RuntimeError)")
+    assert "forms.py draft --path <file>" in reason and "SE_FORMS_GATE=off" in reason
+    with monkeypatch.context() as patch:
+        patch.setattr(se_forms, "claim_forms", broken)
+        assert file_gate(capsys, monkeypatch, tmp_path, text) == ""
+    log = (tmp_path / ".se" / ".runtime" / "forms-gate.log").read_text(encoding="utf-8")
+    assert "RuntimeError: the disk is gone" in log and "Risks" not in log
+
+
+def test_the_file_gate_reads_files_from_the_projects_se_toml_and_counts_its_refusals(
+        capsys, monkeypatch, tmp_path):
+    steps = step_book(tmp_path, step=GOOD_STEP)
+    (tmp_path / ".git").mkdir()
+    text = file_payload("Write", tmp_path, file_path=str(steps / "step.md"), content=EMPTY_STEP)
+    plain = ("--gate", "refuse", "--forms", str(tmp_path / "forms"))
+    assert gate(capsys, monkeypatch, text, *plain) == ""  # files unset: off
+    (tmp_path / "se.toml").write_text('[forms]\nfiles = "write"\n', encoding="utf-8")
+    assert "Risks: empty" in denial(gate(capsys, monkeypatch, text, *plain))
+    monkeypatch.setenv("SE_FORMS_GATE", "off")
+    assert gate(capsys, monkeypatch, text, *plain) == ""
+    monkeypatch.delenv("SE_FORMS_GATE")
+    key = forms.target("step-risks", str(tmp_path), forms.FILE_ACTION, title="book/m1/steps/step.md")
+    assert forms.refusals(key, {"SE_SESSION": SESSION}) == 1
+
+
+def test_the_starts_runtime_line_is_written_only_where_files_is_write(capsys, tmp_path):
+    line = tmp_path / ".se" / ".runtime" / "forms-files"
+    for value, written in (("write", True), ("check", False), ("refuse", False), ("write", True)):
+        (tmp_path / "se.toml").write_text(f'[forms]\nfiles = "{value}"\n', encoding="utf-8")
+        assert se_forms.main(["gate", "--runtime", str(tmp_path)]) == 0
+        assert line.is_file() == written
+        if written:
+            assert line.read_text(encoding="utf-8") == "write\n"
+    (tmp_path / "se.toml").unlink()
+    assert se_forms.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
+    assert capsys.readouterr().out == ""

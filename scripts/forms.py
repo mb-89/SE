@@ -1715,9 +1715,9 @@ ENFORCE_VALUES = (OFF, WARN, REFUSE)
 #: `off` the default.
 GATE_VALUES = (OFF, WARN, REFUSE)
 #: se.toml `[forms] files`: whether SE's checks before work is done check the files a form claims
-#: (se_forms.py check-files), `off` the default.
-CHECK = "check"
-FILES_VALUES = (OFF, CHECK)
+#: (se_forms.py check-files), and with `write` also the gate at each write; `off` the default.
+CHECK, WRITE = "check", "write"
+FILES_VALUES = (OFF, CHECK, WRITE)
 #: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"

@@ -468,3 +468,44 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
     assert result.returncode == passed and "advice" in result.stderr
     start = plugin_hook(kind, "SessionStart", repository, plugin_root(kind, plugin))
     assert start.returncode == 0
+
+
+# The file gate's filter (README "Forms"): the file tools reach se_forms.py gate only where SE's
+# start left `write` in forms-files, and only for a file in the project; the fake uv logs each run.
+
+def file_event(tool: str, **given) -> str:
+    return json.dumps({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": tool,
+                       "tool_input": given})
+
+
+def gate_runs(home: Path) -> int:
+    log = home / "fallback"
+    return log.read_text(encoding="utf-8").count("se_forms.py gate") if log.exists() else 0
+
+
+def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_with_it(machine):
+    home, project = machine
+    install(home, project)
+    inside, outside = sh(project / "book" / "s.md"), sh(project.parent / "else" / "s.md")
+    calls = [file_event("Write", file_path=inside, content="x"),
+             file_event("Edit", file_path=inside, old_string="a", new_string="b"),
+             file_event("MultiEdit", file_path=inside, edits=[]),
+             file_event("mcp__github__push_files", owner="o", repo="r", files=[]),
+             file_event("mcp__github__create_or_update_file", owner="o", repo="r", path="s.md")]
+    for event in calls:  # files unset: no line, every call costs what it did
+        result = hook(home, project, "PreToolUse", event=event)
+        assert result.returncode == 0 and result.stdout == ""
+    assert gate_runs(home) == 0 and (home / "calls").read_text(encoding="utf-8").count("hook ") == 5
+    line = project / ".se" / ".runtime" / "forms-files"
+    line.write_text("write\n", encoding="utf-8", newline="\n")
+    for event in calls:
+        assert hook(home, project, "PreToolUse", event=event).returncode == 0
+    assert gate_runs(home) == 5
+    for event in (file_event("Write", file_path=outside, content="x"),
+                  file_event("Read", file_path=inside), file_event("Write", content="x"),
+                  file_event("mcp__github__get_file_contents", owner="o", repo="r", path="s.md")):
+        assert hook(home, project, "PreToolUse", event=event).returncode == 0
+    assert gate_runs(home) == 5
+    line.write_text("check\n", encoding="utf-8", newline="\n")
+    assert hook(home, project, "PreToolUse", event=calls[0]).returncode == 0
+    assert gate_runs(home) == 5

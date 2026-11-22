@@ -31,10 +31,10 @@ read-only = true
 mcp = "Checks a text or a fields object against a form as SE's filing commands would: its first line is passes or refused, then every finding or, with --render, the Markdown to file. Use it before filing; it files nothing."
 
 [commands."se_forms.py gate"]
-usage = "se_forms.py gate [--gate {off,warn,refuse}]"
-summary = "SE's hook: judge one GitHub write's body against its form"
+usage = "se_forms.py gate [--gate {off,warn,refuse}] [--files {off,check,write}] [--forms FORMS]\n                 [--root ROOT] [--runtime ROOT]"
+summary = "SE's hook: judge one GitHub write's body, or a claimed file's write, ..."
 group = "Forms"
-help = "SE's hook: judge one GitHub write's body against its form"
+help = "SE's hook: judge one GitHub write's body, or a claimed file's write, against its form"
 class = "batch"
 
 [commands."se_forms.py check-files"]
