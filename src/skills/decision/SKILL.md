@@ -40,7 +40,11 @@ it, how others solve it, and which solutions there are.
   model's section "Pugh decision figures" in `spec/design_input/input-model.md`, both in obs, the
   repository beside SE's (`.se/modules/obs/` in a checkout that pins it). SE asks of it:
   - `context` and `concern`: the situation and the concern the decision answers, for its
-    one-sentence summary.
+    one-sentence summary, the verdict.
+    - The verdict names only the chosen option: "In the context of …, facing …, we decided for
+      A · Deck, to achieve …, accepting …", never the options left out, since deciding for one
+      already decides against the rest.
+    - obs's Pugh figure writes it; until obs follows, it still adds "and against" the others.
   - The criteria are weighted before any option is marked.
   - Effort to build or move is a criterion only where it is exceptional; ordinary work to build
     the better system is no criterion
