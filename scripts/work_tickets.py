@@ -3246,9 +3246,12 @@ def push(root: Path, branch: str | None = None) -> str | None:
 
 # Acceptance that can only be seen after the merge: a run, release or deployment on the integration
 # branch. A pull request then names its issue without a closing keyword, and the integrator closes it.
+# A bare "on main" ("the suite passes on main") is not one: the branch's own suite shows it before
+# the merge; only a run (CI, a workflow, a job, a pipeline, a build, a check run) seen on main is.
 POST_MERGE_PATTERN = re.compile(
     r"\bafter (?:the |a |its )?(?:merge|integration)\b|\bpost-merge\b|"
-    r"\bon (?:main|the integration branch)\b|\breleased?\b(?!-)|\bdeploy(?:ed|ment|s)?\b",
+    r"\b(?:CI|workflows?|jobs?|pipelines?|builds?|check runs?)\b[^.;]*?\bon (?:main|the integration branch)\b|"
+    r"\breleased?\b(?!-)|\bdeploy(?:ed|ment|s)?\b",
     re.IGNORECASE,
 )
 

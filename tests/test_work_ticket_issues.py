@@ -7962,3 +7962,17 @@ def test_session_title_refuses_what_breaks_the_scheme_naming_the_remedy(argument
 def test_the_session_title_command_reports_a_refusal(capsys):
     assert work_tickets.main(["session-title", "worker", "obs"]) == 1
     assert "names its ticket name" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("line", "post_merge"), [
+    ("- [ ] The suite passes on main.", False),
+    ("- [ ] `uv run pytest -q` passes on main with the change.", False),
+    ("- [ ] The CI run on main is green.", True),
+    ("- [ ] The `check` workflow passes on the integration branch.", True),
+    ("- [ ] The release names the fix.", True),
+    ("- [ ] The docs are deployed.", True),
+    ("- [ ] CI is green after the merge.", True),
+], ids=["bare-on-main", "command-on-main", "ci-run", "workflow", "release", "deployment", "after-merge"])
+def test_post_merge_acceptance_needs_a_run_release_or_deployment_on_main(line, post_merge):
+    body = BODY.replace("- [ ] Tooling has tests.", line)
+    assert (line.strip() in work_tickets.post_merge_acceptance(body)) is post_merge
