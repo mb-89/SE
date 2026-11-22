@@ -2544,8 +2544,35 @@ def git_push(root: Path, arguments: list[str]) -> None:
     )
 
 
+def guard_foreign_history(root: Path, branch: str) -> None:
+    """Refuse to push `branch` to origin where it carries commits only another remote holds: a
+    project kept on two hosts shares trees, not histories, so such a branch (cut from the other
+    host's main, or one that merged it) would copy that host's history and identities to origin.
+    Local tags prove nothing about origin (one fetched from the other host names its history), so
+    only origin's remote-tracking branches count as held by origin."""
+    ref = f"refs/heads/{branch}"
+    if run_git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+        raise QueueError(
+            f"{branch!r} is no local branch; nothing was pushed. Push names a branch "
+            f"(refs/heads/<branch>), never a refspec, tag or commit"
+        )
+    foreign = run_git(root, "rev-list", "--count", ref, "--not", "--remotes=origin")
+    own = run_git(root, "rev-list", "--count", ref, "--not", "--remotes")
+    if foreign.returncode != 0 or own.returncode != 0:
+        raise QueueError(f"Cannot count the commits {branch} would push to origin; nothing was pushed: {(foreign.stderr + own.stderr).strip()}")
+    extra = int(foreign.stdout.strip() or 0) - int(own.stdout.strip() or 0)
+    if extra > 0:
+        raise QueueError(
+            f"{branch} carries {extra} commit(s) that another remote holds but origin does not; "
+            f"nothing was pushed. Cut the branch from origin's main (git switch -c <branch> "
+            f"origin/main) and carry the change over as new commits (cherry-pick or a squash "
+            f"of the tree), never the other host's history"
+        )
+
+
 def push_gate(root: Path, branch: str) -> None:
     """The public check's push gate on `branch`, as the pre-push hook runs it, unless se.toml turns it off."""
+    guard_foreign_history(root, branch)
     if not public_check_enabled(root):
         print(
             f"Public check off: project.public_check = false in {root / 'se.toml'}; "
@@ -2950,6 +2977,75 @@ def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | N
     return tag
 
 
+def origin_repository_name(root: Path) -> str | None:
+    """The repository name origin names: its `<owner>/<repo>`'s `<repo>` (remote_repo), else, for a
+    path, its last part without `.git`; None without an origin."""
+    if (repo := remote_repo(root)) is not None:
+        return repo.rsplit("/", 1)[-1]
+    result = run_git(root, "remote", "get-url", "origin")
+    url = result.stdout.strip().rstrip("/\\") if result.returncode == 0 else ""
+    name = re.split(r"[/\\:]", url)[-1].removesuffix(".git") if url else ""
+    return name or None
+
+
+def intended_repository(root: Path, issue: dict[str, object]) -> str:
+    """The name of the repository the recorded work issue `issue` is for, where its work branch is
+    published (README "Work publication"): its one `repo:<name>` label, as work_labels writes it;
+    without one, the repository holding the issue, or this checkout's own where that repository is
+    the tracker it routes its issues to (tracker_repo). Raises QueueError where that is unknown."""
+    names = sorted(label[len("repo:"):] for label in issue_labels(issue)
+                   if label.lower().startswith("repo:") and label[len("repo:"):])
+    if len(names) > 1:
+        raise QueueError(
+            f"work issue #{issue.get('number')} carries {len(names)} repo: labels "
+            f"({', '.join(f'repo:{name}' for name in names)}), so the repository its work branch "
+            "belongs to is ambiguous; keep the one repo: label of the repository the work is for")
+    if names:
+        return names[0]
+    held = str(issue.get("repo") or "").rstrip("/")
+    if not held:
+        raise QueueError(
+            f"work issue #{issue.get('number')} names no repository (no repo: label, no "
+            "repository recorded); run work_tickets.py intake again for it")
+    if held == tracker_repo(root) and (own := origin_repository_name(root)) is not None:
+        return own
+    return held.rsplit("/", 1)[-1]
+
+
+def guard_work_publication(root: Path, branch: str) -> None:
+    """Refuse to push the work branch `branch` to origin unless origin is the repository its
+    recorded work issue is for (intended_repository), compared by name, case-insensitively, so the
+    rule holds on any host; nothing is pushed on a refusal (README "Work publication")."""
+    issue = load_snapshot(root)
+    refused = f"nothing was pushed to origin; {branch} is a work branch, published only to the " \
+              "repository its work issue is for"
+    if issue is None:
+        raise QueueError(
+            f"push: this checkout records no work issue, so where {branch} belongs is unknown; "
+            f"{refused}. Run work_tickets.py intake --issue <n> for the work issue titled "
+            f"{branch} (without gh, intake --issue-body <file>), then push again")
+    if issue.get("title") != branch:
+        raise QueueError(
+            f"push: the recorded work issue #{issue.get('number')} is titled "
+            f"{issue.get('title')!r}, not {branch!r}, so where {branch} belongs is unknown; "
+            f"{refused}. Push the branch of the recorded work issue, or run work_tickets.py "
+            f"intake for {branch}'s work issue first")
+    try:
+        intended = intended_repository(root, issue)
+    except QueueError as error:
+        raise QueueError(f"push: {error}; {refused}") from error
+    origin = origin_repository_name(root)
+    if origin is None:
+        raise QueueError(
+            f"push: {root} has no origin remote; {refused}. Add the repository {intended} as "
+            "origin (git remote add origin <url>), then push again")
+    if origin.casefold() != intended.casefold():
+        raise QueueError(
+            f"push: origin is the repository {origin}, but work issue #{issue.get('number')} is "
+            f"for {intended}; {refused}. Point origin at {intended} (git remote set-url origin "
+            f"<url>), or correct the work issue's repo: label, then push again")
+
+
 def push(root: Path, branch: str | None = None) -> str | None:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set; the
     integration branch is released first and its new tag pushed with it, unless the release
@@ -2957,8 +3053,9 @@ def push(root: Path, branch: str | None = None) -> str | None:
     (README "Landing on main") is released the same way against origin's integration branch and,
     like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
     `[forms] files` is `check`, a changed file a form claims that breaks it refuses the push before
-    anything else runs (claimed_files_problem). Returns the release's tag, None where nothing is
-    released."""
+    anything else runs (claimed_files_problem). Any other branch is a work branch, pushed only
+    where origin is the repository its recorded work issue is for (guard_work_publication).
+    Returns the release's tag, None where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
     target = integration_branch(root)
@@ -2979,6 +3076,8 @@ def push(root: Path, branch: str | None = None) -> str | None:
         print(f"Release: tag {tag} once the landing is on {target}; it is not pushed now")
         tag = None
     push_gate(root, branch)
+    if branch != target and not landing:
+        guard_work_publication(root, branch)
     if branch == target and (accepted := guard_integration_push(root, branch)):
         print(accepted)
     elif landing:
@@ -10308,8 +10407,9 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("push", "where se.toml [forms] files is check, se_forms.py check-files --changed "
-                 "origin/<integration branch> first; public check's push gate, then git push -u "
-                 "origin <branch>; retries a "
+                 "origin/<integration branch> first; public check's push gate; a work branch only "
+                 "where origin is the repository its recorded work issue is for (README \"Work "
+                 "publication\"); then git push -u origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,

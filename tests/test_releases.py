@@ -164,6 +164,9 @@ def test_an_untagged_version_is_tagged_as_it_is(checkout, capsys):
 def test_other_branches_and_merges_release_nothing(checkout, capsys):
     integrate(checkout, "feature/topic-20261106")
     git(checkout, "switch", "-q", "-c", "fix/other-20261106")
+    work_tickets.save_snapshot(checkout, {"repo": "git.example/o/origin", "number": 1,
+                                          "title": "fix/other-20261106",
+                                          "labels": [{"name": "repo:origin"}]})
     assert work_tickets.main(["push", "fix/other-20261106", "--worktree", str(checkout)]) == 0
     git(checkout, "switch", "-q", "main")
     git(checkout, "reset", "-q", "--hard", "origin/main")

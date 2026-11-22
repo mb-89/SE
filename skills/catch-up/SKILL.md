@@ -37,17 +37,17 @@ project's commands and hot files by the project's `AGENTS.md`.
   before the call may not be shown.
 - **Every turn ends with exactly one of these, never neither:**
   - the open decisions, brought to the person as the
-    [escalation ladder](../work-model/SKILL.md#escalation-ladder) says and asked with the
-    `ask_user` tool when available, or
+    [escalation ladder](../work-model/SKILL.md#escalation-ladder) says, as one deck
+    ([decision skill](../decision/SKILL.md#bringing-decisions-to-the-person)), never in a question
+    dialog, with any other open point as text at the end of the turn, or
   - the explicit sentence "No input needed from you right now", plus what happens next (which workers
     run, what you integrate when they report).
 
   Decisions that come up while integrating join the queue.
 
-  The user who starts this skill is present, even in autopilot and even if `ask_user` returns "user
-  not available". Never take a default on the user's behalf. If `ask_user` does not reach the user,
-  end the turn with the decision under a heading "Your input needed" at the end of the
-  `task_complete` summary.
+  The user who starts this skill is present, even in autopilot. Never take a default on the user's
+  behalf. In autopilot, end the turn with the deck's link and its decisions under a heading "Your
+  input needed" at the end of the `task_complete` summary.
 - No backwards compatibility unless the user asks for it; no bookkeeping files (hash receipts, index
   snapshots, adjudication JSON). Commit freely, with the environment's
   [`commit_trailer`](../work-model/SKILL.md#what-the-project-provides) if it sets one.
