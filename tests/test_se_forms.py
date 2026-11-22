@@ -158,7 +158,7 @@ def test_check_refuses_exactly_where_file_refuses(case, capsys, worktree, gh, fo
 import io  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
-import time  # noqa: E402
+import threading  # noqa: E402
 
 import review  # noqa: E402
 from shell_paths import BASH, sh  # noqa: E402
@@ -361,14 +361,19 @@ def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
 
 
 def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh):
-    monkeypatch.setattr(se_forms, "GATE_SECONDS", 0.5)
-    monkeypatch.setattr(se_forms, "deciding", lambda *_: time.sleep(5))
+    """A judgement still running at the bound: the bound is zero and the judgement waits until
+    the gate has answered, so the order, not the clock, makes it late."""
+    released = threading.Event()
+    monkeypatch.setattr(se_forms, "GATE_SECONDS", 0)
+    monkeypatch.setattr(se_forms, "deciding", lambda *_: released.wait(60))
     text = payload("mcp__github__issue_write", project, method="create", title=TITLE,
                    labels=["work"], body=THIN)
-    started = time.monotonic()
-    assert gate(capsys, monkeypatch, text, "--gate", "refuse") == ""
-    assert time.monotonic() - started < 0.5 + 2
-    assert "slow: no answer within 0.5 s" in (
+    try:
+        assert gate(capsys, monkeypatch, text, "--gate", "refuse") == ""
+        assert not released.is_set()  # answered while the judgement still ran
+    finally:
+        released.set()
+    assert "slow: no answer within 0 s" in (
         project / ".se" / ".runtime" / "forms-gate.log").read_text(encoding="utf-8")
 
 

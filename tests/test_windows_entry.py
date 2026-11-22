@@ -17,10 +17,10 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path, PureWindowsPath
 
 import pytest
+import waiting
 
 PROJECT = Path(__file__).resolve().parents[1]
 HANDOFF = PROJECT / "scripts" / "bash.ps1"
@@ -304,14 +304,12 @@ def test_the_windows_detached_start_hides_its_console_instead_of_having_none() -
 
 
 CHILD = """
-import sys, time
+import socket, sys
 from pathlib import Path
-go, marker = Path(sys.argv[1]), Path(sys.argv[2])
-deadline = time.monotonic() + 60
-while not go.exists() and time.monotonic() < deadline:
-    time.sleep(0.1)
-if go.exists():
-    marker.write_text("done", encoding="utf-8")
+port, marker = int(sys.argv[1]), Path(sys.argv[2])
+with socket.create_connection(("127.0.0.1", port)) as test:  # rings the test's bell, then waits for go
+    if test.recv(2) == b"go":
+        marker.write_text("done", encoding="utf-8")
 """
 
 PARENT = """
@@ -327,14 +325,19 @@ se_start._spawn_detached([sys.executable, *sys.argv[2:]])
 
 
 def test_a_detached_child_outlives_the_parent_that_started_it(tmp_path: Path) -> None:
-    child, go, marker = tmp_path / "child.py", tmp_path / "go", tmp_path / "marker"
+    """The child rings the test's bell and waits there for the go, which the test sends only once
+    the parent has exited; the child's marker, written after the go, shows it outlived it."""
+    child, marker = tmp_path / "child.py", tmp_path / "marker"
     child.write_text(CHILD, encoding="utf-8")
-    parent = subprocess.run([sys.executable, "-c", PARENT, str(SE_START), str(child), str(go), str(marker)],
-                            capture_output=True, text=True, timeout=120, check=False)
-    assert parent.returncode == 0, parent.stderr
-    assert not marker.exists()
-    go.write_text("go", encoding="utf-8")
-    deadline = time.monotonic() + 30
-    while not marker.exists() and time.monotonic() < deadline:
-        time.sleep(0.1)
+    bell = waiting.Bell()
+    try:
+        parent = subprocess.run([sys.executable, "-c", PARENT, str(SE_START), str(child), str(bell.port),
+                                 str(marker)], capture_output=True, text=True, timeout=120, check=False)
+        assert parent.returncode == 0, parent.stderr
+        with bell.answer() as connection:
+            assert not marker.exists()
+            connection.sendall(b"go")
+            assert connection.recv(1) == b""  # the child closes once the marker is written
+    finally:
+        bell.close()
     assert marker.read_text(encoding="utf-8") == "done"

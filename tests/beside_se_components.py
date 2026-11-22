@@ -146,13 +146,15 @@ def test_a_stop_answers_through_the_delivery_component_as_stop_check_answers_dir
     assert started.returncode == 0, started.stderr
     (checkout / ".se" / ".runtime" / "kern.path").write_text(f"{kern}\n", encoding="utf-8")
     try:
-        for _ in range(600):  # the delivery component's process attaches within seconds
+        # The delivery component's process attaches within seconds; kern tells no attach as an
+        # event, so its status is asked again, each answer the next ask's start, until it names it.
+        deadline = time.monotonic() + 60  # a failure bound
+        while True:
             status = run(str(kern), "status", "--root", str(checkout), "--json", cwd=checkout)
             if status.returncode == 0 and "delivery" in (json.loads(status.stdout)["health"]["attached"] or []):
                 break
-            time.sleep(0.1)
-        else:
-            pytest.fail("the delivery component never attached")
+            if time.monotonic() > deadline:
+                pytest.fail("the delivery component never attached")
         description = tmp_path / "description.md"
         description.write_text("Fixes it, no report\n", encoding="utf-8")
         states = {"no pull request recorded": None, "a description without a report": description}

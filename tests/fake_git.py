@@ -22,8 +22,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
-import time
 import urllib.parse
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -32,6 +32,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import git_door
+
+if "waiting" not in sys.modules:  # a child's door loads this file by its path, beside no tests/ on sys.path
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("waiting", Path(__file__).with_name("waiting.py"))
+    sys.modules["waiting"] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules["waiting"])
+import waiting  # noqa: E402
 
 ZERO_IDENTITY = "Author identity unknown\n\n*** Please tell me who you are.\n"
 
@@ -1618,7 +1625,7 @@ class StateFile:
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path).resolve()
-        self.lock = self.path.with_name(self.path.name + ".lock")
+        self.lock = self.path.with_name(self.path.name + ".flock")
         if not self.path.exists():
             self.save(FakeGit())
 
@@ -1643,19 +1650,8 @@ class StateFile:
 
     @contextmanager
     def locked(self) -> Iterator[None]:
-        deadline = time.monotonic() + 60
-        while True:
-            try:
-                self.lock.mkdir()
-                break
-            except FileExistsError:
-                if time.monotonic() > deadline:
-                    raise TimeoutError(f"{self.lock} is still held after 60 s")
-                time.sleep(0.005)
-        try:
+        with waiting.exclusive(self.lock):
             yield
-        finally:
-            self.lock.rmdir()
 
     @contextmanager
     def edit(self) -> Iterator[FakeGit]:

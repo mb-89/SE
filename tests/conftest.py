@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -21,6 +22,7 @@ import git_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
 import time_bound  # noqa: E402
+import waiting  # noqa: E402
 
 # The test process reaches nothing beyond this machine, its collection included (tests/network_guard.py).
 network_guard.install()
@@ -218,21 +220,15 @@ def obs() -> Path:
     """The obs module at its pin with its environment built, once per checkout at a time.
 
     The suite's workers run test files in parallel (pyproject.toml), and every obs build syncs the module
-    and runs it through uv: a fresh checkout must clone and build it once, never twice at once. A
-    directory made atomically is the lock, which every platform has.
+    and runs it through uv: a fresh checkout must clone and build it once, never twice at once. The
+    lock is the operating system's on a file (`waiting.exclusive`), which wakes the next worker as
+    the build ends and lets go where its holder dies.
     """
-    lock = ROOT / ".se" / "obs-setup.lock"
-    lock.parent.mkdir(exist_ok=True)
-    deadline = time.monotonic() + OBS_LOCK_WAIT_SECONDS
-    while True:
+    with contextlib.ExitStack() as held:
         try:
-            lock.mkdir()
-            break
-        except FileExistsError:
-            if time.monotonic() > deadline:
-                pytest.fail(f"{lock} is still held after {OBS_LOCK_WAIT_SECONDS} s; remove it if no suite runs")
-            time.sleep(0.2)
-    try:
+            held.enter_context(waiting.exclusive(ROOT / ".se" / "obs-setup.flock", OBS_LOCK_WAIT_SECONDS))
+        except TimeoutError as error:
+            pytest.fail(str(error))
         with pytest.MonkeyPatch.context() as patch:
             # Bringing SE's own checkout's obs module to its pin is the suite's setup, not a test:
             # it fetches the real module, through real git.
@@ -242,8 +238,6 @@ def obs() -> Path:
                        env=build_docs.child_environment())
         os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it
         return directory
-    finally:
-        os.rmdir(lock)
 
 
 # kern, the Go core, at the pin se.toml [modules.kern] reads from components/go.mod (README
@@ -269,19 +263,11 @@ def place_kern() -> None:
     the suite's setup, through real git (`se_modules.py sync kern`)."""
     if kern_at_pin():
         return
-    lock = ROOT / ".se" / "kern-setup.lock"
-    lock.parent.mkdir(exist_ok=True)
-    deadline = time.monotonic() + OBS_LOCK_WAIT_SECONDS
-    while True:
+    with contextlib.ExitStack() as held:
         try:
-            lock.mkdir()
-            break
-        except FileExistsError:
-            if time.monotonic() > deadline:
-                raise pytest.UsageError(f"{lock} is still held after {OBS_LOCK_WAIT_SECONDS} s; "
-                                        "remove it if no suite runs")
-            time.sleep(0.2)
-    try:
+            held.enter_context(waiting.exclusive(ROOT / ".se" / "kern-setup.flock", OBS_LOCK_WAIT_SECONDS))
+        except TimeoutError as error:
+            raise pytest.UsageError(str(error)) from None
         if kern_at_pin():
             return
         result = subprocess.run([sys.executable, str(ROOT / "scripts" / "se_modules.py"), "sync", se_modules.KERN],
@@ -290,8 +276,6 @@ def place_kern() -> None:
         if result.returncode:  # fails open: a test that reads kern then fails, naming the file
             print(f"warning: se_modules.py sync kern failed, so the tests that read kern fail:\n"
                   f"{result.stderr}{result.stdout}", file=sys.stderr)
-    finally:
-        os.rmdir(lock)
 
 
 @pytest.fixture(scope="session")

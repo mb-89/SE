@@ -408,8 +408,8 @@ affected command at delivery.
 
 ### tst-002 Fast tests
 
-Test a behaviour once, at the outermost interface, on fakes, with no wall clock and no sleeping,
-in parallel.
+Test a behaviour once, at the outermost interface, on fakes, in parallel, with no wall clock and no
+sleeping: a test waits on an event, and a deadline stays only as the bound of a wait that fails.
 
 - **Why:** a fast suite runs on every change; a slow one is skipped.
 - **Without it:** the suite grows slow and flaky until people stop running it.
@@ -417,7 +417,8 @@ in parallel.
   suite too slow to run on every change.
 - **Implementations:**
   - se: the work model's [Tests](../SKILL.md#tests); the suite runs in parallel
-    (`pyproject.toml`).
+    (`pyproject.toml`); `tests/test_no_sleep.py` refuses a `time.sleep` in a test module or
+    fixture, naming its line.
   - Go line (frozen): the battery's `fast-test` rule; `se overhaul read`'s test ratio, test code
     at or under code size.
 - **Related:** tst-001, tst-003

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -116,6 +118,39 @@ def told(kern: Path, checkout: Path) -> list[tuple[str, dict]]:
     return calls
 
 
+def relayed(call: subprocess.Popen, lines: list[str], kern: Path, checkout: Path,
+            seconds: float) -> Iterator[tuple[str, dict]]:
+    """Each step kern's relay tells for the running `call`, as the session reads it, in turn: the
+    command's stderr announces each step with a line (`GitHub step through kern's relay`), and
+    the step is asked of kern's hook once its line came, again until the hook tells it, as the
+    command posts it to kern just after the line. Ends where the command's stderr ends; fails past
+    `seconds`, a failure bound. Every stderr line is kept in `lines`."""
+    heard: queue.Queue[str | None] = queue.Queue()
+
+    def read() -> None:
+        for line in call.stderr:
+            lines.append(line)
+            heard.put(line)
+        heard.put(None)
+
+    threading.Thread(target=read, daemon=True).start()
+    deadline = time.monotonic() + seconds
+    announced = answered = 0
+    while True:
+        try:
+            line = heard.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
+            pytest.fail(f"the command ran past {seconds} s: {''.join(lines)}")
+        if line is None:
+            return
+        announced += "GitHub step through kern's relay:" in line
+        while answered < announced:
+            assert time.monotonic() < deadline, f"no step told within {seconds} s: {''.join(lines)}"
+            for step in told(kern, checkout):
+                yield step
+                answered += 1
+
+
 def answer(tool: str, input_: dict) -> object:
     """What the GitHub tools answer the fleet check's reads, for a fleet of one stuck issue."""
     method = input_.get("method")
@@ -186,21 +221,17 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
                                 stderr=subprocess.PIPE, text=True)
         answered: list[str] = []
         lines: list[str] = []
-        threading.Thread(target=lambda: lines.extend(call.stderr), daemon=True).start()
-        end = time.monotonic() + 90
-        while call.poll() is None and time.monotonic() < end:
-            for tool, input_ in told(kern, checkout):
-                # Each step's line reached the caller before the session ran it: progress streams.
-                assert any(f"GitHub step through kern's relay: {tool}" in line for line in lines), lines
-                payload = json.dumps({
-                    "session_id": "s1", "hook_event_name": "PostToolUse",
-                    "tool_name": f"mcp__github__{tool}", "tool_input": input_,
-                    "tool_response": [{"type": "text", "text": json.dumps(answer(tool, input_))}]})
-                posted = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
-                             cwd=checkout, stdin=payload)
-                assert posted.returncode == 0, posted.stderr
-                answered.append(tool + " " + str(input_.get("method") or ""))
-            time.sleep(0.05)
+        for tool, input_ in relayed(call, lines, kern, checkout, 90):
+            # Each step's line reached the caller before the session ran it: progress streams.
+            assert any(f"GitHub step through kern's relay: {tool}" in line for line in lines), lines
+            payload = json.dumps({
+                "session_id": "s1", "hook_event_name": "PostToolUse",
+                "tool_name": f"mcp__github__{tool}", "tool_input": input_,
+                "tool_response": [{"type": "text", "text": json.dumps(answer(tool, input_))}]})
+            posted = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
+                         cwd=checkout, stdin=payload)
+            assert posted.returncode == 0, posted.stderr
+            answered.append(tool + " " + str(input_.get("method") or ""))
         out, _ = call.communicate(timeout=30)
         assert call.returncode == 1 and answered, (out, "".join(lines))  # stuck work found, through kern
         assert answered == ["list_issues ", "list_issues ", "list_pull_requests ",
@@ -344,33 +375,27 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
              "--repo", "localhost/owner/tracker", "--worktree", str(checkout)],
             cwd=checkout, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         lines: list[str] = []
-        threading.Thread(target=lambda: lines.extend(call.stderr), daemon=True).start()
         answered: list[str] = []
         nexts: list[str] = []
         refusals: list[str] = []
-        end = time.monotonic() + 120
-        while call.poll() is None and time.monotonic() < end:
-            for tool, input_ in told(kern, checkout):
-                if tool == "list_issues":  # the first step after the push, asked another way
-                    nexts.append(run(sys.executable, str(ROOT / "scripts" / "se_relay.py"), "next",
-                                     "--root", str(checkout), cwd=checkout).stdout)
-                payload = json.dumps({
-                    "session_id": "s1", "hook_event_name": "PostToolUse",
-                    "tool_name": f"mcp__github__{tool}", "tool_input": input_,
-                    "tool_response": [{"type": "text", "text": json.dumps(answers(tool, input_))}]})
-                posted = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
-                             cwd=checkout, stdin=payload)
-                assert posted.returncode == 0, posted.stderr
-                answered.append(f"{tool} {input_.get('method') or ''}".strip())
-                if tool == "list_pull_requests":  # the same answer again: an old step's, refused
-                    again = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
-                                cwd=checkout, stdin=payload)
-                    assert again.returncode == 0, again.stderr
-                    refusals.append(json.loads(again.stdout)["hookSpecificOutput"]
-                                    ["additionalContext"].splitlines()[0])
-            time.sleep(0.05)
-        if call.poll() is None:
-            call.kill()
+        for tool, input_ in relayed(call, lines, kern, checkout, 120):
+            if tool == "list_issues":  # the first step after the push, asked another way
+                nexts.append(run(sys.executable, str(ROOT / "scripts" / "se_relay.py"), "next",
+                                 "--root", str(checkout), cwd=checkout).stdout)
+            payload = json.dumps({
+                "session_id": "s1", "hook_event_name": "PostToolUse",
+                "tool_name": f"mcp__github__{tool}", "tool_input": input_,
+                "tool_response": [{"type": "text", "text": json.dumps(answers(tool, input_))}]})
+            posted = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
+                         cwd=checkout, stdin=payload)
+            assert posted.returncode == 0, posted.stderr
+            answered.append(f"{tool} {input_.get('method') or ''}".strip())
+            if tool == "list_pull_requests":  # the same answer again: an old step's, refused
+                again = run(str(kern), "hook", "PostToolUse", "--root", str(checkout),
+                            cwd=checkout, stdin=payload)
+                assert again.returncode == 0, again.stderr
+                refusals.append(json.loads(again.stdout)["hookSpecificOutput"]
+                                ["additionalContext"].splitlines()[0])
         out, _ = call.communicate(timeout=30)
         assert call.returncode == 0, (out, "".join(lines), answered)
         assert answered == [
