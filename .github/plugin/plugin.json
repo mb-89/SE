@@ -1,6 +1,6 @@
 {
   "name": "se",
-  "version": "5.123.1",
+  "version": "5.123.2",
   "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills.",
   "license": "MIT",
   "agents": ".github/agents/",

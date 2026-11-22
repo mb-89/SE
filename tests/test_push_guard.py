@@ -185,6 +185,64 @@ def verified(root: Path, ref: str = "refs/heads/main") -> int:
     return work_tickets.main(["verified", ref, "HEAD", "--worktree", str(root)])
 
 
+def _cut_from_the_other_host(checkout: Path, tmp_path: Path, tagged: bool) -> None:
+    """Branch `topic` with one own commit on a main only the remote `other` holds; `tagged` also
+    puts a local tag on that main, as a tag fetched from the other host does."""
+    other = tmp_path / "other.git"
+    fake_git.init(other, "--bare", "-b", "main")
+    git(checkout, "remote", "add", "other", str(other))
+    settings = (checkout / "se.toml").read_text(encoding="utf-8")
+    git(checkout, "switch", "-q", "--orphan", "elsewhere")
+    (checkout / "se.toml").write_text(settings, encoding="utf-8")
+    commit(checkout, name="elsewhere.txt")
+    git(checkout, "push", "-q", "other", "elsewhere:main")
+    git(checkout, "fetch", "-q", "other")
+    if tagged:
+        git(checkout, "tag", "v9.9.9", "other/main")
+    git(checkout, "switch", "-q", "-c", "topic", "other/main")
+    commit(checkout, name="topic.txt")
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the clean push's public check runs git in a child
+@pytest.mark.parametrize("public_check", [True, False], ids=["checked", "unchecked"])
+@pytest.mark.parametrize("tagged", [False, True], ids=["untagged", "tagged"])
+def test_push_refuses_a_branch_carrying_history_only_another_remote_holds(checkout, tmp_path, capsys,
+                                                                          tagged, public_check):
+    """A project on two hosts shares trees, not histories: a branch cut from the other host's main
+    must not copy that host's commits to origin, however its own commits look and whether or not
+    the public check is on; a local tag on that history proves nothing about origin."""
+    if not public_check:
+        (checkout / "se.toml").write_text(f"{IDENTITY}public_check = false\n[tests]\ncommand = {SUITE}\n",
+                                          encoding="utf-8")
+    _cut_from_the_other_host(checkout, tmp_path, tagged)
+
+    assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 1
+
+    assert "carries 1 commit(s) that another remote holds but origin does not" in capsys.readouterr().err
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/topic",
+                        root=tmp_path / "origin.git").returncode != 0
+    git(checkout, "switch", "-q", "-c", "clean", "origin/main")
+    commit(checkout, name="clean.txt")
+    assert work_tickets.main(["push", "clean", "--worktree", str(checkout)]) == 0
+
+
+@pytest.mark.parametrize("argument", ["HEAD:refs/heads/topic", "topic:main", "+topic", "v9.9.9"])
+def test_push_refuses_anything_but_a_local_branch_even_without_a_public_check(checkout, tmp_path,
+                                                                             capsys, argument):
+    """A refspec, tag or commit would reach git push unresolved, past the history guard."""
+    (checkout / "se.toml").write_text(f"{IDENTITY}public_check = false\n[tests]\ncommand = {SUITE}\n",
+                                      encoding="utf-8")
+    _cut_from_the_other_host(checkout, tmp_path, tagged=True)
+
+    assert work_tickets.main(["push", argument, "--worktree", str(checkout)]) == 1
+
+    assert "is no local branch; nothing was pushed" in capsys.readouterr().err
+    origin = tmp_path / "origin.git"
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/heads/topic", root=origin).returncode != 0
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/tags/v9.9.9", root=origin).returncode != 0
+    assert git_door.run("rev-list", "--count", "main", root=origin).stdout.strip() == "1"
+
+
 @pytest.mark.parametrize(("public_check", "passes"), [
     (None, False), (False, False), ("other tree", False), (True, True),
 ])

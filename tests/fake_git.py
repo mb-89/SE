@@ -780,8 +780,10 @@ class FakeGit:
         for index, argument in enumerate(args):
             if argument == "--not":
                 negated = args[index + 1:]
+                scoped = [a.partition("=")[2] for a in negated if a.startswith("--remotes=")]
                 for name, sha in repository.refs.items():
                     if ("--remotes" in negated and name.startswith("refs/remotes/")) \
+                            or any(name.startswith(f"refs/remotes/{remote}/") for remote in scoped) \
                             or ("--tags" in negated and name.startswith("refs/tags/")):
                         excluded |= self.ancestors(sha)
                 for rev in negated:

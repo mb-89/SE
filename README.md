@@ -572,6 +572,11 @@ Default `true`, so a project that never set it is still checked; a project witho
 sets `public_check = false`, and `push` then prints one line saying the check is off and where to
 turn it on.
 
+Whatever `public_check` says, `push` (and every command that pushes through its gate) pushes only
+a local branch, never a refspec, tag or commit, and refuses one that carries commits another remote
+holds but origin does not: a project kept on two hosts shares trees, not histories. Only origin's
+remote-tracking branches count as held by origin; a local tag proves nothing about it.
+
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
 ([`se.toml`](#setoml)). Nobody types it after the first: `integrate` releases, on its landing
