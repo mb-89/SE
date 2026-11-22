@@ -21,8 +21,10 @@ from shell_paths import BASH, WINDOWS, sh
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(BASH is None or shutil.which("uv") is None,
                                 reason="bootstrap.sh runs in bash and runs se_start.py through uv")
-# What an installed SE's start reads: its scripts, its manifest and release pins, its layout.
-TREE = ("scripts", "se.toml", ".claude-plugin", "agents", "skills", "components/release.toml", ".gitignore")
+# What an installed SE's start reads: its scripts, its manifest, lock and release pins (kern's
+# among them, components/go.mod), its layout.
+TREE = ("scripts", "se.toml", "se.lock", ".claude-plugin", "agents", "skills", "components/release.toml",
+        "components/go.mod", ".gitignore")
 FAKE_SE = """#!/bin/sh
 input=""
 [ "$1" = hook ] && input=" <<$(cat)"
@@ -74,6 +76,7 @@ def behind(tmp_path, shared_fake_git):
     home = tmp_path / "home"
     plugin = fake_git.clone(origin.as_uri(), home / ".claude" / "skills" / "se", "--depth", "1")
     release(origin, "5.0.1", "0.2.0")
+    kern_at_its_lock(plugin)
     project = tmp_path / "project"
     project.mkdir()
     (project / ".git").mkdir()  # a checkout: the start's core step runs only inside one
@@ -84,6 +87,16 @@ def behind(tmp_path, shared_fake_git):
         fake.write_text(FAKE_SE, encoding="utf-8", newline="\n")
         fake.chmod(0o755)
     return home, plugin, project, tmp_path
+
+
+def kern_at_its_lock(se: Path) -> None:
+    """The installed SE's kern clone at the commit its se.lock locks, as a placed one stands, so
+    the start places nothing (bootstrap.sh kern_place reads its HEAD file)."""
+    import tomllib
+    ref = tomllib.loads((se / "se.lock").read_text(encoding="utf-8"))["modules"]["kern"]["ref"]
+    head = se / ".se" / "modules" / "kern" / ".git" / "HEAD"
+    head.parent.mkdir(parents=True)
+    head.write_text(f"{ref}\n", encoding="utf-8", newline="\n")
 
 
 def start(home: Path, plugin: Path, project: Path, base: Path) -> dict:
