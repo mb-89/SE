@@ -1838,9 +1838,6 @@ checkout.
 
 #### Forms
 
-[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
-that replaces forms. Until its packages land, this section describes the forms engine as it runs.
-
 `components/forms`: SE's forms: list names them, draft gives a form's fields, their instructions and
 their shape, and check finds everything SE's filing commands would refuse in a text, or gives the
 Markdown to file.
@@ -2054,6 +2051,9 @@ and its neighbours. It lists:
 `--json` prints the same facts as data.
 
 ### Forms
+
+[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
+that replaces forms. Until its packages land, this section describes the forms engine as it runs.
 
 SE keeps the shape of its issues as data: one TOML file per form under `forms/`, read by one engine,
 `scripts/forms.py`, whose docstring owns the file format, the field kinds, the selection order and
