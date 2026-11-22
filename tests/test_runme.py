@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from shell_paths import BASH, WINDOWS, sh
+from shell_paths import BASH, WINDOWS, link_tools, sh, tool_path
 
 ROOT = Path(__file__).resolve().parents[1]
 PAIR = ("RUNME.sh", "RUNME.ps1")
@@ -61,14 +61,7 @@ def box(tmp_path):
         folder.mkdir(parents=True)
     shutil.copy2(ROOT / "RUNME.sh", project / "RUNME.sh")
     script(project / "tool", TOOL)
-    for tool in TOOLS:
-        found = shutil.which(tool)
-        if not found:
-            continue
-        if WINDOWS:  # a linked Git tool would not find the DLLs beside it: a shim runs it there
-            script(fakes / tool, f'#!/bin/sh\nexec "{sh(Path(found))}" "$@"\n')
-        else:
-            (fakes / tool).symlink_to(found)
+    link_tools(fakes, TOOLS)
     script(fakes / "uname", FAKE_UNAME)
     script(fakes / "id", FAKE_ID)
     script(fakes / "sudo", FAKE_SUDO)
@@ -92,7 +85,7 @@ REBUILD = ('i=0; set --; while [ "$i" -lt "$ARGC" ]; do eval "set -- \\"\\$@\\" 
 
 def runme(box, *args: str, cwd: Path | None = None, **variables: str) -> subprocess.CompletedProcess:
     project, home, fakes = box
-    env = {"HOME": sh(home), "PATH": f"{sh(fakes)}:{sh(home / 'installed')}", **variables,
+    env = {"HOME": sh(home), "PATH": tool_path(fakes, home / "installed"), **variables,
            "RUNME": sh(project / "RUNME.sh"), "REBUILD": REBUILD, "ARGC": str(len(args)),
            **{f"ARG_{i}": arg for i, arg in enumerate(args)}}
     return subprocess.run([BASH, "-c", "eval $REBUILD"], env=env, capture_output=True, text=True,
@@ -167,7 +160,7 @@ def test_with_a_terminal_apt_get_runs_with_plain_sudo(box):
     conf(project, "need hello command hello", "get hello apt hello", 'run "$RUNME_ROOT/tool"')
     leader, follower = os.openpty()
     try:
-        env = {"HOME": sh(home), "PATH": f"{sh(fakes)}:{sh(home / 'installed')}"}
+        env = {"HOME": sh(home), "PATH": tool_path(fakes, home / "installed")}
         result = subprocess.run([BASH, sh(project / "RUNME.sh")], env=env, capture_output=True, text=True,
                                 timeout=60, cwd=project, stdin=follower)
     finally:
