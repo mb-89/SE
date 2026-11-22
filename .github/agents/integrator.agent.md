@@ -53,6 +53,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
 - You start sessions at or below your own effort, never above it, as the work model's
   [effort ceiling](../skills/work-model/SKILL.md#visible-sessions) says.
+- You may run a workflow (multi-agent orchestration) to plan and run your own work, with fewer
+  than 10 agents and at or below the effort ceiling; a work package still goes to a worker
+  session ([Integrators' workflows](../skills/work-model/SKILL.md#visible-sessions)).
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
   them, runs as its script, as the work model's [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.

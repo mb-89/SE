@@ -1117,6 +1117,8 @@ LESSONS = [
     ("integrator", "Its `effort` is your own or lower, never higher"),
     ("catch-up", "a scheduled task that starts an integrator is set at or below your effort"),
     ("work-model", "is set at or below the SE agent's effort"),
+    ("integrator", "You may run a workflow (multi-agent orchestration)"),
+    ("work-model", "Each workflow holds fewer than 10 agents"),
 ]
 
 

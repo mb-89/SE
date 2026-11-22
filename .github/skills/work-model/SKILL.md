@@ -477,6 +477,10 @@ session list."
   - A scheduled task that starts an integrator, such as the
     [dispatcher's](../../../README.md#dispatcher), is set at or below the SE agent's effort; the
     person sets it when creating the task.
+- **Integrators' workflows**: an integrator may run a workflow (the host's multi-agent
+  orchestration, Claude Code's `Workflow`) to plan and run its own work, such as reviews and
+  checks across several pull requests. Each workflow holds fewer than 10 agents, at or below
+  the effort ceiling. A work package still goes to a worker in its own visible session.
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
 sidebar shows one SE section, each role's sessions nested under the session that started them.
