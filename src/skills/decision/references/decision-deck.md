@@ -52,7 +52,7 @@ candidates:
       volume: {mark: 1, because: every open decision comes in one deck and one pass}
     wins: The answered artifact is the record and outlives the session; the person sees every open decision at once.
     losses: Each deck is built and handed over with the deck command; the person needs a browser or the Claude app.
-    success: Every decision the person blesses has its answered artifact, and none is copied from a chat by hand.
+    success: Every decision the person blesses has its answered artifact, and no answer is copied by hand.
   - key: chat
     label: Tables in the chat (keep what we have)
     short: Chat
@@ -60,7 +60,7 @@ candidates:
     marks: {record: 0, effort: 0, volume: 0}
     wins: Works today with nothing to build.
     losses: The answer lives in the chat until someone copies it; one decision per turn.
-    success: Every answer given in the chat reaches the issue it decides.
+    success: Every answer given in the chat is kept with the work it decides.
   - key: issue
     label: An issue per decision
     short: Issues
