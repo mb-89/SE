@@ -16,6 +16,12 @@
 #   value    the number, in `unit` (bytes, characters, lines, tokens, seconds, milliseconds)
 #   measures optional: for tool-name, the name the host builds, from {server} and {tool}
 #   note     optional: how the host applies it, in its own words where it helps
+#
+# A tool name row (`tool_names`): a shape a host builds an MCP tool's name in, beside those the
+# tool-name limits' `measures` record; scripts/se_hook.sh and scripts/se_forms.py match every shape.
+#   surface  a key of [surfaces]
+#   shape    the name, from {plugin}, {server} and {tool}
+#   source, read, mark (documented | measured | unverified), note as above
 
 # What each host reads, by role: `instructions` and `agent` files are handed to every session
 # whole, a skill's name and description too; its body and `reference` files load on demand.
@@ -427,3 +433,19 @@ mark = "unverified"
 note = "The page names the user profile's configuration, not its path: VS Code's user folder per platform."
 register = '''code --add-mcp '{"name":"se","command":"bash","args":["'"{launcher}"'","--root","${workspaceFolder}"]}' '''
 register_windows = '''code --add-mcp (@{name='se';command='powershell';args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',"{launcher_ps1}",'--root','${workspaceFolder}')} | ConvertTo-Json -Compress).Replace('"','\"')'''
+
+[[tool_names]]
+surface = "claude-code"
+shape = "mcp__plugin_{plugin}_{server}__{tool}"
+source = "https://code.claude.com/docs/en/hooks"
+read = 2026-11-17
+mark = "documented"
+note = "A plugin's MCP server: its server segment is scoped with the plugin's name."
+
+[[tool_names]]
+surface = "copilot-vscode"
+shape = "{server}/{tool}"
+source = "https://code.visualstudio.com/docs/copilot/customization/hooks"
+read = 2026-11-22
+mark = "unverified"
+note = "The page names toolName and toolArgs but no MCP tool's name; the shape is VS Code's tool reference form."

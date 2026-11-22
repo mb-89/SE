@@ -1711,6 +1711,9 @@ def _field_at(form: Form, document: Document, line: int) -> str:
 
 #: se.toml `[forms] enforce`: the values the filing commands know, `off` the default.
 ENFORCE_VALUES = (OFF, WARN, REFUSE)
+#: se.toml `[forms] gate`: the values SE's form gate on GitHub writes knows (se_forms.py gate),
+#: `off` the default.
+GATE_VALUES = (OFF, WARN, REFUSE)
 #: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
@@ -1724,6 +1727,7 @@ class Enforcement:
     enforce: str = OFF
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
+    gate: str = OFF
 
 
 def enforcement(root: Path) -> Enforcement:
@@ -1751,11 +1755,15 @@ def enforcement(root: Path) -> Enforcement:
     if enforce not in ENFORCE_VALUES:
         raise FormError(f"forms: [forms] enforce = {enforce!r} in {where} is none of "
                         f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Forms\")")
+    gate = table.get("gate", OFF)
+    if gate not in GATE_VALUES:
+        raise FormError(f"forms: [forms] gate = {gate!r} in {where} is none of "
+                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Forms\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise FormError(f"forms: [forms] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
-    return Enforcement(enforce, refusals, where)
+    return Enforcement(enforce, refusals, where, gate)
 
 
 def formed(form: Form, *, body: str | None = None, fields: dict | None = None,
@@ -1830,11 +1838,14 @@ def _fit(head: list[str], lines: list[str], tail: list[str]) -> list[str]:
 
 
 def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
-           hold: str = "", scripts: Path = ROOT / "scripts") -> str:
+           hold: str = "", scripts: Path = ROOT / "scripts", gate: bool = False) -> str:
     """The text a filing command prints for `findings` against `form`, at most REFUSAL_LINES
     lines: every refused finding with its fix, the warnings after ALSO, the `draft` command with
     the real path of SE's scripts and, with `hold` (the label it files with), the `--hold` way
-    out. It never counts tries."""
+    out. It never counts tries. With `gate` (se_forms.py gate, a write through the GitHub tools)
+    its tail lines name the MCP door's forms tool before the `draft` command, and the hold names
+    both ways out: the filing command with `--hold`, or the same issue write labelled `hold` and
+    without `ready`."""
     refusing = [f"  {_line(form, item)}" for item in findings if item.severity == REFUSE]
     warning = [_line(form, item) for item in findings if item.severity != REFUSE]
     if refused:
@@ -1847,8 +1858,17 @@ def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
                 "anyway:"]
         lines = [f"  {_line(form, item)}" for item in findings]
         tail = []
-    tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
-    if hold:
+    if gate:
+        tail.append(f"Get the form: the se server's forms tool, command \"se_forms.py draft\", "
+                    f"args [\"{form.name}\"] (or uv run python {scripts / 'forms.py'} draft "
+                    f"{form.name} --json)")
+    else:
+        tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
+    if hold and gate:
+        tail.append("Or file it with the filing command and --hold, or send the same issue write "
+                    f"with the label {hold} and without ready; then fix its text on the issue "
+                    "itself and run work_tickets.py unhold <issue>")
+    elif hold:
         tail.append("Or run it again with --hold: it files the text as given, labelled "
                     f"{hold} and not ready; then fix its text on the issue itself and run "
                     "work_tickets.py unhold <issue>")
