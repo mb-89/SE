@@ -16,7 +16,7 @@ labels: work
 
 ## Goal
 
-<!-- The user-visible outcome and why it matters, in two to four sentences. -->
+<!-- The user-visible outcome and why it matters, in two to four sentences. Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
 
 ## Approach
 

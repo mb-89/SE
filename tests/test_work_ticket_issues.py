@@ -4074,19 +4074,20 @@ LONG_CLAUSE = "while a call waits it captures stdout and stderr for the whole pr
 
 @pytest.mark.parametrize(("goal", "summary"), [
     # The landing title "...: A Python component handles one call at a time, and while a call
-    # waits it captures stdout and stderr for the whole...": it ends at the clause instead.
+    # waits it captures stdout and stderr for the whole...": within 200, it stays whole.
     ("A Python component handles one call at a time, and while a call waits it captures stdout "
      "and stderr for the whole process, so a second call waits.",
-     "A Python component handles one call at a time"),
+     "A Python component handles one call at a time, and while a call waits it captures stdout "
+     "and stderr for the whole process, so a second call waits."),
     # A Goal that opens with a list's lead-in is that lead-in.
     ("The last kern landings left findings, bundled here:\n- kern never tells a component;\n"
      "- calls have no order.", "The last kern landings left findings, bundled here"),
-    # The last clause end within 120 characters, of several.
+    # Several clause ends, within 200: the whole sentence.
     ("Fix one thing, then a second thing, then a third thing, and then " + LONG_CLAUSE + " waits.",
-     "Fix one thing, then a second thing, then a third thing"),
-    # No clause end within 120: the first within 200.
+     "Fix one thing, then a second thing, then a third thing, and then " + LONG_CLAUSE + " waits."),
+    # A clause end past 120, within 200: the whole sentence.
     ("Run " + LONG_CLAUSE + " and its sibling waits behind it, then ship it.",
-     "Run " + LONG_CLAUSE + " and its sibling waits behind it"),
+     "Run " + LONG_CLAUSE + " and its sibling waits behind it, then ship it."),
     # No clause end at all, within 200: the whole sentence.
     ("Run " + LONG_CLAUSE + " waits.", "Run " + LONG_CLAUSE + " waits."),
 ])
@@ -4094,6 +4095,88 @@ def test_a_long_goal_summary_ends_at_a_sentence_or_clause_boundary(goal, summary
     got = work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\npatch\n")
     assert got == summary
     assert not got.endswith("...") and len(got) <= work_tickets.SUMMARY_MAX
+
+
+GATE_SENTENCE = (
+    "Where SE's forms are switched on, a GitHub write through the GitHub MCP tools whose body "
+    "breaks its form is refused before it runs, and the refusal names the form, every finding "
+    "and the tool call that gets the form.")
+GUARD_SENTENCE = (
+    "A test that connects beyond this machine from its own process, or runs far longer than the "
+    "slowest test, fails with its name and what to do.")
+HOOKS_SENTENCE = (
+    'One setting per machine, `SE_HOOK_CORE=off` in the environment or `[hooks] core = "off"` '
+    'in `~/.se/local.toml` (the per-machine settings file), keeps the hooks from starting or '
+    'using the core, while the refresh, the greeting and the Stop check still work.')
+COST_SENTENCE = (
+    "One command reads a folder of transcripts and shows, per session and in total, the tokens "
+    "of each kind (new input, input read from the prompt cache, input written to it, output), "
+    "their price weight per model, the share used by sub-agents and the share spent before the "
+    "first edit.")
+GUARD_LONG_SENTENCE = (
+    GUARD_SENTENCE[:-1] + ", naming the host it tried, the seconds it ran and the setting it needs.")
+BRACKETS_SENTENCE = (
+    "The public check reads every file in the tree and reports each hit with its line, and it "
+    "skips the files its lists name (the committed base list, the local list, and the vendored "
+    "folders) before it reads any of them.")
+DEFAULT_SENTENCE = (
+    "By default the gate only warns about a write whose body breaks its form, and with `refuse` "
+    "set in the project's settings it refuses that write before it reaches GitHub through the "
+    "GitHub MCP tools or through gh on any machine.")
+WHERE_SENTENCE = (
+    "Where a project sets the gate to refuse in its settings, every write that the GitHub MCP "
+    "tools send to an issue or a pull request in one of its home repositories is checked against "
+    "its form before it is sent to GitHub at all.")
+
+
+def before(sentence: str, mark: str) -> str:
+    return sentence[:sentence.index(mark)]
+
+
+@pytest.mark.parametrize(("goal", "summary"), [
+    # form-gate-github-writes landed as "Where SE's forms are switched on": it keeps its main
+    # clause, up to "is refused before it runs".
+    (GATE_SENTENCE + "\n- A write that passes runs as today.\n- With the switch off, as on main.",
+     before(GATE_SENTENCE, ", and the refusal")),
+    # feat/hooks-off-switch-per-machine-20261114: the subject keeps its verb.
+    (HOOKS_SENTENCE, before(HOOKS_SENTENCE, ", while")),
+    # feat/session-cost-from-transcripts-20261116: the last clause end within 200, after "output)".
+    (COST_SENTENCE, before(COST_SENTENCE, ", their price")),
+    # feat/forms-filing-commands-20261116, test-network-guard-and-timeout and
+    # feat/forms-adapters-20261116: within 200, each stays whole.
+    ("With the new switch on, the three filing commands check the title and the body against "
+     "their form before anything is written.",
+     "With the new switch on, the three filing commands check the title and the body against "
+     "their form before anything is written."),
+    (GUARD_SENTENCE, GUARD_SENTENCE),
+    ("Every text that SE's own commands send to GitHub either selects exactly one registered form "
+     "and passes it, or is free by a stated rule.",
+     "Every text that SE's own commands send to GitHub either selects exactly one registered form "
+     "and passes it, or is free by a stated rule."),
+    # A clause end before "or" gets no preference: never at "from its own process".
+    (GUARD_LONG_SENTENCE, before(GUARD_LONG_SENTENCE, ", the seconds")),
+    # A clause end inside brackets does not count.
+    (BRACKETS_SENTENCE, before(BRACKETS_SENTENCE, ", and it skips")),
+    # "By default" opens no leading clause: its first clause end counts.
+    (DEFAULT_SENTENCE, before(DEFAULT_SENTENCE, ", and with")),
+    # The only clause end closes the leading "Where ..." clause: cut at the last word within 200.
+    (WHERE_SENTENCE, WHERE_SENTENCE[:201].rsplit(" ", 1)[0]),
+])
+def test_a_landing_title_summary_is_a_complete_statement(goal, summary):
+    got = work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\nfix\n")
+    assert got == summary
+    assert "..." not in got and len(got) <= work_tickets.SUMMARY_MAX
+
+
+@pytest.mark.parametrize("public", [True, False])
+def test_a_landing_title_stays_within_github_s_title_limit(public):
+    sentence = " ".join(["word"] * 39) + " last."
+    assert len(sentence) == 200 and not work_tickets.CLAUSE_END.search(sentence)
+    branch = "feat/" + "a" * 55
+    title = work_tickets.integration_merge_message(
+        branch, 12345, 12346, public, f"## Goal\n\n{sentence}\n")
+    assert len(title) <= work_tickets.TITLE_MAX and "..." not in title
+    assert title.startswith(f"Integrate {branch}: Word word")
 
 
 def landing_as_read(main_checkout: Path, footer: str = "\n---\n_Generated by a host_\n") -> Path:

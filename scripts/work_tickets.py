@@ -6544,29 +6544,69 @@ def without_tracker_references(sentence: str) -> str:
 CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
 #: Where a Goal's list starts: its lead-in is the Goal's first sentence.
 LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
-#: How long a landing title's summary may run before it ends at a clause, and the longest it runs.
+#: How long a Goal's first sentence should keep to, as the work form warns (`forms/work.toml`
+#: `first_sentence_chars`); and the longest a landing title's summary runs whole.
 SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
+#: The longest title GitHub keeps: a landing title stays within it, its branch name included.
+TITLE_MAX = 256
+#: The words after a clause end that make it the preferred cut: a new clause follows.
+CLAUSE_JOINS = frozenset({"and", "but", "so", "while"})
+#: The first words of a leading clause, whose closing clause end is no cut: the main clause follows.
+LEADING_CLAUSE = frozenset({
+    "where", "wherever", "when", "whenever", "if", "unless", "once", "after", "before", "while",
+    "until", "because", "since", "although", "though", "whereas", "with", "without"})
 
 
-def at_boundary(sentence: str, width: int = SUMMARY_WIDTH, longest: int = SUMMARY_MAX) -> str:
-    """`sentence` ended at a sentence or clause boundary, never mid-clause with "...": whole where
-    it fits `width`; else up to its last clause end within `width`, or its first within `longest`;
-    else whole where it fits `longest`. Only a sentence over `longest` without a clause end there
-    is cut at its last word within it."""
-    if len(sentence) <= width:
-        return sentence
-    ends = [m.start() for m in CLAUSE_END.finditer(sentence)]
-    within = [end for end in ends if end <= width] or [end for end in ends if end <= longest][:1]
-    if within:
-        return sentence[:within[-1]].rstrip(" ,;:")
+def _counting_ends(sentence: str, longest: int) -> list[tuple[int, str]]:
+    """The clause ends at or before `longest` that may end a summary, each with the word after it:
+    none inside an unclosed bracket, double quotes or a code span, and not the one that closes a
+    leading clause (LEADING_CLAUSE)."""
+    ends: list[tuple[int, str]] = []
+    depth, quoted, code, scanned = 0, False, False, 0
+    for match in CLAUSE_END.finditer(sentence):
+        if match.start() > longest:
+            break
+        for char in sentence[scanned:match.start()]:
+            if char == "`":
+                code = not code
+            elif code:
+                continue
+            elif char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth = max(0, depth - 1)
+            elif char == '"':
+                quoted = not quoted
+        scanned = match.start()
+        if depth or quoted or code:
+            continue
+        after = sentence[match.end():].split(maxsplit=1)
+        ends.append((match.start(), after[0].casefold().strip("\"'`*_(") if after else ""))
+    first = sentence.split(maxsplit=1)
+    if ends and first and first[0].casefold().strip(",;:\"'`*_(") in LEADING_CLAUSE:
+        ends = ends[1:]
+    return ends
+
+
+def at_boundary(sentence: str, longest: int = SUMMARY_MAX) -> str:
+    """`sentence` ended at a whole clause, never with "...": whole where it has at most `longest`
+    characters; else up to its last clause end within `longest` before "and", "but", "so" or
+    "while", else its last there (`_counting_ends` says which count); else cut at its last word
+    within `longest`."""
     if len(sentence) <= longest:
         return sentence
-    return sentence[:longest + 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+    ends = _counting_ends(sentence, longest)
+    if ends:
+        joined = [end for end, word in ends if word in CLAUSE_JOINS]
+        return sentence[:(joined or [end for end, _ in ends])[-1]].rstrip(" ,;:")
+    cut = sentence[:longest + 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut[:longest]).rstrip(" ,;:")
 
 
-def goal_summary(issue_body: str) -> str:
+def goal_summary(issue_body: str, longest: int = SUMMARY_MAX) -> str:
     """The first sentence of the work issue's Goal, without its tracker references: what the work
-    is, as the landing's title names it, ended at a sentence or clause boundary (`at_boundary`);
+    is, as the landing's title names it, whole up to `longest` characters, else ended at a whole
+    clause (`at_boundary`);
     a Goal that opens with a list's lead-in is that lead-in. "" where the Goal is missing or
     names no more than that."""
     goal = re.sub(r"<!--.*?-->", "", section(markdown_sections(issue_body), GOAL_SECTION),
@@ -6578,7 +6618,7 @@ def goal_summary(issue_body: str) -> str:
     sentence = without_tracker_references(SENTENCE_END.split(text, maxsplit=1)[0])
     if not sentence or tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
         return ""
-    return at_boundary(" ".join(sentence.replace("**", "").split()).rstrip(":"))
+    return at_boundary(" ".join(sentence.replace("**", "").split()).rstrip(":"), longest)
 
 
 def integration_merge_message(
@@ -6586,11 +6626,15 @@ def integration_merge_message(
 ) -> str:
     """The integration's title, the landing pull request's and the squash commit's: `Integrate
     <branch>: <the first sentence of the work issue's Goal>`, never a commit's subject; without
-    a public check it also names the work issue and pull request."""
-    summary = goal_summary(issue_body)
-    title = f"Integrate {branch}" + (f": {summary}" if summary else "")
+    a public check it also names the work issue and pull request. The whole title keeps within
+    GitHub's TITLE_MAX characters: a long branch name leaves the summary less room."""
+    head = f"Integrate {branch}"
+    tail = "" if public else f" (work issue #{work_number}, PR #{pull_number})"
+    room = min(SUMMARY_MAX, TITLE_MAX - len(head) - len(": ") - len(tail))
+    summary = goal_summary(issue_body, room) if room > 0 else ""
+    title = head + (f": {summary}" if summary else "")
     if not public:
-        return f"{title} (work issue #{work_number}, PR #{pull_number})"
+        return title + tail
     if tracker_references(title) or PUBLIC_HOST_PATTERN.search(title):
         raise QueueError("Public merge messages cannot contain tracker references or host addresses")
     return title

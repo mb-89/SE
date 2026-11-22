@@ -629,9 +629,15 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
      Goal>`, never a commit's subject. Tracker references (pub-004's forms) are dropped from it,
      with an aside such as `(PR #<n>)` that holds one, and its punctuation tidied; without a
      usable Goal, or with fewer than two words left, it is `Integrate <branch>` alone.
-   - A Goal that opens with a list's lead-in gives that lead-in. A sentence over 120 characters
-     ends at its last clause boundary (a comma, semicolon, colon or dash) within them, never with
-     "...", or at its first within 200 (`work_tickets.py` `at_boundary`).
+   - A Goal that opens with a list's lead-in gives that lead-in. A sentence of up to 200
+     characters stays whole, and a long branch name lowers the 200 so the title keeps within
+     GitHub's 256. A longer one ends at its last clause end (a comma, semicolon, colon or dash)
+     within them before "and", "but", "so" or "while", else at its last, never with "..."
+     (`work_tickets.py` `at_boundary`).
+   - A clause end inside brackets, quotes or code does not count, nor the one that closes a
+     leading clause such as "Where ...", "If ..." or "With ..."; without one that counts, the
+     sentence ends at its last word within them. The work form warns where a Goal's first
+     sentence runs past 120 characters.
    - Its description is always a link, never the report, so it fits GitHub's body limit and any
      tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
      marker `<!-- se:field-report-in <n> -->`.
