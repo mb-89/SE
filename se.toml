@@ -140,7 +140,7 @@ version = "^4.0"
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
 [timeline]
-repositories = ["SE", "obs"]
+repositories = ["SE", "obs", "kern"]
 
 # The repositories SE watches for outside issues, each with the last issue number that existed
 # before the fleet marked its own (work model "Outside issues"); a bare name lies beside SE's home.

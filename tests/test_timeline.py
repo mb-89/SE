@@ -210,7 +210,7 @@ def test_the_query_names_every_field_the_snapshot_reads():
 
 def test_the_repositories_come_from_se_toml_beside_the_home():
     home = timeline.sibling("se_home").Home("example.com", "alice", "project")
-    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs"]
+    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs", "alice/kern"]
 
 
 def test_a_bare_repository_takes_the_owner_of_the_config_checkout_origin(tmp_path, fake_git_door):
@@ -492,6 +492,24 @@ def test_an_ages_value_other_than_true_or_false_is_refused(tmp_path, value):
 
 
 # --- kern's lane and a repository that cannot be read (work issue "timeline-shows-kern") ---
+
+
+def test_a_snapshot_of_three_repositories_shows_three_lanes_with_kerns_release(tmp_path):
+    snap = {"read_at": NOW.isoformat(), "repositories": {
+        "alice/SE": {"issues": [issue(1, "ready")], "releases": []},
+        "alice/obs": {"issues": [issue(2, "in-progress")], "releases": []},
+        "alice/kern": {"issues": [issue(3, closed="2026-11-10T09:00:00Z", state="closed")], "releases": [
+            {"tag": "v0.14.0", "url": "https://github.com/alice/kern/releases/tag/v0.14.0",
+             "published_at": "2026-11-10T12:00:00Z"}]},
+    }}
+    source, destination = tmp_path / "snapshot.json", tmp_path / "timeline.html"
+    source.write_text(json.dumps(snap), encoding="utf-8")
+    assert timeline.main(["--snapshot", str(source), "--destination", str(destination)]) == 0
+    text = destination.read_text(encoding="utf-8")
+    assert '--lanes: 3' in text
+    assert re.search(r'<div class="lanes"><span></span><span>SE</span><span>obs</span><span>kern</span></div>', text)
+    assert "releases/tag/v0.14.0" in text and ">v0.14.0<" in text
+    assert timeline.model(snap)["days"]["2026-11-10"]["alice/kern"]["releases"][0]["tag"] == "v0.14.0"
 
 
 def three_repositories_config(tmp_path):
