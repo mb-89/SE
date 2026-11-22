@@ -38,6 +38,13 @@ on a real host without moving it into `src/skills`. Unset or empty, the build wr
 it writes without drafts. The build refuses a listed draft that is missing, shares its name with a
 skill of `src/skills`, or whose `SKILL.md` front matter lacks `disable-model-invocation: true`, so
 a draft never loads by its description.
+
+Every guidance note of the checkout's own tree (`guidance/**/<file>.md`, docs/guidance.md "Notes in
+folders") is also a skill: `build` writes it into both layouts' skills folders as
+`<name>/SKILL.md`, `<name>` its front matter's `name`, its front matter and body as a skill of
+`src/skills` would be (`notes`). The build refuses a note that does not load (scripts/se_guidance.py
+reads it), a second note of one name, and a note whose name a skill of `src/skills` or a listed draft
+has. A module's tree enters no layout: its notes are its own.
 """
 
 from __future__ import annotations
@@ -61,6 +68,7 @@ if "agent_lint" not in sys.modules:
     _lint_spec.loader.exec_module(agent_lint)
 SOURCE = PurePosixPath("src")
 DRAFTS = PurePosixPath("drafts/skills")
+GUIDANCE = PurePosixPath("guidance")  # se_guidance.py TREE
 PLUGIN = "se"
 DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and reviewer "
                "sub-agents and their skills.")
@@ -347,8 +355,11 @@ def _front_matter(text: str, source: PurePosixPath, layout: Layout,
 
 def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
                     role_skills: dict[str, list[RoleSkill]],
-                    drafts: frozenset[str] = frozenset()) -> tuple[PurePosixPath, bytes]:
-    generated = _target(source, layout)
+                    drafts: frozenset[str] = frozenset(),
+                    generated: PurePosixPath | None = None) -> tuple[PurePosixPath, bytes]:
+    """The file a source builds in one layout, at `generated` where given (a guidance note's skill),
+    else at its `_target`."""
+    generated = generated or _target(source, layout)
     data = (root / source).read_bytes()
     if source.suffix != ".md":
         return generated, data
@@ -363,6 +374,44 @@ def _generated_file(source: PurePosixPath, layout: Layout, root: Path,
     first = text.count("\n", 0, len(text) - len(body)) + 1
     body = _rewrite_links(hosts(body, source, layout, first), source, generated, layout, drafts)
     return generated, (front + notice(source) + body).encode("utf-8")
+
+
+def guidance():
+    """scripts/se_guidance.py, which reads and checks guidance notes, loaded when first needed, so a
+    reader of the roles alone (se_start.py) needs no more scripts than before."""
+    found = sys.modules.get("se_guidance")
+    if found is None:
+        spec = importlib.util.spec_from_file_location("se_guidance", Path(__file__).with_name("se_guidance.py"))
+        found = importlib.util.module_from_spec(spec)
+        sys.modules["se_guidance"] = found
+        spec.loader.exec_module(found)
+    return found
+
+
+def notes(root: Path) -> list[tuple[PurePosixPath, str]]:
+    """The checkout's own guidance notes, each its path and its name, in path order; a note that does
+    not load or a second note of one name is refused, as no skill could be written from it."""
+    tree = root / GUIDANCE
+    if not tree.is_dir():
+        return []
+    se_guidance = guidance()
+    found: list[tuple[PurePosixPath, str]] = []
+    names: dict[str, PurePosixPath] = {}
+    source = se_guidance.Source("", root, 0)
+    for path in sorted(tree.rglob("*.md")):
+        if not path.is_file():
+            continue
+        findings: list[str] = []
+        note = se_guidance.read_note(source, path, findings)
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        if note is None:
+            raise SourceError(f"{'; '.join(findings)} ({se_guidance.CHECK})")
+        if note.name in names:
+            raise SourceError(f"{relative}: duplicate name {note.name!r}, also {names[note.name]}; "
+                              "rename one, names are unique across the trees")
+        names[note.name] = relative
+        found.append((relative, note.name))
+    return found
 
 
 def notice(source: PurePosixPath | str) -> str:
@@ -608,6 +657,15 @@ def expected(root: Path = ROOT, copilot: bool = True) -> dict[PurePosixPath, byt
         for layout in LAYOUTS if copilot else LAYOUTS[1:]:
             path, data = _generated_file(source, layout, root, role_skills, frozenset(drafts))
             files[path] = data
+    skills = {source.parts[2] for source in sources if source.parts[:2] == ("src", "skills")}
+    for note, name in notes(root):
+        if name in skills or name in drafts:
+            owner = "a skill of src/skills" if name in skills else "a listed draft's"
+            raise SourceError(f"{note}: the note's name {name!r} is {owner} already; rename the note")
+        for layout in LAYOUTS if copilot else LAYOUTS[1:]:
+            path, data = _generated_file(note, layout, root, role_skills, frozenset(drafts),
+                                         layout.skills / name / "SKILL.md")
+            files[path] = data
     if problems := validate(files):
         raise SourceError("; ".join(problems))
     return files
@@ -672,7 +730,8 @@ def build(root: Path = ROOT) -> list[PurePosixPath]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="se_plugin.py", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("build", "check"),
-                        help="build: write both layouts from src/; check: refuse when they differ")
+                        help="build: write both layouts from src/ and guidance/; check: refuse when they "
+                        "differ")
     parser.add_argument("--root", type=Path, default=ROOT, help="the se checkout (default: this one)")
     args = parser.parse_args(argv)
     try:
@@ -687,10 +746,10 @@ def main(argv: list[str] | None = None) -> int:
     for line in lines:
         print(f"se_plugin.py check: {line}", file=sys.stderr)
     if lines:
-        print("se_plugin.py check: generated files differ from src/; edit the source, then run "
-              "`python scripts/se_plugin.py build`", file=sys.stderr)
+        print("se_plugin.py check: generated files differ from src/ and guidance/; edit the source, "
+              "then run `python scripts/se_plugin.py build`", file=sys.stderr)
         return 1
-    print("se_plugin.py check: both layouts match src/")
+    print("se_plugin.py check: both layouts match src/ and guidance/")
     return 0
 
 

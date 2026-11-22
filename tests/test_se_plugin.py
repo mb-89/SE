@@ -692,7 +692,8 @@ def test_the_copilot_manifest_setting_is_unset_and_unset_builds_todays_files_byt
     assert se_plugin.PurePosixPath(".github/plugin/plugin.json") in committed
     assert not (ROOT / "plugin.json").exists()
     assert se_plugin.expected(ROOT) == committed
-    shutil.copytree(ROOT / "src", tmp_path / "src")
+    for folder in ("src", "guidance"):
+        shutil.copytree(ROOT / folder, tmp_path / folder)
     (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
         "[plugin]\n", '[plugin]\ncopilot_manifest = "github"\n', 1), encoding="utf-8")
     assert se_plugin.expected(tmp_path) == committed
@@ -775,7 +776,8 @@ def test_the_powershell_hooks_setting_is_unset_and_unset_builds_todays_files_byt
     assert se_plugin.expected(ROOT) == committed
     hooks = json.loads(committed[se_plugin.COPILOT_HOOKS_FILE])["hooks"]
     assert hooks["SessionStart"][0]["powershell"] == "bash scripts/bootstrap.sh --hook; exit 0"
-    shutil.copytree(ROOT / "src", tmp_path / "src")
+    for folder in ("src", "guidance"):
+        shutil.copytree(ROOT / folder, tmp_path / folder)
     (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
         "[plugin]\n", '[plugin]\npowershell_hooks = "bash"\n', 1), encoding="utf-8")
     assert se_plugin.expected(tmp_path) == committed
@@ -904,3 +906,57 @@ def test_a_listed_draft_holds_to_the_rules_of_every_skill(tmp_path, capsys):
 
 def test_ses_own_se_toml_includes_no_draft():
     assert se_plugin.draft_skills(ROOT) == []
+
+
+# Guidance notes: each note of the project's guidance tree is also a skill in both layouts
+# (docs/guidance.md "Notes in folders").
+NOTE = ("---\nname: {name}\ndescription: 'How to tell a flake from your own failure.'\n"
+        "tags: [{tags}]\n---\n\nRerun it at base, see [the work model](../../../src/skills/x/SKILL.md).\n")
+
+
+def guidance_copy(tmp_path: Path, tags: str = "worker") -> Path:
+    """A small source with one skill, one template tagged `work, testing, worker` and one note in
+    `guidance/work/testing/`, its own tags `tags`."""
+    root = drafts_copy(tmp_path)
+    write_source(root, "templates/worker.toml", 'name = "worker"\ntags = ["work", "testing", "worker"]\n')
+    write_source(root, "guidance/work/testing/repeat-count.md", NOTE.format(name="repeat-count", tags=tags))
+    return root
+
+
+def test_build_writes_each_guidance_note_as_a_skill_in_both_layouts(tmp_path, capsys):
+    without = se_plugin.expected(drafts_copy(tmp_path / "without"))
+    root = guidance_copy(tmp_path / "with")
+    files = se_plugin.expected(root)
+    added = {path for path in files if path not in without}
+    assert added == {PurePosixPath(layout, "repeat-count", "SKILL.md") for layout in ("skills", ".github/skills")}
+    note = NOTE.format(name="repeat-count", tags="worker")
+    for layout in ("skills", ".github/skills"):
+        text = files[PurePosixPath(layout, "repeat-count", "SKILL.md")].decode("utf-8")
+        front, body = note.split("\n---\n", 1)
+        assert text.startswith(front + "\n---\n" + se_plugin.notice("guidance/work/testing/repeat-count.md"))
+        assert text.endswith(body.replace("../../../src/skills/x/SKILL.md", "../x/SKILL.md"))
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    capsys.readouterr()
+    assert se_plugin.main(["check", "--root", str(root)]) == 0, capsys.readouterr().err
+    (root / "guidance" / "work" / "testing" / "repeat-count.md").unlink()
+    assert se_plugin.differences(root) == [f"{layout}/repeat-count/SKILL.md: not generated from src/; remove "
+                                           "it or add its source" for layout in (".github/skills", "skills")]
+
+
+def test_a_note_that_shares_a_skills_name_is_refused(tmp_path, capsys):
+    root = guidance_copy(tmp_path)
+    write_source(root, "guidance/x.md", NOTE.format(name="x", tags=""))
+    assert se_plugin.main(["build", "--root", str(root)]) == 2
+    assert "guidance/x.md: the note's name 'x' is a skill of src/skills already" in capsys.readouterr().err
+
+
+def test_a_note_the_build_cannot_read_is_refused_naming_it(tmp_path, capsys):
+    root = guidance_copy(tmp_path)
+    write_source(root, "guidance/bare.md", "No front matter.\n")
+    assert se_plugin.main(["build", "--root", str(root)]) == 2
+    assert "guidance/bare.md: has no front matter" in capsys.readouterr().err
+
+
+def test_ses_own_notes_are_skills_of_both_layouts():
+    for layout in ("skills", ".github/skills"):
+        assert (ROOT / layout / "guidance-comes-first" / "SKILL.md").is_file(), layout
