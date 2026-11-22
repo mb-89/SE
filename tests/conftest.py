@@ -248,9 +248,11 @@ def obs() -> Path:
 
 # The suite's JUnit report for `work_tickets.py suite` (README "Test budget"): where the gate names a
 # report directory, the controller writes se.xml there with its worker count and each test's setup
-# time and worker, so the gate prints se's Parts line and its slow setups.
+# time and worker, so the gate prints se's Parts line and its slow setups. It also names the host's
+# CPU and when each test's setup started, in seconds from the controller's session start, which
+# `work_tickets.py test-seconds` reads from CI's artifact test-reports.
 REPORTS_VARIABLE = "SE_TEST_REPORTS"
-setup_seconds: dict[tuple[str, str], float] = {}  # (test, worker): the controller's setup times
+setup_seconds: dict[tuple[str, str], tuple[float, float]] = {}  # (test, worker): setup time, start
 
 
 # The suite builds the plugin layouts from src/ before its tests (AGENTS.md "Agents and skills"), so
@@ -287,22 +289,44 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     report = session.config.stash.get(xml_key, None)
     if report is not None:  # junitxml opens it on the controller only
-        session.config.pluginmanager.register(SetupTimes(), "se-setup-times")
+        session.config.pluginmanager.register(SetupTimes(time.time()), "se-setup-times")
         report.add_global_property("workers", getattr(session.config.option, "numprocesses", 0) or 1)
+        report.add_global_property("cpu", host_cpu())
+
+
+def host_cpu() -> str:
+    """The host's CPU model and its count, `<model> x<count>`: the model from the first `model name`
+    line of /proc/cpuinfo, else platform.processor(), else `unknown`."""
+    import platform
+
+    model = ""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as cpuinfo:
+            model = next((line.split(":", 1)[1].strip() for line in cpuinfo
+                          if line.startswith("model name") and ":" in line), "")
+    except OSError:
+        pass
+    return f"{model or platform.processor() or 'unknown'} x{os.cpu_count()}"
 
 
 class SetupTimes:
-    """Adds each test's setup time and worker to its JUnit test case, on the controller."""
+    """Adds each test's setup time, worker and start to its JUnit test case, on the controller;
+    `started` is the seconds from the session's start to the start of the test's setup."""
+
+    def __init__(self, session_start: float) -> None:
+        self.session_start = session_start
 
     @pytest.hookimpl(tryfirst=True)  # before junitxml writes the test case's properties
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         node = getattr(report, "node", None)  # pytest-xdist: the worker that ran the test
         worker = node.gateway.id if node is not None else "main"
         if report.when == "setup":
-            setup_seconds[(report.nodeid, worker)] = report.duration
+            setup_seconds[(report.nodeid, worker)] = (report.duration, report.start)
         elif report.when == "teardown" and (report.nodeid, worker) in setup_seconds:
-            seconds = setup_seconds.pop((report.nodeid, worker))
-            report.user_properties.extend([("setup_time", f"{seconds:.3f}"), ("worker", worker)])
+            seconds, start = setup_seconds.pop((report.nodeid, worker))
+            started = max(0.0, start - self.session_start)
+            report.user_properties.extend([("setup_time", f"{seconds:.3f}"), ("worker", worker),
+                                           ("started", f"{started:.3f}")])
 
 
 # The order the workers take the test files in (pyproject.toml runs `--dist loadfile`): the
