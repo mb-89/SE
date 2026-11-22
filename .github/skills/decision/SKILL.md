@@ -35,8 +35,13 @@ it, and which solutions there are.
   - `context` and `concern`: the situation and the concern the decision answers, for its
     one-sentence summary.
   - The criteria are weighted before any option is marked.
-  - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
-    is an option whenever something exists.
+  - Effort to build or move is a criterion only where it is exceptional; ordinary work to build
+    the better system is no criterion
+    ([dec-006](../work-model/references/rules.md#dec-006-right-before-cheap)).
+  - "Keep what we have" is an option whenever something exists. The datum is what exists today
+    wherever something exists, never an option not yet built; every other option is marked
+    against it. Only where nothing exists is the datum the strongest rival
+    ([dec-003](../work-model/references/rules.md#dec-003-keep-what-we-have)).
   - Every option says what it is and its own wins and losses.
   - Every option carries `success`, its success criterion
     ([dec-010](../work-model/references/rules.md#dec-010-a-success-criterion)).
@@ -135,6 +140,11 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
    - Any verdict may carry a comment, Bless included: act on the comment too.
    - A decision that reads `comment` has the person's comment and no verdict: it is still open, so
      answer the comment and ask again.
+4. A verdict the person gives in the chat for a decision of an open deck is that decision's answer,
+   as if they had sent it from the deck; they need not send it there as well.
+   - SE records it as it records a deck answer: that decision's entry in the answers payload,
+     with the verdict and the person's chat words as its comment, then step 3.
+   - A chat message that names no verdict, or no decision it answers, is a comment: answer it.
 
 ## The record
 
