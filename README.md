@@ -183,6 +183,20 @@ uv run python <se>/scripts/se_start.py refresh
     Claude Code installed are left to `refresh`.
   - Where the session's working tree is SE's own checkout, the core runs that checkout's release
     pins, not the installed SE's, so a session on `main` runs `main`'s.
+- Then, still before the core starts, the hook resolves the tree of the project's components,
+  `se_start.py start-components`
+  ([docs/components.md](docs/components.md#required-and-optional-at-start)).
+  - What is placed comes first: a clone at the commit `se.lock` locks is used without asking any
+    remote, so a start with every component placed works offline; the rest is found by name and
+    placed at its pin ([Modules](#modules)).
+  - A required component missing anywhere in the tree stops the start. The greeting shows one
+    message, opening `SE cannot start:`, with its path from the root (`se -> obs`), the remotes
+    read, each with why it offered nothing (Git's message where it could not be read), and the
+    remedy, a remote of an owner that offers it.
+  - Nothing after the stop runs: no commit identity, hooks or core. Any other failure to resolve
+    the tree stops it the same way, such as a found release whose tag points elsewhere than
+    `se.lock` records.
+  - An optional component missing is one line naming its path, and the start goes on.
 - The counts are what loaded: the skills and agents of the plugin's layout (every agent but SE is a
   sub-agent) and the rules the [public check](AGENTS.md#public-safety) enforces.
 - `status` reads only the disk and the last update check, cached in `~/.se/start-check.json`

@@ -131,8 +131,8 @@ fresh clone takes each component from the owner it came from, which is what the 
 
 ## Required and optional at start
 
-SE's start (`scripts/se_start.py start`, before the core starts) resolves the tree from the checkout's
-lists:
+SE's start (`scripts/se_start.py start-components`, before the core starts) resolves the tree from
+the checkout's lists:
 
 - **From what is placed, first**: a component whose clone exists at its locked commit is found
   without asking any remote, so a start with every component placed stays within its budget and
@@ -142,7 +142,8 @@ lists:
 
   ```text
   SE cannot start: the required component obs is missing (se -> obs).
-  No remote's owner offers a repository obs marked as a component (read: origin).
+  No remote's owner offers a repository obs marked as a component with a release its pin ^5.0 admits (read: origin).
+    origin: github.com/<owner> marks no repository obs as a component
   Add a remote of an owner that offers it: git remote add <remote> <address>
   ```
 
@@ -232,9 +233,9 @@ In order; each is one work issue.
    README [Modules](../README.md#modules); `tests/test_se_modules.py` on the fake door
    (`tests/fake_git.py`) with a fake host listing. Dropping `url` and renaming the table change the
    format of every `se.toml` SE reads, so it lands as se 6.0.0.
-2. **se: the start check** (`start-checks-required-components`). `scripts/se_start.py` (`start`
-   resolves the tree from what is placed, stops on a required component missing, one line for an
-   optional one), `scripts/bootstrap.sh` (the hook shows the stop), README
+2. **se: the start check** (`start-checks-required-components`). `scripts/se_start.py`
+   (`start-components` resolves the tree from what is placed, stops on a required component
+   missing, one line for an optional one), `scripts/bootstrap.sh` (the hook shows the stop), README
    [Start and refresh](../README.md#start-and-refresh), `tests/test_se_start.py`.
 3. **The person's step**: the topic `component` on `kern` and `obs`, before package 2's release
    reaches a session.

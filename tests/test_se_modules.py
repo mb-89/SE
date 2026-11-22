@@ -1122,8 +1122,8 @@ def test_a_required_component_no_owner_offers_fails_naming_the_path_the_remotes_
     code, out = finds(hosts, capsys, "sync")
 
     assert code == 1
-    assert ("the required component obs is missing (consumer -> obs): no remote's owner offers a repository "
-            "obs marked as a component with a release its pin ^4.0 admits (read: origin, fork)") in out
+    assert ("the required component obs is missing (consumer -> obs).\nNo remote's owner offers a repository "
+            "obs marked as a component with a release its pin ^4.0 admits (read: origin, fork).") in out
     assert "origin: git.example.org/team marks no repository obs as a component" in out
     assert "Add a remote of an owner that offers it: git remote add <remote> <address>" in out
 
