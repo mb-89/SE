@@ -186,7 +186,7 @@ import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-#: The title shape of the templates whose title is a ticket's name (templates/ticket.toml, templates/work.toml).
+#: The title shape of the templates whose title is a ticket's name (templates/ticket.md, templates/work.md).
 NAME_SHAPE = "work_tickets:name_refusal"
 NAME_RULE = "name"
 DANGLING_RULE = "dangling"
