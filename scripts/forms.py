@@ -1714,6 +1714,10 @@ ENFORCE_VALUES = (OFF, WARN, REFUSE)
 #: se.toml `[forms] gate`: the values SE's form gate on GitHub writes knows (se_forms.py gate),
 #: `off` the default.
 GATE_VALUES = (OFF, WARN, REFUSE)
+#: se.toml `[forms] files`: whether SE's checks before work is done check the files a form claims
+#: (se_forms.py check-files), `off` the default.
+CHECK = "check"
+FILES_VALUES = (OFF, CHECK)
 #: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
@@ -1728,6 +1732,7 @@ class Enforcement:
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
     gate: str = OFF
+    files: str = OFF
 
 
 def enforcement(root: Path) -> Enforcement:
@@ -1759,11 +1764,15 @@ def enforcement(root: Path) -> Enforcement:
     if gate not in GATE_VALUES:
         raise FormError(f"forms: [forms] gate = {gate!r} in {where} is none of "
                         f"{', '.join(GATE_VALUES)}; set one of them (README \"Forms\")")
+    files = table.get("files", OFF)
+    if files not in FILES_VALUES:
+        raise FormError(f"forms: [forms] files = {files!r} in {where} is none of "
+                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Forms\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise FormError(f"forms: [forms] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
-    return Enforcement(enforce, refusals, where, gate)
+    return Enforcement(enforce, refusals, where, gate, files)
 
 
 def formed(form: Form, *, body: str | None = None, fields: dict | None = None,

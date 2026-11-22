@@ -36,3 +36,10 @@ summary = "SE's hook: judge one GitHub write's body against its form"
 group = "Forms"
 help = "SE's hook: judge one GitHub write's body against its form"
 class = "batch"
+
+[commands."se_forms.py check-files"]
+usage = "se_forms.py check-files [--changed REF] [--root ROOT] [--forms FORMS] [PATH ...]"
+summary = "check the files a form claims, given or changed since a ref"
+group = "Forms"
+help = "check the files a form claims, given or changed since a ref"
+class = "batch"

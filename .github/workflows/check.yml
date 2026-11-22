@@ -119,6 +119,13 @@ jobs:
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
+      # The changed files a form claims (README "Forms"): the command reads se.toml [forms] files
+      # at origin/<integration branch> itself and passes where it is off.
+      - name: The changed files a form claims follow their forms
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: uv run python scripts/se_forms.py check-files --changed "origin/$BASE_REF"
       # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
       # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
       # declares them, with their own time and budget.
