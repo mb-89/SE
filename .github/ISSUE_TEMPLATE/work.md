@@ -34,8 +34,9 @@ labels: work
 <!-- Standard packages change code and verify it with focused tests. For read-only research that
 produces findings, proposed tickets or probe results, apply the `discovery` label. Discovery
 packages record evidence instead of test-command wording. Write "breaking" here for a breaking
-change: its integration releases a major version (README "Project settings"); otherwise what
-changed sets the bump, as the field report's Release kind declares it, never the branch name. -->
+change: its integration records the major release kind, which the next release raises the version
+by (README "Project settings"); otherwise what changed sets the kind, as the field report's Release
+kind declares it, never the branch name. -->
 
 ## Blocked by
 

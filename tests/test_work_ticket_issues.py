@@ -2624,7 +2624,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     assert [call[:3] for call in calls if call[:2] == ["issue", "comment"]] == [["issue", "comment", "5"]]
     assert bodies == [
         f"Integrated in {commit} from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
-        "Release: none. Suite: 214 passed.\n"]
+        "Release kind: minor, recorded; the version moves when SE asks for a release. Suite: 214 passed.\n"]
     assert not worker.exists()
     assert git_run(main_checkout, "rev-parse", "--verify", "feature/worker").returncode != 0
     assert git_run(main_checkout.parent / "origin.git", "show-ref", "--verify", "refs/heads/feature/worker").returncode != 0
@@ -2907,7 +2907,7 @@ def test_integrate_pushes_a_public_mirror_after_running_the_check(
     assert mirror_head.stdout.strip() == git_run(main_checkout, "rev-parse", "HEAD").stdout.strip()
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
     assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]
-    assert all("from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release: none. "
+    assert all("from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release kind: minor, recorded; the version moves when SE asks for a release. "
                "Suite: 214 passed." in body for body in bodies)
     assert not worker.exists()
     assert git_run(mirror, "show-ref", "--verify", "refs/heads/feature/worker").returncode == 0
@@ -6576,7 +6576,7 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
 
     work_tickets.integrate(main_checkout, 7, None, None)
     assert [call[2] for call in calls if call[:2] == ["issue", "close"]] == []
-    assert len(bodies) == 1 and "from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release: none." in bodies[0]
+    assert len(bodies) == 1 and "from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). Release kind: minor, recorded; the version moves when SE asks for a release." in bodies[0]
     assert "Stays open until this acceptance is seen after the merge: " \
            "- [ ] CI is green on main after the merge." in bodies[0]
     output = capsys.readouterr().out
@@ -6726,7 +6726,7 @@ def test_field_report_check_accepts_a_breaking_minor_only_below_1_0(
     assert ("lists a breaking change, which is major" in capsys.readouterr().err) == bool(code)
 
 
-def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request_and_release(
+def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request_and_its_kind(
         main_checkout, monkeypatch):
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
@@ -6740,12 +6740,15 @@ def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request
     bodies: list[str] = []
     monkeypatch.setattr(work_tickets, "run_gh_with_body",
                         lambda root, args, body: calls.append(args) or bodies.append(body) or "")
-    monkeypatch.setattr(work_tickets, "release", lambda root, branch, upstream: "v1.3.0")
+    version = (main_checkout / "se.toml").read_text(encoding="utf-8")
 
     commit = work_tickets.integrate(main_checkout, 7, None, None)
     assert bodies == [f"Integrated in {commit} from https://git.example/owner/repo/pull/7"
                       ", landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
-                      "Release: https://git.example/owner/repo/releases/tag/v1.3.0. Suite: 1 passed.\n"]
+                      "Release kind: minor, recorded; the version moves when SE asks for a "
+                      "release. Suite: 1 passed.\n"]
+    # The landing records its kind and releases nothing (README "Project settings").
+    assert (main_checkout / "se.toml").read_text(encoding="utf-8") == version
     assert [call[:3] for call in calls if call[:2] == ["issue", "close"]] == [["issue", "close", "5"]]
 
 
@@ -6834,13 +6837,12 @@ def test_dry_run_of_the_worker_to_integrator_flow_files_no_field_report_issue(
     assert capsys.readouterr().out.strip().endswith("Release-kind: minor")
     gh.pulls[0]["headRefOid"] = git_run(worker, "rev-parse", "HEAD", check=True).stdout.strip()
     monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "1 passed"))
-    monkeypatch.setattr(work_tickets, "release", lambda root, branch, upstream: "v1.1.0")
     commit = work_tickets.integrate(main_checkout, 7, None, None)
 
     assert gh.issue["state"] == "CLOSED"
     assert gh.issue["comments"][-1]["body"].startswith(
         f"Integrated in {commit} from https://git.example/owner/repo/pull/7, landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
-        "Release: https://git.example/owner/repo/releases/tag/v1.1.0.")
+        "Release kind: minor, recorded; the version moves when SE asks for a release.")
     assert "Release-kind: minor" in git_run(main_checkout, "log", "-1", "--format=%B", check=True).stdout
     assert not any(call[:2] == ["issue", "create"] or "field-report" in call for call in gh.calls)
 

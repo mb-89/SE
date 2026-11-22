@@ -658,8 +658,8 @@ The plugin's session start (`scripts/bootstrap.sh --hook`) and the setup scripts
 way (`work_tickets.py identity`), so a fresh clone's first commit never carries the host's default
 identity.
 
-`work_tickets.py push` and its release commit with that identity explicitly, whatever the
-checkout's configuration or environment says, and refuse without one. The
+`work_tickets.py push` refuses without one, and `work_tickets.py release` commits its release
+with that identity explicitly, whatever the checkout's configuration or environment says. The
 [public check](AGENTS.md#public-safety) refuses a commit not yet pushed whose author or committer
 differs from it.
 
@@ -694,9 +694,8 @@ between columns, as obs-components prints it. SE's start reports its offers
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
-([`se.toml`](#setoml)). Nobody types it after the first: `integrate` releases, on its landing
-branch, what was integrated since origin and the last tag, as `work_tickets.py push` of the
-integration branch does.
+([`se.toml`](#setoml)). Nobody types it after the first, and a landing never moves it: each
+landing only records its release kind, and the version moves when SE asks for a release.
 
 Each integration is a first-parent commit whose message starts `Integrate <branch>` and states its
 kind in the trailer `Release-kind: major|minor|patch`: the merge `integrate` builds, and on the
@@ -713,23 +712,41 @@ integration branch the one commit it lands as ([Landing on main](#landing-on-mai
     issue's "Package kind" says "breaking"; else by the kind of work it names (or an old name's
     `<type>/` prefix): `feature` (or `feat`) `minor`; `fix`, `perf`, `chore` or `docs` `patch`.
 
-An integration without the trailer is refused, naming the merge and the remedy; push never guesses.
+`work_tickets.py release` is the release, which the integrator runs only when SE asks
+([integrator](src/agents/integrator.md#release)). One release raises the version once, by the
+highest kind recorded since the last release, whose commit the tag of the current version names:
 
-One push bumps once, by its integrations' highest kind: it rewrites only `version`, runs
-`release_build` where set, commits `Release v<new>` with what that regenerated, tags it and pushes
-the tag with the branch.
+- On `land/release-v<new>` at origin's newest integration branch it rewrites only `version`, runs
+  `release_build` where set and commits `Release v<new>` with what that regenerated, its message
+  listing each integration it releases with its kind.
+- The commit carries its parent's suite verdict (the complete suite runs where none is recorded),
+  and the public check runs on it.
+- It lands as integrate's landings do ([Landing on main](#landing-on-main)): a landing pull request,
+  its `check`, then the squash merge or the fast-forward; without gh it prints the plan, and
+  `release --read-back <tag>` finishes. That pull request names no work issue: `pr_issues.py`
+  exempts the owner's `land/release-v<version>`.
+- Then it tags the landed commit and pushes the tag, or leaves it to the
+  [release workflow](#release-tags).
+
+Two landings of kind patch, then one release, raise the version by one patch. With nothing
+integrated since the last release, the release releases nothing and says so.
+
+An integration without the trailer is refused, naming the merge and the remedy; the release never
+guesses. One already on the integration branch cannot be reworded there: the person sets
+`version` by hand in a pull request, which the next release tags as it is.
 
 Below 1.0.0 a major bumps the minor part (0.3.1 to 0.4.0), so no kind reaches 1.0.0: the person
-sets `version = "1.0.0"` by hand, as the statement that the interface is stable, and push tags it
-as it is.
+sets `version = "1.0.0"` by hand, as the statement that the interface is stable, and the release
+tags it as it is.
 
-A version without its tag yet is tagged as it is, which is how a project
-starts versioning. Without `version` push releases nothing and says so; a malformed one is refused,
-naming the file.
+A version without its tag yet is tagged as it is, which is how a project starts versioning.
+Without `version` the release releases nothing and says so; a malformed one is refused, naming
+the file.
 
 `release_build` is the command that regenerates what copies the version (se's plugin manifests:
 `["uv", "run", "python", "scripts/se_plugin.py", "build"]`), an argument array run without a shell
-from the project root. Where it fails, push restores `se.toml`, commits nothing and shows its output.
+from the project root. Where it fails, the release restores `se.toml`, commits nothing and shows
+its output.
 
 `integrate` also runs it on its merge, before the suite, and commits what it rewrites into the
 landing: a generated file that carries the version, added on a branch before `main` released,
@@ -788,8 +805,9 @@ deletion, keeps the history linear and requires `check`
 setting `landing` below. `work_tickets.py integrate` does all of it:
 
 1. It merges the work branch into origin's newest integration branch on `land/<branch>` (the
-   `Integrate <branch>` merge with its `Release-kind` trailer), runs the complete suite, the
-   output regeneration, the project checks and the public check, and releases there.
+   `Integrate <branch>` merge with its `Release-kind` trailer, which records its kind and moves no
+   version), runs the complete suite, the output regeneration, the project checks and the public
+   check.
    - A fast-forward landing then writes the one landing commit: that tree on the base, as the
      project identity in both roles, with the merge's title and message less each line that
      holds an e-mail address (a `commit_trailer` co-author line, say).
@@ -944,8 +962,9 @@ no token), the hand-off needs neither a retyped file nor a second run
     minutes (`se.toml` `[tests.beside.kern-long-step]`), nightly and where a change touches the
     files it guards ([Test budget](#test-budget)); its fast guards run in kern's own tests.
 
-The landed commit carries the release's `se.toml` version, so the release workflow tags it and
-the docs workflow publishes it, as both run on every push to `main`.
+The docs workflow publishes every landed commit, as it runs on every push to `main`; a landing
+moves no version, and the release workflow tags only the commit a release lands with its new
+`se.toml` version ([Project settings](#project-settings)).
 
 ```toml
 [integrate]
@@ -1017,9 +1036,10 @@ its own repository.
 `release = "workflow"` hands the tags to se's release workflow, for hosts that may push branches but
 not tags (Claude's cloud sessions).
 
-- `push` still bumps and commits the version, pushes the branch only and names the workflow; it
-  reads the released versions from origin's tags (`git ls-remote --tags`), never from local ones,
-  so a version without its tag on origin is left for the workflow, not bumped.
+- `work_tickets.py release` still raises the version and lands its commit, pushes no tag and
+  names the workflow; it reads the released versions from origin's tags (`git ls-remote --tags`),
+  never from local ones, so a version without its tag on origin is left for the workflow, not
+  raised.
 - On each push to the integration branch the workflow walks its first-parent history and tags
   every version `se.toml` carried without a tag, `v<version>` on the first commit that carried it,
   so a missed release is backfilled; a second run changes nothing.
@@ -1032,7 +1052,8 @@ not tags (Claude's cloud sessions).
   reason and the remedy, and the others still land. The remedy is the repository's tag rulesets
   where origin's reason names a rule; otherwise it is a rerun first, as a transient refusal
   (`missing necessary objects`) passes on one.
-- Without `release`, `push` pushes the tags itself; another value is refused, naming the file.
+- Without `release`, `work_tickets.py release` pushes the tag itself once its commit landed;
+  another value is refused, naming the file.
 
 A repository turns it on with `release = "workflow"`, the copy of se's `release.yml` that
 `se_workflows.py write .github/workflows/release.yml` writes ([Workflows](#workflows)), and a copy
@@ -1719,8 +1740,9 @@ A person never waits on a silent command. The budgets are declared once, in
   `metrics`; `se_start.py status`, the greeting, within 1 s. Each run notes its budget in its
   [metrics](#metrics) line, so `work_tickets.py metrics` flags an overrun.
 - Long commands announce each phase as it starts, `Phase: <what>`: `integrate` (the pull request
-  read, the guard, sync, the merge, the suite, the checks, the release, the push, the landing plan,
-  the read-back and the close-out), `suite` (its setup and the suite; with `--compare`, each run)
+  read, the guard, sync, the merge, the suite, the checks, the push, the landing plan,
+  the read-back and the close-out), `release` (sync, the release commit, the checks, the push and
+  the landing plan), `suite` (its setup and the suite; with `--compare`, each run)
   and `refresh`.
 - A call that reads GitHub or a remote prints what it reads before it is made:
   `Reading GitHub: gh issue list --state open --label escalated` (without the options that only
@@ -2029,7 +2051,7 @@ gated push and the pull request, and the Stop hook's check.
 
 #### Integration
 
-`components/integration`: The integrator's and SE's work: integrate and its release, ref
+`components/integration`: The integrator's and SE's work: integrate, the release SE asks for, ref
 maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and
 settings checks and the generated docs.
 
@@ -2050,6 +2072,7 @@ settings checks and the generated docs.
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py refs request` | `work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO] [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL] [--conclusion CONCLUSION] [--log-file LOG_FILE] issue` | for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its output and label the issue escalated; prints the line for SE. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
+| `work_tickets.py release` | `work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]` | release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README "Project settings"); with nothing integrated since, it releases nothing |
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |

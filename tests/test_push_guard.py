@@ -330,7 +330,7 @@ def test_the_public_check_of_a_rev_records_its_verdict(checkout, content, passed
 
 
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
-def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
+def test_a_release_commit_carries_its_parents_suite_verdict(checkout):
     (checkout / "se.toml").write_text(
         f'{IDENTITY}version = "1.0.0"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
     commit(checkout)
@@ -342,8 +342,7 @@ def test_a_release_commit_carries_its_parents_suite_verdict(checkout, capfd):
         "-m", "Release-kind: patch", "fix/topic-20261106")
     run_suite(checkout)
     merge_tree = git(checkout, "rev-parse", "HEAD^{tree}")
-    pushed, output = push_with("push", checkout, capfd)
-    assert pushed, output
+    assert work_tickets.release(checkout, "main") == ("v1.0.1", [("fix/topic-20261106", "patch")])
     release_tree = git(checkout, "rev-parse", "HEAD^{tree}")
     assert git(checkout, "log", "-1", "--format=%s") == "Release v1.0.1"
     recorded = verdicts.verdict(checkout, "suite", release_tree)

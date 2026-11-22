@@ -1,4 +1,5 @@
-"""work_tickets.py push releases the integration branch: it bumps se.toml's version and tags it."""
+"""Landings record their release kind and release nothing; work_tickets.py release, when SE asks,
+raises se.toml's version by the highest kind recorded since the last release, lands it and tags it."""
 import contextlib
 import importlib.util
 import io
@@ -100,6 +101,51 @@ def push(root: Path) -> int:
     return work_tickets.main(["push", "--worktree", str(root)])
 
 
+REMOTE = "git.example/alice/project"
+
+
+class SquashLanding:
+    """The release landing's GitHub steps as GitHub runs them, on the test's origin: the landing
+    pull request's squash merge, one commit with the landed tree on origin's main, as `title` and
+    `message`. `landed` is each release commit it landed."""
+
+    def __init__(self, root: Path) -> None:
+        self.root, self.landed, self.plans = root, [], []
+
+    def __call__(self, plan, actions) -> dict[str, object]:
+        self.plans.append(plan)
+        squash = next(step for step in plan.steps if step.action == "squash").arguments
+        base = git(self.root.parent / "origin.git", "rev-parse", "main")
+        self.landed.append(squash["expectedHeadSha"])
+        merged = git(self.root, "commit-tree", f"{squash['expectedHeadSha']}^{{tree}}", "-p", base,
+                     "-m", squash["commit_title"], "-m", squash["commit_message"])
+        git(self.root, "push", "-q", "origin", f"{merged}:refs/heads/main")
+        return {"pull number": 7, "pull url": f"https://{REMOTE}/pull/7",
+                "check run url": "run", "merge commit sha": merged}
+
+
+def as_integrator(patch: pytest.MonkeyPatch, root: Path, signed_in: bool = True) -> SquashLanding:
+    """The integrator's GitHub, faked: gh signed in (or not), origin named `REMOTE`, no pause."""
+    landing = SquashLanding(root)
+    patch.setattr(work_tickets, "hand_off", lambda: not signed_in)
+    patch.setattr(work_tickets, "remote_repo", lambda root: REMOTE)
+    patch.setattr(work_tickets, "pause_issues", lambda root, repo: [])
+    patch.setattr(work_tickets, "GitHub", lambda root, remote: None)
+    patch.setattr(work_tickets, "run_plan", landing)
+    return landing
+
+
+def release(root: Path) -> int:
+    """SE asks for a release: main's integrations land (push, which releases nothing), then
+    work_tickets.py release lands the release commit through its landing pull request."""
+    code = push(root)
+    if code:
+        return code
+    with pytest.MonkeyPatch.context() as patch:
+        as_integrator(patch, root)
+        return work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(root)])
+
+
 def released(root: Path) -> tuple[str, str]:
     """The version in se.toml on origin's main and origin's newest tag."""
     origin = root.parent / "origin.git"
@@ -123,7 +169,7 @@ def newest(tags: list[str]) -> str:
 def test_each_package_kind_bumps_its_part_and_the_tag_is_pushed_with_the_merge(
         checkout, capsys, branch, breaking, version):
     integrate(checkout, branch, breaking)
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == (version, f"v{version}")
     assert git(checkout, "rev-parse", f"v{version}") == git(checkout, "rev-parse", "origin/main")
     assert git(checkout, "log", "-1", "--format=%s", "main") == f"Release v{version}"
@@ -131,25 +177,89 @@ def test_each_package_kind_bumps_its_part_and_the_tag_is_pushed_with_the_merge(
     assert f"Release: v{version} (" in capsys.readouterr().out
 
 
+def test_two_patch_landings_then_one_release_raise_the_version_by_one_patch(checkout, capsys):
+    """The acceptance of the release SE asks for: landings record their kind, release nothing."""
+    integrate(checkout, "fix/one-20261106")
+    assert push(checkout) == 0
+    integrate(checkout, "fix/two-20261106")
+    assert push(checkout) == 0
+    assert released(checkout) == ("1.2.3", "v1.2.3")
+    assert "Release:" not in capsys.readouterr().out
+    assert release(checkout) == 0
+    assert released(checkout) == ("1.2.4", "v1.2.4")
+    assert origin_tags(checkout) == ["v1.2.3", "v1.2.4"]
+    out = capsys.readouterr().out
+    assert "Release: v1.2.4 (patch: fix/one-20261106, fix/two-20261106)" in out
+    assert "Released v1.2.4 in " in out
+
+
+def test_without_gh_the_release_prints_its_landing_plan_and_the_read_back_finishes(
+        checkout, capsys):
+    """No gh: the plan is the session's (work model "Without gh"); the read-back tags the landing."""
+    integrate(checkout, "fix/one-20261106")
+    assert push(checkout) == 0
+    capsys.readouterr()
+    with pytest.MonkeyPatch.context() as patch:
+        landing = as_integrator(patch, checkout, signed_in=False)
+        patch.setattr(work_tickets, "relay_door", lambda root, repo: None)
+        assert work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(checkout)]) == 0
+        out = capsys.readouterr().out
+        assert landing.plans == []
+        assert "Pushed land/release-v1.2.4 at " in out
+        assert '"head": "land/release-v1.2.4"' in out and '"title": "Release v1.2.4"' in out
+        assert '"commit_message": "fix/one-20261106: patch"' in out
+        assert f"work_tickets.py release --read-back v1.2.4 --worktree {checkout}" in out
+        assert released(checkout) == ("1.2.3", "v1.2.3")
+        plan = work_tickets.handoff_path(checkout, work_tickets.RELEASE_HANDOFF)
+        landing(work_tickets.Plan("landed", tuple(
+            work_tickets.Step(step["tool"] == "merge_pull_request" and "squash" or "other",
+                              step["tool"], step["arguments"])
+            for step in json.loads(plan.read_text(encoding="utf-8"))["plan"]["steps"])), {})
+        assert work_tickets.main(["release", "--read-back", "v1.2.3", "--worktree",
+                                  str(checkout)]) == 1
+        assert "is for v1.2.4, not v1.2.3" in capsys.readouterr().err
+        assert work_tickets.main(["release", "--read-back", "v1.2.4", "--worktree",
+                                  str(checkout)]) == 0
+    assert released(checkout) == ("1.2.4", "v1.2.4")
+    assert not plan.exists()
+    assert "Released v1.2.4 in " in capsys.readouterr().out
+
+
+def test_the_release_landing_names_its_integrations_and_no_work_issue(checkout):
+    integrate(checkout, "fix/one-20261106")
+    integrate(checkout, "feature/two-20261106")
+    assert push(checkout) == 0
+    with pytest.MonkeyPatch.context() as patch:
+        landing = as_integrator(patch, checkout)
+        assert work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(checkout)]) == 0
+    opened = next(step for step in landing.plans[0].steps if step.action == "open_pull").arguments
+    assert (opened["head"], opened["base"], opened["title"]) == ("land/release-v1.3.0", "main",
+                                                                 "Release v1.3.0")
+    assert opened["body"].startswith("Release v1.3.0: `work_tickets.py release` raises the version")
+    assert "- fix/one-20261106: patch\n- feature/two-20261106: minor\n" in opened["body"]
+    assert "Refs" not in opened["body"]
+
+
 def test_several_integrations_release_once_by_the_highest_kind(checkout):
     integrate(checkout, "fix/one-20261106")
     integrate(checkout, "feature/two-20261106")
     integrate(checkout, "docs/three-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
-    # Pushing again releases nothing new: the integrations are behind the tag.
-    assert push(checkout) == 0
+    # Releasing again releases nothing new: the integrations are behind the tag.
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
 
 
-def test_a_failed_push_is_retried_without_a_second_bump(checkout, monkeypatch):
+def test_a_failed_push_of_the_landings_is_retried_and_the_release_raises_once(checkout, monkeypatch):
     integrate(checkout, "feature/topic-20261106")
     real = work_tickets.run_git_push
     refusals = [subprocess.CompletedProcess(["push"], 1, "", "error: permission denied (403)")]
     monkeypatch.setattr(work_tickets, "run_git_push",
                         lambda root, arguments: refusals.pop() if refusals else real(root, arguments))
-    assert push(checkout) == 1
-    assert push(checkout) == 0
+    assert release(checkout) == 1
+    assert released(checkout) == ("1.2.3", "v1.2.3")
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
 
 
@@ -157,9 +267,11 @@ def test_an_untagged_version_is_tagged_as_it_is(checkout, capsys):
     (checkout / "se.toml").write_text(settings("2.0.0"), encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "start at 2.0.0")
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("2.0.0", "v2.0.0")
-    assert "v2.0.0 tagged, the first tag of project.version" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Release: v2.0.0 carries no tag yet; it is released as it is" in out
+    assert "Released v2.0.0 as it is: tagged " in out
 
 
 def test_other_branches_and_merges_release_nothing(checkout, capsys):
@@ -173,9 +285,11 @@ def test_other_branches_and_merges_release_nothing(checkout, capsys):
     git(checkout, "reset", "-q", "--hard", "origin/main")
     integrate(checkout, "side", trailer="")  # a merge named like no integration
     git(checkout, "commit", "-q", "--amend", "-m", "Merge branch 'side'")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.2.3", "v1.2.3")
-    assert "is no integration; it bumps nothing" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "is no integration; it bumps nothing" in out
+    assert "Nothing to release: main at " in out
 
 
 def release_trailer(root: Path, branch: str, breaking: bool, *arguments: str) -> int:
@@ -188,7 +302,7 @@ def release_trailer(root: Path, branch: str, breaking: bool, *arguments: str) ->
 def test_the_declared_kind_wins_over_the_branch_prefix(checkout, capsys):
     integrate(checkout, "fix/topic-20261106", report=declared("minor"))
     integrate(checkout, "refactor/other-20261106", report=declared("patch"))
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
 
 
@@ -221,7 +335,7 @@ def test_a_work_issue_marked_breaking_refuses_a_smaller_declared_kind(checkout):
 def test_a_breaking_removal_declared_major_releases_major(checkout):
     integrate(checkout, "fix/topic-20261106",
               report=declared("major", "- **Breaking:** made the `kind` field required"))
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("2.0.0", "v2.0.0")
 
 
@@ -232,7 +346,7 @@ def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
     trailer = capsys.readouterr().out.strip()
     assert trailer == "Release-kind: major"
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("2.0.0", "v2.0.0")
 
 
@@ -266,7 +380,7 @@ def test_a_breaking_report_releases_minor_below_1_0_and_major_from_it(
                                              work_tickets.project_version(checkout)) == kind
     integrate(checkout, "topic", breaking=True, report=declared(kind, BREAKING_REMOVAL))
     assert release_kind(checkout) == kind
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released_as(checkout, expected)
 
 
@@ -299,12 +413,12 @@ def test_a_quoted_sentence_naming_the_breaking_marker_is_no_breaking_change(chec
 def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
     released_at(checkout, "0.3.1")
     integrate(checkout, "topic", breaking=True, report=declared("major", BREAKING_REMOVAL))
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released_as(checkout, "0.4.0")
     # The person states the interface stable by setting 1.0.0 by hand; the release tags it.
     (checkout / "se.toml").write_text(settings("1.0.0"), encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "Stable interface")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released_as(checkout, "1.0.0")
 
 
@@ -317,24 +431,27 @@ def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
 def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, capsys, trailer, stated):
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
     before = git(checkout, "rev-parse", "HEAD")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     assert git(checkout, "rev-parse", "HEAD") == before
     assert released(checkout) == ("1.2.3", "v1.2.3")
+    assert work_tickets.current_branch(checkout) == "main"
     error = capsys.readouterr().err
     assert f"Cannot release merge {before[:7]} (Integrate fix/topic-20261106: work): it {stated}" in error
-    assert ("Reword the merge to end with one trailer Release-kind: major|minor|patch, as "
-            "work_tickets.py release-trailer <branch> --issue-body <file> --pr-description <file> "
-            "prints it from the field report in the pull request description") in error
+    assert ("Before it lands, reword the merge to end with one trailer Release-kind: "
+            "major|minor|patch, as work_tickets.py release-trailer <branch> --issue-body <file> "
+            "--pr-description <file> prints it from the field report in the pull request "
+            "description; one already on the integration branch stays as it is: set "
+            "project.version by hand in a pull request, which the release then tags as it is") in error
 
 
 def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):
     integrate(checkout, "feature/topic-20261106")
     assert release_kind(checkout) == "minor"
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     integrate(checkout, "feature/topic-20261106", text="a late prose fix")
     assert release_kind(checkout) == "patch"
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.1", "v1.3.1")
 
 
@@ -362,29 +479,27 @@ def test_a_squash_landed_integration_counts_as_integrated_and_releases_its_kind(
     assert work_tickets.release_trailer(
         checkout, "feature/topic-20261106", issue_body(False), declared("minor")) == "Release-kind: patch"
     # The squash commit's trailer is the kind a release counts, as the merge commit's was.
-    assert work_tickets.integrated_packages(checkout, "main", "v1.2.3", "refs/tags/v1.2.3") == [
+    assert work_tickets.integrated_packages(checkout, "main", "v1.2.3") == [
         ("feature/topic-20261106", "minor")]
 
 
-def test_push_of_a_landing_branch_releases_against_origin_s_main_and_waits_with_the_tag(
-        checkout, capsys):
-    git(checkout, "switch", "-q", "-c", "land/feature/topic-20261106")
+@pytest.mark.parametrize("branch", ["main", "land/feature/topic-20261106"])
+def test_push_of_the_integration_or_a_landing_branch_releases_nothing(checkout, capsys, branch):
     integrate(checkout, "feature/topic-20261106")
-    git(checkout, "switch", "-q", "land/feature/topic-20261106")
-    git(checkout, "merge", "-q", "--ff-only", "main")
+    if branch != "main":
+        git(checkout, "switch", "-q", "-c", branch)
     assert push(checkout) == 0
     origin = checkout.parent / "origin.git"
-    shown = git_door.run("show", "land/feature/topic-20261106:se.toml", root=origin).stdout
-    assert shown == settings("1.3.0")
-    assert "v1.3.0" not in origin_tags(checkout)
-    assert "Release: tag v1.3.0 once the landing is on main" in capsys.readouterr().out
+    assert git_door.run("show", f"{branch}:se.toml", root=origin).stdout == settings("1.2.3")
+    assert origin_tags(checkout) == ["v1.2.3"]
+    assert "Release" not in capsys.readouterr().out
 
 
 def test_a_re_integration_releases_the_kind_its_own_report_states(checkout, capsys):
     integrate(checkout, "fix/topic-20261106")
     report = "**Branch tip:** `abc1234`  **Re-integration kind:** minor\n"
     integrate(checkout, "fix/topic-20261106", text="more", report=report)
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     with pytest.raises(work_tickets.QueueError, match="Re-integration kind 'big'; write one of"):
         work_tickets.release_trailer(checkout, "fix/topic-20261106", issue_body(False),
@@ -470,10 +585,10 @@ def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(check
     assert "Includes 1 commit(s) after the field report's Branch tip: the late commit" in captured.err
 
 
-def test_without_a_version_push_says_how_to_release(checkout, capsys):
+def test_without_a_version_release_says_how_to_release(checkout, capsys):
     (checkout / "se.toml").write_text(settings(None), encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "no version")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert (f"Release off: no project.version in {checkout / 'se.toml'}; write it as "
             'version = "MAJOR.MINOR.PATCH" under [project]') in capsys.readouterr().out
 
@@ -484,17 +599,20 @@ def test_a_clone_with_a_foreign_identity_releases_with_the_project_identity(chec
     integrate(checkout, "fix/topic-20261106")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "agent@example.com")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "agent@example.com")
-    assert push(checkout) == 0
-    assert git(checkout, "log", "-1", "--format=%s|%an <%ae>|%cn <%ce>", "origin/main") == (
+    with pytest.MonkeyPatch.context() as patch:
+        assert push(checkout) == 0
+        landing = as_integrator(patch, checkout)
+        assert work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(checkout)]) == 0
+    assert git(checkout, "log", "-1", "--format=%s|%an <%ae>|%cn <%ce>", landing.landed[0]) == (
         "Release v1.2.4|mb <mb>|mb <mb>")
 
 
-def test_without_an_identity_push_refuses_naming_the_setting_and_sync(checkout, capsys):
+def test_without_an_identity_the_landing_s_push_refuses_naming_the_setting_and_sync(checkout, capsys):
     (checkout / "se.toml").write_text(settings("1.2.3").replace(IDENTITY, ""), encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "no identity")
     integrate(checkout, "fix/topic-20261106")
     before = git(checkout, "rev-parse", "origin/main")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     error = capsys.readouterr().err
     assert (f'work_tickets.py push: no commit identity; set identity = "Name <email>" in [project] '
             f"of {checkout / 'se.toml'}") in error and "run work_tickets.py sync" in error
@@ -508,7 +626,7 @@ def test_a_malformed_version_is_an_error_naming_the_file_and_the_remedy(checkout
     value = f'"{version}"' if isinstance(version, str) else str(version)
     (checkout / "se.toml").write_text(f"[project]\nversion = {value}\npublic_check = false\n{IDENTITY}",
                                       encoding="utf-8")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     error = capsys.readouterr().err
     assert f"project.version in {checkout / 'se.toml'} is {version!r}, not MAJOR.MINOR.PATCH" in error
     assert 'write it as version = "MAJOR.MINOR.PATCH" under [project]' in error
@@ -532,41 +650,49 @@ def origin_tags(root: Path) -> list[str]:
     return git(root.parent / "origin.git", "tag", "--list").split()
 
 
-def test_with_release_by_workflow_push_bumps_and_pushes_the_branch_only(checkout, capsys):
+def test_with_release_by_workflow_the_release_lands_the_version_and_pushes_no_tag(checkout, capsys):
     by_workflow(checkout)
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert origin_tags(checkout) == ["v1.2.3"]
     assert git(checkout, "show", "origin/main:se.toml").count('version = "1.3.0"') == 1
     assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.3.0"
     out = capsys.readouterr().out
     assert ("Release: v1.3.0 is tagged by the release workflow (.github/workflows/release.yml of se) "
             "on its push, as se.toml [project] release = \"workflow\" says") in out
+    assert "Released v1.3.0 in " in out
 
 
 def test_with_release_by_workflow_an_untagged_version_waits_for_the_workflow(checkout, capsys):
     by_workflow(checkout, "2.0.0")
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert origin_tags(checkout) == ["v1.2.3"]
     assert git(checkout, "tag", "--list", "v2.0.0") == ""
     assert git(checkout, "rev-parse", "origin/main") == git(checkout, "rev-parse", "main")
-    assert "Release: v2.0.0 is tagged by the release workflow" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Release: v2.0.0 is tagged by the release workflow" in out
+    assert "v2.0.0 is on main without its tag: the release workflow tags it on its next run" in out
 
 
 def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
     (checkout / "se.toml").write_text(settings("1.2.3") + 'release = "manual"\n', encoding="utf-8")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     assert (f"project.release in {checkout / 'se.toml'} is 'manual'; set it to \"workflow\" or remove it"
             in capsys.readouterr().err)
 
 
-def test_a_pushed_merge_without_a_kind_is_never_read_again(checkout, capsys):
-    """Integrations pushed before the trailer existed are behind origin: push reads none of them."""
+def test_a_landed_merge_without_a_kind_is_released_by_hand_and_never_read_again(checkout, capsys):
+    """A merge without its kind already on main stays: the version set by hand is released as it
+    is, and the next release reads only what landed after it."""
     integrate(checkout, "fix/old-20261106", trailer="")
-    git(checkout, "push", "-q", "origin", "main")
+    assert release(checkout) == 1
+    (checkout / "se.toml").write_text(settings("1.2.4"), encoding="utf-8")
+    git(checkout, "commit", "-q", "-am", "Release v1.2.4 by hand")
+    assert release(checkout) == 0
+    assert released(checkout) == ("1.2.4", "v1.2.4")
     integrate(checkout, "feature/new-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
     assert "Release: v1.3.0 (minor: feature/new-20261106)" in capsys.readouterr().out
 
@@ -577,7 +703,7 @@ def test_with_release_by_workflow_a_stale_local_tag_causes_no_bump(checkout, cap
     git(checkout, "push", "-q", "origin", "main")
     git(checkout, "tag", "v2.0.0")  # stale: origin has no v2.0.0
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert git(checkout, "show", "origin/main:se.toml").count('version = "2.0.0"') == 1
     assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Integrate feature/topic-20261106: work"
     assert origin_tags(checkout) == ["v1.2.3"]
@@ -589,9 +715,9 @@ def test_with_release_by_workflow_origin_tags_count_without_local_ones(checkout)
     by_workflow(checkout)
     git(checkout, "tag", "-d", "v1.2.3")
     integrate(checkout, "fix/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.2.4"
-    assert git(checkout, "tag", "--list") == ""
+    assert "v1.2.4" not in git(checkout, "tag", "--list").split()
 
 
 def plugin_checkout(checkout: Path, build: list[str]) -> Path:
@@ -617,7 +743,7 @@ def plugin(command: str, root: Path) -> subprocess.CompletedProcess[str]:
 def test_the_release_commit_carries_what_release_build_regenerates(checkout):
     plugin_checkout(checkout, [sys.executable, "scripts/se_plugin.py", "build"])
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 0
+    assert release(checkout) == 0
     assert git(checkout, "log", "-1", "--format=%s", "origin/main") == "Release v1.3.0"
     assert git(checkout, "status", "--porcelain") == ""
     assert plugin("check", checkout).returncode == 0
@@ -634,8 +760,9 @@ def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, 
     plugin_checkout(checkout, [sys.executable, "-c", "raise SystemExit('generator broke')"])
     integrate(checkout, "feature/topic-20261106")
     before = git(checkout, "rev-parse", "HEAD")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     assert git(checkout, "rev-parse", "HEAD") == before
+    assert work_tickets.current_branch(checkout) == "main"
     assert git(checkout, "status", "--porcelain") == ""
     error = capsys.readouterr().err
     assert "Cannot release v1.3.0: project.release_build (" in error
@@ -647,7 +774,7 @@ def test_a_malformed_release_build_is_an_error_naming_the_file(checkout, capsys)
     (checkout / "se.toml").write_text(settings("1.2.3") + 'release_build = "make"\n', encoding="utf-8")
     git(checkout, "commit", "-q", "-am", "malformed")
     integrate(checkout, "feature/topic-20261106")
-    assert push(checkout) == 1
+    assert release(checkout) == 1
     assert (f"project.release_build in {checkout / 'se.toml'} must be a non-empty argument array"
             in capsys.readouterr().err)
 

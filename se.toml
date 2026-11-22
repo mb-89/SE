@@ -1,7 +1,9 @@
 [project]
-# The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "10.11.0"
-# Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
+# The project's one semantic version, raised by work_tickets.py release when SE asks (README
+# "Project settings").
+version = "11.0.0"
+# Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (README
+# "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
 release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]

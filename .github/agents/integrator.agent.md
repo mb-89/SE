@@ -40,9 +40,9 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   worker as an escalation.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
   never wait on workers.
-- Releases (version, tag) only on a release request from SE, which carries the human's
-  approval. Without one you do not release and do not ask; a release that looks due is a line in
-  your report to SE.
+- You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
+  its release kind and moves no version; without SE's request you do not release and do not ask,
+  and a release that looks due is a line in your report to SE.
 - A branch whose commits carry attribution trailers is refused at the public check's gate; it
   goes back to its worker to reword.
 - Paths and shell follow the work model's
@@ -155,8 +155,8 @@ merge or a start.
    - Every push goes through `work_tickets.py` (`integrate`), which retries a transient GitHub refusal once a minute, ten attempts; never `git push`
      by hand, and never tell a worker to retry.
 5. **Close** through `integrate`: it closes the work pull request with a line naming the landing
-   one, and the work issue with a comment that links both pull requests, the `check` run and the
-   release; then hand the field report's "Tickets for other repositories" to SE.
+   one, and the work issue with a comment that links both pull requests and the `check` run and
+   names the release kind the landing recorded; then hand the field report's "Tickets for other repositories" to SE.
    - A work issue whose review passed it with open points (`review.py file`) stays open:
      `integrate` leaves it open and names the open points. Start a worker on that same issue for
      them; its next landing closes it.
@@ -220,6 +220,23 @@ merge or a start.
    Do not judge a worker by its session status right after starting it: a new session reads as
    idle or "review ready" before its first turn. A worker counts as stuck only when its events
    show it waiting on a prompt; then delete it and start it again in its worktree.
+
+## Release
+
+SE asks for a release with a message that names it, `release`. Read your queued messages first,
+as before a merge, then:
+
+1. Integrate what `queue` lists as delivered first, so the release takes it; a merge in progress
+   finishes before the release starts.
+2. Run `work_tickets.py release`. It raises `se.toml`'s version by the highest release kind the
+   landings recorded since the last release and lands that one commit as `integrate` lands
+   (README [Project settings](../../README.md#project-settings)); without gh, run its plan's
+   steps, then `work_tickets.py release --read-back <tag>`.
+3. Report the line it prints to SE: `Released v<version> in <commit> on <branch>`, or `Nothing to
+   release`, and where the release workflow tags it, that the tag follows its run.
+
+A release refused on a landed merge without its kind is an escalation to SE: the person sets the
+version by hand in a pull request, which the next release tags as it is.
 
 ## Escalate and improve
 
