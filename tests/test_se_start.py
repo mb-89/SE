@@ -412,11 +412,20 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
 
 # kern's state, as bootstrap.sh hands it over (README "Kern").
 
+def bare_kern(se: Path) -> None:
+    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [modules.kern]), its clone placed."""
+    manifest = se / "se.toml"
+    text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+    write(manifest, text + '\n[modules.kern]\nurl = "../kern.git"\ngo = true\n')
+    write(se / "go.mod", "module se\n\nrequire kern v0.2.0\n")
+    write(se / ".se" / "modules" / "kern" / "release.toml",
+          'version = "0.2.0"\ndownload = "https://example.com/alice/kern/releases/download/v{version}"\n')
+
+
 def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
     """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
-    write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+    bare_kern(setup["se"])
     asked = []
     world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
@@ -434,8 +443,8 @@ def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, m
 
 @pytest.mark.parametrize(("args", "answer", "line"), [
     (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting"),
-    (["--kern-starting", "fetching release kern-v0.2.0 for linux-amd64 in the background"], None,
-     "kern 0.2.0: starting: fetching release kern-v0.2.0 for linux-amd64 in the background"),
+    (["--kern-starting", "fetching release v0.2.0 for linux-amd64 in the background"], None,
+     "kern 0.2.0: starting: fetching release v0.2.0 for linux-amd64 in the background"),
     (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"}, "kern 0.2.0: failed: kern start: boom"),
     (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see "),
     (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see "),
@@ -473,8 +482,7 @@ def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monk
     """Copilot's sessions work with no core, through SE's scripts and gh, and the greeting says so;
     Claude Code's greeting stays as it is."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
-    write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+    bare_kern(setup["se"])
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]), "--cache",
                           str(setup["cache"]), "status", "--hook", "--offline", "--host", host, *args],
                          world=setup["world"]) == 0
@@ -708,6 +716,126 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
     work = se_start.work_check(project)
     assert work["retro"] == {"landed": 11, "due_after": 10}
     assert work["overhaul"] == {"retros": 2, "due_after": 3}
+
+
+# The project's components: its listing command, run by the check, reported by the greeting.
+
+
+LISTING = """component  kind     installed      newest  repository
+html       adapter  1.0.0          1.1.0   https://git.example.org/team/obs-html.git  (update)
+dark       style    not installed  2.0.0   https://git.example.org/team/obs-dark.git
+plain      style    1.0.0          1.0.0   https://git.example.org/team/obs-plain.git
+gone       style    0.3.0          -       -
+"""
+
+
+class Listing(list):
+    """The fake component listing: records each project and command it runs, answers `answer`."""
+
+    def __init__(self, answer: dict):
+        super().__init__()
+        self.answer = answer
+
+    def __call__(self, root, command):
+        self.append((root, command))
+        return self.answer
+
+
+def with_components(s, command=("uv", "run", "obs-components")):
+    manifest = s["project"] / "se.toml"
+    command_text = ", ".join(f'"{part}"' for part in command)
+    manifest.write_text(f"[project]\ncomponents = [{command_text}]\n" + manifest.read_text(encoding="utf-8"),
+                        encoding="utf-8")
+
+
+def component_lines(lines):
+    return [line for line in lines if line.startswith("Component")]
+
+
+def test_the_greeting_names_each_new_component_and_each_update_with_the_command_that_takes_it(setup):
+    with_components(setup)
+    listing = Listing({"offers": se_start.parse_listing(LISTING)})
+    setup["world"] = dataclasses.replace(setup["world"], components=listing)
+    report(setup, "check")
+    assert listing == [(setup["project"], ["uv", "run", "obs-components"])]
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert component_lines(lines) == [
+        "Component html (adapter): 1.0.0 -> 1.1.0; update it: uv run obs-components update html",
+        "Component dark (style): not installed, newest 2.0.0; install it: uv run obs-components install dark"]
+    assert component_lines(se_start.full(report(setup), setup["se"])) == component_lines(lines)
+    assert len(listing) == 1  # status answers from the cache and runs nothing
+
+
+def test_a_project_without_the_setting_prints_nothing_new_and_runs_no_listing(setup):
+    listing = Listing({"error": "never run"})
+    setup["world"] = dataclasses.replace(setup["world"], components=listing)
+    report(setup, "check")
+    before = se_start.greeting(report(setup), setup["se"])
+    assert listing == [] and component_lines(before) == []
+    assert se_start.Cache.read(setup["cache"]).components is None
+
+
+def test_a_listing_not_yet_run_for_the_projects_command_starts_the_check(setup):
+    seed(setup, None)
+    assert se_start.greeting(report(setup), setup["se"]) and setup["world"].spawn == []
+    with_components(setup)
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert len(setup["world"].spawn) == 1 and setup["world"].spawn[0][-1] == "check"
+    assert component_lines(lines) == [
+        "Component check not done: running in the background; the next start shows its result"]
+
+
+def test_a_failed_listing_is_one_warning_line_and_the_greeting_still_appears(setup):
+    with_components(setup)
+    setup["world"] = dataclasses.replace(setup["world"], components=Listing({"error": "obs-components failed"}))
+    report(setup, "check")
+    lines = se_start.greeting(report(setup), setup["se"])
+    assert lines[0].startswith("SE 1.2.0 started")
+    assert component_lines(lines) == [
+        "Component check not done: obs-components failed; run it by hand to see the cause: "
+        f"uv run python {setup['se'].as_posix()}/scripts/se_start.py check"]
+
+
+def test_a_setting_that_is_no_argument_array_is_one_warning_line(setup):
+    manifest = setup["project"] / "se.toml"
+    manifest.write_text('[project]\ncomponents = "uv run obs-components"\n' + manifest.read_text(encoding="utf-8"),
+                        encoding="utf-8")
+    report(setup, "check")
+    assert component_lines(se_start.greeting(report(setup), setup["se"])) == [
+        f"Component check not done: [project] components of {manifest.as_posix()} is no argument "
+        'array; set it as components = ["uv", "run", "obs-components"]']
+
+
+def _script(tmp_path: Path, body: str) -> list[str]:
+    return [sys.executable, str(write(tmp_path / "listing.py", body))]
+
+
+def test_the_listing_runs_in_the_checkout_and_its_table_is_read(tmp_path):
+    command = _script(tmp_path, "import os, sys\n"
+                                "sys.stderr.write('obs-components: warning: a host cannot be listed\\n')\n"
+                                f"print(os.getcwd() == {str(tmp_path / 'project')!r} and {LISTING!r})\n")
+    (tmp_path / "project").mkdir()
+    found = se_start.list_components(tmp_path / "project", command)
+    assert [offer["name"] for offer in found["offers"]] == ["html", "dark", "plain", "gone"]
+    assert found["offers"][1] == {"name": "dark", "kind": "style", "installed": "not installed",
+                                  "newest": "2.0.0"}
+
+
+@pytest.mark.parametrize(("body", "error"), [
+    ("import sys\nsys.exit('obs-components: no remote')\n", " failed with exit code 1: obs-components: no remote"),
+    ("print('nothing here')\n", ": its output holds no table headed component  kind  installed  newest  repository"),
+    ("import time\ntime.sleep(5)\n", " took longer than 0.5 s"),
+])
+def test_a_listing_that_fails_or_takes_too_long_answers_its_error(tmp_path, monkeypatch, body, error):
+    monkeypatch.setattr(se_start, "COMPONENTS_TIMEOUT", 0.5)
+    command = _script(tmp_path, body)
+    found = se_start.list_components(tmp_path, command)
+    assert found == {"error": " ".join(command) + error}
+
+
+def test_a_listing_that_does_not_start_answers_its_error(tmp_path):
+    found = se_start.list_components(tmp_path, [str(tmp_path / "no-such-command")])
+    assert found["error"].startswith(f"{(tmp_path / 'no-such-command')} did not start: ")
 
 
 # Requirement 3: refresh moves only what is due, on the fake git's repositories.

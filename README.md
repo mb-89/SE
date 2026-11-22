@@ -137,7 +137,7 @@ What a cloud session meets, whatever state its container comes up in.
   - A plugin from before SE [refreshes at start](#start-and-refresh) (5.47.4 was one) cannot move
     itself, and one from before that line cannot say so.
   - A standing file that names no running core stops no start: kern takes it over
-    ([kern/README.md](kern/README.md), "The standing file").
+    (kern's README, "The standing file").
 - **A late checkout gets a core.** In a session without sources that clones a repository with an
   `se.toml` after its start, SessionStart ran before the clone existed. The first hook whose working
   directory is inside the clone starts its core in the background, as SessionStart would have, and
@@ -204,6 +204,14 @@ uv run python <se>/scripts/se_start.py refresh
   - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
+- The project's components: where the project's `se.toml` sets `[project] components`, its
+  listing command ([Project settings](#project-settings)), `check` runs it in the checkout and
+  caches its table; the greeting names, one line each, a component offered and not installed and
+  an installed one with a newer release, with installed and newest version.
+  - Each line names the command that takes it, the listing's `install <name>` or `update <name>`;
+    SE never runs it.
+  - A listing that fails, prints no table or runs past 60 seconds is one warning line, and the
+    greeting still appears; without the setting nothing runs and nothing prints.
 - The outside skills SE's agents rely on (`[roles]` of SE's `se.toml`,
   [AGENTS.md "Agents and skills"](AGENTS.md#agents-and-skills)): the greeting names, in one line,
   each one whose plugin the session lacks, with the roles that rely on it.
@@ -235,6 +243,13 @@ uv run python <se>/scripts/se_start.py refresh
 - What fails stays at the version in use, with the cause and the command to try again. An se
   checkout with local changes or its own commits is a development checkout and is left alone. Run
   twice, the second `refresh` moves nothing.
+- An installed SE older than the project's se: where the project's `se.toml` uses a key the
+  installed SE does not know, the start's modules step fails, and the greeting's update check
+  names the same cause.
+  - Such a key is `go` of `[modules.kern]`, SE's pin of kern since kern left SE's tree: `se
+    bootstrap: error: module kern: unknown key(s) go`.
+  - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
+    new session, whose start moves it.
 
 ### Kern
 
@@ -243,6 +258,13 @@ released as `se-v<version>` that `components/release.toml` owns. `scripts/se_mod
 is bootstrap's one reader of the binary to run — SE's `se`, or the bare kern for an application with
 no Go components. The plugin's hooks start the binary and post every session event to it:
 
+- **kern at its pin:** the `se` binary is built on the kern `se.toml` `[modules.kern]` pins
+  ([Modules](#modules)), its clone in `.se/modules/kern`.
+  - Before the core starts, the start syncs the installed SE's kern where that clone is missing
+    or not at the commit `se.lock` locks, both read from the files alone, so an SE at its pin
+    starts no process for it.
+  - Where that fails, the session goes on without it and the greeting names the cause. A project
+    that is SE's own checkout syncs it in the modules step.
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: for a project inside a
   git checkout, where `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the
   project, which returns at once, and hands the core the session's start, which takes the session's
@@ -253,9 +275,9 @@ no Go components. The plugin's hooks start the binary and post every session eve
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
-  - Where no release matches, the binary is built from its folder (SE's `components/`, kern's own
-    `kern/`) with `go` in the background, and the greeting says so; without `go` it failed, and the
-    greeting names both causes.
+  - Where no release matches, the binary is built from its folder (SE's `components/`, on kern's
+    clone at its pin; the bare kern in that clone) with `go` in the background, and the greeting
+    says so; without `go` it failed, and the greeting names both causes.
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
 - **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
@@ -326,8 +348,8 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 ### The MCP door
 
-`se mcp --root <checkout>` is SE's MCP server over stdio, kern's door ([kern/README.md "The MCP
-door"](kern/README.md#the-mcp-door)), for every agent host that reads an `mcp.json` (Claude Code,
+`se mcp --root <checkout>` is SE's MCP server over stdio, kern's door (kern's README "The MCP
+door"), for every agent host that reads an `mcp.json` (Claude Code,
 Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
 through it as tools. The host spawns it as the session starts; nobody starts anything else.
 
@@ -391,7 +413,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 |---|---|---|
 | `status` | whether the core runs, and its health | kern |
 | `greeting` | the live part of the [start greeting](#start-and-refresh): `retro-due/due` and `fleet/findings` | `components/cmd/se` `Greeting` |
-| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
+| `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
 | `forms` | `list`, `draft`, `check` | `components/forms` |
@@ -468,6 +490,11 @@ module (`[modules.obs]` in `se.toml`, the repository beside SE's) builds it:
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
+obs builds it, and every decision deck, with the adapter component `html`, which it finds among
+the machine's installed components, else in its own tree. `build_docs.py --install-html` runs
+`obs-components install html` and fails, naming that command, where obs finds no `html`; the setup
+scripts in se's checkout, the `check` job and the docs workflow run it before they build.
+
 The build reads a copy of the repository in which no note asks for a verdict, so the worked
 decision note shows as a page to read, with no Send; the note itself still asks, for the decks
 built from it.
@@ -522,14 +549,19 @@ path = "skills"                              # optional: the part of the module 
 [modules.style]
 url = "https://github.com/<owner>/style.git"
 version = "^1.4"                             # in place of ref: a semver range of the module's tags
+
+[modules.kern]
+url = "../kern.git"
+go = "components/go.mod"                     # in place of ref: the version that go.mod requires
 ```
 
 | Key | Meaning |
 |---|---|
 | `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
 | `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
-| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
-| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
+| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref`, `version` and `go`. |
+| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version without its tag, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
+| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, and each `go` pin's tag, with its version and commit; `sync` and `update` write it and the repository commits it. |
 | `path` | optional relative directory inside the module; without it the whole module is used. |
 | Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
 | The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
@@ -589,6 +621,13 @@ The check before every push knows its destination remote: it gates each commit t
 not hold yet, and a local-list line `remote:<remote name> <regex>` stops only the pushes to that
 remote, so one checkout with two remotes keeps a term from one while the other may receive it.
 The local list's line forms are [Public safety](AGENTS.md#public-safety)'s.
+
+`components` is the project's component listing command, an argument array run without a shell
+in the checkout, such as obs's `["uv", "run", "obs-components"]`.
+
+With no argument it lists, never installs: a table headed `component  kind  installed  newest  repository`, two spaces or more
+between columns, as obs-components prints it. SE's start reports its offers
+([Start and refresh](#start-and-refresh)); unset, it runs nothing.
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
@@ -754,7 +793,7 @@ no token), the hand-off needs neither a retyped file nor a second run
     relay no longer waits for with one line naming the current one. The two reads of a landing
     pull request in a row, its merge confirmation and its read-back, each name their purpose.
   - kern refuses an answer to an old step the same way, in one line on its hook
-    ([kern's GitHub component](kern/components/github/README.md#the-verb-step-a-write-tool-through-the-relay)).
+    (kern's GitHub component, its README "The verb `step`: a write tool through the relay").
   - A relay landing (`integrate`, `rehearse`) starts with one line: run each long wait in the
     background and call `next` after each, as a told step reaches the agent only when a tool call
     ends. It reads no CI suite time past the relay, and says once that it skipped it.
@@ -827,14 +866,17 @@ one landing: `integrate <pull request> --landing fast-forward` (or `--landing sq
 
 #### Component versions
 
-kern (`kern/release.toml`) and the binary `se.toml` `[binary] release` names (SE's `se`,
-`components/release.toml`) have versions of their own, which their release workflows cut as tags
-(`kern-release`, `se-release`). As with the project's version, a branch states the kind and the
-landing assigns the number, so branches open in parallel never claim the same one.
+The binary `se.toml` `[binary] release` names (SE's `se`, `components/release.toml`) has a version
+of its own, which `se-release` cuts as its tag. As with the project's version, a branch states the
+kind and the landing assigns the number, so branches open in parallel never claim the same one.
+
+Its folder is its inputs: for SE `components/`, whose `go.mod` `require kern` is the kern it is
+built on ([Modules](#modules)), so a branch that moves that pin changes `se`. kern releases from
+its own repository.
 
 - **The branch states the kind:** a branch that changes a component adds the header line
-  `**Component kinds:** se patch, kern minor` to its field report, beside its Release kind, and
-  leaves the version in the `release.toml` alone; `field-report --check` refuses an unknown kind.
+  `**Component kinds:** se patch` to its field report, beside its Release kind, and leaves the
+  version in the `release.toml` alone; `field-report --check` refuses an unknown kind.
 - **The guard follows on a work branch:** kern's release guard (`se.toml`
   `[tests.beside.release-guard]`) passes a changed component whose kind is stated, read from
   `$SE_COMPONENT_KINDS`.
@@ -843,14 +885,13 @@ landing assigns the number, so branches open in parallel never claim the same on
   - A landing and `main` set none, so there the guard refuses as before.
 - **The landing assigns the number:** `integrate` writes the next version of that kind after
   `main`'s into the landing's merge, before the suite runs, for each component whose folder the
-  merge changes (kern's, and the binary's with kern's), and names it with the tag the push to
-  `main` cuts. A kind stated for no component is refused before anything lands.
+  merge changes, and names it with the tag the push to `main` cuts. A kind stated for no component is refused before anything lands.
 - **A branch that still claims a number lands:** its raised version gives the kind (the highest
   part it raised), and the number becomes the next free one of that kind, said in the output.
   Where the claim conflicts with `main`'s version, the landing takes `main`'s version on top of
   the branch first and then assigns the number.
 - **The pins move with the number:** every other file that pins a component's tag as `@<tag>`
-  (none today: kern's template calls the battery's [local copy](#workflows)) is on one list,
+  (none today) is on one list,
   `scripts/component_versions.py` `PINS`, and the landing moves each pin to the assigned tag in
   the same merge, also where the branch moved it by hand.
   - `tests/test_component_versions.py` fails where a file pins a component's current tag and is
@@ -965,6 +1006,22 @@ the doors.
 `work_tickets.py settings-check` compares it with what the live doors read and prints each
 difference in one line. It is advisory: it exits 0 unless `--strict` is given, and nothing runs it
 on its own.
+
+### Source parity
+
+The same tree may be held by more than one remote or checkout
+([More than one remote](src/skills/work-model/SKILL.md#more-than-one-remote)).
+`work_tickets.py parity` compares two commits' trees, such as `origin/main` and
+`mirror/main`, path by path, by mode and object id, and only reads (`git ls-tree`).
+
+- **The lockfile rule:** a tracked file named `se.lock` or `uv.lock` is a dependency lockfile at any
+  depth (`kern/template/uv.lock` too), since it records what resolved, which may differ where the
+  source does not. Its content, presence and absence pass, and the command names it on one line,
+  `lockfiles excluded:`. `work_tickets.py` `PARITY_LOCKFILES` owns the list; nothing else is excluded.
+- **Every other path fails:** a path that differs is listed as `changed:`, or `only in <ref>:` for
+  the side that holds it. Generated outputs (the layouts, `components/*/component.toml`) compare
+  like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
+  without (`tests/test_parity.py`).
 
 ### Retro due
 
@@ -1120,13 +1177,13 @@ tier = "tests.tiers:tier" # optional
 over_limit = "fail" # optional, or "warn"
 shards = 1 # optional: how many shards CI runs the suite in
 
-[tests.beside.kern] # optional, one table per suite in another toolchain
+[tests.beside.go-components] # optional, one table per suite in another toolchain
 setup = ["go", "test", "-run", "^$", "./..."] # optional
 command = ["go", "test", "./..."]
-directory = "kern"
+directory = "components"
 target_seconds = 30
 limit_seconds = 60
-paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touches one
+paths = ["components/", "se.lock"] # optional: run only where the change touches one
 ```
 
 | Key | Default | Meaning |
@@ -1137,7 +1194,7 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
 | `limit_seconds` | 120 | the budget, judged on one reference run, CI's (below). |
 | `over_limit` | `"fail"` | what a run over the limit does. One rule holds for every project: an overrun fails, as below. A project that declares `"warn"` takes the other side of the trade-off: no run is refused for its time, so a slow runner never blocks a landing, but nothing stops the suite from creeping past its budget; each overrun only warns, naming the setting. |
 | `shards` | 1 | how many shards CI's `check` runs the suite in, side by side (below). SE's own suite, unsharded, keeps the default: its limit is the whole suite's. |
-| `beside.<name>` | optional | a suite in another toolchain, such as SE's kern Go tests ([kern/README.md](kern/README.md#tests)). Its `command` runs in `directory` (relative to the root, default `.`) after the complete suite, wherever the suite runs: `integrate`, `work_tickets.py suite` and CI's `check`. |
+| `beside.<name>` | optional | a suite in another toolchain, such as SE's Go components' tests on kern at its pin (`setup` places it); kern's own tests run in kern's repository. Its `command` runs in `directory` (relative to the root, default `.`) after the complete suite, wherever the suite runs: `integrate`, `work_tickets.py suite` and CI's `check`. |
 
 - `shards`:
   - Over 1, `target_seconds` and `limit_seconds` are each shard's, which CI's slowest shard is
@@ -1149,7 +1206,7 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
 - `beside.<name>`:
   - Its `setup`, optional, runs first in the same folder, outside its budget, as the suite's
     does: for a Go suite, `go test -run '^$' ./...` builds every test binary, so a cold build
-    (kern's took 35.1 s once on CI) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
+    (kern's took 35.1 s once on CI, while SE carried it) never counts as test time. A failing setup refuses the run, and the suite beside does not run.
   - Its `paths`, optional, keep a slow suite off the landing path: a file, or a folder ending
     with `/`, relative to the root. The suite then runs only where the change touches one: the
     commits since their merge base with origin's integration branch (a landing's merge, a pull
@@ -1167,8 +1224,8 @@ paths = ["kern/bus/", "kern/go.mod"] # optional: run only where the change touch
 
 The two budgets are apart, and neither spends the other's time:
 
-- Each run prints and reports both times, `Suite: <result>; <time> (target, limit); kern passed in
-  <time> (target, limit)`, and the metrics line notes `beside_seconds` beside `suite_seconds`;
+- Each run prints and reports both times, `Suite: <result>; <time> (target, limit); go-components passed
+  in <time> (target, limit)`, and the metrics line notes `beside_seconds` beside `suite_seconds`;
   `work_tickets.py metrics` flags a suite beside over its limit as it does the suite
   ([Metrics](#metrics)).
 - A failing suite beside refuses the run as a failing suite does, with its output. A suite beside
@@ -1389,7 +1446,7 @@ and tests run only where it answers false.
 
 To turn it on, the application also grants those two permissions, adds the `schedule` and copies
 `se-pass-record.yml` with the action's copy beside the battery's. kern's template keeps it off
-([kern's battery](kern/README.md#the-battery)).
+(kern's README "The battery").
 
 Free minutes for a private repository, which the owner sets up:
 
@@ -1449,9 +1506,10 @@ ci = false # default true: CI's check is the verdict, wherever the host has runn
 
 ### Platform legs and their queue
 
-kern-platforms runs kern's tests, SE's start and hook tests and its worktree removal tests on a
-Windows runner, and `check` needs every leg. kern is built for darwin; neither it nor the start
-and hook scripts are tested there.
+kern-platforms runs SE's start, hook and setup tests and its worktree removal tests on a Windows
+runner, and `check` needs every leg; kern's own tests on Windows run in kern's repository's
+`check`. The job keeps its name, which `work_tickets.py`, `ci_queue.py` and `check-rerun.yml` read.
+The `se` binary is built for darwin; neither it nor the start and hook scripts are tested there.
 
 A job's `timeout-minutes` counts only from when a runner takes it, so it
 bounds a leg that runs (45 minutes) and not one that waits: a leg that never gets a runner waits
@@ -1683,14 +1741,17 @@ python3 <se>/scripts/public_check.py --rev "$AFTER" --push "$BEFORE" --branch "$
 in the new or empty folder its `--path` names: kern's template at SE's kern pin, the name filled in,
 and git's first commit on `main` as the [project identity](#project-settings).
 
-- **The pin:** while kern is incubated, `kern/release.toml`'s version and its tag `kern-v<version>`,
-  read by `se_modules.py`'s `kern_pin`. A version not tagged yet comes from SE's `HEAD`, which the
-  command says.
-- **kern beside it:** kern's module (the path `kern/go.mod` names) cannot be fetched yet, so the application holds
-  kern's source at the pin in `kern/`, and its `go.mod` replaces the module by it.
-- **What it holds:** the template's ([kern/template/README.md](kern/template/README.md)): its wiring,
-  where `enabled = false` switches a component off, CI through kern's battery (its copy at the pin,
-  [Workflows](#workflows)), the `[tests]` budget and the `[modules.kern]` pin.
+- **The pin:** the version SE's `[modules.kern]` reads from `components/go.mod` and its tag
+  `v<version>`, which the pinned clone's `release.toml` names, read by `se_modules.py`'s
+  `kern_pin`. The template and kern's Go module come from that clone at the tag; a clone without
+  the tag is refused, naming `se_modules.py sync kern`.
+- **kern beside it:** kern's module path names no host, so it cannot be fetched: the application
+  holds kern's Go module at the pin in `kern/` (every file of kern's repository but its template
+  and its own project files: `.github/`, `se.toml`, `se.lock`, `AGENTS.md`, `pyproject.toml`,
+  `uv.lock`, `.gitignore`), its `go.mod` requires `kern v<version>` and replaces the module by it.
+- **What it holds:** the template's (kern's template README): its wiring,
+  where `enabled = false` switches a component off, CI through kern's battery (its copy from the SE
+  that made it, [Workflows](#workflows)), the `[tests]` budget and the `[modules.kern]` pin.
 - **Its own binary:** a bare application runs the bare kern. To build its own (the core plus its Go
   components), it adds a `release.toml` naming its `binary`, `package` and download, `[binary]
   release = "release.toml"` in `se.toml`, and a release workflow calling kern's reusable
@@ -1823,6 +1884,7 @@ settings checks and the generated docs.
 | `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build) and the command reference with its declarations (docs); a second run writes nothing |
 | `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
+| `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
 | `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues |
 | `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list startable ready work issues |
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
@@ -2106,6 +2168,9 @@ and its neighbours. It lists:
 `--json` prints the same facts as data.
 
 ### Forms
+
+[docs/templates.md](docs/templates.md) owns the shape of agent texts: the one template system
+that replaces forms. Until its packages land, this section describes the forms engine as it runs.
 
 SE keeps the shape of its issues as data: one TOML file per form under `forms/`, read by one engine,
 `scripts/forms.py`, whose docstring owns the file format, the field kinds, the selection order and

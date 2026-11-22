@@ -44,7 +44,7 @@ routes there, the plugin's as much as the checkout's own (`serves`).
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
 
-Standard library only; kern's SDK is imported where it is needed, from `kern/python/`.
+Standard library only; kern's SDK is imported where it is needed, from `python/` of the pinned clone (`sdk`).
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 SE_ROOT = Path(__file__).resolve().parents[1]
-#: Where SE's components live, under the checkout kern serves (kern/README.md "The host").
+#: Where SE's components live, under the checkout kern serves (kern's README "The host").
 COMPONENTS = "components"
 #: The switch of routed: off, on, or unset for kern where it serves this checkout.
 SWITCH = "SE_KERN"
@@ -103,8 +103,11 @@ EXIT_ERROR = re.compile(r"\Aexit code (\d+)\n?")
 
 
 def sdk() -> None:
-    """Put kern's Python SDK, kern/python/ beside this script's checkout, on the path."""
-    path = str(SE_ROOT / "kern" / "python")
+    """Put kern's Python SDK, `python/` of the kern this script's checkout pins
+    (se_modules.py `kern_dir`), on the path; where it is missing, the import fails as before."""
+    from se_modules import kern_dir
+
+    path = str(kern_dir(SE_ROOT) / "python")
     if path not in sys.path:
         sys.path.insert(0, path)
 

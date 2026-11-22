@@ -164,11 +164,11 @@ def test_a_git_subprocess_outside_the_door_fails_and_an_entry_too_high_too(tmp_p
         "subprocess.run(['git', '-C', root, 'status'])\n"
         "subprocess.run('git status', shell=True)\n"
         "git_door.run('status', root=root)\n", encoding="utf-8")
-    (tmp_path / "kern").mkdir()
-    (tmp_path / "kern" / "tool.go").write_text('cmd := exec.CommandContext(ctx, "git", "-C", dir)\n',
-                                                 encoding="utf-8")
+    (tmp_path / "components").mkdir()
+    (tmp_path / "components" / "tool.go").write_text('cmd := exec.CommandContext(ctx, "git", "-C", dir)\n',
+                                                       encoding="utf-8")
     (tmp_path / "scripts" / "git_door.py").write_text("subprocess.run(['git', *argv])\n", encoding="utf-8")
-    assert git_door_findings(tmp_path, {"kern/tool.go": (1, "a reason"), "tests/gone.py": (2, "a reason")}) == [
+    assert git_door_findings(tmp_path, {"components/tool.go": (1, "a reason"), "tests/gone.py": (2, "a reason")}) == [
         "scripts/tool.py:3: 2 git subprocess(es) outside the door, 0 allowed; run git through "
         "scripts/git_door.py (tests: the fake_git_door fixture)",
         "tests/gone.py: 0 git subprocess(es) outside the door, the allow list says 2; lower its entry (it may "

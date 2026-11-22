@@ -1,13 +1,14 @@
 # SE's components
 
-SE's own components on kern ([kern/README.md](../kern/README.md)), the application's, not kern's:
+SE's own components on kern (kern's README), the application's, not kern's:
 the rules they compute are SE's work model. Two kinds live here, one folder each:
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
 - **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
-  `se/components` (`go.mod` here, kern replaced by `../kern` while it is incubated).
+  `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[modules.kern]` pins
+  and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
 
 ## The Go components
 
@@ -15,11 +16,11 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 |---|---|---|---|
 | `fleet` | `github/issues`, `github/pulls`, `github/checks`, `github/issue-lists`, `github/pull-lists` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed, how many issues, pull requests and branches it read, whether that was a complete read of the open issue and pull-request lists (`complete`) and since when (`since`); only a complete read is `healthy` | `work_tickets.py` `fleet_findings` |
 | `retro-due` | `github/issues`, `github/pulls` whole; `origin/tracker`; config `due-after`, `overhaul-after` (0, off, unless set), `base` | `retro-due/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts; the retros closed since the last overhaul, `overhaul_after`, whether an overhaul is due, where that window starts | `retro.py` `landed_since_retro`, `overhaul.py` `retros_since_overhaul` |
-| `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (`kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
+| `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (kern's `kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
 
 - **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the
-  derivation runs once per change at any key (kern's index, kern/README.md "Types").
+  derivation runs once per change at any key (kern's index, kern's README "Types").
 - **What the names hold.** They hold only what was read: every GitHub tool answer a session receives
   lands, and the token backend refreshes what it holds, but nothing lists a repository's issues. So
   each output names how many issues it read, and a reader takes it only where that is above 0.

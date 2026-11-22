@@ -15,11 +15,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import se_modules
 from shell_paths import BASH, WINDOWS, link_tools, sh, tool_path
 
 ROOT = Path(__file__).resolve().parents[1]
 PAIR = ("RUNME.sh", "RUNME.ps1")
-TEMPLATE = ROOT / "kern" / "template"
+# kern's application template, in the clone of kern se.toml pins (tests/conftest.py places it).
+TEMPLATE = se_modules.kern_dir(ROOT) / "template"
 CEILINGS = {"RUNME.sh": 60, "RUNME.ps1": 40}
 # The tools RUNME.sh runs besides the fakes; nothing else is on the test's PATH.
 TOOLS = ("sh", "awk", "sed", "dirname", "cat", "chmod", "mkdir", "touch", "tr", "printf")
@@ -299,8 +301,9 @@ mkdir -p .se/.runtime && echo 1.0.0 > .se/.runtime/runme-se
 
 # The pair itself, the same in every project.
 def confs() -> list[Path]:
+    """Every RUNME.conf of SE's checkout and of kern's template (in .se/, which the walk skips)."""
     found = []
-    for folder, dirs, files in os.walk(ROOT):
+    for folder, dirs, files in [*os.walk(ROOT), *os.walk(TEMPLATE)]:
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__")]
         found += [Path(folder) / name for name in files if name == "RUNME.conf"]
     return found
@@ -323,7 +326,7 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
             named.update(re.findall(r"https?://\S+", line))
     for name in PAIR:
         data = (ROOT / name).read_bytes()
-        assert (TEMPLATE / name).read_bytes() == data, f"kern/template/{name} differs from {name}"
+        assert (TEMPLATE / name).read_bytes() == data, f"kern's template/{name} differs from {name}"
         text = data.decode("ascii")  # ASCII, for Windows PowerShell 5.1
         assert len(text.splitlines()) <= CEILINGS[name]
         if name == "RUNME.sh":  # sh reads LF only (.gitattributes); PowerShell reads either

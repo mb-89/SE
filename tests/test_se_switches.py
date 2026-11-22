@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import se_modules
 import se_switches  # scripts/ is on the path (tests/conftest.py)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,7 @@ help = "README.md"
 [[switch]]
 name = "enabled"
 kind = "wiring-instance"
-reader = "kern/index/wiring.go"
+reader = ".se/modules/kern/index/wiring.go"
 default = "on"
 layers = ["wiring", "wiring-overlay"]
 key = "enabled"
@@ -205,11 +206,11 @@ def test_se_git_door_default_is_the_real_git():
     assert se_switches.state(switch, "refused") == "set"
 
 
-WIRING_GO = ROOT / "kern" / "index" / "wiring.go"
+WIRING_GO = se_modules.kern_dir(ROOT) / "index" / "wiring.go"  # kern at its pin (tests/conftest.py)
 
 
 def test_an_instance_is_enabled_unless_it_says_otherwise():
-    """kern's Go reader (kern/index/wiring_test.go holds it) starts each instance enabled."""
+    """kern's Go reader (kern's index/wiring_test.go holds it) starts each instance enabled."""
     source = WIRING_GO.read_text(encoding="utf-8")
     assert "in := Instance{Name: name, Enabled: true," in source
     assert default_of("enabled").default == "on"

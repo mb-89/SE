@@ -11,8 +11,8 @@ dependencies = []
 package = false
 
 [tool.pytest.ini_options]
-# kern's Python SDK keeps its tests beside it (kern/README.md "Tests"): against the Python fake, no Go, no bus.
-testpaths = ["tests", "kern/python/tests"]
+# SE's tests; kern's SDK tests run in kern's repository.
+testpaths = ["tests"]
 # One worker per core (pytest-xdist); a file's tests share one worker and run in order there, the
 # heaviest file first by the cache's seconds, else tests/file-seconds.json's (tests/conftest.py).
 addopts = "-n auto --dist loadfile"

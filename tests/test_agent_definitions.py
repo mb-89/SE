@@ -644,7 +644,7 @@ def test_agents_md_names_the_focused_and_complete_test_commands():
     tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
     assert "| Suite | Command | When it runs |" in tests
     assert "| Focused | `uv run pytest -q tests/<file>.py`" in tests
-    assert "| Complete | `uv run pytest -q` and kern's tests |" in tests
+    assert "| Complete | `uv run pytest -q` and the suites beside it |" in tests
 
 
 def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():

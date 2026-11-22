@@ -19,6 +19,7 @@ import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
 import network_guard  # noqa: E402
+import se_modules  # noqa: E402
 import time_bound  # noqa: E402
 
 # The test process reaches nothing beyond this machine, its collection included (tests/network_guard.py).
@@ -158,8 +159,8 @@ class GuardReports:
     """Fails each test phase that tried to reach beyond this machine (tests/network_guard.py
     `fail`) and explains a test past its time bound (tests/time_bound.py `explain`). A plugin
     `pytest_configure` registers, not a hook of this conftest's own: pytest calls a conftest's
-    `pytest_runtest_makereport` only for the tests under its folder, and the complete run also
-    collects kern/python/tests."""
+    `pytest_runtest_makereport` only for the tests under its folder, and a run may name a test
+    file outside it."""
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_makereport(self, item: pytest.Item, call):
@@ -170,8 +171,7 @@ class GuardReports:
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Every collected test gets its time bound (tests/time_bound.py), those of kern/python/tests
-    in the complete run too."""
+    """Every collected test gets its time bound (tests/time_bound.py), one outside tests/ too."""
     time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
 
 
@@ -246,6 +246,60 @@ def obs() -> Path:
         os.rmdir(lock)
 
 
+# kern, the Go core, at the pin se.toml [modules.kern] reads from components/go.mod (README
+# "Modules"): placed before collection, as tests read its files while they are collected
+# (tests/test_se_home.py TABLE, tests/test_se_components.py's import of kern's SDK).
+KERN = se_modules.kern_dir(ROOT)
+
+
+def kern_at_pin() -> bool:
+    """Whether kern's clone is at the commit se.lock locks for the version components/go.mod
+    requires, read from the files alone: no git, so an unchanged pin costs nothing."""
+    try:
+        version = se_modules.go_require(ROOT, se_modules.KERN, "components/go.mod")[1]
+        locked = se_modules.read_lock(ROOT).get(se_modules.KERN)
+        head = (KERN / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+    except (OSError, se_modules.ModuleError):
+        return False
+    return locked is not None and locked == (version, head)
+
+
+def place_kern() -> None:
+    """Bring kern to its pin once per checkout at a time, under a lock as the obs fixture does:
+    the suite's setup, through real git (`se_modules.py sync kern`)."""
+    if kern_at_pin():
+        return
+    lock = ROOT / ".se" / "kern-setup.lock"
+    lock.parent.mkdir(exist_ok=True)
+    deadline = time.monotonic() + OBS_LOCK_WAIT_SECONDS
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                raise pytest.UsageError(f"{lock} is still held after {OBS_LOCK_WAIT_SECONDS} s; "
+                                        "remove it if no suite runs")
+            time.sleep(0.2)
+    try:
+        if kern_at_pin():
+            return
+        result = subprocess.run([sys.executable, str(ROOT / "scripts" / "se_modules.py"), "sync", se_modules.KERN],
+                                cwd=ROOT, capture_output=True, text=True,
+                                env={**os.environ, git_door.VARIABLE: "real"})
+        if result.returncode:  # fails open: a test that reads kern then fails, naming the file
+            print(f"warning: se_modules.py sync kern failed, so the tests that read kern fail:\n"
+                  f"{result.stderr}{result.stdout}", file=sys.stderr)
+    finally:
+        os.rmdir(lock)
+
+
+@pytest.fixture(scope="session")
+def kern() -> Path:
+    """kern's folder, its clone at the pin (`se_modules.kern_dir`), which pytest_configure placed."""
+    return KERN
+
+
 # The suite's JUnit report for `work_tickets.py suite` (README "Test budget"): where the gate names a
 # report directory, the controller writes se.xml there with its worker count and each test's setup
 # time and worker, so the gate prints se's Parts line and its slow setups. It also names the host's
@@ -277,6 +331,7 @@ def pytest_terminal_summary(terminalreporter, config: pytest.Config) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     if not hasattr(config, "workerinput"):
         build_plugin_layouts(config)
+        place_kern()  # on the controller, before pytest-xdist starts the workers that collect
     config.pluginmanager.register(GuardReports(), "se-guard-reports")
     order_by_file_seconds(config)
     reports = os.environ.get(REPORTS_VARIABLE)

@@ -6,7 +6,7 @@
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
 **Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](skills/work-model/SKILL.md#release-kind) says; field-report --draft proposes the branch prefix's -->
-<!-- A branch that changes kern or the se binary adds the line "**Component kinds:** se patch, kern minor" here, one kind per component, and leaves the version in its release.toml alone: the landing assigns it (README "Component versions"). -->
+<!-- A branch that changes the se binary (components/, its require kern among them) adds the line "**Component kinds:** se patch" here, one kind per component, and leaves the version in its release.toml alone: the landing assigns it (README "Component versions"). -->
 **Re-integration kind:** patch <!-- what a later integration of this branch releases once its first merge is on the integration branch: patch, minor or major -->
 
 ## User requirement (quoted back)
@@ -42,7 +42,10 @@ requirements they share, and why (one function changed together, or a test-only 
 <!-- Follow the [capability-preservation rule](skills/work-model/SKILL.md#rules-for-all-roles).
      Each removed or renamed public item and each newly required field gets its own line
      "**Breaking:** <item>", which makes the Release kind major
-     ([work model](skills/work-model/SKILL.md#release-kind)). "None" otherwise. -->
+     ([work model](skills/work-model/SKILL.md#release-kind)). "None" otherwise.
+     Name each deleted or renamed test; a folder moved with its tests to another repository is one
+     line "Moved: <folder> to <repository> at <commit>" (with "as <path>" below its root there),
+     checked at that commit ([work model](skills/work-model/SKILL.md#tests)). -->
 
 ## Review responses
 

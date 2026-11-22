@@ -14,7 +14,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "kern" / "python"))
+sys.path.insert(0, str(ROOT / "scripts"))
+from se_modules import kern_dir  # noqa: E402
+
+sys.path.insert(0, str(kern_dir(ROOT) / "python"))  # kern at its pin (tests/conftest.py places it)
 
 import overhaul  # noqa: E402
 import review  # noqa: E402

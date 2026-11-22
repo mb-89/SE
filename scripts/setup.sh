@@ -3,7 +3,9 @@
 # repository given as the first argument, such as a project that uses se as a module. Also adds the
 # public check's local list (.public-check.local, never checked in) to the repository's .gitignore,
 # and sets the repository's commit identity as work_tickets.py sync does, so its first commit
-# already carries it. Its git goes through se's git door (scripts/git_door.py).
+# already carries it. Its git goes through se's git door (scripts/git_door.py). In se's own
+# checkout it then installs obs's adapter component html, which the docs and decks build with
+# (`build_docs.py --install-html`).
 #
 # With --copilot (opt-in) it then installs SE for GitHub Copilot there: `copilot.py install`
 # (docs/copilot.md, "Another repository"). Without it nothing else changes.
@@ -38,6 +40,9 @@ if ! grep -qxF -e "$local_list" -e "/$local_list" "$ignore" 2>/dev/null; then
     echo "$local_list added to $ignore"
 fi
 "$se_root/.githooks/se-script" work_tickets.py identity --worktree "$repo"
+if [ "$repo" = "$se_root" ]; then
+    "$se_root/.githooks/se-script" build_docs.py --install-html
+fi
 if [ -n "$copilot" ]; then
     "$se_root/.githooks/se-script" copilot.py install --repo "$repo"
 fi
