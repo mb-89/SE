@@ -70,6 +70,17 @@ shows them above the options, and warns of an option without `success` or a mark
 The aim is no failed item: a failed item's answer says what would fix it. The worked example is
 [the decision deck](references/decision-deck.md).
 
+## Diagrams
+
+Wherever something can be shown with a diagram (how parts fit together, what flows where, what is
+generated from what), show it as one, never as text art (boxes and arrows drawn with characters).
+The person: "If you can do something with a diagram, do it with a diagram."
+
+- In a decision note, as obs's diagram figure, a `mermaid` fence (obs's capability note
+  `spec/capabilities/mermaid.md`), so the deck draws it. The worked example's current situation
+  carries one.
+- In a chat answer, as a rendered image the host shows, such as that diagram drawn as SVG or PNG.
+
 ## The checklist
 
 The decider answers every item before it decides or asks; each is a rule of the

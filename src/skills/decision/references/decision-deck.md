@@ -10,6 +10,13 @@ This is one case of how any decision reaches the person, so it decides the mecha
 decision, not for one. Today SE shows each decision as one option table in a chat message, one
 decision per turn, and the person answers in the chat.
 
+```mermaid
+graph TD
+  SE -->|one table per message| Chat
+  Person -->|answers in| Chat
+  Chat -->|copied by hand| Issue
+```
+
 ## The problem
 
 A chat table dies with the session that showed it: answers had to be copied into issues by hand.

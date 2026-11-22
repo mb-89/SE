@@ -1101,6 +1101,7 @@ BUILT = {
     "decision": [ROOT / "skills" / "decision" / "SKILL.md", GITHUB / "skills" / "decision" / "SKILL.md"],
     "work-model": [ROOT / "skills" / "work-model" / "SKILL.md", GITHUB / "skills" / "work-model" / "SKILL.md"],
     "catch-up": [ROOT / "skills" / "catch-up" / "SKILL.md", GITHUB / "skills" / "catch-up" / "SKILL.md"],
+    "se": [ROOT / "agents" / "se.md", GITHUB / "agents" / "se.agent.md"],
 }
 LESSONS = [
     ("integrator", "Before you start a worker and before each merge, read the messages queued for your session"),
@@ -1126,6 +1127,10 @@ LESSONS = [
     ("worker", "never with `SE_KERN=off`"),
     ("work-model", "**Kern in the cloud, always**"),
     ("work-model", "A command that still blocks that way is a defect"),
+    ("decision", "show it as one, never as text art"),
+    ("decision", "as obs's diagram figure, a `mermaid` fence"),
+    ("decision", "In a chat answer, as a rendered image"),
+    ("se", "in a chat answer as a rendered image, never as text art"),
 ]
 
 
@@ -1143,3 +1148,9 @@ def test_the_worked_example_shows_what_others_do_and_its_options_name_none_of_th
     options = fence.split("candidates:\n", 1)[1].split("checklist:\n", 1)[0]
     for outside in ("ADR", "RFC", "PEP", "Nygard", "required review", "decision record"):
         assert outside not in options, outside
+
+
+def test_the_worked_example_draws_its_current_situation_as_a_diagram():
+    note = (DECISION.parent / "references" / "decision-deck.md").read_text(encoding="utf-8")
+    situation = note.split("## Current situation\n", 1)[1].split("## The problem", 1)[0]
+    assert "```mermaid\n" in situation
