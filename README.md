@@ -514,14 +514,19 @@ path = "skills"                              # optional: the part of the module 
 [modules.style]
 url = "https://github.com/<owner>/style.git"
 version = "^1.4"                             # in place of ref: a semver range of the module's tags
+
+[modules.kern]
+url = "../kern.git"
+go = "components/go.mod"                     # in place of ref: the version that go.mod requires
 ```
 
 | Key | Meaning |
 |---|---|
 | `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
 | `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
-| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
-| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
+| `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref`, `version` and `go`. |
+| `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version without its tag, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
+| `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, and each `go` pin's tag, with its version and commit; `sync` and `update` write it and the repository commits it. |
 | `path` | optional relative directory inside the module; without it the whole module is used. |
 | Module names | letters, digits, `.`, `_` and `-`. Other keys are errors. |
 | The module `se` | se itself; its pin is the se the [public check](AGENTS.md#public-safety) must run: exactly its `ref`, or any se whose `se.toml` version its `version` range admits. |
