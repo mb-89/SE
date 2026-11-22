@@ -98,7 +98,7 @@ SAMPLES = {
         ),
     },
     "work-model-field-report": {
-        "report-form": (
+        "report-template": (
             "<!-- se:field-report -->\n## Field report\n\nRequirements 1 and 2 are done.\n\n"
             "## Not delivered\n\n- Requirement 3, CSV export: not started; adding a CSV library "
             "is not this issue's to decide.\n<!-- se:field-report:end -->",

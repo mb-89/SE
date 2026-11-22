@@ -669,25 +669,25 @@ def test_new_files_the_overhaul_issue_through_file_labelled_discovery(checkout, 
     assert '"title": "overhaul-20261112"' in out
 
 
-def test_new_files_the_overhaul_template_while_the_work_form_refuses(checkout, monkeypatch,
+def test_new_files_the_overhaul_template_while_the_work_template_refuses(checkout, monkeypatch,
                                                                        capsys, tmp_path):
-    """The template passes the work form as it stands: with `[forms] enforce = "refuse"` on the
-    integration branch, `overhaul.py new` files it, marked with the work form."""
+    """The template passes the work template as it stands: with `[templates] enforce = "refuse"` on the
+    integration branch, `overhaul.py new` files it, marked with the work template."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (checkout / "se.toml").write_text('[project]\nauthored_content = ["README.md"]\n\n'
-                                      '[forms]\nenforce = "refuse"\n', encoding="utf-8")
+                                      '[templates]\nenforce = "refuse"\n', encoding="utf-8")
     git(checkout, "add", ".")
-    git(checkout, "commit", "-q", "-m", "Forms refuse", when="2026-03-02T00:00:00Z")
+    git(checkout, "commit", "-q", "-m", "Templates refuse", when="2026-03-02T00:00:00Z")
     git(checkout, "update-ref", "refs/remotes/origin/main", "HEAD")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261116")
 
     assert overhaul.main(["new", "--repo", REPO, "--worktree", str(checkout)]) == 0
     captured = capsys.readouterr()
-    assert "the work form refuses" not in captured.err  # at most the title-shape warning
+    assert "the work template refuses" not in captured.err  # at most the title-shape warning
     out = captured.out
     assert "GitHub plan: file overhaul-20261116" in out
     assert '"labels": ["work", "ready", "repo:repo", "discovery"]' in out
-    assert "<!-- se:form work -->" in out
+    assert "<!-- se:template se/work " in out
     assert "overhaul.py read <this issue> --out <draft>" in out
     assert "overhaul.py file <this issue> --draft <draft>" in out

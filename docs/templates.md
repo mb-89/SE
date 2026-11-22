@@ -10,15 +10,15 @@ template system for everything agents write; the names template, schema and docu
 separate guidance system that templates use. The guidance system has its own design; this note
 states only the one call a template makes to it ([Tags and guidance](#tags-and-guidance)).
 
-Until the packages land, README ["Forms"](../README.md#forms) describes the engine as it runs
-today; the [Map](#map) says where each of its parts goes.
+Until the packages land, README ["Templates"](../README.md#templates) describes the engine as it
+runs today; the [Map](#map) says where each of its parts goes.
 
 ## Names
 
 | word | meaning |
 |---|---|
 | **template** | the definition a person or an agent writes and keeps: its fields, its skeleton, its rules, its tags |
-| **schema** | generated from a template, never written by hand: the machine form code and tools read |
+| **schema** | generated from a template, never written by hand: the shape code and tools read |
 | **document** | a filled template: a file, an issue, a comment, a message, recording the template and version it implements |
 | **overlay** | the agent-only additions a template repository keeps beside an imported template |
 | **import adapter** | the code that brings a template from its source tool into the template repository |
@@ -43,7 +43,7 @@ A template is one Markdown note in a template repository, `templates/<name>.md`:
   whole template.
 
 The field kinds, the rules with their severities, `extends` and the selection order carry over
-from the forms engine as they are; the engine's docstring keeps owning them.
+from the TOML engine of today as they are; the engine's docstring keeps owning them.
 
 ## The schema
 
@@ -68,8 +68,8 @@ overlay: sha256:<digest of the overlay the fill applied>
 ```
 
 An issue, a comment or a message records the same three in its marker line,
-`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`, which replaces today's
-`<!-- se:form <name> -->`.
+`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. Until templates declare a version
+and an overlay, the engine writes what it knows (the docstring of `scripts/templates.py` owns it).
 
 The check reads a document against the template and version it records. Where the template has
 moved since, a new minor or patch version warns and a new major version refuses, naming both
@@ -167,27 +167,27 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twelve forms, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's twelve TOML templates, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
-### SE's forms
+### SE's TOML templates
 
-| Form today | Template | Kind | Owner |
+| File today | Template | Kind | Owner |
 |---|---|---|---|
-| `forms/ticket.toml` | `ticket` | document | SE |
-| `forms/work.toml` | `work`, `extends` ticket | document | SE |
-| `forms/decision.toml` | `decision`, whose options node is the `pugh` block | document | SE |
-| `forms/field-report.toml` | `field-report` | document | SE |
-| `forms/landing.toml` | `landing` | document | SE |
-| `forms/housekeeping.toml` | `housekeeping` | document | SE |
-| `forms/merge-message.toml` | `merge-message` | interface | SE |
-| `forms/review.toml` | `review`: prose, then its data node | document | SE |
-| `forms/retro.toml` | `retro`: its judged node | document | SE |
-| `forms/overhaul.toml` | `overhaul`: its judged node | document | SE |
-| `forms/routed.toml` | `routed`: the routing section of an outside issue | block | SE |
-| `forms/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
+| `templates/ticket.toml` | `ticket` | document | SE |
+| `templates/work.toml` | `work`, `extends` ticket | document | SE |
+| `templates/decision.toml` | `decision`, whose options node is the `pugh` block | document | SE |
+| `templates/field-report.toml` | `field-report` | document | SE |
+| `templates/landing.toml` | `landing` | document | SE |
+| `templates/housekeeping.toml` | `housekeeping` | document | SE |
+| `templates/merge-message.toml` | `merge-message` | interface | SE |
+| `templates/review.toml` | `review`: prose, then its data node | document | SE |
+| `templates/retro.toml` | `retro`: its judged node | document | SE |
+| `templates/overhaul.toml` | `overhaul`: its judged node | document | SE |
+| `templates/routed.toml` | `routed`: the routing section of an outside issue | block | SE |
+| `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
-A form that is an adapter today (`checker` and `[adapter]`) stays one: its template names the
+A TOML template that is an adapter today (`checker` and `[adapter]`) stays one: its template names the
 check its code already owns, and the move only renames it.
 
 SE's free texts become interface templates: the worker's delivery notice, an escalation, the

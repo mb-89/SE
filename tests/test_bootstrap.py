@@ -476,7 +476,7 @@ def start_steps(home: Path) -> dict[str, bool]:
             "modules": any("se_modules.py" in line and " sync" in line for line in log),
             "identity": any("work_tickets.py" in line and " identity " in line for line in log),
             "hooks": any(" start-hooks" in line for line in log),
-            "file gate": any("se_forms.py gate --runtime " in line for line in log)}
+            "file gate": any("se_templates.py gate --runtime " in line for line in log)}
 
 
 def test_a_start_after_a_compaction_skips_the_refresh_modules_identity_and_hooks_and_still_greets(machine):
@@ -505,23 +505,23 @@ def test_every_other_start_runs_every_step(machine, source):
     assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks", "file gate"), True)
 
 
-def test_the_start_writes_the_file_gates_line_through_se_forms_and_removes_it_without_se_toml(machine):
-    """se_hook.sh guards the file tools only where the start left forms-files (README "Forms"):
-    `se_forms.py gate --runtime` writes or removes it from se.toml (tests/test_se_forms.py); a
+def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml(machine):
+    """se_hook.sh guards the file tools only where the start left templates-files (README "Templates"):
+    `se_templates.py gate --runtime` writes or removes it from se.toml (tests/test_se_templates.py); a
     project without se.toml loses a line an earlier start left."""
     home, project, base = machine
     path = fake_bin(base)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert [line for line in calls(home) if "se_forms.py" in line] == [
-        f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_forms.py gate --runtime "
+    assert [line for line in calls(home) if "se_templates.py" in line] == [
+        f"uv run --no-project --python >=3.11 python {sh(SCRIPT.parent)}/se_templates.py gate --runtime "
         f"{sh(project)}"]
-    line = project / ".se" / ".runtime" / "forms-files"
+    line = project / ".se" / ".runtime" / "templates-files"
     line.parent.mkdir(parents=True, exist_ok=True)
     line.write_text("write\n", encoding="utf-8")
     (project / "se.toml").unlink()
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert not line.exists() and not any("se_forms.py" in line for line in calls(home))
+    assert not line.exists() and not any("se_templates.py" in line for line in calls(home))
 
 
 def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):

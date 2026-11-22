@@ -1,4 +1,4 @@
-"""SE's side of forms (scripts/se_forms.py), the command component `forms` kern's MCP door serves:
+"""SE's side of templates (scripts/se_templates.py), the command component `templates` kern's MCP door serves:
 draft gives the engine's answer, check answers the verdict first and refuses exactly where the
 filing commands refuse, and nothing it does writes."""
 
@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-import forms
-import se_forms
+import templates
+import se_templates
 import work_tickets
-from test_work_ticket_issues import IDENTITY, FakeGh, forms_home, worktree  # noqa: F401 (fixtures)
+from test_work_ticket_issues import IDENTITY, FakeGh, templates_home, worktree  # noqa: F401 (fixtures)
 
 ROOT = Path(__file__).resolve().parents[1]
-CATALOG = forms.load(ROOT, tree=True)
+CATALOG = templates.load(ROOT, tree=True)
 WORK = CATALOG["work"]
 TITLE = WORK.example["title"]
 FIELDS = dict(WORK.example["fields"])
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 @pytest.fixture
 def gh(monkeypatch) -> FakeGh:
-    """GitHub as test_work_ticket_issues fakes it, on the work_tickets se_forms.py imports."""
+    """GitHub as test_work_ticket_issues fakes it, on the work_tickets se_templates.py imports."""
     fake = FakeGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
@@ -42,62 +42,62 @@ def direct(monkeypatch):
 
 
 def run(capsys, *arguments: str) -> tuple[int, str, str]:
-    code = se_forms.main([*arguments])
+    code = se_templates.main([*arguments])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
 
 
 def test_list_and_draft_answer_what_the_engine_answers(capsys):
     code, out, _ = run(capsys, "list", "--tree")
-    assert code == 0 and out.splitlines() == forms.list_forms(CATALOG)
+    assert code == 0 and out.splitlines() == templates.list_templates(CATALOG)
     code, out, _ = run(capsys, "draft", "work", "--tree")
     drafted = json.loads(out)
-    assert code == 0 and drafted == forms.draft_fields(WORK)
+    assert code == 0 and drafted == templates.draft_fields(WORK)
     assert {"fields", "field_says", "field_shape", "schema"} <= set(drafted)
     assert drafted["field_shape"]["goal"]["required"] and drafted["schema"]["required"]
     code, out, _ = run(capsys, "draft", "work", "--markdown", "--tree")
-    assert code == 0 and out == forms.draft(WORK)
+    assert code == 0 and out == templates.draft(WORK)
 
 
-def test_an_unknown_form_is_answered_with_the_list_of_forms(capsys):
+def test_an_unknown_template_is_answered_with_the_list_of_templates(capsys):
     for command in (["draft", "nope"], ["check", "nope", "--body", "B."]):
         code, out, _ = run(capsys, *command, "--tree")
         assert code == 2, command
-        assert "no form 'nope'; the forms are:" in out
-        assert all(line in out for line in forms.list_forms(CATALOG))
+        assert "no template 'nope'; the templates are:" in out
+        assert all(line in out for line in templates.list_templates(CATALOG))
 
 
-def test_check_answers_its_verdict_first_and_exits_0(capsys, tmp_path, worktree, gh, forms_home):
+def test_check_answers_its_verdict_first_and_exits_0(capsys, tmp_path, worktree, gh, templates_home):
     thin = tmp_path / "thin.md"
-    thin.write_text("<!-- se:fleet -->\n<!-- se:form work -->\n\n## Situation\n\nIt is so.\n",
+    thin.write_text(f"<!-- se:fleet -->\n{CATALOG['work'].marker_line}\n\n## Situation\n\nIt is so.\n",
                     encoding="utf-8")
     code, out, _ = run(capsys, "check", "work", "--title", "thin-ticket", "--body-file",
                        str(thin), "--worktree", str(worktree), "--tree")
     lines = out.splitlines()
     assert code == 0 and lines[0].startswith("refused: ") and lines[0].endswith(" findings")
     assert any(line.startswith("  Problem: missing") for line in lines)
-    assert len(lines) <= 1 + forms.REFUSAL_LINES
-    assert lines[-1].endswith(f"{Path(se_forms.__file__).resolve()} draft work")
+    assert len(lines) <= 1 + templates.REFUSAL_LINES
+    assert lines[-1].endswith(f"{Path(se_templates.__file__).resolve()} draft work")
 
     code, out, err = run(capsys, "check", "work", "--fields-json", json.dumps(FIELDS),
                          "--render", "--worktree", str(worktree), "--tree")
     first, rendered = out.split("\n", 1)
     assert code == 0 and first == "passes"
-    assert rendered == forms.render(WORK, FIELDS)
+    assert rendered == templates.render(WORK, FIELDS)
     code, out, _ = run(capsys, "check", "work", "--title", TITLE, "--body",
-                       forms.render(WORK, FIELDS), "--worktree", str(worktree), "--tree")
+                       templates.render(WORK, FIELDS), "--worktree", str(worktree), "--tree")
     assert code == 0 and out.splitlines()[0] == "passes"
 
 
 def test_check_selects_by_action_and_answers_free_texts_as_passing(capsys, worktree, gh,
-                                                                    forms_home):
+                                                                    templates_home):
     code, out, _ = run(capsys, "check", "--action", "comment.create", "--body", "Thanks.",
                        "--worktree", str(worktree), "--tree")
-    assert code == 0 and out.splitlines() == ["passes", "free: no form applies (comment.create)"]
+    assert code == 0 and out.splitlines() == ["passes", "free: no template applies (comment.create)"]
     code, out, _ = run(capsys, "check", "--action", "issue.create", "--labels", "work",
                        "--body", "Only a line.", "--title", TITLE, "--worktree", str(worktree),
                        "--tree")
-    assert code == 0 and out.startswith("refused: ") and "the work form refuses" in out
+    assert code == 0 and out.startswith("refused: ") and "the work template refuses" in out
 
 
 @pytest.mark.parametrize("arguments", [
@@ -111,8 +111,8 @@ def test_check_usage_errors_exit_2(capsys, arguments):
     assert code == 2 and out.strip()
 
 
-# The same title and body, through se_forms.py check and through work_tickets.py file with
-# [forms] enforce = "refuse": both refuse in exactly the same cases.
+# The same title and body, through se_templates.py check and through work_tickets.py file with
+# [templates] enforce = "refuse": both refuse in exactly the same cases.
 
 def fields_with(**changes) -> dict:
     values = {key: value for key, value in FIELDS.items() if changes.get(key, "") is not None}
@@ -131,13 +131,13 @@ CASES = {
 
 
 @pytest.mark.parametrize("case", CASES)
-def test_check_refuses_exactly_where_file_refuses(case, capsys, worktree, gh, forms_home):
-    (worktree / "se.toml").write_text(f'{IDENTITY}\n[forms]\nenforce = "refuse"\n',
+def test_check_refuses_exactly_where_file_refuses(case, capsys, worktree, gh, templates_home):
+    (worktree / "se.toml").write_text(f'{IDENTITY}\n[templates]\nenforce = "refuse"\n',
                                       encoding="utf-8")
     (worktree / ".public-check.local").write_text("quuxcorp\n", encoding="utf-8")
     title, fields, says = CASES[case]
     body = worktree / "body.md"
-    body.write_text(forms.render(WORK, fields), encoding="utf-8")
+    body.write_text(templates.render(WORK, fields), encoding="utf-8")
     code, out, _ = run(capsys, "check", "work", "--title", title, "--body-file", str(body),
                        "--worktree", str(worktree), "--tree")
     assert code == 0
@@ -153,7 +153,7 @@ def test_check_refuses_exactly_where_file_refuses(case, capsys, worktree, gh, fo
     assert "quux" not in out.lower()
 
 
-# The gate (se_forms.py gate): SE's PreToolUse hook's judge of a write through the GitHub tools.
+# The gate (se_templates.py gate): SE's PreToolUse hook's judge of a write through the GitHub tools.
 
 import io  # noqa: E402
 import subprocess  # noqa: E402
@@ -162,12 +162,13 @@ import threading  # noqa: E402
 
 import review  # noqa: E402
 from shell_paths import BASH, sh  # noqa: E402
-from test_forms import field_report_variants, review_report  # noqa: E402
+from test_templates import field_report_variants, review_report  # noqa: E402
 
 OWNER, REPO_NAME = "owner", "repo"
 SESSION = "gate-session"
 THIN = "<!-- se:fleet -->\n\n## Situation\n\nIt is so.\n"
-GOOD_WORK = forms.render(WORK, FIELDS)
+WORK_MARKER = CATALOG["work"].marker_line
+GOOD_WORK = templates.render(WORK, FIELDS)
 GOOD_REVIEW = review.verdict_comment(5, review_report(), False)
 THIN_REVIEW = f"{review.VERDICT_MARKER}\n## Review of pull request #5\n\nLooks fine.\n"
 REPORTS = field_report_variants()
@@ -186,7 +187,7 @@ def home_repo(monkeypatch):
 
 
 @pytest.fixture
-def project(worktree, home_repo, forms_home) -> Path:
+def project(worktree, home_repo, templates_home) -> Path:
     """The checkout holding the payload's cwd: its se.toml decides, its local list is read."""
     (worktree / ".git").mkdir()
     (worktree / ".public-check.local").write_text("quuxcorp\n", encoding="utf-8")
@@ -195,7 +196,7 @@ def project(worktree, home_repo, forms_home) -> Path:
 
 def gate(capsys, monkeypatch, text: str, *arguments: str) -> str:
     monkeypatch.setattr(sys, "stdin", io.StringIO(text))
-    assert se_forms.main(["gate", *arguments]) == 0
+    assert se_templates.main(["gate", *arguments]) == 0
     return capsys.readouterr().out
 
 
@@ -206,8 +207,8 @@ def denial(out: str) -> str:
     return answer["permissionDecisionReason"]
 
 
-# One row of the gate's table each: tool, the call's other arguments, the off-form body, the form's
-# own body and the form that refuses.
+# One row of the gate's table each: tool, the call's other arguments, the off-template body, the template's
+# own body and the template that refuses.
 ROWS = {
     "issue_write create": ("issue_write", {"method": "create", "title": TITLE, "labels": ["work"]},
                            THIN, GOOD_WORK, "work"),
@@ -234,16 +235,16 @@ ROWS = {
 
 
 @pytest.mark.parametrize("row", ROWS)
-def test_the_gate_denies_an_off_form_write_of_each_tool_and_passes_its_form(
+def test_the_gate_denies_an_off_template_write_of_each_tool_and_passes_its_template(
         row, capsys, monkeypatch, project, gh):
-    tool, given, thin, good, form = ROWS[row]
+    tool, given, thin, good, template = ROWS[row]
     out = gate(capsys, monkeypatch, payload(f"mcp__github__{tool}", project, body=thin, **given),
                "--gate", "refuse")
     reason = denial(out)
-    assert f"the {form} form refuses" in reason and f"in {OWNER}/{REPO_NAME}" in reason
-    assert len(reason.splitlines()) <= forms.REFUSAL_LINES
+    assert f"the {template} template refuses" in reason and f"in {OWNER}/{REPO_NAME}" in reason
+    assert len(reason.splitlines()) <= templates.REFUSAL_LINES
     assert reason.splitlines()[-1].startswith(
-        f"Get the form: the se server's forms tool, command \"se_forms.py draft\", args [\"{form}\"]")
+        f"Get the template: the se server's templates tool, command \"se_templates.py draft\", args [\"{template}\"]")
     assert gate(capsys, monkeypatch, payload(f"mcp__github__{tool}", project, body=good, **given),
                 "--gate", "refuse") == ""
 
@@ -252,7 +253,7 @@ def test_the_gate_denies_an_off_form_write_of_each_tool_and_passes_its_form(
                                   "github-mcp-server-issue_write", "github/issue_write"])
 def test_every_shape_of_a_guarded_name_is_gated(name, capsys, monkeypatch, project, gh):
     text = payload(name, project, method="create", title=TITLE, labels=["work"], body=THIN)
-    assert "the work form refuses" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    assert "the work template refuses" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
 
 
 def test_the_payloads_mcp_server_name_is_the_server_part(capsys, monkeypatch, project, gh):
@@ -260,7 +261,7 @@ def test_the_payloads_mcp_server_name_is_the_server_part(capsys, monkeypatch, pr
     data = json.loads(payload("mcp__gh__issue_write", project, **given))
     assert gate(capsys, monkeypatch, json.dumps(data), "--gate", "refuse") == ""
     data["mcp_server"] = {"name": "github", "source": "user"}
-    assert "work form" in denial(gate(capsys, monkeypatch, json.dumps(data), "--gate", "refuse"))
+    assert "work template" in denial(gate(capsys, monkeypatch, json.dumps(data), "--gate", "refuse"))
     data["tool_name"], data["mcp_server"] = "mcp__github__issue_write", {"name": "files"}
     assert gate(capsys, monkeypatch, json.dumps(data), "--gate", "refuse") == ""
 
@@ -270,7 +271,7 @@ def test_copilots_payload_is_read_from_its_tool_args(capsys, monkeypatch, projec
              "labels": ["work"], "body": THIN}
     text = json.dumps({"sessionId": SESSION, "cwd": str(project),
                        "toolName": "github-mcp-server-issue_write", "toolArgs": json.dumps(given)})
-    assert "work form" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    assert "work template" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
 
 
 def test_free_writes_and_the_switch_off_print_nothing(capsys, monkeypatch, project, gh):
@@ -285,9 +286,9 @@ def test_free_writes_and_the_switch_off_print_nothing(capsys, monkeypatch, proje
                          (json.dumps(unguarded), ["--gate", "refuse"]), (thin, ["--gate", "off"]),
                          (thin, [])):
         assert gate(capsys, monkeypatch, text, *switch) == "", (text, switch)
-    (project / "se.toml").write_text(f'{IDENTITY}\n[forms]\ngate = "refuse"\n', encoding="utf-8")
-    assert "work form" in denial(gate(capsys, monkeypatch, thin))
-    monkeypatch.setenv("SE_FORMS_GATE", "OFF")
+    (project / "se.toml").write_text(f'{IDENTITY}\n[templates]\ngate = "refuse"\n', encoding="utf-8")
+    assert "work template" in denial(gate(capsys, monkeypatch, thin))
+    monkeypatch.setenv("SE_TEMPLATES_GATE", "OFF")
     assert gate(capsys, monkeypatch, thin) == ""
 
 
@@ -296,45 +297,45 @@ def test_warn_hands_the_findings_to_the_agent_and_never_allows(capsys, monkeypat
                    labels=["work"], body=THIN)
     answer = json.loads(gate(capsys, monkeypatch, text, "--gate", "warn"))["hookSpecificOutput"]
     assert set(answer) == {"hookEventName", "additionalContext"}
-    assert "([forms] gate = warn); sent anyway" in answer["additionalContext"]
+    assert "([templates] gate = warn); sent anyway" in answer["additionalContext"]
     assert "Problem: missing" in answer["additionalContext"]
 
 
-def test_a_wrong_gate_value_is_a_form_error_naming_the_file(worktree):
-    (worktree / "se.toml").write_text('[forms]\ngate = "maybe"\n', encoding="utf-8")
-    with pytest.raises(forms.FormError, match=r"\[forms\] gate = 'maybe' in se.toml"):
-        forms.enforcement(worktree)
+def test_a_wrong_gate_value_is_a_template_error_naming_the_file(worktree):
+    (worktree / "se.toml").write_text('[templates]\ngate = "maybe"\n', encoding="utf-8")
+    with pytest.raises(templates.TemplateError, match=r"\[templates\] gate = 'maybe' in se.toml"):
+        templates.enforcement(worktree)
 
 
 def test_the_second_refusal_offers_the_hold_and_the_held_write_then_passes(
         capsys, monkeypatch, project, gh):
     given = {"method": "create", "title": TITLE, "body": THIN}
     thin = payload("mcp__github__issue_write", project, labels=["work"], **given)
-    held = payload("mcp__github__issue_write", project, labels=["work", "off-form"], **given)
+    held = payload("mcp__github__issue_write", project, labels=["work", "off-template"], **given)
     first = denial(gate(capsys, monkeypatch, thin, "--gate", "refuse"))
-    assert "off-form" not in first
-    assert "off-form" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
+    assert "off-template" not in first
+    assert "off-template" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
     assert gate(capsys, monkeypatch, held, "--gate", "refuse") == ""
-    ready = payload("mcp__github__issue_write", project, labels=["work", "off-form", "ready"],
+    ready = payload("mcp__github__issue_write", project, labels=["work", "off-template", "ready"],
                     **given)
     assert denial(gate(capsys, monkeypatch, ready, "--gate", "refuse"))
 
 
 def test_a_private_term_is_refused_every_time_and_never_printed(capsys, monkeypatch, project, gh):
-    body = forms.render(WORK, {**FIELDS, "goal": "For Quuxcorp."})
+    body = templates.render(WORK, {**FIELDS, "goal": "For Quuxcorp."})
     text = payload("mcp__github__issue_write", project, method="create", title=TITLE,
-                   labels=["work", "off-form"], body=body)
+                   labels=["work", "off-template"], body=body)
     for _ in range(4):
         reason = denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
         assert "local list" in reason and "quux" not in reason.lower()
         assert "--hold" not in reason
 
 
-def test_an_issue_edit_without_labels_is_checked_against_its_bodys_form(
+def test_an_issue_edit_without_labels_is_checked_against_its_bodys_template(
         capsys, monkeypatch, project, gh):
-    body = "<!-- se:form work -->\n" + THIN
+    body = WORK_MARKER + "\n" + THIN
     text = payload("mcp__github__issue_write", project, method="update", issue_number=7, body=body)
-    assert "the work form refuses" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    assert "the work template refuses" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
 
 
 def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
@@ -346,14 +347,14 @@ def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
         raise RuntimeError("the disk is gone")
 
     with monkeypatch.context() as patch:
-        patch.setattr(se_forms, "findings", broken)
+        patch.setattr(se_templates, "findings", broken)
         reason = denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
-    assert reason.startswith("SE's form gate failed on this write (RuntimeError), so it was not sent")
-    assert "work_tickets.py file" in reason and "SE_FORMS_GATE=off" in reason
-    log = project / ".se" / ".runtime" / "forms-gate.log"
+    assert reason.startswith("SE's template gate failed on this write (RuntimeError), so it was not sent")
+    assert "work_tickets.py file" in reason and "SE_TEMPLATES_GATE=off" in reason
+    log = project / ".se" / ".runtime" / "templates-gate.log"
     assert gate(capsys, monkeypatch, "{not json", "--gate", "refuse") == ""
     with monkeypatch.context() as patch:
-        patch.setattr(se_forms, "deciding", broken)
+        patch.setattr(se_templates, "deciding", broken)
         assert gate(capsys, monkeypatch, text, "--gate", "refuse") == ""
     lines = log.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1 and "RuntimeError: the disk is gone" in lines[0]
@@ -364,8 +365,8 @@ def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh)
     """A judgement still running at the bound: the bound is zero and the judgement waits until
     the gate has answered, so the order, not the clock, makes it late."""
     released = threading.Event()
-    monkeypatch.setattr(se_forms, "GATE_SECONDS", 0)
-    monkeypatch.setattr(se_forms, "deciding", lambda *_: released.wait(60))
+    monkeypatch.setattr(se_templates, "GATE_SECONDS", 0)
+    monkeypatch.setattr(se_templates, "deciding", lambda *_: released.wait(60))
     text = payload("mcp__github__issue_write", project, method="create", title=TITLE,
                    labels=["work"], body=THIN)
     try:
@@ -374,7 +375,7 @@ def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh)
     finally:
         released.set()
     assert "slow: no answer within 0 s" in (
-        project / ".se" / ".runtime" / "forms-gate.log").read_text(encoding="utf-8")
+        project / ".se" / ".runtime" / "templates-gate.log").read_text(encoding="utf-8")
 
 
 # The hook: se_hook.sh runs the gate for a guarded call only, its answer the hook's whole stdout.
@@ -400,7 +401,7 @@ def hooked(tmp_path: Path, text: str, **variables: str) -> subprocess.CompletedP
 def hook_project(tmp_path: Path, gate_value: str | None) -> Path:
     root = tmp_path / "hooked"
     (root / ".git").mkdir(parents=True)
-    switch = f'[forms]\ngate = "{gate_value}"\n' if gate_value else ""
+    switch = f'[templates]\ngate = "{gate_value}"\n' if gate_value else ""
     (root / "se.toml").write_text(f'{IDENTITY}{switch}\n[outside]\n"{OWNER}/{REPO_NAME}" = 1\n',
                                   encoding="utf-8")
     kern = tmp_path / "kern"
@@ -423,7 +424,7 @@ def test_the_plugins_hook_line_prints_exactly_the_deny(tmp_path, shared_fake_git
     result = hooked(tmp_path, text, CLAUDE_PROJECT_DIR=sh(root))
     assert result.returncode == 0
     assert result.stdout.count("\n") == 1 and result.stdout.endswith("}\n")
-    assert "the work form refuses" in denial(result.stdout)
+    assert "the work template refuses" in denial(result.stdout)
     calls = (tmp_path / "hook-home" / "calls").read_text(encoding="utf-8")
     assert calls.startswith(f"hook PreToolUse --root {sh(root)} <<") and SESSION in calls
 
@@ -439,15 +440,15 @@ def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
     for text, variables in ((payload("mcp__github__get_me", root, body=THIN), {}),
                             (payload("mcp__files__issue_write", root, body=THIN), {}),
-                            (thin, {"SE_FORMS_GATE": "off"})):
+                            (thin, {"SE_TEMPLATES_GATE": "off"})):
         result = hooked(tmp_path, text, CLAUDE_PROJECT_DIR=sh(root), **variables)
         assert result.returncode == 0 and result.stdout == '{"kern": "answer"}\n'
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
 
 
-# The shell reader: a gh write in a shell call is held to its form as the GitHub tools' call is.
+# The shell reader: a gh write in a shell call is held to its template as the GitHub tools' call is.
 
-MARKED_THIN = "<!-- se:form work -->\n" + THIN
+MARKED_THIN = WORK_MARKER + "\n" + THIN
 
 
 def shell_payload(command: str, cwd: Path, tool: str = "Bash", key: str = "command") -> str:
@@ -456,7 +457,7 @@ def shell_payload(command: str, cwd: Path, tool: str = "Bash", key: str = "comma
 
 
 # One row each of the gh writes the reader reads: the command with {file} for the body file, the
-# off-form body, the form's own body and the form that refuses.
+# off-template body, the template's own body and the template that refuses.
 GH_ROWS = {
     "issue create": (f"gh issue create --title {TITLE} --label work --body-file {{file}}",
                      THIN, GOOD_WORK, "work"),
@@ -490,13 +491,13 @@ def body_file(folder: Path, text: str, name: str = "body.md") -> Path:
 
 
 @pytest.mark.parametrize("row", GH_ROWS)
-def test_each_gh_write_is_denied_off_form_and_passes_its_form(row, capsys, monkeypatch, project,
+def test_each_gh_write_is_denied_off_template_and_passes_its_template(row, capsys, monkeypatch, project,
                                                               gh):
-    command, thin, good, form = GH_ROWS[row]
+    command, thin, good, template = GH_ROWS[row]
     path = body_file(project, thin, "thin.md")
     reason = denial(gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)),
                                                             project), "--gate", "refuse"))
-    assert f"the {form} form refuses" in reason
+    assert f"the {template} template refuses" in reason
     path = body_file(project, good, "good.md")
     assert gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)), project),
                 "--gate", "refuse") == ""
@@ -515,7 +516,7 @@ def test_a_gh_write_is_read_behind_prefixes_separators_and_quotes(command, capsy
     import shlex
     body_file(project, THIN, "thin.md")
     text = command.replace("{quoted}", shlex.quote(THIN))
-    assert "the work form refuses" in denial(
+    assert "the work template refuses" in denial(
         gate(capsys, monkeypatch, shell_payload(text, project), "--gate", "refuse"))
 
 
@@ -523,7 +524,7 @@ def test_gh_api_input_is_read_as_json_and_reads_pass(capsys, monkeypatch, projec
     data = body_file(project, json.dumps({"title": TITLE, "body": THIN, "labels": ["work"]}),
                      "issue.json")
     api = f"gh api repos/{OWNER}/{REPO_NAME}/issues --input {data}"
-    assert "the work form refuses" in denial(
+    assert "the work template refuses" in denial(
         gate(capsys, monkeypatch, shell_payload(api, project), "--gate", "refuse"))
     data.write_text(json.dumps({"title": TITLE, "body": GOOD_WORK, "labels": ["work"]}),
                     encoding="utf-8")
@@ -558,7 +559,7 @@ def test_a_body_the_gate_cannot_read_is_denied_naming_body_file(case, capsys, mo
         command = "cat thin.md | " + command
     reason = denial(gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse"))
     assert reason.startswith("gh issue create: SE cannot read this body (") and why in reason
-    assert reason.endswith("against the work form. Write the body to a file and pass "
+    assert reason.endswith("against the work template. Write the body to a file and pass "
                            "--body-file <file>.")
 
 
@@ -568,12 +569,12 @@ def test_gh_fill_into_the_integration_branch_is_denied_and_a_quoted_heredoc_is_r
                     f"gh api repos/{OWNER}/{REPO_NAME}/pulls -f title=x -f body=\"$(cat r.md)\""):
         reason = denial(gate(capsys, monkeypatch, shell_payload(command, project),
                              "--gate", "refuse"))
-        assert "against the field-report form" in reason, command
+        assert "against the field-report template" in reason, command
     assert "-F body=@<file>" in reason
     assert gate(capsys, monkeypatch, shell_payload("gh pr create -B other --fill", project),
                 "--gate", "refuse") == ""
     quoted = f"gh issue create -t {TITLE} -l work --body-file - <<'EOF'\n{{body}}EOF\necho done"
-    assert "the work form refuses" in denial(gate(
+    assert "the work template refuses" in denial(gate(
         capsys, monkeypatch, shell_payload(quoted.replace("{body}", THIN), project),
         "--gate", "refuse"))
     assert gate(capsys, monkeypatch, shell_payload(quoted.replace("{body}", GOOD_WORK), project),
@@ -589,17 +590,17 @@ def test_other_commands_and_writes_elsewhere_print_nothing(capsys, monkeypatch, 
         assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
     text = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
     assert gate(capsys, monkeypatch, text, "--gate", "off") == ""
-    assert "work form" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
+    assert "work template" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
     copilot = json.dumps({"sessionId": SESSION, "cwd": str(project), "toolName": "powershell",
                           "toolArgs": json.dumps({"input": json.loads(text)["tool_input"][
                               "command"]})})
-    assert "work form" in denial(gate(capsys, monkeypatch, copilot, "--gate", "refuse"))
+    assert "work template" in denial(gate(capsys, monkeypatch, copilot, "--gate", "refuse"))
 
 
 def test_an_unreadable_comment_passes_and_logs_one_line(capsys, monkeypatch, project, gh):
     command = "gh issue comment 7 --body \"$(cat review.md)\""
     assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
-    lines = (project / ".se" / ".runtime" / "forms-gate.log").read_text(
+    lines = (project / ".se" / ".runtime" / "templates-gate.log").read_text(
         encoding="utf-8").splitlines()
     assert len(lines) == 1 and "gh issue comment" in lines[0] and "cannot read" in lines[0]
 
@@ -607,10 +608,10 @@ def test_an_unreadable_comment_passes_and_logs_one_line(capsys, monkeypatch, pro
 def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
     thin = body_file(project, THIN, "thin.md")
     plain = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
-    held = shell_payload(f"gh issue create -t {TITLE} -l work -l off-form --body-file {thin}",
+    held = shell_payload(f"gh issue create -t {TITLE} -l work -l off-template --body-file {thin}",
                          project)
-    assert "off-form" not in denial(gate(capsys, monkeypatch, plain, "--gate", "refuse"))
-    assert "off-form" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
+    assert "off-template" not in denial(gate(capsys, monkeypatch, plain, "--gate", "refuse"))
+    assert "off-template" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
     assert gate(capsys, monkeypatch, held, "--gate", "refuse") == ""
 
 
@@ -620,7 +621,7 @@ def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
     thin = body_file(root, THIN, "thin.md")
     command = f"gh issue create -R {OWNER}/{REPO_NAME} -t {TITLE} -l work --body-file {thin}"
     result = hooked(tmp_path, shell_payload(command, root), CLAUDE_PROJECT_DIR=sh(root))
-    assert result.returncode == 0 and "the work form refuses" in denial(result.stdout)
+    assert result.returncode == 0 and "the work template refuses" in denial(result.stdout)
     pythons = tmp_path / "hook-home" / "pythons"
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
     for text in (shell_payload("echo through high enough ", root),
@@ -631,9 +632,9 @@ def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
 
 
-# check-files: the files a form claims (the module docstring: Claimed files).
+# check-files: the files a template claims (the module docstring: Claimed files).
 
-STEP_FORM = '''name = "step-risks"
+STEP_TEMPLATE = '''name = "step-risks"
 reader = "owner"
 says = "Risks: what could go wrong."
 
@@ -651,34 +652,34 @@ heading = "Risks"
 required = true
 says = "One item per risk, or None."
 '''
-GOOD_STEP = "---\nform: step-risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
-EMPTY_STEP = "---\nform: step-risks\n---\n\n# Risks\n\n## Risks\n\n"
+GOOD_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
+EMPTY_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n"
 
 
 def step_book(root: Path, **steps: str) -> Path:
-    """`root` with forms/step-risks.toml and one step file per keyword, book/m1/steps/<name>.md."""
-    (root / "forms").mkdir(parents=True, exist_ok=True)
-    (root / "forms" / "step-risks.toml").write_text(STEP_FORM, encoding="utf-8")
+    """`root` with templates/step-risks.toml and one step file per keyword, book/m1/steps/<name>.md."""
+    (root / "templates").mkdir(parents=True, exist_ok=True)
+    (root / "templates" / "step-risks.toml").write_text(STEP_TEMPLATE, encoding="utf-8")
     (root / "book" / "m1" / "steps").mkdir(parents=True, exist_ok=True)
     for name, text in steps.items():
         (root / "book" / "m1" / "steps" / f"{name}.md").write_text(text, encoding="utf-8")
     return root / "book" / "m1" / "steps"
 
 
-def test_check_files_checks_each_claimed_file_given_and_names_path_form_and_field(capsys, tmp_path):
+def test_check_files_checks_each_claimed_file_given_and_names_path_template_and_field(capsys, tmp_path):
     steps = step_book(tmp_path, good=GOOD_STEP, empty=EMPTY_STEP)
     (tmp_path / "free.md").write_text("# Free\n", encoding="utf-8")
-    given = ["--forms", str(tmp_path / "forms"), "--root", str(tmp_path)]
+    given = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
     assert run(capsys, "check-files", *given, str(steps / "good.md"))[:2] == (
-        0, "se_forms.py check-files: 1 claimed file passes its form\n")
+        0, "se_templates.py check-files: 1 claimed file passes its template\n")
     assert run(capsys, "check-files", *given, str(tmp_path / "free.md"))[:2] == (
-        0, "se_forms.py check-files: no form claims a file checked\n")
+        0, "se_templates.py check-files: no template claims a file checked\n")
     code, out, _ = run(capsys, "check-files", *given, str(steps / "good.md"), str(steps / "empty.md"))
     lines = out.splitlines()
     assert code == 1
     assert lines[0].startswith("book/m1/steps/empty.md (step-risks): Risks: empty")
-    assert lines[-1].startswith("The empty form of each: uv run python ")
-    assert f"forms.py draft --path <file> --root {tmp_path.resolve()} --forms" in lines[-1]
+    assert lines[-1].startswith("The empty template of each: uv run python ")
+    assert f"templates.py draft --path <file> --root {tmp_path.resolve()} --templates" in lines[-1]
 
 
 def test_check_files_names_at_most_ten_lines_with_a_count_of_the_rest(capsys, tmp_path):
@@ -686,7 +687,7 @@ def test_check_files_names_at_most_ten_lines_with_a_count_of_the_rest(capsys, tm
     files = sorted(str(path) for path in (tmp_path / "book" / "m1" / "steps").iterdir())
     code, out, _ = run(capsys, "check-files", "--root", str(tmp_path), *files)
     lines = out.splitlines()
-    assert code == 1 and len(lines) == se_forms.CHECK_FILES_LINES
+    assert code == 1 and len(lines) == se_templates.CHECK_FILES_LINES
     assert lines[-2] == "... and 4 more findings"
 
 
@@ -696,7 +697,7 @@ def test_check_files_changed_finds_an_untracked_claimed_file_and_skips_a_deleted
     import fake_git
     import git_door
     steps = step_book(tmp_path, kept=GOOD_STEP, gone=GOOD_STEP)
-    (tmp_path / "se.toml").write_text(f'[forms]\nfiles = "{level}"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text(f'[templates]\nfiles = "{level}"\n', encoding="utf-8")
     fake_git.init(tmp_path, "-b", "main")
     for arguments in (("config", "user.name", "alice"), ("config", "user.email", "alice@example.com"),
                       ("add", "."), ("commit", "-q", "-m", "steps"),
@@ -716,23 +717,23 @@ def test_check_files_changed_finds_an_untracked_claimed_file_and_skips_a_deleted
 def test_check_files_usage_errors_and_a_wrong_files_value(capsys, worktree):
     assert run(capsys, "check-files")[0] == 2
     assert run(capsys, "check-files", "a.md", "--changed", "origin/main")[0] == 2
-    (worktree / "se.toml").write_text('[forms]\nfiles = "refuse"\n', encoding="utf-8")
-    with pytest.raises(forms.FormError, match=r"\[forms\] files = 'refuse' in se.toml"):
-        forms.enforcement(worktree)
-    assert forms.enforcement(worktree.parent).files == forms.OFF  # unset: off
+    (worktree / "se.toml").write_text('[templates]\nfiles = "refuse"\n', encoding="utf-8")
+    with pytest.raises(templates.TemplateError, match=r"\[templates\] files = 'refuse' in se.toml"):
+        templates.enforcement(worktree)
+    assert templates.enforcement(worktree.parent).files == templates.OFF  # unset: off
 
 
-def test_no_form_of_ses_claims_a_path_and_ses_own_se_toml_leaves_files_off():
+def test_no_template_of_ses_claims_a_path_and_ses_own_se_toml_leaves_files_off():
     """Requirement "SE's value": SE's own check-files has nothing to check yet."""
-    assert not any(form.paths for form in CATALOG.values())
-    assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["forms"]
+    assert not any(template.paths for template in CATALOG.values())
+    assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["templates"]
 
 
 @pytest_hook
 def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
         tmp_path, shared_fake_git):
     """SE's own se.toml, read from this checkout, at the fixture's `origin/main`: the hook denies an
-    off-form `issue_write` naming Problem and passes the form's own body. The working tree's copy
+    off-template `issue_write` naming Problem and passes the template's own body. The working tree's copy
     lacks the gate, so the integration branch's decides."""
     import git_door
     import fake_git
@@ -758,7 +759,7 @@ def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
     assert result.returncode == 0 and result.stdout == ""
 
 
-# The file tools: where [forms] files is write, the gate judges the file a call would leave.
+# The file tools: where [templates] files is write, the gate judges the file a call would leave.
 
 def file_payload(tool: str, cwd: Path, **given) -> str:
     return json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(cwd),
@@ -767,10 +768,10 @@ def file_payload(tool: str, cwd: Path, **given) -> str:
 
 def file_gate(capsys, monkeypatch, root: Path, text: str, files: str = "write") -> str:
     return gate(capsys, monkeypatch, text, "--gate", "refuse", "--files", files,
-                "--forms", str(root / "forms"), "--root", str(root))
+                "--templates", str(root / "templates"), "--root", str(root))
 
 
-def test_a_write_or_edit_whose_result_breaks_its_form_is_denied_and_the_file_never_changes(
+def test_a_write_or_edit_whose_result_breaks_its_template_is_denied_and_the_file_never_changes(
         capsys, monkeypatch, tmp_path):
     steps = step_book(tmp_path, step=GOOD_STEP)
     step = steps / "step.md"
@@ -787,9 +788,9 @@ def test_a_write_or_edit_whose_result_breaks_its_form_is_denied_and_the_file_nev
         reason = denial(file_gate(capsys, monkeypatch, tmp_path,
                                   file_payload(name.split()[0], tmp_path, **given)))
         relative = Path(given["file_path"]).relative_to(tmp_path).as_posix()
-        assert reason.startswith(f"{name.split()[0]} of {relative}: a file a form claims")
+        assert reason.startswith(f"{name.split()[0]} of {relative}: a file a template claims")
         assert f"{relative} (step-risks): Risks: empty" in reason
-        assert "forms.py draft --path <file>" in reason
+        assert "templates.py draft --path <file>" in reason
     passing = [
         file_payload("Edit", tmp_path, file_path=str(step), old_string="misses a tool",
                      new_string="misses two tools"),
@@ -822,7 +823,7 @@ def test_a_github_file_write_is_judged_per_path_and_names_the_claimed_one(
                        "tool_input": {"owner": OWNER, "repo": REPO_NAME, "branch": "b",
                                       "files": files, "message": "m"}})
     reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
-    assert reason.startswith(f"push_files in {OWNER}/{REPO_NAME}: a file a form claims")
+    assert reason.startswith(f"push_files in {OWNER}/{REPO_NAME}: a file a template claims")
     assert "book/m1/steps/s2.md (step-risks): Risks: empty" in reason and "s1.md" not in reason
     one = json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(tmp_path),
                       "tool_name": "mcp__github__create_or_update_file",
@@ -844,14 +845,14 @@ def test_a_file_gate_crash_after_the_claim_denies_and_one_before_passes_and_logs
         raise RuntimeError("the disk is gone")
 
     with monkeypatch.context() as patch:
-        patch.setattr(se_forms, "left_by", broken)
+        patch.setattr(se_templates, "left_by", broken)
         reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
-    assert reason.startswith("SE's form gate failed on this write (RuntimeError)")
-    assert "forms.py draft --path <file>" in reason and "SE_FORMS_GATE=off" in reason
+    assert reason.startswith("SE's template gate failed on this write (RuntimeError)")
+    assert "templates.py draft --path <file>" in reason and "SE_TEMPLATES_GATE=off" in reason
     with monkeypatch.context() as patch:
-        patch.setattr(se_forms, "claim_forms", broken)
+        patch.setattr(se_templates, "claim_templates", broken)
         assert file_gate(capsys, monkeypatch, tmp_path, text) == ""
-    log = (tmp_path / ".se" / ".runtime" / "forms-gate.log").read_text(encoding="utf-8")
+    log = (tmp_path / ".se" / ".runtime" / "templates-gate.log").read_text(encoding="utf-8")
     assert "RuntimeError: the disk is gone" in log and "Risks" not in log
 
 
@@ -860,31 +861,31 @@ def test_the_file_gate_reads_files_from_the_projects_se_toml_and_counts_its_refu
     steps = step_book(tmp_path, step=GOOD_STEP)
     (tmp_path / ".git").mkdir()
     text = file_payload("Write", tmp_path, file_path=str(steps / "step.md"), content=EMPTY_STEP)
-    plain = ("--gate", "refuse", "--forms", str(tmp_path / "forms"))
+    plain = ("--gate", "refuse", "--templates", str(tmp_path / "templates"))
     assert gate(capsys, monkeypatch, text, *plain) == ""  # files unset: off
-    (tmp_path / "se.toml").write_text('[forms]\nfiles = "write"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text('[templates]\nfiles = "write"\n', encoding="utf-8")
     assert "Risks: empty" in denial(gate(capsys, monkeypatch, text, *plain))
-    monkeypatch.setenv("SE_FORMS_GATE", "off")
+    monkeypatch.setenv("SE_TEMPLATES_GATE", "off")
     assert gate(capsys, monkeypatch, text, *plain) == ""
-    monkeypatch.delenv("SE_FORMS_GATE")
-    key = forms.target("step-risks", str(tmp_path), forms.FILE_ACTION, title="book/m1/steps/step.md")
-    assert forms.refusals(key, {"SE_SESSION": SESSION}) == 1
+    monkeypatch.delenv("SE_TEMPLATES_GATE")
+    key = templates.target("step-risks", str(tmp_path), templates.FILE_ACTION, title="book/m1/steps/step.md")
+    assert templates.refusals(key, {"SE_SESSION": SESSION}) == 1
 
 
 def test_the_starts_runtime_line_is_written_only_where_files_is_write(capsys, tmp_path):
-    line = tmp_path / ".se" / ".runtime" / "forms-files"
+    line = tmp_path / ".se" / ".runtime" / "templates-files"
     for value, written in (("write", True), ("check", False), ("refuse", False), ("write", True)):
-        (tmp_path / "se.toml").write_text(f'[forms]\nfiles = "{value}"\n', encoding="utf-8")
-        assert se_forms.main(["gate", "--runtime", str(tmp_path)]) == 0
+        (tmp_path / "se.toml").write_text(f'[templates]\nfiles = "{value}"\n', encoding="utf-8")
+        assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
         assert line.is_file() == written
         if written:
             assert line.read_text(encoding="utf-8") == "write\n"
     (tmp_path / "se.toml").unlink()
-    assert se_forms.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
+    assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
     assert capsys.readouterr().out == ""
 
 
-# The backstop (se_forms.py backstop, .github/workflows/forms.yml): an event file in, a plan out.
+# The backstop (se_templates.py backstop, .github/workflows/templates.yml): an event file in, a plan out.
 
 def event_file(folder: Path, name: str, *, action: str = "opened", body: str = THIN,
                title: str = TITLE, labels=("work",), comment: str | None = None) -> Path:
@@ -908,21 +909,21 @@ def backstop(capsys, project: Path, name: str, event: Path, *switch: str) -> dic
     return plan
 
 
-def test_backstop_labels_an_off_form_fleet_issue_and_leaves_the_rest_alone(
+def test_backstop_labels_an_off_template_fleet_issue_and_leaves_the_rest_alone(
         capsys, tmp_path, project, gh):
     plan = backstop(capsys, project, "issues", event_file(tmp_path, "thin"), "--backstop", "on")
-    assert plan["add_labels"] == ["off-form"] and plan["failed"] is False
+    assert plan["add_labels"] == ["off-template"] and plan["failed"] is False
     assert plan["repo"] == f"{OWNER}/{REPO_NAME}" and plan["number"] == 7
     lines = plan["summary"].splitlines()
     assert "issue #7 in owner/repo" in lines[0] and any("Problem: missing" in line
                                                         for line in lines)
-    assert len(lines) <= forms.REFUSAL_LINES + 1
+    assert len(lines) <= templates.REFUSAL_LINES + 1
     assert lines[-1] == "Fix its title or body on the issue itself, then run work_tickets.py " \
                         "unhold 7"
     marked = event_file(tmp_path, "marked", body=THIN, labels=(), action="edited")
     assert backstop(capsys, project, "issues", marked, "--backstop", "on")["add_labels"] == [
-        "off-form"]
-    held = event_file(tmp_path, "held", labels=("work", "off-form"), action="labeled")
+        "off-template"]
+    held = event_file(tmp_path, "held", labels=("work", "off-template"), action="labeled")
     plan = backstop(capsys, project, "issues", held, "--backstop", "on")
     assert plan["add_labels"] == [] and "Problem: missing" in plan["summary"]
     empty = {"repo": f"{OWNER}/{REPO_NAME}", "number": 7, "add_labels": [], "summary": "",
@@ -937,14 +938,14 @@ def test_backstop_labels_an_off_form_fleet_issue_and_leaves_the_rest_alone(
 
 
 def test_backstop_names_a_private_term_by_field_and_list_only(capsys, tmp_path, project, gh):
-    body = forms.render(WORK, {**FIELDS, "goal": "For Quuxcorp."})
+    body = templates.render(WORK, {**FIELDS, "goal": "For Quuxcorp."})
     plan = backstop(capsys, project, "issues", event_file(tmp_path, "private", body=body),
                     "--backstop", "on")
-    assert plan["add_labels"] == ["off-form"]
+    assert plan["add_labels"] == ["off-template"]
     assert "local list" in plan["summary"] and "quux" not in plan["summary"].lower()
 
 
-def test_backstop_fails_the_run_for_an_off_form_marked_comment_and_labels_nothing(
+def test_backstop_fails_the_run_for_an_off_template_marked_comment_and_labels_nothing(
         capsys, tmp_path, project, gh):
     def comment(name: str, text: str, action: str = "created") -> dict:
         event = event_file(tmp_path, name, body=GOOD_WORK, action=action, comment=text)
@@ -952,7 +953,7 @@ def test_backstop_fails_the_run_for_an_off_form_marked_comment_and_labels_nothin
 
     plan = comment("thin-review", THIN_REVIEW, "edited")
     assert plan["failed"] is True and plan["add_labels"] == []
-    assert "the review form refuses" in plan["summary"] and "unhold" not in plan["summary"]
+    assert "the review template refuses" in plan["summary"] and "unhold" not in plan["summary"]
     for name, text in (("good-review", GOOD_REVIEW), ("unmarked", "Thanks, looks fine.")):
         plan = comment(name, text)
         assert plan["failed"] is False and plan["add_labels"] == [] and not plan["summary"]
@@ -961,13 +962,13 @@ def test_backstop_fails_the_run_for_an_off_form_marked_comment_and_labels_nothin
 def test_backstop_reads_its_switch_from_the_checkouts_se_toml(capsys, tmp_path, project, gh):
     thin = event_file(tmp_path, "thin")
     assert backstop(capsys, project, "issues", thin)["add_labels"] == []
-    (project / "se.toml").write_text(f'{IDENTITY}\n[forms]\nbackstop = "on"\n', encoding="utf-8")
-    assert backstop(capsys, project, "issues", thin)["add_labels"] == ["off-form"]
-    (project / "se.toml").write_text(f'{IDENTITY}\n[forms]\nbackstop = "maybe"\n',
+    (project / "se.toml").write_text(f'{IDENTITY}\n[templates]\nbackstop = "on"\n', encoding="utf-8")
+    assert backstop(capsys, project, "issues", thin)["add_labels"] == ["off-template"]
+    (project / "se.toml").write_text(f'{IDENTITY}\n[templates]\nbackstop = "maybe"\n',
                                      encoding="utf-8")
     code, out, _ = run(capsys, "backstop", "--event-name", "issues", "--event", str(thin),
                        "--worktree", str(project))
-    assert code == 2 and "[forms] backstop = 'maybe'" in out and str(project / "se.toml") in out
+    assert code == 2 and "[templates] backstop = 'maybe'" in out and str(project / "se.toml") in out
     (tmp_path / "broken.json").write_text("[1]", encoding="utf-8")
     code, out, _ = run(capsys, "backstop", "--event-name", "issues", "--event",
                        str(tmp_path / "broken.json"), "--worktree", str(project))

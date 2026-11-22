@@ -26,16 +26,16 @@
 # stop hook does not read, so its text goes to stderr with exit code 2, which Copilot shows the
 # person as a warning and the run goes on.
 #
-# The form gate (README "Forms"): a PreToolUse whose tool is one of SE's guarded GitHub writes
-# (GATE_TOOLS below, the table of scripts/se_forms.py's docstring) runs `se_forms.py gate` with the
+# The template gate (README "Templates"): a PreToolUse whose tool is one of SE's guarded GitHub writes
+# (GATE_TOOLS below, the table of scripts/se_templates.py's docstring) runs `se_templates.py gate` with the
 # payload, through uv without a Python download, else python3 where it is 3.11 or later; its answer,
 # a JSON deny or nothing, is the hook's whole stdout, and kern still gets the payload, its answer
 # discarded. The gate also runs for a shell call: a tool whose input holds a string `command`,
 # `input` or `script` in which `gh` stands as a word followed by a space (shelled below), so
-# `se_forms.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
-# only, so every other call costs what it did. SE_FORMS_GATE=off skips it.
-# Where the project's se.toml `[forms] files` is `write`, which SE's start leaves as the line
-# `write` in <project>/.se/.runtime/forms-files (scripts/bootstrap.sh), the gate also runs for
+# `se_templates.py gate` reads its gh writes (its docstring: The shell reader). The tests are builtins
+# only, so every other call costs what it did. SE_TEMPLATES_GATE=off skips it.
+# Where the project's se.toml `[templates] files` is `write`, which SE's start leaves as the line
+# `write` in <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), the gate also runs for
 # Claude Code's Write, Edit and MultiEdit of a file in the project and for the GitHub tools that
 # write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools); without that line
 # they cost what they did.
@@ -128,10 +128,10 @@ guarded() { # <payload> [tool ...]: the tools, GATE_TOOLS where none is given
 FILE_TOOLS=(Write Edit MultiEdit)
 GITHUB_FILE_TOOLS=(push_files create_or_update_file)
 # Whether the payload is a file tool's call the gate judges: only where the start left `write` in
-# forms-files; Claude Code's own file tools by their whole name, whose file_path lies in the
+# templates-files; Claude Code's own file tools by their whole name, whose file_path lies in the
 # project, and the GitHub file tools as guarded reads them. Builtins only.
 files_write=false
-if [ "$event" = PreToolUse ] && read -r level 2>/dev/null <"$project/.se/.runtime/forms-files" &&
+if [ "$event" = PreToolUse ] && read -r level 2>/dev/null <"$project/.se/.runtime/templates-files" &&
   [ "${level%$'\r'}" = write ]; then
   files_write=true
 fi
@@ -165,7 +165,7 @@ shelled() { # <payload>
 # The gate's answer for the payload: uv where bootstrap.sh installs it, else python3 at 3.11 or
 # later; without either it passes and says so in the project's log, as the gate itself does.
 gate() { # <payload>
-  local script="$here/se_forms.py"
+  local script="$here/se_templates.py"
   if PATH="$HOME/.local/bin:$PATH" command -v uv >/dev/null 2>&1; then
     PATH="$HOME/.local/bin:$PATH" uv run --no-project --no-python-downloads --python ">=3.11" \
       python "$script" gate 2>/dev/null <<<"$1"
@@ -174,14 +174,14 @@ gate() { # <payload>
     python3 "$script" gate 2>/dev/null <<<"$1"
   elif mkdir -p "$project/.se/.runtime" 2>/dev/null; then
     printf '%s passed unjudged: no Python 3.11 or later (uv or python3)\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" >>"$project/.se/.runtime/forms-gate.log" 2>/dev/null
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" >>"$project/.se/.runtime/templates-gate.log" 2>/dev/null
   fi
 }
 case "$event" in
 Stop | SubagentStop) ;;
 *)
   gate_off=false
-  case "${SE_FORMS_GATE:-}" in [oO][fF][fF]) gate_off=true ;; esac
+  case "${SE_TEMPLATES_GATE:-}" in [oO][fF][fF]) gate_off=true ;; esac
   if [ "$event" = PreToolUse ] && ! $gate_off &&
     { guarded "$payload" || shelled "$payload" || filed "$payload"; }; then
     said="$(gate "$payload")"

@@ -416,16 +416,16 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")
 fi
-# The file gate's switch (README "Forms"): where se.toml [forms] files is write at
-# origin/<integration branch>, the line write in <project>/.se/.runtime/forms-files, as kern.path is
+# The file gate's switch (README "Templates"): where se.toml [templates] files is write at
+# origin/<integration branch>, the line write in <project>/.se/.runtime/templates-files, as kern.path is
 # written, so se_hook.sh guards the file tools with builtins alone; removed otherwise. A switch
 # changed during a session takes effect at the next session's start.
 if $hook && ! $compact; then
   if [ -f "$project/se.toml" ]; then
-    uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_forms.py" gate \
-      --runtime "$project" >/dev/null 2>&1 || rm -f "$project/.se/.runtime/forms-files"
+    uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_templates.py" gate \
+      --runtime "$project" >/dev/null 2>&1 || rm -f "$project/.se/.runtime/templates-files"
   else
-    rm -f "$project/.se/.runtime/forms-files"
+    rm -f "$project/.se/.runtime/templates-files"
   fi
 fi
 # The core switch (README "Machine-local `~/.se/local.toml`"): SE_HOOK_CORE in the environment

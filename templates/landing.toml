@@ -1,5 +1,5 @@
 # The landing pull request `integrate` opens: the lines work_tickets.py's landing_description
-# writes. scripts/forms.py's docstring owns this file's format.
+# writes. scripts/templates.py's docstring owns this file's format.
 name = "landing"
 reader = "fleet"
 says = "A landing pull request: it names the work issue, the work pull request and its report."

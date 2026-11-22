@@ -473,8 +473,8 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
     assert start.returncode == 0
 
 
-# The file gate's filter (README "Forms"): the file tools reach se_forms.py gate only where SE's
-# start left `write` in forms-files, and only for a file in the project; the fake uv logs each run.
+# The file gate's filter (README "Templates"): the file tools reach se_templates.py gate only where SE's
+# start left `write` in templates-files, and only for a file in the project; the fake uv logs each run.
 
 def file_event(tool: str, **given) -> str:
     return json.dumps({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": tool,
@@ -483,7 +483,7 @@ def file_event(tool: str, **given) -> str:
 
 def gate_runs(home: Path) -> int:
     log = home / "fallback"
-    return log.read_text(encoding="utf-8").count("se_forms.py gate") if log.exists() else 0
+    return log.read_text(encoding="utf-8").count("se_templates.py gate") if log.exists() else 0
 
 
 def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_with_it(machine):
@@ -499,7 +499,7 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
         result = hook(home, project, "PreToolUse", event=event)
         assert result.returncode == 0 and result.stdout == ""
     assert gate_runs(home) == 0 and (home / "calls").read_text(encoding="utf-8").count("hook ") == 5
-    line = project / ".se" / ".runtime" / "forms-files"
+    line = project / ".se" / ".runtime" / "templates-files"
     line.write_text("write\n", encoding="utf-8", newline="\n")
     for event in calls:
         assert hook(home, project, "PreToolUse", event=event).returncode == 0

@@ -1,5 +1,5 @@
 # A decision note of a deck: deck.py's section rule, checked where deck.py checks it, at its
-# build. scripts/forms.py's docstring owns this file's format.
+# build. scripts/templates.py's docstring owns this file's format.
 name = "decision"
 reader = "owner"
 says = "A decision note: the situation and the problem before the options' pugh fence."
