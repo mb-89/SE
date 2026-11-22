@@ -1,5 +1,6 @@
-# The battery every kern application's CI calls (kern's README "The battery"): it sets up the Go its
-# go.mod pins and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
+# The battery every kern application's CI calls (kern's README "The battery"): it places kern at the
+# commit the application's se.lock locks (the action kern-at-pin), sets up the Go its go.mod pins
+# and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
 # as its se.toml [tests] command declares them, held to that table's one budget: over target_seconds
 # it warns, over limit_seconds or on a failed test it fails. An application calls the copy SE writes
 # into it at kern's pin (scripts/se_workflows.py, SE's README "Workflows") with
@@ -69,6 +70,13 @@ jobs:
       - name: The integrator's record of this tree is trusted
         if: needs.trust.outputs.trusted == 'true'
         run: echo "The battery did not run, as the integrator's record of this tree is trusted"
+      # kern at the commit the application's se.lock locks, which its go.mod replaces kern by: the
+      # action's copy SE writes beside this workflow's (scripts/se_workflows.py).
+      - name: kern at the pin
+        if: needs.trust.outputs.trusted != 'true'
+        uses: ./.github/actions/kern-at-pin
+        with:
+          folder: ${{ inputs.directory }}
       - if: needs.trust.outputs.trusted != 'true'
         uses: actions/setup-go@v6
         with:

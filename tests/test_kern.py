@@ -136,6 +136,9 @@ UNTRUSTED = "needs.trust.outputs.trusted != 'true'"
 KERN_AT_THE_PIN = {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}",
                    "path": ".kern-battery"}
 INTEGRATOR_PASS = "./.kern-battery/.github/actions/integrator-pass"
+# The one action that places kern, the battery's and the release's (README "Workflows").
+KERN_AT_PIN = "./.github/actions/kern-at-pin"
+ACTION = PROJECT / KERN_AT_PIN / "action.yml"
 
 
 def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
@@ -184,8 +187,14 @@ def test_the_battery_passes_on_the_integrators_record_through_kern_at_the_applic
     assert job["steps"][0] == {"uses": "actions/checkout@v7"}
     notice = step(job, "The integrator's record of this tree is trusted")
     assert notice["if"] == "needs.trust.outputs.trusted == 'true'"
-    for name in ("actions/setup-go", "astral-sh/setup-uv", "The Go code vets", "The tests, within their budget"):
+    for name in ("kern at the pin", "actions/setup-go", "astral-sh/setup-uv", "The Go code vets",
+                 "The tests, within their budget"):
         assert step(job, name)["if"] == UNTRUSTED, name
+    # kern at the commit the application's se.lock locks, before the vet builds on it.
+    kern = step(job, "kern at the pin")
+    assert kern["uses"] == KERN_AT_PIN and kern["with"] == {"folder": "${{ inputs.directory }}"}
+    order = [s.get("name") or s.get("uses") for s in job["steps"]]
+    assert order.index("actions/checkout@v7") < order.index("kern at the pin") < order.index("The Go code vets")
     # The safety net's bookkeeping, after the tests: kern's action at the pin, a full pass marked, a
     # failure's trusted records named.
     names = [s.get("name") for s in job["steps"]]
@@ -239,7 +248,7 @@ def test_the_template_keeps_trust_off_so_its_ci_runs_the_full_battery() -> None:
 
 
 def test_kerns_workflows_use_only_node_24_actions() -> None:
-    for path in (RELEASE, BATTERY):
+    for path in (RELEASE, BATTERY, ACTION):
         text = path.read_text(encoding="utf-8")
         uses = re.findall(r"uses: ([\w.-]+/[\w.-]+)@v(\d+)", text)
         assert uses, path
@@ -256,13 +265,13 @@ def test_the_release_is_reusable_built_on_every_change_and_published_only_from_m
     assert list(release["jobs"]) == ["build", "publish"], "no template job: kern's battery runs in kern's CI"
     build = release["jobs"]["build"]
     names = [s.get("name") or s.get("uses") for s in build["steps"]]
-    kern = step(build, "kern at the commit se.lock locks")
-    assert kern["if"] == "steps.kern.outputs.ref != ''"
-    assert kern["with"] == {"repository": "${{ github.repository_owner }}/kern",
-                            "ref": "${{ steps.kern.outputs.ref }}", "path": ".se/modules/kern"}
+    # kern is placed one way, by the action the battery calls too, for the checkout's se.lock.
+    kern = step(build, "kern at the pin")
+    assert kern == {"name": "kern at the pin", "uses": KERN_AT_PIN}, "the folder is the checkout's, the default"
+    assert all("se.lock" not in str(s.get("run", "")) for s in build["steps"]), "no inline lock reader"
     go = step(build, "actions/setup-go")
     assert go["with"]["go-version-file"] == "${{ inputs.directory }}/go.mod"
-    assert names.index("The kern se.lock locks") < names.index(kern["name"]) < names.index(go["uses"])
+    assert names.index("actions/checkout@v7") < names.index(kern["name"]) < names.index(go["uses"])
     plan, archives = step(build, "The release the folder names"), step(build, "Six binaries and SHA256SUMS")
     for each in (plan, archives):
         assert each["working-directory"] == "${{ inputs.directory }}", "kern's tool runs from the binary's module"
@@ -280,37 +289,68 @@ def test_the_release_is_reusable_built_on_every_change_and_published_only_from_m
     assert run.index('gh release view "$TAG"') < run.index('gh release create "$TAG"')
 
 
-def lock_check(folder: Path, lock: str | None, gomod: str) -> tuple[subprocess.CompletedProcess, str]:
-    """Run the release's step "The kern se.lock locks" in `folder` for the binary folder `app`."""
-    (folder / "app").mkdir(parents=True)
-    (folder / "app" / "go.mod").write_text(gomod, encoding="utf-8")
-    if lock is not None:
-        (folder / "se.lock").write_text(lock, encoding="utf-8")
-    output = folder / "output"
+def kern_at_pin(folder: Path, files: dict[str, str]) -> tuple[subprocess.CompletedProcess, str]:
+    """Run the action kern-at-pin's step "The kern se.lock locks" for `folder`, holding `files`."""
+    for name, text in files.items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8")
+    output = folder.parent / f"{folder.name}.output"
     output.write_text("", encoding="utf-8")
-    script = step(workflow(RELEASE)["jobs"]["build"], "The kern se.lock locks")
-    assert script["shell"] == "python3 {0}" and script["env"] == {"DIRECTORY": "${{ inputs.directory }}"}
-    result = subprocess.run([sys.executable, "-c", script["run"]], cwd=folder, capture_output=True, text=True,
-                            env={**os.environ, "DIRECTORY": "app", "GITHUB_OUTPUT": str(output)})
+    script = step(yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"], "The kern se.lock locks")
+    assert script["shell"] == "python3 {0}" and script["env"] == {"FOLDER": "${{ inputs.folder }}"}
+    result = subprocess.run([sys.executable, "-c", script["run"]], cwd=folder.parent, capture_output=True,
+                            text=True, env={**os.environ, "FOLDER": folder.name, "GITHUB_OUTPUT": str(output)})
     return result, output.read_text(encoding="utf-8")
 
 
 LOCKED = '[modules.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
 REQUIRES = "module se/components\n\nrequire (\n\tgolang.org/x/sys v0.41.0\n\tkern v{}\n)\n\nreplace kern => ../.se/modules/kern\n"
+SE_PIN = '[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n'
+APP_PIN = '[modules.kern]\nurl = "../kern.git"\ngo = true\n'
 
 
-def test_the_release_places_the_kern_se_lock_locks_and_refuses_a_lock_off_the_require(tmp_path) -> None:
-    result, output = lock_check(tmp_path / "at", LOCKED, REQUIRES.format("0.14.1"))
-    assert result.returncode == 0 and output == f"ref={'a' * 40}\n", result.stdout + result.stderr
-    result, output = lock_check(tmp_path / "off", LOCKED, REQUIRES.format("0.15.0"))
+def test_the_action_places_kern_at_the_commit_se_lock_locks_for_the_go_mod_se_toml_names(tmp_path) -> None:
+    """SE's shape (go names components/go.mod) and an application's (go = true, its own go.mod)."""
+    action = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
+    assert action["inputs"]["folder"]["default"] == "."
+    checkout = step(action["runs"], "kern at the commit se.lock locks")
+    assert checkout["if"] == "steps.lock.outputs.ref != ''"
+    assert checkout["with"] == {"repository": "${{ github.repository_owner }}/kern",
+                                "ref": "${{ steps.lock.outputs.ref }}", "path": "${{ steps.lock.outputs.path }}"}
+    for name, files in (("se", {"se.toml": SE_PIN, "se.lock": LOCKED, "components/go.mod": REQUIRES.format("0.14.1")}),
+                        ("app", {"se.toml": APP_PIN, "se.lock": LOCKED, "go.mod": REQUIRES.format("0.14.1")})):
+        result, output = kern_at_pin(tmp_path / name, files)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert output == f"ref={'a' * 40}\npath={name}/.se/modules/kern\n"
+        assert result.stdout == f"kern-at-pin: kern 0.14.1 at {'a' * 12} into {name}/.se/modules/kern\n"
+
+
+def test_the_action_refuses_a_lock_off_the_require_naming_both_lines(tmp_path) -> None:
+    result, output = kern_at_pin(tmp_path / "off", {"se.toml": SE_PIN, "se.lock": LOCKED,
+                                                    "components/go.mod": REQUIRES.format("0.15.0")})
     assert result.returncode == 1 and output == ""
-    assert ('se.lock [modules.kern] version = "0.14.1" but app/go.mod says require kern v0.15.0: run uv run '
-            "python scripts/se_modules.py sync kern and commit se.lock") in result.stdout
-    # An application's copy whose se.lock locks no kern carries kern's source and builds as before.
-    for name, lock in (("none", None), ("other", '[modules.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n')):
-        result, output = lock_check(tmp_path / name, lock, "module app\n\nrequire kern v0.0.0\n\nreplace kern => ./kern\n")
+    assert result.stdout == (
+        '::error::kern-at-pin: off/se.lock [modules.kern] version = "0.14.1" but off/components/go.mod says '
+        "require kern v0.15.0: run se_modules.py sync kern and commit se.lock\n")
+    result, _ = kern_at_pin(tmp_path / "unnamed", {"se.toml": '[modules.kern]\nurl = "../kern.git"\n', "se.lock": LOCKED})
+    assert result.returncode == 1 and "unnamed/se.toml [modules.kern] names no go" in result.stdout
+
+
+def test_the_action_leaves_a_folder_carrying_kerns_source_as_it_is(tmp_path) -> None:
+    """An application made before kern left SE: its se.lock locks no kern, its kern/ carries kern."""
+    for name, lock in (("none", {}), ("other", {"se.lock": '[modules.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n'})):
+        result, output = kern_at_pin(tmp_path / name, {"se.toml": APP_PIN, **lock, "kern/go.mod": "module kern\n",
+                                                       "go.mod": "module app\n\nrequire kern v0.0.0\n\nreplace kern => ./kern\n"})
         assert result.returncode == 0 and output == "", result.stdout + result.stderr
-        assert "se.lock locks no kern" in result.stdout
+        assert result.stdout == (f"kern-at-pin: {name}/se.lock locks no kern and {name}/kern/go.mod carries "
+                                 "kern's source; nothing is placed\n")
+
+
+def test_the_action_refuses_a_folder_with_neither_naming_the_sync(tmp_path) -> None:
+    result, output = kern_at_pin(tmp_path / "bare", {"se.toml": APP_PIN, "go.mod": "module app\n\nrequire kern v0.14.1\n"})
+    assert result.returncode == 1 and output == ""
+    assert result.stdout == ("::error::kern-at-pin: bare/se.lock locks no kern and bare/kern/go.mod does not exist: "
+                             "run se_modules.py sync kern and commit se.lock\n")
 
 
 SE_RELEASE = PROJECT / ".github" / "workflows" / "se-release.yml"
@@ -327,7 +367,7 @@ def test_se_builds_its_own_binary_through_kerns_reusable_release() -> None:
     for event in ("  pull_request:\n", "  push:\n"):
         assert event in text
     paths = ["components/**", "se.lock", "se.toml", ".github/workflows/se-release.yml",
-             ".github/workflows/kern-release.yml"]
+             ".github/workflows/kern-release.yml", ".github/actions/kern-at-pin/action.yml"]
     release = workflow(SE_RELEASE)
     for event in ("pull_request", "push"):
         assert release["on"][event]["paths"] == paths, "the binary's inputs: its folder, the kern pin, the workflows"

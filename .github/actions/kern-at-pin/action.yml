@@ -1,0 +1,59 @@
+# kern at the commit a project's se.lock locks, in <folder>/.se/modules/kern, the clone its go.mod
+# replaces kern by (SE's README "Modules"): the one way CI places kern, for the battery's vet and
+# tests and for the release's build (kern-battery.yml, kern-release.yml). It refuses a lock whose
+# version is not the one the go.mod requires that the folder's se.toml [modules.kern] go names,
+# naming both lines. An application whose se.lock locks no kern and that carries kern's source in
+# its kern/ builds from there, and nothing is placed. A project calls the copy SE writes beside the
+# workflows (SE's se_workflows.py and its README "Workflows").
+name: kern at the pin
+description: Check out kern at the commit the folder's se.lock locks into its .se/modules/kern.
+inputs:
+  folder:
+    description: The folder holding the project's se.toml, se.lock and the go.mod that requires kern.
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: The kern se.lock locks
+      id: lock
+      shell: python3 {0}
+      env:
+        FOLDER: ${{ inputs.folder }}
+      run: |
+        import os, pathlib, re, sys, tomllib
+
+        def kern(path):
+            return tomllib.loads(path.read_text(encoding="utf-8")).get("modules", {}).get("kern") if path.is_file() else None
+
+        def refuse(text):
+            print(f"::error::kern-at-pin: {text}")
+            sys.exit(1)
+
+        folder = pathlib.Path(os.environ["FOLDER"])
+        lock, manifest, carried = folder / "se.lock", folder / "se.toml", folder / "kern" / "go.mod"
+        locked = kern(lock)
+        if not locked:
+            if carried.is_file():
+                print(f"kern-at-pin: {lock.as_posix()} locks no kern and {carried.as_posix()} carries kern's source; nothing is placed")
+                sys.exit(0)
+            refuse(f"{lock.as_posix()} locks no kern and {carried.as_posix()} does not exist: run se_modules.py sync kern and commit se.lock")
+        go = (kern(manifest) or {}).get("go")
+        if go is not True and not (isinstance(go, str) and go):
+            refuse(f"{manifest.as_posix()} [modules.kern] names no go: set go = true, or the path of the go.mod that requires kern")
+        gomod = folder / "go.mod" if go is True else folder / go
+        text = gomod.read_text(encoding="utf-8") if gomod.is_file() else ""
+        required = re.search(r"(?m)^\s*(?:require\s+)?kern\s+v(\S+)", text)
+        if not required or required[1] != locked["version"]:
+            line = f"require kern v{required[1]}" if required else "no require kern"
+            refuse(f"{lock.as_posix()} [modules.kern] version = \"{locked['version']}\" but {gomod.as_posix()} says {line}: run se_modules.py sync kern and commit se.lock")
+        place = (folder / ".se" / "modules" / "kern").as_posix()
+        print(f"kern-at-pin: kern {locked['version']} at {locked['ref'][:12]} into {place}")
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            out.write(f"ref={locked['ref']}\npath={place}\n")
+    - name: kern at the commit se.lock locks
+      if: steps.lock.outputs.ref != ''
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ github.repository_owner }}/kern
+        ref: ${{ steps.lock.outputs.ref }}
+        path: ${{ steps.lock.outputs.path }}

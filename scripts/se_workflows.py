@@ -45,6 +45,7 @@ SHIPPED = (
     ".github/workflows/kern-release.yml",
     ".github/workflows/release.yml",
     ".github/actions/integrator-pass/action.yml",
+    ".github/actions/kern-at-pin/action.yml",
     ".github/actions/suite-shard/action.yml",
     ".github/actions/suite-time/action.yml",
 )

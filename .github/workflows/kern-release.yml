@@ -13,10 +13,9 @@
 #       with:
 #         directory: <the application's binary folder, e.g. components>
 #
-# SE's own se-release.yml does, for the `se` binary. Where the checkout's se.lock locks
-# [modules.kern] (README "Modules"), kern is placed at that commit in .se/modules/kern, which the
-# folder's go.mod replaces kern by; an application whose se.lock locks no kern carries kern's
-# source in its kern/ and builds from there.
+# SE's own se-release.yml does, for the `se` binary. kern is placed at the commit the checkout's
+# se.lock locks (README "Modules") in .se/modules/kern, which the folder's go.mod replaces kern by,
+# through the action kern-at-pin, as the battery places it.
 name: kern-release
 
 on:
@@ -42,35 +41,11 @@ jobs:
       binary: ${{ steps.plan.outputs.binary }}
     steps:
       - uses: actions/checkout@v7
-      # The kern se.lock locks, where it locks one: its commit, and a refusal where its version is
-      # not the one the folder's go.mod requires, naming both lines.
-      - name: The kern se.lock locks
-        id: kern
-        env:
-          DIRECTORY: ${{ inputs.directory }}
-        shell: python3 {0}
-        run: |
-          import os, pathlib, re, sys, tomllib
-          lock = pathlib.Path("se.lock")
-          kern = tomllib.loads(lock.read_text(encoding="utf-8")).get("modules", {}).get("kern") if lock.is_file() else None
-          if not kern:
-              print("kern-release: se.lock locks no kern; the folder builds on the kern it carries")
-              sys.exit(0)
-          gomod = pathlib.Path(os.environ["DIRECTORY"]) / "go.mod"
-          required = re.search(r"(?m)^\s*(?:require\s+)?kern\s+v(\S+)", gomod.read_text(encoding="utf-8"))
-          if not required or required[1] != kern["version"]:
-              line = f"require kern v{required[1]}" if required else "no require kern"
-              print(f"::error::kern-release: se.lock [modules.kern] version = \"{kern['version']}\" but {gomod} says {line}: run uv run python scripts/se_modules.py sync kern and commit se.lock")
-              sys.exit(1)
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"ref={kern['ref']}\n")
-      - name: kern at the commit se.lock locks
-        if: steps.kern.outputs.ref != ''
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ github.repository_owner }}/kern
-          ref: ${{ steps.kern.outputs.ref }}
-          path: .se/modules/kern
+      # kern at the commit the checkout's se.lock locks, which the folder's go.mod replaces kern
+      # by: the one action the battery calls too (kern-at-pin), whose copy SE writes beside this
+      # workflow's (scripts/se_workflows.py).
+      - name: kern at the pin
+        uses: ./.github/actions/kern-at-pin
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ inputs.directory }}/go.mod

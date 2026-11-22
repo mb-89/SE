@@ -8,8 +8,8 @@
 # push to main it publishes the release se-v<version> where it does not exist yet, so the push that
 # changes components/release.toml's version cuts it; a release that exists is never changed. A rerun
 # is workflow_dispatch on main. The build runs on a change to the binary's inputs: SE's Go
-# components (components/go.mod's require kern among them), se.lock, se.toml, or either release
-# workflow.
+# components (components/go.mod's require kern among them), se.lock, se.toml, either release
+# workflow, or the action that places kern (kern-at-pin).
 name: se-release
 
 on:
@@ -20,6 +20,7 @@ on:
       - "se.toml"
       - ".github/workflows/se-release.yml"
       - ".github/workflows/kern-release.yml"
+      - ".github/actions/kern-at-pin/action.yml"
   push:
     branches: [main]
     paths:
@@ -28,6 +29,7 @@ on:
       - "se.toml"
       - ".github/workflows/se-release.yml"
       - ".github/workflows/kern-release.yml"
+      - ".github/actions/kern-at-pin/action.yml"
   workflow_dispatch:
 
 permissions:
