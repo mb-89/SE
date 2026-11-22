@@ -2955,11 +2955,19 @@ def push(root: Path, branch: str | None = None) -> str | None:
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the landed commit. Returns the
-    release's tag, None where nothing is released."""
+    like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
+    `[forms] files` is `check`, a changed file a form claims that breaks it refuses the push before
+    anything else runs (claimed_files_problem). Returns the release's tag, None where nothing is
+    released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
     target = integration_branch(root)
+    try:
+        files = claimed_files_problem(root)
+    except sibling("forms").FormError as error:
+        raise QueueError(f"push: {error}") from error
+    if files is not None:
+        raise QueueError(f"push: {files}")
     landing = branch.startswith(LANDING_PREFIX)
     released = tag = (release(root, branch) if branch == target
                       else release(root, branch, f"refs/remotes/origin/{target}") if landing
@@ -3499,6 +3507,7 @@ def set_stop_count(root: Path, count: int) -> None:
     if count <= 0:
         path.unlink(missing_ok=True)
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"refused": count}) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -3510,46 +3519,78 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
             and sibling("copilot_guards").guarded(root, "refuse_stop"))
 
 
+def claimed_files_problem(root: Path) -> str | None:
+    """What se.toml `[forms] files = "check"` refuses in the checkout `root`: the lines of
+    `se_forms.py check-files --changed origin/<integration branch>`; None where the switch is off
+    or every changed claimed file passes. Errors raise."""
+    lines = sibling("se_forms").changed_refusal(root, f"origin/{integration_branch(root)}")
+    if lines is None:
+        return None
+    return ("A changed file a form claims breaks its form (se.toml [forms] files = \"check\"); "
+            "fix every finding:\n" + "\n".join(lines))
+
+
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, at most `[stop] refusals` times in a row; under Copilot only advise
-    (copilot_advises); everywhere else, and where it cannot judge, let the turn end (advice fails
-    open). `count` false judges without counting."""
+    is not delivered, or, where se.toml `[forms] files` is `check`, while a changed file a form
+    claims breaks it in any checkout it judges, at most `[stop] refusals` times in a row; under
+    Copilot only advise (copilot_advises); everywhere else, and where it cannot judge, let the turn
+    end (advice fails open). `count` false judges without counting."""
     if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
         return StopVerdict()
     root = checkout_top(path)
+    files: str | None = None
+    notes: list[str] = []
+    if root is not None:
+        try:
+            files = claimed_files_problem(root)
+        except Exception as error:  # advice fails open, whatever broke
+            notes.append(f"se Stop hook: cannot check the claimed files, so the turn may end: "
+                         f"{one_line(str(error), 300)}")
+    problem: str | None = None
     if root is None or not has_work_issue(root):
         if event.get("hook_event_name") == "SubagentStop":
-            return StopVerdict(note=(
+            notes.append(
                 "se Stop hook: cannot judge the worker sub-agent's delivery, so it may end: "
                 "neither its prompt nor its transcript names a checkout whose ticket queue is for "
-                f"a work issue, and its working directory {path} holds none"))
-        return StopVerdict()
-    try:
-        branch = current_branch(root)
-        if not branch or branch == integration_branch(root):
-            return StopVerdict()
-        problem = delivery_problem(root, branch)
-        cap = stop_refusals(root)
-    except Exception as error:  # advice fails open, whatever broke
-        return StopVerdict(note=f"se Stop hook: cannot judge the delivery, so the turn may end: "
-                                f"{one_line(str(error), 300)}")
+                f"a work issue, and its working directory {path} holds none")
+        if files is None:
+            return StopVerdict(note="; ".join(notes) or None)
+        try:
+            cap = stop_refusals(root)
+        except Exception as error:
+            return StopVerdict(note=f"se Stop hook: cannot judge the claimed files, so the turn "
+                                    f"may end: {one_line(str(error), 300)}")
+    else:
+        try:
+            branch = current_branch(root)
+            if branch and branch != integration_branch(root):
+                problem = delivery_problem(root, branch)
+            cap = stop_refusals(root)
+        except Exception as error:  # advice fails open, whatever broke
+            if files is None:
+                return StopVerdict(note=f"se Stop hook: cannot judge the delivery, so the turn may "
+                                        f"end: {one_line(str(error), 300)}")
+            problem, cap = None, STOP_REFUSALS
+    both = "\n\n".join(part for part in (problem, files) if part) or None
     if not count:
-        return StopVerdict(block=problem)
-    if problem is None:
+        return StopVerdict(block=both)
+    if both is None:
         set_stop_count(root, 0)
-        return StopVerdict()
+        return StopVerdict(note="; ".join(notes) or None)
     if copilot_advises(root, event):
         set_stop_count(root, 0)
+        said = "\n\n".join(part for part in (problem and f"undelivered: {problem}", files) if part)
         return StopVerdict(note=f"se Stop hook, advice only under Copilot ([copilot] refuse_stop = "
-                                f"true refuses): undelivered: {problem}")
+                                f"true refuses): {said}")
     refused = stop_count(root) + 1
     if refused > cap:
         set_stop_count(root, 0)
+        how = "undelivered" if problem else "with claimed files off their forms"
         return StopVerdict(note=f"se Stop hook: refused {cap} times in a row; the turn may end "
-                                f"undelivered: {one_line(problem, 300)}")
+                                f"{how}: {one_line(both, 300)}")
     set_stop_count(root, refused)
-    return StopVerdict(block=f"se Stop hook ({refused} of {cap} in a row): {problem}")
+    return StopVerdict(block=f"se Stop hook ({refused} of {cap} in a row): {both}")
 
 
 def hook_event() -> dict[str, object]:
@@ -9965,7 +10006,9 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("push", "public check's push gate, then git push -u origin <branch>; retries a "
+@command("push", "where se.toml [forms] files is check, se_forms.py check-files --changed "
+                 "origin/<integration branch> first; public check's push gate, then git push -u "
+                 "origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
@@ -10523,7 +10566,9 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "field-report --check at the branch tip, naming what is missing and the "
                        "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
                        "under Copilot it only says what is undelivered unless [copilot] "
-                       "refuse_stop is true. "
+                       "refuse_stop is true. Where se.toml [forms] files is check it also "
+                       "refuses, in any checkout, while a changed file a form claims breaks it "
+                       "(se_forms.py check-files). "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",
