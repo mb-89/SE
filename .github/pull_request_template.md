@@ -33,8 +33,9 @@ requirements they share, and why (one function changed together, or a test-only 
 ## Not delivered
 
 <!-- The delta: each unmet requirement or acceptance item, why, and exact next steps. "None" if complete.
-     A planned split names each piece left as a bullet "- **Piece <n>, <what>:** ...", which keeps
-     the work issue open at this landing. -->
+     Any partial keeps the work issue open at this landing: a planned split, which names each piece
+     left as a bullet "- **Piece <n>, <what>:** ...", until its last piece; any other until SE
+     re-scopes it. -->
 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 
