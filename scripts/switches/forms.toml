@@ -1,5 +1,6 @@
 # SE's switches, forms group: the form check of the commands that file issues (`file`,
-# `backlog file`, `route`), read from se.toml at origin's integration branch; core.toml's header
+# `backlog file`, `route`) and the form gate on writes through the GitHub tools, read from se.toml
+# at origin's integration branch; core.toml's header
 # owns the keys of a row, scripts/se_switches.py's docstring the format.
 
 [[switch]]
@@ -23,3 +24,27 @@ layers = ["se.toml"]
 key = "forms.refusals"
 help = "README.md#forms"
 note = "set: 2 unless se.toml names another count, the refusals of one issue in one session after which --hold files it labelled off-form"
+
+[[switch]]
+name = "[forms] gate"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.gate"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): GitHub writes through the GitHub tools run unchecked; warn hands the findings to the agent; refuse denies a write whose body breaks its form (scripts/se_forms.py gate)"
+
+[[switch]]
+name = "SE_FORMS_GATE"
+kind = "environment"
+reader = "scripts/se_forms.py"
+default = "on"
+layers = ["environment"]
+off = ["off"]
+other = "on"
+fold = true
+help = "README.md#machine-local-selocaltoml"
+note = "off: the form gate judges no GitHub write on this machine, whatever se.toml [forms] gate says; unset, it follows se.toml"

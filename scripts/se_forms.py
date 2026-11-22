@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """SE's side of forms: the forms engine (`forms.py`) with the checks SE's filing commands add, as
-the command component `forms` that kern's MCP door serves as its tool `forms` (README "Forms").
+the command component `forms` that kern's MCP door serves as its tool `forms` (README "Forms"),
+and the form gate SE's PreToolUse hook runs on a write through the GitHub tools.
 
-The engine stays free of SE's own scripts; this script joins it to them. Its three commands only
-read: nothing is filed, written or sent through them, and none calls GitHub or starts a model.
+The engine stays free of SE's own scripts; this script joins it to them. Its three door commands
+only read: nothing is filed, written or sent through them, and none calls GitHub or starts a
+model. The fourth, `gate`, is the hook's and not the door's; it writes only its count of refusals
+and its log.
 
 - `se_forms.py list [--tree]` prints what `forms.py list` prints: every form of SE's with its
   actions and, for an adapter, its checker.
@@ -34,14 +37,55 @@ finding as `forms.report` writes it, at most REFUSAL_LINES lines, ending with th
 the Markdown to file (the warnings then on stderr). Where no form applies to `--action`, it passes
 and says `free: no form applies (<action>)` (on stderr with `--render`, the text as given after).
 
+**The gate.** `se_forms.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
+Copilot's with `toolName` and `toolArgs`) and answers on stdout one JSON object or nothing; it
+exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), with
+`--no-python-downloads`, and the hook prints its answer as its whole stdout.
+
+- The tool table (GATE_TOOLS): the tool is the last part of the name, after `__` (Claude Code,
+  `mcp__<server>__<tool>`, a plugin's `mcp__plugin_<plugin>_<server>__<tool>`), else after `/`
+  (VS Code) or `-` (Copilot CLI); the server part, or the payload's `mcp_server.name` where it
+  carries one, holds `github`. Each tool maps to an action and to the arguments that hold its
+  body, title, labels and base; `issue_write` is `issue.create` with method `create` and
+  `issue.edit` otherwise. A call without a body passes. The repository is `owner`/`repo`.
+- Which se.toml decides: the project's (the checkout holding the payload's `cwd`) where its home
+  repositories (`forms.home_repositories`) hold the target, else that of the SE this script runs
+  from where its home holds it, else the write is free. Its `[forms] gate` (`forms.enforcement`,
+  read at `origin/<integration branch>`) is `off` (the default), `warn` or `refuse`;
+  `SE_FORMS_GATE=off` in the environment turns it off for the machine whatever se.toml says, and
+  `--gate`, for tests only, sets it for the run. The forms are SE's (`forms.load`).
+- Selection: `forms.select` for the action, with the call's labels and base. Where the call
+  carries no labels or no base, the body's own `<!-- se:form <name> -->` picks among the action's
+  forms without that filter; an unmarked body is selected as if the call had no labels. It never
+  reads GitHub.
+- The check is `check`'s: the same `filed` and `findings`, the private terms read from the
+  project's local list.
+- The answers: with `refuse` and a refused finding, a `deny` whose reason is `forms.report`'s, its
+  tail naming the forms tool (`gate=True`); with `warn` and any finding, `additionalContext` with
+  the findings; else nothing. Never an `allow`, which would skip the person's prompt.
+- The cap and the hold: each refusal is counted (`forms.count_refusal`) under `forms.target`
+  (form, repository, action, the issue's number or the title) in the payload's `session_id`. From
+  `[forms] refusals` on, the refusal offers the hold; an issue write labelled `off-form` and not
+  `ready` then passes. A private term is never held; comments and pull requests have no hold.
+- The failure rule: a payload it cannot read, or any error before it knows that the target is at
+  home and a form applies, passes and appends one line, the error and never the body, to
+  `<project>/.se/.runtime/forms-gate.log` (GATE_LOG). An error after that denies with
+  GATE_FAILED, naming the command to use instead and `SE_FORMS_GATE=off`. A run past
+  GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
+  tool call for the host's own hook timeout.
+
 Standard library only; it imports `forms` and `work_tickets` as the scripts beside it."""
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import importlib
 import json
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -51,6 +95,27 @@ NAME_RULE = "name"
 DANGLING_RULE = "dangling"
 COMMAND = "se_forms.py check"
 PASSES = "passes"
+#: The gate's bound on its own run, from its start to its answer: past it, the write passes.
+GATE_SECONDS = 10.0
+#: The gate's log of the writes it let pass without judging, under the project.
+GATE_LOG = Path(".se") / ".runtime" / "forms-gate.log"
+#: The machine's switch of the gate (README "Machine-local `~/.se/local.toml`").
+GATE_SWITCH = "SE_FORMS_GATE"
+#: The server part of a guarded tool's name holds this.
+GATE_SERVER = "github"
+#: The guarded tools: each maps to (action, body, title, labels, base), the arguments that hold
+#: them; None where the call has none. `issue_write` is `issue.create` for method `create`.
+GATE_TOOLS = {
+    "issue_write": ("issue.edit", "body", "title", "labels", None),
+    "add_issue_comment": ("comment.create", "body", None, None, None),
+    "update_issue_comment": ("comment.edit", "body", None, None, None),
+    "create_pull_request": ("pr.create", "body", "title", None, "base"),
+    "update_pull_request": ("pr.edit", "body", "title", None, "base"),
+    "pull_request_review_write": ("comment.create", "body", None, None, None),
+    "add_comment_to_pending_review": ("comment.create", "body", None, None, None),
+    "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
+}
+GATE_FAILED = "SE's form gate failed on this write ({kind}), so it was not sent"
 
 
 def sibling(name: str):
@@ -66,9 +131,9 @@ def sibling(name: str):
 COMPONENTS = (sibling("se_components").Group(
     "forms", "Forms",
     "SE's forms: list names them, draft gives a form's fields, their instructions and their shape, "
-    "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
-    "to file.",
-    ("list", "draft", "check")),)
+    "check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
+    "to file, and gate is SE's hook's judge of a write through the GitHub tools.",
+    ("list", "draft", "check", "gate")),)
 #: The commands that go through kern where it runs (se_components.routed): all three only read.
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
@@ -120,9 +185,15 @@ def make_parser() -> argparse.ArgumentParser:
     checking.add_argument("--worktree", type=Path, default=Path("."),
                           help="the project whose private terms are checked (default: .)")
     checking.add_argument("--tree", **tree)
-    for command in (listing, drafting, checking):
-        command.set_defaults(run={"list": run_list, "draft": run_draft,
-                                  "check": run_check}[command.prog.split()[-1]])
+    gating = commands.add_parser(
+        "gate", help="SE's hook: judge one GitHub write's body against its form",
+        description="Read a PreToolUse payload on stdin and answer a deny, the findings, or "
+                    "nothing (the module docstring: The gate). It exits 0.")
+    gating.add_argument("--gate", choices=sibling("forms").GATE_VALUES,
+                        help="for tests only: the switch for this run, whatever se.toml says")
+    for command in (listing, drafting, checking, gating):
+        command.set_defaults(run={"list": run_list, "draft": run_draft, "check": run_check,
+                                  "gate": run_gate}[command.prog.split()[-1]])
     return top
 
 
@@ -306,8 +377,239 @@ def run_check(options: argparse.Namespace) -> int:
     return 0
 
 
+class Write:
+    """One guarded GitHub write as the gate reads it from a payload."""
+
+    def __init__(self, payload: dict) -> None:
+        self.cwd = str(payload.get("cwd") or "")
+        self.session = str(payload.get("session_id") or payload.get("sessionId") or "")
+        name = str(payload.get("tool_name") or payload.get("toolName") or "")
+        server = payload.get("mcp_server")
+        self.tool, part = tool_parts(name)
+        if isinstance(server, dict) and server.get("name"):
+            part = str(server["name"])
+        self.guarded = self.tool in GATE_TOOLS and GATE_SERVER in part.casefold()
+        given = payload.get("tool_input")
+        if given is None and "toolArgs" in payload:
+            given = payload["toolArgs"]
+            given = json.loads(given) if isinstance(given, str) else given
+        self.input = given if isinstance(given, dict) else {}
+        action, body, title, labels, base = GATE_TOOLS.get(self.tool, ("", None, None, None, None))
+        if self.tool == "issue_write" and str(self.input.get("method") or "") == "create":
+            action = "issue.create"
+        self.action = action
+        self.body = self.text(body)
+        self.title = self.text(title)
+        self.labels = self.listed(labels)
+        self.base = self.text(base)
+        self.repo = "/".join(str(self.input.get(key) or "").strip() for key in ("owner", "repo"))
+        number = self.input.get("issue_number")
+        self.number = number if isinstance(number, int) and not isinstance(number, bool) else None
+
+    def text(self, key: str | None) -> str | None:
+        value = self.input.get(key) if key else None
+        return value if isinstance(value, str) else None
+
+    def listed(self, key: str | None) -> list[str] | None:
+        value = self.input.get(key) if key else None
+        return [str(item) for item in value] if isinstance(value, list) else None
+
+
+def tool_parts(name: str) -> tuple[str, str]:
+    """A tool's name as (tool, server part): `mcp__<server>__<tool>`, `<server>/<tool>` or
+    `<server>-<tool>`; ("", "") for any other name."""
+    if name.startswith("mcp__") and "__" in name[5:]:
+        server, tool = name[5:].rsplit("__", 1)
+        return tool, server
+    for separator in ("/", "-"):
+        if separator in name:
+            server, tool = name.rsplit(separator, 1)
+            return tool, server
+    return "", ""
+
+
+def checkout(cwd: str) -> Path | None:
+    """The git checkout holding `cwd`, None outside any."""
+    if not cwd:
+        return None
+    here = Path(cwd)
+    for folder in (here, *here.parents):
+        if (folder / ".git").exists():
+            return folder
+    return None
+
+
+class Judged(Exception):
+    """An error after the gate knows that the target is at home and a form applies."""
+
+    def __init__(self, error: BaseException, write: Write) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.write = write
+
+
+def log_line(where: Path | None, error: BaseException | str) -> None:
+    """One line in GATE_LOG of `where` (else of SE's own checkout): the error, never the body."""
+    folder = where or HERE.parent
+    if isinstance(error, BaseException):
+        first = (str(error).splitlines() or [""])[0][:200]
+        error = f"{type(error).__name__}: {first}"
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        path = folder / GATE_LOG
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as log:
+            log.write(f"{stamp} passed unjudged: {error}\n")
+    except OSError:
+        pass
+
+
+def deny(reason: str) -> str:
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                              "permissionDecision": "deny",
+                                              "permissionDecisionReason": reason}})
+
+
+def context(text: str) -> str:
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                              "additionalContext": text}})
+
+
+def deciding(write: Write, project: Path | None) -> Path | None:
+    """The checkout whose se.toml decides for `write`: the project's where its home holds the
+    target, else SE's own where its home does; None: the write is free."""
+    forms = sibling("forms")
+    roots = [project] if project is not None and (project / "se.toml").is_file() else []
+    for root in (*roots, HERE.parent):
+        if forms._at_home(write.repo, forms.home_repositories(root)):
+            return root
+    return None
+
+
+def gate_form(catalog: dict, write: Write, root: Path):
+    """The form that shapes `write` (None: free), and the refused markers selection met."""
+    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+    body = write.body or ""
+    integration = work_tickets.integration_branch(root)
+    if write.labels is None or write.base is None:
+        have = {label.casefold() for label in write.labels or ()}
+        for name in dict.fromkeys(forms.FORM_MARKER_PATTERN.findall(body)):
+            form = catalog.get(name)
+            if form is None or write.action not in form.actions:
+                continue
+            if write.labels is not None and not all(label.casefold() in have
+                                                    for label in form.labels):
+                continue
+            if write.base is not None and form.base and write.base != integration:
+                continue
+            return form, ()
+    selection = forms.select(catalog, write.action, body, write.title, labels=write.labels or (),
+                             base=write.base, integration=integration)
+    return selection.form, selection.findings
+
+
+def instead(write: Write) -> str:
+    if write.action in sibling("forms").ISSUE_ACTIONS:
+        return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
+                "ticket)")
+    return "check it with the se server's forms tool (se_forms.py check) and send it again"
+
+
+def judge(text: str, switch: str | None, seen: dict) -> str:
+    """The gate's answer for the payload `text`: a JSON object, or "" (it passes); `seen` gets
+    the project, where the log goes."""
+    forms = sibling("forms")
+    project: Path | None = None
+    try:
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("the payload is no JSON object")
+        write = Write(payload)
+        project = seen["project"] = checkout(write.cwd)
+        if not write.guarded or write.body is None or write.repo.startswith("/") \
+                or write.repo.endswith("/"):
+            return ""
+        if switch is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == forms.OFF:
+            return ""
+        root = deciding(write, project)
+        if root is None:
+            return ""
+        gate = forms.enforcement(root)
+        switch = switch or gate.gate
+        if switch == forms.OFF:
+            return ""
+        catalog = forms.load(forms.ROOT)
+        form, met = gate_form(catalog, write, root)
+        if form is None:
+            return ""
+    except Exception as error:  # it cannot judge: the write passes, and the log says why
+        log_line(project, error)
+        return ""
+    try:
+        return judged(write, form, list(met), project or root, gate, switch)
+    except Exception as error:
+        raise Judged(error, write) from error
+
+
+def judged(write: Write, form, found: list, root: Path, gate, switch: str) -> str:
+    """The answer for `write` once `form` applies: its findings judged by `switch`."""
+    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+    rendered, title = filed(form, write.body, None, write.title)
+    found += findings(form, root, write.repo, title, rendered)
+    if not found:
+        return ""
+    command = f"{write.action} in {write.repo}"
+    if switch == forms.WARN:
+        return context(forms.report(command, form, found, refused=False, gate=True).replace(
+            "([forms] enforce = warn); filed anyway", "([forms] gate = warn); sent anyway"))
+    if not any(item.severity == forms.REFUSE for item in found):
+        return ""
+    private = any(item.rule == forms.PRIVATE_RULE for item in found)
+    environ = {"SE_SESSION": write.session} if write.session else None
+    key = forms.target(form.name, write.repo, write.action, number=write.number,
+                       title=write.title or "")
+    issue = write.action in forms.ISSUE_ACTIONS
+    labels = {label.casefold() for label in write.labels or ()}
+    held = issue and work_tickets.OFF_FORM_LABEL in labels and "ready" not in labels
+    if held and not private and forms.refusals(key, environ) >= gate.refusals:
+        return ""
+    count = forms.count_refusal(key, environ)
+    offer = work_tickets.OFF_FORM_LABEL if issue and not private and count >= gate.refusals else ""
+    return deny(forms.report(command, form, found, refused=True, hold=offer, gate=True))
+
+
+def run_gate(options: argparse.Namespace) -> int:
+    """The hook's gate (the module docstring: The gate): its answer, or nothing, exit 0."""
+    started = time.monotonic()
+    answer: list[str] = []
+    seen: dict = {"project": None}
+
+    def work() -> None:
+        try:
+            answer.append(judge(sys.stdin.read(), options.gate, seen))
+        except Judged as failed:
+            kind = type(failed.error).__name__
+            answer.append(deny(f"{GATE_FAILED.format(kind=kind)}: {instead(failed.write)}; or "
+                               f"set {GATE_SWITCH}=off to send it ungated on this machine"))
+        except BaseException as error:  # never a traceback on the hook's stdout
+            answer.append("")
+            log_line(seen["project"], error)
+
+    runner = threading.Thread(target=work, daemon=True)
+    runner.start()
+    runner.join(max(0.0, GATE_SECONDS - (time.monotonic() - started)))
+    if runner.is_alive() or not answer:
+        log_line(seen["project"], f"slow: no answer within {GATE_SECONDS:g} s")
+        return 0
+    if answer[0]:
+        print(answer[0])
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
+    if args.command == "gate":
+        return args.run(args)
     words = [args.command]
     routed = sibling("se_components").routed(
         Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
