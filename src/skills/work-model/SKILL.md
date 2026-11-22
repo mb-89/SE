@@ -643,6 +643,15 @@ of the whole suite is judged against the shards times it; otherwise it is the wh
 - A worker whose change adds tests runs `work_tickets.py suite` before and after the change and
   reports both times in its field report (`**Suite time:**`); each new test that takes over 2 s is
   named there with its reason.
+- A field report names each test its branch deletes or renames under "Removed behaviour", as
+  `integrate`'s landing guard reads them. A folder that moves with its tests to another repository
+  is named once instead, `Moved: <folder> to <repository> at <commit>`, adding `as <path>` where
+  the folder lands below the destination's root.
+  - `<repository>` lies beside the checkout's origin, under the same owner; `<commit>` is a full
+    or abbreviated commit id.
+  - The guard fetches that commit and passes each deleted test the moved file holds there; one it
+    lacks, one outside the folder, and every test of a destination it cannot fetch are named by
+    name.
 - Leave the worktree alone while the complete suite runs: tests that read the checkout (the
   generated layouts, the references, the public check) would see an edit made mid-run and fail or
   pass on files the run never started with.

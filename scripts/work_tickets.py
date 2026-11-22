@@ -64,6 +64,13 @@ REMOVED_PYTHON_TEST_PATTERN = re.compile(r"^-\s*def\s+(test_[A-Za-z0-9_]+)\s*\("
 REMOVED_JAVASCRIPT_TEST_PATTERN = re.compile(
     r"""^-\s*(?:test|it)\s*\(\s*(?P<quote>["'`])(?P<name>.*?)(?P=quote)"""
 )
+# A Removed behaviour line naming a folder whose tests moved to another repository
+# (`Moved: <folder> to <repository> at <commit> [as <path>]`), checked at that commit by `guard`.
+MOVED_FOLDER_PATTERN = re.compile(
+    r"Moved:\s+(?P<folder>[^\s]+)\s+to\s+(?P<repository>[\w.-]+)\s+at\s+"
+    r"(?P<commit>[0-9a-fA-F]{4,64})\b(?:\s+as\s+(?P<path>[^\s]+?))?[.,;]?(?:\s|$)"
+)
+FULL_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 # A sentence ends at ".", "!" or "?" (and any closing quotes or brackets) followed by whitespace,
 # or at the end of its block, so a dot inside a path, file name or version never ends one.
 SENTENCE_PATTERN = re.compile(r"\S.*?(?:[.!?]+[\"')\]]*(?=\s|$)|$)")
@@ -2251,22 +2258,151 @@ def integration_ref(root: Path) -> str:
     return published_ref(root, integration_branch(root))
 
 
-def deleted_tests(root: Path, branch: str) -> list[str]:
+def test_name(line: str) -> str | None:
+    """The test a line of a diff removes (`-def test_...`, `-test("...")`), or None."""
+    python = REMOVED_PYTHON_TEST_PATTERN.match(line)
+    if python is not None:
+        return python.group(1)
+    javascript = REMOVED_JAVASCRIPT_TEST_PATTERN.match(line)
+    return javascript.group("name") if javascript is not None else None
+
+
+def deleted_test_places(root: Path, branch: str) -> list[tuple[str, str]]:
+    """Each test `branch` removes as (file it was in, name), compared with where it forked from the
+    integration branch."""
     base = integration_ref(root)
-    result = run_git(root, "diff", "--unified=0", f"{base}...{branch}")
+    result = run_git(root, "diff", "--unified=0", "--src-prefix=a/", "--dst-prefix=b/",
+                     f"{base}...{branch}")
     if result.returncode != 0:
         detail = failure_detail(result)
         raise QueueError(f"Cannot diff {base} against {branch}: {detail}")
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
+    path, header = "", False
     for line in result.stdout.splitlines():
-        python = REMOVED_PYTHON_TEST_PATTERN.match(line)
-        javascript = REMOVED_JAVASCRIPT_TEST_PATTERN.match(line)
-        name = python.group(1) if python is not None else (
-            javascript.group("name") if javascript is not None else None
-        )
-        if name is not None and name not in found:
-            found.append(name)
+        if line.startswith("diff --git "):
+            path, header = "", True
+            continue
+        if header:
+            if line.startswith("--- "):
+                old = line[4:].rstrip("\t")
+                path = old.removeprefix("a/") if old != "/dev/null" else ""
+            header = not line.startswith("@@")
+            continue
+        name = test_name(line)
+        if name is not None and (path, name) not in found:
+            found.append((path, name))
     return found
+
+
+@dataclass(frozen=True)
+class MovedFolder:
+    """A Removed behaviour line `Moved: <folder> to <repository> at <commit> [as <path>]`: the
+    folder's tests went to `<path>` (default: the root) of `<repository>`, a repository beside the
+    checkout's origin, at `<commit>`."""
+
+    folder: str
+    repository: str
+    commit: str
+    path: str
+
+    @property
+    def line(self) -> str:
+        moved = f"Moved: {self.folder} to {self.repository} at {self.commit}"
+        return moved + (f" as {self.path}" if self.path else "")
+
+    def holds(self, path: str) -> bool:
+        return path == self.folder or path.startswith(self.folder + "/")
+
+    def destination(self, path: str) -> str:
+        """`path` under the folder, rebased to its path at the destination."""
+        relative = path[len(self.folder):].lstrip("/")
+        return "/".join(part for part in (self.path, relative) if part)
+
+
+def moved_folders(lines: list[str]) -> list[MovedFolder]:
+    found: list[MovedFolder] = []
+    for line in lines:
+        match = MOVED_FOLDER_PATTERN.search(line.replace("`", ""))
+        if match is not None:
+            found.append(MovedFolder(
+                match["folder"].strip("/"), match["repository"], match["commit"],
+                (match["path"] or "").strip("/"),
+            ))
+    return found
+
+
+def fetched_destination(root: Path, moved: MovedFolder, scratch: Path) -> str:
+    """The commit `moved` names, fetched from its repository into the bare repository `scratch`:
+    by its full id, shallow, that commit only; an abbreviated id is first looked up among the
+    destination's branch and tag tips, else in its whole history. Refused where it cannot be."""
+    remedy = (
+        f"name each test the branch deletes under {moved.folder} under Removed behaviour instead, "
+        "or fix the line and deliver again"
+    )
+
+    def refused(reason: str) -> QueueError:
+        return QueueError(
+            f"Cannot check the moved-folder line {moved.line!r}: {reason}; it never passes a move "
+            f"it could not check: {remedy}"
+        )
+
+    try:
+        url = se_home.resolve_module(root, f"../{moved.repository}.git")
+    except se_home.NoHome as error:
+        raise refused(str(error)) from error
+    initialized = run_git(scratch, "init", "-q", "--bare", str(scratch))
+    if initialized.returncode != 0:
+        raise refused(f"git init failed: {failure_detail(initialized)}")
+    commit = moved.commit.lower()
+    if not FULL_COMMIT_PATTERN.fullmatch(commit):
+        tips = run_git(scratch, "ls-remote", url)
+        if tips.returncode != 0:
+            raise refused(f"{moved.repository} cannot be read: {failure_detail(tips)}")
+        matches = {line.split()[0] for line in tips.stdout.splitlines()
+                   if line.split() and line.split()[0].startswith(commit)}
+        if len(matches) == 1:
+            commit = matches.pop()
+    if FULL_COMMIT_PATTERN.fullmatch(commit):
+        fetched = run_git(scratch, "fetch", "-q", "--depth=1", url, commit)
+    else:
+        fetched = run_git(scratch, "fetch", "-q", url, "+refs/heads/*:refs/heads/*",
+                          "+refs/tags/*:refs/tags/*")
+    if fetched.returncode != 0:
+        raise refused(f"{moved.repository} at {moved.commit} cannot be fetched: "
+                      f"{failure_detail(fetched)}")
+    resolved = run_git(scratch, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        raise refused(f"{moved.repository} holds no commit {moved.commit}")
+    return resolved.stdout.strip()
+
+
+def tests_at_destination(root: Path, moved: MovedFolder,
+                         places: list[tuple[str, str]]) -> set[tuple[str, str]]:
+    """The (path, name) pairs of `places` the destination of `moved` holds: the same test, found as
+    `deleted_test_places` finds tests, in the file at the path rebased from the folder."""
+    held: set[tuple[str, str]] = set()
+    with tempfile.TemporaryDirectory(prefix="se-moved-") as directory:
+        scratch = Path(directory)
+        commit = fetched_destination(root, moved, scratch)
+        files = {
+            path for path in run_git(scratch, "ls-tree", "-r", "--name-only", commit)
+            .stdout.splitlines()
+        }
+        names: dict[str, set[str]] = {}
+        for path, name in places:
+            target = moved.destination(path)
+            if target not in names:
+                text = ""
+                if target in files:
+                    shown = run_git(scratch, "show", f"{commit}:{target}")
+                    text = shown.stdout if shown.returncode == 0 else ""
+                names[target] = {
+                    found for line in text.splitlines()
+                    if (found := test_name(f"-{line}")) is not None
+                }
+            if name in names[target]:
+                held.add((path, name))
+    return held
 
 
 # Text a generator writes into an authored file is marked once, where it is written: a block between
@@ -2436,18 +2572,39 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     removes, refused where the field report `report` does not name each under its Removed
     behaviour."""
     branch = branch_head(root, branch)
-    removed_tests = deleted_tests(root, branch)
+    places = deleted_test_places(root, branch)
+    removed_tests = list(dict.fromkeys(name for _, name in places))
     removed_sentences = deleted_authored_sentences(root, branch)
-    named = re.sub(r"\s+", " ", "\n".join(section_content(report, REMOVED_SECTION)))
+    section = section_content(report, REMOVED_SECTION)
+    named = re.sub(r"\s+", " ", "\n".join(section))
+    unnamed = [(path, name) for path, name in places if name not in named]
+    moves = moved_folders(section)
+    checked: list[str] = []
+    def owner(path: str) -> MovedFolder | None:
+        """The moved folder a deleted test's file lies in, the deepest where folders nest."""
+        holding = [moved for moved in moves if moved.holds(path)]
+        return max(holding, key=lambda moved: len(moved.folder)) if holding else None
+
+    for moved in moves:
+        under = [place for place in unnamed if owner(place[0]) == moved]
+        held = tests_at_destination(root, moved, under)
+        checked.append(moved.line)
+        unnamed = [place for place in unnamed if place not in held]
     missing = [
-        *[name for name in removed_tests if name not in named],
+        *dict.fromkeys(name for _, name in unnamed),
         *[sentence for sentence in removed_sentences if sentence not in named],
     ]
     if missing:
+        lines = (
+            f"; checked at their destination by {', '.join(repr(line) for line in checked)}, "
+            "which holds none of these under the moved path"
+            if checked else ""
+        )
         raise QueueError(
             "Field report must name each deleted or renamed test and authored sentence: "
             + ", ".join(missing) + f", each compared with where the branch forked from "
-            f"{integration_ref(root)}: name them under its Removed behaviour and deliver again"
+            f"{integration_ref(root)}{lines}: name them under its Removed behaviour and deliver "
+            "again"
         )
     return [*removed_tests, *removed_sentences]
 
