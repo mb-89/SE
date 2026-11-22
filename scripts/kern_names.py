@@ -2,7 +2,7 @@
 
 The core's standing file (`<checkout>/.se/.runtime/standing.json`, kern/README.md "The host")
 names its bus and the client user's password; each name is one `get.<name>` on that bus, through
-kern's Python SDK (`kern/python/kern`, standard library only). Where no core runs, or it does not
+kern's Python SDK (`python/kern` in the clone se.toml pins, se_modules.py `kern_dir`; standard library only). Where no core runs, or it does not
 answer within the wait, the reader answers None, and every caller falls back to its own path:
 the greeting to its cached work check, `fleet-check` to its own reads.
 
@@ -34,8 +34,10 @@ def read(root: Path | None, names: list[str], wait: float = WAIT) -> dict[str, o
         url, password = standing["bus"], standing["users"]["client"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    if str(SE_ROOT / "kern" / "python") not in sys.path:
-        sys.path.insert(0, str(SE_ROOT / "kern" / "python"))
+    from se_modules import kern_dir
+
+    if str(kern_dir(SE_ROOT) / "python") not in sys.path:
+        sys.path.insert(0, str(kern_dir(SE_ROOT) / "python"))
     try:
         from kern.nats import NatsError, Peer
         from kern.subjects import subject

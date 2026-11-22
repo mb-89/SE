@@ -21,6 +21,15 @@ import se_home
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
+#: kern, the Go core, as se.toml [modules.kern] pins it (README "Modules").
+KERN = "kern"
+
+
+def kern_dir(root: Path) -> Path:
+    """Where kern is for the checkout at `root`: its pinned clone, `<root>/.se/modules/kern`, which
+    `se_modules.py sync kern` places (its Go module, its Python SDK under `python/`)."""
+    return root / MODULES_DIR / KERN
+
 TRACKED_BRANCH = "main"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
