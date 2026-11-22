@@ -10,10 +10,11 @@ also works without a template. Today SE's guidance lives in its skills, the rule
 definitions and each project's `AGENTS.md`, and an agent reads it when it chooses to. A weak model
 skips what it may skip, so the guidance that matters must stand in the agent's way to the work.
 
-The template system that uses guidance is designed beside this one, in `docs/templates.md`. This
-note relies on one fact of it only: a template carries tags and calls "collect the guidance for
-this template". Until templates exist, SE's forms (README [Forms](../README.md#forms)) are the
-templates: each form gains its tags.
+The template system that uses guidance is designed beside this one, in
+[docs/templates.md](templates.md). This note relies on one fact of it only: a template carries
+tags and calls "collect the guidance for this template"
+([Tags and guidance](templates.md#tags-and-guidance)). Until templates exist, SE's forms
+(README [Forms](../README.md#forms)) are the templates: each form gains its tags.
 
 ## Words
 
@@ -59,7 +60,7 @@ Rerun the one test at the integration branch with `go test -count=500 -run <test
 
 ## Resolution
 
-A template carries a set of tags, as `docs/templates.md` says where. Resolution gives it its
+A template carries a set of tags in its front matter ([docs/templates.md](templates.md#tags-and-guidance)). Resolution gives it its
 notes:
 
 1. **A note reaches every template that carries all of its tags.** A note tagged `work`,
@@ -95,8 +96,9 @@ rules, not that system's code.
 
 ### The template command prints guidance first
 
-The command that hands an agent its template (the fill tool `docs/templates.md` names; until it
-exists, `se_forms.py draft` and the forms tool's `draft`) prints the template's resolved guidance
+The command that hands an agent its template (`templates.py fill` and the fill tool,
+[docs/templates.md "Fill"](templates.md#fill); until they exist, `se_forms.py draft` and the
+forms tool's `draft`) prints the template's resolved guidance
 before the template itself. The agent cannot reach the template's fields without reading past the
 guidance, so reading it is the only way to the work.
 
