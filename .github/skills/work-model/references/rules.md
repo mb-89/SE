@@ -211,7 +211,7 @@ door, and a run reads its inputs once, computes, then writes its outputs.
     rule in its CI.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
     through its own HTTP client, never `gh`); a box's take, local work and land.
-- **Related:** tst-001, des-009
+- **Related:** tst-001, des-009, des-017, des-018
 
 ### des-005 Once and only once
 
@@ -383,6 +383,52 @@ tool, with no option, no help and no service of their own.
     the pair byte-identical to se's at obs's se pin.
   - Pieces shipped on their own inside a repository: by judgment.
 - **Related:** doc-001, des-003, des-005, gen-002
+
+### des-017 Time is an I/O module
+
+No module keeps a timer or reads the system time of its own: time is an I/O module, the clock,
+whose counters a module reads to act on time.
+
+- **Why:** a timer hidden in a module is an outside thing reached past its door, so its time can
+  be neither seen in the index nor moved by a test; one clock is one place to fake it.
+- **Without it:** every module keeps its own timers, a test of time waits on the wall clock, and
+  modules act on clocks that disagree.
+- **Prevents:** a test that waits out a real interval; a module whose schedule a test cannot
+  move; a module whose idea of now differs from the others'.
+- **Implementations:**
+  - kern: the clock, `components/clock`, writes `time` and the counters `second`, `minute` and
+    `hour`, which a component reads, keeping its interval with a relay over its count; every
+    wait for an answer measures its limit against the host's clock, which a test moves itself
+    (kern's README "The host", "Time is an I/O module").
+  - kern's checks: the clock's forbid list refuses a component that reads or waits on the system
+    time ([des-018](#des-018-every-io-module-declares-its-forbid-list)), and the timers check
+    holds every file of kern to starting no timer outside the clock and the host's clock.
+  - se: its Go components under `components/`, by judgment until SE pins a kern with the clock
+    (kern 1.0.0) and a commit check runs its forbid list.
+- **Related:** des-004, des-018, tst-002
+
+### des-018 Every I/O module declares its forbid list
+
+Every I/O module declares a forbid list of what it replaces, the calls, imports, commands and
+hosts only its own code may use, and every other module that uses an entry is refused before it
+is committed.
+
+- **Why:** a module that reaches past its I/O module is hidden from the index and cannot be faked
+  in tests; a list the module declares makes [des-004](#des-004-one-door-per-outside-thing) a
+  check instead of a judgment.
+- **Without it:** a second door to an outside thing grows unnoticed, and a test that should use
+  the fake needs the real service.
+- **Prevents:** an outside call past its door; a test that needs a real service because one
+  module bypasses the fake; a door that only review holds.
+- **Implementations:**
+  - kern: `[forbids]` in a declared component's `component.toml`, `index.Forbids` in Go, refused
+    on a component without the I/O flag; the scan `kern forbids` (`<name> forbids` of an
+    application), which kern's own `go test ./...` runs over its tree (kern's README "Forbid
+    lists").
+  - se: a project runs its forbid scan before each commit as a commit check, `se.toml`
+    `[commit_checks]` ([Commit checks](../../../../README.md#commit-checks)); SE's own tree, once
+    SE pins a kern with forbid lists (kern 1.3.0) and names its scan there.
+- **Related:** des-004, des-017, tst-001, tst-004
 
 ## tst: testing and quality
 
