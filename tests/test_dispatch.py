@@ -18,6 +18,7 @@ pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 NOW = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
 REPO = "git.example/owner/repo"
+WORKFLOW = PROJECT / ".github" / "workflows" / "dispatch.yml"
 
 
 def stamp(hours_ago: float) -> str:
@@ -156,3 +157,14 @@ def test_ready_skips_issues_that_wait_on_a_person(worktree, monkeypatch, fake_gi
     monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
     assert [issue["number"] for issue in work_tickets.ready_issues(worktree, REPO)] == [1]
 
+
+def test_the_workflow_runs_dispatch_on_a_four_hourly_cron_with_no_model():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert 'cron: "' in text and "*/4 * * *" in text
+    assert "work_tickets.py dispatch" in text
+    for name in (work_tickets.DISPATCH_TRIGGER_VARIABLE, work_tickets.DISPATCH_TOKEN_VARIABLE):
+        assert f"secrets.{name}" in text
+    assert "--dry-run" in text and "--fire" in text
+    # No model: the workflow calls no Claude action and holds no host but GitHub's own.
+    assert "claude" not in text.lower() and "anthropic" not in text.lower()
+    assert "http" not in text.lower()
