@@ -850,14 +850,16 @@ class Finder:
 
 
 def missing(module: Module, path: tuple[str, ...], finding: Finding) -> str:
-    """Why a component was not found: its path from the root, the remotes read and the remedy."""
+    """Why a component was not found, as docs/components.md "Required and optional at start" shows
+    it: its path from the root, the remotes read, each with why it offered nothing (a remote that
+    could not be read with Git's message), and the remedy."""
     kind = "optional" if module.optional else "required"
     read = ", ".join(finding.read) or "none"
     release = f" with a release its pin {module.pin} admits" if module.version else ""
-    lines = [f"the {kind} component {module.name} is missing ({_arrow(path, module.name)}): no remote's "
-             f"owner offers a repository {module.name} marked as a {TOPIC}{release} (read: {read})"]
+    lines = [f"the {kind} component {module.name} is missing ({_arrow(path, module.name)}).",
+             f"No remote's owner offers a repository {module.name} marked as a {TOPIC}{release} (read: {read})."]
     lines += [f"  {reason}" for reason in finding.reasons]
-    lines.append("  Add a remote of an owner that offers it: git remote add <remote> <address>")
+    lines.append("Add a remote of an owner that offers it: git remote add <remote> <address>")
     return "\n".join(lines)
 
 
@@ -1050,9 +1052,18 @@ class Tree:
 
 def sync_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
               finder: Finder | None = None, unlock: frozenset[str] = frozenset()) -> list[str]:
-    """`sync`: resolve the tree (the root's components named in `names`, default all, and theirs),
-    check each placed one out at its release, lock what ranges and go.mod pins chose; one line each,
-    then the finder's notes and the optional components missing."""
+    """`sync`: the line of each placed component (`place_tree`), then what the run says besides."""
+    placed, said = place_tree(root, local, names, finder, unlock)
+    return [*placed, *said]
+
+
+def place_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
+               finder: Finder | None = None, unlock: frozenset[str] = frozenset()) -> tuple[list[str], list[str]]:
+    """Resolve the tree (the root's components named in `names`, default all, and theirs), check each
+    placed one out at its release, lock what ranges and go.mod pins chose: one line per placed
+    component, and what the run says besides, the finder's notes and the optional components
+    missing. A placed clone at its pin is used without asking any remote; a required component
+    missing raises `ModuleError` with `missing`'s message."""
     tree = Tree(root, local, finder, unlock)
     placed, missing_lines = tree.resolve(names)
     lines = [sync_module(item.source) + (f" (for {' -> '.join(item.path[1:])})" if len(item.path) > 1 else "")
@@ -1065,7 +1076,7 @@ def sync_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
         elif item.source.kind == "local" and name in tree.lock:
             entries[name] = tree.lock[name]  # a local checkout leaves its lock as it is
     write_lock(root, entries)
-    return [*lines, *tree.finder.notes, *missing_lines]
+    return lines, [*tree.finder.notes, *missing_lines]
 
 
 def version_report(source: Source) -> str:

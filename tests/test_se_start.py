@@ -1321,3 +1321,120 @@ def test_without_docs_url_the_greeting_names_the_docs_of_ses_home(tmp_path: Path
     assert se_start._docs_url(se_root) == "https://alice.github.io/se/"
     write(se_root / "se.toml", '[project]\nversion = "1.0.0"\ndocs_url = "https://docs.example.com/se/"\n')
     assert se_start._docs_url(se_root) == "https://docs.example.com/se/"
+
+
+# The components at the session's start (start_components, docs/components.md "Required and optional
+# at start"): the tree resolved from what is placed first, a required component missing stopping the
+# start, an optional one a line.
+
+
+@pytest.fixture
+def tree(tmp_path, isolated_git, monkeypatch):
+    """SE's checkout, origin `team/se` on a host its machine's [urls] rewrites to folders, with a fake
+    listing of origin's owner (SE_COMPONENT_LISTING=fake:) that marks no repository yet."""
+    root = fake_git.init(tmp_path / "se")
+    git(root, "remote", "add", "origin", SE_URL)
+    folders = tmp_path / "hosts"
+    local = write(tmp_path / "home" / ".se" / "local.toml",
+                  f'[urls]\n"https://git.example.org/" = "{folders.as_posix()}/"\n')
+    listing = tmp_path / "listing.json"
+
+    class Tree:
+        def __init__(self) -> None:
+            self.root, self.local, self.folders = root, local, folders
+
+        def list(self, owners: dict) -> None:
+            listing.write_text(json.dumps(owners), encoding="utf-8")
+            monkeypatch.setenv(se_modules.LISTING_VARIABLE, f"fake:{listing}")
+
+        def release(self, name: str, version: str) -> str:
+            """`team/<name>.git` with one commit, tagged `v<version>`, marked as a component."""
+            repo = folders / "team" / f"{name}.git"
+            repo.mkdir(parents=True)
+            fake_git.init(repo, "-b", "main")
+            write(repo / "version.txt", f"{version}\n")
+            git(repo, "add", "-A")
+            git(repo, "commit", "-q", "-m", f"{name} {version}")
+            git(repo, "tag", f"v{version}")
+            return git(repo, "rev-parse", "HEAD")
+
+        def components(self, text: str) -> None:
+            write(root / "se.toml", '[project]\nversion = "1.0.0"\n\n' + text)
+
+        def start(self) -> tuple[list[str], bool]:
+            return se_start.start_components(root, local)
+
+    found = Tree()
+    found.list({"git.example.org/team": []})
+    return found
+
+
+def test_a_required_component_missing_stops_the_start_naming_its_path_the_remotes_read_and_the_remedy(tree):
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    lines, stopped = tree.start()
+
+    assert stopped
+    assert lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    assert lines[1] == ("No remote's owner offers a repository obs marked as a component with a release its "
+                        "pin ^4.0 admits (read: origin).")
+    assert "  origin: git.example.org/team marks no repository obs as a component" in lines
+    assert lines[-1] == "Add a remote of an owner that offers it: git remote add <remote> <address>"
+    assert not (tree.root / se_modules.MODULES_DIR / "obs").exists(), "nothing half-placed"
+
+
+def test_a_remote_that_could_not_be_read_is_named_with_gits_message(tree, monkeypatch):
+    monkeypatch.setenv(se_modules.LISTING_VARIABLE, "off")  # the repository beside origin, read directly
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    lines, stopped = tree.start()
+
+    assert stopped and lines[0] == "SE cannot start: the required component obs is missing (se -> obs)."
+    unread = [line for line in lines if line.startswith("  origin: ")]
+    assert len(unread) == 1 and " could not be read: git ls-remote --tags " in unread[0], lines
+    assert unread[0].split(" failed in ", 1)[1].split(": ", 1)[1], "git's own message follows"
+
+
+def test_an_optional_component_missing_is_one_line_and_the_start_goes_on(tree):
+    lib = tree.release("lib", "1.0.0")
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.style]\nversion = "^1"\noptional = true\n\n[components.lib]\nversion = "^1"\n')
+
+    lines, stopped = tree.start()
+
+    assert not stopped
+    assert lines == ["optional component se -> style not found on any remote's owner"]
+    assert git(tree.root / se_modules.MODULES_DIR / "lib", "rev-parse", "HEAD") == lib
+    assert se_modules.read_lock(tree.root) == {"lib": ("1.0.0", lib)}
+
+
+def test_a_start_with_every_component_placed_at_its_locked_commit_asks_no_remote(tree, door_fake, monkeypatch):
+    tree.release("lib", "1.0.0")
+    tree.list({"git.example.org/team": ["lib"]})
+    tree.components('[components.lib]\nversion = "^1"\n')
+    assert tree.start() == ([], False)
+    assert any("ls-remote" in call for call in door_fake.calls), "the first start found lib on its remote"
+    shutil.rmtree(tree.folders)  # no remote offers anything now
+    monkeypatch.setenv(se_modules.LISTING_VARIABLE, "fake:" + (tree.folders / "gone.json").as_posix())
+    door_fake.calls.clear()
+
+    assert tree.start() == ([], False)
+
+    asked = [call for call in door_fake.calls if {"ls-remote", "fetch", "clone"} & set(call)]
+    assert asked == [], "a placed tree asks no remote"
+
+
+def test_start_components_prints_the_stop_and_exits_1(tree, capsys):
+    tree.components('[components.obs]\nversion = "^4.0"\n')
+
+    code = se_start.main(["--root", str(tree.root), "--local", str(tree.local), "start-components"])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert out.startswith("SE cannot start: the required component obs is missing (se -> obs).\n")
+
+
+def test_start_components_of_a_project_without_components_says_nothing(tmp_path, capsys):
+    write(tmp_path / "plain" / "se.toml", '[project]\nversion = "0.1.0"\n')
+    assert se_start.start_components(tmp_path / "plain", None) == ([], False)
+    assert se_start.start_components(None, None) == ([], False)
