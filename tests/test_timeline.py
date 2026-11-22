@@ -210,7 +210,7 @@ def test_the_query_names_every_field_the_snapshot_reads():
 
 def test_the_repositories_come_from_se_toml_beside_the_home():
     home = timeline.sibling("se_home").Home("example.com", "alice", "project")
-    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs"]
+    assert timeline.repositories(home=home) == ["alice/SE", "alice/obs", "alice/kern"]
 
 
 def test_a_bare_repository_takes_the_owner_of_the_config_checkout_origin(tmp_path, fake_git_door):
@@ -489,3 +489,62 @@ def test_an_ages_value_other_than_true_or_false_is_refused(tmp_path, value):
         timeline.main(["--config", config(tmp_path, value), "--destination", str(tmp_path / "t.html")],
                       post=AgesGitHub(AGES_REPOSITORIES))
     assert not (tmp_path / "t.html").exists()
+
+
+# --- kern's lane and a repository that cannot be read (work issue "timeline-shows-kern") ---
+
+
+def test_a_snapshot_of_three_repositories_shows_three_lanes_with_kerns_release(tmp_path):
+    snap = {"read_at": NOW.isoformat(), "repositories": {
+        "alice/SE": {"issues": [issue(1, "ready")], "releases": []},
+        "alice/obs": {"issues": [issue(2, "in-progress")], "releases": []},
+        "alice/kern": {"issues": [issue(3, closed="2026-11-10T09:00:00Z", state="closed")], "releases": [
+            {"tag": "v0.14.0", "url": "https://github.com/alice/kern/releases/tag/v0.14.0",
+             "published_at": "2026-11-10T12:00:00Z"}]},
+    }}
+    source, destination = tmp_path / "snapshot.json", tmp_path / "timeline.html"
+    source.write_text(json.dumps(snap), encoding="utf-8")
+    assert timeline.main(["--snapshot", str(source), "--destination", str(destination)]) == 0
+    text = destination.read_text(encoding="utf-8")
+    assert '--lanes: 3' in text
+    assert re.search(r'<div class="lanes"><span></span><span>SE</span><span>obs</span><span>kern</span></div>', text)
+    assert "releases/tag/v0.14.0" in text and ">v0.14.0<" in text
+    assert timeline.model(snap)["days"]["2026-11-10"]["alice/kern"]["releases"][0]["tag"] == "v0.14.0"
+
+
+def three_repositories_config(tmp_path):
+    config = tmp_path / "se.toml"
+    config.write_text('[timeline]\nrepositories = ["alice/SE", "alice/obs", "alice/kern"]\n', encoding="utf-8")
+    return config
+
+
+@pytest.mark.parametrize("refusal", ["refused", "no repository"])
+def test_a_repository_that_cannot_be_read_is_named_and_the_page_still_builds(tmp_path, capsys, refusal):
+    github = FakeGitHub({name: {"issues": [node(1, labels={"nodes": [{"name": "ready"}]})], "tags": []}
+                         for name in ("alice/SE", "alice/obs")})
+
+    def post(query, variables):
+        if variables["name"] != "kern":
+            return github(query, variables)
+        if refusal == "refused":
+            raise timeline.ReadError("GitHub refused the read: Could not resolve to a Repository with the name 'alice/kern'.")
+        return {"repository": None}
+
+    destination, saved = tmp_path / "t.html", tmp_path / "snap.json"
+    assert timeline.main(["--config", str(three_repositories_config(tmp_path)), "--destination", str(destination),
+                          "--save-snapshot", str(saved)], post=post) == 0
+    text = destination.read_text(encoding="utf-8")
+    assert '--lanes: 2' in text and "<span>SE</span><span>obs</span></div>" in text
+    assert re.search(r'<p class="gap">Not shown: alice/kern could not be read \(GitHub [^<]*\)\.</p>', text)
+    assert "alice/kern could not be read" in capsys.readouterr().err
+    snap = json.loads(saved.read_text(encoding="utf-8"))
+    assert list(snap["repositories"]) == ["alice/SE", "alice/obs"] and list(snap["unreadable"]) == ["alice/kern"]
+    rebuilt = tmp_path / "rebuilt.html"
+    assert timeline.main(["--snapshot", str(saved), "--destination", str(rebuilt)]) == 0
+    assert rebuilt.read_text(encoding="utf-8") == text
+
+
+def test_a_snapshot_with_every_repository_read_names_no_gap():
+    page = timeline.model(snapshot(issue(1, "ready")))
+    assert page["unreadable"] == {}
+    assert 'class="gap"' not in timeline.render(page)
