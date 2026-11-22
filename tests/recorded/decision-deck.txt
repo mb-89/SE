@@ -495,7 +495,7 @@
                       },
                       "wins": "The answered artifact is the record and outlives the session; the person sees every open decision at once.",
                       "losses": "Each deck is built and handed over with the deck command; the person needs a browser or the Claude app.",
-                      "success": "Every decision the person blesses has its answered artifact, and none is copied from a chat by hand."
+                      "success": "Every decision the person blesses has its answered artifact, and no answer is copied by hand."
                     },
                     {
                       "key": "chat",
@@ -509,7 +509,7 @@
                       },
                       "wins": "Works today with nothing to build.",
                       "losses": "The answer lives in the chat until someone copies it; one decision per turn.",
-                      "success": "Every answer given in the chat reaches the issue it decides."
+                      "success": "Every answer given in the chat is kept with the work it decides."
                     },
                     {
                       "key": "issue",
@@ -605,7 +605,7 @@
         }
       },
       "bless": {
-        "version": "767438fd36f3e4b7fb48aa212b98fa2df7f4757d6a6cfe010666ee5987df645b"
+        "version": "6c5cbf4467a34f20a238f891b834f80e0af0ffc2e18a19e60c81f00a0d2fce2c"
       }
     }
   ],
