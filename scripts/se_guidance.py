@@ -22,11 +22,10 @@ gets from the note. A note's depth is the number of folders between it and `guid
 are every folder name on that way and its own `tags`, as one set. A tag and a name are lowercase
 words of letters and digits joined by single dashes (TAG).
 
-**Templates.** Until the template notes exist, SE's TOML templates are the templates
-(docs/guidance.md): each `templates/<name>.toml` of a source, but `templates/terms.toml`, is the
-template `<name>` with the tags of its `tags` list (none where it sets none), a key
-`scripts/templates.py` accepts and never reads; a project's template replaces a module's of the
-same name.
+**Templates.** Each template note `templates/<name>.md` of a source is the template `<name>`
+with the tags of its front matter's `tags` list (none where it sets none), read as
+`scripts/templates.py` reads the note (`templates.note_data`); a project's template replaces a
+module's of the same name.
 
 **Resolution.** A template gets every note whose tags it carries all of. A tag query
 (`--tags a,b`) gets every note that carries all the asked tags, and every note at depth 0. Where a
@@ -94,7 +93,6 @@ HERE = Path(__file__).resolve().parent
 SE_ROOT = HERE.parent
 TREE = "guidance"
 TEMPLATES = "templates"
-TERMS_FILE = "terms.toml"
 #: A tag, a folder name and a note's name: lowercase words of letters and digits joined by dashes.
 TAG = re.compile(r"\A[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 #: The keys of a note's front matter: a skill's two, then the two of guidance, never a third.
@@ -340,14 +338,16 @@ def read_templates(source: Source, templates: dict[str, Template], findings: lis
     folder = source.root / TEMPLATES
     if not folder.is_dir():
         return
-    for path in sorted(folder.glob("*.toml")):
-        if path.name == TERMS_FILE:
-            continue
+    engine = sibling("templates")
+    for path in sorted(folder.glob(f"*{engine.TEMPLATE_SUFFIX}")):
         where = source.where(path.relative_to(source.root).as_posix())
         try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-            findings.append(f"{where}: not TOML ({error}); fix the template")
+            data = engine.note_data(path.read_text(encoding="utf-8"), where)
+        except UnicodeDecodeError as error:
+            findings.append(f"{where}: not UTF-8 ({error}); fix the template")
+            continue
+        except engine.TemplateError as error:
+            findings.append(f"{error}")
             continue
         tags = data.get("tags", [])
         if not isinstance(tags, list) or not all(isinstance(t, str) and TAG.match(t) for t in tags):

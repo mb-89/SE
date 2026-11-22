@@ -634,32 +634,36 @@ def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
 
 # check-files: the files a template claims (the module docstring: Claimed files).
 
-STEP_TEMPLATE = '''name = "step-risks"
-reader = "owner"
-says = "Risks: what could go wrong."
+STEP_TEMPLATE = '''---
+name: step-risks
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "Risks: what could go wrong."
+applies:
+  actions: ["file.write"]
+  paths: ["book/*/steps/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: risks
+    kind: list
+    required: true
+---
 
-[applies]
-actions = ["file.write"]
-paths = ["book/*/steps/*.md"]
+## Risks
 
-[rules]
-required = "refuse"
-
-[[fields]]
-name = "risks"
-kind = "list"
-heading = "Risks"
-required = true
-says = "One item per risk, or None."
+<!-- risks: One item per risk, or None. -->
 '''
 GOOD_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
 EMPTY_STEP = "---\ntemplate: step-risks\n---\n\n# Risks\n\n## Risks\n\n"
 
 
 def step_book(root: Path, **steps: str) -> Path:
-    """`root` with templates/step-risks.toml and one step file per keyword, book/m1/steps/<name>.md."""
+    """`root` with templates/step-risks.md and one step file per keyword, book/m1/steps/<name>.md."""
     (root / "templates").mkdir(parents=True, exist_ok=True)
-    (root / "templates" / "step-risks.toml").write_text(STEP_TEMPLATE, encoding="utf-8")
+    (root / "templates" / "step-risks.md").write_text(STEP_TEMPLATE, encoding="utf-8")
     (root / "book" / "m1" / "steps").mkdir(parents=True, exist_ok=True)
     for name, text in steps.items():
         (root / "book" / "m1" / "steps" / f"{name}.md").write_text(text, encoding="utf-8")

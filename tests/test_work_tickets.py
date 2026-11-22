@@ -2927,23 +2927,27 @@ def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeyp
 # se.toml `[templates] files = "check"`: stop-check and push refuse a changed file a template claims that
 # breaks it (README "Templates", scripts/se_templates.py check-files).
 
-NOTE_TEMPLATE = '''name = "note"
-reader = "owner"
-says = "A note: its risks."
+NOTE_TEMPLATE = '''---
+name: note
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "A note: its risks."
+applies:
+  actions: ["file.write"]
+  paths: ["notes/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: risks
+    kind: list
+    required: true
+---
 
-[applies]
-actions = ["file.write"]
-paths = ["notes/*.md"]
+## Risks
 
-[rules]
-required = "refuse"
-
-[[fields]]
-name = "risks"
-kind = "list"
-heading = "Risks"
-required = true
-says = "One item per risk, or None."
+<!-- risks: One item per risk, or None. -->
 '''
 OFF_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n"
 ON_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
@@ -2954,7 +2958,7 @@ def claimed_checkout(tmp_path: Path, monkeypatch, files: str | None, note: str) 
     an se.toml with `[templates] files` (unset where `files` is None); notes/a.md untracked."""
     root = stop_checkout(tmp_path, monkeypatch, queue=False)
     (root / "templates").mkdir()
-    (root / "templates" / "note.toml").write_text(NOTE_TEMPLATE, encoding="utf-8")
+    (root / "templates" / "note.md").write_text(NOTE_TEMPLATE, encoding="utf-8")
     (root / "se.toml").write_text(
         '[project]\nidentity = "Worker test <worker-test@example.invalid>"\n\n[templates]\n'
         + (f'files = "{files}"\n' if files else ""), encoding="utf-8")

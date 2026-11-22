@@ -5,6 +5,7 @@ order, and check refuses each thing that note refuses, each on a fixture of its 
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -44,8 +45,8 @@ def note(root: Path, path: str, name: str, *, tags: list[str] | None = None,
 def template(root: Path, name: str, tags: list[str] | None = None) -> None:
     folder = root / "templates"
     folder.mkdir(parents=True, exist_ok=True)
-    tagged = "" if tags is None else f"tags = {json.dumps(tags)}\n"
-    (folder / f"{name}.toml").write_text(f'name = "{name}"\n{tagged}', encoding="utf-8")
+    tagged = "" if tags is None else f"tags: {json.dumps(tags)}\n"
+    (folder / f"{name}.md").write_text(f"---\nname: {name}\n{tagged}---\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -224,9 +225,9 @@ REFUSALS = {
         "guidance/Work_Stuff/n.md: orphan, no template carries all its tags (Work_Stuff); fix "
         "its tags or delete it"),
     "a template whose tags are no list": (
-        lambda root: (root / "templates" / "bad.toml").write_text('name = "bad"\ntags = "work"\n',
-                                                               encoding="utf-8"),
-        "templates/bad.toml: tags is no list of tags, lowercase words joined by dashes; fix the "
+        lambda root: (root / "templates" / "bad.md").write_text("---\nname: bad\ntags: work\n---\n",
+                                                             encoding="utf-8"),
+        "templates/bad.md: tags is no list of tags, lowercase words joined by dashes; fix the "
         "template's tags"),
 }
 
@@ -248,20 +249,22 @@ def test_collect_leaves_out_a_note_that_does_not_load_and_names_it(capsys, proje
 
 
 def test_a_template_with_tags_loads_and_gets_the_notes_of_those_tags(capsys, tmp_path):
-    """SE's TOML templates are the templates: templates.py accepts `tags`, which se_guidance.py
-    reads."""
+    """SE's template notes are the templates: se_guidance.py reads their `tags` as templates.py
+    reads the note."""
     folder = tmp_path / "project" / "templates"
-    folder.mkdir(parents=True)
-    for path in (ROOT / "templates").glob("*.toml"):
-        text = path.read_text(encoding="utf-8")
-        if path.name == "work.toml":
-            text = text.replace('name = "work"\n', 'name = "work"\ntags = ["work"]\n', 1)
-        (folder / path.name).write_text(text, encoding="utf-8")
-    assert "work" in templates.load(ROOT, folder=folder)
+    shutil.copytree(ROOT / "templates", folder)
+    assert set(templates.load(ROOT, folder=folder)) == set(templates.load(ROOT, tree=True))
     root = folder.parent
     note(root, "guidance/work/w.md", "w")
     assert names(capsys, root, "--template", "work") == ["w"]
     assert names(capsys, root, "--template", "ticket") == []
+
+
+def test_a_template_note_that_does_not_load_is_a_finding(capsys, project):
+    (project / "templates" / "broken.md").write_text("name: broken\n", encoding="utf-8")
+    code, out, _ = run(capsys, "check", "--root", str(project))
+    assert (code, out) == (1, "templates/broken.md: a template opens with its front matter between "
+                              "`---` lines\n")
 
 
 def test_ses_own_tree_passes_and_its_seed_note_reaches_every_template(capsys):
