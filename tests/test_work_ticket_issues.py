@@ -14,6 +14,7 @@ from xml.etree import ElementTree
 import git_door
 import pytest
 import fake_git
+import interfaces
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -1066,14 +1067,21 @@ def test_the_integration_reads_the_report_from_the_pull_request_description(work
         call[:2] == ["issue", "create"] for call in gh.calls)
 
 
-def test_escalate_comments_through_a_body_file_and_labels(worktree, gh):
+def test_escalate_comments_through_a_body_file_labels_and_prints_the_escalation_message(
+        worktree, gh, capsys):
     run(worktree, "intake", "--issue", "5")
+    capsys.readouterr()
     question = worktree / "question.md"
-    question.write_text('Merge conflict in "table.js": which side wins?\n', encoding="utf-8")
+    question.write_text('Merge conflict in "table.js": which side wins?\n\nDecision note: '
+                        '<link>\n', encoding="utf-8")
     assert run(worktree, "escalate", "--issue", "8", "--file", str(question)) == 0
+    sent = capsys.readouterr().out.splitlines()[-1].removeprefix("Send SE: ")
+    assert sent == 'escalated #8: Merge conflict in "table.js": which side wins?'
+    assert interfaces.read("escalation", sent) == {
+        "issue": "8", "question": 'Merge conflict in "table.js": which side wins?'}
     comment, label = gh.calls[-2], gh.calls[-1]
     assert comment[:3] == ["issue", "comment", "8"] and "--body-file" in comment
-    assert gh.bodies[-1] == 'Merge conflict in "table.js": which side wins?\n'
+    assert gh.bodies[-1] == 'Merge conflict in "table.js": which side wins?\n\nDecision note: <link>\n'
     assert label == ["issue", "edit", "8", "--add-label", "escalated",
                      "--repo", "git.example/owner/repo"]
 
@@ -1409,9 +1417,11 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     assert ["-C", str(worktree), "push", "-u", "origin", BRANCH] in scripted_git.calls
     assert any(call[:2] == ["pr", "create"] for call in gh.calls)
     assert not any(call[:2] in (["issue", "create"], ["issue", "edit"]) for call in gh.calls)
-    assert f"Notify ahp-session:/integrator: field report in PR #7 for {BRANCH}" in (
-        capsys.readouterr().out
-    )
+    notice = next(line for line in capsys.readouterr().out.splitlines()
+                  if line.startswith("Notify ahp-session:/integrator: "))
+    assert notice == f"Notify ahp-session:/integrator: field report in PR #7 for {BRANCH}"
+    assert interfaces.read("delivery-notice", notice.split(": ", 1)[1]) == {
+        "pr": "7", "branch": BRANCH}
     description = gh.bodies[-1]
     assert description.startswith(f"Fixes {URL}\n\n{BEGIN}\n**Work issue:** #5")
     assert description.endswith(f"{END}\n") and "<!--" not in description.replace(

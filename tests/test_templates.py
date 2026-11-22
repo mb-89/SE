@@ -121,14 +121,17 @@ ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review"
             "overhaul", "pugh")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry")
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING)
+#: The interface templates with fields: the texts SE's sessions pass to each other.
+INTERFACES = ("delivery-notice", "escalation", "handover")
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
     assert set(catalog) == set(EVERY)
     assert all(catalog[name].actions == templates.ISSUE_ACTIONS for name in ISSUE_TEMPLATES)
     assert all(catalog[name].is_adapter for name in ADAPTERS)
-    assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING))
+    assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING, *INTERFACES))
+    assert all(catalog[name].kind == "interface" for name in INTERFACES)
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == templates.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -292,7 +295,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_fourteen_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_of_the_seventeen_templates_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -304,7 +307,7 @@ def test_each_of_the_fourteen_templates_renders_and_parses_its_example_back(cata
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 14
+    assert len(catalog) == 17
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():

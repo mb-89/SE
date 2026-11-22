@@ -1274,8 +1274,9 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
 
 def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_nothing(
         tmp_path, capsys):
-    """format writes what se_plugin.py check and docs --check refuse: the generated layouts and
-    the README's command reference, in a misformatted copy of the checkout."""
+    """format writes what se_plugin.py check, templates.py interfaces --check and docs --check
+    refuse: the generated layouts, the interfaces' schemas and the README's command reference, in
+    a misformatted copy of the checkout."""
     root = tmp_path / "se"
     shutil.copytree(PROJECT / "src", root / "src")
     shutil.copy(PROJECT / "se.toml", root)
@@ -1290,9 +1291,14 @@ def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_n
         encoding="utf-8")
     assert len(se_plugin.differences(root)) == 3
 
+    shutil.copytree(PROJECT / "templates", root / "templates")
+    shutil.copytree(PROJECT / "scripts" / "interfaces", root / "scripts" / "interfaces")
+    (root / "scripts" / "interfaces" / "escalation.json").write_text("{}\n", encoding="utf-8")
+
     assert work_tickets.main(["format", "--root", str(root)]) == 0
     output = capsys.readouterr().out
     assert "wrote skills/work-model/SKILL.md" in output
+    assert "wrote scripts/interfaces/escalation.json" in output
     assert "wrote README.md" in output
     assert se_plugin.differences(root) == []
     readme = (root / "README.md").read_text(encoding="utf-8")
