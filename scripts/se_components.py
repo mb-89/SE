@@ -43,6 +43,14 @@ routes there, the plugin's as much as the checkout's own (`serves`).
   the way is reported, never run twice.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
   kern's Python SDK and `scripts/` on the path and runs `python -m kern run components/<name>`.
+- **Discovered:** `se_components.py commands [--json] [--root DIR]` lists every command the
+  checkout's components declare, `components/<name>/` and then the ad hoc `.se/components/<name>/`,
+  each with its component, usage, summary, group and class, from each `component.toml` alone as
+  kern's reader reads it (`discovered`): it imports or runs none of their code, so it holds the
+  discovery budget however many commands there are (guidance note discover-cheap-load-late,
+  `tests/test_discovery_budget.py`). A declaration kern refuses is named on stderr, the rest are
+  listed, and the exit code is 1. `--root` defaults to the checkout of the working directory
+  (`kern_root`).
 
 Standard library only; kern's SDK is imported where it is needed, from `python/` of the pinned clone (`sdk`).
 """
@@ -322,6 +330,48 @@ def reference(declarations) -> str:
         parts.append(f"#### {group}\n\n{about}\n\n| Command | Usage | What it does |\n|---|---|---|\n"
                      + "\n".join(rows))
     return "\n\n".join(parts)
+
+
+# Discovered.
+
+#: The folders a checkout's components are declared in, tracked first, then the ad hoc ones
+#: (kern's README "The host", declared components).
+DECLARED = (Path(COMPONENTS), Path(".se") / COMPONENTS)
+
+
+def discovered(root: Path) -> tuple[list, list[str]]:
+    """Every component declared under root, in DECLARED's folders and each folder in name order,
+    read from its component.toml alone as kern reads it, and a line per declaration kern refuses.
+    Nothing of a component's code is imported or run (guidance note discover-cheap-load-late)."""
+    sdk()
+    from kern import declaration as kern_declaration
+
+    found, refused = [], []
+    for folder in DECLARED:
+        for path in sorted((root / folder).glob(f"*/{kern_declaration.FILE}")):
+            try:
+                found.append(kern_declaration.read(path))
+            except (OSError, ValueError) as error:
+                refused.append(f"{path}: {error}")
+    return found, refused
+
+
+def command_list(root: Path, as_json: bool) -> int:
+    """`commands`: print every declared command, one line each or as JSON; exit 1 where a
+    declaration was refused."""
+    found, refused = discovered(root)
+    entries = [{"command": c.name, "component": d.name, "group": c.group, "usage": c.usage,
+                "summary": c.summary, "class": c.klass}
+               for d in found for c in d.commands.values()]
+    if as_json:
+        print(json.dumps(entries, indent=2))
+    else:
+        width = max((len(e["command"]) for e in entries), default=0)
+        for e in entries:
+            print(f"{e['command']:<{width}}  {e['summary']}  ({e['component']}, {e['class']})")
+    for line in refused:
+        print(f"se_components.py commands: {line}", file=sys.stderr)
+    return 1 if refused else 0
 
 
 # Attached.
@@ -853,11 +903,22 @@ class Stepped:
 def main(argv: list[str] | None = None) -> int:
     """`se_components.py run <name>`: the process of SE's component <name>, as wiring.toml places it;
     `run-adhoc <name>` runs an ad hoc component under .se/components/<name>, as the ad hoc wiring
-    overlay places it (se_component.py)."""
+    overlay places it (se_component.py); `commands` lists every declared command (Discovered)."""
     args = sys.argv[1:] if argv is None else argv
+    if args[:1] == ["commands"]:
+        parser = argparse.ArgumentParser(prog="se_components.py commands",
+                                         description="List every command the checkout's components "
+                                                     "declare, from their declarations alone.")
+        parser.add_argument("--json", action="store_true", help="print the list as JSON")
+        parser.add_argument("--root", type=Path, help="the checkout (default: that of the working "
+                                                      "directory)")
+        options = parser.parse_args(args[1:])
+        root = options.root or kern_root(Path.cwd()) or Path.cwd()
+        return command_list(root.resolve(), options.json)
     folders = {"run": SE_ROOT / COMPONENTS, "run-adhoc": SE_ROOT / ".se" / COMPONENTS}
     if len(args) != 2 or args[0] not in folders:
-        print("usage: se_components.py (run | run-adhoc) <component>", file=sys.stderr)
+        print("usage: se_components.py (run | run-adhoc) <component> | commands [--json] "
+              "[--root DIR]", file=sys.stderr)
         return 2
     os.environ[SWITCH] = "off"  # the component runs each command directly
     sys.path.insert(0, str(Path(__file__).resolve().parent))

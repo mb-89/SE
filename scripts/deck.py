@@ -13,8 +13,9 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       `## The problem` and `## What others do`, in that order, before its fence (the decision skill's note shape), and on
       any obs warning. It writes the obs Document the deck was built from beside it, `<deck>.document.json`
       (its chapters, their versions and answers): read that, never the built page. It warns, building all
-      the same, of each option without `success` and each mark off the datum without `because` (the
-      decision skill's fence fields), naming the note and the option.
+      the same, of each option without `success`, each mark off the datum without `because` (the
+      decision skill's fence fields) and each option whose text names another option by its key or
+      short name (the decision skill: only the matrix compares them), naming the note and the option.
       It builds with obs-html's passing line after Send on for four seconds (`BRIEF_NOTICE_MILLISECONDS`,
       obs's `artifact.reading.briefNoticeMilliseconds`), set in the vault copy's cfg.json beside the
       folder's own keys (`brief_notice`); a value the folder's cfg.json sets wins, so 0 turns it off there.
@@ -207,11 +208,13 @@ def _matrices(nodes: list[dict]) -> list[dict]:
 
 
 def _warnings(chapters: list[dict]) -> list[str]:
-    """Each option without ``success`` and each mark off the datum without ``because``, the fields the decision skill asks
-    of the fence (src/skills/decision/SKILL.md), as ``<note>, option <letter>: <what is missing>``."""
+    """Each option that names another (``_cross_names``), each option without ``success`` and each mark off the datum
+    without ``because``, what the decision skill asks of the fence (src/skills/decision/SKILL.md), as
+    ``<note>, option <letter>: <what is wrong>``."""
     warnings = []
     for chapter in chapters:
         for matrix in _matrices(chapter["content"]):
+            warnings.extend(_cross_names(chapter["id"], matrix["candidates"]))
             for index, option in enumerate(matrix["candidates"]):
                 where = f"{chapter['id']}, option {chr(ord('A') + index)}"
                 if not option.get("success"):
@@ -221,6 +224,39 @@ def _warnings(chapters: list[dict]) -> list[str]:
                 warnings.extend(f"{where}: the mark on `{key}` has no `because`, its reason"
                                 for key, mark in option.get("marks", {}).items()
                                 if not (isinstance(mark, dict) and mark.get("because")))
+    return warnings
+
+
+def _cross_names(chapter: str, candidates: list[dict]) -> list[str]:
+    """Each option whose text names another option by its key or short name, as ``<note>, option <letter>: it names
+    option <letter> (`<name>`)``: deciding for one already decides against the rest, and only the matrix compares them
+    (src/skills/decision/SKILL.md). A text is the option's label, what, wins, losses, success and its marks' reasons; a
+    name is matched as a whole word in any case, and one of a single character, which reads as a word, is not."""
+    def names(option: dict) -> list[str]:
+        found = {}
+        for field in ("key", "short"):
+            name = str(option.get(field) or "").strip()
+            if len(name) > 1:
+                found.setdefault(name.casefold(), name)
+        return list(found.values())
+
+    def texts(option: dict) -> str:
+        reasons = [mark.get("because") for mark in option.get("marks", {}).values() if isinstance(mark, dict)]
+        return "\n".join(str(text) for text in [*(option.get(field) for field in ("label", "what", "wins", "losses",
+                                                                                     "success")), *reasons] if text)
+
+    warnings = []
+    for index, option in enumerate(candidates):
+        text = texts(option)
+        for other_index, other in enumerate(candidates):
+            if other_index == index:
+                continue
+            named = [name for name in names(other)
+                     if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE)]
+            if named:
+                warnings.append(f"{chapter}, option {chr(ord('A') + index)}: it names option "
+                                f"{chr(ord('A') + other_index)} ({', '.join(f'`{name}`' for name in named)}); "
+                                "an option says only what it is, the matrix compares them")
     return warnings
 
 

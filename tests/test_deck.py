@@ -90,6 +90,11 @@ DECKS = {
                          + "\n## Current situation\n\nToday.\n\n## The problem\n\nIt hurts.\n"
                          + "\n## What others do\n\nThey rule it.\n"}, None),
     "worked-example": ({"decision-deck": EXAMPLE.read_text(encoding="utf-8")}, None),
+    # Option A names B by its short name; B names itself, and the word "a", A's one-letter key, is no name.
+    "cross-named": ({"cross": NOTE % ("Cross", "a cross") + SHORT.replace(
+        "what: One way., marks: {cost: 1}, wins: Cheap.,",
+        "what: 'One way, not the short one.', marks: {cost: {mark: 1, because: less}}, wins: Cheap., success: Built.,"
+    ).replace("wins: Known.,", "wins: Known as a short way., success: Kept.,")}, None),
     # Option A names neither its success nor the reason for its mark; B, the datum, needs no reasons.
     "unargued": ({"bare": NOTE % ("Bare", "a bare") + PUGH.replace("wins: Known.,", "wins: Known., success: Kept.,")},
                  None),
@@ -332,6 +337,30 @@ def page():
         finally:
             browser.kill()
             reader.shutdown(wait=False)
+
+
+def test_build_warns_of_an_option_that_names_another(decks):
+    result, destination = decks["cross-named"]
+    assert result.returncode == 0, result.stderr
+    assert destination.exists()
+    assert result.stderr.splitlines() == [
+        "deck: warning: cross, option A: it names option B (`Short`); an option says only what it is, the matrix "
+        "compares them",
+    ]
+
+
+def test_cross_names_match_a_key_or_short_name_as_a_word_in_any_case_never_the_options_own():
+    candidates = [
+        {"key": "pooled", "short": "Pooled", "label": "Pooled by name", "what": "One pool, unlike the pact.",
+         "marks": {"cost": {"mark": 1, "because": "cheaper than AS-TODAY"}}},
+        {"key": "pact", "short": "Pact", "label": "Pact", "what": "A pooled-free pact.", "wins": "Impact."},
+        {"key": "as-today", "short": "As today", "label": "As today", "what": "Unpooled, as today."},
+    ]
+    assert deck._cross_names("note", candidates) == [
+        "note, option A: it names option B (`pact`); an option says only what it is, the matrix compares them",
+        "note, option A: it names option C (`as-today`); an option says only what it is, the matrix compares them",
+        "note, option B: it names option A (`pooled`); an option says only what it is, the matrix compares them",
+    ]
 
 
 @pytest.mark.parametrize("profile", PROFILES)
