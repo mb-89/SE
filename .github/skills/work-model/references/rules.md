@@ -667,7 +667,8 @@ written.
   host's owner.
 - **Implementations:**
   - se: the owner's rule as landed, [Neutral by construction](../SKILL.md#neutral-by-construction),
-    and its workflows, [Neutral workflows](../SKILL.md#neutral-workflows); `<se>/scripts/hygiene.py`'s
+    its workflows, [Neutral workflows](../SKILL.md#neutral-workflows), and a checkout with more
+    than one remote, [More than one remote](../SKILL.md#more-than-one-remote); `<se>/scripts/hygiene.py`'s
     check `neutral-home` ([Neutral home](../../../../AGENTS.md#neutral-home)).
 - **Related:** pub-001, pub-005, gen-001
 
