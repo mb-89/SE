@@ -89,7 +89,8 @@ project's commands and hot files by the project's `AGENTS.md`.
    - **Worker**: can be done and verified without the user → one work package per coherent change.
    - **Ticket**: belongs to another repository → file an issue there.
    - **Decision**: needs the user's judgment (keep vs. delete, naming, scope, product behaviour).
-   - **Small and blocking nothing**: one worker package; do not implement it yourself.
+   - **Small and blocking nothing**: a very small change SE makes itself, as its
+     [own changes](../../agents/se.md#boundaries) say; anything larger is one worker package.
 5. **Check file overlap** before dispatching. List the files each package will likely touch (source
    modules, design notes, test files, files in related repositories) next to the changed files of
    live foreign worktrees and the hot files the project's `AGENTS.md` lists. For every shared file:
