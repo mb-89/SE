@@ -102,7 +102,10 @@ which names its nodes' templates at their versions.
 ## Fill
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
-door's tool `templates`.
+door's tool `templates`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
+rule `quote`) and `scripts/se_templates.py` (its `fill`) own what is built. Until kern's door
+offers a tool that writes, the tool's `fill` answers the checked document and writes nothing, and
+neither files through the tracker: the agent files what it answers.
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against

@@ -2024,3 +2024,267 @@ def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]
+
+
+# Fields honest about their source (docs/templates.md "Fill"): "Not in input" and quotes
+
+
+def every_field_not_in_input(template: templates.Template) -> dict[str, object]:
+    """Every field of `template` filled with "Not in input", each in the form its kind takes."""
+    forms = {"list": ["Not in input"], "issue": ["Not in input"],
+             "checklist": [{"done": False, "text": "Not in input"}],
+             "object": [{"key": "Not in input", "value": ""}]}
+    return {item.name: forms.get(item.kind, templates.NOT_IN_INPUT) for item in template.fields}
+
+
+def test_not_in_input_passes_every_field_of_every_template_whatever_its_rules(catalog):
+    for template in catalog.values():
+        if template.is_adapter:
+            continue
+        for values in (every_field_not_in_input(template),
+                       {item.name: templates.NOT_IN_INPUT for item in template.fields}):
+            values = templates.answer(template, values)
+            title = next((values[item.name] for item in template.fields if item.source == "title"),
+                         None)
+            body = templates.render(template, values)
+            found = templates.check(template, templates.parse(template, body, title))
+            assert found == [], (template.name, found)
+            assert body.count(templates.NOT_IN_INPUT) == sum(not item.source for item in template.fields)
+
+
+def test_not_in_input_reads_back_from_a_section_of_any_kind(tmp_path):
+    write_template(tmp_path, "obj", OBJECT_TEMPLATE)
+    template = templates.load(tmp_path, tree=True)["obj"]
+    body = templates.render(template, {"meta": "Not in input."})
+    assert "## Meta\n\nNot in input.\n" in body
+    document = templates.parse(template, body)
+    assert document.fields == {"meta": "Not in input."}
+    assert templates.check(template, document) == []
+    assert templates.render(template, document) == body
+
+
+def test_a_required_field_left_empty_still_refuses_beside_not_in_input(catalog):
+    work = catalog["work"]
+    values = every_field_not_in_input(work)
+    values["goal"] = ""
+    found = templates.check(work, templates.parse(work, templates.render(work, templates.answer(work, values)),
+                                                  values["title"]))
+    assert [(item.field, item.rule) for item in found if item.severity == "refuse"] == [("goal", "required")]
+    assert "Not in input" in found[0].fix
+
+
+def test_the_schema_offers_not_in_input_among_a_choice_s_values(catalog):
+    shaped = templates.schema(catalog["work"])["properties"]["package_kind"]
+    assert templates.NOT_IN_INPUT in shaped["enum"]
+
+
+QUOTE_TEMPLATE = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "A finding: what was seen, in the reporter's words."
+applies:
+  actions: ["file.write"]
+  paths: ["findings/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: seen
+    kind: text
+    required: true
+    quote: true
+  - name: impact
+    kind: list
+    required: true
+---
+
+## Seen
+
+<!-- seen: What the reporter saw, quoted word for word: "..." or a > line. -->
+
+## Impact
+
+<!-- impact: One item per effect. -->
+"""
+
+RAW = ("Ticket from Alice, Monday:\n\nThe export stops at row 1000 and the\nfile is cut off. "
+       "It happens on every run since the update.\n")
+
+
+def quote_template(root: Path) -> templates.Template:
+    write_template(root, "finding", QUOTE_TEMPLATE.format(name="finding"))
+    return templates.load(root, folder=root / "templates")["finding"]
+
+
+def quote_findings(template: templates.Template, seen: object, raw: str | None = RAW) -> list[templates.Finding]:
+    body = templates.render(template, {"seen": seen, "impact": ["Exports are incomplete."]})
+    return [item for item in templates.check(template, templates.parse(template, body), raw=raw)
+            if item.rule == templates.QUOTE_RULE]
+
+
+@pytest.mark.parametrize("seen", [
+    'Alice reports: "The export stops at row 1000".',
+    '"stops at row 1000 and the file is cut off"',  # a line break in the input is a space
+    "The reporter wrote:\n\n> It happens on every run since the update.",
+    "“every run since the update”",
+    "Not in input",
+])
+def test_a_quote_the_raw_input_holds_word_for_word_passes(tmp_path, seen):
+    assert quote_findings(quote_template(tmp_path), seen) == []
+
+
+@pytest.mark.parametrize("seen, named", [
+    ('Alice reports: "The export stops at row 2000".', '"The export stops at row 2000"'),
+    ('"The export stops" and "the screen goes black"', '"the screen goes black"'),
+    ('"the export stops at row 1000"', '"the export stops at row 1000"'),  # case counts
+    ("> It fails on every run.", '"It fails on every run."'),
+])
+def test_an_invented_quote_is_refused_naming_it(tmp_path, seen, named):
+    found = quote_findings(quote_template(tmp_path), seen)
+    assert [(item.field, item.severity) for item in found] == [("seen", "refuse")]
+    assert named in found[0].fix and "does not hold" in found[0].fix
+
+
+def test_a_quote_field_without_a_quote_is_refused_with_or_without_the_raw_input(tmp_path):
+    template = quote_template(tmp_path)
+    for raw in (RAW, None):
+        found = quote_findings(template, "The export breaks.", raw)
+        assert [item.severity for item in found] == ["refuse"]
+        assert "quotes nothing" in found[0].fix
+    assert quote_findings(template, '"anything at all"', None) == []
+
+
+def test_a_field_s_quote_key_loads_and_shows_in_its_shape(tmp_path):
+    template = quote_template(tmp_path)
+    assert template.field("seen").quote and not template.field("impact").quote
+    assert templates.field_shape(template.field("seen"))["quote"] is True
+    assert "quote" not in templates.field_shape(template.field("impact"))
+
+
+# Fill (docs/templates.md "Fill"): one command takes template, prompt, raw input and fields
+
+
+FILLED = {"seen": 'Alice wrote: "The export stops at row 1000".', "impact": ["Exports are incomplete."]}
+
+
+def fill_project(root: Path) -> tuple[templates.Template, Path, list[str]]:
+    """The quote template in `root`'s templates/, a raw input file, and the options that read them."""
+    template = quote_template(root)
+    raw = root / "ticket.txt"
+    raw.write_text(RAW, encoding="utf-8")
+    return template, raw, ["--templates", str(root / "templates"), "--root", str(root)]
+
+
+def test_a_fill_from_a_raw_input_file_writes_a_document_that_passes_check(tmp_path, capsys):
+    template, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    code = templates.main(["fill", "finding", "--path", str(target), "--prompt", "File Alice's ticket.",
+                           "--input", str(raw), "--fields-json", json.dumps(FILLED), *where])
+    out = capsys.readouterr()
+    assert code == 0, out
+    assert out.out == "wrote findings/export.md: finding 1.0.0\n"
+    written = target.read_text(encoding="utf-8")
+    assert written == templates.render(template, FILLED)
+    assert written.startswith(f"---\n{recorded(template)}---\n")
+    assert templates.main(["check", "--path", str(target), *where]) == 0
+    assert capsys.readouterr().out == "finding: no findings\n"
+
+
+def test_a_fill_with_an_invented_quote_is_refused_and_writes_nothing(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    invented = {**FILLED, "seen": 'Alice wrote: "The export crashes the server".'}
+    code = templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(invented), *where])
+    out = capsys.readouterr().out
+    assert code == 1 and not target.exists()
+    assert 'refuse: seen [quote]: Seen quotes "The export crashes the server", which the raw input ' \
+           "does not hold" in out
+    assert out.splitlines()[-1] == "templates.py fill: nothing was written; fix every finding and fill again"
+
+
+def test_a_fill_names_every_finding_at_once(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    code = templates.main(["fill", "finding", "--path", str(tmp_path / "findings" / "x.md"),
+                           "--input-text", RAW, "--fields-json", json.dumps({"seen": "No quote."}),
+                           *where])
+    out = capsys.readouterr().out
+    assert code == 1 and "[quote]" in out and "impact [required]" in out
+
+
+def test_a_fill_takes_not_in_input_for_a_field_the_raw_input_does_not_answer(tmp_path, capsys):
+    _, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "gap.md"
+    fields = {"seen": FILLED["seen"], "impact": "Not in input"}
+    assert templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(fields), *where]) == 0
+    assert "## Impact\n\nNot in input\n" in target.read_text(encoding="utf-8")
+
+
+def test_a_fill_keeps_the_head_of_the_file_it_fills_again(tmp_path, capsys):
+    template, raw, where = fill_project(tmp_path)
+    target = tmp_path / "findings" / "export.md"
+    target.parent.mkdir()
+    target.write_text("---\nid: F1\n---\n\n# Export\n\n## Seen\n\nOld.\n", encoding="utf-8")
+    assert templates.main(["fill", "finding", "--path", str(target), "--input", str(raw),
+                           "--fields-json", json.dumps(FILLED), *where]) == 0
+    written = target.read_text(encoding="utf-8")
+    assert written.startswith(f"---\nid: F1\n{recorded(template)}---\n\n# Export\n\n## Seen\n\n")
+    assert "Old." not in written and templates.parse(template, written).fields == FILLED
+
+
+def test_a_fill_without_fields_answers_the_instructions_guidance_and_empty_draft(tmp_path, capsys):
+    template, _, where = fill_project(tmp_path)
+    (tmp_path / "guidance").mkdir()
+    (tmp_path / "guidance" / "quote-first.md").write_text(
+        "---\nname: quote-first\ndescription: 'Quote before you summarise.'\n---\n\nQuote first.\n",
+        encoding="utf-8")
+    code = templates.main(["fill", "finding", "--prompt", "File Alice's ticket.", *where])
+    answer = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert list(answer)[:5] == ["template", "prompt", "says", "rules", "guidance"]
+    assert answer["template"] == "finding" and answer["prompt"] == "File Alice's ticket."
+    assert any("Not in input" in rule for rule in answer["rules"])
+    assert any(rule.startswith("Seen: quote the raw input word for word") for rule in answer["rules"])
+    assert [note["name"] for note in answer["guidance"]] == ["quote-first"]
+    assert answer["guidance"][0]["text"] == "Quote first."
+    assert answer["draft"] == templates.draft(template)
+    assert {key: answer[key] for key in ("fields", "field_says", "field_shape", "schema")} == {
+        key: value for key, value in templates.draft_fields(template).items()
+        if key in ("fields", "field_says", "field_shape", "schema")}
+
+
+def test_a_fill_of_an_issue_template_prints_or_writes_the_markdown_to_file(tmp_path, capsys, catalog):
+    work = catalog["work"]
+    values = work_fields(catalog)
+    fields = tmp_path / "fields.json"
+    fields.write_text(json.dumps(values), encoding="utf-8")
+    raw = ["--input-text", "The person asked for one fill command.", "--tree"]
+    assert templates.main(["fill", "work", "--fields", str(fields), *raw]) == 0
+    assert capsys.readouterr().out == templates.render(work, values)
+    out = tmp_path / "issue.md"
+    assert templates.main(["fill", "work", "--fields", str(fields), "--out", str(out), *raw]) == 0
+    assert capsys.readouterr().out == f"wrote {out}: work {work.version}\n"
+    assert out.read_text(encoding="utf-8") == templates.render(work, values)
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["finding", "--fields-json", "{}"], "give the raw input"),
+    (["finding", "--input-text", "x", "--fields-json", "{}"], "writes its file: give --path"),
+    (["--path", "notes/x.md", "--input-text", "x", "--fields-json", "{}"], "no template claims notes/x.md"),
+    (["finding", "--path", "findings/x.md", "--out", "y.md", "--input-text", "x", "--fields-json", "{}"],
+     "--out"),
+    (["finding", "--path", "notes/x.md", "--input-text", "x", "--fields-json", "{}"],
+     "finding claims no path notes/x.md"),
+    (["finding", "--input", "missing.txt", "--fields-json", "{}"], "cannot read --input"),
+])
+def test_fill_usage_errors_exit_2_and_write_nothing(tmp_path, capsys, arguments, error):
+    _, _, where = fill_project(tmp_path)
+    for index, argument in enumerate(arguments):
+        if argument in ("--path", "--input", "--out"):
+            arguments[index + 1] = str(tmp_path / arguments[index + 1])
+    code = templates.main(["fill", *arguments, *where])
+    assert code == 2 and error in capsys.readouterr().err
+    assert not (tmp_path / "findings").exists() and not (tmp_path / "y.md").exists()
