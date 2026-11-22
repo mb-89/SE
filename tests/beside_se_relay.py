@@ -24,7 +24,10 @@ import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(ROOT / "kern" / "python"))
+from se_modules import kern_dir  # noqa: E402
+
+KERN = kern_dir(ROOT)  # kern at its pin (tests/conftest.py places it)
+sys.path.insert(0, str(KERN / "python"))
 
 import se_relay  # noqa: E402
 
@@ -61,7 +64,7 @@ def test_a_posttooluse_hook_lands_a_snapshot_the_relay_read_writes_to_a_file(
         tmp_path: Path, monkeypatch, shared_fake_git) -> None:
     monkeypatch.delenv(se_relay.se_components.SWITCH, raising=False)  # the suite sets SE_KERN=off
     kern = tmp_path / ("kern.exe" if os.name == "nt" else "kern")
-    built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=ROOT / "kern")
+    built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=KERN)
     assert built.returncode == 0, built.stderr
     checkout = tmp_path / "se"
     (checkout / ".git").mkdir(parents=True)
@@ -143,8 +146,9 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
     built = run("go", "build", "-o", str(kern), "./cmd/se", cwd=ROOT / "components")
     assert built.returncode == 0, built.stderr
     checkout = fake_git.init(tmp_path / "se")  # a repository: SE's origin component reads its refs
-    for part in ("components", "scripts", "kern"):
+    for part in ("components", "scripts", ".se/modules/kern"):  # kern: the clone se.toml pins
         try:
+            (checkout / part).parent.mkdir(parents=True, exist_ok=True)
             (checkout / part).symlink_to(ROOT / part, target_is_directory=True)
         except OSError as error:  # Windows without the right to make links
             pytest.skip(f"no symlink: {error}")
@@ -167,7 +171,8 @@ def test_a_streamed_command_runs_as_one_call_its_steps_through_the_relay(
         se = tmp_path / "plugin"
         shutil.copytree(ROOT / "scripts", se / "scripts",
                         ignore=shutil.ignore_patterns("__pycache__"))
-        (se / "kern").symlink_to(ROOT / "kern", target_is_directory=True)
+        (se / ".se" / "modules").mkdir(parents=True)
+        (se / ".se" / "modules" / "kern").symlink_to(KERN, target_is_directory=True)
     command = [sys.executable, str(se / "scripts" / "work_tickets.py"), "fleet-check",
                "--repo", "alice/demo", "--worktree", str(worktree)]
 
@@ -310,8 +315,9 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
     door(worker, "commit", "-q", "-m", "Add the worker file")
     door(worker, "push", "-q", "origin", "feature/worker")
     head = door(worker, "rev-parse", "HEAD")
-    for part in ("components", "scripts", "kern"):
+    for part in ("components", "scripts", ".se/modules/kern"):  # kern: the clone se.toml pins
         try:
+            (checkout / part).parent.mkdir(parents=True, exist_ok=True)
             (checkout / part).symlink_to(ROOT / part, target_is_directory=True)
         except OSError as error:  # Windows without the right to make links
             pytest.skip(f"no symlink: {error}")
