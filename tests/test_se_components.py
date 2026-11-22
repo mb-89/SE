@@ -42,7 +42,7 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
         "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add",
         "se_forms.py list", "se_forms.py draft", "se_forms.py check", "se_forms.py gate",
         "se_forms.py check-files", "se_forms.py backstop", "se_guidance.py collect",
-        "se_guidance.py check"])
+        "se_guidance.py check", "se_guidance.py project"])
     wiring = (ROOT / "wiring.toml").read_text(encoding="utf-8")
     for group in GROUPS:
         assert f'[instances.{group}]\ncomponent = "{group}"\n' in wiring

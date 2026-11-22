@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Guidance: SE reads the guidance trees of a project and of its modules, resolves them for a
-template or a set of tags, and checks them, as docs/guidance.md designs ("Notes in folders",
-"Resolution", "Guidance without a template"). It is the command component `guidance`.
+template or a set of tags, generates the tool files they implement, and checks them, as
+docs/guidance.md designs ("Notes in folders", "Resolution", "Guidance without a template",
+"Implementations and projections"). It is the command component `guidance`.
 
 **Trees.** A guidance tree is the folder `guidance/` at the root of a source: each module the
 project's se.toml declares, in its order, at its folder on this machine (se_modules.py
@@ -14,7 +15,10 @@ one `key: value` a line, the value plain, quoted (`'...'` or `"..."`) or a list 
 - `tags`, a list, optional: tags beside those its folders give;
 - `overrides`, optional: the name of the note it replaces (Resolution, below).
 
-No other key loads. A note's depth is the number of folders between it and `guidance/`; its tags
+No other key loads. Its body may carry implementations of itself for other tools, one per target:
+a fenced block whose info string is `implements <path>`, the path a file relative to the
+project's root, of a kind whose lines `#` comments (COMMENTS), and the block the text that file
+gets from the note. A note's depth is the number of folders between it and `guidance/`; its tags
 are every folder name on that way and its own `tags`, as one set. A tag and a name are lowercase
 words of letters and digits joined by single dashes (TAG).
 
@@ -29,6 +33,13 @@ overriding note prints at its own place. The notes print by depth, lowest first;
 the number of tags, fewest first; then the modules' notes before the project's, in se.toml's
 order; then by path.
 
+**Projections.** Each file the notes implement gets one generated part: a header line that says
+`se_guidance.py project` generates it from the notes it names, every implementation of that file
+in the notes' order (Resolution, below), and an end line. Where the file holds the part, the part
+is replaced; where it holds none, the part follows the file's own text; where there is no file,
+the part is the file. Nothing else of the file changes, so a project keeps its own settings beside
+the generated ones (`pyproject.toml` beside `[tool.ruff]`).
+
 **The check** refuses, each finding naming the note's file and the remedy:
 
 - a note whose front matter is missing or not `key: value` lines, or lacks `name` or
@@ -41,9 +52,14 @@ order; then by path.
   of, a module's override of a project's note, or an override in a cycle (bad override);
 - a note over a quarter of kern's page limit (`PageLimit` in kern's `mcp/page.go`, read from the
   kern clone se pins), naming its size;
-- a form whose `tags` is no list of tags.
+- a form whose `tags` is no list of tags;
+- an implementation of a path outside the project or in `guidance/`, of a file of unknown
+  comments, or a second one of one path in a note;
+- a generated file that does not match its notes, edited by hand or behind a changed note, naming
+  `se_guidance.py project`; for a `.toml` file, a projection that is no TOML.
 
-**Commands.** `collect` and `check` only read; neither writes, calls GitHub or starts a model.
+**Commands.** `collect` and `check` only read; `project` writes only the generated files. None
+calls GitHub or starts a model.
 
 - `se_guidance.py collect (--template NAME | --tags A,B) [--json] [--root ROOT]` prints the
   resolution: a line naming what was resolved and how many notes, then each note as a `##` heading
@@ -53,6 +69,9 @@ order; then by path.
   rest. A note that does not load is left out and named on stderr.
 - `se_guidance.py check [--root ROOT]` prints every finding, one a line, exit code 1, or `passes:
   <n> notes, <m> templates`, exit code 0.
+
+- `se_guidance.py project [--root ROOT]` writes each generated file that does not match its
+  notes, printing `wrote <path>` or `<path>: up to date`, exit code 0.
 
 `--root` is the project (default: the folder holding se.toml at or above the working directory,
 else the working directory). Exit code 2 is a usage or setup error, named.
@@ -83,6 +102,18 @@ KEYS = (*SKILL_KEYS, "tags", "overrides")
 PAGE_FILE = Path("mcp") / "page.go"
 PAGE_LIMIT = re.compile(r"^const PageLimit = (\d+)$", re.MULTILINE)
 CHECK = "se_guidance.py check"
+PROJECT = "se_guidance.py project"
+#: A fence that opens a note's implementation: ```implements <path>.
+IMPLEMENTS = re.compile(r"\A(`{3,}|~{3,})implements[ \t]+(\S+)[ \t]*\Z")
+FENCE = re.compile(r"\A(`{3,}|~{3,})")
+#: The comment that starts a line in the files a projection may write, by suffix or by name.
+COMMENTS = {**dict.fromkeys((".toml", ".yaml", ".yml", ".cfg", ".ini", ".conf", ".sh", ".py",
+                             ".properties"), "#"),
+            **dict.fromkeys((".gitignore", ".gitattributes", ".editorconfig", "Makefile",
+                             "Dockerfile"), "#")}
+BEGIN = "{comment} Generated by `se_guidance.py project` from the guidance notes {names}; edit them, never this part."
+BEGIN_START = "{comment} Generated by `se_guidance.py project` "
+END = "{comment} End of what `se_guidance.py project` generates."
 
 
 def sibling(name: str):
@@ -121,6 +152,8 @@ class Note:
     source: Source
     size: int
     body: str
+    #: Its implementations, each a project-relative path and the text the note gives that file.
+    implementations: tuple[tuple[str, str], ...] = ()
 
     @property
     def depth(self) -> int:
@@ -148,6 +181,7 @@ class Loaded:
     notes: list[Note]
     templates: dict[str, Template]
     findings: list[str]
+    root: Path
 
 
 # Reading.
@@ -207,6 +241,46 @@ def tag_list(value: str) -> list[str] | None:
     return [scalar(item) for item in inner.split(",")] if inner else []
 
 
+def comment_of(path: str) -> str | None:
+    name = Path(path).name
+    return COMMENTS.get(name) or COMMENTS.get(Path(path).suffix)
+
+
+def implementations(body: str, where: str, findings: list[str]) -> tuple[tuple[str, str], ...]:
+    """The note's ```implements <path> blocks, one per path, each checked; a fence of the same
+    character and at least its length closes one."""
+    found: dict[str, str] = {}
+    lines, index = body.splitlines(keepends=True), 0
+    while index < len(lines):
+        opening = FENCE.match(lines[index].strip())
+        if not opening:
+            index += 1
+            continue
+        fence, implements = opening[1], IMPLEMENTS.match(lines[index].strip())
+        end = index + 1
+        while end < len(lines) and not (lines[end].strip().startswith(fence[0] * len(fence))
+                                        and not lines[end].strip().strip(fence[0])):
+            end += 1
+        if implements:
+            target, text = implements[2], "".join(lines[index + 1:end])
+            posix = Path(target).as_posix()
+            if Path(target).is_absolute() or ".." in Path(target).parts or posix.startswith(
+                    f"{TREE}/"):
+                findings.append(f"{where}: implements {target!r}, no path inside the project; "
+                                "name a file relative to the project's root")
+            elif comment_of(posix) is None:
+                findings.append(f"{where}: implements {posix}, a file whose comment syntax "
+                                "se_guidance.py does not know, so it cannot say it is generated; "
+                                "use a file of #-comments")
+            elif posix in found:
+                findings.append(f"{where}: implements {posix} twice; one implementation per "
+                                "target")
+            else:
+                found[posix] = text if not text or text.endswith("\n") else text + "\n"
+        index = end + 1
+    return tuple(found.items())
+
+
 def read_note(source: Source, path: Path, findings: list[str]) -> Note | None:
     relative = path.relative_to(source.root).as_posix()
     where = source.where(relative)
@@ -251,10 +325,12 @@ def read_note(source: Source, path: Path, findings: list[str]) -> Note | None:
         if not TAG.match(tag):
             findings.append(f"{where}: tag {tag!r} is no lowercase words joined by dashes; "
                             "respell it")
+    implemented = implementations(body, where, findings)
     if not loads:
         return None
     return Note(name, scalar(keys["description"]), frozenset((*folders, *own)), folders,
-                tuple(own), scalar(keys.get("overrides", "")), relative, source, len(data), body)
+                tuple(own), scalar(keys.get("overrides", "")), relative, source, len(data), body,
+                implemented)
 
 
 def read_templates(source: Source, templates: dict[str, Template], findings: list[str]) -> None:
@@ -293,7 +369,7 @@ def load(root: Path) -> Loaded:
                     if note is not None:
                         notes.append(note)
         read_templates(source, templates, findings)
-    return Loaded(sorted(notes, key=Note.order), templates, findings)
+    return Loaded(sorted(notes, key=Note.order), templates, findings, root)
 
 
 # Resolution.
@@ -310,6 +386,71 @@ def for_template(notes: list[Note], template: Template) -> list[Note]:
 
 def for_tags(notes: list[Note], tags: frozenset[str]) -> list[Note]:
     return resolved([note for note in notes if tags <= note.tags or note.depth == 0])
+
+
+# Projections.
+
+@dataclass(frozen=True)
+class Projection:
+    """One tool file the notes implement: its path in the project and the part they generate."""
+
+    path: str
+    names: tuple[str, ...]
+    part: str
+
+    def applied(self, current: str | None) -> str:
+        """The file's text with the generated part in place: replacing the part it holds, after
+        the file's own text where it holds none, or alone where there is no file."""
+        comment = comment_of(self.path)
+        lines = (current or "").splitlines(keepends=True)
+        start = BEGIN_START.format(comment=comment)
+        end_line = END.format(comment=comment)
+        begin = next((i for i, line in enumerate(lines) if line.startswith(start)), None)
+        if begin is not None:
+            end = next((i for i in range(begin, len(lines)) if lines[i].rstrip("\r\n") == end_line),
+                       len(lines) - 1)
+            return "".join([*lines[:begin], self.part, *lines[end + 1:]])
+        own = (current or "").rstrip("\n")
+        return f"{own}\n\n{self.part}" if own else self.part
+
+
+def projections(notes: list[Note]) -> list[Projection]:
+    """Each file the notes implement, its part every implementation of it in the notes' order."""
+    by_path: dict[str, list[tuple[str, str]]] = {}
+    for note in notes:
+        for path, text in note.implementations:
+            by_path.setdefault(path, []).append((note.name, text))
+    found = []
+    for path, parts in sorted(by_path.items()):
+        comment, names = comment_of(path), tuple(sorted(name for name, _ in parts))
+        part = "".join([BEGIN.format(comment=comment, names=", ".join(names)) + "\n",
+                        *(text for _, text in parts), END.format(comment=comment) + "\n"])
+        found.append(Projection(path, names, part))
+    return found
+
+
+def current_text(root: Path, path: str) -> str | None:
+    file = root / path
+    return file.read_text(encoding="utf-8") if file.is_file() else None
+
+
+def projection_findings(loaded: Loaded) -> list[str]:
+    findings = []
+    for projection in projections(loaded.notes):
+        current = current_text(loaded.root, projection.path)
+        expected = projection.applied(current)
+        if projection.path.endswith(".toml"):
+            try:
+                tomllib.loads(expected)
+            except tomllib.TOMLDecodeError as error:
+                findings.append(f"{projection.path}: its projection is not TOML ({error}); fix "
+                                f"the implementations of {', '.join(projection.names)}")
+                continue
+        if current != expected:
+            findings.append(f"{projection.path}: does not match its notes "
+                            f"({', '.join(projection.names)}); run `{PROJECT}`, never edit it "
+                            "by hand")
+    return findings
 
 
 # The check.
@@ -370,7 +511,7 @@ def check(loaded: Loaded, limit: int) -> list[str]:
                     break
                 chain.append(current.overrides)
                 current = by_name.get(current.overrides)
-    return findings
+    return findings + projection_findings(loaded)
 
 
 # Commands.
@@ -446,14 +587,31 @@ def run_check(options: argparse.Namespace) -> int:
     return 0
 
 
+def run_project(options: argparse.Namespace) -> int:
+    loaded = load(project_root(options.root))
+    for finding in loaded.findings:
+        print(f"left out: {finding} ({CHECK})", file=sys.stderr)
+    for projection in projections(loaded.notes):
+        current = current_text(loaded.root, projection.path)
+        expected = projection.applied(current)
+        if current == expected:
+            print(f"{projection.path}: up to date")
+            continue
+        file = loaded.root / projection.path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(expected, encoding="utf-8", newline="\n")
+        print(f"wrote {projection.path}")
+    return 0
+
+
 #: se_guidance.py's commands as one kern component (README "Commands as components"); each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "guidance", "Guidance",
     "SE's guidance: collect resolves the guidance trees of the project and its modules for a "
-    "template or a set of tags, general before specific, and check finds what docs/guidance.md "
-    "refuses in them.",
-    ("collect", "check")),)
+    "template or a set of tags, general before specific; project writes the tool files the notes "
+    "implement; and check finds what docs/guidance.md refuses in them.",
+    ("collect", "check", "project")),)
 #: The commands that go through kern where it runs (se_components.routed): both only read.
 INTERACTIVE_COMMANDS = frozenset({"collect", "check"})
 
@@ -478,8 +636,14 @@ def make_parser() -> argparse.ArgumentParser:
         description="Check every note of the trees: front matter, keys, names, tags, orphans, "
                     "overrides and size. It exits 1 on a finding.")
     checking.add_argument("--root", **root)
+    projecting = commands.add_parser(
+        "project", help="write each tool file the notes implement, its generated part from them",
+        description="Write the part of each file the notes' ```implements <path> blocks give, "
+                    "in the notes' order, under a header that says it is generated.")
+    projecting.add_argument("--root", **root)
     collecting.set_defaults(run=run_collect)
     checking.set_defaults(run=run_check)
+    projecting.set_defaults(run=run_project)
     return top
 
 
