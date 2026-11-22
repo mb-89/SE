@@ -425,10 +425,10 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")
 fi
-# The file gate's switch (README "Templates"): where se.toml [templates] files is write at
-# origin/<integration branch>, the line write in <project>/.se/.runtime/templates-files, as kern.path is
-# written, so se_hook.sh guards the file tools with builtins alone; removed otherwise. A switch
-# changed during a session takes effect at the next session's start.
+# The file gate's line (README "Templates"): where a template claims a path, the line claimed in
+# <project>/.se/.runtime/templates-files, as kern.path is written, so se_hook.sh guards the file
+# tools with builtins alone; removed otherwise. A template added during a session is guarded from
+# the next session's start.
 if $hook && ! $compact; then
   if [ -f "$project/se.toml" ]; then
     uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_templates.py" gate \

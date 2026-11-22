@@ -1,7 +1,7 @@
 # SE's switches, templates group: the template check of the commands that file issues (`file`,
-# `backlog file`, `route`), the template gate on writes through the GitHub tools and the check of the
-# files a template claims, read from se.toml at origin's integration branch; core.toml's header owns
-# the keys of a row, scripts/se_switches.py's docstring the format.
+# `backlog file`, `route`) and the template gate on writes through the GitHub tools, read from se.toml
+# at origin's integration branch; core.toml's header owns the keys of a row, scripts/se_switches.py's
+# docstring the format.
 
 [[switch]]
 name = "[templates] enforce"
@@ -38,18 +38,6 @@ help = "README.md#templates"
 note = "off (or unset): GitHub writes through the GitHub tools run unchecked; warn hands the findings to the agent; refuse denies a write whose body breaks its template (scripts/se_templates.py gate)"
 
 [[switch]]
-name = "[templates] files"
-kind = "se.toml"
-reader = "scripts/templates.py"
-default = "off"
-layers = ["se.toml"]
-key = "templates.files"
-off = ["off"]
-other = "on"
-help = "README.md#templates"
-note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a template claims that breaks it (scripts/se_templates.py check-files); write: as check, and the template gate also denies a Write, Edit or MultiEdit, or a GitHub file write, whose result breaks the claiming template (scripts/se_templates.py gate)"
-
-[[switch]]
 name = "[templates] backstop"
 kind = "se.toml"
 reader = "scripts/se_templates.py"
@@ -71,4 +59,4 @@ off = ["off"]
 other = "on"
 fold = true
 help = "README.md#machine-local-selocaltoml"
-note = "off: the template gate judges no GitHub write on this machine, whatever se.toml [templates] gate says; unset, it follows se.toml"
+note = "off: the template gate judges no GitHub write and no write of a claimed file on this machine, whatever se.toml [templates] gate says; unset, it follows se.toml"

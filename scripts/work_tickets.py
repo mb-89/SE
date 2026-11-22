@@ -3241,10 +3241,10 @@ def push(root: Path, branch: str | None = None) -> str | None:
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
-    `[templates] files` is `check`, a changed file a template claims that breaks it refuses the push before
-    anything else runs (claimed_files_problem). Any other branch is a work branch, pushed only
-    where origin is the repository its recorded work issue is for (guard_work_publication).
+    like it, needs the verdicts on its tree; its tag waits for the landed commit. A changed file a
+    template claims that breaks it refuses the push before anything else runs
+    (claimed_files_problem). Any other branch is a work branch, pushed only where origin is the
+    repository its recorded work issue is for (guard_work_publication).
     Returns the release's tag, None where nothing is released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
@@ -3847,22 +3847,21 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
 
 
 def claimed_files_problem(root: Path) -> str | None:
-    """What se.toml `[templates] files = "check"` refuses in the checkout `root`: the lines of
-    `se_templates.py check-files --changed origin/<integration branch>`; None where the switch is off
-    or every changed claimed file passes. Errors raise."""
+    """What the claimed files refuse in the checkout `root`: the lines of `se_templates.py
+    check-files --changed origin/<integration branch>`; None where no template claims a path or
+    every changed claimed file passes. Errors raise."""
     lines = sibling("se_templates").changed_refusal(root, f"origin/{integration_branch(root)}")
     if lines is None:
         return None
-    return ("A changed file a template claims breaks its template (se.toml [templates] files = \"check\"); "
-            "fix every finding:\n" + "\n".join(lines))
+    return ("A changed file a template claims breaks its template; fix every finding:\n"
+            + "\n".join(lines))
 
 
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, or, where se.toml `[templates] files` is `check`, while a changed file a template
-    claims breaks it in any checkout it judges, at most `[stop] refusals` times in a row; under
-    Copilot only advise (copilot_advises); everywhere else, and where it cannot judge, let the turn
-    end (advice fails open). `count` false judges without counting."""
+    is not delivered, or while a changed file a template claims breaks it in any checkout it
+    judges, at most `[stop] refusals` times in a row; under Copilot only advise (copilot_advises);
+    everywhere else, and where it cannot judge, let the turn end (advice fails open). `count` false judges without counting."""
     if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
         return StopVerdict()
     root = checkout_top(path)
@@ -10638,10 +10637,9 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("push", "where se.toml [templates] files is check, se_templates.py check-files --changed "
-                 "origin/<integration branch> first; public check's push gate; a work branch only "
-                 "where origin is the repository its recorded work issue is for (README \"Work "
-                 "publication\"); then git push -u origin <branch>; retries a "
+@command("push", "se_templates.py check-files --changed origin/<integration branch> first; "
+                 "public check's push gate; a work branch only where origin is the repository "
+                 "its recorded work issue is for (README \"Work publication\"); then git push -u origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
@@ -11256,8 +11254,7 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "field-report --check at the branch tip, naming what is missing and the "
                        "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
                        "under Copilot it only says what is undelivered unless [copilot] "
-                       "refuse_stop is true. Where se.toml [templates] files is check it also "
-                       "refuses, in any checkout, while a changed file a template claims breaks it "
+                       "refuse_stop is true. It also refuses, in any checkout, while a changed file a template claims breaks it "
                        "(se_templates.py check-files). "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "

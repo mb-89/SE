@@ -126,8 +126,8 @@ Fields stay honest about their source:
 
 The gate refuses free writes. A template that claims paths owns them: a write, an edit or a
 write through the tracker's tools of a claimed path that does not come from the fill is refused before it runs,
-naming the template and the fill to use. The gate is on wherever a template claims a path; the
-se.toml switch that keeps it off today goes.
+naming the template and the fill to use. The gate is on wherever a template claims a path, with
+no se.toml switch to keep it off.
 
 ## Template repositories
 

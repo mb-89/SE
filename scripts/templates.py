@@ -2195,10 +2195,6 @@ ENFORCE_VALUES = (OFF, WARN, REFUSE)
 #: se.toml `[templates] gate`: the values SE's template gate on GitHub writes knows (se_templates.py gate),
 #: `off` the default.
 GATE_VALUES = (OFF, WARN, REFUSE)
-#: se.toml `[templates] files`: whether SE's checks before work is done check the files a template claims
-#: (se_templates.py check-files), and with `write` also the gate at each write; `off` the default.
-CHECK, WRITE = "check", "write"
-FILES_VALUES = (OFF, CHECK, WRITE)
 #: se.toml `[templates] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
@@ -2213,7 +2209,6 @@ class Enforcement:
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
     gate: str = OFF
-    files: str = OFF
 
 
 def enforcement(root: Path) -> Enforcement:
@@ -2245,15 +2240,11 @@ def enforcement(root: Path) -> Enforcement:
     if gate not in GATE_VALUES:
         raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
                         f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
-    files = table.get("files", OFF)
-    if files not in FILES_VALUES:
-        raise TemplateError(f"templates: [templates] files = {files!r} in {where} is none of "
-                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Templates\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
-    return Enforcement(enforce, refusals, where, gate, files)
+    return Enforcement(enforce, refusals, where, gate)
 
 
 def filled(template: Template, *, body: str | None = None, fields: dict | None = None,

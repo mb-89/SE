@@ -40,7 +40,7 @@ read-only = true
 mcp = "Fills a template from the raw input: without fields it gives the template's instructions, guidance and empty draft; with fields and the raw input its first line is passes, then the document to write or file, or refused, then every finding. Use it to write any text a template shapes; it writes nothing."
 
 [commands."se_templates.py gate"]
-usage = "se_templates.py gate [--gate {off,warn,refuse}] [--files {off,check,write}]\n                     [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]"
+usage = "se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT]\n                     [--runtime ROOT]"
 summary = "SE's hook: judge one GitHub write's body, or a claimed file's write, ..."
 group = "Templates"
 help = "SE's hook: judge one GitHub write's body, or a claimed file's write, against its template"
