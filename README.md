@@ -1911,7 +1911,7 @@ the judged draft and closes the retro issue with its report.
 
 | Command | Usage | What it does |
 |---|---|---|
-| `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
 | `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul
@@ -2051,6 +2051,12 @@ Each issue comes with the field report of the work pull request its landing pull
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
+
+`--sessions <file>` adds the cloud sessions' costs: the file holds each session `list_sessions`
+lists, with its `list_events` result events (kinds `["result"]`) as `"events"`. Each session is
+found by its title, `SE/<repo>/<role>/<topic>` ([Visible sessions](src/skills/work-model/SKILL.md#visible-sessions)),
+and the draft sums its tokens and cost per issue, role and repository; another title is counted
+as other, never guessed.
 
 Without gh it prints the GitHub steps whose
 answers are still missing, round by round, and reads the answers from the files the session saved

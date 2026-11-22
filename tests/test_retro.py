@@ -1081,3 +1081,66 @@ def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_counts_i
             "| Lost reports | watch | `(?i)integration stopped` | 3 | #11, #12 | only merges |"
             in text)
     assert retro.read_block(text)["previous"]["classes"][0]["matches"] == 3
+
+
+def result_event(cost: float | None, input_tokens: int, output_tokens: int) -> dict:
+    """One `list_events` result event, as the session tools answer it."""
+    record = {"type": "result", "result": "Done.", "usage": {
+        "input_tokens": input_tokens, "cache_creation_input_tokens": 10,
+        "cache_read_input_tokens": 100, "output_tokens": output_tokens}}
+    if cost is not None:
+        record["total_cost_usd"] = cost
+    return {"id": f"event-{input_tokens}", "data": record}
+
+
+def test_sessions_adds_each_cloud_session_s_cost_by_its_title_per_issue_role_and_repository(
+        checkout, tmp_path):
+    plain = retro.draft(collected(checkout))
+    titles = {item.number: item.title for item in collected(checkout).issues}
+    sessions = [
+        {"id": "session_w1", "title": f"SE/SE/worker/{titles[11]}",
+         "events": [result_event(1.25, 1000, 200), result_event(0.75, 500, 100)]},
+        {"id": "session_r1", "title": "SE/SE/reviewer/22", "events": [result_event(0.5, 300, 50)]},
+        {"id": "session_i1", "title": "SE/SE/integrator", "events": [result_event(2.0, 4000, 800)]},
+        {"id": "session_k1", "title": "SE/kern/integrator", "events": [result_event(None, 40, 8)]},
+        {"id": "session_x1", "title": "an unrelated session", "events": [result_event(9.0, 1, 1)]},
+    ]
+    found = collected(checkout, sessions=sessions)
+
+    costs = found.costs
+    assert (costs["given"], costs["other"], len(costs["sessions"])) == (5, 1, 4)
+    assert costs["per_issue"]["11"]["sessions"] == 2  # the worker's and the reviewer's of PR #22
+    assert costs["per_issue"]["11"]["cost"] == 2.5
+    assert costs["per_issue"]["11"]["tokens"]["input_tokens"] == 1800
+    assert costs["per_issue"]["none"]["sessions"] == 2  # the integrators name no issue
+    assert costs["per_role"]["worker"]["cost"] == 2.0
+    assert costs["per_role"]["integrator"] == {
+        "sessions": 2, "cost": 2.0, "tokens": {"input_tokens": 4040,
+                                              "cache_creation_input_tokens": 20,
+                                              "cache_read_input_tokens": 200,
+                                              "output_tokens": 808}}
+    assert costs["per_repository"]["SE"]["cost"] == 4.5
+    assert costs["per_repository"]["kern"]["cost"] is None  # no result event named a cost
+    assert found.extras() == {"costs": costs}
+
+    text = retro.draft(found)
+    assert "## Session costs\n\n4 sessions of 5 given carry an SE title; 1 other" in text
+    assert "| #11 | 2 | 1800 | 30 | 300 | 350 | $2.50 |" in text
+    assert "| kern | 1 | 40 | 10 | 100 | 8 | unknown |" in text
+    assert without_block(text, "## Session costs") == plain
+    assert retro.read_block(text) == retro.read_block(plain)
+
+
+def test_collect_reads_the_session_tools_answers_from_a_file(checkout, tmp_path, monkeypatch):
+    saved = tmp_path / "sessions.json"
+    saved.write_text(json.dumps({"data": [{"id": "s", "title": "SE/SE/integrator",
+                                           "events": [result_event(1.0, 10, 1)]}]}),
+                     encoding="utf-8")
+    args = retro.make_parser().parse_args(["collect", "30", "--sessions", str(saved)])
+    seen: dict = {}
+    monkeypatch.setattr(retro, "collect", lambda *arguments: seen.update(sessions=arguments[-1]))
+    monkeypatch.setattr(retro.work_tickets, "resolve_repo", lambda root, repo: REPO)
+    monkeypatch.setattr(retro.work_tickets, "hand_off", lambda: True)
+    args.worktree = str(checkout)
+    retro.run_collect(args)
+    assert [session["title"] for session in seen["sessions"]] == ["SE/SE/integrator"]

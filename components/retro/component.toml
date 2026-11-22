@@ -4,7 +4,7 @@ contract = 1
 help = "A retro: collect writes its draft from the work since the last one, file checks the judged draft and closes the retro issue with its report."
 
 [commands."retro.py collect"]
-usage = "retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json]\n                 [--signals FILE [FILE ...]] [--refusals] [--answers DIR]\n                 [--worktree WORKTREE] [--repo REPO]\n                 retro"
+usage = "retro.py collect [--since DATE | --retro ISSUE] [--out FILE] [--json]\n                 [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR]\n                 [--worktree WORKTREE] [--repo REPO]\n                 retro"
 summary = "read a retro's window from GitHub and write its draft"
 group = "Retro"
 help = "read a retro's window from GitHub and write its draft"
