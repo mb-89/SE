@@ -43,7 +43,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
-- **SE**, the main agent (formerly the dispatcher): the only session the human talks to. SE never
+- **SE**, the SE agent: the only session the human talks to. SE never
   writes any repository. It may file work issues for and dispatch into any repository by starting or
   messaging that repository's integrator.
   - Each repository has exactly one integrator, the only writer of its integration branch. The
@@ -938,7 +938,8 @@ harnesses.
   - `--max-ai-credits <n>` (at least 30) caps that session's spend; the person may add it.
 - **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
   delivered pull requests a message would have announced; a role that would send one sends none.
-- **No ask tool** (`ask_user`): SE asks the person in the chat, its question the turn's last
-  lines, as the catch-up skill ends every turn; workers and integrators still never ask.
+- **Ask tool** (`ask_user`): SE never uses it, on any host: a decision goes to the person as a deck,
+  any other open point as the turn's last lines, as the catch-up skill ends every turn; workers and
+  integrators never ask.
 
 <!-- /copilot -->

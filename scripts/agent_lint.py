@@ -17,7 +17,7 @@ import sys
 from pathlib import Path, PurePath
 
 # Copilot's custom agent fields: VS Code's custom agent file reference and the Copilot CLI's and cloud
-# agent's own (the dispatcher's fact-check of 14 Nov). `handoffs` and `agents` work only in VS Code's
+# agent's own (the SE agent's fact-check of 14 Nov). `handoffs` and `agents` work only in VS Code's
 # local harness and are not offered. An unknown tool name is no finding: Copilot ignores it.
 COPILOT_AGENT_FIELDS = frozenset({
     "name", "description", "tools", "model", "model-policy", "hooks", "target", "user-invocable",

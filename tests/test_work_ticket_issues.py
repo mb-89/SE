@@ -1492,6 +1492,7 @@ def test_deliver_uses_only_an_open_pull_request(
 def test_deliver_writes_the_report_into_the_pull_request_on_origin_and_files_no_issue(
         worktree, gh, monkeypatch, capsys, scripted_git, branch):
     gh.issue["title"] = branch
+    gh.issue["labels"] = [{"name": "repo:source"}]  # held in owner/repo, for origin's source
     if "/" not in branch:  # the kind of work is the Package kind's, not the name's
         gh.issue["body"] = BODY.rstrip() + "\n\n## Package kind\n\nfeat, small.\n"
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: branch)
@@ -5590,8 +5591,12 @@ def fake_push(main_checkout, monkeypatch):
     """A fake git push answering from a script of (exit code, stderr); waits are recorded, not slept.
 
     Its checkout turns the public check off, so the retry tests reach the push; the gate's own
-    tests set se.toml themselves."""
+    tests set se.toml themselves. It has the local branch `topic` the tests push, at main."""
     (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
+    assert git_door.run("branch", "topic", root=main_checkout).returncode == 0
+    # The work issue `topic` is published for: the repository origin names (origin.git).
+    work_tickets.save_snapshot(main_checkout, {"repo": "git.example/owner/origin", "number": 5,
+                                               "title": "topic", "labels": [{"name": "repo:origin"}]})
     calls, waits, script = [], [], []
 
     def run_git_push(root, arguments):

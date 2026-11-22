@@ -719,12 +719,15 @@ A decision names what shows its problem exists: a failure, a measurement or the 
 ### dec-003 Keep what we have
 
 Where something exists, keeping it is an option, and the datum every option is marked against is
-the strongest rival.
+what exists today, never an option not yet built; only where nothing exists is it the strongest
+rival.
 
-- **Why:** change costs something, so a new option must beat what exists, and against a weak datum
+- **Why:** what exists is the one option whose marks are known, so a new option must beat it; a
+  datum on an option not yet built marks everything against a guess, and against a weak datum
   every option looks good.
-- **Without it:** decisions replace what works with what merely sounds better.
-- **Prevents:** churn that replaces a working solution; a matrix rigged by a weak datum.
+- **Without it:** decisions replace what works with what merely sounds better, and a matrix
+  measured from an unbuilt option favours whatever is closest to it.
+- **Prevents:** churn that replaces a working solution; a matrix rigged by its datum.
 - **Implementations:**
   - se: checklist item 3 of the [decision skill](../../decision/SKILL.md#the-checklist).
 - **Related:** dec-004
@@ -756,11 +759,14 @@ is counted twice.
 
 ### dec-006 Right before cheap
 
-Being right and consistent outweighs effort, and effort never decides alone.
+Being right and consistent outweighs effort: effort to build or move is a criterion only where it
+is exceptional, and effort never decides alone.
 
-- **Why:** effort is paid once, and a wrong or inconsistent choice is paid for on every later use.
+- **Why:** effort is paid once, and a wrong or inconsistent choice is paid for on every later use;
+  weighing ordinary effort makes a matrix favour saving work over the better system.
 - **Without it:** the cheapest option wins, and its inconsistencies are paid for again and again.
-- **Prevents:** a shortcut that leaves the system inconsistent; a decision won on effort alone.
+- **Prevents:** a shortcut that leaves the system inconsistent; a decision won on effort alone; a
+  cost to move that keeps a worse system in place.
 - **Implementations:**
   - se: checklist item 6 of the [decision skill](../../decision/SKILL.md#the-checklist).
 - **Related:** dec-005, gen-005
@@ -829,7 +835,8 @@ Anything controversial goes to a person, and everything else flows without one.
   could decide.
 - **Implementations:**
   - se: the [escalation ladder](../SKILL.md#escalation-ladder); decisions reach the person as
-    decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues.
+    decision notes in a deck ([decision skill](../../decision/SKILL.md)), never as issues
+    and never in a question dialog.
   - Go line (frozen): the retro counted `se-person` answers.
 - **Related:** wrk-004, dec-012
 

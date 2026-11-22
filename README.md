@@ -521,7 +521,7 @@ version = "^1.4"                             # in place of ref: a semver range o
 
 | Key | Meaning |
 |---|---|
-| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`); a checkout without an origin refuses it. |
+| `url` | the clone URL in its public form. Machine-specific forms (mirrors, credentials) belong in the machine-local file below, never here. A URL starting `../` or `./` is relative to the checkout's origin, as git resolves a relative submodule URL: `../obs.git` is the repository `obs` beside this one on the same host (`scripts/se_home.py`). An origin that is a relative path is read from the checkout, as git reads it, so the module's clone in `.se/modules` reaches the same repository; a checkout without an origin refuses it. |
 | `ref` | the pin, a full commit SHA. Any commit on the module's `main` can be pinned, not only releases; `update` moves it. |
 | `version` | in place of `ref`, a semantic version range of the module's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a module releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). A module pins one of `ref` and `version`. |
 | `se.lock` | next to `se.toml`, it records the highest tag matching each `version` range, with its version and commit; `sync` and `update` write it and the repository commits it. |
@@ -574,6 +574,11 @@ escalates. `work_tickets.py push` runs its push gate first.
 Default `true`, so a project that never set it is still checked; a project without a public check
 sets `public_check = false`, and `push` then prints one line saying the check is off and where to
 turn it on.
+
+Whatever `public_check` says, `push` (and every command that pushes through its gate) pushes only
+a local branch, never a refspec, tag or commit, and refuses one that carries commits another remote
+holds but origin does not: a project kept on two hosts shares trees, not histories. Only origin's
+remote-tracking branches count as held by origin; a local tag proves nothing about it.
 
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
@@ -1011,6 +1016,22 @@ What it judges:
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
   `stop-check --pull <number> --pr-description <file>` writes from the pull request the session's
   GitHub tools opened; without either, it cannot judge.
+
+### Work publication
+
+A work branch is published only to the repository its work issue is for, never to whatever
+origin happens to be. `work_tickets.py push`, and `deliver` through it, check origin before
+anything is pushed or a pull request opened; the integration branch and landing branches keep
+their own guards.
+
+- The work issue is the one the checkout records (`intake`), titled like the branch.
+- The repository it is for is its one `repo:<name>` label, which every work issue SE files
+  carries. Without one, it is the repository holding the issue, or the checkout's own where that
+  repository is the tracker the checkout routes its issues to.
+- Origin passes where its repository name is that name, in any case: a name, not a host or an
+  owner, so the rule holds wherever the project lives.
+- Refused, naming the remedy, with nothing pushed: no recorded work issue, a recorded one titled
+  like another branch, more than one `repo:` label, no origin, and an origin of another name.
 
 ### Late push
 
@@ -1745,7 +1766,7 @@ gated push and the pull request, and the Stop hook's check.
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
 | `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README "Work publication"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
 | `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Where se.toml [forms] files is check it also refuses, in any checkout, while a changed file a form claims breaks it (se_forms.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
