@@ -14,6 +14,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,8 @@ CLOUD_ENV = "CLAUDE_CODE_REMOTE"  # "true" in a Claude Code cloud session
 CLOUD_PLUGINS = "README \"Claude Code cloud\""
 CHECK_REMEDY = "run it by hand to see the cause: uv run python {se}/scripts/se_start.py check"
 START_TIMEOUT = 15  # seconds each network read of the refresh at start may take
+COMPONENTS_TIMEOUT = 60  # seconds the project's component listing may take
+COMPONENTS_HEADER = ("component", "kind", "installed", "newest", "repository")
 
 
 def _load(name: str):
@@ -305,14 +308,16 @@ class Cache:
     started_at: float | None = None
     remotes: dict[str, dict] = field(default_factory=dict)
     work: dict | None = None  # what is due in the work (work_check); None: not read (no gh)
+    components: dict | None = None  # the project's component listing (list_components); None: not run
 
     @classmethod
     def read(cls, path: Path) -> "Cache":
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            work = data.get("work")
+            work, components = data.get("work"), data.get("components")
             return cls(data.get("checked_at"), data.get("started_at"), dict(data.get("remotes", {})),
-                       work if isinstance(work, dict) else None)
+                       work if isinstance(work, dict) else None,
+                       components if isinstance(components, dict) else None)
         except (OSError, ValueError, AttributeError):
             return cls()
 
@@ -320,14 +325,17 @@ class Cache:
         """Atomically: a status reading at the same time sees the old or the new check, whole."""
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {"checked_at": self.checked_at, "started_at": self.started_at, "remotes": self.remotes,
-                "work": self.work}
+                "work": self.work, "components": self.components}
         with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8",
                                          suffix=".tmp") as handle:
             json.dump(data, handle, indent=1)
         os.replace(handle.name, path)
 
-    def fresh(self, urls: set[str], now: float) -> bool:
-        return self.checked_at is not None and now - self.checked_at < MAX_AGE and urls <= set(self.remotes)
+    def fresh(self, urls: set[str], now: float, listing: dict | None = None) -> bool:
+        """Checked within the hour, every url read, and, where the project sets a component
+        listing (`listing`: its root and command), that listing run."""
+        return (self.checked_at is not None and now - self.checked_at < MAX_AGE
+                and urls <= set(self.remotes) and (not listing or components_of(self, listing) is not None))
 
     def running(self, now: float) -> bool:
         return self.started_at is not None and now - self.started_at < RUNNING_FOR
@@ -394,6 +402,73 @@ def work_check(root: Path | None) -> dict | None:
     return work
 
 
+def components_command(root: Path | None) -> tuple[list[str] | None, str]:
+    """The project's component listing command, `[project] components` of its se.toml, as an
+    argument array; (None, "") where unset, (None, cause) where it is no argument array."""
+    if root is None:
+        return None, ""
+    try:
+        value = _project(root).get("components")
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return None, f"{(root / se_modules.MANIFEST).as_posix()}: {error}"
+    if value is None:
+        return None, ""
+    if not isinstance(value, list) or not value or not all(isinstance(a, str) and a for a in value):
+        return None, (f"[project] components of {(root / se_modules.MANIFEST).as_posix()} is no "
+                      "argument array; set it as components = [\"uv\", \"run\", \"obs-components\"]")
+    return value, ""
+
+
+def listing_key(root: Path | None) -> dict | None:
+    """What a cached listing answers for: the project and its command; None where none is set."""
+    command, _ = components_command(root)
+    return {"root": root.as_posix(), "command": command} if command and root else None
+
+
+def components_of(cache: Cache, key: dict | None) -> dict | None:
+    """The cached listing where it answers for `key`, else None."""
+    found = cache.components
+    if not key or not found or {k: found.get(k) for k in key} != key:
+        return None
+    return found
+
+
+def parse_listing(text: str) -> list[dict]:
+    """The rows of the listing's table (obs-components: `component kind installed newest
+    repository`, two spaces or more between columns, `(update)` after an update's repository).
+    Raises ValueError where the output holds no such table."""
+    rows = [re.split(r"\s{2,}", line.strip()) for line in text.splitlines() if line.strip()]
+    if not rows or tuple(cell.lower() for cell in rows[0][:5]) != COMPONENTS_HEADER:
+        raise ValueError("its output holds no table headed " + "  ".join(COMPONENTS_HEADER))
+    offers = []
+    for row in rows[1:]:
+        if len(row) < 5:
+            raise ValueError(f"a row has {len(row)} columns, not 5: {'  '.join(row)}")
+        name, kind, installed, newest = row[:4]
+        offers.append({"name": name, "kind": kind, "installed": installed, "newest": newest})
+    return offers
+
+
+def list_components(root: Path, command: list[str]) -> dict:
+    """Run the project's component listing in its checkout, read-only (the command with no
+    subcommand lists, never installs), within COMPONENTS_TIMEOUT: its rows, or its error."""
+    try:
+        result = subprocess.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", stdin=subprocess.DEVNULL, timeout=COMPONENTS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"error": f"{' '.join(command)} took longer than {COMPONENTS_TIMEOUT} s"}
+    except (OSError, subprocess.SubprocessError) as error:
+        return {"error": f"{' '.join(command)} did not start: {error}"}
+    if result.returncode != 0:
+        tail = (result.stderr.strip() or result.stdout.strip()).splitlines()
+        return {"error": f"{' '.join(command)} failed with exit code {result.returncode}"
+                         + (f": {tail[-1]}" if tail else "")}
+    try:
+        return {"offers": parse_listing(result.stdout)}
+    except ValueError as error:
+        return {"error": f"{' '.join(command)}: {error}"}
+
+
 # The computing: pure, on what was read
 
 
@@ -435,6 +510,7 @@ class Report:
     now: float
     work: dict | None = None  # the cached work_check
     root: Path | None = None  # the project
+    components: dict | None = None  # the cached component listing of the project, where it answers
 
     @property
     def errors(self) -> list[str]:
@@ -465,7 +541,7 @@ def greeting(report: Report, se_root: Path) -> list[str]:
     if due:
         lines.append(f"Refresh: {refresh_command(se_root)}")
     lines += _check_lines(report, se_root)
-    return lines + skill_lines(report.local) + work_lines(report, se_root)
+    return lines + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root)
 
 
 def _plugin_name(root: Path) -> str | None:
@@ -508,6 +584,42 @@ def skill_lines(local: Local) -> list[str]:
                 f"environment provides plugins ({CLOUD_PLUGINS})"]
     installs = list(dict.fromkeys(skill.install for skill, _ in local.lacking))
     return [f"Missing for SE's agents: {named}. Install: {' && '.join(installs)}"]
+
+
+def component_lines(report: Report, se_root: Path) -> list[str]:
+    """From the cached component listing: one line per component offered and not installed and
+    per installed one with a newer release, with installed and newest version and the command
+    that installs or updates it; SE never runs those. A setting SE cannot read, or a listing
+    that failed or took too long, is one warning line. Nothing where the project sets none."""
+    command, problem = components_command(report.root)
+    if problem:
+        return [f"Component check not done: {problem}"]
+    if not command:
+        return []
+    found = report.components
+    if found is None:
+        if any(s.unchecked for s in report.states):
+            return []  # the update check's line already says it runs
+        reason = "running in the background" if report.running else "not run yet"
+        return [f"Component check not done: {reason}; the next start shows its result"]
+    if "error" in found:
+        return [f"Component check not done: {found['error']}; "
+                f"{CHECK_REMEDY.format(se=se_root.as_posix())}"]
+    run = " ".join(command)
+    lines = []
+    for offer in found.get("offers") or []:
+        name, kind = offer.get("name"), offer.get("kind")
+        installed, newest = offer.get("installed"), offer.get("newest")
+        have, latest = se_modules.parse_version(installed), se_modules.parse_version(newest)
+        if latest is None:
+            continue  # installed, and no source offers it any more
+        if installed == "not installed":
+            lines.append(f"Component {name} ({kind}): not installed, newest {newest}; "
+                         f"install it: {run} install {name}")
+        elif have is not None and latest > have:
+            lines.append(f"Component {name} ({kind}): {installed} -> {newest}; "
+                         f"update it: {run} update {name}")
+    return lines
 
 
 def work_lines(report: Report, se_root: Path) -> list[str]:
@@ -605,7 +717,8 @@ def full(report: Report, se_root: Path) -> list[str]:
         lines.append(f"{item.name}: in use {use}; latest {_v(state.latest)}; {verdict}")
     if any(s.due for s in report.states):
         lines.append(f"Refresh: {refresh_command(se_root)}")
-    return lines + _check_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root)
+    return (lines + _check_lines(report, se_root) + component_lines(report, se_root)
+            + skill_lines(report.local) + work_lines(report, se_root))
 
 
 def _plural(count: int, word: str) -> str:
@@ -712,6 +825,7 @@ class World:
     clock: Callable[[], float] = time.time
     remote: Callable[[str], list[Version]] = git_tags
     work: Callable[[Path | None], dict | None] = work_check
+    components: Callable[[Path, list[str]], dict] = list_components
     spawn: Callable[[list[str]], None] = _spawn_detached
     claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
     kern: Callable[[Path, Path], dict | None] = kern_status
@@ -726,7 +840,8 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
     cache = Cache.read(cache_path)
     urls = {item.url for item in local.items if item.url}
     running = cache.running(now)
-    if not offline and not cache.fresh(urls, now) and not running:
+    key = listing_key(root)
+    if not offline and not cache.fresh(urls, now, key) and not running:
         cache.started_at = now
         cache.write(cache_path)
         argv = [sys.executable, str(se_root / "scripts" / "se_start.py"), "--cache", str(cache_path)]
@@ -734,7 +849,8 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
         world.spawn(argv + ["check"])
         running = True
     states = [assess(item, cache.remotes if cache.checked_at is not None else None) for item in local.items]
-    return Report(local, states, cache.checked_at, running, now, live_or_cached(world, root, cache.work), root)
+    return Report(local, states, cache.checked_at, running, now, live_or_cached(world, root, cache.work), root,
+                  components_of(cache, key))
 
 
 def live_or_cached(world: World, root: Path | None, cached: dict | None) -> dict | None:
@@ -747,13 +863,21 @@ def live_or_cached(world: World, root: Path | None, cached: dict | None) -> dict
 def check(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
           world: World, work: bool = True) -> Report:
     """Read every remote once, in parallel, and, with `work`, what is due in the work
-    (work_check); keep both in the cache. Without `work` the cached work stays."""
+    (work_check) and the project's component listing (list_components), where it sets one; keep
+    them in the cache. Without `work` the cached work and listing stay."""
     local = read_local(se_root, root, local_config)
     remotes = run_check({item.url for item in local.items if item.url}, world.remote)
-    found = world.work(root) if work else Cache.read(cache_path).work
+    key = listing_key(root)
+    if work:
+        found = world.work(root)
+        listing = {**key, **world.components(root, key["command"])} if key else None
+    else:
+        cached = Cache.read(cache_path)
+        found, listing = cached.work, cached.components
     now = world.clock()
-    Cache(now, None, remotes, found).write(cache_path)
-    return Report(local, [assess(item, remotes) for item in local.items], now, False, now, found, root)
+    Cache(now, None, remotes, found, listing).write(cache_path)
+    return Report(local, [assess(item, remotes) for item in local.items], now, False, now, found, root,
+                  components_of(Cache(components=listing), key))
 
 
 # Refresh: new location first, check that it starts, then switch
