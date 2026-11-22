@@ -218,7 +218,29 @@ fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude A
 (`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
 adapter, its checker. `--tree` reads the working tree's `templates/`; `--templates DIR`, on all four, reads
-the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None writes a file, calls GitHub or starts a model.
+the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
+`fill` writes a file; none calls GitHub or starts a model.
+
+`templates.py fill (<template> | --path FILE) [--prompt TEXT | --prompt-file FILE] [--input FILE |
+--input-text TEXT] [--fields FILE | --fields-json TEXT] [--title TEXT] [--out FILE] [--root DIR]` is
+docs/templates.md "Fill": one command takes the template, the prompt, the raw input and the agent's
+fields.
+
+- Without fields it answers the instructions first (`instructions`): the template, the prompt, its
+  `says`, the rules of honest fields (HONEST, and one per `quote` field), the guidance its tags
+  resolve in `--root`'s trees (`guidance`, through `scripts/se_guidance.py`), then the empty draft
+  as Markdown (`draft`) and `draft --json`'s fields, field_says, field_shape and schema. Exit 0.
+- With fields it needs the raw input, and checks the document the fields render against the
+  template and that input (`fill`: `check(raw=)`, so a `quote` field's quotes must be in it).
+  A refusal prints every finding, at most 10 lines, then `templates.py fill: nothing was written;
+  fix every finding and fill again`, exit 1, and writes nothing; warnings go to stderr.
+- Where nothing refuses, a file template (`file.write`) writes the file `--path` names, which its
+  `paths` must claim; a file that exists keeps its head and its undeclared sections, its fields
+  the values alone. `--path` without a template selects as `check --path` does, so a new file
+  names its template. Another template's document goes to `--out`, else to stdout as it stands.
+  A write prints `wrote <path>: <template> <version>`, exit 0.
+- Filing a document as an issue, a comment or a message stays the filing commands' and the
+  tracker's tools': the engine calls no GitHub. A usage error exits 2 and writes nothing.
 """
 
 from __future__ import annotations
@@ -2384,6 +2406,63 @@ def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
     return counts[key]
 
 
+# Fill
+
+
+#: What every fill tells the agent first, beside a rule per `quote` field (`instructions`).
+HONEST = (f"Fill each field from the raw input alone. Where the raw input does not answer a field, "
+          f"write `{NOT_IN_INPUT}`: every field takes it, whatever its rules; never invent a value.")
+
+
+def guidance(template: Template, root: Path = ROOT) -> list[dict[str, str]]:
+    """The guidance notes `scripts/se_guidance.py` resolves for `template` by its tags in `root`'s
+    trees, general before specific: each its `name`, `path` and `text`. A tree that does not load
+    gives none of its notes, as `se_guidance.py collect` leaves them out."""
+    module = _sibling("se_guidance")
+    loaded = module.load(root)
+    chosen = module.Template(template.name, frozenset(template.tags), template.path)
+    return [{"name": note.name, "path": note.where, "text": note.body.strip()}
+            for note in module.for_template(loaded.notes, chosen)]
+
+
+def instructions(template: Template, prompt: str = "", root: Path = ROOT) -> dict[str, object]:
+    """What a fill without fields answers, its instructions first: the template and the prompt,
+    the template's `says`, the rules of honest fields (HONEST, and one per `quote` field), its
+    guidance (`guidance`), then the empty draft as Markdown (`draft`) and as data (`draft_fields`)."""
+    rules = [HONEST, *(f"{item.heading or item.name}: quote the raw input word for word, in \"...\" or "
+                       "as a `>` line; a quote the raw input does not hold is refused"
+                       for item in template.fields if item.quote)]
+    data = draft_fields(template)
+    return {"template": template.name, "prompt": prompt, "says": template.says, "rules": rules,
+            "guidance": guidance(template, root), "version": template.version,
+            "draft": draft(template),
+            **{key: data[key] for key in ("fields", "field_says", "field_shape", "schema")}}
+
+
+def fill(template: Template, values: dict[str, object], raw: str, *, title: str | None = None,
+         existing: str | None = None) -> tuple[str, list[Finding]]:
+    """The document `values` fill `template` with, and every finding of it checked against the raw
+    input `raw` (`check(raw=)`). `title` fills the title field where the template has one.
+    `existing`, the text of the file a file template fills again, keeps its head (front matter and
+    page title) and the sections the template does not declare; its fields are the values alone."""
+    if template.is_adapter:
+        raise TemplateError(f"templates: {template.name} is an adapter and has no fields to fill; the "
+                            "command that writes it writes its body")
+    values = answer(template, values)
+    title_field = next((item.name for item in template.fields if item.source == "title"), None)
+    if title is not None and title_field:
+        values[title_field] = title
+    if existing:
+        document = parse(template, existing)
+        document.fields = dict(values)
+        rendered = render(template, document)
+    else:
+        rendered = render(template, values)
+    named = values.get(title_field) if title_field else None
+    document = parse(template, rendered, named if isinstance(named, str) else None)
+    return rendered, check(template, document, raw=raw)
+
+
 # Command
 
 
@@ -2533,6 +2612,75 @@ def _check(templates: dict[str, Template], options: argparse.Namespace):
     return template, rendered, parse(template, rendered, values.get(title) if title else None), met
 
 
+FILL = "templates.py fill"
+
+
+def _text_option(options: argparse.Namespace, text: str, path: str, name: str) -> str | None:
+    """The text an option pair gives: `--<name>-text`/`--<name>` as text, or the file it names."""
+    given, file = getattr(options, text), getattr(options, path)
+    if file is None:
+        return given
+    try:
+        return file.read_text(encoding="utf-8")
+    except OSError as error:
+        raise TemplateError(f"{FILL}: cannot read --{name} {file} ({error})") from error
+
+
+def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
+    """`fill`: the instructions without fields; else the document checked against the raw input,
+    written to `--path` (a file template), to `--out` or to stdout, or refused, writing nothing."""
+    if (options.template is None) == (options.path is None) and options.template is None:
+        raise TemplateError(f"{FILL}: name a template, or give --path to take the template that claims "
+                            "the file")
+    root = _root(options.path if options.path is not None else Path.cwd() / FILL, options.root)
+    relative = None
+    if options.path is not None:
+        relative, chosen = _claimed(templates, options, FILL)
+        if options.template is not None:
+            template = _template(templates, options.template)
+            if not template.claims(relative):
+                raise TemplateError(f"{FILL}: {template.name} claims no path {relative}; give a path "
+                                    f"its paths match ({', '.join(template.paths) or 'none'})")
+        elif chosen.template is None:
+            found = "; ".join(item.fix for item in chosen.findings)
+            raise TemplateError(f"{FILL}: no template claims {relative}" + (f": {found}" if found else ""))
+        else:
+            template = chosen.template
+        if options.out is not None:
+            raise TemplateError(f"{FILL}: --path is where the file goes; give it without --out")
+    else:
+        template = _template(templates, options.template)
+    prompt = _text_option(options, "prompt", "prompt_file", "prompt-file") or ""
+    if options.fields is None and options.fields_json is None:
+        print(json.dumps(instructions(template, prompt, root), indent=2))
+        return 0
+    raw = _text_option(options, "input_text", "input", "input")
+    if raw is None:
+        raise TemplateError(f"{FILL}: give the raw input the fields come from: --input FILE or "
+                            "--input-text TEXT")
+    if template.is_file and options.path is None:
+        raise TemplateError(f"{FILL}: {template.name} writes its file: give --path, a file its paths "
+                            f"match ({', '.join(template.paths)})")
+    values = (fields_data(options.fields_json, "--fields-json", FILL) if options.fields is None
+              else fields_file(options.fields, FILL))
+    existing = _file_text(options.path, FILL, missing_ok=True) if options.path is not None else None
+    rendered, found = fill(template, values, raw, title=options.title, existing=existing)
+    if any(item.severity == REFUSE for item in found):
+        print("\n".join([*_capped(found), f"{FILL}: nothing was written; fix every finding and fill "
+                                         "again"]))
+        return 1
+    if found:
+        print("\n".join(_capped(found)), file=sys.stderr)
+    target = options.path if options.path is not None else options.out
+    if target is None:
+        print(rendered, end="")
+        return 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(rendered, encoding="utf-8")
+    print(f"wrote {relative if relative is not None else target}: {template.name} {template.version}")
+    return 0
+
+
 def _capped(findings: list[Finding]) -> list[str]:
     lines = [str(finding) for finding in findings]
     if len(lines) > 10:
@@ -2542,7 +2690,8 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py", description="SE's templates: check, draft, schema, list")
+    parser = argparse.ArgumentParser(prog="templates.py",
+                                     description="SE's templates: check, draft, schema, list, fill")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -2566,12 +2715,28 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
-    for command in (checking, drafting, schemas):
+    filling = commands.add_parser("fill", help="fill a template from the raw input: check the fields, "
+                                  "render the document and write it, or answer the instructions")
+    filling.add_argument("template", nargs="?", help="the template; without it, --path selects one")
+    prompts = filling.add_mutually_exclusive_group()
+    prompts.add_argument("--prompt", help="what the agent was asked to write, as text")
+    prompts.add_argument("--prompt-file", type=Path, help="the prompt as a file")
+    raws = filling.add_mutually_exclusive_group()
+    raws.add_argument("--input", type=Path, help="the raw input the fields come from, as a file")
+    raws.add_argument("--input-text", help="the raw input as text")
+    values = filling.add_mutually_exclusive_group()
+    values.add_argument("--fields", type=Path, help="the field values as a JSON file; without them "
+                        "the answer is the instructions and the empty draft")
+    values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    filling.add_argument("--title", help="the title, where the template has a title field")
+    filling.add_argument("--out", type=Path, help="write the document of a template that claims no "
+                         "file here (default: stdout)")
+    for command in (checking, drafting, schemas, filling):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")
         command.add_argument("--root", type=Path, help="the project root of --path's globs "
                              "(default: the git checkout holding it, else the working directory)")
-    for command in (checking, drafting, schemas, listing):
+    for command in (checking, drafting, schemas, listing, filling):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -2586,6 +2751,8 @@ def main(arguments: list[str] | None = None) -> int:
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
+        if options.command == "fill":
+            return _fill(templates, options)
         if options.command in ("draft", "schema"):
             command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):

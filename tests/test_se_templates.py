@@ -999,3 +999,65 @@ def test_backstop_reads_its_switch_from_the_checkouts_se_toml(capsys, tmp_path, 
     code, out, _ = run(capsys, "backstop", "--event-name", "issues", "--event",
                        str(tmp_path / "broken.json"), "--worktree", str(project))
     assert code == 2 and "no JSON object" in out
+
+
+# fill, the templates tool's action: the engine's fill with SE's checks, answering and writing nothing
+
+RAW = "The person asked for one fill command that checks, renders and files."
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_fill_refuses_exactly_where_check_refuses(case, capsys, worktree, gh, templates_home):
+    (worktree / "se.toml").write_text(f'{IDENTITY}\n[templates]\nenforce = "refuse"\n',
+                                      encoding="utf-8")
+    (worktree / ".public-check.local").write_text("quuxcorp\n", encoding="utf-8")
+    title, fields, says = CASES[case]
+    given = ["--title", title, "--fields-json", json.dumps(fields), "--worktree", str(worktree), "--tree"]
+    before = sorted(path.name for path in worktree.iterdir())
+    _, checked, _ = run(capsys, "check", "work", *given)
+    code, filled, _ = run(capsys, "fill", "work", "--prompt", "File it.", "--input-text", RAW, *given)
+    assert code == 0 and filled.splitlines()[0] == checked.splitlines()[0]
+    assert sorted(path.name for path in worktree.iterdir()) == before
+    if says is None:
+        assert filled == "passes\n" + templates.render(WORK, {**FIELDS, "title": title})
+    else:
+        assert says in filled and "quux" not in filled.lower()
+        assert filled.splitlines()[-1].endswith(f"{Path(se_templates.__file__).resolve()} fill work")
+
+
+def test_fill_without_fields_answers_the_instructions_first(capsys, worktree):
+    code, out, _ = run(capsys, "fill", "work", "--prompt", "File it.", "--worktree", str(worktree),
+                       "--tree")
+    answer = json.loads(out)
+    assert code == 0 and answer == templates.instructions(WORK, "File it.", worktree.resolve())
+    assert list(answer)[:5] == ["template", "prompt", "says", "rules", "guidance"]
+
+
+def test_fill_refuses_an_invented_quote_against_the_raw_input(capsys, tmp_path, worktree, gh,
+                                                            templates_home):
+    import test_templates
+    template = test_templates.quote_template(tmp_path)
+    fields = {"seen": '"The export crashes the server"', "impact": ["Exports are incomplete."]}
+    given = ["finding", "--templates", str(tmp_path / "templates"), "--worktree", str(worktree)]
+    code, out, _ = run(capsys, "fill", *given, "--input-text", test_templates.RAW,
+                       "--fields-json", json.dumps(fields))
+    assert code == 0 and out.splitlines()[0] == "refused: 1 findings"
+    assert '"The export crashes the server", which the raw input does not hold' in out
+    fields["seen"] = '"The export stops at row 1000"'
+    code, out, _ = run(capsys, "fill", *given, "--input-text", test_templates.RAW,
+                       "--fields-json", json.dumps(fields))
+    assert code == 0 and out == "passes\n" + templates.render(template, fields)
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["fill", "work", "--fields-json", "{}"], "give the raw input"),
+    (["fill", "nope", "--input-text", "x", "--fields-json", "{}"], "no template 'nope'"),
+])
+def test_fill_usage_errors_exit_2(capsys, arguments, error):
+    code, out, _ = run(capsys, *arguments, "--tree")
+    assert code == 2 and error in out
+
+
+def test_fill_is_a_read_only_command_of_the_templates_tool():
+    assert "fill" in se_templates.READ_ONLY_COMMANDS and "fill" in se_templates.INTERACTIVE_COMMANDS
+    assert "fill" in se_templates.COMPONENTS[0].commands

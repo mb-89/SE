@@ -3,10 +3,9 @@
 the command component `templates` that kern's MCP door serves as its tool `templates` (README "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
 
-The engine stays free of SE's own scripts; this script joins it to them. Its three door commands
+The engine stays free of SE's own scripts; this script joins it to them. Its four door commands
 only read: nothing is filed, written or sent through them, and none calls GitHub or starts a
-model. The fourth, `gate`, is the hook's and not the door's; it writes only its count of refusals
-and its log.
+model. `gate` is the hook's and not the door's; it writes only its count of refusals and its log.
 
 - `se_templates.py list [--tree]` prints what `templates.py list` prints: every template of SE's with its
   actions and, for an adapter, its checker.
@@ -28,6 +27,20 @@ and its log.
     given; it replaces the template's own warning of that shape;
   - for a template of an issue, the SE commands that do not exist, as `work_tickets.refuse_dangling`
     finds them, where the template's own check named none.
+
+- `se_templates.py fill <template> [--prompt TEXT] [--input FILE | --input-text TEXT] [--fields FILE |
+  --fields-json TEXT] [--title TEXT] [--worktree DIR] [--templates DIR] [--tree]` is the tool's
+  action `fill` (docs/templates.md "Fill"), `templates.py fill` with `check`'s findings:
+  - without fields it prints `templates.instructions` as JSON, the instructions first and the
+    guidance of `--worktree`'s trees, exit 0;
+  - with fields it needs the raw input and answers as `check --render` answers, `refused: <n>
+    findings` or `passes` then the document (`templates.fill`): `check`'s findings for the title
+    and the rendered text, and the `quote` findings against the raw input (`templates.quoted`); a
+    refusal's last line names `se_templates.py fill <template>`.
+  - It writes nothing, as the door's tools only read: the agent writes the file or files the
+    document it answers, through the filing commands or the tracker's tools, which the gate checks.
+    `templates.py fill` writes a file template's file itself. `--templates` reads the templates
+    from that folder.
 
 **Its answer.** `check` exits 0 whatever it finds, and 2 on a usage error only, as kern's door
 answers any other exit code as `command-failed` with a remedy about usage. Its first line is the
@@ -191,6 +204,7 @@ NAME_SHAPE = "work_tickets:name_refusal"
 NAME_RULE = "name"
 DANGLING_RULE = "dangling"
 COMMAND = "se_templates.py check"
+FILL_COMMAND = "se_templates.py fill"
 PASSES = "passes"
 #: The gate's bound on its own run, from its start to its answer: past it, the write passes.
 GATE_SECONDS = 10.0
@@ -620,11 +634,11 @@ def sibling(name: str):
 COMPONENTS = (sibling("se_components").Group(
     "templates", "Templates",
     "SE's templates: list names them, draft gives a template's fields, their instructions and their shape, "
-    "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
-    "to file.",
-    ("list", "draft", "check", "gate", "check-files", "backstop")),)
-#: The commands that go through kern where it runs (se_components.routed): all three only read.
-INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
+    "check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
+    "to file, and fill checks an agent's fields against the raw input and gives the document.",
+    ("list", "draft", "check", "fill", "gate", "check-files", "backstop")),)
+#: The commands that go through kern where it runs (se_components.routed): all four only read.
+INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check", "fill"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
 READ_ONLY_COMMANDS = {
     "list": "Lists SE's templates with the actions each shapes. Use it to find the template for a text "
@@ -635,6 +649,10 @@ READ_ONLY_COMMANDS = {
     "check": "Checks a text or a fields object against a template as SE's filing commands would: its "
              "first line is passes or refused, then every finding or, with --render, the Markdown "
              "to file. Use it before filing; it files nothing.",
+    "fill": "Fills a template from the raw input: without fields it gives the template's instructions, "
+            "guidance and empty draft; with fields and the raw input its first line is passes, "
+            "then the document to write or file, or refused, then every finding. Use it to write "
+            "any text a template shapes; it writes nothing.",
 }
 
 
@@ -674,6 +692,25 @@ def make_parser() -> argparse.ArgumentParser:
     checking.add_argument("--worktree", type=Path, default=Path("."),
                           help="the project whose private terms are checked (default: .)")
     checking.add_argument("--tree", **tree)
+    filling = commands.add_parser(
+        "fill", help="fill a template from the raw input: the instructions, or the checked document",
+        description="templates.py fill with the checks check adds: without fields, the template's "
+                    "instructions, guidance and empty draft as JSON; with fields and the raw input, "
+                    "passes and the document, or refused: <n> findings. It writes nothing and exits 0.")
+    filling.add_argument("template", help="the template, as list names it")
+    filling.add_argument("--prompt", help="what the agent was asked to write")
+    raws = filling.add_mutually_exclusive_group()
+    raws.add_argument("--input", type=Path, help="the raw input the fields come from, as a file")
+    raws.add_argument("--input-text", help="the raw input as text")
+    values = filling.add_mutually_exclusive_group()
+    values.add_argument("--fields", type=Path, help="the field values as a JSON file")
+    values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    filling.add_argument("--title", help="the title it would be filed with")
+    filling.add_argument("--worktree", type=Path, default=Path("."),
+                         help="the project whose private terms and guidance are read (default: .)")
+    filling.add_argument("--templates", type=Path,
+                         help="read the templates from this folder instead of SE's templates/")
+    filling.add_argument("--tree", **tree)
     gating = commands.add_parser(
         "gate",
         help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its template",
@@ -716,8 +753,9 @@ def make_parser() -> argparse.ArgumentParser:
     backstop.add_argument("--worktree", type=Path, default=Path("."),
                           help="the checkout whose se.toml and private terms are read "
                                "(default: .)")
-    for command in (listing, drafting, checking, gating, files, backstop):
+    for command in (listing, drafting, checking, filling, gating, files, backstop):
         command.set_defaults(run={"list": run_list, "draft": run_draft, "check": run_check,
+                                  "fill": run_fill,
                                   "gate": run_gate, "check-files": run_check_files,
                                   "backstop": run_backstop}[command.prog.split()[-1]])
     return top
@@ -730,7 +768,8 @@ class Usage(Exception):
 def loaded(options: argparse.Namespace) -> dict:
     templates = sibling("templates")
     try:
-        return templates.load(templates.ROOT, tree=options.tree)
+        return templates.load(templates.ROOT, tree=options.tree,
+                              folder=getattr(options, "templates", None))
     except templates.TemplateError as error:
         raise Usage(str(error)) from error
 
@@ -857,13 +896,15 @@ def findings(template, root: Path, repo: str, title: str | None, body: str) -> l
     return sorted(found, key=lambda item: item.severity != templates.REFUSE)
 
 
-def refusal(template, found: list) -> list[str]:
-    """`templates.report`'s refusal, its last line naming this script's draft."""
+def refusal(template, found: list, command: str = COMMAND) -> list[str]:
+    """`templates.report`'s refusal, its last line naming this script's draft (for `fill`, its fill
+    without fields, which gives the draft with the instructions)."""
     templates = sibling("templates")
     if template is None:
         return [f"  {item.field}: {item.fix}" for item in found if item.severity == templates.REFUSE]
-    lines = templates.report(COMMAND, template, found, refused=True).splitlines()
-    lines[-1] = f"The empty template: uv run python {HERE / 'se_templates.py'} draft {template.name}"
+    lines = templates.report(command, template, found, refused=True).splitlines()
+    word = "fill" if command == FILL_COMMAND else "draft"
+    lines[-1] = f"The empty template: uv run python {HERE / 'se_templates.py'} {word} {template.name}"
     return lines
 
 
@@ -900,6 +941,46 @@ def run_check(options: argparse.Namespace) -> int:
         print(rendered, end="")
         return 0
     print("\n".join([PASSES, *warnings]))
+    return 0
+
+
+def run_fill(options: argparse.Namespace) -> int:
+    """`fill`: `templates.instructions` without fields; else `templates.fill`'s document against the
+    raw input with `check`'s findings, answered as `check --render` answers. It writes nothing."""
+    templates = sibling("templates")
+    template = named(loaded(options), options.template, FILL_COMMAND)
+    root = options.worktree.resolve()
+    if options.fields is None and options.fields_json is None:
+        print(json.dumps(templates.instructions(template, options.prompt or "", root), indent=2))
+        return 0
+    try:
+        if options.input is not None:
+            try:
+                raw = options.input.read_text(encoding="utf-8")
+            except OSError as error:
+                raise Usage(f"{FILL_COMMAND}: cannot read --input {options.input} ({error})") from error
+        elif options.input_text is not None:
+            raw = options.input_text
+        else:
+            raise Usage(f"{FILL_COMMAND}: give the raw input the fields come from: --input FILE or "
+                        "--input-text TEXT")
+        values = (templates.fields_data(options.fields_json, "--fields-json", FILL_COMMAND)
+                  if options.fields is None else templates.fields_file(options.fields, FILL_COMMAND))
+        rendered, own = templates.fill(template, values, raw, title=options.title)
+    except templates.TemplateError as error:
+        raise Usage(str(error)) from error
+    _, title = filed(template, None, values, options.title)
+    found = findings(template, root, repository(root, None), title, rendered)
+    found += [item for item in own if item.rule == templates.QUOTE_RULE and item not in found]
+    found.sort(key=lambda item: item.severity != templates.REFUSE)
+    refused = sum(item.severity == templates.REFUSE for item in found)
+    if refused:
+        print("\n".join([f"refused: {refused} findings", *refusal(template, found, FILL_COMMAND)]))
+        return 0
+    if found:
+        print("\n".join(str(item) for item in found[:templates.REFUSAL_LINES]), file=sys.stderr)
+    print(PASSES)
+    print(rendered, end="")
     return 0
 
 

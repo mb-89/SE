@@ -430,7 +430,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 | `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
-| `templates` | `list`, `draft`, `check` | `components/templates` |
+| `templates` | `list`, `draft`, `check`, `fill` | `components/templates` |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
@@ -2035,8 +2035,9 @@ checkout.
 #### Templates
 
 `components/templates`: SE's templates: list names them, draft gives a template's fields, their
-instructions and their shape, and check finds everything SE's filing commands would refuse in a
-text, or gives the Markdown to file.
+instructions and their shape, check finds everything SE's filing commands would refuse in a text, or
+gives the Markdown to file, and fill checks an agent's fields against the raw input and gives the
+document.
 
 | Command | Usage | What it does |
 |---|---|---|
@@ -2044,6 +2045,7 @@ text, or gives the Markdown to file.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--tree] template` | print a template's fields, their instructions, their shape and its schema |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--files {off,check,write}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -2346,6 +2348,17 @@ An agent asks for a template through the MCP door's tool `templates`, `scripts/s
 names the templates, `draft <template>` gives `draft --json`'s answer, and `check` finds all the filing
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
 Markdown to file. It only reads; its first line is `passes` or `refused: <n> findings`.
+
+`fill` is one step from raw input to document ([docs/templates.md "Fill"](docs/templates.md#fill)):
+it takes the template, the prompt, the raw input and the agent's fields.
+
+- Without fields it answers the template's instructions, its guidance and the empty draft.
+- With them it checks the document against the template and the raw input. Every field takes
+  `Not in input` where the input does not say, and a field with `quote: true` refuses a quote the
+  raw input does not hold word for word.
+- `templates.py fill` writes a claimed file to its `--path`, or the document to `--out` or stdout;
+  a refusal names every finding and writes nothing. The tool's `fill` answers as `check --render`
+  and writes nothing; filing stays the filing commands' and the GitHub tools'.
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

@@ -40,7 +40,8 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
         "review.py brief", "review.py file", "retro.py collect", "retro.py file", "overhaul.py new",
         "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
         "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add",
-        "se_templates.py list", "se_templates.py draft", "se_templates.py check", "se_templates.py gate",
+        "se_templates.py list", "se_templates.py draft", "se_templates.py check", "se_templates.py fill",
+        "se_templates.py gate",
         "se_templates.py check-files", "se_templates.py backstop", "se_guidance.py collect",
         "se_guidance.py check", "se_guidance.py project"])
     wiring = (ROOT / "wiring.toml").read_text(encoding="utf-8")
