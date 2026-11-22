@@ -157,6 +157,15 @@ class = "interactive"
 read-only = true
 mcp = "Compares the fleet's settings the repository records (fleet/settings.toml) with the live ones, one line per difference; advisory. Use it to see whether main's ruleset, the scheduled tasks or the cloud environment drifted."
 
+[commands."work_tickets.py parity"]
+usage = "work_tickets.py parity [--worktree WORKTREE] left right"
+summary = "compare two commits' trees, such as one branch on two remotes: every ..."
+group = "Integration"
+help = "compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads"
+class = "batch"
+read-only = true
+mcp = "Compares two commits' trees, such as one branch on two remotes, path by path apart from dependency lockfiles (se.lock, uv.lock). Use it to check that two remotes hold the same source."
+
 [commands."work_tickets.py docs"]
 usage = "work_tickets.py docs [--check]"
 summary = "write the command groups' component declarations ..."
