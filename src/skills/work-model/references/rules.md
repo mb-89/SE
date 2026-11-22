@@ -206,7 +206,8 @@ door, and a run reads its inputs once, computes, then writes its outputs.
     [`<se>/scripts/work_tickets.py`](../../../../scripts/work_tickets.py) reaches GitHub only
     through its `run_gh` functions, and without `gh` a role uses the host's GitHub tools
     ([Without gh](../SKILL.md#without-gh)); otherwise by judgment.
-  - kern: git only through its Go door, `kern/git`, which the same check holds.
+  - kern: git only through its Go door, `kern/git`, which kern's own repository holds to the same
+    rule in its CI.
   - Go line (frozen): the battery's `io-module` and `programs` rules (`proc.Programs`; GitHub
     through its own HTTP client, never `gh`); a box's take, local work and land.
 - **Related:** tst-001, des-009
@@ -666,7 +667,8 @@ written.
   host's owner.
 - **Implementations:**
   - se: the owner's rule as landed, [Neutral by construction](../SKILL.md#neutral-by-construction),
-    and its workflows, [Neutral workflows](../SKILL.md#neutral-workflows); `<se>/scripts/hygiene.py`'s
+    its workflows, [Neutral workflows](../SKILL.md#neutral-workflows), and a checkout with more
+    than one remote, [More than one remote](../SKILL.md#more-than-one-remote); `<se>/scripts/hygiene.py`'s
     check `neutral-home` ([Neutral home](../../../../AGENTS.md#neutral-home)).
 - **Related:** pub-001, pub-005, gen-001
 

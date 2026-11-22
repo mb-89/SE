@@ -46,7 +46,7 @@ import ratchet
 ROOT = Path(__file__).resolve().parents[1]
 DOORS = ROOT / "scripts" / "doors"
 
-SCANNED = ("scripts", "tests", "components", "kern")
+SCANNED = ("scripts", "tests", "components")
 SUFFIXES = (".py", ".go")
 SKIPPED = frozenset({".venv", "testdata", "__pycache__"})
 SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})

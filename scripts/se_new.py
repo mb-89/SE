@@ -1,9 +1,10 @@
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
-what the command does. While kern is incubated in SE, kern's Go module (the path `kern/go.mod`
-names) cannot be fetched, so the application carries kern's source at the pin in `kern/` and its
-go.mod replaces the module by it; kern's move to its own repository drops both.
+what the command does. The template and kern's Go module come from the clone of kern se.toml
+[modules.kern] pins (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. kern's module path
+names no host, so it cannot be fetched: the application carries kern's source at the pin in `kern/`,
+its go.mod requires kern at the pin and replaces the module by that folder.
 """
 
 from __future__ import annotations
@@ -29,14 +30,18 @@ TEMPLATE_IDENTITY = 'identity = "<name> <name>"'
 # go.mod's replace of kern, with the comment lines above it, as the template writes it: the one
 # replace of the template, by kern's source one folder up.
 KERN_REPLACE = re.compile(r"(?m)(?:^//.*\n)*^replace (?P<module>\S+) => \.\./?[ \t]*\n?")
+# go.mod's require of kern, whose version the application gets as the pin.
+KERN_REQUIRE = re.compile(r"(?m)^(?P<lead>(?:require[ \t]+|[ \t]+)kern[ \t]+)v\S+")
+# What of kern's repository is no part of kern's Go module: its template (unpacked as the
+# application) and the files of kern's own project; everything else goes into the application's kern/.
+KERN_OWN = {"template", ".github", "se.toml", "se.lock", "AGENTS.md", "pyproject.toml", "uv.lock", ".gitignore"}
 
 
 def app_replace(match: re.Match) -> str:
     """The application's replace of kern's module, by the source it carries in kern/."""
     module = match["module"]
-    return (f"// kern is incubated in SE: no module {module} can be fetched yet, so kern's\n"
-            "// source at its pin is in kern/; kern's move to its own repository drops this line and\n"
-            f"// that folder.\nreplace {module} => ./kern\n")
+    return (f"// kern's module path names no host, so it cannot be fetched: kern's source at the\n"
+            f"// version required above is in kern/.\nreplace {module} => ./kern\n")
 
 
 class NewError(Exception):
@@ -64,35 +69,37 @@ def _has_ref(root: Path, ref: str) -> bool:
     return git_door.run("rev-parse", "-q", "--verify", f"{ref}^{{commit}}", cwd=root).returncode == 0
 
 
-def source_ref(se_root: Path, tag: str) -> tuple[str, str]:
-    """(ref, note) the template is read at: the pin's tag, fetched from origin where the clone lacks
-    it; HEAD, with a note saying so, where the version is not released yet."""
-    if not _has_ref(se_root, f"refs/tags/{tag}"):
-        git_door.run("fetch", "-q", "origin", f"refs/tags/{tag}:refs/tags/{tag}", cwd=se_root, no_prompt=True)
-    if _has_ref(se_root, f"refs/tags/{tag}"):
-        return f"refs/tags/{tag}", ""
-    head = _git(se_root, "rev-parse", "--short=12", "HEAD")
-    return "HEAD", f"{tag} is not released yet: kern and its template come from {se_root}'s HEAD, {head}"
+def source_ref(kern: Path, tag: str) -> str:
+    """The ref kern's template is read at in the pinned clone `kern`: the pin's tag, fetched from
+    its origin where the clone lacks it."""
+    if not _has_ref(kern, f"refs/tags/{tag}"):
+        git_door.run("fetch", "-q", "origin", f"refs/tags/{tag}:refs/tags/{tag}", cwd=kern, no_prompt=True)
+    if not _has_ref(kern, f"refs/tags/{tag}"):
+        raise NewError(f"kern's clone {kern} has no tag {tag}: run uv run python scripts/se_modules.py "
+                       "sync kern, or release kern at the version components/go.mod requires")
+    return f"refs/tags/{tag}"
 
 
-def unpack(se_root: Path, ref: str, path: Path, name: str) -> None:
-    """kern's template at `ref` into `path`, the name filled in; kern's source beside it in
-    `path/kern`, without the template."""
-    archive = _git(se_root, "archive", "--format=tar", ref, "kern", binary=True)
+def unpack(kern: Path, ref: str, path: Path, name: str) -> None:
+    """kern's template at `ref` of the clone `kern` into `path`, the name filled in; kern's Go
+    module beside it in `path/kern`: every file but the template and kern's own project files."""
+    archive = _git(kern, "archive", "--format=tar", ref, binary=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         for member in tar.getmembers():
             if not member.isfile():
                 continue
             parts = PurePosixPath(member.name).parts
             data = tar.extractfile(member).read()
-            if parts[:2] == ("kern", "template"):
-                relative = [TEMPLATE_NAME.sub(name, part) for part in parts[2:]]
+            if parts[0] == "template":
+                relative = [TEMPLATE_NAME.sub(name, part) for part in parts[1:]]
                 try:
                     data = TEMPLATE_NAME.sub(name, data.decode("utf-8")).encode("utf-8")
                 except UnicodeDecodeError:
                     pass
+            elif parts[0] in KERN_OWN:
+                continue
             else:
-                relative = list(parts)
+                relative = ["kern", *parts]
             target = path.joinpath(*relative)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
@@ -103,7 +110,7 @@ def unpack(se_root: Path, ref: str, path: Path, name: str) -> None:
 def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
     text = path.read_text(encoding="utf-8")
     filled = old.sub(new, text, count=1) if isinstance(old, re.Pattern) else text.replace(old, new, 1)
-    if filled == text:
+    if not (old.search(text) if isinstance(old, re.Pattern) else old in text):
         what = old.pattern if isinstance(old, re.Pattern) else old
         raise NewError(f"kern's template at {tag} has no {what!r} in {path.name}: se_new.py no longer "
                        "matches the template; update the one with the other")
@@ -151,14 +158,20 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     if identity is None:
         raise NewError(f"no commit identity for the application: set identity = \"Name <email>\" in "
                        f"[project] of {se_root / 'se.toml'} (README \"Project settings\")")
-    version, tag = _sibling("se_modules").kern_pin(se_root)
-    ref, note = source_ref(se_root, tag)
-    commit = _git(se_root, "rev-parse", "--short=12", ref)
+    modules = _sibling("se_modules")
+    try:
+        version, tag = modules.kern_pin(se_root)
+    except modules.ModuleError as error:
+        raise NewError(str(error)) from error
+    kern = modules.kern_dir(se_root)
+    ref = source_ref(kern, tag)
+    commit = _git(kern, "rev-parse", "--short=12", ref)
     path.mkdir(parents=True, exist_ok=True)
-    unpack(se_root, ref, path, name)
+    unpack(kern, ref, path, name)
+    _fill(path / "go.mod", KERN_REQUIRE, lambda match: f"{match['lead']}v{version}", tag)
     _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
-    write_workflows(se_root, ref, path)
+    write_workflows(se_root, "HEAD", path)
     _git(path, "init", "-q", "-b", "main")
     _git(path, "config", "user.name", identity[0])
     _git(path, "config", "user.email", identity[1])
@@ -168,7 +181,6 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     first = _git(path, "rev-parse", "--short=12", "HEAD")
     owner = github_owner(se_root)
     return [
-        *([note] if note else []),
         f"se new app: {name} created in {path} from kern's template at {tag} ({commit}), "
         f"first commit {first}",
         f"Owner's step: create the GitHub repository {owner}/{name}, empty, with a ruleset on main "

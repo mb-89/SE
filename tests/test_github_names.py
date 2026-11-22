@@ -21,10 +21,10 @@ def section(text: str, heading: str) -> str:
     return text[start:end if end != -1 else None]
 
 
-def test_the_docs_github_names_are_the_components() -> None:
+def test_the_docs_github_names_are_the_components(kern: Path) -> None:
     doc = section((ROOT / "docs" / "go-core.md").read_text(encoding="utf-8"), "GitHub in the cloud")
     named = set(re.findall(r"`github/([a-z-]+)(?:/<key>)?`", doc))
-    source = (ROOT / "kern" / "components" / "github" / "github.go").read_text(encoding="utf-8")
+    source = (kern / "components" / "github" / "github.go").read_text(encoding="utf-8")
     declared = set(re.findall(r'index\.Family\("([a-z-]+)"', source))
     assert declared, "github.go declares its families with index.Family"
     assert named == declared, (sorted(named - declared), sorted(declared - named))

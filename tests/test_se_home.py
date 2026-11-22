@@ -11,12 +11,14 @@ import pytest
 import fake_git
 import git_door
 import se_home
+import se_modules
 from se_home import Home
 
 
-# The one table of origins and answers, which kern's Go helper (kern/home) reads too.
-TABLE = json.loads((Path(__file__).resolve().parents[1] / "kern" / "home" / "testdata" / "origins.json")
-                   .read_text(encoding="utf-8"))
+# The one table of origins and answers, which kern's Go helper (kern's home) reads too, from the
+# clone of kern se.toml pins (tests/conftest.py places it before collection).
+TABLE = json.loads((se_modules.kern_dir(Path(__file__).resolve().parents[1]) / "home" / "testdata"
+                    / "origins.json").read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("case", TABLE["origins"], ids=lambda case: repr(case["origin"]))

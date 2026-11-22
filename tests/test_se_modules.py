@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -904,3 +905,87 @@ def test_the_switch_table_shows_hook_core_by_its_answering_layer(tmp_path, monke
     (home / ".se" / "local.toml").unlink()
     effect = switches_json(monkeypatch, capsys, home, tmp_path)
     assert (effect["state"], effect["layer"]) == ("off", "environment")
+
+
+# A `go` pin: the version a go.mod requires of the module is the pin (README "Modules").
+
+GO_MOD = "module example.com/app\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/x/y v1.0.0\n\tlib v{version}\n)\n"
+
+
+@pytest.fixture
+def go_pinned(released):
+    """The consumer pins lib by its components/go.mod's require lib v1.4.2."""
+    released.manifest.write_text(f'[modules.lib]\nurl = "{released.upstream.as_posix()}"\ngo = "components/go.mod"\n')
+    released.gomod = write(released.root / "components" / "go.mod", GO_MOD.format(version="1.4.2"))
+    return released
+
+
+def test_a_go_pin_reads_the_version_its_go_mod_requires_and_locks_its_tag(go_pinned, capsys):
+    module = se_modules.load_manifest(go_pinned.root)[0]
+    assert (module.version, module.go, module.ref) == ("1.4.2", "components/go.mod", "")
+    code, out = run(go_pinned, capsys, "sync")
+    assert code == 0, out
+    assert locked(go_pinned) == {"lib": ("1.4.2", go_pinned.tags["v1.4.2"])}
+    assert git(go_pinned.cache, "rev-parse", "HEAD") == go_pinned.tags["v1.4.2"]
+    assert "components/go.mod v1.4.2 locked" in out
+    code, out = run(go_pinned, capsys, "status")
+    assert code == 0 and "(components/go.mod v1.4.2, pin " in out and out.rstrip().endswith("at pin"), out
+    go_pinned.gomod.write_text(GO_MOD.format(version="1.10.1"))
+    assert run(go_pinned, capsys, "sync")[0] == 0
+    assert locked(go_pinned) == {"lib": ("1.10.1", go_pinned.tags["v1.10.1"])}, "a moved require locks again"
+
+
+def test_go_true_names_the_roots_go_mod(go_pinned):
+    write(go_pinned.root / "go.mod", "module x\n\nrequire lib v2.0.0 // the pin\n")
+    go_pinned.manifest.write_text(go_pinned.manifest.read_text().replace('"components/go.mod"', "true"))
+    assert se_modules.load_manifest(go_pinned.root)[0].version == "2.0.0"
+
+
+@pytest.mark.parametrize(("gomod", "message"), [
+    ("module x\n\nrequire other v1.0.0\n", "components/go.mod has no require lib v<version>; add one"),
+    ("module x\n\nrequire lib v0.0.0-20260101000000-abcdefabcdef\n", "not vMAJOR.MINOR.PATCH"),
+    (None, "no components/go.mod in"),
+])
+def test_a_go_mod_without_the_require_is_refused(go_pinned, gomod, message):
+    if gomod is None:
+        go_pinned.gomod.unlink()
+    else:
+        go_pinned.gomod.write_text(gomod)
+    with pytest.raises(se_modules.ModuleError, match=re.escape(message)):
+        se_modules.load_manifest(go_pinned.root)
+
+
+def test_a_go_pin_beside_ref_or_version_is_refused(go_pinned):
+    write(go_pinned.manifest, go_pinned.manifest.read_text() + 'version = "^1.4"\n')
+    with pytest.raises(se_modules.ModuleError, match="go pins the version; drop ref and version"):
+        se_modules.load_manifest(go_pinned.root)
+
+
+def test_a_go_pin_whose_version_has_no_tag_is_refused(go_pinned, capsys):
+    go_pinned.gomod.write_text(GO_MOD.format(version="1.4.1"))
+    code, out = run(go_pinned, capsys, "sync")
+    assert code == 1
+    assert "no tag v1.4.1 in" in out and "components/go.mod's require lib v1.4.1" in out, out
+
+
+def test_update_of_a_go_pin_is_refused_naming_the_go_mod_line(go_pinned, capsys):
+    code, out = run(go_pinned, capsys, "update", "lib")
+    assert code == 1
+    assert "pinned by components/go.mod's require lib v1.4.2; change that line" in out
+    code, out = run(go_pinned, capsys, "update", "--all")
+    assert code == 0 and "lib: pinned by components/go.mod, left as it is" in out, out
+
+
+def test_a_local_checkout_of_a_go_pin_reports_its_release_toml_version(go_pinned, capsys):
+    checkout = go_pinned.upstream
+    write(checkout / "se.toml", "[tests]\ncommand = []\n")
+    write(checkout / "release.toml", 'version = "1.4.2"\n')
+    write(go_pinned.local, f'[paths]\nlib = "{checkout.as_posix()}"\n')
+    for command in ("sync", "status"):
+        code, out = run(go_pinned, capsys, command)
+        assert code == 0 and "lib: local" in out and "version 1.4.2" in out and "off the pin" not in out, out
+    write(checkout / "release.toml", 'version = "1.5.0"\n')
+    assert "version 1.5.0, off the pin 1.4.2" in run(go_pinned, capsys, "status")[1]
+    (checkout / "release.toml").unlink()
+    code, out = run(go_pinned, capsys, "sync")
+    assert code == 1 and "release.toml sets no version, so the pin 1.4.2 cannot be checked" in out

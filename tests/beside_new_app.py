@@ -3,11 +3,13 @@ created from this SE, at its kern pin, passes its own test run, and its core ref
 needs a switched-off component, naming both.
 
 The SE it is created from is this working tree's, in the git door's fake: its scripts, se.toml and
-kern, kern committed and tagged at its pin, so the template checked is the one this tree would
-release; how the pin's ref is found is tests/test_se_new.py's.
+components/go.mod, with the clone of kern at its pin (tests/conftest.py places it) committed and
+tagged v<version> in the fake, so the template checked is the one SE's pin names; how the pin's ref
+is found is tests/test_se_new.py's.
 
-It builds the application's Go, so it runs beside the suite, after kern's tests have warmed Go's
-build cache, not in it (its file name keeps the suite from collecting it): README "Test budget".
+It builds the application's Go, so it runs beside the suite, after SE's Go components' tests have
+warmed Go's build cache, not in it (its file name keeps the suite from collecting it): README "Test
+budget".
 """
 
 from __future__ import annotations
@@ -25,8 +27,9 @@ import se_modules
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = "ledger"
-# kern's Go module path, as kern/go.mod names it: this file names no home of its own.
-KERN = next(line.split()[1] for line in (ROOT / "kern" / "go.mod").read_text(encoding="utf-8").splitlines()
+# kern at its pin, and its Go module path, as its go.mod names it: this file names no home of its own.
+KERN_DIR = se_modules.kern_dir(ROOT)
+KERN = next(line.split()[1] for line in (KERN_DIR / "go.mod").read_text(encoding="utf-8").splitlines()
             if line.startswith("module "))
 
 # An application's own component: it reads a total, as a report would. kern's fixture component
@@ -78,22 +81,30 @@ def run(*args: str, cwd: Path, timeout: float = 300) -> subprocess.CompletedProc
 
 
 def fake_se(root: Path) -> Path:
-    """This working tree's SE in the fake: its scripts, se.toml, kern and the battery the template's
-    CI calls, committed and tagged kern-v<version> at its pin, origin on github.com."""
+    """This working tree's SE in the fake: its scripts, se.toml, components/go.mod and the battery
+    the template's CI calls, committed, origin on github.com; and kern's clone at the pin in
+    .se/modules/kern, committed and tagged v<version>."""
     se = root / "se"
-    ignore = shutil.ignore_patterns("__pycache__", ".venv")
+    ignore = shutil.ignore_patterns("__pycache__", ".venv", ".git", ".se")
     shutil.copytree(ROOT / "scripts", se / "scripts", ignore=ignore)
-    shutil.copytree(ROOT / "kern", se / "kern", ignore=ignore)
     shutil.copy2(ROOT / "se.toml", se / "se.toml")
+    (se / "components").mkdir()
+    shutil.copy2(ROOT / "components" / "go.mod", se / "components" / "go.mod")
     (se / ".github" / "workflows").mkdir(parents=True)
     shutil.copy2(ROOT / ".github" / "workflows" / "kern-battery.yml", se / ".github" / "workflows")
+    kern = se_modules.kern_dir(se)
+    shutil.copytree(KERN_DIR, kern, ignore=ignore)
     _, tag = se_modules.kern_pin(se)
+    commit = ("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m")
     with git_door.use(DOOR[0]):
         fake_git.init(se, "-b", "main")
-        for args in (("add", "se.toml", "kern", ".github"), ("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q",
-                     "-m", "SE"), ("tag", tag), ("remote", "add", "origin", "https://github.com/alice/se.git")):
-            done = git_door.run(*args, root=se)
-            assert done.returncode == 0, done.stderr
+        fake_git.init(kern, "-b", "main")
+        for folder, steps in ((se, (("add", "se.toml", "components", ".github"), (*commit, "SE"),
+                                    ("remote", "add", "origin", "https://github.com/alice/se.git"))),
+                              (kern, (("add", "-A"), (*commit, "kern"), ("tag", tag)))):
+            for args in steps:
+                done = git_door.run(*args, root=folder)
+                assert done.returncode == 0, done.stderr
     return se
 
 
@@ -105,7 +116,7 @@ def app(tmp_path_factory) -> Path:
     done = run(sys.executable, str(se / "scripts" / "se.py"), "new", "app", NAME, "--path", str(path), cwd=se)
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.splitlines()[-1].startswith("Owner's step: create the GitHub repository alice/"), done.stdout
-    assert "is not released yet" not in done.stdout, "the template comes from the pin's tag"
+    assert f"from kern's template at {se_modules.kern_pin(ROOT)[1]} (" in done.stdout, "the template comes from the pin's tag"
     return path
 
 

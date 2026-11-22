@@ -7,6 +7,10 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure.
   closed) and a page of its tags, 100 each, until both are read; never a request per issue or tag.
   The result is a snapshot (`--save-snapshot` writes it, `--snapshot` builds from one without the
   network).
+- A repository GitHub refuses to the token (a private one the workflow's token cannot read, a name
+  that does not exist) is one gap, not a failed build: the snapshot keeps it under `unreadable`
+  with GitHub's answer, the page shows no lane for it and names it, with that answer, above the
+  map, and the command warns on stderr. Only where no repository can be read does the build fail.
 - Compute: the page comes from the snapshot alone. Pull requests and field reports (label
   `field-report`) are left out. An issue goes to exactly one place:
   - closed as not planned or duplicate: hidden;
@@ -33,7 +37,7 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure.
   each planned day with an issue as one hollow stop per lane, Needs you and Next; tapping a stop lists its issues, tapping an issue shows the first paragraph of its Goal and
   its link.
 
-Exit code 0: written; 1: GitHub refused the read; 2: setup error. The README section
+Exit code 0: written, a gap included; 1: GitHub refused the read of every repository; 2: setup error. The README section
 "Documentation" says where the page is published.
 """
 
@@ -192,45 +196,60 @@ def read(names: list[str], post: Poster, now: datetime, ages: bool = False) -> d
 
     GraphQL's issues are issues only; pull requests are never read. With ``ages`` each issue also
     keeps `person_since` ([timeline] ages); without it the snapshot is the same as before the setting.
+    A repository whose read GitHub refuses goes under `unreadable` with the refusal; where every
+    one is refused, the read fails.
     """
     snapshot: dict = {"read_at": now.astimezone(timezone.utc).isoformat(timespec="seconds"), "repositories": {}}
+    unreadable: dict[str, str] = {}
     for name in names:
-        owner, repo = name.split("/", 1)
-        issues: list[dict] = []
-        tags: list[dict] = []
-        cursors: dict[str, str | None] = {"issues": None, "tags": None}
-        more = {"issues": True, "tags": True}
-        while more["issues"] or more["tags"]:
-            data = post(query(ages), {"owner": owner, "name": repo, **cursors,
-                                "withIssues": more["issues"], "withTags": more["tags"]})
-            repository = data.get("repository")
-            if repository is None:
-                raise ReadError(f"GitHub returned no repository {name}; check [timeline] in se.toml")
-            for key, field, into in (("issues", "issues", issues), ("tags", "refs", tags)):
-                if more[key]:
-                    connection = repository[field]
-                    into.extend(connection["nodes"])
-                    more[key] = connection["pageInfo"]["hasNextPage"]
-                    cursors[key] = connection["pageInfo"]["endCursor"]
-        snapshot["repositories"][name] = {
-            "issues": [{
-                "number": issue["number"],
-                "title": issue["title"],
-                "url": issue["url"],
-                "state": issue["state"].lower(),
-                "state_reason": (issue.get("stateReason") or "").lower() or None,
-                "closed_at": issue.get("closedAt"),
-                "labels": sorted(label["name"] for label in issue["labels"]["nodes"]),
-                "body": issue.get("body") or "",
-                **({"person_since": person_since(issue)} if ages else {}),
-            } for issue in issues],
-            "releases": [{
-                "tag": tag["name"],
-                "url": f"https://github.com/{name}/releases/tag/{tag['name']}",
-                "published_at": tag_date(tag.get("target")),
-            } for tag in tags if RELEASE_TAG.fullmatch(tag["name"])],
-        }
+        try:
+            snapshot["repositories"][name] = read_repository(name, post, ages)
+        except ReadError as error:
+            unreadable[name] = str(error)
+    if unreadable and not snapshot["repositories"]:
+        raise ReadError("; ".join(f"{name}: {reason}" for name, reason in unreadable.items()))
+    if unreadable:
+        snapshot["unreadable"] = unreadable
     return snapshot
+
+
+def read_repository(name: str, post: Poster, ages: bool) -> dict:
+    """One repository's issues and releases, in one batched pass."""
+    owner, repo = name.split("/", 1)
+    issues: list[dict] = []
+    tags: list[dict] = []
+    cursors: dict[str, str | None] = {"issues": None, "tags": None}
+    more = {"issues": True, "tags": True}
+    while more["issues"] or more["tags"]:
+        data = post(query(ages), {"owner": owner, "name": repo, **cursors,
+                                  "withIssues": more["issues"], "withTags": more["tags"]})
+        repository = data.get("repository")
+        if repository is None:
+            raise ReadError(f"GitHub returned no repository {name}; check [timeline] in se.toml")
+        for key, field, into in (("issues", "issues", issues), ("tags", "refs", tags)):
+            if more[key]:
+                connection = repository[field]
+                into.extend(connection["nodes"])
+                more[key] = connection["pageInfo"]["hasNextPage"]
+                cursors[key] = connection["pageInfo"]["endCursor"]
+    return {
+        "issues": [{
+            "number": issue["number"],
+            "title": issue["title"],
+            "url": issue["url"],
+            "state": issue["state"].lower(),
+            "state_reason": (issue.get("stateReason") or "").lower() or None,
+            "closed_at": issue.get("closedAt"),
+            "labels": sorted(label["name"] for label in issue["labels"]["nodes"]),
+            "body": issue.get("body") or "",
+            **({"person_since": person_since(issue)} if ages else {}),
+        } for issue in issues],
+        "releases": [{
+            "tag": tag["name"],
+            "url": f"https://github.com/{name}/releases/tag/{tag['name']}",
+            "published_at": tag_date(tag.get("target")),
+        } for tag in tags if RELEASE_TAG.fullmatch(tag["name"])],
+    }
 
 
 # --- Compute ----------------------------------------------------------------------------------
@@ -343,6 +362,7 @@ def model(snapshot: dict, ages: bool = False) -> dict:
         for entries in lists.values():
             entries.sort(key=lambda issue: -issue["number"])
     return {"read_at": snapshot["read_at"], "today": today, "lanes": lanes,
+            "unreadable": dict(snapshot.get("unreadable") or {}),
             "days": dict(sorted(days.items())), "planned": dict(sorted(ahead.items())), "places": places}
 
 
@@ -406,6 +426,8 @@ a { color: var(--accent); }
 .planned .when { font-style: italic; }
 .lane .mark { flex-shrink: 0; margin-left: 0; }
 .needs .dot { border-color: var(--accent); }
+.gap { font: 0.9rem var(--font-interface); border-left: 3px solid var(--accent); padding: 0.25rem 0.5rem;
+  margin: 0 0 1rem; }
 .backlog h3 { font: bold 0.95rem var(--font-interface); margin: 1rem 0 0.25rem; }
 @media (max-width: 30rem) {
   .lanes, .row > summary { grid-template-columns: 3.9rem repeat(var(--lanes), minmax(0, 1fr)); }
@@ -523,6 +545,8 @@ def render(page: dict) -> str:
     if not backlog:
         backlog.append('<p class="meta">Nothing is backlogged.</p>')
     read_at = page["read_at"].replace("T", " ").replace("+00:00", " UTC")
+    gaps = "".join(f'<p class="gap">Not shown: {esc(name)} could not be read ({esc(reason)}).</p>\n'
+                   for name, reason in page.get("unreadable", {}).items())
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -535,7 +559,7 @@ def render(page: dict) -> str:
 <h1>Timeline</h1>
 <p class="meta">Built from the issues and releases of {", ".join(esc(lane) for lane in lanes)} at {esc(read_at)}.
 Tap a day to list its issues, an issue for its goal.</p>
-<main class="map">
+{gaps}<main class="map">
 {chr(10).join(parts)}
 </main>
 <section class="backlog">
@@ -614,6 +638,9 @@ def main(argv: list[str] | None = None, post: Poster | None = None, now: datetim
     args.destination.parent.mkdir(parents=True, exist_ok=True)
     page = model(snapshot, ages=ages)
     args.destination.write_text(render(page), encoding="utf-8")
+    for name, reason in page["unreadable"].items():
+        print(f"timeline: warning: {name} could not be read, so the page names it as a gap: {reason}",
+              file=sys.stderr)
     done = sum(len(stop["issues"]) for stops in page["days"].values() for stop in stops.values())
     print(f"timeline: wrote {args.destination} ({len(page['days'])} days, {done} done issues)")
     return 0

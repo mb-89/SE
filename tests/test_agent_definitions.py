@@ -96,11 +96,43 @@ def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_de
             assert asks not in text, asks
 
 
+# #1567's decision: "'dispatcher' then names only the scheduled work check" (README "Dispatcher").
+DISPATCHER_OWNER = ("#dispatcher", 'readme "dispatcher"')
+BLOCK_START = re.compile(r"^\s*(?:[-*]|\d+\.)\s|^#")
+
+
+def dispatcher_misnamed(text: str) -> list[str]:
+    """The paragraphs and list items of `text` that say "dispatcher" without naming the
+    scheduled work check's owner (a link to README "Dispatcher", or that name), outside
+    README's own "### Dispatcher" section: there "dispatcher" could name the person's session."""
+    text = re.sub(r"^### Dispatcher\n.*?(?=^#)", "", text, flags=re.MULTILINE | re.DOTALL)
+    blocks: list[list[str]] = [[]]
+    for line in text.splitlines():
+        if not line.strip() or BLOCK_START.match(line):
+            blocks.append([])
+        if line.strip():
+            blocks[-1].append(line)
+    return [" ".join(block) for block in blocks
+            if "dispatcher" in " ".join(block).casefold()
+            and not any(owner in " ".join(block).casefold() for owner in DISPATCHER_OWNER)]
+
+
+@pytest.mark.parametrize(("text", "misnamed"), [
+    ("SE, the dispatcher, talks to the person.\n", True),
+    ("- Ask the dispatcher.\n- See [README](README.md#dispatcher).\n", True),
+    ("The [dispatcher](README.md#dispatcher) fires the integrator.\n", False),
+    ("the dispatcher (README \"Dispatcher\") lists work\n", False),
+    ("### Dispatcher\n\nThe dispatcher runs.\n\n### Next\n", False),
+])
+def test_dispatcher_may_name_only_the_scheduled_work_check(text, misnamed):
+    assert bool(dispatcher_misnamed(text)) is misnamed
+
+
 def test_no_instruction_calls_the_session_the_person_talks_to_the_dispatcher():
     instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md"]
-    named = [path.relative_to(ROOT).as_posix() for path in instructions
-             if "dispatcher" in path.read_text(encoding="utf-8").casefold()]
-    assert named == []
+    named = {path.relative_to(ROOT).as_posix(): found for path in instructions
+             if (found := dispatcher_misnamed(path.read_text(encoding="utf-8")))}
+    assert named == {}
 
 
 def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
@@ -612,7 +644,7 @@ def test_agents_md_names_the_focused_and_complete_test_commands():
     tests = text.split("## Tests", 1)[1].split(" ## ", 1)[0]
     assert "| Suite | Command | When it runs |" in tests
     assert "| Focused | `uv run pytest -q tests/<file>.py`" in tests
-    assert "| Complete | `uv run pytest -q` and kern's tests |" in tests
+    assert "| Complete | `uv run pytest -q` and the suites beside it |" in tests
 
 
 def test_the_work_model_owns_where_the_commit_identity_and_the_public_check_come_from():
@@ -1029,3 +1061,10 @@ def test_visible_sessions_states_the_scheme_and_how_sessions_are_named_found_and
         assert rule in text, rule
     assert "`session-title`" in between(WORK_MODEL, "- **Commands that still run**",
                                         "- **Commands that hand off**")
+
+
+def test_integrator_starts_the_next_startable_issue_after_each_landing_and_records_it():
+    integrator = normalized(AGENTS / "integrator.md")
+    assert "**Start what is unblocked**, after each landing, before the next delivered pull request." in integrator
+    assert "write what you did into the issue you landed" in integrator
+    assert "`Started: none startable`" in integrator

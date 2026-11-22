@@ -5450,30 +5450,21 @@ def test_suite_budget_refuses_paths_that_are_no_paths_in_the_project(worktree, p
         work_tickets.suite_budget(worktree)
 
 
-def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budget():
+def test_se_declares_its_go_components_beside_its_python_suite_on_kern_at_its_pin():
     budget = work_tickets.suite_budget(Path(__file__).resolve().parents[1])
     assert (budget.command, budget.target_seconds) == (["uv", "run", "pytest", "-q"], 60)
-    # kern's tests first: they warm Go's build cache for the acceptances after them.
-    kern, go_components, long_step, release_guard, new_app, components, relay, scripts, copilot = budget.beside
-    assert (kern.name, kern.command, kern.directory) == ("kern", ["go", "test", "./..."], "kern")
-    assert kern.setup == ["go", "test", "-run", "^$", "./..."], "a cold build counts as no test time"
-    assert kern.target_seconds < kern.limit_seconds < budget.limit_seconds
+    # kern's own tests run in kern's repository; SE's components first, on kern at its pin, which
+    # their setup places: they warm Go's build cache for the acceptances after them.
+    go_components, release_guard, new_app, components, relay, scripts, copilot = budget.beside
     assert (go_components.name, go_components.command, go_components.directory) == (
-        "go-components", ["go", "test", "./..."], "components"), "after kern's, with Go's cache warm"
+        "go-components", ["go", "test", "./..."], "components")
+    assert go_components.setup == ["uv", "run", "python", "../scripts/se_modules.py", "sync", "kern"], "kern is placed first"
     assert go_components.target_seconds < go_components.limit_seconds < budget.limit_seconds
-    # A relay step after a local phase longer than NATS's two minutes: a real wait, its own budget.
-    assert (long_step.name, long_step.directory) == ("kern-long-step", "kern")
-    assert long_step.command[:4] == ["go", "test", "-tags", "longstep"], "out of kern's own tests"
-    assert 130 < long_step.target_seconds < long_step.limit_seconds
-    # Off the landing path: it runs nightly and where the change touches what it guards.
-    assert long_step.guards({"kern/bus/bus.go"}) and long_step.guards({"kern/go.mod"})
-    assert long_step.guards({"kern/host/declared.go"}) and long_step.guards({"kern/python/kern/runner.py"})
-    assert not long_step.guards({"scripts/work_tickets.py", "kern/host/core.go", "README.md"})
-    assert all(suite.paths is None for suite in budget.beside if suite is not long_step)
-    # The released binaries hold what the checkout builds (kern/README.md "Release").
-    assert (release_guard.name, release_guard.directory) == ("release-guard", "kern")
-    assert release_guard.command == ["go", "run", "./tools/release", "guard", "--dir", ".",
-                                     "--dir", "../components"]
+    assert all(suite.paths is None for suite in budget.beside)
+    # The released binary holds what the checkout builds (kern's README "Release"): se's alone.
+    assert (release_guard.name, release_guard.directory, release_guard.setup) == (
+        "release-guard", "components", ["uv", "run", "python", "../scripts/se_modules.py", "sync", "kern"])
+    assert release_guard.command == ["go", "run", "kern/tools/release", "guard", "--dir", "."]
     assert release_guard.target_seconds < release_guard.limit_seconds < budget.limit_seconds
     assert (new_app.name, new_app.command[-1]) == ("new-app", "tests/beside_new_app.py")
     assert new_app.target_seconds < new_app.limit_seconds < budget.limit_seconds
@@ -5486,6 +5477,7 @@ def test_se_declares_kerns_go_tests_beside_its_python_suite_with_their_own_budge
     assert scripts.target_seconds < scripts.limit_seconds < budget.limit_seconds
     # SE installed beside an empty project, checked without Copilot (docs/copilot.md "Self-test").
     assert (copilot.name, copilot.command[-3:]) == ("copilot-self-test", ["scripts/copilot.py", "self-test", "--build"])
+    assert copilot.setup == ["uv", "run", "python", "scripts/se_modules.py", "sync", "kern"], "it builds se"
     assert copilot.target_seconds < copilot.limit_seconds < budget.limit_seconds
 
 
@@ -5681,7 +5673,8 @@ def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeyp
     ))
     assert work_tickets.main(["push", "topic", "--worktree", str(main_checkout)]) == 1
     assert calls == []
-    assert gate[0][-4:] == ["--rev", "topic", "--range", "topic --not --remotes"]
+    assert gate[0][-6:] == ["--rev", "topic", "--remote", "origin",
+                            "--range", "topic --not --remotes=origin"]
     error = capsys.readouterr().err
     assert "Public check failed" in error
     assert error.rstrip().endswith(

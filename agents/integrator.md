@@ -147,10 +147,19 @@ integrator: reconcile from GitHub first (`queue`) and treat a missing message as
 6. **Clean up** through `integrate`; it removes only an eligible worker worktree and reports a
    retained worktree explicitly. Where the host refuses deleting a merged branch, leave it: the
    repository's automatic head-branch deletion removes it. Never retry the deletion.
-7. **Start what is unblocked**: use `work_tickets.py ready` and `capacity` as helpers. Every work
-   issue labelled `ready` whose blockers are closed, that has no branch yet and whose file ownership
-   does not clash with running workers, gets a fresh worktree from the newest integration branch
+7. **Start what is unblocked**, after each landing, before the next delivered pull request.
+
+   Use `work_tickets.py ready` and `capacity` as helpers. Every work issue `ready` lists (labelled
+   `ready`, not waiting on a person, blockers closed, no branch yet, file ownership that does not
+   clash with running workers) gets a fresh worktree from the newest integration branch
    (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
+
+   Then write what you did into the issue you landed, as one comment: each issue you started with
+   its worker session, or `Started: none startable`.
+
+   A landing that frees work so starts it at once; the dispatcher
+   ([README "Dispatcher"](../README.md#dispatcher)) only restarts a fleet where no integrator
+   runs.
 
    It also gets a worker session whose `workspace` is that worktree folder; local workers only
    within capacity. You start it yourself, so it is your child, titled

@@ -5,7 +5,7 @@ go 1.25.14
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/sys v0.41.0
-	kern v0.0.0
+	kern v0.14.1
 )
 
 require (
@@ -29,4 +29,6 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace kern => ../kern
+// kern at the version required above, which `uv run python scripts/se_modules.py sync kern` places
+// there (se.toml [modules.kern]).
+replace kern => ../.se/modules/kern

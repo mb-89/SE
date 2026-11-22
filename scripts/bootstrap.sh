@@ -17,7 +17,8 @@
 #   kern     in --hook mode, for a project inside a git checkout: the application binary
 #            (se_modules.py app-binary) — kern's core plus the application's Go components where it
 #            has any (the `se` binary for SE), else the bare kern — fetched for this platform into ~/.se/bin/<name>-<version> in the background (or built
-#            from its folder where no release matches), started detached for the project, and handed
+#            from its folder where no release matches, on the installed SE's kern, placed first at
+#            the pin its se.toml [modules.kern] reads: kern_place), started detached for the project, and handed
 #            the session's start; SE_HOOK_CORE=off, or [hooks] core = "off" in ~/.se/local.toml,
 #            skips this step (below)
 # --binary (RUNME.conf's `get se` line, run by SE's RUNME): the plain run's git, uv and Python steps,
@@ -145,7 +146,7 @@ kern_run() { # <bin> <session start file>
   "$1" hook SessionStart --root "$project" <"$2" >/dev/null 2>&1
   return 0
 }
-# Put the binary in place in the background, from the release or built from kern/, then start it.
+# Put the binary in place in the background, from the release or built from its folder, then start it.
 # Its own process (setsid where there is one), so the hook's end does not end it.
 kern_background() { # <mode> <bin> <args>...
   local detach=()
@@ -217,10 +218,36 @@ kern_fetch() { # <bin> <archive url> <SHA256SUMS file> <binary in it>
   rm -rf "$part"
   return "$ok"
 }
-# Build the binary with go from its folder into <bin>.
+# Build the binary with go from its folder into <bin>; its go.mod replaces kern by the clone
+# kern_place put in place.
 kern_build() { # <bin> <build folder> <package>
   local part="$1.part$$"
-  (cd "${2:-$se_root/kern}" && go build -o "$part" "${3:-./cmd/kern}") && mv -f "$part" "$1"
+  (cd "$2" && go build -o "$part" "$3") && mv -f "$part" "$1"
+}
+# kern for the installed SE (its se.toml [modules.kern], README "Modules"), which a build of its
+# binary builds on: synced where its clone in .se/modules/kern is missing or not at the commit
+# se.lock locks, both read from the files alone, so an SE at its pin starts no process here. Where
+# that fails, the start goes on without it and the greeting names the cause. A project that is SE's
+# own checkout syncs it in the modules step.
+kern_place() {
+  [ -f "$se_root/se.toml" ] && grep -q '^\[modules\.kern\]' "$se_root/se.toml" || return 0
+  local locked="" head="" inside=false line out
+  if [ -f "$se_root/se.lock" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      case "$line" in
+        "[modules.kern]") inside=true ;;
+        "["*) inside=false ;;
+        "ref = \""*) $inside && { locked="${line#ref = \"}"; locked="${locked%\"}"; } ;;
+      esac
+    done <"$se_root/se.lock"
+  fi
+  [ -f "$se_root/.se/modules/kern/.git/HEAD" ] && IFS= read -r head <"$se_root/.se/modules/kern/.git/HEAD"
+  [ -n "$locked" ] && [ "${head%$'\r'}" = "$locked" ] && return 0
+  if ! out="$(uv run --no-project --python ">=$python_version" python "$se_root/scripts/se_modules.py" \
+      --root "$se_root" sync kern 2>&1)"; then
+    notes+=("SE: placing kern for $se_root failed, so this start goes on without it: ${out##*$'\n'}")
+  fi
 }
 kern_step() {
   local start
@@ -233,6 +260,7 @@ kern_step() {
     kern_args+=(--kern-none)
     return 0
   fi
+  [ "$project" -ef "$se_root" ] || kern_place
   kern_locate || return 0
   mkdir -p "$project/.se/.runtime" 2>/dev/null
   # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place; the
@@ -266,6 +294,7 @@ kern_step() {
 # its last step writes <se root>/.se/.runtime/runme-se, the version it linked, RUNME's need.
 binary_step() {
   project="$se_root"
+  kern_place
   kern_locate || need "SE's checkout $se_root names no application binary (se_modules.py app-binary)"
   if [ ! -x "$bin" ]; then
     kern_release

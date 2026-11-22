@@ -1,0 +1,53 @@
+# The dispatcher (README "Dispatcher"): every four hours, one SE command reads from GitHub whether
+# startable work waits (open `work` issues labelled `ready`, not waiting on a person, with no open
+# blocker) and whether an integrator runs; where work waits and none runs, it fires the scheduled
+# task whose session is a fresh integrator, once. No model runs here: a run that finds nothing to
+# start costs no model tokens.
+#
+# The scheduled task's fire URL (its API trigger's, naming the task's id) and its token come from
+# the repository secrets SE_DISPATCH_TRIGGER and SE_DISPATCH_TOKEN. While either is unset the run
+# is a dry run: it prints the fire it would make and fires nothing. A run by hand is a dry run
+# unless `dry_run` is unticked.
+#
+# Switch it off by disabling this workflow (the Actions tab, or `gh workflow disable dispatch.yml`),
+# or pause the whole fleet with an open issue labelled `pause`, which dispatch honours.
+name: dispatch
+
+on:
+  schedule:
+    - cron: "41 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the fire it would make, fire nothing"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Fire the integrator's scheduled task where startable work waits and none runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SE_DISPATCH_TRIGGER: ${{ secrets.SE_DISPATCH_TRIGGER }}
+          SE_DISPATCH_TOKEN: ${{ secrets.SE_DISPATCH_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          mode=--fire
+          if [ "$DRY_RUN" = true ] || [ -z "$SE_DISPATCH_TRIGGER" ] || [ -z "$SE_DISPATCH_TOKEN" ]; then
+            mode=--dry-run
+          fi
+          uv run python scripts/work_tickets.py dispatch --worktree . "$mode"

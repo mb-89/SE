@@ -390,6 +390,45 @@ The owner: "Whatever we do, it needs to be neutral when we build it."
 - A change is neutral when it is written, so no later pass has to neutralize it.
 - A workflow is no exception, though the host reads its `uses:` lines literally: it calls what it
   needs as a local copy ([Neutral workflows](#neutral-workflows)).
+- A checkout may have more than one remote, and changes move between them by one rule
+  ([More than one remote](#more-than-one-remote)).
+
+### More than one remote
+
+The owner: "If we figure this out once, I feel like we can apply this everywhere, including Kern."
+
+The rule holds for SE, obs and kern alike, and for every repository that uses SE as a module:
+
+- **Where remotes live**: a checkout may have more than one remote. The remotes live only in that
+  checkout's own git configuration (and a machine's `[mirrors]`, [Mirrors](#mirrors)), never in a
+  tracked file.
+- **What no remote shows**: nothing about another remote is ever committed, tagged or filed: no
+  name of its host, owner or repository, no tag named for it, no issue or comment text about it.
+  Each remote sees one neutral tree, as if it were the only one.
+- **How modules and plugins are named**: by a relative address (`../obs.git`), resolved against the
+  checkout's origin, or by name (`<plugin>@<marketplace>`), never by a host's absolute address
+  ([README "Modules"](../../../README.md#modules)).
+- **How a change lands**: every change lands through SE's landing step, `work_tickets.py
+  integrate` ([README "Landing on main"](../../../README.md#landing-on-main)), never a host's merge
+  button, whose commit carries the host's account identity.
+- **Which line a module follows**: every checkout follows one line of each module, the module's
+  `main` (obs `main`); a pin is a commit on that line, and every remote's tree pins the same.
+
+The checks that hold it:
+
+| Part of the rule | Check |
+|---|---|
+| History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([README "Project settings"](../../../README.md#project-settings), `tests/test_push_guard.py`) |
+| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([README "Work publication"](../../../README.md#work-publication), `tests/test_push_guard.py`) |
+| Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([README "Modules"](../../../README.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
+| The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
+| No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
+| No issue or comment text names another remote | a filing's form check (`<se>/scripts/work_tickets.py` `form_findings`) refuses each private term in the title and body, at the filing commands and the form gate ([README "Forms"](../../../README.md#forms)) |
+| Trees compare equal apart from lock files | the parity check, work issue `parity-excludes-lockfiles` (#1530) |
+| Every change lands through SE's landing step | with `[integrate] landing = "fast-forward"`, the public check's identity gate refuses a commit the host made, so a merge-button commit turns `check` red ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
+| A generic commit identity on every remote | the commit gates of the hooks and of `check` ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)) |
+
+Not picked: separate repositories merged by hand, the fallback if a guard ever misses.
 
 ### Neutral workflows
 
@@ -489,11 +528,17 @@ Pull requests built on an old `main` cause most integration trouble.
   `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
   issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
-  and whose file ownership does not clash with running workers, and starts its session itself.
+  and whose file ownership does not clash with running workers, starts its session itself and
+  comments on the landed issue what it started.
+- A startable issue also waits on no person: none labelled `se-person` or `escalated`, none
+  assigned to someone (`work_tickets.py ready`).
+- **Dispatcher**: where no integrator runs, a four-hourly workflow with no model fires the
+  scheduled task whose session is a fresh integrator, once, while startable work waits
+  ([README "Dispatcher"](../../../README.md#dispatcher)).
 - Nobody watches for deliveries. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
   SE turn, so a missed notification is handled as soon as either session is talked to; in the
-  cloud only, scheduled triggers.
+  cloud only, the scheduled task of the [dispatcher](../../../README.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and

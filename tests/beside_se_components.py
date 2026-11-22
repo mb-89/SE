@@ -45,8 +45,9 @@ def checkout(tmp_path: Path, shared_fake_git) -> Path:
     core it starts (`shared_fake_git`)."""
     root = tmp_path / "se"
     fake_git.init(root, "-b", "main")
-    for part in ("components", "scripts", "kern"):
+    for part in ("components", "scripts", ".se/modules/kern"):  # kern: the clone se.toml pins
         try:
+            (root / part).parent.mkdir(parents=True, exist_ok=True)
             (root / part).symlink_to(ROOT / part, target_is_directory=True)
         except OSError as error:  # Windows without the right to make links
             pytest.skip(f"no symlink: {error}")

@@ -382,8 +382,12 @@ def test_a_local_override_silences_a_public_term(repo: Path, local: Path) -> Non
 
 
 @pytest.mark.parametrize(("line", "error"), [
-    ("off:email-address\n", ".public-check.local:1: write '<regex>', 'off:<public label>  # "
-                            "reason' or 'allow:<path> local-term:<n>  # reason'"),
+    ("off:email-address\n", ".public-check.local:1: write '<regex>', 'remote:<remote name> "
+                            "<regex>', 'off:<public label>  # reason' or 'allow:<path> "
+                            "local-term:<n>  # reason'"),
+    ("remote:mirror\n", ".public-check.local:1: write 'remote:<remote name> <regex>'"),
+    ("remote: example-secret\n", ".public-check.local:1: write 'remote:<remote name> <regex>'"),
+    ("remote:mirror example-secret(\n", ".public-check.local:1 is not a valid regex"),
     ("off:no-such-label  # why\n", ".public-check.local:1: no public entry is labelled 'no-such-label'"),
     ("example-secret(\n", ".public-check.local:1 is not a valid regex"),
 ])
@@ -394,6 +398,60 @@ def test_a_malformed_local_list_is_a_setup_error(repo: Path, local: Path, line: 
     assert result.returncode == 2
     assert error in result.stdout
     assert "secret" not in result.stdout.lower()
+
+
+def mirrored(repo: Path, tmp_path: Path) -> str:
+    """A made-up remote `mirror` that holds nothing, and a commit whose file and message hold a
+    term of the local list; returns that commit."""
+    fake_git.init(tmp_path / "mirror.git", "--bare")
+    git(repo, "remote", "add", "mirror", str(tmp_path / "mirror.git"))
+    commit(repo, {"src/app.py": "print('built for Example-SecretCorp')\n"},
+           "Port the Example-SecretCorp tool")
+    return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+@pytest.mark.parametrize(("args", "applies"), [
+    ([], False), (["--rev", "HEAD", "--remote", "origin"], False),
+    (["--rev", "HEAD", "--remote", "mirror"], True),
+], ids=["no destination", "another remote", "its remote"])
+def test_a_remote_term_applies_only_to_a_push_to_its_remote(repo: Path, local: Path,
+                                                            tmp_path: Path, args: list[str],
+                                                            applies: bool) -> None:
+    local.write_text("remote:mirror example-secret\\w*\n", encoding="utf-8")
+    head = mirrored(repo, tmp_path)
+    result = run_check("--repo", str(repo), *args)
+    assert result.returncode == (1 if applies else 0), result.stdout
+    if applies:
+        assert f"commit {head[:12]} src/app.py:1:18: local-term:1" in result.stdout
+        assert f"commit {head[:12]} message:1: local-term:1" in result.stdout
+        assert "gating HEAD --not --remotes=mirror, the commits mirror does not hold yet" in result.stdout
+    assert "secret" not in result.stdout.lower()
+
+
+def test_a_remote_term_naming_no_remote_is_warned_about_by_line(repo: Path, local: Path) -> None:
+    local.write_text("# kept\nremote:mirorr example-secret\\w*\n", encoding="utf-8")
+    result = run_check("--repo", str(repo))
+    assert result.returncode == 0
+    assert (".public-check.local:2: no remote of this checkout is named 'mirorr', so its term "
+            "applies to no push") in result.stdout
+
+
+def test_the_allow_line_of_a_remote_term_applies_with_its_term(repo: Path, local: Path,
+                                                               tmp_path: Path) -> None:
+    local.write_text("remote:mirror example-secret\\w*\n"
+                     "allow:src/app.py local-term:1  # the tool's own name\n", encoding="utf-8")
+    mirrored(repo, tmp_path)
+    away = run_check("--repo", str(repo), "--rev", "HEAD", "--remote", "origin")
+    assert away.returncode == 0 and "unused" not in away.stdout
+    there = run_check("--repo", str(repo), "--rev", "HEAD", "--remote", "mirror")
+    assert there.returncode == 1
+    assert "src/app.py" not in there.stdout and "message:1: local-term:1" in there.stdout
+
+
+def test_remote_needs_the_commit_pushed(repo: Path) -> None:
+    result = run_check("--repo", str(repo), "--remote", "mirror")
+    assert result.returncode == 2
+    assert "--remote needs --rev: it names the commit pushed to that remote" in result.stdout
 
 
 @pytest.mark.parametrize("mode", [[], ["--staged"], ["--rev", "HEAD"]])
@@ -1584,14 +1642,15 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
     # An edited report reruns, and so does a label change (the issue rule's housekeeping exemption).
     assert "types: [opened, synchronize, reopened, edited, labeled, unlabeled]" in workflow
     # One job, every check the integration runs; the layouts before the suite, which rebuilds them.
-    steps = ["public_check.py --rev", "scripts/se_plugin.py check", "scripts/work_tickets.py docs --check",
-             "scripts/hygiene.py", "scripts/work_tickets.py field-report --check",
-             "scripts/se_forms.py check-files --changed", "scripts/work_tickets.py suite --worktree ."]
+    steps = ["public_check.py --rev", "scripts/se_modules.py sync kern", "scripts/se_plugin.py check",
+             "scripts/work_tickets.py docs --check", "scripts/hygiene.py",
+             "scripts/work_tickets.py field-report --check", "scripts/se_forms.py check-files --changed",
+             "scripts/work_tickets.py suite --worktree ."]
     assert [workflow.index(step) for step in steps] == sorted(workflow.index(step) for step in steps)
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", workflow)[1]
     assert "pytest" not in check, "the suite runs through work_tickets.py suite, within its budget"
     # The nightly run alone is full: it runs every suite beside, also one its paths skip.
-    suite = check[check.index("- name: The complete suite and kern's tests"):]
+    suite = check[check.index("- name: The complete suite and the suites beside it"):]
     suite = suite[:suite.index("\n      - ")]
     assert "EVENT: ${{ github.event_name }}" in suite
     assert 'if [ "$EVENT" = schedule ]; then full=(--full); fi' in suite
@@ -1599,11 +1658,12 @@ def test_ci_is_the_check_main_requires_on_pull_requests_and_pushes_to_main() -> 
 
 
 def field_report_script() -> str:
-    """The shell of the check workflow's field-report step, its second `run: |` block."""
+    """The shell of the check workflow's field-report step, the first `run: |` block after its name."""
     lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
-    starts = [index for index, line in enumerate(lines) if line.strip() == "run: |"]
+    named = lines.index("      - name: The pull request's field report follows the template")
+    start = next(index for index in range(named, len(lines)) if lines[index].strip() == "run: |")
     block = []
-    for line in lines[starts[1] + 1:]:
+    for line in lines[start + 1:]:
         if line.strip() and not line.startswith(" " * 10):
             break
         block.append(line[10:])
