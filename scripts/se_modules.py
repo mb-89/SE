@@ -187,13 +187,18 @@ def write_lock(root: Path, entries: dict[str, tuple[str, str]]) -> None:
     pinned by a range or a go.mod; nothing is written where it holds them already."""
     if entries == read_lock(root) and (entries or not (root / LOCK).is_file()):
         return
+    (root / LOCK).write_text(lock_text(entries), encoding="utf-8", newline="\n")
+
+
+def lock_text(entries: dict[str, tuple[str, str]]) -> str:
+    """`se.lock`'s text for (version, commit) per component, as sync writes it."""
     lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges and go.mod pins "
              f"of the components {MANIFEST} lists, and of theirs.",
              "# Written by sync and update; commit it, never edit it."]
     for key in sorted(entries):
         locked_version, locked_ref = entries[key]
         lines += ["", f"[{COMPONENTS}.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']
-    (root / LOCK).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return "\n".join(lines) + "\n"
 
 
 def _read_toml(path: Path) -> dict:

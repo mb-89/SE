@@ -1777,9 +1777,18 @@ uv run python <se>/scripts/se_workflows.py check
 ```
 
 - What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
-  and `release.yml`, and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
-  `scripts/se_workflows.py`). `write` writes the files it names, or regenerates those the project
-  holds; each is a generated file whose first line names its source path, the pin and SE's place.
+  and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `suite-shard` and
+  `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
+- `write` writes the files it names, or regenerates those the project holds; each is a generated
+  file whose first line names its source path, the pin and SE's place.
+- `kern-at-pin` checks kern out at the commit a folder's `se.lock` locks into its
+  `.se/modules/kern`, refusing a lock whose version is not the `require kern` of the `go.mod` that
+  the folder's `se.toml` `[components.kern]` `go` names, naming both lines. A folder whose `se.lock`
+  locks no kern and that carries `kern/go.mod` is left as it is; one with neither is refused,
+  naming `se_modules.py sync kern`.
+  - `kern-battery.yml` calls it before its vet and `kern-release.yml` before its build, so kern is
+    placed one way. `write` adds its copy wherever it writes either workflow, and `check` names it
+    where a project holds either without it.
 - SE's own workflows beside them are not shipped: `check.yml`, `docs.yml` and the templates backstop,
   `templates.yml`, run on SE's own events ([Templates](#templates)).
 - The pin is `[components.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
@@ -1844,12 +1853,22 @@ and git's first commit on `main` as the [project identity](#project-settings).
 
 - **The pin:** the version SE's `[components.kern]` reads from `components/go.mod` and its tag
   `v<version>`, which the pinned clone's `release.toml` names, read by `se_modules.py`'s
-  `kern_pin`. The template and kern's Go module come from that clone at the tag; a clone without
-  the tag is refused, naming `se_modules.py sync kern`.
-- **kern beside it:** kern's module path names no host, so it cannot be fetched: the application
-  holds kern's Go module at the pin in `kern/` (every file of kern's repository but its template
-  and its own project files: `.github/`, `se.toml`, `se.lock`, `AGENTS.md`, `pyproject.toml`,
-  `uv.lock`, `.gitignore`), its `go.mod` requires `kern v<version>` and replaces the module by it.
+  `kern_pin`, and the commit SE's `se.lock` locks for it. The template comes from that clone at the
+  tag.
+  - A clone without the tag, or a lock that is missing, names another version or another commit
+    than the tag's, is refused, naming `se_modules.py sync kern`.
+- **kern beside it:** kern's module path names no host, so it cannot be fetched; the application
+  pins it as SE does and carries no copy of it, only the template.
+  - Its `go.mod` requires `kern v<version>` and replaces the module by `./.se/modules/kern`; its
+    `se.lock` locks the commit SE's does; its `.gitignore` ignores `.se/modules/`.
+  - Its `se.toml` pins kern as `[components.kern]` with `go = true`; a template that still writes
+    `[modules.kern]` with its `url` gets that table in its place.
+  - `se new app` copies SE's clone there at that commit, so the application vets and tests before
+    it has an origin, and nothing under `.se/` is in its first commit. `se_modules.py sync kern`
+    there keeps that clone while it holds the locked commit; once the pin moves, it finds kern by
+    its name under the owners of the application's remotes ([Modules](#modules)).
+  - Its CI places kern at that commit with the action `kern-at-pin` before the battery vets and
+    tests it, and before its release builds ([Workflows](#workflows)).
 - **What it holds:** the template's (kern's template README): its wiring,
   where `enabled = false` switches a component off, CI through kern's battery (its copy from the SE
   that made it, [Workflows](#workflows)), the `[tests]` budget and the `[components.kern]` pin.

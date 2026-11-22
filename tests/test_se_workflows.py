@@ -170,6 +170,63 @@ def test_an_application_without_se_pinned_keeps_the_pin_and_place_its_copies_car
     assert (plan.ref, plan.repository) == (first, PLACE)
 
 
+# The action the battery and the release call, beside their copies.
+
+BATTERY = ".github/workflows/kern-battery.yml"
+KERN_RELEASE = ".github/workflows/kern-release.yml"
+KERN_AT_PIN = ".github/actions/kern-at-pin/action.yml"
+
+
+@pytest.fixture
+def kern_world(tmp_path: Path, fake_git_door):
+    """An SE whose first commit ships the battery alone, as before the action, and whose second
+    ships the battery, the release and the action they call; a project that pins the second."""
+    se = fake_git.init(tmp_path / "SE", "-b", "main")
+    commits = []
+    for files in ((BATTERY,), (BATTERY, KERN_RELEASE, KERN_AT_PIN)):
+        for name in files:
+            write(se / name, (ROOT / name).read_text(encoding="utf-8"))
+        git_door.run("add", "-A", root=se)
+        git_door.run("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m", "se", root=se)
+        commits.append(git_door.run("rev-parse", "HEAD", root=se).stdout.strip())
+    git_door.run("remote", "add", "origin", "https://example.com/alice/SE.git", root=se)  # where it was found
+    project = fake_git.init(tmp_path / "project", "-b", "main")
+    git_door.run("remote", "add", "origin", "https://example.com/alice/project.git", root=project)
+    write(project / "se.toml", f'[components.se]\nref = "{commits[1]}"\n')
+    return se, project, *commits
+
+
+def test_the_action_the_battery_and_the_release_call_is_written_beside_their_copies(kern_world) -> None:
+    se, project, _, pin = kern_world
+    for workflow in (BATTERY, KERN_RELEASE):
+        plan = se_workflows.plan(project, [workflow], source=se)
+        assert plan.paths == (workflow, KERN_AT_PIN), workflow
+    assert se_workflows.write(project, se_workflows.plan(project, [BATTERY, KERN_RELEASE], source=se)) == [
+        f"{path}: generated from SE at {pin[:12]}" for path in (BATTERY, KERN_RELEASE, KERN_AT_PIN)]
+    copy = (project / KERN_AT_PIN).read_text(encoding="utf-8")
+    assert se_workflows.read_header(copy) == (KERN_AT_PIN, pin, PLACE)
+    assert "uses: ./.github/actions/kern-at-pin" in (project / BATTERY).read_text(encoding="utf-8")
+    assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == []
+
+
+def test_a_project_holding_only_the_batterys_copy_is_named_and_regenerated_with_the_action(kern_world, capsys) -> None:
+    """An application whose battery was written before the action: check names the action the
+    battery now calls, and write, regenerating the copies it holds, writes it."""
+    se, project, before, pin = kern_world
+    assert se_workflows.write(project, se_workflows.Plan((BATTERY,), pin, PLACE, se)) == [
+        f"{BATTERY}: generated from SE at {pin[:12]}"]
+    assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == [
+        f"{KERN_AT_PIN}: missing, though {BATTERY} calls it; run se_workflows.py write"]
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "check"]) == 1
+    capsys.readouterr()
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "write"]) == 0
+    assert capsys.readouterr().out == f"{KERN_AT_PIN}: generated from SE at {pin[:12]}\n"
+    assert set(se_workflows.held(project)) == {BATTERY, KERN_AT_PIN}
+    assert se_workflows.main(["--root", str(project), "--source", str(se), "check"]) == 0
+    # A pin that ships no action adds none: its battery calls none.
+    assert se_workflows.plan(project, [BATTERY], ref=before, source=se).paths == (BATTERY,)
+
+
 # The shards CI runs against se.toml's `[tests] shards` (README "Test budget").
 
 CHECK = ".github/workflows/check.yml"

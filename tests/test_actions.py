@@ -6,7 +6,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 ACTIONS = sorted((PROJECT / ".github" / "actions").glob("*/action.yml"))
 # The first major of each action they use that runs on Node 24 (its own action.yml, `using:`).
-NODE_24 = {"actions/upload-artifact": 6, "actions/download-artifact": 7}
+NODE_24 = {"actions/checkout": 5, "actions/upload-artifact": 6, "actions/download-artifact": 7}
 
 
 def test_the_actions_are_composite_and_use_only_node_24_actions():

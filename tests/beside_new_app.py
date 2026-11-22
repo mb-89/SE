@@ -81,30 +81,34 @@ def run(*args: str, cwd: Path, timeout: float = 300) -> subprocess.CompletedProc
 
 
 def fake_se(root: Path) -> Path:
-    """This working tree's SE in the fake: its scripts, se.toml, components/go.mod and the battery
-    the template's CI calls, committed, origin on github.com; and kern's clone at the pin in
-    .se/modules/kern, committed and tagged v<version>."""
+    """This working tree's SE in the fake: its scripts, se.toml, se.lock, components/go.mod, the
+    battery the template's CI calls and the action it calls, committed, origin on github.com; and
+    kern's clone at the pin in .se/modules/kern, committed and tagged v<version> and locked there in
+    se.lock at that commit."""
     se = root / "se"
     ignore = shutil.ignore_patterns("__pycache__", ".venv", ".git", ".se")
     shutil.copytree(ROOT / "scripts", se / "scripts", ignore=ignore)
-    shutil.copy2(ROOT / "se.toml", se / "se.toml")
-    (se / "components").mkdir()
-    shutil.copy2(ROOT / "components" / "go.mod", se / "components" / "go.mod")
-    (se / ".github" / "workflows").mkdir(parents=True)
-    shutil.copy2(ROOT / ".github" / "workflows" / "kern-battery.yml", se / ".github" / "workflows")
+    for name in ("se.toml", "se.lock", "components/go.mod", ".github/workflows/kern-battery.yml",
+                 ".github/actions/kern-at-pin/action.yml"):
+        (se / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, se / name)
     kern = se_modules.kern_dir(se)
     shutil.copytree(KERN_DIR, kern, ignore=ignore)
-    _, tag = se_modules.kern_pin(se)
+    version, tag = se_modules.kern_pin(se)
     commit = ("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-m")
     with git_door.use(DOOR[0]):
         fake_git.init(se, "-b", "main")
         fake_git.init(kern, "-b", "main")
-        for folder, steps in ((se, (("add", "se.toml", "components", ".github"), (*commit, "SE"),
+        for folder, steps in ((se, (("add", "se.toml", "se.lock", "components", ".github"), (*commit, "SE"),
                                     ("remote", "add", "origin", "https://github.com/alice/se.git"))),
                               (kern, (("add", "-A"), (*commit, "kern"), ("tag", tag)))):
             for args in steps:
                 done = git_door.run(*args, root=folder)
                 assert done.returncode == 0, done.stderr
+        # The fake's commit of kern is another than the real clone's: SE's lock names it.
+        head = git_door.run("rev-parse", "HEAD", root=kern).stdout.strip()
+    (se / "se.lock").write_text(se_modules.lock_text({**{name: lock for name, lock in se_modules.read_lock(se).items()
+                                                        if name != "kern"}, "kern": (version, head)}), encoding="utf-8")
     return se
 
 
@@ -118,6 +122,20 @@ def app(tmp_path_factory) -> Path:
     assert done.stdout.splitlines()[-1].startswith("Owner's step: create the GitHub repository alice/"), done.stdout
     assert f"from kern's template at {se_modules.kern_pin(ROOT)[1]} (" in done.stdout, "the template comes from the pin's tag"
     return path
+
+
+def test_the_new_application_carries_no_kern_and_builds_on_the_clone_at_the_pin_before_it_has_an_origin(app: Path) -> None:
+    assert not (app / "kern").exists()
+    with git_door.use(DOOR[0]):
+        tracked = git_door.run("ls-files", root=app).stdout.splitlines()
+        assert git_door.run("remote", root=app).stdout == "", "no origin yet"
+        assert git_door.run("check-ignore", "-q", ".se/modules/kern", root=app).returncode == 0
+    assert not [name for name in tracked if name.startswith(("kern/", ".se/"))], tracked
+    assert "replace kern => ./.se/modules/kern\n" in (app / "go.mod").read_text(encoding="utf-8")
+    assert f"require kern v{se_modules.kern_pin(ROOT)[0]}\n" in (app / "go.mod").read_text(encoding="utf-8")
+    assert (se_modules.kern_dir(app) / "go.mod").is_file()
+    done = run("go", "vet", "./...", cwd=app)
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 def test_the_new_applications_own_test_run_passes(app: Path) -> None:
