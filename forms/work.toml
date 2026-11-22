@@ -17,6 +17,7 @@ labels = ["work"]
 [rules]
 terms = "off"
 bare-number = "off"
+first-sentence = "warn"
 
 [[fields]]
 name = "title"
@@ -25,6 +26,15 @@ source = "title"
 required = true
 shape = "work_tickets:name_refusal"
 says = "The name, its branch too: 1 to 5 lowercase words joined by dashes, such as `branch-cleanup-on-pr-close`."
+
+[[fields]]
+name = "goal"
+kind = "text"
+heading = "Goal"
+required = true
+max_words = 120
+first_sentence_chars = 120
+says = "What is true once this is done, the outcome a person sees. Its first sentence, one complete statement of at most 120 characters, becomes the landing title."
 
 [[fields]]
 name = "base_branch"
