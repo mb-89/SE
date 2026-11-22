@@ -750,3 +750,93 @@ def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
     result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=GOOD_WORK, **given),
                     **variables)
     assert result.returncode == 0 and result.stdout == ""
+
+
+# The backstop (se_forms.py backstop, .github/workflows/forms.yml): an event file in, a plan out.
+
+def event_file(folder: Path, name: str, *, action: str = "opened", body: str = THIN,
+               title: str = TITLE, labels=("work",), comment: str | None = None) -> Path:
+    """An issues or issue_comment event as GitHub writes it to $GITHUB_EVENT_PATH."""
+    data = {"action": action, "repository": {"full_name": f"{OWNER}/{REPO_NAME}"},
+            "issue": {"number": 7, "title": title, "body": body,
+                      "labels": [{"name": label} for label in labels]}}
+    if comment is not None:
+        data["comment"] = {"id": 9, "body": comment}
+    path = folder / f"{name}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def backstop(capsys, project: Path, name: str, event: Path, *switch: str) -> dict:
+    code, out, _ = run(capsys, "backstop", "--event-name", name, "--event", str(event),
+                       "--worktree", str(project), *switch)
+    assert code == 0, out
+    plan = json.loads(out)
+    assert {"repo", "number", "add_labels", "summary", "failed"} <= set(plan)
+    return plan
+
+
+def test_backstop_labels_an_off_form_fleet_issue_and_leaves_the_rest_alone(
+        capsys, tmp_path, project, gh):
+    plan = backstop(capsys, project, "issues", event_file(tmp_path, "thin"), "--backstop", "on")
+    assert plan["add_labels"] == ["off-form"] and plan["failed"] is False
+    assert plan["repo"] == f"{OWNER}/{REPO_NAME}" and plan["number"] == 7
+    lines = plan["summary"].splitlines()
+    assert "issue #7 in owner/repo" in lines[0] and any("Problem: missing" in line
+                                                        for line in lines)
+    assert len(lines) <= forms.REFUSAL_LINES + 1
+    assert lines[-1] == "Fix its title or body on the issue itself, then run work_tickets.py " \
+                        "unhold 7"
+    marked = event_file(tmp_path, "marked", body=THIN, labels=(), action="edited")
+    assert backstop(capsys, project, "issues", marked, "--backstop", "on")["add_labels"] == [
+        "off-form"]
+    held = event_file(tmp_path, "held", labels=("work", "off-form"), action="labeled")
+    plan = backstop(capsys, project, "issues", held, "--backstop", "on")
+    assert plan["add_labels"] == [] and "Problem: missing" in plan["summary"]
+    empty = {"repo": f"{OWNER}/{REPO_NAME}", "number": 7, "add_labels": [], "summary": "",
+             "failed": False}
+    for event, switch in (
+            (event_file(tmp_path, "good", body=GOOD_WORK), "on"),
+            (event_file(tmp_path, "outside", body="The page breaks on my phone.\n", labels=()),
+             "on"),
+            (event_file(tmp_path, "closed", action="closed"), "on"),
+            (event_file(tmp_path, "thin"), "off")):
+        assert backstop(capsys, project, "issues", event, "--backstop", switch) == empty, event
+
+
+def test_backstop_names_a_private_term_by_field_and_list_only(capsys, tmp_path, project, gh):
+    body = forms.render(WORK, {**FIELDS, "goal": "For Quuxcorp."})
+    plan = backstop(capsys, project, "issues", event_file(tmp_path, "private", body=body),
+                    "--backstop", "on")
+    assert plan["add_labels"] == ["off-form"]
+    assert "local list" in plan["summary"] and "quux" not in plan["summary"].lower()
+
+
+def test_backstop_fails_the_run_for_an_off_form_marked_comment_and_labels_nothing(
+        capsys, tmp_path, project, gh):
+    def comment(name: str, text: str, action: str = "created") -> dict:
+        event = event_file(tmp_path, name, body=GOOD_WORK, action=action, comment=text)
+        return backstop(capsys, project, "issue_comment", event, "--backstop", "on")
+
+    plan = comment("thin-review", THIN_REVIEW, "edited")
+    assert plan["failed"] is True and plan["add_labels"] == []
+    assert "the review form refuses" in plan["summary"] and "unhold" not in plan["summary"]
+    for name, text in (("good-review", GOOD_REVIEW), ("unmarked", "Thanks, looks fine.")):
+        plan = comment(name, text)
+        assert plan["failed"] is False and plan["add_labels"] == [] and not plan["summary"]
+
+
+def test_backstop_reads_its_switch_from_the_checkouts_se_toml(capsys, tmp_path, project, gh):
+    thin = event_file(tmp_path, "thin")
+    assert backstop(capsys, project, "issues", thin)["add_labels"] == []
+    (project / "se.toml").write_text(f'{IDENTITY}\n[forms]\nbackstop = "on"\n', encoding="utf-8")
+    assert backstop(capsys, project, "issues", thin)["add_labels"] == ["off-form"]
+    (project / "se.toml").write_text(f'{IDENTITY}\n[forms]\nbackstop = "maybe"\n',
+                                     encoding="utf-8")
+    code, out, _ = run(capsys, "backstop", "--event-name", "issues", "--event", str(thin),
+                       "--worktree", str(project))
+    assert code == 2 and "[forms] backstop = 'maybe'" in out and str(project / "se.toml") in out
+    (tmp_path / "broken.json").write_text("[1]", encoding="utf-8")
+    code, out, _ = run(capsys, "backstop", "--event-name", "issues", "--event",
+                       str(tmp_path / "broken.json"), "--worktree", str(project))
+    assert code == 2 and "no JSON object" in out
