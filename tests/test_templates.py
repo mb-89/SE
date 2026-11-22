@@ -118,14 +118,17 @@ uv run pytest
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
 ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
-            "overhaul", "decision")
+            "overhaul", "pugh")
+#: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
+NESTING = ("decision", "raid-register", "raid-entry")
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
-    assert set(catalog) == {*ISSUE_TEMPLATES, *ADAPTERS}
+    assert set(catalog) == set(EVERY)
     assert all(catalog[name].actions == templates.ISSUE_ACTIONS for name in ISSUE_TEMPLATES)
     assert all(catalog[name].is_adapter for name in ADAPTERS)
-    assert not any(catalog[name].is_adapter for name in ISSUE_TEMPLATES)
+    assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING))
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == templates.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -276,8 +279,6 @@ def test_parse_of_render_gives_each_example_back(catalog):
 def adapter_examples() -> dict[str, tuple[str, str | None]]:
     """Each adapter's example, (body, title), as the SE writer it names writes it: an adapter's
     body is its writer's, so its template keeps no copy."""
-    notes, _ = test_deck.DECKS["only-records"]
-    decision = test_deck.NOTE % ("One", "one") + test_deck.PUGH
     return {
         "field-report": (f"Refs {ISSUE_URL}\n\n{issue_tests.reported_at(issue_tests.TIP)}", "feat/x"),
         "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL), "feat/x"),
@@ -286,12 +287,12 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "review": (review_comment(test_review.report()), None),
         "retro": (marked_block(retro.BLOCK_MARKER, retro_block()), None),
         "overhaul": (marked_block(overhaul.BLOCK_MARKER, overhaul_block()), None),
-        "decision": (decision, None),
+        "pugh": (test_deck.PUGH, None),
     }
 
 
-@pytest.mark.parametrize("name", [*ISSUE_TEMPLATES, *ADAPTERS])
-def test_each_of_the_eleven_templates_renders_and_parses_its_example_back(catalog, name):
+@pytest.mark.parametrize("name", EVERY)
+def test_each_of_the_fourteen_templates_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -303,13 +304,13 @@ def test_each_of_the_eleven_templates_renders_and_parses_its_example_back(catalo
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 11
+    assert len(catalog) == 14
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
     yaml = pytest.importorskip("yaml")
     notes = sorted((ROOT / "templates").glob("*.md"))
-    assert [path.stem for path in notes] == sorted([*ISSUE_TEMPLATES, *ADAPTERS])
+    assert [path.stem for path in notes] == sorted(EVERY)
     assert sorted(path.name for path in (ROOT / "templates").iterdir()) == sorted(
         [path.name for path in notes] + [templates.TERMS_FILE])
     for path in notes:
@@ -816,7 +817,7 @@ def test_check_takes_fields_from_a_draft(tmp_path, capsys, catalog):
     assert "title-shape" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("name", [*ISSUE_TEMPLATES, *ADAPTERS])
+@pytest.mark.parametrize("name", EVERY)
 def test_schema_prints_the_schema_draft_json_gives(capsys, catalog, name):
     assert templates.main(["draft", name, "--json", "--tree"]) == 0
     drafted = json.loads(capsys.readouterr().out)["schema"]
@@ -999,7 +1000,7 @@ def test_list_names_every_template_with_its_actions(capsys):
     assert templates.main(["list", "--tree"]) == 0
     out = capsys.readouterr().out.splitlines()
     names = [line.split(" ")[0] for line in out]
-    assert sorted(names) == sorted((*ISSUE_TEMPLATES, *ADAPTERS))
+    assert sorted(names) == sorted(EVERY)
     assert all("issue.create, issue.edit" in line for line in out if line.split(" ")[0]
                in ISSUE_TEMPLATES)
 
@@ -1304,7 +1305,8 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
     assert "checker retro:judgment_problems" in lines["retro"]
     assert "checker overhaul:judgment_problems" in lines["overhaul"]
-    assert "deck.build: checker deck:_explains:" in lines["decision"]
+    assert "a node of a document: checker deck:pugh_problems:" in lines["pugh"]
+    assert "deck.build: A decision note:" in lines["decision"]
     assert ("pr.merge: checker work_tickets:merge_release_kind, title "
             "work_tickets:INTEGRATION_SUBJECT_PATTERN:") in lines["merge-message"]
     assert "pr.create, pr.edit: checker none, 3 lines:" in lines["landing"]
@@ -1615,16 +1617,23 @@ UNEXPLAINED = {*parametrized(
 
 
 @pytest.mark.parametrize("name", list(test_deck.DECKS))
-def test_the_decision_adapter_gives_the_section_rule_of_deck_py(catalog, name):
+def test_the_decision_template_gives_the_section_rule_of_deck_py(catalog, name):
+    """A note with a `pugh` fence is a decision, checked by the decision template as deck.py's build
+    refuses it; a record chapter, without one, is free."""
     notes, _ = test_deck.DECKS[name]
     for note, text in notes.items():
         nodes = templates._nodes(text)
-        expected = deck._holds_pugh(nodes) and name in UNEXPLAINED
-        refused = adapter_verdict(catalog["decision"], text)
-        assert bool(refused) == expected, (name, note)
+        template, found = templates.verdict(catalog, "deck.build", text)
+        assert (template is not None) == deck._holds_pugh(nodes), (name, note)
+        refused = [finding for finding in found if finding.severity == templates.REFUSE]
+        assert bool(refused) == (template is not None and name in UNEXPLAINED), (name, note, refused)
         assert deck._explains(nodes) or not deck._holds_pugh(nodes) or refused
-    template, _ = templates.verdict(catalog, "deck.build", next(iter(notes.values())))
-    assert template.name == "decision"
+
+
+def test_deck_py_reads_its_sections_from_the_decision_template(catalog):
+    decision = catalog["decision"]
+    assert deck.sections() == tuple(item.heading for item in decision.fields if item.in_body)
+    assert [item.name for item in decision.fields][-1] == "options"
 
 
 # Contract over every body SE sends: each sending function, the bodies its command sends
@@ -2024,6 +2033,218 @@ def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]
+
+
+# Nesting (docs/templates.md "Nesting"): nodes, registers and the fence node
+
+
+def raid_register(catalog) -> str:
+    """The RAID register's example as an issue body, rendered."""
+    register = catalog["raid-register"]
+    return templates.render(register, register.example["fields"])
+
+
+def test_the_raid_example_passes(catalog, tmp_path, capsys):
+    register = catalog["raid-register"]
+    body = raid_register(catalog)
+    assert register.field("entries").nested is catalog["raid-entry"]
+    assert [name for name, _ in templates.entries(register.example["fields"]["entries"])] == [
+        "The release slips", "The mirror stays up"]
+    assert templates.check(register, templates.parse(register, body)) == []
+    path = tmp_path / "raid.md"
+    path.write_text(body, encoding="utf-8")
+    assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 0
+    assert templates.main(["check", "--action", "issue.create", "--tree", "--body-file", str(path)]) == 0
+    assert "free:" not in capsys.readouterr().out
+
+
+def test_a_register_with_one_bad_entry_fails_naming_the_entry(catalog, tmp_path, capsys):
+    register = catalog["raid-register"]
+    body = raid_register(catalog).replace("Type: assumption", "Type: hazard")
+    found = templates.check(register, templates.parse(register, body))
+    assert [(finding.field, finding.rule, finding.severity) for finding in found] == [
+        ("entries", "choice", templates.REFUSE)]
+    assert found[0].fix.startswith("entry 'The mirror stays up' (raid-entry): Type is 'hazard': write one of risk")
+    path = tmp_path / "raid.md"
+    path.write_text(body, encoding="utf-8")
+    assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "entry 'The mirror stays up'" in out and "The release slips" not in out
+
+
+def test_each_bad_entry_is_named_by_its_own_heading_and_its_owner_line_by_its_label(catalog):
+    register = catalog["raid-register"]
+    body = raid_register(catalog).replace("Owner: alice\n", "").replace("Status: watched", "Status: gone")
+    fixes = [finding.fix for finding in templates.check(register, templates.parse(register, body))]
+    assert fixes[0].startswith("entry 'The release slips' (raid-entry): Owner is missing: write a `Owner:` line")
+    assert fixes[1].startswith("entry 'The mirror stays up' (raid-entry): Status is 'gone'")
+    assert len(fixes) == 2
+
+
+def test_a_register_without_an_entry_refuses(catalog):
+    register = catalog["raid-register"]
+    body = templates.render(register, {**register.example["fields"], "entries": "Nothing yet."})
+    found = templates.check(register, templates.parse(register, body))
+    assert [(finding.rule, finding.severity) for finding in found] == [(templates.NODE_RULE, templates.REFUSE)]
+    assert "Entries holds no entry: write each entry as a heading of its own, `### <name>`" in found[0].fix
+
+
+def test_the_decision_template_s_options_node_is_the_pugh_block(catalog):
+    options = catalog["decision"].field("options")
+    assert (options.kind, options.node, options.pin, options.fence) == ("node", "pugh", "1.0.0", "pugh")
+    assert options.nested is catalog["pugh"] and catalog["pugh"].kind == "block"
+    assert not options.in_body and catalog["pugh"].actions == ()
+
+
+def test_a_decision_s_pugh_fence_is_checked_by_the_pugh_block(catalog):
+    decision = catalog["decision"]
+    body = templates.render(decision, decision.example["fields"])
+    one = re.sub(r"\n  - \{key: deck.*", "", body)
+    found = templates.check(decision, templates.parse(decision, one))
+    assert [(finding.field, finding.rule) for finding in found] == [("options", "checker")]
+    assert found[0].fix == "pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
+    without = re.sub(r"```pugh.*```\n", "", body, flags=re.DOTALL)
+    assert [finding.rule for finding in templates.check(decision, templates.parse(decision, without))] == [
+        "required"]
+
+
+def test_a_fence_node_reads_apart_from_the_section_that_holds_it_and_writes_back_in_place(catalog):
+    decision = catalog["decision"]
+    text = test_deck.EXAMPLE.read_text(encoding="utf-8")
+    document = templates.parse(decision, text)
+    assert "```pugh" not in document.fields["others"]
+    assert document.fields["options"].startswith("```pugh\n") and document.fields["options"].endswith("```")
+    assert templates.check(decision, document) == []
+    document.fields["others"] = "Changed."
+    written = templates.render(decision, document)
+    assert "## What others do\n\nChanged.\n\n```pugh\n" in written
+    assert written.count("```pugh") == 1
+
+
+def test_a_fence_before_the_sections_it_follows_refuses_naming_each(catalog):
+    decision = catalog["decision"]
+    notes, _ = test_deck.DECKS["after-the-fence"]
+    found = templates.check(decision, templates.parse(decision, notes["late"]))
+    assert [finding.fix for finding in found] == [
+        f"`## {heading}` comes after the `pugh` fence: write it before the fence"
+        for heading in deck.sections()]
+
+
+#: A document whose section is a node of another document, `part`.
+WHOLE = f"""---
+{HEAD.format(name="whole")}reader: owner
+says: A whole.
+{ISSUE_CREATE}rules:
+  required: refuse
+fields:
+  - name: intro
+    kind: text
+    required: true
+  - name: part
+    node: {{node}}
+    required: true
+---
+
+## Intro
+
+<!-- intro: The intro. -->
+
+## Part
+
+<!-- part: The part, a document of its own. -->
+"""
+PART = """---
+name: part
+version: 1.2.0
+kind: {kind}
+tags: ["test"]
+reader: owner
+says: A part.
+{applies}rules:
+  required: refuse
+fields:
+  - name: owner
+    kind: line
+    label: Owner
+    required: true
+    says: Who owns it.
+---
+"""
+
+
+def part(kind: str) -> str:
+    """The part template of `kind`; one that is no block or entry shapes an action of its own."""
+    return PART.format(kind=kind, applies="" if kind in templates.PART_KINDS else ISSUE_CREATE)
+
+
+def nested(tmp_path: Path, node: str = "part@1.2.0", kind: str = "block") -> dict[str, templates.Template]:
+    write_template(tmp_path, "whole", WHOLE.format(node=node))
+    write_template(tmp_path, "part", part(kind))
+    return templates.load(tmp_path, tree=True)
+
+
+def test_a_section_node_is_checked_by_its_template_under_its_field(tmp_path):
+    whole = nested(tmp_path)["whole"]
+    good = templates.render(whole, {"intro": "Why.", "part": "Owner: alice"})
+    assert templates.check(whole, templates.parse(whole, good)) == []
+    bad = templates.render(whole, {"intro": "Why.", "part": "Nobody."})
+    assert [str(finding) for finding in templates.check(whole, templates.parse(whole, bad))] == [
+        "refuse: part [required]: part: Owner is missing: write a `Owner:` line: Who owns it. "
+        "(or `Not in input` where the input does not say)"]
+
+
+def test_a_document_s_digest_covers_its_nodes_templates(tmp_path):
+    before = nested(tmp_path)
+    (tmp_path / "templates" / "part.md").write_text(part("block").replace("A part.", "B part."),
+                                                    encoding="utf-8")
+    after = templates.load(tmp_path, tree=True)
+    assert after["part"].digest != before["part"].digest
+    assert after["whole"].digest != before["whole"].digest
+    alone = templates._digest("whole", {"whole": {}}, {"whole": (tmp_path / "templates" / "whole.md").read_text(
+        encoding="utf-8")})
+    assert after["whole"].digest != alone
+
+
+@pytest.mark.parametrize("node, kind, error", [
+    ("gone@1.0.0", "block", "names gone, which is no template"),
+    ("part@1.0.0", "block", "pins part 1.0.0, but part is at 1.2.0; pin part@1.2.0"),
+    ("part", "block", "write the template and the version it pins"),
+    ("part@1.2.0", "entry", "part is an entry; a node names a block or document template"),
+    ("part@1.2.0", "interface", "part is an interface; a node names a block or document template"),
+    ("whole@1.0.0", "block", "nests whole in a cycle"),
+], ids=["no-template", "other-version", "no-pin", "entry-as-node", "interface-as-node", "cycle"])
+def test_a_node_that_does_not_resolve_does_not_load(tmp_path, node, kind, error):
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        nested(tmp_path, node, kind)
+
+
+@pytest.mark.parametrize("entry, kind, error", [
+    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "is a node or a register, not both"),
+    ("    entries: part@1.2.0\n", "block", "part is a block; a register names an entry template"),
+    ("    node: part@1.2.0\n    fence: pugh\n    says: It.\n", "document",
+     "part is a document; a node fence names a block template"),
+    ("    kind: register\n", "block", "has kind register without its template"),
+    ("    kind: text\n    fence: pugh\n    says: It.\n", "block", "has a fence but is no node"),
+    ('    node: part@1.2.0\n    choices: ["a"]\n', "block", "is a node, checked by its template; take out choices"),
+    ("    node: part@1.2.0\n    kind: text\n", "block", "is a node (node:) and takes no kind text"),
+], ids=["both", "entries-of-a-block", "fence-of-a-document", "kind-alone", "fence-alone", "choices",
+        "other-kind"])
+def test_a_node_field_written_wrong_does_not_load(tmp_path, entry, kind, error):
+    write_template(tmp_path, "part", part(kind))
+    text = WHOLE.format(node="x").replace("    node: x\n", entry)
+    if "fence" in entry:  # a fence has no section of its own
+        text = text.replace("\n## Part\n\n<!-- part: The part, a document of its own. -->\n", "\n")
+    write_template(tmp_path, "whole", text)
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.load(tmp_path, tree=True)
+
+
+def test_only_a_block_or_an_entry_leaves_applies_out(tmp_path):
+    write_template(tmp_path, "part", part("entry"))
+    assert templates.load(tmp_path, tree=True)["part"].actions == ()
+    write_template(tmp_path, "part", PART.format(kind="document", applies=""))
+    with pytest.raises(templates.TemplateError, match="applies.actions is required"):
+        templates.load(tmp_path, tree=True)
 
 
 # Fields honest about their source (docs/templates.md "Fill"): "Not in input" and quotes

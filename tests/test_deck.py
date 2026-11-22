@@ -731,3 +731,18 @@ def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, pag
     shown = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "answers", str(answers)],
                            capture_output=True, text=True)
     assert shown.stdout == "cache: bless\nqueue: bless\n", shown.stderr
+
+
+@pytest.mark.parametrize("text, problems", [
+    (PUGH, []),
+    (EXAMPLE.read_text(encoding="utf-8"), []),
+    ("No fence here.\n", ["no `pugh` fence: write the options as obs's ```pugh fence"]),
+    (PUGH.replace("criteria:\n  - {key: cost, label: Cost, weight: 1, better: higher, kind: judged}\n", ""),
+     ["the `pugh` fence has no `criteria:`; write its criteria, as the decision skill's fence says"]),
+    (PUGH.split("  - {key: b")[0] + "```\n", ["the `pugh` fence's `candidates` lists 1; write at least 2"]),
+    ("```pugh\ncriteria: [{key: c, weight: 1}]\ncandidates: [{key: a, marks: {c: 1}}, {key: b}]\n```\n", []),
+    ("```pugh\ncriteria:\n- {key: c}\ncandidates: []\n```\n", ["the `pugh` fence's `candidates` lists 0; write at least 2"]),
+], ids=["fence", "worked-example", "no-fence", "no-criteria", "one-option", "flow-lists", "empty-flow"])
+def test_pugh_problems_asks_criteria_and_two_options_of_the_fence(text, problems):
+    """The pugh block template's check (templates/pugh.md): obs checks everything else at the build."""
+    assert deck.pugh_problems(text) == problems
