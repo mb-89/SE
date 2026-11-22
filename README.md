@@ -704,6 +704,8 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
 3. It waits for the check `check` on the landing head, polling every 30 s for up to an hour; a
    conclusion other than success merges nothing and escalates. A repository whose host has no
    runners accepts the integrator's status instead ([Landing without CI](#landing-without-ci)).
+   - The run it waits for and names may be an edit's, which took its suite's result from an
+     earlier run of exactly that tree and names it ([Edits reuse the suite](#edits-reuse-the-suite)).
 4. It lands that head, once origin's integration branch is still the tested base; where it
    moved while it waited, it merges nothing: integrate again.
    - A squash landing squash-merges at exactly that head with the merge's message as the commit
@@ -1524,6 +1526,31 @@ until GitHub fails it after 24 hours, and `check` with it.
   re-run; a second attempt, or a run that ended any other way, stays as it ended.
 - **Tested** against a fake of the jobs API and a fake clock (`tests/test_ci_queue.py`); GitHub's
   own queue, cancel and re-run are not reproducible there.
+
+### Edits reuse the suite
+
+A pull request's description and labels change many times without a new commit: the worker
+corrects its field report, the integrator moves labels. Each change starts `check` again, on a tree
+already checked, so such a run checks again only what it can change and takes the rest from an
+earlier run ([scripts/ci_reuse.py](scripts/ci_reuse.py)).
+
+- **What runs again.** On `edited`, `labeled` and `unlabeled` the gate of the commits, the issue
+  rule, the field report and every other cheap step run as always.
+- **What is taken.** The suite, the Go checks and kern-platforms: the job `trust` reads the runs of
+  `check` for the same head, newest first, and takes the first result of the same reuse key.
+  - The key is the tree checked out, the merge of the head into its base, so a base that moved is
+    another tree; and the Component kinds the description gives the suite's release guard.
+  - Each run names its decision step with its key, `Reuse an earlier result of this tree (reuse
+    key <key>)`, which a later run reads in the jobs API; a run that took a result or stopped
+    before the suite holds none, and the run before it is read.
+- **A failure stays.** A failed suite, Go check or leg of that tree keeps `check` failed, as an
+  error naming the run it came from; a pass is a notice naming it.
+- **Everything runs** where no completed run of the head holds a result for the key, where the
+  newest completed one was cancelled, on a re-run attempt (re-run all jobs to run them again), and
+  where the runs cannot be read. Every other event runs everything, as always.
+- **Tested** against a fake of the runs and jobs API and through a local GitHub
+  (`tests/test_ci_reuse.py`), with the steps of `check` that act on the decision run as the runner
+  runs them.
 ### Metrics
 
 Every run of a `work_tickets.py` or `se_start.py` subcommand appends one JSON line to
