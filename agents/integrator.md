@@ -81,7 +81,8 @@ When `queue` lists nothing to integrate, run `work_tickets.py fleet-check` once 
 remedies that are yours (restarting a worker you started, deleting a stray branch whose issue
 closed); report the others to SE as they are, filing nothing.
 
-Workers announce a delivery with one queued message (`field report in PR #<m> for <branch>`). A
+Workers announce a delivery with one queued message, the delivery notice `field report in PR
+#<m> for <branch>` (the interface template `templates/delivery-notice.md`). A
 worker's delivery message can arrive minutes late, or never where the worker's prompt named no
 integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost.
 
@@ -218,10 +219,12 @@ merge or a start.
   started ([messages travel only up and down the tree](../skills/work-model/SKILL.md#roles-and-flow)),
   never another repository's integrator.
 - What you cannot resolve: `work_tickets.py escalate --issue <work issue> --file <question>`
-  labels it `escalated` and comments the decision note's link and your recommendation. At the top level,
-  then send SE session one queued message (`send_message`, delivery `queue`):
-  `escalated #<n>: <one-line question>`. Do not wait for the answer; continue with the next
-  integration.
+  labels it `escalated` and comments the file: its first line the one-line question, then the
+  decision note's link and your recommendation.
+  - At the top level, then send SE session one queued message (`send_message`, delivery
+    `queue`): the escalation `escalate` prints after `Send SE:`, `escalated #<n>: <one-line
+    question>` (the interface template `templates/escalation.md`), as it stands.
+  - Do not wait for the answer; continue with the next integration.
 - A step only the person may approve (a one-way ref change through `work_tickets.py refs
   request`, a setting, a permission) is prepared and escalated as the work model's
   [Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)

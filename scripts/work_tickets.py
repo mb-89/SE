@@ -5650,13 +5650,34 @@ def backlog_list(root: Path, search: str | None, repo: str | None) -> list[dict[
     ]))
 
 
-def escalate(root: Path, number: int, file: Path, repo: str | None) -> None:
+def interface_message(name: str, **values: str) -> str:
+    """The message line of interface template `name`, written through its generated schema
+    (scripts/interfaces.py); a value its schema refuses stops the command."""
+    interfaces = sibling("interfaces")
+    try:
+        return interfaces.write(name, values)
+    except interfaces.InterfaceError as error:
+        raise QueueError(str(error)) from error
+
+
+def escalation_question(text: str) -> str:
+    """An escalation comment's one-line question: its first line that holds words, without a
+    heading's `#`s."""
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    return first.strip().lstrip("#").strip()
+
+
+def escalate(root: Path, number: int, file: Path, repo: str | None) -> str:
+    """Comment the escalation on issue `number`, label it escalated, and give the escalation
+    message to send SE (templates/escalation.md)."""
     repo = resolve_repo(root, repo)
     question = read_file(file, "escalation").strip()
     if not question:
         raise QueueError("The escalation needs a question")
+    message = interface_message("escalation", issue=str(number), question=escalation_question(question))
     run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)], question + "\n")
     run_gh(root, ["issue", "edit", str(number), "--add-label", "escalated", *repo_arguments(repo)])
+    return message
 
 
 def pull_request_report(
@@ -10008,14 +10029,17 @@ def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("escalate", "comment a question on an issue and label it escalated",
+@command("escalate", "comment a question on an issue, label it escalated and print the "
+                     "escalation message to send SE, its first line the question "
+                     "(templates/escalation.md)",
          WORKTREE,
          arg("--issue", required=True, type=int, help="issue to escalate"),
          arg("--file", required=True, type=Path, help="Markdown question"),
          REPO)
 def run_escalate(root: Path, args: argparse.Namespace) -> int:
-    escalate(root, args.issue, args.file, args.repo)
+    message = escalate(root, args.issue, args.file, args.repo)
     print(f"Escalated #{args.issue}")
+    print(f"Send SE: {message}")
     return 0
 
 
@@ -10661,8 +10685,8 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     session = config_value(
         "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
     pr = deliver(root)
-    print(f"Notify {session or '<integrator session>'}: field report in PR #{pr} for "
-          f"{current_branch(root)}")
+    notice = interface_message("delivery-notice", pr=str(pr), branch=current_branch(root))
+    print(f"Notify {session or '<integrator session>'}: {notice}")
     return 0
 
 
@@ -11528,7 +11552,8 @@ def run_docs(root: None, args: argparse.Namespace) -> int:
 
 
 @command("format", "apply the fix of every check the check job runs that a fix can satisfy: write "
-                   "the generated layouts (se_plugin.py build) and the command reference with "
+                   "the generated layouts (se_plugin.py build), the interface templates' "
+                   "generated schemas (templates.py interfaces) and the command reference with "
                    "its declarations (docs); a second run writes nothing",
          arg("--root", type=Path, default=README.parent,
              help="the se checkout to write; default: the one this script runs from"))
@@ -11538,6 +11563,10 @@ def run_format(root: None, args: argparse.Namespace) -> int:
         written = [str(path) for path in se_plugin.build(args.root)]
     except se_plugin.SourceError as error:
         raise QueueError(f"format: se_plugin.py build: {error}") from error
+    if (args.root / "templates").is_dir():
+        templates = sibling("templates")
+        written += [f"scripts/interfaces/{name}" for name in templates.write_interfaces(
+            templates.load(args.root, tree=True), args.root / "scripts" / "interfaces")]
     written += write_command_reference(args.root)
     for path in written:
         print(f"wrote {path}")

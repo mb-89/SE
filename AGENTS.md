@@ -87,9 +87,12 @@
   - `scripts/references.py` owns what counts; the issue-filing commands call it too
     ([Issues](src/skills/work-model/SKILL.md#issues)).
 - Fixes: `uv run python scripts/work_tickets.py format` writes what the `check` job's generated
-  checks refuse, the layouts (`se_plugin.py check`) and the README's command reference with its
-  components' declarations (`work_tickets.py docs --check`); SE runs no code formatter or linter,
-  and its other checks have no fix to apply.
+  checks refuse; SE runs no code formatter or linter, and its other checks have no fix to apply.
+  - the layouts (`se_plugin.py check`);
+  - the interface templates' generated schemas (`templates.py interfaces --check`, held by
+    `tests/test_interfaces.py`);
+  - the README's command reference with its components' declarations (`work_tickets.py docs
+    --check`).
 - Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
   `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.

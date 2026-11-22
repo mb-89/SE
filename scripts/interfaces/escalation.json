@@ -1,0 +1,25 @@
+{
+  "template": "se/escalation",
+  "version": "1.0.0",
+  "says": "An escalation to SE: the escalated issue and its question in one line.",
+  "message": "escalated #{issue}: {question}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "issue": {
+        "type": "string",
+        "description": "The number of the escalated issue, digits alone."
+      },
+      "question": {
+        "type": "string",
+        "description": "The question SE decides, in one line: the first line of the escalation's comment."
+      }
+    },
+    "required": [
+      "issue",
+      "question"
+    ],
+    "additionalProperties": false
+  }
+}

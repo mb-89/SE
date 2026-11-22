@@ -1,0 +1,25 @@
+{
+  "template": "se/delivery-notice",
+  "version": "1.0.0",
+  "says": "A worker's delivery: the pull request whose description is its field report, and its branch.",
+  "message": "field report in PR #{pr} for {branch}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "pr": {
+        "type": "string",
+        "description": "The number of the work pull request, digits alone."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The work branch, named like the work issue's title."
+      }
+    },
+    "required": [
+      "pr",
+      "branch"
+    ],
+    "additionalProperties": false
+  }
+}

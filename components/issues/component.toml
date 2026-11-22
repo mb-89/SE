@@ -33,9 +33,9 @@ class = "batch"
 
 [commands."work_tickets.py escalate"]
 usage = "work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]"
-summary = "comment a question on an issue and label it escalated"
+summary = "comment a question on an issue, label it escalated and print the ..."
 group = "Issues"
-help = "comment a question on an issue and label it escalated"
+help = "comment a question on an issue, label it escalated and print the escalation message to send SE, its first line the question (templates/escalation.md)"
 class = "batch"
 
 [commands."work_tickets.py file"]

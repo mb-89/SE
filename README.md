@@ -1966,7 +1966,7 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 | `work_tickets.py block` | `work_tickets.py block --worktree WORKTREE --by BLOCKER [--repo REPO] issue` | link an issue to a native blocker |
 | `work_tickets.py body-read` | `work_tickets.py body-read --worktree WORKTREE [--body-file FILE]` | record the work issue's body as read (intake records it; field-report --check and deliver refuse a body changed after it) |
 | `work_tickets.py comments-read` | `work_tickets.py comments-read --worktree WORKTREE --count COUNT --newest NEWEST` | record the work issue's comments as read: their count and the newest one's id (intake records them; field-report --check and deliver refuse comments after it) |
-| `work_tickets.py escalate` | `work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]` | comment a question on an issue and label it escalated |
+| `work_tickets.py escalate` | `work_tickets.py escalate --worktree WORKTREE --issue ISSUE --file FILE [--repo REPO]` | comment a question on an issue, label it escalated and print the escalation message to send SE, its first line the question (templates/escalation.md) |
 | `work_tickets.py file` | `work_tickets.py file --worktree WORKTREE --title TITLE (--body-file BODY_FILE \| --fields FILE) [--hold] [--blocked-by N] [--label LABEL] [--repo REPO]` | for SE: file a work issue labelled work, ready and repo:<name>; with --blocked-by, ready only once its blockers are linked |
 | `work_tickets.py intake` | `work_tickets.py intake --worktree WORKTREE (--issue ISSUE \| --issue-body FILE \| --outside) [--comments-file FILE] [--repo REPO] [--discovery] [--probe-root PROBE_ROOT]` | read the work issue with gh, or from the files your GitHub tools' answers were saved to, and write its tickets into todo; it lists the comments, each with its author, a line ending [not the repository owner] where the repository's owner account did not write it (scripts/comment_authors.py) |
 | `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
@@ -2005,7 +2005,7 @@ settings checks and the generated docs.
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
 | `work_tickets.py file-seconds` | `work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]` | write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more |
 | `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
-| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build) and the command reference with its declarations (docs); a second run writes nothing |
+| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
 | `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
@@ -2332,7 +2332,10 @@ both.
 | Template | What it shapes |
 |---|---|
 | `templates/decision.md` | A decision note: the situation, the problem and what others do, then the options' pugh fence. |
+| `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
+| `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
@@ -2368,6 +2371,12 @@ where it holds them, else the working tree (`--tree` always).
 `draft --json` also gives each field's shape (its kind, heading, whether it is required, its
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
+
+The interface templates (`delivery-notice`, `escalation`, `handover`) shape the texts SE's sessions
+pass to each other. `templates.py interfaces` writes each one's schema beside the code that uses
+it, `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
+`work_tickets.py deliver` and `escalate` write their messages through it
+(`scripts/interfaces.py`).
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`

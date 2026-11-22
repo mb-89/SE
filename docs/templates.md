@@ -176,12 +176,12 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's fifteen template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's eighteen template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's fourteen templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's seventeen templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
@@ -195,6 +195,9 @@ SE's fourteen templates are notes; the term list stays a TOML list until the gui
 | `templates/landing.md` | `landing` | document | SE |
 | `templates/housekeeping.md` | `housekeeping` | document | SE |
 | `templates/merge-message.md` | `merge-message` | interface | SE |
+| `templates/delivery-notice.md` | `delivery-notice`: a worker's message to its integrator | interface | SE |
+| `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
+| `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/retro.md` | `retro`: its judged node | document | SE |
 | `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
@@ -204,8 +207,10 @@ SE's fourteen templates are notes; the term list stays a TOML list until the gui
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
 owns.
 
-SE's free texts become interface templates: the worker's delivery notice, an escalation, the
-handover, a design note's outline.
+SE's free texts are interface templates: the worker's delivery notice, an escalation and the
+handover; a design note's outline is still to come. Each one's schema is generated into
+`scripts/interfaces/`, beside `scripts/work_tickets.py`, which writes the two messages through it;
+the docstrings of `scripts/interfaces.py` and `scripts/templates.py` (Interfaces) own the rest.
 
 ### obs's note kinds
 
