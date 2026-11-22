@@ -913,6 +913,31 @@ sessions, so the check then reads the fleet itself.
 resume the session once the limit lifts and comment `Restarted after a usage limit:` on its issue,
 at most once per issue. [scripts/limit_restart.py](scripts/limit_restart.py) owns what counts.
 
+### Dispatcher
+
+`work_tickets.py dispatch` starts a fleet that stopped, with no model: an hour with nothing to start
+costs no model tokens. It reads from GitHub alone:
+
+- the startable work issues, as `ready` lists them: labelled `work` and `ready`, not waiting on a
+  person (labelled `se-person` or `escalated`, or assigned to someone), with no open blocker;
+- whether an integrator runs: an open landing pull request (`land/<branch>`), or in-progress work
+  whose issue or branch moved within the [fleet lease](#fleet-check).
+
+- Where startable work waits, no integrator runs and the fleet is not [paused](src/skills/work-model/SKILL.md#pause), `--fire`
+  fires the scheduled task whose session is a fresh integrator, once, and names its session;
+  `--dry-run` prints that fire and makes none. Anything else fires nothing and says why.
+- The workflow [.github/workflows/dispatch.yml](.github/workflows/dispatch.yml) runs it every four
+  hours. The integrator starts the next startable issue itself after each landing
+  ([integrator](src/agents/integrator.md)); the dispatcher only restarts a fleet where none runs.
+- Two repository secrets configure it, so no committed file names the task, its token or the
+  service's host: `SE_DISPATCH_TRIGGER`, the fire URL of the scheduled task's API trigger as it
+  shows it (an https URL ending in `/trig_<id>/fire`, which names the task's id), and
+  `SE_DISPATCH_TOKEN`, that trigger's token. While either is unset, the workflow runs `--dry-run`.
+- Setting them, and creating the scheduled task, are steps only the person takes
+  ([Steps only the person approves](src/skills/work-model/SKILL.md#steps-only-the-person-approves)).
+- Switch it off by disabling the workflow (the Actions tab, or `gh workflow disable dispatch.yml`)
+  or by deleting either secret; an open `pause` issue holds it with the rest of the fleet.
+
 ### Settings check
 
 `fleet/settings.toml` records settings the fleet runs on outside the repository: main's ruleset,
