@@ -488,11 +488,17 @@ Pull requests built on an old `main` cause most integration trouble.
   `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
   issue.
 - After each integration the integrator starts every startable work issue that has no branch yet
-  and whose file ownership does not clash with running workers, and starts its session itself.
+  and whose file ownership does not clash with running workers, starts its session itself and
+  comments on the landed issue what it started.
+- A startable issue also waits on no person: none labelled `se-person` or `escalated`, none
+  assigned to someone (`work_tickets.py ready`).
+- **Dispatcher**: where no integrator runs, a four-hourly workflow with no model fires the
+  scheduled task whose session is a fresh integrator, once, while startable work waits
+  ([README "Dispatcher"](../../../README.md#dispatcher)).
 - Nobody watches for deliveries. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
   SE turn, so a missed notification is handled as soon as either session is talked to; in the
-  cloud only, scheduled triggers.
+  cloud only, the scheduled task of the [dispatcher](../../../README.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and

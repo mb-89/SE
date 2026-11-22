@@ -939,6 +939,31 @@ sessions, so the check then reads the fleet itself.
 resume the session once the limit lifts and comment `Restarted after a usage limit:` on its issue,
 at most once per issue. [scripts/limit_restart.py](scripts/limit_restart.py) owns what counts.
 
+### Dispatcher
+
+`work_tickets.py dispatch` starts a fleet that stopped, with no model: an hour with nothing to start
+costs no model tokens. It reads from GitHub alone:
+
+- the startable work issues, as `ready` lists them: labelled `work` and `ready`, not waiting on a
+  person (labelled `se-person` or `escalated`, or assigned to someone), with no open blocker;
+- whether an integrator runs: an open landing pull request (`land/<branch>`), or in-progress work
+  whose issue or branch moved within the [fleet lease](#fleet-check).
+
+- Where startable work waits, no integrator runs and the fleet is not [paused](src/skills/work-model/SKILL.md#pause), `--fire`
+  fires the scheduled task whose session is a fresh integrator, once, and names its session;
+  `--dry-run` prints that fire and makes none. Anything else fires nothing and says why.
+- The workflow [.github/workflows/dispatch.yml](.github/workflows/dispatch.yml) runs it every four
+  hours. The integrator starts the next startable issue itself after each landing
+  ([integrator](src/agents/integrator.md)); the dispatcher only restarts a fleet where none runs.
+- Two repository secrets configure it, so no committed file names the task, its token or the
+  service's host: `SE_DISPATCH_TRIGGER`, the fire URL of the scheduled task's API trigger as it
+  shows it (an https URL ending in `/trig_<id>/fire`, which names the task's id), and
+  `SE_DISPATCH_TOKEN`, that trigger's token. While either is unset, the workflow runs `--dry-run`.
+- Setting them, and creating the scheduled task, are steps only the person takes
+  ([Steps only the person approves](src/skills/work-model/SKILL.md#steps-only-the-person-approves)).
+- Switch it off by disabling the workflow (the Actions tab, or `gh workflow disable dispatch.yml`)
+  or by deleting either secret; an open `pause` issue holds it with the rest of the fleet.
+
 ### Settings check
 
 `fleet/settings.toml` records settings the fleet runs on outside the repository: main's ruleset,
@@ -1803,6 +1828,7 @@ settings checks and the generated docs.
 |---|---|---|
 | `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show local worker capacity or cloud unlimited capacity |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
+| `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (README "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
 | `work_tickets.py file-seconds` | `work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]` | write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more |
 | `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
