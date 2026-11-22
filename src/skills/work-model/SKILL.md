@@ -327,8 +327,8 @@ default (`field-report --draft`).
 - **Below 1.0.0, breaking means minor**, as its item 4 allows: while `se.toml`'s
   `[project] version` is 0.y.z, a breaking change raises y, and only the person sets 1.0.0, by hand.
 - **The check**: such a report lists each as a `**Breaking:**` line under "Removed behaviour", and
-  `field-report --check` refuses it, or a work issue whose "Package kind" says "breaking", below
-  the kind the project's version gives it: patch or minor from 1.0.0 on, patch below.
+  `field-report --check` refuses it, or a work issue whose "Package kind" says "breaking", as
+  patch or minor. Below 1.0.0 it refuses only patch.
 - **Public** is what a user of the project relies on: its command-line interfaces, its file formats
   and schemas, and its documented module APIs.
 - Otherwise new behaviour is minor and a fix that changes no public interface is patch.
