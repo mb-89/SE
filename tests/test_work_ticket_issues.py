@@ -6195,7 +6195,7 @@ def test_route_derives_a_name_of_five_words_and_states_the_kind_in_package_kind(
     assert capsys.readouterr().out == "Routed issue #1 as make-the-example-work-on\n"
     body = github.issues[1]["body"]
     assert body.endswith("\n### Package kind\n\nfix\n")
-    assert work_tickets.default_release_kind("make-the-example-work-on", body) == "patch"
+    assert work_tickets.default_release_kind("make-the-example-work-on", body, (1, 2, 3)) == "patch"
 
     github.issues[2] = {**github.issues[1], "number": 2, "title": "Outside", "body": "Other.",
                         "labels": []}
@@ -6204,7 +6204,7 @@ def test_route_derives_a_name_of_five_words_and_states_the_kind_in_package_kind(
     assert "route: the name 'Outside_Name' breaks the name rule" in capsys.readouterr().err
     assert run(worktree, "route", "2", "--title", "outside-name", "--routing-file", str(routing)) == 0
     assert github.issues[2]["body"].count("Package kind") == 1  # the routing's own, no second
-    assert work_tickets.default_release_kind("outside-name", github.issues[2]["body"]) == "minor"
+    assert work_tickets.default_release_kind("outside-name", github.issues[2]["body"], (1, 2, 3)) == "minor"
 
 
 @pytest.mark.parametrize(("branch", "kind", "expected"), [
@@ -6219,7 +6219,7 @@ def test_route_derives_a_name_of_five_words_and_states_the_kind_in_package_kind(
 def test_the_drafts_release_kind_comes_from_package_kind_where_the_name_has_no_type(
         branch, kind, expected):
     body = f"## Goal\n\nG.\n\n## Package kind\n\n{kind}\n"
-    assert work_tickets.default_release_kind(branch, body) == expected
+    assert work_tickets.default_release_kind(branch, body, (1, 2, 3)) == expected
 
 
 def test_a_raced_twin_closes_the_later_issue_as_its_duplicate(worktree, monkeypatch, capsys):
@@ -6569,6 +6569,23 @@ def test_field_report_check_refuses_a_release_kind_it_cannot_release(
     issue.write_text(BODY, encoding="utf-8")
     assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == 1
     assert refusal in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("version", "code"), [("0.3.1", 0), ("2.3.1", 1)])
+def test_field_report_check_accepts_a_breaking_minor_only_below_1_0(
+        tmp_path, monkeypatch, capsys, version, code):
+    """Without a worktree, as CI runs it, the check reads project.version from the working
+    directory's se.toml."""
+    report, issue = tmp_path / "report.md", tmp_path / "issue.md"
+    removed = "## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone"
+    assert removed in COMPLETE_REPORT
+    report.write_text(COMPLETE_REPORT.replace(removed, removed.replace(
+        "None", "- **Breaking:** removed the --all option")), encoding="utf-8")
+    issue.write_text(BODY, encoding="utf-8")
+    (tmp_path / "se.toml").write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert work_tickets.main(["field-report", "--check", str(report), "--issue-body", str(issue)]) == code
+    assert ("lists a breaking change, which is major" in capsys.readouterr().err) == bool(code)
 
 
 def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request_and_release(

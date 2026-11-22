@@ -88,7 +88,9 @@ BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
 RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[—–:,-]*[ \t]*([^\n]*)")
-BREAKING_PATTERN = re.compile(r"\*\*Breaking:\*\*")
+# A breaking change's line under Removed behaviour: one that starts with the marker, as a list item
+# or not; a quoted sentence that only names the marker inside it is none.
+BREAKING_PATTERN = re.compile(r"^\s*(?:[-*+]\s+)?\*\*Breaking:\*\*")
 REMOVED_SECTION = "Removed behaviour, deleted or weakened tests, and authored prose"
 WORK_ISSUE_PATTERN = re.compile(r"\bWork issue:\*{0,2}\s*#(\d+)\b", re.IGNORECASE)
 PUBLIC_HOST_PATTERN = re.compile(r"(?:[a-z][a-z0-9+.-]*://|@)", re.IGNORECASE)
@@ -2805,18 +2807,33 @@ RELEASE_TRAILER_HELP = (
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
 
 
+def breaking_kind(version: tuple[int, int, int] | None) -> str:
+    """The release kind a breaking change takes: major from project.version 1.0.0 on; minor below
+    it (Semantic Versioning, item 4: in 0.y.z anything may change, so a breaking change raises y)
+    and where no version is read, such as a structure-only check, so the lower one passes there."""
+    return "major" if version is not None and version >= (1, 0, 0) else "minor"
+
+
+def released_version(version: tuple[int, int, int], kind: str) -> tuple[int, int, int]:
+    """The version a release of `kind` after `version` gets. Below 1.0.0 a major raises the minor
+    part: a project reaches 1.0.0 only by project.version set by hand, the statement that its
+    interface is stable."""
+    return bumped(version, "minor" if kind == "major" and version < (1, 0, 0) else kind)
+
+
 def is_breaking(issue_body: str) -> bool:
     """Whether a work issue marks a breaking change: the word in its Package kind section."""
     kind = HTML_COMMENT_PATTERN.sub("", section(issue_sections(issue_body), "Package kind"))
     return re.search(r"\bbreaking\b", kind, re.IGNORECASE) is not None
 
 
-def default_release_kind(branch: str, issue_body: str) -> str | None:
-    """The kind field-report --draft proposes: major where the work issue marks a breaking change,
-    else by an old name's `<type>/` prefix, else by the first release kind (patch, minor) or kind
+def default_release_kind(branch: str, issue_body: str,
+                         version: tuple[int, int, int] | None) -> str | None:
+    """The kind field-report --draft proposes: where the work issue marks a breaking change, the
+    kind one takes at project.version `version` (breaking_kind), else by an old name's `<type>/` prefix, else by the first release kind (patch, minor) or kind
     of work (feat, fix, ...) its Package kind names; None where neither names one."""
     if is_breaking(issue_body):
-        return "major"
+        return breaking_kind(version)
     if "/" in branch:
         return RELEASE_KINDS.get(branch.split("/", 1)[0])
     kind = HTML_COMMENT_PATTERN.sub("", section(issue_sections(issue_body), "Package kind"))
@@ -2825,10 +2842,12 @@ def default_release_kind(branch: str, issue_body: str) -> str | None:
     return None if found is None else RELEASE_KINDS.get(found[1].lower(), found[1].lower())
 
 
-def release_kind_problems(report_body: str, issue_body: str | None) -> list[str]:
+def release_kind_problems(report_body: str, issue_body: str | None,
+                          version: tuple[int, int, int] | None) -> list[str]:
     """Where the field report's Release kind, the one source of a first integration's kind, is
-    missing, unknown, without its reason, or below major although the report's Removed behaviour
-    lists a breaking change (a **Breaking:** line) or the work issue marks one."""
+    missing, unknown, without its reason, or below the kind a breaking change takes at
+    project.version `version` (breaking_kind) although the report's Removed behaviour lists one
+    (a **Breaking:** line) or the work issue marks one."""
     header = HTML_COMMENT_PATTERN.sub("", "\n".join(ordered_sections(report_body)[0][1]))
     match = RELEASE_KIND_PATTERN.search(header)
     where = "header (above the first section): Release kind"
@@ -2841,24 +2860,27 @@ def release_kind_problems(report_body: str, issue_body: str | None) -> list[str]
         problems.append(f"{where} {kind!r} must be one of {', '.join(RELEASE_ORDER)}")
     if not reason:
         problems.append(f"{where} needs a one-line reason after the kind")
-    if kind in RELEASE_ORDER and kind != "major":
+    least = breaking_kind(version)
+    if kind in RELEASE_ORDER and RELEASE_ORDER.index(kind) < RELEASE_ORDER.index(least):
+        takes = least if least == "major" else f"{least} below 1.0.0"
         removed = HTML_COMMENT_PATTERN.sub("", "\n".join(section_content(report_body, REMOVED_SECTION)))
         problems.extend(
             f"{where} is {kind}, but section \"## {REMOVED_SECTION}\" lists a breaking change, "
-            f"which is major: {line.strip()}"
+            f"which is {takes}: {line.strip()}"
             for line in removed.splitlines() if BREAKING_PATTERN.search(line)
         )
         if issue_body is not None and is_breaking(issue_body):
             problems.append(f"{where} is {kind}, but the work issue's Package kind marks a "
-                            "breaking change, which is major")
+                            f"breaking change, which is {takes}")
     return problems
 
 
-def declared_release_kind(branch: str, report_body: str | None, issue_body: str) -> str:
+def declared_release_kind(branch: str, report_body: str | None, issue_body: str,
+                          version: tuple[int, int, int] | None) -> str:
     """The kind a first integration of `branch` releases: its field report's Release kind."""
     problems = (["no field report given; pass --pr-description <file>, the pull request "
                  "description that carries it"] if report_body is None
-                else release_kind_problems(report_body, issue_body))
+                else release_kind_problems(report_body, issue_body, version))
     if problems:
         raise QueueError(f"Cannot release {branch}: " + "; ".join(problems) + "; nothing was merged")
     return RELEASE_KIND_PATTERN.search(report_body)[1]
@@ -2894,7 +2916,8 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
     `branch` is on the integration branch) its Re-integration kind, patch without a report."""
     if integrated_before(root, branch):
         return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
-    return f"{RELEASE_TRAILER}: {declared_release_kind(branch, report_body, issue_body)}"
+    return (f"{RELEASE_TRAILER}: "
+            f"{declared_release_kind(branch, report_body, issue_body, project_version(root))}")
 
 
 def branch_head(root: Path, branch: str) -> str:
@@ -3148,7 +3171,7 @@ def release(root: Path, branch: str, upstream_ref: str | None = None) -> str | N
                          upstream_ref or f"refs/remotes/origin/{branch}")
         return None if pushed.returncode == 0 else current
     kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
-    tag = f"v{version_text(bumped(version, kind))}"
+    tag = f"v{version_text(released_version(version, kind))}"
     if tagged(tag) is not None:
         raise QueueError(
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
@@ -3799,7 +3822,8 @@ def delivery_problem(root: Path, branch: str) -> str | None:
     except QueueError as error:
         return f"{error}. Complete {report_file}, {deliver_line}."
     snapshot = load_snapshot(root)
-    problems = field_report_problems(report, None if snapshot is None else str(snapshot["body"]))
+    problems = field_report_problems(report, None if snapshot is None else str(snapshot["body"]),
+                                     project_version(root))
     match = BRANCH_TIP_PATTERN.search(report)
     tip = branch_tip(root)
     if match is None or tip is None or not same_commit(match[1], tip):
@@ -4357,7 +4381,7 @@ def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
             report = report_in(str(pull.get("body") or ""), f"pull request #{pull['number']}")
         except QueueError:
             continue
-        if not field_report_problems(report, None):
+        if not field_report_problems(report, None, project_version(root)):
             delivered.append(pull)
     return delivered
 
@@ -4409,7 +4433,7 @@ def draft_field_report(root: Path, file: Path, issue_file: Path | None = None) -
     issue = required_snapshot(root) if issue_file is None else issue_record(issue_answer(issue_file), [])
     branch = delivery_branch(root, issue)
     body = field_report_template().replace("#<n>", f"#{issue['number']}", 1)
-    kind = default_release_kind(branch, str(issue["body"]))
+    kind = default_release_kind(branch, str(issue["body"]), project_version(root))
     if kind is not None:
         body = body.replace("**Release kind:** <kind>", f"**Release kind:** {kind}", 1)
     body = (body.replace("<integration branch>", integration_branch(root))
@@ -4463,7 +4487,8 @@ def label_pattern(label: str) -> re.Pattern[str]:
     return re.compile(r"\*\*" + r"[^*\n]+?".join(map(re.escape, parts)) + r"\*\*")
 
 
-def field_report_problems(body: str, issue_body: str | None) -> list[str]:
+def field_report_problems(body: str, issue_body: str | None,
+                          version: tuple[int, int, int] | None = None) -> list[str]:
     """Where the field report `body` departs from the pull request template, the one owner of its
     template (the report between the markers).
 
@@ -4509,7 +4534,7 @@ def field_report_problems(body: str, issue_body: str | None) -> list[str]:
             "header (above the first section): Branch tip must be the branch's commit; "
             "field-report --check --worktree <worktree> fills it from the branch"
         )
-    problems.extend(release_kind_problems(body, issue_body))
+    problems.extend(release_kind_problems(body, issue_body, version))
     problems.extend(component_versions.kinds_problems(body))
     kind = REINTEGRATION_KIND_PATTERN.search(header)
     if kind is not None and kind[1] not in RELEASE_ORDER:
@@ -4633,7 +4658,7 @@ def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
     if root is not None:
         text = with_branch_tip(root, text)
     report = report_in(text, f"Field report {file.name}")
-    problems = field_report_problems(report, issue_body)
+    problems = field_report_problems(report, issue_body, project_version(root or Path.cwd()))
     if problems:
         raise field_report_error(file.name, problems)
     if root is not None:
@@ -5653,7 +5678,7 @@ def pull_request_report(
             "**Work issue:** #<n> in its header and delivers again"
         )
     work_issue = fetch_issue(root, int(work[1]), tracker)
-    problems = field_report_problems(report, str(work_issue["body"]))
+    problems = field_report_problems(report, str(work_issue["body"]), project_version(root))
     if problems:
         raise field_report_error(f"in {where}", problems)
     return pull, report, work_issue, int(work[1])
@@ -7941,7 +7966,7 @@ def handed_pull_request(root: Path, pull_number: int, remote: str, description: 
             f"The field report in {where} names no work issue; the worker writes "
             "**Work issue:** #<n> in its header and delivers again")
     body = issue_body_text(issue_body)
-    problems = field_report_problems(report, body)
+    problems = field_report_problems(report, body, project_version(root))
     if problems:
         raise field_report_error(f"in {where}", problems)
     checked_git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
@@ -7956,7 +7981,9 @@ def relay_pull_request(relay, root: Path, pull_number: int, remote: str, tracker
     request (its snapshot, on `remote`), its field report, its work issue (that snapshot, on
     `tracker`, as the gh path reads it) and its number. No file is saved."""
     pull, report, work_number = relay_pull(relay, root, pull_number, remote)
-    return pull, report, relay_work_issue(relay, pull_number, tracker, report, work_number), work_number
+    work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number,
+                                  project_version(root))
+    return pull, report, work_issue, work_number
 
 
 def relay_pull(relay, root: Path, pull_number: int, remote: str
@@ -7986,13 +8013,14 @@ def relay_pull(relay, root: Path, pull_number: int, remote: str
     return pull, report, work_number
 
 
-def relay_work_issue(relay, pull_number: int, tracker: str, report: str, work_number: int
-                     ) -> dict[str, object]:
+def relay_work_issue(relay, pull_number: int, tracker: str, report: str, work_number: int,
+                     version: tuple[int, int, int] | None) -> dict[str, object]:
     """The work issue through kern's relay, read from `tracker` (where the work issues live, not
-    origin), with its comments, its body checked against the field report."""
+    origin), with its comments, its body checked against the field report at project.version
+    `version`."""
     owner, name = api_repo(tracker).split("/")
     body = str(relay_issue_read(relay, owner, name, work_number)["body"])
-    problems = field_report_problems(report, body)
+    problems = field_report_problems(report, body, version)
     if problems:
         raise field_report_error(f"in pull request #{pull_number}", problems)
     return {"body": body}
@@ -8090,7 +8118,8 @@ def integrate(
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
         try:
-            work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number)
+            work_issue = relay_work_issue(relay, pull_number, tracker, report, work_number,
+                                          project_version(root))
         except Exception:
             abandon_landing(root, target, landing)
             raise

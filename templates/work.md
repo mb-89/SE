@@ -123,7 +123,7 @@ example:
 
 ## Package kind
 
-<!-- package_kind: standard, discovery (read-only research), breaking (a major release), or a kind of work, as `route --type` takes it. -->
+<!-- package_kind: standard, discovery (read-only research), breaking (a major release, minor below 1.0.0), or a kind of work, as `route --type` takes it. -->
 
 ## Blocked by
 
