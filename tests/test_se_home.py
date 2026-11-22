@@ -48,6 +48,11 @@ def test_https_and_ssh_origins_name_the_home_without_credentials() -> None:
     ("git@example.com:alice/project.git", "git@example.com:alice/obs.git"),
     ("http://local_proxy@127.0.0.1:41231/git/alice/project", "http://local_proxy@127.0.0.1:41231/git/alice/obs.git"),
     ("/srv/alice/project", "/srv/alice/obs.git"),
+    ("ssh://git@example.com:2222/alice/project.git", "ssh://git@example.com:2222/alice/obs.git"),
+    ("file:///srv/alice/project.git", "file:///srv/alice/obs.git"),
+    ("C:\\repos\\alice\\project.git", "C:/repos/alice/obs.git"),
+    ("C:/repos/alice/project.git", "C:/repos/alice/obs.git"),
+    ("\\\\server\\share\\project.git", "//server/share/obs.git"),
 ])
 def test_a_relative_module_url_resolves_against_origin_as_git_does(origin: str, want: str) -> None:
     assert se_home.module_url(origin, "../obs.git") == want
@@ -65,6 +70,19 @@ def test_the_checkout_home_comes_from_origin(tmp_path: Path, fake_git_door) -> N
 
     assert se_home.home(root) == Home("example.com", "alice", "project")
     assert se_home.resolve_module(root, "../obs.git") == "git@example.com:alice/obs.git"
+
+
+def test_a_relative_path_origin_resolves_from_the_checkout_not_the_working_directory(
+        tmp_path: Path, fake_git_door, monkeypatch) -> None:
+    # git reads a relative path origin from the checkout; a module cache clones from elsewhere (#1525).
+    root = fake_git.init(tmp_path / "work" / "project")
+    git_door.run("remote", "add", "origin", "../../srv/project.git", root=root)
+    monkeypatch.chdir(tmp_path / "work")
+
+    resolved = se_home.resolve_module(root, "../obs.git")
+
+    assert Path(resolved) == tmp_path / "srv" / "obs.git"
+    assert Path(resolved).is_absolute()
 
 
 def test_without_an_origin_nothing_guesses_a_home(tmp_path: Path, fake_git_door, capsys) -> None:
