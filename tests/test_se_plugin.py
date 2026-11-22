@@ -461,6 +461,49 @@ def test_no_root_mcp_json_with_the_setting_off_and_check_refuses_a_stray_one(che
     assert not (checkout / ".mcp.json").exists()
 
 
+def claude_manifest(tmp_path: Path, setting: str) -> bytes:
+    """.claude-plugin/plugin.json as a build of SE's sources writes it under `[plugin]` `setting`."""
+    root = tmp_path / "claude-mcp"
+    shutil.copytree(ROOT / "src", root / "src")
+    version = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    (root / "se.toml").write_text(f'[project]\nversion = "{version}"\n[plugin]\n{setting}\n', encoding="utf-8")
+    return se_plugin.expected(root, copilot=False)[PurePosixPath(".claude-plugin/plugin.json")]
+
+
+def test_claude_mcp_on_declares_the_door_run_from_the_plugin_root(tmp_path):
+    manifest = json.loads(claude_manifest(tmp_path, "claude_mcp = true"))
+    assert manifest["mcpServers"] == {"se": {"type": "stdio", "command": "bash",
+                                             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/se_mcp.sh", "--root", "."]}}
+    assert list(manifest) == ["name", "version", "description", "license", "hooks", "mcpServers"]
+
+
+@pytest.mark.parametrize("setting", ["", "claude_mcp = false"], ids=["unset", "off"])
+def test_claude_mcp_unset_or_off_writes_the_manifest_as_before(tmp_path, setting):
+    """Without the setting the manifest is byte for byte the one before it existed: the on build's
+    file without its mcpServers, its keys in their old order."""
+    off = claude_manifest(tmp_path, setting)
+    on = json.loads(claude_manifest(tmp_path / "on", "claude_mcp = true"))
+    del on["mcpServers"]
+    assert off == (json.dumps(on, indent=2) + "\n").encode("utf-8")
+    assert list(json.loads(off)) == ["name", "version", "description", "license", "hooks"]
+
+
+def test_the_committed_claude_manifest_follows_ses_own_claude_mcp():
+    """SE's own value is read from se.toml, so flipping it is one line there and a build."""
+    setting = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["plugin"].get("claude_mcp", False)
+    assert se_plugin.claude_mcp(ROOT) is setting
+    manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert ("mcpServers" in manifest) is setting
+    assert not (ROOT / ".mcp.json").exists(), "claude_mcp writes no root .mcp.json"
+
+
+def test_a_claude_mcp_that_is_no_boolean_is_refused(tmp_path, capsys):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nclaude_mcp = "on"\n', encoding="utf-8")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert "`claude_mcp = true|false`" in capsys.readouterr().err
+
+
 def test_check_refuses_a_hand_edit_to_the_plugin_hooks(checkout, capsys):
     path = checkout / ".github" / "plugin" / "hooks.json"
     original = path.read_bytes()

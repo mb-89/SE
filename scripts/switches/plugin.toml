@@ -13,6 +13,16 @@ help = "README.md#the-mcp-door"
 note = "off: the build writes no root .mcp.json; on: it writes one, which Claude Code reads too"
 
 [[switch]]
+name = "[plugin] claude_mcp"
+kind = "se.toml"
+reader = "scripts/se_plugin.py"
+default = "off"
+layers = ["se.toml"]
+key = "plugin.claude_mcp"
+help = "README.md#the-mcp-door"
+note = "off: the Claude Code manifest .claude-plugin/plugin.json declares no MCP server; on: it declares the door, run from ${CLAUDE_PLUGIN_ROOT}, so every Claude Code session with the plugin starts it"
+
+[[switch]]
 name = "[plugin] copilot_manifest"
 kind = "se.toml"
 reader = "scripts/se_plugin.py"
@@ -45,4 +55,4 @@ layers = ["environment"]
 off = ["off"]
 other = "on"
 help = "scripts/se_mcp.sh"
-note = "on: a plugin install serves the session's repository; off keeps the plugin folder as the root; it matters only where PLUGIN_ROOT is set; se_mcp.ps1 compares case-insensitively (-ne) and se_mcp.sh (line 97) does not, so the row follows se_mcp.sh"
+note = "on: a plugin install serves the session's repository; off keeps the plugin folder as the root; it matters only where PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT is set; se_mcp.ps1 compares case-insensitively (-ne) and se_mcp.sh (line 103) does not, so the row follows se_mcp.sh"

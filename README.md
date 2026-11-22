@@ -345,18 +345,34 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   - `.github/mcp.json` for Copilot in a checkout of SE;
   - the `mcpServers` entry of Copilot's plugin manifest `.github/plugin/plugin.json` for a plugin
     install, the plugin's root `${PLUGIN_ROOT}` in an argument only;
+  - the `mcpServers` entry of the Claude Code manifest `.claude-plugin/plugin.json` only where
+    `se.toml` `[plugin] claude_mcp` is on, the launcher run from `${CLAUDE_PLUGIN_ROOT}`; every
+    Claude Code session with SE's plugin then starts the door, and Claude Code names its tools
+    `mcp__plugin_se_se__<tool>` (`mcp__plugin_se_se__forms`);
   - a root `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on; it is off, as Claude Code
-    reads that file too.
+    reads that file in every checkout.
 - **A plugin install** runs the launcher in the plugin's folder with `--root .`; the launcher then
-  serves the session's repository. It reads `SE_SESSION_CWD`, else `COPILOT_SESSION_CWD`, else, on
-  Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>: root
-  <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
+  serves the session's repository. It reads `SE_SESSION_CWD`, else the host's session folder,
+  else, on Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>:
+  root <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
+  - Copilot's plugin root is `PLUGIN_ROOT`, its session folder `COPILOT_SESSION_CWD`; Claude
+    Code's are `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PROJECT_DIR`, each read only under its own host.
+  - Claude Code starts a plugin's server in the project itself, measured
+    ([scripts/host-limits.toml](scripts/host-limits.toml), "plugin MCP door"), so there `--root .`
+    is the project already.
   - A session folder that is no checkout gets no `.se`: that line goes to `~/.se/.runtime/mcp.log`.
 - **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
   or in VS Code `code --add-mcp
   '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.
   - An installed plugin's `se` outranks `copilot mcp add`; then the door goes by hand, per
     session ([docs/copilot.md "The door by hand"](docs/copilot.md#the-door-by-hand)).
+- **What the door does not cover.**
+  - Where the `se` binary is not in place as the server starts (a fresh machine, or a cloud
+    snapshot older than the pin), the door offers only `status` for that whole session; the way to
+    a form there is the command line, `forms.py draft <form> --json`.
+  - In a claude.ai cloud session the plugin is the clone in `~/.claude/skills/se` (`se@skills-dir`,
+    [Claude Code cloud](#claude-code-cloud)); whether Claude Code starts that plugin's
+    `mcpServers` is not measured.
 - **In another repository**, one without a `wiring.toml` of its own, the door serves SE's tools
   from the SE the launcher lies in (the plugin's root, or the pinned module under
   `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
@@ -391,6 +407,8 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
   `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
   through "Chat: Manage Tool Approval".
+  - The door the Claude Code plugin declares takes the rule `mcp__plugin_se_se__<tool>`, such as
+    `mcp__plugin_se_se__forms` for a session whose permission mode asks before a tool runs.
 - **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
   so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
   catalog to the check, and the door to its contract with the Go SDK's client against the built

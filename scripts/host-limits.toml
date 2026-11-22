@@ -317,6 +317,19 @@ mark = "documented"
 register = 'claude mcp add --scope project se -- bash "{launcher}" --root .'
 register_windows = 'claude mcp add --scope project se -- powershell -NoProfile -ExecutionPolicy Bypass -File "{launcher_ps1}" --root .'
 
+[[registrations.claude-code.places]]
+place = "plugin MCP door"
+kind = "mcp"
+base = "plugin"
+file = ".claude-plugin/plugin.json"
+finds = "se"
+outside = true
+source = "https://code.claude.com/docs/en/hooks"
+read = 2026-11-22
+mark = "measured"
+note = "Written where SE's se.toml [plugin] claude_mcp is on; its tools are mcp__plugin_se_se__<tool>. Measured 2026-11-22 in Claude Code 2.1.330 on Linux: a plugin's stdio server starts in the project folder, with CLAUDE_PROJECT_DIR (the project) and CLAUDE_PLUGIN_ROOT (the plugin) in its environment, as the hooks reference says of CLAUDE_PROJECT_DIR."
+register = "claude plugin install se --marketplace {tracker}"
+
 [[registrations.copilot-cli.places]]
 place = "hooks"
 kind = "hooks"

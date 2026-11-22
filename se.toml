@@ -148,8 +148,12 @@ repositories = ["SE", "obs"]
 # The plugin's build (scripts/se_plugin.py): `root_mcp` writes a root .mcp.json declaring SE's MCP
 # door. Off, as Claude Code reads that file too; Copilot reads .github/mcp.json, always written
 # (README "MCP door").
+# `claude_mcp` declares the door in the Claude Code manifest, .claude-plugin/plugin.json: on, every
+# Claude Code session with SE's plugin starts the door (README "The MCP door"). Off on this branch
+# until the owner answers whether SE's own default is on.
 [plugin]
 root_mcp = false
+claude_mcp = false
 
 # The outside skills each role relies on, `<plugin>@<marketplace>:<skill>`: se_plugin.py build
 # preloads them into that agent and the start greeting names one the session lacks (AGENTS.md
