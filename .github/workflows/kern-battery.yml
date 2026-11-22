@@ -1,4 +1,4 @@
-# The battery every kern application's CI calls (kern/README.md "The battery"): it sets up the Go its
+# The battery every kern application's CI calls (kern's README "The battery"): it sets up the Go its
 # go.mod pins and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
 # as its se.toml [tests] command declares them, held to that table's one budget: over target_seconds
 # it warns, over limit_seconds or on a failed test it fails. An application calls the copy SE writes
@@ -14,8 +14,8 @@
 # workflow runs at (job.workflow_sha), in an application's copy the pin it was written at. The default
 # is off: the battery runs in full, and the application grants nothing more than contents: read.
 #
-# While kern is incubated in SE, it lives here; it moves with kern's workflows to kern's own
-# repository, beside SE's.
+# SE keeps it, as an application's copy is written from SE (scripts/se_workflows.py); kern's own CI
+# runs in kern's repository.
 name: kern-battery
 
 on:

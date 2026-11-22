@@ -11090,7 +11090,7 @@ COMPONENT_SOURCE = "its command registry"
 INTERACTIVE_COMMANDS = frozenset(
     {"status", "config", "ready", "capacity", "queue", "fleet-check", "settings-check", "metrics"})
 #: The commands that change nothing (no file, no git state, nothing on GitHub), each with when an
-#: agent uses it: kern's MCP door offers these, and only these (kern/README.md "The MCP door").
+#: agent uses it: kern's MCP door offers these, and only these (kern's README "The MCP door").
 #: `queue` syncs the checkout (git fetch and merge), so it is not among them.
 READ_ONLY_COMMANDS = {
     "status": "Reports the local ticket queue of a worker's worktree (--worktree): the tickets "

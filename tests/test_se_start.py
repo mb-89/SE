@@ -412,11 +412,20 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
 
 # kern's state, as bootstrap.sh hands it over (README "Kern").
 
+def bare_kern(se: Path) -> None:
+    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [modules.kern]), its clone placed."""
+    manifest = se / "se.toml"
+    text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+    write(manifest, text + '\n[modules.kern]\nurl = "../kern.git"\ngo = true\n')
+    write(se / "go.mod", "module se\n\nrequire kern v0.2.0\n")
+    write(se / ".se" / "modules" / "kern" / "release.toml",
+          'version = "0.2.0"\ndownload = "https://example.com/alice/kern/releases/download/v{version}"\n')
+
+
 def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
     """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
-    write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+    bare_kern(setup["se"])
     asked = []
     world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
@@ -434,8 +443,8 @@ def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, m
 
 @pytest.mark.parametrize(("args", "answer", "line"), [
     (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting"),
-    (["--kern-starting", "fetching release kern-v0.2.0 for linux-amd64 in the background"], None,
-     "kern 0.2.0: starting: fetching release kern-v0.2.0 for linux-amd64 in the background"),
+    (["--kern-starting", "fetching release v0.2.0 for linux-amd64 in the background"], None,
+     "kern 0.2.0: starting: fetching release v0.2.0 for linux-amd64 in the background"),
     (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"}, "kern 0.2.0: failed: kern start: boom"),
     (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see "),
     (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see "),
@@ -473,8 +482,7 @@ def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monk
     """Copilot's sessions work with no core, through SE's scripts and gh, and the greeting says so;
     Claude Code's greeting stays as it is."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
-    write(setup["se"] / "kern" / "release.toml",
-          'version = "0.2.0"\ndownload = "https://example.com/alice/SE/releases/download/kern-v{version}"\n')
+    bare_kern(setup["se"])
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]), "--cache",
                           str(setup["cache"]), "status", "--hook", "--offline", "--host", host, *args],
                          world=setup["world"]) == 0

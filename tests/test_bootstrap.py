@@ -45,6 +45,9 @@ case "$*" in *"se_modules.py --local "*" hooks-core"*) shift 5; exec "@PYTHON@" 
 case "$*" in *"se_start.py "*" start-hooks"*) exit 0 ;; esac
 case "$*" in *se_start.py*) [ -f "$HOME/status-fails" ] && exit 1; echo '{"greeting": 1}'; exit 0 ;; esac
 case "$*" in *"se_modules.py --root "*" app-binary"*) cat "$HOME/app-binary" 2>/dev/null; exit 0 ;; esac
+case "$*" in *"se_modules.py --root "*" sync kern"*)
+  [ -f "$HOME/kern-sync-fails" ] && { echo "error: module kern: git clone failed"; exit 1; }; exit 0 ;;
+esac
 case "$1 $2" in
   "python find") [ -f "$HOME/python" ] ;;
   "python install") touch "$HOME/python" ;;
@@ -867,3 +870,96 @@ def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machi
     assert lines == [f"se bootstrap: no {NAME} {APP_VERSION} release at {APP_BASE}, and no go to build it "
                      f"from {sh(root)}/{BUILD_DIR}"], result.stdout
     assert not (root / ".se" / ".runtime" / "runme-se").exists()
+
+
+# kern for the installed SE (scripts/bootstrap.sh kern_place, README "Modules"): an SE that pins kern
+# by [modules.kern] gets its clone synced before the core starts where it is missing or off the
+# commit se.lock locks; at that commit, no process starts.
+LOCKED = "b" * 40
+
+
+def pinning_se(base: Path, head: str | None) -> Path:
+    """A copy of SE's start scripts in a folder of its own that pins kern, its clone at `head`."""
+    root = binary_root(base)
+    (root / "se.toml").write_text('[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+                                  encoding="utf-8", newline="\n")
+    (root / "se.lock").write_text(f'[modules.obs]\nversion = "4.0.1"\nref = "{"a" * 40}"\n\n'
+                                  f'[modules.kern]\nversion = "0.14.1"\nref = "{LOCKED}"\n',
+                                  encoding="utf-8", newline="\n")
+    if head is not None:
+        (root / ".se" / "modules" / "kern" / ".git").mkdir(parents=True)
+        (root / ".se" / "modules" / "kern" / ".git" / "HEAD").write_text(f"{head}\n", encoding="utf-8")
+    return root
+
+
+def run_hook(home: Path, path: Path, project: Path, root: Path) -> subprocess.CompletedProcess:
+    env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project)}
+    return subprocess.run([BASH, sh(root / "scripts" / "bootstrap.sh"), "--hook"], env=env, input=START,
+                          capture_output=True, text=True, timeout=60)
+
+
+def kern_syncs(home: Path, root: Path) -> list[str]:
+    return [line for line in calls(home) if f"se_modules.py --root {sh(root)} sync kern" in line]
+
+
+@pytest.mark.parametrize("head", [None, "c" * 40], ids=["missing", "off-the-lock"])
+def test_a_start_places_the_installed_ses_kern_before_the_core_where_it_is_missing(machine, head):
+    home, project, base = machine
+    root = pinning_se(base, head)
+    path = fake_bin(base)
+    run(home, path, project)  # uv and Python in place
+    (home / "calls").unlink()
+    assert run_hook(home, path, project, root).returncode == 0
+    log = calls(home)
+    assert len(kern_syncs(home, root)) == 1
+    locate = next(i for i, line in enumerate(log) if " app-binary " in line)
+    assert log.index(kern_syncs(home, root)[0]) < locate, "placed before the core's binary is located"
+    assert "placing kern" not in greeting_call(home)
+
+
+def test_an_ses_kern_at_its_lock_starts_no_process(machine):
+    home, project, base = machine
+    root = pinning_se(base, LOCKED)
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "calls").unlink()
+    assert run_hook(home, path, project, root).returncode == 0
+    assert kern_syncs(home, root) == [] and any(" app-binary " in line for line in calls(home))
+
+
+def test_a_failed_placement_is_named_in_the_greeting_and_the_start_goes_on(machine):
+    home, project, base = machine
+    root = pinning_se(base, None)
+    path = fake_bin(base)
+    run(home, path, project)
+    (home / "kern-sync-fails").touch()
+    (home / "calls").unlink()
+    assert run_hook(home, path, project, root).returncode == 0
+    assert (f"--note SE: placing kern for {sh(root)} failed, so this start goes on without it: error: "
+            "module kern: git clone failed") in greeting_call(home)
+    assert any(" app-binary " in line for line in calls(home)), "the core step goes on"
+
+
+def test_binary_places_kern_before_it_builds_the_binary_on_it(machine):
+    """The build fallback builds $pins/$builddir, whose go.mod replaces kern by the placed clone:
+    --binary syncs it first; the build names its folder and package, no default of kern/."""
+    home, _, base = machine
+    root = pinning_se(base, None)
+    path = fake_bin(base)
+    (path / "go").write_text(f"""#!/bin/sh
+echo "go $* in $PWD" >> "$HOME/calls"
+cat > "$3" <<'KERN'
+{FAKE_KERN}KERN
+chmod +x "$3"
+""", encoding="utf-8", newline="\n")
+    (path / "go").chmod(0o755)
+    (root / BUILD_DIR).mkdir()
+    (root / BUILD_DIR / "go.mod").write_text("module se/components\n\nreplace kern => ../.se/modules/kern\n",
+                                             encoding="utf-8")
+    result = run_binary(home, path, root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = calls(home)
+    build = next(i for i, line in enumerate(log) if line.startswith("go build -o "))
+    assert log[build].endswith(f"{PACKAGE} in {sh(root)}/{BUILD_DIR}")
+    assert log.index(kern_syncs(home, root)[0]) < build
+    assert "$se_root/kern" not in SCRIPT.read_text(encoding="utf-8"), "--kern-build names its folder"

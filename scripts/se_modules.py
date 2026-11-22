@@ -21,10 +21,19 @@ import se_home
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 MODULES_DIR = Path(".se") / "modules"
+#: kern, the Go core, as se.toml [modules.kern] pins it (README "Modules").
+KERN = "kern"
+
+
+def kern_dir(root: Path) -> Path:
+    """Where kern is for the checkout at `root`: its pinned clone, `<root>/.se/modules/kern`, which
+    `se_modules.py sync kern` places (its Go module, its Python SDK under `python/`)."""
+    return root / MODULES_DIR / KERN
+
 TRACKED_BRANCH = "main"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-MODULE_KEYS = {"url", "ref", "version", "path"}
+MODULE_KEYS = {"url", "ref", "version", "path", "go"}
 VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 RANGE_RE = re.compile(r"^([\^~=]?)(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?$")
 VERSION_REMEDY = 'set version = "MAJOR.MINOR.PATCH" under [project] (README "Project settings")'
@@ -59,6 +68,8 @@ class Module:
     ref: str
     path: str | None = None
     version: str | None = None
+    #: For a `go` pin: the `go.mod` (relative to the root) whose `require <name>` is the version.
+    go: str | None = None
 
 
 # Semantic versions
@@ -99,8 +110,18 @@ def matches(version: Version, bounds: tuple[Version, Version]) -> bool:
     return bounds[0] <= version < bounds[1]
 
 
-def checkout_version(checkout: Path) -> Version | None:
-    """`[project] version` of a module checkout's se.toml; None where it sets none."""
+def checkout_version(checkout: Path, go: bool = False) -> Version | None:
+    """`[project] version` of a module checkout's se.toml, or for a `go` pin its `release.toml`
+    `version` (kern's se.toml sets none); None where it sets none."""
+    if go:
+        release = checkout / "release.toml"
+        value = _read_toml(release).get("version") if release.is_file() else None
+        if value is None:
+            return None
+        version = parse_version(value)
+        if version is None:
+            raise ModuleError(f"{release}: version {value!r} is not MAJOR.MINOR.PATCH")
+        return version
     manifest = checkout / MANIFEST
     data = _read_toml(manifest) if manifest.is_file() else {}
     project = data.get("project", {})
@@ -158,6 +179,41 @@ def _check_subpath(name: str, value: object) -> str:
     return value
 
 
+GO_REQUIRE = re.compile(r"^(?:require\s+)?(?P<module>\S+)\s+v(?P<version>\S+)(?:\s*//.*)?$")
+
+
+def go_require(root: Path, name: str, value: object) -> tuple[str, str]:
+    """(go.mod path relative to root, version) of a `go` pin: the exact version the `go.mod` that
+    `value` names (`true`, the root's) requires of the module path `name` (README "Modules")."""
+    if value is True:
+        relative = "go.mod"
+    elif isinstance(value, str) and value:
+        relative = _check_subpath(name, value)
+    else:
+        raise ModuleError(f"module {name}: go must be true or a relative path to a go.mod")
+    path = root / relative
+    if not path.is_file():
+        raise ModuleError(f"module {name}: no {relative} in {root}, which go names")
+    block = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        bare = line.strip()
+        if bare.startswith("require ("):
+            block = True
+            continue
+        if block and bare == ")":
+            block = False
+            continue
+        if not (block or bare.startswith("require ")):
+            continue
+        match = GO_REQUIRE.match(bare if not block else f"require {bare}")
+        if match and match["module"] == name:
+            if parse_version(match["version"]) is None:
+                raise ModuleError(f"module {name}: {relative} requires {name} v{match['version']}, "
+                                  "not vMAJOR.MINOR.PATCH")
+            return relative, match["version"]
+    raise ModuleError(f"module {name}: {relative} has no require {name} v<version>; add one")
+
+
 def load_manifest(root: Path) -> list[Module]:
     """Read and validate the modules declared in `<root>/se.toml`."""
     manifest = root / MANIFEST
@@ -185,6 +241,13 @@ def load_manifest(root: Path) -> list[Module]:
         except se_home.NoHome as error:
             raise ModuleError(f"module {name}: {error}") from error
         path = _check_subpath(name, table["path"]) if "path" in table else None
+        if "go" in table:
+            if ref is not None or version is not None:
+                raise ModuleError(f"module {name}: go pins the version; drop ref and version")
+            gomod, exact = go_require(root, name, table["go"])
+            locked_version, locked_ref = locked.get(name, ("", ""))
+            modules.append(Module(name, url, locked_ref if locked_version == exact else "", path, exact, gomod))
+            continue
         if version is not None:
             if ref is not None:
                 raise ModuleError(f"module {name}: pin either ref or version, not both")
@@ -299,34 +362,43 @@ def resolve(root: Path, module: Module, local: LocalConfig) -> Source:
     return Source(module, "pinned", root / MODULES_DIR / module.name, url, note)
 
 
-KERN_RELEASE = Path("kern") / "release.toml"
 # What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
 # then builds the binary from its folder, as where no release matches.
 NO_BASE = "-"
+#: kern's release.toml in its clone: its release tag (`download`'s last part) and download base.
+KERN_RELEASE = "release.toml"
 
 
 def kern_pin(root: Path) -> tuple[str, str]:
-    """(version, tag) of the kern a repository that incubates it pins: the version
-    `kern/release.toml` owns (kern/README.md "Release") and its release tag `kern-v<version>`.
-    kern's own go.mod names no version of kern; `[modules.kern]` replaces this with the move."""
-    path = root / KERN_RELEASE
+    """(version, tag) of the kern `root` pins: the version `[modules.kern]` reads from the go.mod
+    its `go` names (README "Modules"), and the tag the pinned clone's `release.toml` names for it,
+    the last part of its `download` (kern's README "Release")."""
+    manifest = root / MANIFEST
+    table = (_read_toml(manifest).get("modules", {}) if manifest.is_file() else {}).get(KERN)
+    if not isinstance(table, dict) or "go" not in table:
+        raise ModuleError(f"no [modules.{KERN}] with go in {manifest}: it pins no kern")
+    version = go_require(root, KERN, table["go"])[1]
+    return version, _kern_download(root)[1].rsplit("/", 1)[-1].replace("{version}", version)
+
+
+def _kern_download(root: Path) -> tuple[Path, str]:
+    """(release.toml, its `download`) of the pinned kern clone, `{version}` unfilled."""
+    path = kern_dir(root) / KERN_RELEASE
     if not path.is_file():
-        raise ModuleError(f"no {KERN_RELEASE.as_posix()} in {root}: it incubates no kern")
-    version = _read_toml(path).get("version")
-    if parse_version(version) is None:
-        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
-    return version, f"kern-v{version}"
+        raise ModuleError(f"no {path}: kern is not placed; run uv run python scripts/se_modules.py "
+                          f"sync {KERN} in {root}")
+    download = _read_toml(path).get("download")
+    if not isinstance(download, str) or not download:
+        raise ModuleError(f"{path}: download names no URL (kern's README \"Release\")")
+    return path, download
 
 
 def kern_download(root: Path) -> str:
-    """Where the release of the kern `root` pins is published: `kern/release.toml`'s `download`
-    with `{version}` filled in (kern/README.md "Release"), as bootstrap.sh fetches it; "" where it
-    is relative to a home `root`'s origin names none (`release_base`)."""
+    """Where the release of the kern `root` pins is published: the pinned clone's `release.toml`
+    `download`, its version filled in, under the home the clone's origin names (kern's own
+    repository), as bootstrap.sh fetches it; "" where that origin names none (`release_base`)."""
     version, _ = kern_pin(root)
-    download = _read_toml(root / KERN_RELEASE).get("download")
-    if not isinstance(download, str) or not download:
-        raise ModuleError(f"{root / KERN_RELEASE}: download names no URL (kern/README.md \"Release\")")
-    return release_base(root, download, version)
+    return release_base(kern_dir(root), _kern_download(root)[1], version)
 
 
 def release_base(root: Path, download: str, version: str) -> str:
@@ -359,14 +431,14 @@ def app_binary(root: Path) -> AppBinary:
     components, where it has any, else the bare kern (SE's docs/go-core.md "How the binary
     arrives"). `se.toml` `[binary] release = "<path>"` names where that binary's release.toml
     lives; its `version`, `download`, `binary` and `package` own the binary's facts
-    (components/release.toml for SE). An application that sets no `[binary]` runs the bare kern,
-    read from `kern/release.toml` (kern-pin)."""
+    (components/release.toml for SE). An application that sets no `[binary]` runs the bare kern
+    of its pinned clone, read from the clone's `release.toml` (kern-pin), built there."""
     manifest = root / MANIFEST
     binary = _read_toml(manifest).get("binary", {}) if manifest.is_file() else {}
     release = binary.get("release") if isinstance(binary, dict) else None
     if not release:
         version, _ = kern_pin(root)
-        return AppBinary("kern", version, kern_download(root), "kern", "./cmd/kern")
+        return AppBinary("kern", version, kern_download(root), (MODULES_DIR / KERN).as_posix(), "./cmd/kern")
     if not isinstance(release, str):
         raise ModuleError(f"{manifest}: [binary] release must be a path to a release.toml")
     _check_subpath("binary", release)
@@ -377,11 +449,11 @@ def app_binary(root: Path) -> AppBinary:
     version, name = doc.get("version"), doc.get("binary")
     download, package = doc.get("download"), doc.get("package")
     if parse_version(version) is None:
-        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern/README.md \"Release\")")
+        raise ModuleError(f"{path}: version must be MAJOR.MINOR.PATCH (kern's README \"Release\")")
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise ModuleError(f"{path}: binary must name the application's binary (e.g. \"se\")")
     if not isinstance(download, str) or not download:
-        raise ModuleError(f"{path}: download names no URL (kern/README.md \"Release\")")
+        raise ModuleError(f"{path}: download names no URL (kern's README \"Release\")")
     if not isinstance(package, str) or not package:
         raise ModuleError(f"{path}: package names no Go package (e.g. \"./cmd/se\")")
     return AppBinary(name, version, release_base(root, download, version),
@@ -508,6 +580,11 @@ def resolve_range(root: Path, source: Source) -> Module:
     ensure_clone(source)
     fetch(source.checkout)
     found = newest_matching(source)
+    if found is None and module.go:
+        raise ModuleError(
+            f"module {module.name}: no tag v{module.version} in {source.url}, which "
+            f"{module.go}'s require {module.name} v{module.version} names; release it or change that line"
+        )
     if found is None:
         raise ModuleError(
             f"module {module.name}: no tag vMAJOR.MINOR.PATCH in {source.url} matches version "
@@ -515,7 +592,7 @@ def resolve_range(root: Path, source: Source) -> Module:
             "(README \"Project settings\")"
         )
     write_lock(root, module.name, *found)
-    return Module(module.name, module.url, found[1], module.path, module.version)
+    return Module(module.name, module.url, found[1], module.path, module.version, module.go)
 
 
 def pinned_source(root: Path, module: Module, local: LocalConfig) -> Source:
@@ -531,9 +608,12 @@ def lock_range(root: Path, module: Module, local: LocalConfig) -> Module:
 
 def version_report(source: Source) -> str:
     """The version of a local checkout, and whether the module's range admits it."""
-    version = checkout_version(source.checkout)
     module = source.module
+    version = checkout_version(source.checkout, go=module.go is not None)
     if version is None:
+        if module.go:
+            raise ModuleError(f"module {module.name}: {source.checkout / 'release.toml'} sets no version, "
+                              f"so the pin {module.version} cannot be checked")
         if module.version:
             raise ModuleError(
                 f"module {module.name}: {source.checkout / MANIFEST} sets no version, so range "
@@ -542,7 +622,7 @@ def version_report(source: Source) -> str:
         return "version none"
     text = f"version {version_text(version)}"
     if module.version and not matches(version, version_bounds(module.name, module.version)):
-        text += f", outside {module.version}"
+        text += f", off the pin {module.version}" if module.go else f", outside {module.version}"
     return text
 
 
@@ -567,7 +647,8 @@ def sync_module(source: Source) -> str:
         at = "the local path" if source.kind == "local" else module.ref[:7]
         raise ModuleError(f"module {module.name}: path {module.path} does not exist at {at}")
     if source.kind == "pinned":
-        state = module.ref[:12] + (f", {module.version} locked" if module.version else "")
+        state = module.ref[:12] + (f", {module.go} v{module.version} locked" if module.go
+                                   else f", {module.version} locked" if module.version else "")
     else:
         state = f"working tree as is, {version_report(source)}"
     return _with_note(f"{module.name}: {source.kind} {source.dir} ({state})", source)
@@ -622,7 +703,9 @@ def status_state(source: Source) -> str:
 
 def status_line(source: Source) -> str:
     module = source.module
-    pin = f"version {module.version}, pin {module.ref[:7] or 'none'}" if module.version else f"pin {module.ref[:7]}"
+    pin = (f"{module.go} v{module.version}, pin {module.ref[:7] or 'none'}" if module.go
+           else f"version {module.version}, pin {module.ref[:7] or 'none'}" if module.version
+           else f"pin {module.ref[:7]}")
     state = status_state(source)
     if module.version and module.ref and source.kind == "pinned":
         state = ", ".join(filter(None, [state, range_state(source)]))
@@ -687,6 +770,11 @@ def update_module(root: Path, module: Module, local: LocalConfig, to: str | None
     admitted tag; report the commits between, regenerate SE's workflows in the project at the new
     pin (regenerate_workflows) and sync."""
     pinned = pinned_source(root, module, local)
+    if module.go:
+        raise ModuleError(
+            f"module {module.name}: pinned by {module.go}'s require {module.name} v{module.version}; "
+            "change that line and run sync instead"
+        )
     if module.version is not None:
         if to is not None:
             raise ModuleError(
@@ -721,7 +809,7 @@ def update_module(root: Path, module: Module, local: LocalConfig, to: str | None
         if module.version is None:
             set_pin(root, module.name, new)
     report.extend(regenerate_workflows(root, module, pinned.checkout, new))
-    moved = Module(module.name, module.url, new, module.path, module.version)
+    moved = Module(module.name, module.url, new, module.path, module.version, module.go)
     report.append(sync_module(resolve(root, moved, local)))
     return report
 
@@ -800,6 +888,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(sync_module(source))
                 elif args.command == "status":
                     print(status_line(resolve(root, module, local)))
+                elif args.all and module.go:
+                    print(f"{module.name}: pinned by {module.go}, left as it is")
                 else:
                     print("\n".join(update_module(root, module, local, args.to)))
             except ModuleError as error:

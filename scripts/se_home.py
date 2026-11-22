@@ -25,7 +25,7 @@ door (`scripts/git_door.py`):
   such as the module cache a clone runs in.
 
 kern's Go helper (`kern/home`) answers the same: both suites read one table of origins and answers,
-`kern/home/testdata/origins.json`.
+kern's `home/testdata/origins.json`, read from kern's clone at its pin (`se_modules.kern_dir`).
 
 As a command, `se_home.py [--repo <path>] {url,tracker,docs,module <url>}` prints one answer; exit
 code 0, or 1 with the reason where the checkout has no home.

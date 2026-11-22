@@ -14,7 +14,6 @@ calls = ["gh_executable"]
 literals = ["api.github.com"]
 
 [baseline]
-"kern/components/github/github.go" = { count = 2, reason = "kern's GitHub component: the token backend's API default and its gh auth token read" }
 "scripts/ci_queue.py" = { count = 1, reason = "the CI queue's REST API default where GITHUB_API_URL is unset" }
 "scripts/ci_trust.py" = { count = 1, reason = "the CI trust check's REST API default where GITHUB_API_URL is unset" }
 "scripts/pr_issues.py" = { count = 1, reason = "the pull request issue rule's REST API default where GITHUB_API_URL is unset" }

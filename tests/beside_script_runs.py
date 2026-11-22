@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import git_door  # noqa: E402
 import retro  # noqa: E402
+import se_modules  # noqa: E402
 
 # The window starts before every run the test posts.
 SINCE = "2026-01-01T00:00:00Z"
@@ -58,7 +59,7 @@ def run(*args: str, cwd: Path, stdin: str | None = None) -> subprocess.Completed
 def test_an_untracked_script_run_three_times_is_listed_by_the_retro_with_count_three(
         tmp_path: Path, shared_fake_git) -> None:
     kern = tmp_path / ("kern.exe" if os.name == "nt" else "kern")
-    built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=ROOT / "kern")
+    built = run("go", "build", "-o", str(kern), "./cmd/kern", cwd=se_modules.kern_dir(ROOT))  # at its pin
     assert built.returncode == 0, built.stderr
     checkout = tmp_path / "app"
     assert git_door.run("init", "-q", str(checkout)).returncode == 0

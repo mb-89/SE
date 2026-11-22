@@ -22,24 +22,24 @@ shows it, and the item links the file that assumes it.
   carries its protocol version, identity and capabilities as metadata, and every server must
   implement `server/discover`. Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle,
   read 2026-11-14. `documented`. SE acts on it in
-  [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door).
+  kern's README "The MCP door".
 - **Legacy handshake.** Revisions up to 2025-11-25 open a session with `initialize`; a dual-era
   server may serve both, and an `initialize` request selects legacy semantics for that stdio
   process. Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle,
   read 2026-11-14. `documented`. SE acts on it in
-  [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door).
+  kern's README "The MCP door".
 - **Stdio fallback.** A client that knows both eras should probe with `server/discover` first; any
   error that is not a recognized modern error, or no answer within a reasonable time, marks the
   server legacy, and the client falls back to `initialize`, never keyed to one error code. Source:
   https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio, read 2026-11-14.
-  `documented`. SE acts on it in [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door).
+  `documented`. SE acts on it in kern's README "The MCP door".
 - **Which handshake a host sends first.** No host's page says whether it sends `server/discover`
   or `initialize` first, so either may open the door. Pages read, each read 2026-11-14:
   https://docs.github.com/en/copilot/reference/cli-command-reference,
   https://docs.github.com/en/copilot/reference/cli-plugin-reference,
   https://code.visualstudio.com/docs/agents/reference/mcp-configuration and
   https://code.claude.com/docs/en/mcp. `silent`. SE acts on it in
-  [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door): the door speaks both.
+  kern's README "The MCP door": the door speaks both.
 - **Standard output is protocol only.** A stdio server must not write anything to its standard
   output that is not a valid MCP message; it may log to standard error, which the client should not
   read as an error. Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,
@@ -101,13 +101,13 @@ shows it, and the item links the file that assumes it.
   not answer within it; the budgets are the `mcp-start-timeout` rows of `limits` in
   [scripts/host-limits.toml](../../scripts/host-limits.toml), with their sources. Source:
   https://docs.github.com/en/copilot/reference/cli-command-reference, read 2026-11-14.
-  `documented`. SE acts on it in [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door):
+  `documented`. SE acts on it in kern's README "The MCP door":
   the handshake and the tool list never wait on the core.
 - **A tool call's time limit.** The Copilot CLI's per-server `timeout` also bounds tool discovery
   and every tool call; [scripts/host-limits.toml](../../scripts/host-limits.toml) has no row for a
   tool call's limit, on any host. Source:
   https://docs.github.com/en/copilot/reference/cli-command-reference, read 2026-11-14.
-  `documented`. SE acts on it in [kern/README.md "The MCP door"](../../kern/README.md#the-mcp-door):
+  `documented`. SE acts on it in kern's README "The MCP door":
   a call made while the core starts waits briefly, then answers `starting`.
 
 ## The launcher's stand-in door

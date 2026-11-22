@@ -18,6 +18,7 @@ import pytest
 
 import fake_git
 import git_door
+import se_modules
 import work_tickets  # scripts/ is on the path (tests/conftest.py)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -985,7 +986,7 @@ def test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_ref
 
 # The door's variable: one fake for a test and the processes it starts
 
-STATE_TESTDATA = ROOT / "kern" / "git" / "gitfake" / "testdata" / "state"
+STATE_TESTDATA = se_modules.kern_dir(ROOT) / "git" / "gitfake" / "testdata" / "state"  # kern at its pin
 STATE_ANSWERS = [  # what kern's door asks of a state file, in the repository `repo`
     ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/"],
     ["ls-files", "--others", "--exclude-standard"],
@@ -1026,13 +1027,14 @@ def state_json(path: Path) -> dict:
 
 
 def test_the_state_file_is_the_format_kern_reads(tmp_path: Path) -> None:
-    """kern/git/gitfake reads the state file the Python fake writes: the testdata state is what
+    """kern's git/gitfake reads the state file the Python fake writes: the testdata state is what
     the Python fake writes for build_state, and both fakes answer answers.json from it (the Go side
-    is kern/git/gitfake/state_test.go)."""
+    is kern's git/gitfake/state_test.go)."""
     state = build_state(tmp_path)
     with git_door.use(state):
         answers = state_answers(tmp_path)
-    remedy = f"rewrite {STATE_TESTDATA.relative_to(ROOT).as_posix()} from build_state ({tmp_path})"
+    remedy = (f"rewrite kern's {STATE_TESTDATA.relative_to(se_modules.kern_dir(ROOT)).as_posix()} from "
+              f"build_state ({tmp_path}) in kern's repository")
     assert state_json(state.path) == state_json(STATE_TESTDATA / "git-door.json"), remedy
     assert sorted(p.relative_to(tmp_path).as_posix() for p in (tmp_path / "repo").rglob("*")
                   if p.is_file() and ".git" not in p.parts) == \

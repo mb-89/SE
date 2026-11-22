@@ -55,7 +55,7 @@ def init_py(name: str) -> str:
     ident = name.replace("-", "_")
     return ('"""An ad hoc component scaffolded by `se component add` (SE\'s docs/go-core.md "Scripts\n'
             'are ad hoc, components are long-term"). Add inputs, outputs, commands or verbs to\n'
-            'component.toml and answer them here; kern\'s Python SDK is kern/python/kern/.\n'
+            'component.toml and answer them here; kern\'s Python SDK is python/kern/ in kern\'s clone, .se/modules/kern.\n'
             '"""\n'
             '\n'
             'from kern import component\n'
