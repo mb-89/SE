@@ -442,6 +442,69 @@ def module_dirs(root: Path, local: LocalConfig) -> list[tuple[str, Path]]:
     return found
 
 
+#: se.toml `[templates] repositories`: the components whose `templates/` the templates engine
+#: resolves a name from, in their order, between the project's own and SE's (docs/templates.md
+#: "Template repositories").
+TEMPLATE_REPOSITORIES = "repositories"
+#: The folder of a template repository that holds its templates, under its `path` where it sets one.
+TEMPLATES_DIR = "templates"
+
+
+def template_repositories(root: Path, local: LocalConfig | None = None) -> list[tuple[str, Path]]:
+    """Each template repository `<root>/se.toml` `[templates] repositories` lists, in its order, with
+    its `templates/` folder on this machine. Each is a component `[components.<name>]` pins as any
+    other, public or private, placed by `sync`; a machine's `[paths]` checkout stands in for the
+    clone. A name that is no component, a clone not placed at its pin, or one without `templates/`
+    is a ModuleError naming the name and the remedy: the engine never skips one, so no name falls
+    back to another repository's template. None where se.toml lists none."""
+    manifest = root / MANIFEST
+    if not manifest.is_file():
+        return []
+    table = _read_toml(manifest).get("templates", {})
+    listed = table.get(TEMPLATE_REPOSITORIES, []) if isinstance(table, dict) else []
+    where = f"{MANIFEST} [templates] {TEMPLATE_REPOSITORIES}"
+    if not isinstance(listed, list) or not all(isinstance(name, str) and name for name in listed):
+        raise ModuleError(f"{where} must be a list of component names, such as [\"templates\"]")
+    if len({name.lower() for name in listed}) != len(listed):
+        raise ModuleError(f"{where} names a repository twice; list each once, in the order names "
+                          "resolve")
+    if not listed:
+        return []
+    local = local if local is not None else load_local(default_local_config())
+    modules = {module.name.lower(): module for module in load_manifest(root)}
+    found = []
+    for name in listed:
+        module = modules.get(name.lower())
+        if module is None:
+            raise ModuleError(f"template repository {name}: {where} lists it, but se.toml declares no "
+                              f"[{COMPONENTS}.{name}]; pin it there with ref or version as any "
+                              "component (README \"Modules\")")
+        source = resolve(root, module, local)
+        sync = f"run `se_modules.py sync {module.name}`"
+        if source.kind == "pinned":
+            if not module.ref:
+                raise ModuleError(f"template repository {module.name}: version {module.version} is not "
+                                  f"locked; {sync}, which locks and places it")
+            if not is_populated(source.checkout):
+                raise ModuleError(
+                    f"template repository {module.name}: its pin {module.pin} is not fetched into "
+                    f"{source.checkout}; {sync}. Where sync cannot fetch it, no remote offers the "
+                    "pin: a private repository needs this machine's access to it, or the pin "
+                    "names a commit no owner holds and moves with `se_modules.py update "
+                    f"{module.name}`")
+            head = git(source.checkout, "rev-parse", "HEAD")
+            if head.lower() != module.ref:
+                raise ModuleError(f"template repository {module.name}: its clone is at {head[:12]}, "
+                                  f"its pin at {module.ref[:12]}; {sync}")
+        folder = source.dir / TEMPLATES_DIR
+        if not folder.is_dir():
+            raise ModuleError(f"template repository {module.name}: {source.dir} holds no "
+                              f"{TEMPLATES_DIR}/ at its pin; pin a release that has one, or take "
+                              f"{module.name} out of {where}")
+        found.append((module.name, folder))
+    return found
+
+
 # What `kern-pin` and `app-binary` print for a download base origin names no home for: bootstrap.sh
 # then builds the binary from its folder, as where no release matches.
 NO_BASE = "-"

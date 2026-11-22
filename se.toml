@@ -1,6 +1,6 @@
 [project]
 # The project's one semantic version, bumped by work_tickets.py push (README "Project settings").
-version = "10.7.0"
+version = "10.8.0"
 # Its tag v<version> is pushed by the release workflow, not by push (README "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
@@ -36,6 +36,9 @@ landing = "fast-forward"
 # lacks a part its template requires. Read from the integration branch, so a branch cannot switch it off.
 [templates]
 enforce = "refuse"
+# The template repositories a name resolves from after the project's templates/ and before SE's,
+# in this order, each a [components.<name>] (docs/templates.md "Template repositories"). SE uses none.
+repositories = []
 # SE's PreToolUse hook refuses a GitHub write through the GitHub tools whose body breaks its template
 # (README "Templates"); read from the integration branch like enforce.
 gate = "refuse"

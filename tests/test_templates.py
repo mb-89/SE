@@ -16,6 +16,7 @@ import pytest
 
 import deck
 import fake_git
+import git_door
 import templates
 import outside_text
 import overhaul
@@ -2512,3 +2513,127 @@ def test_fill_usage_errors_exit_2_and_write_nothing(tmp_path, capsys, arguments,
     code = templates.main(["fill", *arguments, *where])
     assert code == 2 and error in capsys.readouterr().err
     assert not (tmp_path / "findings").exists() and not (tmp_path / "y.md").exists()
+
+
+# Template repositories (docs/templates.md "Template repositories"): se.toml [templates] repositories
+# lists components pinned as any other; a name resolves from the project's templates/, then each
+# repository in that order, then SE's, and a repository not placed at its pin refuses.
+
+
+#: The project's origin, on a host SE lists nothing of, so a component is read beside it, at the
+#: address the machine's [urls] rewrites to the fake upstreams (as tests/test_se_modules.py's world).
+TEMPLATE_ORIGIN = "https://git.example.org/team/project"
+
+
+def template_repository(folder: Path, templates_by_name: dict[str, str]) -> str:
+    """A fake template repository at `folder` holding `templates/<name>.md`; its commit."""
+    fake_git.init(folder, "-b", "main")
+    for name, text in templates_by_name.items():
+        write_template(folder, name, text)
+    commit_all(folder)
+    return git_door.run("-C", str(folder), "rev-parse", "HEAD").stdout.strip()
+
+
+def template_project(tmp_path: Path, pins: dict[str, str], listed: list[str]) -> tuple[Path, Path]:
+    """A project whose se.toml pins `pins` as components and lists `listed` as its template
+    repositories, and the machine's local.toml that finds them under `tmp_path / "upstream"`."""
+    project = fake_git.init(tmp_path / "project")
+    fake_git.git("-C", str(project), "remote", "add", "origin", TEMPLATE_ORIGIN)
+    tables = "".join(f'[components.{name}]\nref = "{ref}"\n\n' for name, ref in pins.items())
+    (project / "se.toml").write_text(f"{tables}[templates]\nrepositories = {json.dumps(listed)}\n",
+                                     encoding="utf-8")
+    local = tmp_path / "home" / "local.toml"
+    local.parent.mkdir(parents=True)
+    local.write_text(f'[urls]\n"https://git.example.org/team/" = "{(tmp_path / "upstream").as_posix()}/"\n',
+                     encoding="utf-8")
+    return project, local
+
+
+def synced(project: Path, local: Path, capsys) -> None:
+    import se_modules
+    capsys.readouterr()
+    code = se_modules.main(["--root", str(project), "--local", str(local), "sync"])
+    assert code == 0, capsys.readouterr()
+
+
+def test_a_template_repository_s_template_fills(tmp_path, fake_git_door, capsys, monkeypatch):
+    shared = template_repository(tmp_path / "upstream" / "shared", {
+        "note": MINIMAL.format(name="note", extra=ISSUE_CREATE)})
+    project, local = template_project(tmp_path, {"shared": shared}, ["shared"])
+    synced(project, local, capsys)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    code = templates.main(["fill", "note", "--root", str(project), "--input-text", "Ship the export.",
+                           "--fields-json", json.dumps({"goal": "Ship the export."})])
+    out = capsys.readouterr()
+    assert code == 0, out
+    assert "<!-- se:template shared/note 1.0.0 sha256:" in out.out
+    assert "## Goal\n\nShip the export." in out.out
+
+
+def test_a_name_resolves_from_the_project_then_each_repository_in_order_then_se(
+        tmp_path, fake_git_door, capsys, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    se_name = next(iter(templates.load(templates.ROOT)))
+    first = template_repository(tmp_path / "upstream" / "first", {
+        "note": MINIMAL.format(name="note", extra=ISSUE_CREATE),
+        "own": MINIMAL.format(name="own", extra=ISSUE_CREATE),
+        se_name: MINIMAL.format(name=se_name, extra=ISSUE_CREATE)})
+    second = template_repository(tmp_path / "upstream" / "second", {
+        "note": MINIMAL.format(name="note", extra=ISSUE_CREATE),
+        "later": MINIMAL.format(name="later", extra=ISSUE_CREATE)})
+    project, local = template_project(tmp_path, {"first": first, "second": second}, ["first", "second"])
+    write_template(project, "own", MINIMAL.format(name="own", extra=ISSUE_CREATE))
+    synced(project, local, capsys)
+    resolved = templates.catalog(project, tree=True)
+    assert {name: resolved[name].repository for name in ("own", "note", "later", se_name)} == {
+        "own": "project", "note": "first", "later": "second", se_name: "first"}
+    assert set(templates.load(templates.ROOT)) <= set(resolved)
+
+
+def test_an_unfetchable_pin_refuses_the_fill_with_the_remedy(tmp_path, fake_git_door, capsys, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    template_repository(tmp_path / "upstream" / "shared", {
+        "note": MINIMAL.format(name="note", extra=ISSUE_CREATE)})
+    project, local = template_project(tmp_path, {"shared": "b" * 40}, ["shared"])
+    import se_modules
+    assert se_modules.main(["--root", str(project), "--local", str(local), "sync"]) == 1
+    capsys.readouterr()
+    code = templates.main(["fill", "note", "--root", str(project), "--input-text", "x",
+                           "--fields-json", json.dumps({"goal": "x"})])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "template repository shared: its pin ref bbbbbbbbbbbb is not fetched" in err
+    assert "run `se_modules.py sync shared`" in err
+
+
+@pytest.mark.parametrize("toml, error", [
+    ('[templates]\nrepositories = ["absent"]\n', "declares no [components.absent]"),
+    ('[templates]\nrepositories = "shared"\n', "must be a list of component names"),
+    ('[components.shared]\nref = "' + "a" * 40 + '"\n\n[templates]\nrepositories = ["shared", "Shared"]\n',
+     "names a repository twice"),
+])
+def test_a_template_repository_listed_wrong_refuses_naming_the_remedy(tmp_path, toml, error, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    (tmp_path / "se.toml").write_text(toml, encoding="utf-8")
+    with pytest.raises(templates.TemplateError, match=re.escape(error)):
+        templates.catalog(tmp_path, tree=True)
+
+
+def test_a_template_repository_without_templates_refuses(tmp_path, fake_git_door, capsys, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    folder = tmp_path / "upstream" / "bare"
+    fake_git.init(folder, "-b", "main")
+    (folder / "README.md").write_text("no templates\n", encoding="utf-8")
+    commit_all(folder)
+    ref = git_door.run("-C", str(folder), "rev-parse", "HEAD").stdout.strip()
+    project, local = template_project(tmp_path, {"bare": ref}, ["bare"])
+    synced(project, local, capsys)
+    with pytest.raises(templates.TemplateError, match=r"holds no templates/ at its pin"):
+        templates.catalog(project, tree=True)
+
+
+def test_a_project_without_template_repositories_resolves_its_own_then_se_s(tmp_path, fake_git_door):
+    write_template(tmp_path, "own", MINIMAL.format(name="own", extra=ISSUE_CREATE))
+    resolved = templates.catalog(tmp_path, tree=True)
+    assert resolved["own"].repository == "project"
+    assert {template.repository for name, template in resolved.items() if name != "own"} == {"se"}
