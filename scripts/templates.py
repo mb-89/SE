@@ -81,8 +81,8 @@ back as it stands). Besides: `source: title` (the field is the issue's title, ne
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
 `numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
-should have, 0 for none), `actor`, `one_sentence`, `not_picked` and `shape`, a title's (rule
-`title-shape`).
+should have, 0 for none), `actor`, `one_sentence`, `not_picked`, `shape`, a title's (rule
+`title-shape`), and `quote` (rule `quote`: the value quotes the raw input word for word).
 
 A field may name code as `"<module>:<NAME>"`, a script beside this one, as an adapter's keys do;
 `load` resolves it and refuses one that does not resolve, naming the template file and the key.
@@ -156,6 +156,10 @@ Refuse rules: `required` (missing, empty or placeholder, or the field's own `say
 `choice`, `not-picked` (no `Not picked:` line), `duplicate` (the same text in two fields) and
 `dangling` (an SE command that does not exist, through `references.dangling` as
 `work_tickets.refuse_dangling` calls it); an adapter refuses with `checker`, `line` and `title`.
+A `quote` field always refuses (QUOTE_RULE, never a template's to set) a value that quotes nothing
+and, given the raw input (`check(raw=)`, as `fill` gives it), a quote the raw input does not hold
+word for word (`quoted`). A quote is a span in `"..."` or `“...”` on one line, or a run of `>`
+lines (`quotes`); whitespace and line breaks aside, case counts.
 Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, taken as
 `work_tickets.goal_summary` takes it, runs past `first_sentence_chars`: a work issue's Goal's
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
@@ -251,13 +255,21 @@ REFUSE, WARN, OFF = "refuse", "warn", "off"
 #: The rule of a document's recorded version against its template's (`provenance`): its severity is
 #: the move's, never a template's to set.
 VERSION_RULE = "version"
+#: The rule of a `quote` field's quotes against the raw input (`quoted`): it always refuses, never
+#: a template's to set.
+QUOTE_RULE = "quote"
+#: A quote in a field's value: a span in straight or curly double quotes on one line, or a run of
+#: `>` lines.
+QUOTE_SPANS = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
+QUOTE_LINE = re.compile(r"^[ \t]*>[ \t]?(.*?)[ \t]*$")
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
 ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
               "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
-              "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
+              "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
+              "quote"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
@@ -329,6 +341,7 @@ class Field:
     one_sentence: bool = False
     not_picked: bool = False
     shape: str = ""
+    quote: bool = False
     #: What `shape` names, loaded: a pattern or a function (the module docstring: Fields).
     rule: object = dataclass_field(default=None, compare=False, repr=False)
 
@@ -1491,7 +1504,7 @@ def draft_fields(template: Template) -> dict[str, object]:
 
 #: The keys `field_shape` gives, each where the field sets it.
 SHAPE_KEYS = ("kind", "heading", "required", "none_ok", "choices", "max_words",
-              "first_sentence_chars", "numbered", "label", "source")
+              "first_sentence_chars", "numbered", "label", "source", "quote")
 #: The only keywords `schema` writes: none that strict tool use on the Claude API refuses.
 SCHEMA_KEYWORDS = ("$schema", "type", "properties", "required", "additionalProperties", "items",
                    "enum", "description")
@@ -1788,6 +1801,41 @@ def first_sentence(text: str) -> str:
     return FIRST_SENTENCE_END.split(text, maxsplit=1)[0]
 
 
+def quotes(text: str) -> list[str]:
+    """The quotes of `text`, in order: each span in double quotes ("..." or “...”) on one line, and
+    each run of `>` lines as one quote, its lines joined by a space; comments dropped."""
+    text = COMMENT.sub("", text)
+    found: list[str] = []
+    run: list[str] = []
+    for line in [*text.splitlines(), ""]:
+        quoted = QUOTE_LINE.match(line)
+        if quoted:
+            run.append(quoted.group(1))
+            continue
+        if run and " ".join(run).strip():
+            found.append(" ".join(" ".join(run).split()))
+        run = []
+        found += [" ".join((match.group(1) or match.group(2)).split())
+                  for match in QUOTE_SPANS.finditer(line)]
+    return [quote for quote in found if quote]
+
+
+def quoted(item: Field, text: str, raw: str | None) -> list[str]:
+    """The fixes of a `quote` field's value `text` against the raw input (rule `quote`): it quotes
+    nothing; or, where `raw` is given, a quote the raw input does not hold word for word, whitespace
+    and line breaks aside, case counting."""
+    found = quotes(text)
+    heading = item.heading or item.name
+    if not found:
+        return [f"{heading} quotes nothing: quote the raw input word for word, in \"...\" or as a "
+                f"`>` line (or write `{NOT_IN_INPUT}` where the input does not say)"]
+    if raw is None:
+        return []
+    held = " ".join(COMMENT.sub("", raw).split())
+    return [f"{heading} quotes \"{quote}\", which the raw input does not hold: quote it word for word, "
+            f"or drop the quote" for quote in found if quote not in held]
+
+
 def _entries(value: object) -> list[str]:
     if isinstance(value, list):
         return [entry.get("text", "") if isinstance(entry, dict) else str(entry)
@@ -1796,9 +1844,10 @@ def _entries(value: object) -> list[str]:
 
 
 def check(template: Template, document: Document, *, root: Path = ROOT,
-          bare_scripts: bool = True) -> list[Finding]:
+          bare_scripts: bool = True, raw: str | None = None) -> list[Finding]:
     """Every finding of `document` against `template`, refusals first, in field order; an adapter's
-    are its own check's."""
+    are its own check's. `raw`, the raw input a fill takes, is what a `quote` field's quotes must
+    hold (`quoted`); without it a quote field must only quote."""
     if template.is_adapter:
         return adapter_findings(template, document)
     found: list[Finding] = provenance(template, document)
@@ -1835,6 +1884,8 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
             continue
         filled[item.name] = value
         text = _plain(value)
+        if item.quote:
+            found += [Finding(item.name, QUOTE_RULE, REFUSE, fix) for fix in quoted(item, text, raw)]
         if item.kind == "choice":
             word = re.split(r"[\s,.;:]+", text.strip().casefold(), maxsplit=1)[0]
             if word not in item.choices:

@@ -2076,3 +2076,88 @@ def test_a_required_field_left_empty_still_refuses_beside_not_in_input(catalog):
 def test_the_schema_offers_not_in_input_among_a_choice_s_values(catalog):
     shaped = templates.schema(catalog["work"])["properties"]["package_kind"]
     assert templates.NOT_IN_INPUT in shaped["enum"]
+
+
+QUOTE_TEMPLATE = """---
+name: {name}
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "A finding: what was seen, in the reporter's words."
+applies:
+  actions: ["file.write"]
+  paths: ["findings/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: seen
+    kind: text
+    required: true
+    quote: true
+  - name: impact
+    kind: list
+    required: true
+---
+
+## Seen
+
+<!-- seen: What the reporter saw, quoted word for word: "..." or a > line. -->
+
+## Impact
+
+<!-- impact: One item per effect. -->
+"""
+
+RAW = ("Ticket from Alice, Monday:\n\nThe export stops at row 1000 and the\nfile is cut off. "
+       "It happens on every run since the update.\n")
+
+
+def quote_template(root: Path) -> templates.Template:
+    write_template(root, "finding", QUOTE_TEMPLATE.format(name="finding"))
+    return templates.load(root, folder=root / "templates")["finding"]
+
+
+def quote_findings(template: templates.Template, seen: object, raw: str | None = RAW) -> list[templates.Finding]:
+    body = templates.render(template, {"seen": seen, "impact": ["Exports are incomplete."]})
+    return [item for item in templates.check(template, templates.parse(template, body), raw=raw)
+            if item.rule == templates.QUOTE_RULE]
+
+
+@pytest.mark.parametrize("seen", [
+    'Alice reports: "The export stops at row 1000".',
+    '"stops at row 1000 and the file is cut off"',  # a line break in the input is a space
+    "The reporter wrote:\n\n> It happens on every run since the update.",
+    "“every run since the update”",
+    "Not in input",
+])
+def test_a_quote_the_raw_input_holds_word_for_word_passes(tmp_path, seen):
+    assert quote_findings(quote_template(tmp_path), seen) == []
+
+
+@pytest.mark.parametrize("seen, named", [
+    ('Alice reports: "The export stops at row 2000".', '"The export stops at row 2000"'),
+    ('"The export stops" and "the screen goes black"', '"the screen goes black"'),
+    ('"the export stops at row 1000"', '"the export stops at row 1000"'),  # case counts
+    ("> It fails on every run.", '"It fails on every run."'),
+])
+def test_an_invented_quote_is_refused_naming_it(tmp_path, seen, named):
+    found = quote_findings(quote_template(tmp_path), seen)
+    assert [(item.field, item.severity) for item in found] == [("seen", "refuse")]
+    assert named in found[0].fix and "does not hold" in found[0].fix
+
+
+def test_a_quote_field_without_a_quote_is_refused_with_or_without_the_raw_input(tmp_path):
+    template = quote_template(tmp_path)
+    for raw in (RAW, None):
+        found = quote_findings(template, "The export breaks.", raw)
+        assert [item.severity for item in found] == ["refuse"]
+        assert "quotes nothing" in found[0].fix
+    assert quote_findings(template, '"anything at all"', None) == []
+
+
+def test_a_field_s_quote_key_loads_and_shows_in_its_shape(tmp_path):
+    template = quote_template(tmp_path)
+    assert template.field("seen").quote and not template.field("impact").quote
+    assert templates.field_shape(template.field("seen"))["quote"] is True
+    assert "quote" not in templates.field_shape(template.field("impact"))
