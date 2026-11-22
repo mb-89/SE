@@ -146,3 +146,6 @@ project's commands and hot files by the project's `AGENTS.md`.
    releases (version, tag, push). Update the single open `handover` issue (state, open issues,
    running and unintegrated branches, parked decisions, how to resume); close the previous one.
    Do the same whenever the user is about to leave or switch the machine off.
+
+   Fill it from the interface template `templates/handover.md` (`templates.py fill handover`):
+   the template gate checks its sections on every write.
