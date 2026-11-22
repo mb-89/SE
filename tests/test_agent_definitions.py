@@ -668,6 +668,25 @@ def test_the_worker_checks_the_identity_of_its_worktree_not_of_the_checkout_it_s
     assert "check the worktree's identity with `work_tickets.py identity --worktree <worktree>`" in worker
 
 
+def test_a_worker_or_integrator_rereads_its_issue_only_when_it_changed():
+    rule = ("checks whether its issue changed, its `updated_at` and comment count (`issue_read` "
+            "method `get`, or `gh issue view --json updatedAt,comments`) against the values it last "
+            "read. It rereads the body and the comments only when one of them changed")
+    assert rule in normalized(WORK_MODEL)
+    for agent in ("worker.md", "integrator.md"):
+        text = normalized(AGENTS / agent)
+        assert "`updated_at` and comment count against the values you last read" in text, agent
+        assert "[Check before rereading](../skills/work-model/SKILL.md#issues)" in text, agent
+    for built in (ROOT / "skills" / "work-model" / "SKILL.md",
+                  ROOT / ".github" / "skills" / "work-model" / "SKILL.md"):
+        assert rule in normalized(built), built
+    for built in (ROOT / "agents" / "worker.md", ROOT / "agents" / "integrator.md",
+                  ROOT / ".github" / "agents" / "worker.agent.md",
+                  ROOT / ".github" / "agents" / "integrator.agent.md"):
+        assert "`updated_at` and comment count against the values you last read" in normalized(
+            built), built
+
+
 def test_the_worker_commits_each_requirement_while_working():
     worker = normalized(AGENTS / "worker.md")
     assert "Commit each requirement as soon as it is done, while working; never reconstruct commits at the end." in worker

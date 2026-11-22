@@ -76,6 +76,10 @@ Workers announce a delivery with one queued message (`field report in PR #<m> fo
 worker's delivery message can arrive minutes late, or never where the worker's prompt named no
 integrator: reconcile from GitHub first (`queue`) and treat a missing message as late, not lost.
 
+Before each step, check whether the work issue changed, its `updated_at` and comment count
+against the values you last read, and reread it only when one changed
+([Check before rereading](../skills/work-model/SKILL.md#issues)).
+
 1. **Review** the field report in the pull request's description, the worker's queue
    (`work_tickets.py status --worktree <its worktree>`: only `done/`, every acceptance item checked
    with evidence) and `git diff <integration branch>...<branch>`.

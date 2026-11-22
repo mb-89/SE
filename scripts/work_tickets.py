@@ -1797,8 +1797,8 @@ def planned_tickets(issue: dict[str, object]) -> list[tuple[str, str]]:
         tickets.append((ticket_id, (
             f"# {ticket_id}: {one_line(text.splitlines()[0])}\n\n"
             "## Design\n\n"
-            f"Work issue {issue['url']}, requirement {number}; re-read its body and its comments "
-            "before starting.\n\n"
+            f"Work issue {issue['url']}, requirement {number}; before starting, "
+            "check whether it changed (its updated_at and comment count) and reread it only then.\n\n"
             f"Design owner: {owner}\n\n"
             f"## Scope\n\n{text}\n\n"
             f"## Dependencies\n\n{previous}\n\n"

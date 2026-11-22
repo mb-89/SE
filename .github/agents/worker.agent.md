@@ -83,7 +83,12 @@ every package, so work issues and session prompts never repeat it.
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
-3. **Before each ticket**: re-read the body and the comments. `work_tickets.py refresh` reads the
+3. **Before each ticket**: check whether the issue changed, its `updated_at` and comment count
+   against the values you last read
+   ([Check before rereading](../skills/work-model/SKILL.md#issues)); reread it only when one
+   changed.
+
+   Then `work_tickets.py refresh` reads the
    issue's body (with its "Changes after filing") and its comments and reports what changed; apply
    the changes to the tickets (`intake` again adds tickets for added requirements), run
    `work_tickets.py sync`, then move the ticket to `held`.
