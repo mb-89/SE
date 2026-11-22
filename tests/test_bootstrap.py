@@ -12,7 +12,7 @@ import tomllib
 import zipfile
 
 import pytest
-from shell_paths import BASH, WINDOWS, sh
+from shell_paths import BASH, WINDOWS, drop_tool, link_tools, sh, tool_path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bootstrap.sh"
@@ -82,17 +82,8 @@ UV_INSTALL = ("powershell -NoProfile -ExecutionPolicy ByPass -c irm https://astr
 
 def fake_bin(base: Path, *, git: bool = True) -> Path:
     """A PATH holding only the shell tools the script uses, a fake curl and, optionally, git."""
-    folder = base / "bin"
-    folder.mkdir()
-    for tool in TOOLS:
-        found = shutil.which(tool)
-        if not found:  # setsid, shasum and unzip are not everywhere; bootstrap.sh does without them
-            continue
-        if WINDOWS:  # a linked Git tool would not find the DLLs beside it: a shim runs it there
-            (folder / tool).write_text(f'#!/bin/sh\nexec "{sh(Path(found))}" "$@"\n', encoding="utf-8",
-                                       newline="\n")
-        else:
-            (folder / tool).symlink_to(found)
+    # setsid, shasum and unzip are not everywhere; bootstrap.sh does without them
+    folder = link_tools(base / "bin", TOOLS)
     for name, script in (("curl", FAKE_CURL), ("powershell", FAKE_POWERSHELL)):
         (folder / name).write_text(script, encoding="utf-8", newline="\n")
         (folder / name).chmod(0o755)
@@ -104,7 +95,7 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
 
 def run(home: Path, path: Path, project: Path, *args: str, stdin: str = "",
         **variables: str) -> subprocess.CompletedProcess:
-    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project), **variables}
+    env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project), **variables}
     return subprocess.run([BASH, sh(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
                           input=stdin)
 
@@ -127,6 +118,40 @@ def machine(tmp_path):
     (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8", newline="\n")
     return home, project, tmp_path
+
+
+# A wrapper of the kind a harness puts first on PATH (an rm guard): it records its call, then hands
+# over to the next file of its name on PATH past its own entry.
+WRAPPER = """#!/bin/sh
+echo "wrapper $*" >> "@LOG@"
+past=
+IFS=:
+for entry in $PATH; do
+  if [ -n "$past" ] && [ -x "$entry/cat" ]; then exec "$entry/cat" "$@"; fi
+  [ "$entry/cat" -ef "$0" ] && past=1
+done
+echo "cat: command not found" >&2
+exit 127
+"""
+
+
+@pytest.mark.skipif(WINDOWS, reason="a shim runs its file by its path there: a wrapper finds no entry of its own")
+def test_a_wrapper_first_on_path_still_reaches_the_tool_after_it_on_the_fake_path(tmp_path, monkeypatch):
+    wrapper, log, text = tmp_path / "wrapper", tmp_path / "log", tmp_path / "text"
+    wrapper.mkdir()
+    (wrapper / "cat").write_text(WRAPPER.replace("@LOG@", str(log)), encoding="utf-8", newline="\n")
+    (wrapper / "cat").chmod(0o755)
+    text.write_text("through the wrapper\n", encoding="utf-8", newline="\n")
+    monkeypatch.setenv("PATH", f"{wrapper}{os.pathsep}{os.environ['PATH']}")
+    path = fake_bin(tmp_path)
+    assert (path / "cat").resolve() == (wrapper / "cat").resolve(), "the wrapper stays first"
+    env = {"PATH": tool_path(path)}
+    result = subprocess.run([BASH, "-c", 'cat "$0"', str(text)], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0 and result.stdout == "through the wrapper\n", result.stderr
+    assert log.read_text(encoding="utf-8") == f"wrapper {text}\n"
+    drop_tool(path, "cat")
+    gone = subprocess.run([BASH, "-c", "command -v cat"], env=env, capture_output=True, text=True, timeout=60)
+    assert gone.returncode != 0 and gone.stdout == ""
 
 
 def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quiet(machine):
@@ -177,7 +202,7 @@ def test_a_project_without_modules_syncs_nothing(machine):
 def test_the_session_finds_uv_through_claudes_env_file(machine):
     home, project, base = machine
     env_file = base / "env"
-    env = {"HOME": sh(home), "PATH": sh(fake_bin(base)), "CLAUDE_PROJECT_DIR": sh(project),
+    env = {"HOME": sh(home), "PATH": tool_path(fake_bin(base)), "CLAUDE_PROJECT_DIR": sh(project),
            "CLAUDE_ENV_FILE": str(env_file)}
     subprocess.run([BASH, sh(SCRIPT)], env=env, check=True, capture_output=True, timeout=60)
     assert env_file.read_text(encoding="utf-8") == f'export PATH="{sh(home)}/.local/bin:$PATH"\n'
@@ -222,7 +247,7 @@ def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payl
     if host == "claude":
         result = run(home, path, project, "--hook", stdin=START)
     elif host == "copilot camelCase":
-        result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env={"HOME": sh(home), "PATH": sh(path)},
+        result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env={"HOME": sh(home), "PATH": tool_path(path)},
                                 capture_output=True, text=True, timeout=60, input=COPILOT_START % sh(project),
                                 cwd=base)
     else:
@@ -353,7 +378,7 @@ def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hand
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     (home / "calls").unlink()
-    env = {"HOME": sh(home), "PATH": sh(path)}
+    env = {"HOME": sh(home), "PATH": tool_path(path)}
     result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
                             input=COPILOT_START % sh(project), cwd=base)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
@@ -369,7 +394,7 @@ PASCAL_START = '{"hook_event_name":"SessionStart","session_id":"s1","cwd":"%s","
 
 
 def copilot_start(home: Path, path: Path, cwd: Path, payload: str) -> subprocess.CompletedProcess:
-    env = {"HOME": sh(home), "PATH": sh(path), "SE_HOOK_HOST": "copilot"}
+    env = {"HOME": sh(home), "PATH": tool_path(path), "SE_HOOK_HOST": "copilot"}
     return subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
                           input=payload, cwd=cwd)
 
@@ -456,7 +481,7 @@ def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     env_file = base / "env"
-    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project),
+    env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project),
            "CLAUDE_ENV_FILE": str(env_file)}
     subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
                    text=True, timeout=60)
@@ -482,7 +507,7 @@ def test_the_core_starts_without_uvs_deprecated_tls_variable(machine):
         encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     (home / "calls").unlink()
-    env = {"HOME": sh(home), "PATH": sh(path), "CLAUDE_PROJECT_DIR": sh(project), "UV_NATIVE_TLS": "1"}
+    env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project), "UV_NATIVE_TLS": "1"}
     subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
                    text=True, timeout=60)
     assert f"kern start --root {sh(project)} --home {SE_ROOT} native=unset system=1" in calls(home), calls(home)
@@ -512,7 +537,7 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     home, project, base = machine
     path = fake_bin(base)
     for tool in missing:
-        (path / tool).unlink(missing_ok=True)
+        drop_tool(path, tool)
     if not (path / "sha256sum").exists() and not (path / "shasum").exists():
         pytest.skip("neither sha256sum nor shasum is on this machine")
     run(home, path, project)
@@ -766,7 +791,7 @@ def binary_root(base: Path) -> Path:
 
 
 def run_binary(home: Path, path: Path, root: Path) -> subprocess.CompletedProcess:
-    env = {"HOME": sh(home), "PATH": sh(path)}
+    env = {"HOME": sh(home), "PATH": tool_path(path)}
     return subprocess.run([BASH, sh(root / "scripts" / "bootstrap.sh"), "--binary"], env=env,
                           capture_output=True, text=True, timeout=60, cwd=root)
 
