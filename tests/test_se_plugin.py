@@ -971,3 +971,15 @@ def test_a_note_the_build_cannot_read_is_refused_naming_it(tmp_path, capsys):
 def test_ses_own_notes_are_skills_of_both_layouts():
     for layout in ("skills", ".github/skills"):
         assert (ROOT / layout / "guidance-comes-first" / "SKILL.md").is_file(), layout
+
+
+def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys):
+    """A copy of the generator alone (se_plugin.py, agent_lint.py) checks its layouts as before."""
+    root = drafts_copy(tmp_path)
+    (root / "scripts").mkdir()
+    for name in ("se_plugin.py", "agent_lint.py"):
+        shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
+    assert se_plugin.main(["build", "--root", str(root)]) == 0
+    done = subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), "check", "--root", str(root)],
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr

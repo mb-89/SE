@@ -44,9 +44,10 @@ folders") is also a skill: `build` writes it into both layouts' skills folders a
 `<name>/SKILL.md`, `<name>` its front matter's `name`, its front matter and body as a skill of
 `src/skills` would be (`notes`). The build refuses a note that does not load (scripts/se_guidance.py
 reads it), a second note of one name, and a note whose name a skill of `src/skills` or a listed draft
-has. A module's tree enters no layout: its notes are its own. `check` also runs the guidance check
-(`se_guidance.py check`, `guidance_findings`) over the checkout and its modules, so a note it refuses,
-an orphan among them, fails where a stale layout fails.
+has. A module's tree enters no layout: its notes are its own. Where the checkout has a guidance tree,
+`check` also runs the guidance check (`se_guidance.py check`, `guidance_findings`) over the checkout
+and its modules, so a note it refuses, an orphan among them, fails where a stale layout fails; a
+checkout without one (a copy of the generator alone) has no note of its own to check.
 """
 
 from __future__ import annotations
@@ -417,7 +418,10 @@ def notes(root: Path) -> list[tuple[PurePosixPath, str]]:
 
 
 def guidance_findings(root: Path) -> list[str]:
-    """What the guidance check (`se_guidance.py check`) refuses in the checkout and its modules."""
+    """What the guidance check (`se_guidance.py check`) refuses in the checkout and its modules;
+    nothing where the checkout has no guidance tree."""
+    if not (root / GUIDANCE).is_dir():
+        return []
     se_guidance = guidance()
     try:
         return se_guidance.check(se_guidance.load(root), se_guidance.page_limit())
