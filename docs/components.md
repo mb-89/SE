@@ -191,6 +191,54 @@ resolved the same way.
 The order of remotes puts `origin` first rather than in Git's alphabetical order alone, so that a
 fresh clone takes each component from the owner it came from ([Finding kern](#finding-kern)).
 
+## Runtimes
+
+kern runs components in Go or, over its bus, in Python, and a component may need a browser or Node
+besides: each needs its runtimes on the machine. They are collected from the tree, as npm's
+`engines`, Cargo's `rust-version` and uv's `requires-python` sit beside the dependencies they
+belong to (the person's decision of 22 Nov 2026, runtimes blessed).
+
+- **Each component declares its own**, in its `se.toml` beside its `[components]`, as the table
+  `[runtimes]`: a runtime's name and the range of its versions it admits, in the form of a
+  component's `version` pin ([README "Modules"](../README.md#modules)). The root declares its own
+  the same way.
+
+  ```toml
+  [runtimes]
+  python = "^3.12"                  # 3.12.0 up to 4.0.0
+  uv = "^0.5"
+  ```
+
+- **The names** are the runtimes SE can ask for their version, `go`, `node`, `python` and `uv`,
+  each by its own command (`scripts/se_runtimes.py` `PROBES`, where one line adds one); a name it
+  cannot ask, or a range it cannot read, refuses naming the file.
+- **The union over the tree**: resolving the tree ([Several hosts, one tree](#several-hosts-one-tree))
+  reads each placed component's `[runtimes]` from its release, the root's first. A runtime two
+  components name must meet both ranges; where they admit no common version, the resolution fails
+  naming both paths and both ranges.
+- **Got through RUNME**: a runtime the machine lacks is got by the `get` lines of that name in the
+  root's `RUNME.conf`, run by the root's own RUNME (`RUNME.sh`'s header owns the line kind), so a
+  machine gets a runtime one way whether RUNME or the tree asks for it.
+  - The check writes `.se/.runtime/runtimes/RUNME.conf` with the root's `path` lines, a `need` per
+    command that answers the runtime's version and those `get` lines, and runs `RUNME.sh` beside
+    it; a command line runs in the root, as RUNME runs it there.
+  - One line names each runtime got: `runtime go 1.23.0: got through RUNME.conf (for se -> lib)`.
+- **Before any component runs**: the check runs once the tree is resolved and before its lock is
+  written, so `sync` and the start of [Required and optional at start](#required-and-optional-at-start)
+  stop before the core, or any component, starts. Where a runtime is still missing or found at a
+  version a range refuses, they stop with one message naming each, its ranges, the components that
+  need it and the remedy:
+
+  ```text
+  SE cannot start: the component tree needs 1 runtime this machine lacks; no component runs until each is present:
+    go ^1.22 (for se -> lib): missing; RUNME.conf names no way to get it: add a line get go <way> <what> (RUNME.sh's header), or install go yourself
+  ```
+
+  RUNME's own last line is the remedy where its `get` lines failed (`go is missing; run: <command>`);
+  a runtime found outside its range is never replaced, as the machine's other users may need it.
+- **A tree that declares none asks nothing**: no runtime's command runs, so a start of such a tree
+  keeps its budget.
+
 ## Required and optional at start
 
 SE's start (`scripts/se_start.py start-components`, before the core starts) resolves the tree from
@@ -249,7 +297,8 @@ person who knows one knows all (the person's decision of 22 Nov 2026):
 - **`components`**: every application has the verb below, with the same subcommands, output and exit
   codes ([The `components` verb](#the-components-verb)).
 - **Its dependencies in one list**: `RUNME.conf` declares everything the application needs on a
-  machine, GitHub among them ([GitHub, a hard dependency](#github-a-hard-dependency)).
+  machine, GitHub among them ([GitHub, a hard dependency](#github-a-hard-dependency)), and how
+  the machine gets each runtime its component tree needs ([Runtimes](#runtimes)).
 
 The one step outside the main command is placing the main command itself: `RUNME.conf`'s `get`
 line for it (SE's `bootstrap.sh --binary`) runs before the main command exists, and no person types
@@ -321,6 +370,8 @@ release, prepares its environment at once, then writes the list and the lock:
   - `go.mod`: `go build ./...` in the placed tree against the host's kern pin, which fetches its
     modules and shows a failure to build at once;
   - neither: nothing to prepare.
+- **Its runtimes**: the tree's [Runtimes](#runtimes) are checked, and what `RUNME.conf` gets got,
+  before anything is prepared; one still missing refuses.
 - **Output**: one line per component placed, with its version, pin, owner and what was prepared,
   `added obs-html 1.4.0 (^1.4) from github.com/<owner>/obs-html; prepared: uv sync --locked (2.1
   s)`.
@@ -336,6 +387,7 @@ release, prepares its environment at once, then writes the list and the lock:
 | no release the version admits | the versions offered and the form `x.y.z` or a range |
 | the release carries no mark | the release and `component.toml` naming `<name>` at its root |
 | the tree's pins admit no common release | both paths and both pins |
+| a runtime the tree needs is missing or outside its range | each runtime, its ranges, the components that need it and the remedy, as [Runtimes](#runtimes) says |
 | preparing failed | the step's command, its exit code and its output's last line |
 | GitHub cannot be reached | the remote, Git's message, and `RUNME.conf`'s line that declares GitHub |
 
@@ -475,7 +527,8 @@ person takes](#steps-only-the-person-takes)); its package 4, obs's, is package 3
 1. **kern: the `components` verb** (kern's repository). `cli/verbs.go` adds `components` with
    `list`, `add`, `remove`, `update`, `sync` and `path` as [The `components` verb](#the-components-verb)
    says, over a finder package in kern by [Finding a component](#finding-a-component) and
-   [Listing every offer](#listing-every-offer), its cache, and environment preparation. kern's root
+   [Listing every offer](#listing-every-offer), its cache, environment preparation and the tree's
+   [Runtimes](#runtimes), whose check `scripts/se_runtimes.py` holds until then. kern's root
    gets its mark, `component.toml` with `name = "kern"`, which kern's own reader does not load as a
    component. kern's template carries the verb's `help` lines and `RUNME.conf`'s `service github`
    line, and `RUNME.sh`'s header the line kind. Tests on a fake listing and the fake Git door.
