@@ -1,6 +1,7 @@
 # SE's switches, forms group: the form check of the commands that file issues (`file`,
-# `backlog file`, `route`), read from se.toml at origin's integration branch; core.toml's header
-# owns the keys of a row, scripts/se_switches.py's docstring the format.
+# `backlog file`, `route`), the form gate on writes through the GitHub tools and the check of the
+# files a form claims, read from se.toml at origin's integration branch; core.toml's header owns
+# the keys of a row, scripts/se_switches.py's docstring the format.
 
 [[switch]]
 name = "[forms] enforce"
@@ -23,3 +24,51 @@ layers = ["se.toml"]
 key = "forms.refusals"
 help = "README.md#forms"
 note = "set: 2 unless se.toml names another count, the refusals of one issue in one session after which --hold files it labelled off-form"
+
+[[switch]]
+name = "[forms] gate"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.gate"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): GitHub writes through the GitHub tools run unchecked; warn hands the findings to the agent; refuse denies a write whose body breaks its form (scripts/se_forms.py gate)"
+
+[[switch]]
+name = "[forms] files"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.files"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a form claims that breaks it (scripts/se_forms.py check-files); write: as check, and the form gate also denies a Write, Edit or MultiEdit, or a GitHub file write, whose result breaks the claiming form (scripts/se_forms.py gate)"
+
+[[switch]]
+name = "[forms] backstop"
+kind = "se.toml"
+reader = "scripts/se_forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.backstop"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): the forms workflow marks nothing; on: an off-form fleet issue gets the label off-form, an off-form marked comment a failed run (scripts/se_forms.py backstop, .github/workflows/forms.yml)"
+
+[[switch]]
+name = "SE_FORMS_GATE"
+kind = "environment"
+reader = "scripts/se_forms.py"
+default = "on"
+layers = ["environment"]
+off = ["off"]
+other = "on"
+fold = true
+help = "README.md#machine-local-selocaltoml"
+note = "off: the form gate judges no GitHub write on this machine, whatever se.toml [forms] gate says; unset, it follows se.toml"

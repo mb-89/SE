@@ -16,9 +16,11 @@
 # nothing itself, so the host never waits on a download. Its twin is se_mcp.ps1.
 #
 # A plugin install (Copilot's plugin config runs this from the plugin folder with --root .): only
-# where PLUGIN_ROOT, this SE and --root are one physical folder, the launcher serves the session's
-# repository instead. It reads SE_SESSION_CWD, else COPILOT_SESSION_CWD (an absolute existing
-# folder), else, on Linux and macOS, its parent's working directory; walks up to the nearest .git;
+# where the plugin's root, this SE and --root are one physical folder, the launcher serves the
+# session's repository instead. The plugin's root is Copilot's PLUGIN_ROOT, else Claude Code's
+# CLAUDE_PLUGIN_ROOT. It reads SE_SESSION_CWD, else the host's session folder (Copilot's
+# COPILOT_SESSION_CWD, Claude Code's CLAUDE_PROJECT_DIR; an absolute existing folder; each counts
+# only under its own host), else, on Linux and macOS, its parent's working directory; walks up to the nearest .git;
 # hands over to that repository's own launcher where it is an SE checkout; and writes one line,
 # "plugin <folder>: root <root> from <source>", to the chosen root's mcp.log (the home log where
 # that root is a session folder with no .git). Where no source
@@ -53,10 +55,10 @@ logfile() { # <root> [<session folder: 1 or 0>]: the log the launcher writes for
 }
 note() { printf '%s se_mcp.sh: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log" 2>/dev/null; }
 
-plugin_project() { # <plugin folder>: the root a plugin install serves; fails where no source counts
-  local plugin="$1" name value dir="" source="" found=0
+plugin_project() { # <plugin folder> <session variables>: the root a plugin install serves; fails where no source counts
+  local plugin="$1" names="$2" name value dir="" source="" found=0
   usable() { case "$1" in /* | [A-Za-z]:[\\/]*) [ -d "$1" ] ;; *) false ;; esac; }
-  for name in SE_SESSION_CWD COPILOT_SESSION_CWD; do
+  for name in $names; do
     value="${!name:-}"
     if usable "$value"; then dir="$(cd "$value" && pwd -P)" && { source="$name=$value"; break; }; fi
   done
@@ -85,7 +87,7 @@ plugin_project() { # <plugin folder>: the root a plugin install serves; fails wh
         ;;
     esac
   else
-    source="no variable set (SE_SESSION_CWD, COPILOT_SESSION_CWD) and no parent cwd outside the plugin"
+    source="no variable set (${names// /, }) and no parent cwd outside the plugin"
   fi
   log="$(logfile "$chosen" "$(session_folder "$chosen" "$plugin")")"
   note "plugin $plugin: root $chosen from $source"
@@ -94,11 +96,15 @@ plugin_project() { # <plugin folder>: the root a plugin install serves; fails wh
 }
 
 session=0
-if [ -n "${PLUGIN_ROOT:-}" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
-  plugin="$(cd "$PLUGIN_ROOT" 2>/dev/null && pwd -P)" || plugin=""
+plugin_root="${PLUGIN_ROOT:-}" session_names="SE_SESSION_CWD COPILOT_SESSION_CWD"
+if [ -z "$plugin_root" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  plugin_root="$CLAUDE_PLUGIN_ROOT" session_names="SE_SESSION_CWD CLAUDE_PROJECT_DIR"
+fi
+if [ -n "$plugin_root" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
+  plugin="$(cd "$plugin_root" 2>/dev/null && pwd -P)" || plugin=""
   if [ -n "$plugin" ] && [ "$plugin" = "$(cd "$se_root" && pwd -P)" ] && [ "$plugin" = "$(cd "$root" && pwd -P)" ]; then
     unset SE_MCP_PLUGIN_FOLDER
-    if chosen="$(plugin_project "$plugin")"; then
+    if chosen="$(plugin_project "$plugin" "$session_names")"; then
       if [ "$chosen" != "$plugin" ]; then
         root="$chosen"
         session="$(session_folder "$chosen" "$plugin")"

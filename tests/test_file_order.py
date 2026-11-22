@@ -258,6 +258,112 @@ def test_file_seconds_reads_an_artifact_the_host_downloaded(checkout, capsys):
     assert "from run 12" in capsys.readouterr().out
 
 
+def junit_report(path: Path, cases: list[tuple[str, float, str, float | None]], cpu: str | None = "Some CPU x2",
+                 wall: float = 12.0) -> Path:
+    """A JUnit report as tests/conftest.py writes se.xml: (test, seconds, worker, started) per case;
+    `started` and `cpu` left out where None."""
+    def case(test: str, seconds: float, worker: str, started: float | None) -> str:
+        module, name = test.split("::")
+        start = f'<property name="started" value="{started:.3f}"/>' if started is not None else ""
+        return (f'<testcase classname="{module}" name="{name}" time="{seconds}"><properties>'
+                f'<property name="setup_time" value="0.100"/><property name="worker" value="{worker}"/>'
+                f'{start}</properties></testcase>')
+    named = f'<property name="cpu" value="{cpu}"/>' if cpu else ""
+    path.write_text(f'<testsuites><testsuite name="pytest" time="{wall}"><properties>'
+                    f'<property name="workers" value="2"/>{named}</properties>'
+                    + "".join(case(*item) for item in cases) + "</testsuite></testsuites>", encoding="utf-8")
+    return path
+
+
+def test_test_seconds_prints_each_runs_workers_and_the_median_of_the_slowest_tests(tmp_path, capsys):
+    first = junit_report(tmp_path / "first.xml", [("tests.test_a::test_slow", 2.0, "gw0", 1.5),
+                                                 ("tests.test_b::test_other", 1.0, "gw1", 1.6),
+                                                 ("tests.test_c::test_some", 5.0, "gw1", 2.6)])
+    second = junit_report(tmp_path / "second.xml", [("tests.test_a::test_slow", 4.0, "gw0", 0.5),
+                                                   ("tests.test_b::test_other", 3.0, "gw1", 0.7),
+                                                   ("tests.test_c::test_some", 7.0, "gw0", 4.5)])
+    third = junit_report(tmp_path / "third.xml", [("tests.test_a::test_slow", 9.0, "gw0", None),
+                                                 ("tests.test_b::test_other", 2.0, "gw1", None)],
+                         cpu=None, wall=11.5)
+    arguments = [item for path in (first, second, third) for item in ("--report", str(path))]
+    assert work_tickets.main(["test-seconds", *arguments]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "Test seconds of 3 runs:",
+        f"  {first}: 12.0 s wall; 8.0 s test time / 2 workers; cpu Some CPU x2",
+        "    gw0: first test at 1.5 s, busy 2.0 s, last done at 3.5 s",
+        "    gw1: first test at 1.6 s, busy 6.0 s, last done at 7.6 s",
+        f"  {second}: 12.0 s wall; 14.0 s test time / 2 workers; cpu Some CPU x2",
+        "    gw0: first test at 0.5 s, busy 11.0 s, last done at 11.5 s",
+        "    gw1: first test at 0.7 s, busy 3.0 s, last done at 3.7 s",
+        f"  {third}: 11.5 s wall; 11.0 s test time / 2 workers; cpu not reported",
+        "    gw0: busy 9.0 s",
+        "    gw1: busy 2.0 s",
+        "Slowest tests, median of 3 runs:",
+        "  7.00 s (5.00-7.00 s, 2 of 3 runs) tests.test_c::test_some",  # even count: the slower middle
+        "  4.00 s (2.00-9.00 s, 3 of 3 runs) tests.test_a::test_slow",
+        "  2.00 s (1.00-3.00 s, 3 of 3 runs) tests.test_b::test_other",
+    ]
+    assert work_tickets.main(["test-seconds", *arguments, "--slowest", "1"]) == 0
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        "Slowest tests, median of 3 runs:", "  7.00 s (5.00-7.00 s, 2 of 3 runs) tests.test_c::test_some"]
+
+
+class FakeReportsCi:
+    """CI's runs as gh answers them: `runs` the passing pushes newest first (id, commit), `kept`
+    the runs that kept test-reports, each run's report seconds its id."""
+
+    def __init__(self, runs: list[tuple[int, str]], kept: set[str]) -> None:
+        self.runs, self.kept, self.calls = runs, kept, []
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        self.calls.append(arguments)
+        if arguments[:2] == ["run", "list"]:
+            return json.dumps([{"databaseId": run, "headSha": sha} for run, sha in self.runs])
+        if arguments[0] == "api":
+            run = arguments[1].split("/")[-2]
+            kept = [{"name": "test-reports", "expired": False}] if run in self.kept else []
+            return json.dumps({"artifacts": [{"name": "file-seconds", "expired": False}, *kept]})
+        if arguments[:2] == ["run", "download"]:
+            assert arguments[arguments.index("--name") + 1] == "test-reports"
+            directory = Path(arguments[arguments.index("--dir") + 1])
+            junit_report(directory / "se.xml", [("tests.test_a::test_slow", float(arguments[2]), "gw0", 0.5)])
+            return ""
+        raise AssertionError(f"unexpected gh {arguments}")
+
+
+def test_test_seconds_reads_the_newest_pushes_that_kept_test_reports(checkout, monkeypatch, capsys):
+    runs = [(run, f"abc{run}def" + "0" * 32) for run in (17, 16, 15, 14, 13, 12, 11)]
+    ci = FakeReportsCi(runs, {"16", "14", "13", "12"})
+    monkeypatch.setattr(work_tickets, "run_gh", ci)
+    assert work_tickets.main(["test-seconds", "--worktree", str(checkout), "--runs", "3"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "Test seconds of 3 runs:"
+    for run in (16, 14, 13):
+        assert f"  run {run} (commit abc{run}de): 12.0 s wall; {run}.0 s test time / 1 workers" in out
+    assert "run 12" not in out and "run 17" not in out and "run 15" not in out
+    assert "  14.00 s (13.00-16.00 s, 3 of 3 runs) tests.test_a::test_slow" in out
+    listed = ci.calls[0]
+    assert listed[:2] == ["run", "list"] and listed[listed.index("--event") + 1] == "push"
+    assert listed[listed.index("--branch") + 1] == "main" and listed[listed.index("--status") + 1] == "success"
+    assert "headSha" in listed[listed.index("--json") + 1]
+    assert [call[2] for call in ci.calls if call[:2] == ["run", "download"]] == ["16", "14", "13"]
+
+
+def test_test_seconds_refuses_a_run_without_the_artifact_in_one_line_naming_it(checkout, monkeypatch, capsys):
+    ci = FakeReportsCi([], {"9"})
+    monkeypatch.setattr(work_tickets, "run_gh", ci)
+    assert work_tickets.main(["test-seconds", "--worktree", str(checkout), "--run", "9", "--run", "8"]) == 1
+    captured = capsys.readouterr()
+    error = captured.err.strip()
+    assert len(error.splitlines()) == 1 and "run 8 has no artifact test-reports" in error
+    assert captured.out == "" and not [call for call in ci.calls if call[:2] == ["run", "download"]]
+
+    monkeypatch.setattr(work_tickets, "run_gh", FakeReportsCi([(5, "a" * 40)], set()))
+    assert work_tickets.main(["test-seconds", "--worktree", str(checkout)]) == 1
+    error = capsys.readouterr().err.strip()
+    assert len(error.splitlines()) == 1 and "--run" in error and "--report" in error
+
+
 def test_record_file_seconds_without_a_path_is_refused_naming_the_refresh_from_ci():
     before = conftest.FILE_SECONDS_TABLE.read_bytes()
     ran = run_pytest("-q", "-n", "2", "-p", "no:cacheprovider", *QUICK, "--record-file-seconds")

@@ -58,8 +58,9 @@ start_sessions = true   # built in: SE dispatches sessions automatically
 
 - **Where they show**: the greeting under Copilot ends with a `Copilot guards:` line naming each
   setting; `uv run python <se>/scripts/se_doctor.py` has a `copilot` row for each.
-- **Invalid configuration**: an unreadable se.toml or a non-boolean guard setting keeps both
-  guards on and says so; SE starts no session until it is fixed.
+- **Invalid configuration**: an unreadable se.toml, a `copilot` value that is not a table or a
+  non-boolean guard setting keeps both guards on and says so; SE starts no session until it is
+  fixed.
 - **To cap a session yourself**: `--max-ai-credits <n>` (at least 30) on a `copilot -p` line, or
   `/limits set max-ai-credits <n>` in a session; sub-agents share it ([limits][limits]).
 - **To measure one**: `--usage-output-file <file>` writes a session's credits, premium requests and
@@ -162,9 +163,10 @@ relative `bash scripts/...` there runs that one, not SE's, so always name SE's b
 ### VS Code
 
 VS Code's own parser takes SE as a Claude-format plugin: it checks `.claude-plugin/plugin.json`
-before `.github/plugin/plugin.json`. So the plugin brings no `se` server there, and its hooks use
-`${CLAUDE_PLUGIN_ROOT}`. Always add the user-level door, README's `code --add-mcp` line with
-`${workspaceFolder}` ([The MCP door](../README.md#the-mcp-door)).
+before `.github/plugin/plugin.json`. So the plugin brings an `se` server there only where `se.toml`
+`[plugin] claude_mcp` writes one into that manifest, which is not measured in VS Code, and its
+hooks use `${CLAUDE_PLUGIN_ROOT}`. Always add the user-level door, README's `code --add-mcp` line
+with `${workspaceFolder}` ([The MCP door](../README.md#the-mcp-door)).
 
 - That expansion in a user profile is unverified. The fallback is `<repo>/.vscode/mcp.json` with
   the same entry: `{"servers": {"se": {"type": "stdio", "command": "bash", "args":

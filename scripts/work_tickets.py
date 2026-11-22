@@ -2982,11 +2982,19 @@ def push(root: Path, branch: str | None = None) -> str | None:
     integration branch is released first and its new tag pushed with it, unless the release
     workflow pushes the tags (`project.release = "workflow"`). A landing branch `land/<branch>`
     (README "Landing on main") is released the same way against origin's integration branch and,
-    like it, needs the verdicts on its tree; its tag waits for the landed commit. Returns the
-    release's tag, None where nothing is released."""
+    like it, needs the verdicts on its tree; its tag waits for the landed commit. Where se.toml
+    `[forms] files` is `check`, a changed file a form claims that breaks it refuses the push before
+    anything else runs (claimed_files_problem). Returns the release's tag, None where nothing is
+    released."""
     required_identity(root, "push")
     branch = branch or current_branch(root)
     target = integration_branch(root)
+    try:
+        files = claimed_files_problem(root)
+    except sibling("forms").FormError as error:
+        raise QueueError(f"push: {error}") from error
+    if files is not None:
+        raise QueueError(f"push: {files}")
     landing = branch.startswith(LANDING_PREFIX)
     released = tag = (release(root, branch) if branch == target
                       else release(root, branch, f"refs/remotes/origin/{target}") if landing
@@ -3031,8 +3039,9 @@ PLANNED_PIECE_PATTERN = re.compile(
 
 def planned_pieces(report: str) -> list[str]:
     """The pieces of the work issue a partial field report names as still to land, in its "Not
-    delivered" (`PLANNED_PIECE_PATTERN`); none for a complete report or one naming no piece, so
-    only a planned split keeps its issue open across its landings."""
+    delivered" (`PLANNED_PIECE_PATTERN`); none for a complete report or one naming no piece. Its
+    pieces keep the issue open until its last piece lands; `partial_left` covers every other
+    partial."""
     result = FIELD_REPORT_RESULT_PATTERN.search(report)
     if result is None or result.group(1) != "partial":
         return []
@@ -3040,13 +3049,47 @@ def planned_pieces(report: str) -> list[str]:
     return [match.group(1).strip() for match in PLANNED_PIECE_PATTERN.finditer(left)]
 
 
+# A top-level bullet of "Not delivered" and its bold lead, as `- **R8, the off switch:** ...`.
+TOP_BULLET_PATTERN = re.compile(r"[-*] (.*)")
+BOLD_LEAD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
+NOTHING_LEFT_NAMED = "nothing named under Not delivered"
+
+
+def partial_left(report: str) -> list[str]:
+    """What a partial field report naming no planned piece left undone: one item per top-level
+    bullet of its "Not delivered" (its bold lead without a trailing `:` or `.`, else its first
+    line), else that section's first paragraph on one line, else `NOTHING_LEFT_NAMED`; none for
+    a complete report or a planned split (`planned_pieces`). Its issue stays open at the landing,
+    as a partial is not done and only SE drops or moves what it left."""
+    result = FIELD_REPORT_RESULT_PATTERN.search(report)
+    if result is None or result.group(1) != "partial" or planned_pieces(report):
+        return []
+    left = section(markdown_sections(report), "not delivered")
+    items = []
+    for line in left.splitlines():
+        bullet = TOP_BULLET_PATTERN.fullmatch(line.rstrip())
+        if bullet is None:
+            continue
+        text = bullet.group(1).strip()
+        lead = BOLD_LEAD_PATTERN.match(text)
+        items.append(lead.group(1).strip().rstrip(":.").strip() if lead else text)
+    if items:
+        return items
+    paragraph = " ".join(left.split("\n\n", 1)[0].split()) if left.strip() else ""
+    if not paragraph or paragraph.rstrip(".").casefold() == "none":
+        return [NOTHING_LEFT_NAMED]
+    return [paragraph]
+
+
 def pull_request_body(issue: dict[str, object], report: str) -> str:
-    """The pull request description: `Fixes <issue>` where all its acceptance shows before the
-    merge and the report names no planned piece still to land (`planned_pieces`), else `Refs
-    <issue>`, so GitHub never closes an issue before its acceptance can be seen or its last piece
-    lands; then the field report `report` between its markers, without the template's comments."""
-    keyword = ("Refs" if post_merge_acceptance(str(issue.get("body", ""))) or planned_pieces(report)
-               else "Fixes")
+    """The pull request description: `Fixes <issue>` only where the report is complete and all
+    its acceptance shows before the merge, else `Refs <issue>`: for every partial report and for
+    acceptance seen only after the merge, so the pull request never says it fixes what it left,
+    and a merge of it on GitHub, outside `integrate`, would not close the issue; then the field
+    report `report` between its markers, without the template's comments."""
+    result = FIELD_REPORT_RESULT_PATTERN.search(report)
+    partial = result is not None and result.group(1) == "partial"
+    keyword = ("Refs" if partial or post_merge_acceptance(str(issue.get("body", ""))) else "Fixes")
     return f"{keyword} {issue['url']}\n\n{marked_report(report)}"
 
 
@@ -3526,6 +3569,7 @@ def set_stop_count(root: Path, count: int) -> None:
     if count <= 0:
         path.unlink(missing_ok=True)
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"refused": count}) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -3537,46 +3581,78 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
             and sibling("copilot_guards").guarded(root, "refuse_stop"))
 
 
+def claimed_files_problem(root: Path) -> str | None:
+    """What se.toml `[forms] files = "check"` refuses in the checkout `root`: the lines of
+    `se_forms.py check-files --changed origin/<integration branch>`; None where the switch is off
+    or every changed claimed file passes. Errors raise."""
+    lines = sibling("se_forms").changed_refusal(root, f"origin/{integration_branch(root)}")
+    if lines is None:
+        return None
+    return ("A changed file a form claims breaks its form (se.toml [forms] files = \"check\"); "
+            "fix every finding:\n" + "\n".join(lines))
+
+
 def stop_verdict(path: Path, event: dict[str, object], count: bool = True) -> StopVerdict:
     """The Stop hook's verdict for the checkout holding `path`: refuse while a worker's work issue
-    is not delivered, at most `[stop] refusals` times in a row; under Copilot only advise
-    (copilot_advises); everywhere else, and where it cannot judge, let the turn end (advice fails
-    open). `count` false judges without counting."""
+    is not delivered, or, where se.toml `[forms] files` is `check`, while a changed file a form
+    claims breaks it in any checkout it judges, at most `[stop] refusals` times in a row; under
+    Copilot only advise (copilot_advises); everywhere else, and where it cannot judge, let the turn
+    end (advice fails open). `count` false judges without counting."""
     if event.get("hook_event_name") == "SubagentStop" and not is_worker_agent(event):
         return StopVerdict()
     root = checkout_top(path)
+    files: str | None = None
+    notes: list[str] = []
+    if root is not None:
+        try:
+            files = claimed_files_problem(root)
+        except Exception as error:  # advice fails open, whatever broke
+            notes.append(f"se Stop hook: cannot check the claimed files, so the turn may end: "
+                         f"{one_line(str(error), 300)}")
+    problem: str | None = None
     if root is None or not has_work_issue(root):
         if event.get("hook_event_name") == "SubagentStop":
-            return StopVerdict(note=(
+            notes.append(
                 "se Stop hook: cannot judge the worker sub-agent's delivery, so it may end: "
                 "neither its prompt nor its transcript names a checkout whose ticket queue is for "
-                f"a work issue, and its working directory {path} holds none"))
-        return StopVerdict()
-    try:
-        branch = current_branch(root)
-        if not branch or branch == integration_branch(root):
-            return StopVerdict()
-        problem = delivery_problem(root, branch)
-        cap = stop_refusals(root)
-    except Exception as error:  # advice fails open, whatever broke
-        return StopVerdict(note=f"se Stop hook: cannot judge the delivery, so the turn may end: "
-                                f"{one_line(str(error), 300)}")
+                f"a work issue, and its working directory {path} holds none")
+        if files is None:
+            return StopVerdict(note="; ".join(notes) or None)
+        try:
+            cap = stop_refusals(root)
+        except Exception as error:
+            return StopVerdict(note=f"se Stop hook: cannot judge the claimed files, so the turn "
+                                    f"may end: {one_line(str(error), 300)}")
+    else:
+        try:
+            branch = current_branch(root)
+            if branch and branch != integration_branch(root):
+                problem = delivery_problem(root, branch)
+            cap = stop_refusals(root)
+        except Exception as error:  # advice fails open, whatever broke
+            if files is None:
+                return StopVerdict(note=f"se Stop hook: cannot judge the delivery, so the turn may "
+                                        f"end: {one_line(str(error), 300)}")
+            problem, cap = None, STOP_REFUSALS
+    both = "\n\n".join(part for part in (problem, files) if part) or None
     if not count:
-        return StopVerdict(block=problem)
-    if problem is None:
+        return StopVerdict(block=both)
+    if both is None:
         set_stop_count(root, 0)
-        return StopVerdict()
+        return StopVerdict(note="; ".join(notes) or None)
     if copilot_advises(root, event):
         set_stop_count(root, 0)
+        said = "\n\n".join(part for part in (problem and f"undelivered: {problem}", files) if part)
         return StopVerdict(note=f"se Stop hook, advice only under Copilot ([copilot] refuse_stop = "
-                                f"true refuses): undelivered: {problem}")
+                                f"true refuses): {said}")
     refused = stop_count(root) + 1
     if refused > cap:
         set_stop_count(root, 0)
+        how = "undelivered" if problem else "with claimed files off their forms"
         return StopVerdict(note=f"se Stop hook: refused {cap} times in a row; the turn may end "
-                                f"undelivered: {one_line(problem, 300)}")
+                                f"{how}: {one_line(both, 300)}")
     set_stop_count(root, refused)
-    return StopVerdict(block=f"se Stop hook ({refused} of {cap} in a row): {problem}")
+    return StopVerdict(block=f"se Stop hook ({refused} of {cap} in a row): {both}")
 
 
 def hook_event() -> dict[str, object]:
@@ -5687,6 +5763,7 @@ class SuiteRun:
     stdout: str
     output: str  # stdout and stderr, stripped
     parts: list[SuitePart]
+    kept: list[str] | None = None  # the reports copied with keep_reports; None: none asked
 
     def refuse_failed(self, budget: SuiteBudget) -> str:
         """The run's result line; refuses a run whose tests failed, with its output."""
@@ -5701,8 +5778,12 @@ class SuiteRun:
         return summary
 
 
-def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
-    """Run the suite command once in `checkout` and time it; its JUnit reports become its parts."""
+def time_suite(checkout: Path, command: list[str], keep_reports: Path | None = None) -> SuiteRun:
+    """Run the suite command once in `checkout` and time it; its JUnit reports become its parts.
+
+    With `keep_reports`, each XML report the run wrote is copied there at its path under the
+    run's report folder, before the folder goes and whatever the run's result (keep_test_reports);
+    the run's `kept` names them."""
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
         result = subprocess.run(
@@ -5711,9 +5792,28 @@ def time_suite(checkout: Path, command: list[str]) -> SuiteRun:
             env={**os.environ, TEST_REPORTS_VARIABLE: reports},
         )
         seconds = clock() - started
+        kept = keep_test_reports(Path(reports), keep_reports) if keep_reports is not None else None
         parts = report_parts(Path(reports))
     return SuiteRun(seconds, result.returncode, result.stdout,
-                    (result.stdout + result.stderr).strip(), parts)
+                    (result.stdout + result.stderr).strip(), parts, kept)
+
+
+def keep_test_reports(reports: Path, directory: Path) -> list[str]:
+    """Copy each XML report under `reports` to `directory` at its relative path, creating it; the
+    copied paths under `directory`, sorted, as POSIX paths."""
+    directory.mkdir(parents=True, exist_ok=True)
+    kept = []
+    for report in sorted(reports.rglob("*.xml")):
+        relative = report.relative_to(reports)
+        (directory / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(report, directory / relative)
+        kept.append(relative.as_posix())
+    return sorted(kept)
+
+
+def kept_reports_line(directory: Path, kept: list[str]) -> str:
+    """The line `suite --keep-test-reports` prints right after the timed run."""
+    return f"Test reports kept in {directory}: {', '.join(kept) or 'none written'}"
 
 
 @dataclass(frozen=True)
@@ -6072,7 +6172,8 @@ CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside ke
 
 
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
-              full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None) -> str:
+              full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None,
+              keep_reports: Path | None = None) -> str:
     """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
@@ -6082,6 +6183,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     and, where `[tests]` names a tier function, each tier's slowest test (tier_lines);
     warns above the target; refuses failed tests. With `record_file_seconds` a pytest suite writes
     its seconds per file there (with_file_seconds), and its `file seconds:` lines follow the Parts.
+    With `keep_reports` the run's JUnit reports are copied there (time_suite), also from a failed
+    or over-limit run, and the line `Test reports kept in <DIR>: ...` is printed right after the
+    timed run; without it nothing is copied and nothing more is printed.
 
     The reference run (suite_is_reference, CI) prints its time as a notice for ci_suite_time and
     refuses a passing suite above the limit with SuiteOverLimitError. Any other run above the limit
@@ -6107,7 +6211,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     limit, target = budget.whole_limit, budget.whole_target  # the whole suite's (`[tests] shards`)
     feedback.phase(f"complete suite: {' '.join(budget.command)} (limit {limit:g} s)")
     result = time_suite(root, with_file_seconds(with_durations(budget.command, slowest_count),
-                                                record_file_seconds))
+                                                record_file_seconds), keep_reports)
+    if keep_reports is not None:
+        print(kept_reports_line(keep_reports, result.kept or []))
     seconds, output, parts = result.seconds, result.output, result.parts
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
@@ -6530,29 +6636,69 @@ def without_tracker_references(sentence: str) -> str:
 CLAUSE_END = re.compile(r"[,;:](?=\s)|\s[-\u2013\u2014]\s")
 #: Where a Goal's list starts: its lead-in is the Goal's first sentence.
 LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
-#: How long a landing title's summary may run before it ends at a clause, and the longest it runs.
+#: How long a Goal's first sentence should keep to, as the work form warns (`forms/work.toml`
+#: `first_sentence_chars`); and the longest a landing title's summary runs whole.
 SUMMARY_WIDTH, SUMMARY_MAX = 120, 200
+#: The longest title GitHub keeps: a landing title stays within it, its branch name included.
+TITLE_MAX = 256
+#: The words after a clause end that make it the preferred cut: a new clause follows.
+CLAUSE_JOINS = frozenset({"and", "but", "so", "while"})
+#: The first words of a leading clause, whose closing clause end is no cut: the main clause follows.
+LEADING_CLAUSE = frozenset({
+    "where", "wherever", "when", "whenever", "if", "unless", "once", "after", "before", "while",
+    "until", "because", "since", "although", "though", "whereas", "with", "without"})
 
 
-def at_boundary(sentence: str, width: int = SUMMARY_WIDTH, longest: int = SUMMARY_MAX) -> str:
-    """`sentence` ended at a sentence or clause boundary, never mid-clause with "...": whole where
-    it fits `width`; else up to its last clause end within `width`, or its first within `longest`;
-    else whole where it fits `longest`. Only a sentence over `longest` without a clause end there
-    is cut at its last word within it."""
-    if len(sentence) <= width:
-        return sentence
-    ends = [m.start() for m in CLAUSE_END.finditer(sentence)]
-    within = [end for end in ends if end <= width] or [end for end in ends if end <= longest][:1]
-    if within:
-        return sentence[:within[-1]].rstrip(" ,;:")
+def _counting_ends(sentence: str, longest: int) -> list[tuple[int, str]]:
+    """The clause ends at or before `longest` that may end a summary, each with the word after it:
+    none inside an unclosed bracket, double quotes or a code span, and not the one that closes a
+    leading clause (LEADING_CLAUSE)."""
+    ends: list[tuple[int, str]] = []
+    depth, quoted, code, scanned = 0, False, False, 0
+    for match in CLAUSE_END.finditer(sentence):
+        if match.start() > longest:
+            break
+        for char in sentence[scanned:match.start()]:
+            if char == "`":
+                code = not code
+            elif code:
+                continue
+            elif char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth = max(0, depth - 1)
+            elif char == '"':
+                quoted = not quoted
+        scanned = match.start()
+        if depth or quoted or code:
+            continue
+        after = sentence[match.end():].split(maxsplit=1)
+        ends.append((match.start(), after[0].casefold().strip("\"'`*_(") if after else ""))
+    first = sentence.split(maxsplit=1)
+    if ends and first and first[0].casefold().strip(",;:\"'`*_(") in LEADING_CLAUSE:
+        ends = ends[1:]
+    return ends
+
+
+def at_boundary(sentence: str, longest: int = SUMMARY_MAX) -> str:
+    """`sentence` ended at a whole clause, never with "...": whole where it has at most `longest`
+    characters; else up to its last clause end within `longest` before "and", "but", "so" or
+    "while", else its last there (`_counting_ends` says which count); else cut at its last word
+    within `longest`."""
     if len(sentence) <= longest:
         return sentence
-    return sentence[:longest + 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+    ends = _counting_ends(sentence, longest)
+    if ends:
+        joined = [end for end, word in ends if word in CLAUSE_JOINS]
+        return sentence[:(joined or [end for end, _ in ends])[-1]].rstrip(" ,;:")
+    cut = sentence[:longest + 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut[:longest]).rstrip(" ,;:")
 
 
-def goal_summary(issue_body: str) -> str:
+def goal_summary(issue_body: str, longest: int = SUMMARY_MAX) -> str:
     """The first sentence of the work issue's Goal, without its tracker references: what the work
-    is, as the landing's title names it, ended at a sentence or clause boundary (`at_boundary`);
+    is, as the landing's title names it, whole up to `longest` characters, else ended at a whole
+    clause (`at_boundary`);
     a Goal that opens with a list's lead-in is that lead-in. "" where the Goal is missing or
     names no more than that."""
     goal = re.sub(r"<!--.*?-->", "", section(markdown_sections(issue_body), GOAL_SECTION),
@@ -6564,7 +6710,7 @@ def goal_summary(issue_body: str) -> str:
     sentence = without_tracker_references(SENTENCE_END.split(text, maxsplit=1)[0])
     if not sentence or tracker_references(sentence) or PUBLIC_HOST_PATTERN.search(sentence):
         return ""
-    return at_boundary(" ".join(sentence.replace("**", "").split()).rstrip(":"))
+    return at_boundary(" ".join(sentence.replace("**", "").split()).rstrip(":"), longest)
 
 
 def integration_merge_message(
@@ -6572,11 +6718,15 @@ def integration_merge_message(
 ) -> str:
     """The integration's title, the landing pull request's and the squash commit's: `Integrate
     <branch>: <the first sentence of the work issue's Goal>`, never a commit's subject; without
-    a public check it also names the work issue and pull request."""
-    summary = goal_summary(issue_body)
-    title = f"Integrate {branch}" + (f": {summary}" if summary else "")
+    a public check it also names the work issue and pull request. The whole title keeps within
+    GitHub's TITLE_MAX characters: a long branch name leaves the summary less room."""
+    head = f"Integrate {branch}"
+    tail = "" if public else f" (work issue #{work_number}, PR #{pull_number})"
+    room = min(SUMMARY_MAX, TITLE_MAX - len(head) - len(": ") - len(tail))
+    summary = goal_summary(issue_body, room) if room > 0 else ""
+    title = head + (f": {summary}" if summary else "")
     if not public:
-        return f"{title} (work issue #{work_number}, PR #{pull_number})"
+        return title + tail
     if tracker_references(title) or PUBLIC_HOST_PATTERN.search(title):
         raise QueueError("Public merge messages cannot contain tracker references or host addresses")
     return title
@@ -7445,12 +7595,16 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
 
 
 def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
-                  comment: str, pending: list[str]) -> Plan:
+                  comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
-    take it out of progress and close it unless `pending` keeps it open: post-merge acceptance,
-    a review's open points or a planned split's pieces left."""
+    take it out of progress and close it unless something keeps it open: `pending`, post-merge
+    acceptance, a review's open points or a planned split's pieces left; or `left`, what a
+    partial delivery naming no planned piece left (`partial_left`), which also takes any `ready`
+    off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
+    escalate = (label_step(tracker, work_number, "ready", add=False),
+                label_step(tracker, work_number, "escalated", add=True)) if left else ()
     return Plan(f"close out #{work_number}", (
         Step("comment_pull", "add_issue_comment",
              {**pulls, "issue_number": pull_number, "body": landed}),
@@ -7459,7 +7613,8 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int,
         Step("comment_issue", "add_issue_comment",
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
-        *(() if pending else (Step("close_issue", "issue_write", {
+        *escalate,
+        *(() if pending or left else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
             "state_reason": "completed"}),)),
     ))
@@ -7703,7 +7858,7 @@ def integrate(
             "work_number": work_number, "suite": suite_result, "late": late,
             "included": included, "pending": post_merge_acceptance(str(work_issue.get("body", ""))),
             "open_points": open_points(str(work_issue.get("body", "")), reported_tip(report)),
-            "pieces": planned_pieces(report),
+            "pieces": planned_pieces(report), "left": partial_left(report),
             "check_commands": check_commands,
             "check_temporary_working_directory": check_temporary_working_directory,
             "landing_mode": mode, "took": took,
@@ -8073,6 +8228,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     pending = list(state.get("pending") or [])
     points = list(state.get("open_points") or [])
     pieces = list(state.get("pieces") or [])
+    left = list(state.get("left") or [])
     waits = ("Stays open until this acceptance is seen after the merge: "
              + "; ".join(pending) + "\n") if pending else ""
     if points:
@@ -8081,13 +8237,16 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if pieces:
         waits += ("Stays open for the planned pieces left, as the field report names them: "
                   + "; ".join(pieces) + "\n")
+    if left:
+        waits += ("Stays open for what this partial delivery left, which SE re-scopes: "
+                  + "; ".join(left) + "\n")
     comment = (
         f"Integrated in {short} from {state['pull_url'] or f'PR #{pull_number}'}, landed through "
         f"{landing_url} (check: {run_url}). {release_line(landing_url, tag)} "
         f"Suite: {suite_result}.\n{once}{extra}{waits}")
     plan = closeout_plan(remote, tracker, pull_number, work_number,
                          f"Landed on {target} in {commit[:12]} through {landing_url}.",
-                         comment, [*pending, *points, *pieces])
+                         comment, [*pending, *points, *pieces], left)
     if door is None:
         print(plan.text())
     elif getattr(door, "relayed", False):
@@ -8124,6 +8283,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if pieces:
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
+    if left:
+        print(f"escalated #{work_number}: stays open for what its partial delivery left; re-scope "
+              f"the issue or take it to the owner: {'; '.join(left)}")
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -9758,14 +9920,22 @@ def stated_component_kinds(root: Path) -> None:
                   "(CI's nightly run)"),
          arg("--record-file-seconds", type=Path, metavar="PATH",
              help="have a pytest suite write each test file's seconds to PATH, as CI's suite step "
-                  "does for its artifact file-seconds, which file-seconds reads"))
+                  "does for its artifact file-seconds, which file-seconds reads"),
+         arg("--keep-test-reports", type=Path, metavar="DIR",
+             help="copy the run's JUnit reports to DIR, also from a failed run, and name them in "
+                  "one line, as CI's suite step does for its artifact test-reports, which "
+                  "test-seconds reads; without it nothing is copied"))
 def run_suite_command(root: Path, args: argparse.Namespace) -> int:
+    if args.compare and args.keep_test_reports is not None:
+        raise QueueError("suite: --keep-test-reports keeps one budget run's reports; --compare "
+                         "times several runs, so they cannot be given together")
     stated_component_kinds(root)
     if args.compare:
         print(f"Verdict: {compare_suites(root, args.compare, args.runs)}")
         return 0
     record = args.record_file_seconds.resolve() if args.record_file_seconds else None
-    print(f"Suite: {run_suite(root, args.slowest, full=args.full, record_file_seconds=record)}")
+    print(f"Suite: {run_suite(root, args.slowest, full=args.full, record_file_seconds=record,
+                              keep_reports=args.keep_test_reports)}")
     return 0
 
 
@@ -9821,10 +9991,7 @@ def moved_file_seconds(old: Mapping[str, float], new: Mapping[str, float]) -> li
 
 def run_has_file_seconds(root: Path, repo: str, run: str) -> bool:
     """Whether CI's run `run` kept the artifact file-seconds, unexpired."""
-    listed = json.loads(run_gh(root, ["api", f"repos/{api_repo(repo)}/actions/runs/{run}/artifacts"])
-                        or "{}")
-    return any(artifact.get("name") == FILE_SECONDS_ARTIFACT and not artifact.get("expired")
-               for artifact in listed.get("artifacts") or [])
+    return run_has_artifact(root, repo, run, FILE_SECONDS_ARTIFACT)
 
 
 def newest_file_seconds_run(root: Path, repo: str) -> str:
@@ -9895,6 +10062,181 @@ def run_file_seconds(root: Path, args: argparse.Namespace) -> int:
             source, where = download_file_seconds(root, args.run, Path(directory))
             lines = write_file_seconds(root, source, where)
     print("\n".join(lines))
+    return 0
+
+
+# The test reports CI keeps (README "Test budget"): CI's suite step copies the suite's JUnit reports
+# (`suite --keep-test-reports`) into its run's artifact test-reports, with the runner's cpu and each
+# test's `started` (tests/conftest.py), and `test-seconds` prints each run's workers and the median
+# seconds of the slowest tests over CI's recent runs. It writes nothing.
+TEST_REPORTS_ARTIFACT = "test-reports"
+TEST_SECONDS_RUNS = 5
+TEST_SECONDS_SLOWEST = 20
+
+
+@dataclass(frozen=True)
+class KeptWorker:
+    """One worker of a report: its first start, busy seconds and last end; None where the report
+    names no `started`."""
+
+    name: str
+    first: float | None
+    busy: float
+    last: float | None
+
+    def line(self) -> str:
+        if self.first is None or self.last is None:
+            return f"    {self.name}: busy {self.busy:.1f} s"
+        return (f"    {self.name}: first test at {self.first:.1f} s, busy {self.busy:.1f} s, "
+                f"last done at {self.last:.1f} s")
+
+
+@dataclass(frozen=True)
+class KeptRun:
+    """One run's report as test-seconds reads it."""
+
+    name: str
+    wall: float
+    cpu: str | None
+    cases: dict[str, float]
+    workers: tuple[KeptWorker, ...]
+
+    def lines(self) -> list[str]:
+        head = (f"  {self.name}: {self.wall:.1f} s wall; {sum(self.cases.values()):.1f} s test time / "
+                f"{len(self.workers)} workers; cpu {self.cpu or 'not reported'}")
+        return [head, *(worker.line() for worker in self.workers)]
+
+
+def read_test_seconds(report: Path, name: str) -> KeptRun:
+    """A JUnit report as test-seconds reads it; refuses one that cannot be read, naming it."""
+    try:
+        root = ElementTree.parse(report).getroot()
+    except (ElementTree.ParseError, OSError) as error:
+        raise QueueError(f"test-seconds: {name} is no JUnit report ({error})") from error
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    times = [float(suite.get("time")) for suite in suites if suite.get("time")]
+    wall = float(root.get("time")) if root.get("time") else sum(times)
+    cpu = next((prop.get("value") for suite in suites for prop in suite.findall("properties/property")
+                if prop.get("name") == "cpu"), None)
+    cases: dict[str, float] = {}
+    spans: dict[str, list[tuple[float, float | None]]] = {}
+    for case in root.iter("testcase"):
+        test = "::".join(filter(None, (case.get("classname"), case.get("name"))))
+        seconds = float(case.get("time") or 0)
+        cases[test] = cases.get(test, 0.0) + seconds
+        properties = {prop.get("name"): prop.get("value") for prop in case.iter("property")}
+        started = properties.get("started")
+        spans.setdefault(properties.get("worker") or "main", []).append(
+            (seconds, float(started) if started is not None else None))
+    workers = []
+    for worker, cases_of in sorted(spans.items()):
+        starts = [start for _, start in cases_of if start is not None]
+        complete = len(starts) == len(cases_of)
+        workers.append(KeptWorker(
+            worker, min(starts) if complete else None, sum(seconds for seconds, _ in cases_of),
+            max(start + seconds for seconds, start in cases_of) if complete else None))  # type: ignore[operator]
+    return KeptRun(name, wall, cpu, cases, tuple(workers))
+
+
+def slower_median(values: list[float]) -> float:
+    """The median, the slower middle value with an even count, as ci_suite_time takes it."""
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def test_seconds_lines(runs: list[KeptRun], slowest: int) -> list[str]:
+    """The table test-seconds prints: each run with its workers, then the slowest tests' medians."""
+    lines = [f"Test seconds of {len(runs)} runs:"]
+    for run in runs:
+        lines.extend(run.lines())
+    seconds_of: dict[str, list[float]] = {}
+    for run in runs:
+        for test, seconds in run.cases.items():
+            seconds_of.setdefault(test, []).append(seconds)
+    ranked = sorted(seconds_of.items(), key=lambda item: (-slower_median(item[1]), item[0]))
+    lines.append(f"Slowest tests, median of {len(runs)} runs:")
+    lines.extend(f"  {slower_median(values):.2f} s ({min(values):.2f}-{max(values):.2f} s, "
+                 f"{len(values)} of {len(runs)} runs) {test}" for test, values in ranked[:slowest])
+    return lines
+
+
+def run_has_artifact(root: Path, repo: str, run: str, artifact: str) -> bool:
+    """Whether CI's run `run` kept the artifact `artifact`, unexpired."""
+    listed = json.loads(run_gh(root, ["api", f"repos/{api_repo(repo)}/actions/runs/{run}/artifacts"])
+                        or "{}")
+    return any(item.get("name") == artifact and not item.get("expired")
+               for item in listed.get("artifacts") or [])
+
+
+def newest_test_reports_runs(root: Path, repo: str, count: int) -> list[tuple[str, str]]:
+    """The newest `count` passing `check` runs of a push to the integration branch that kept
+    test-reports, among the last FILE_SECONDS_RUNS, newest first: each run's id and commit."""
+    branch = integration_branch(root)
+    listed = json.loads(run_gh(root, [
+        "run", "list", "--repo", api_repo(repo), "--workflow", CHECK_WORKFLOW.name, "--branch", branch,
+        "--event", "push", "--status", "success", "--limit", str(FILE_SECONDS_RUNS),
+        "--json", "databaseId,headSha"]) or "[]")
+    found = []
+    for entry in listed:
+        if len(found) == count:
+            break
+        run = str(entry.get("databaseId"))
+        if run_has_artifact(root, repo, run, TEST_REPORTS_ARTIFACT):
+            found.append((run, str(entry.get("headSha") or "")))
+    if not found:
+        raise QueueError(f"test-seconds: none of the last {len(listed)} passing {CHECK_NAME} runs of a push "
+                         f"to {branch} kept the artifact {TEST_REPORTS_ARTIFACT}; name a run with --run "
+                         f"or a downloaded report with --report")
+    return found
+
+
+def download_test_reports(root: Path, repo: str, run: str, directory: Path) -> Path:
+    """Run `run`'s se.xml from its artifact test-reports, downloaded into `directory` through gh."""
+    run_gh(root, ["run", "download", run, "--repo", api_repo(repo), "--name", TEST_REPORTS_ARTIFACT,
+                  "--dir", str(directory)])
+    found = sorted(directory.rglob("se.xml")) or sorted(directory.rglob("*.xml"))
+    if not found:
+        raise QueueError(f"test-seconds: run {run}'s artifact {TEST_REPORTS_ARTIFACT} holds no XML report")
+    return found[0]
+
+
+@command("test-seconds", "print each test's seconds from CI's kept test reports: per run its wall, "
+                         "cpu and when each worker started and finished, then the slowest tests' "
+                         "median over the runs; by default the artifact test-reports of the newest "
+                         "passing check runs of a push to the integration branch that kept it; "
+                         "writes nothing",
+         OPTIONAL_WORKTREE,
+         arg("--runs", type=positive_int, default=TEST_SECONDS_RUNS, metavar="N",
+             help=f"how many of the newest runs that kept it to read (default {TEST_SECONDS_RUNS})"),
+         arg("--run", action="append", default=[], metavar="ID",
+             help="a check run to read instead, repeatable; one without the artifact is refused"),
+         arg("--report", action="append", default=[], type=Path, metavar="FILE",
+             help="a report already downloaded (without gh, through the host's GitHub tools), "
+                  "repeatable"),
+         arg("--slowest", type=positive_int, default=TEST_SECONDS_SLOWEST, metavar="N",
+             help=f"how many slowest tests to list (default {TEST_SECONDS_SLOWEST})"))
+def run_test_seconds(root: Path, args: argparse.Namespace) -> int:
+    if args.report:
+        runs = [read_test_seconds(path, str(path)) for path in args.report]
+    else:
+        repo = remote_repo(root)
+        if repo is None:
+            raise QueueError("test-seconds: the checkout's origin names no repository, so no CI run is "
+                             "known; name downloaded reports with --report")
+        if args.run:
+            for run in args.run:
+                if not run_has_artifact(root, repo, run, TEST_REPORTS_ARTIFACT):
+                    raise QueueError(f"test-seconds: run {run} has no artifact {TEST_REPORTS_ARTIFACT}; name a "
+                                     f"{CHECK_NAME} run whose step \"Keep the suite's test reports\" ran")
+            named = [(run, f"run {run}") for run in args.run]
+        else:
+            named = [(run, f"run {run} (commit {commit[:7]})")
+                     for run, commit in newest_test_reports_runs(root, repo, args.runs)]
+        runs = []
+        for run, name in named:
+            with tempfile.TemporaryDirectory(prefix="se-test-reports-") as directory:
+                runs.append(read_test_seconds(download_test_reports(root, repo, run, Path(directory)), name))
+    print("\n".join(test_seconds_lines(runs, args.slowest)))
     return 0
 
 
@@ -9992,7 +10334,9 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("push", "public check's push gate, then git push -u origin <branch>; retries a "
+@command("push", "where se.toml [forms] files is check, se_forms.py check-files --changed "
+                 "origin/<integration branch> first; public check's push gate, then git push -u "
+                 "origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
@@ -10042,9 +10386,10 @@ def run_verified(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("pr-body", "print the pull request description deliver writes: Fixes <issue> where all "
-                    "its acceptance shows before the merge, else Refs <issue>, then the field "
-                    "report between its markers",
+@command("pr-body", "print the pull request description deliver writes: Fixes <issue> where the "
+                    "report is complete and all its acceptance shows before the merge, else Refs "
+                    "<issue> (every partial, and acceptance seen only after the merge), then the "
+                    "field report between its markers",
          OPTIONAL_WORKTREE, ISSUE_BODY,
          arg("--issue-url", required=True, help="the work issue's URL, ending in /issues/<n>"),
          arg("--field-report", required=True, type=Path, metavar="FILE",
@@ -10550,7 +10895,9 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
                        "field-report --check at the branch tip, naming what is missing and the "
                        "commands; at most [stop] refusals times in a row (se.toml, built in 5); "
                        "under Copilot it only says what is undelivered unless [copilot] "
-                       "refuse_stop is true. "
+                       "refuse_stop is true. Where se.toml [forms] files is check it also "
+                       "refuses, in any checkout, while a changed file a form claims breaks it "
+                       "(se_forms.py check-files). "
                        "Anywhere else, for a sub-agent that is no worker, and where it cannot "
                        "judge (no gh and no recorded pull request) it lets the turn end. It reads "
                        "the hook's JSON on stdin and answers the hook's JSON on stdout",
@@ -10621,7 +10968,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "fleet-check",
       "settings-check", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.

@@ -6,7 +6,8 @@ Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) i
 layout setting: `Layout.hooks`), Copilot's one plugin manifest
 (`.github/plugin/plugin.json`, or the root `plugin.json` where `se.toml` `[plugin] copilot_manifest`
 is `"root"`) and the MCP door's declarations (`.github/mcp.json`, and a root
-`.mcp.json` only where `se.toml` `[plugin] root_mcp` is on). Whether the PowerShell lines of both
+`.mcp.json` only where `se.toml` `[plugin] root_mcp` is on, and the Claude Code manifest's
+`mcpServers` only where `[plugin] claude_mcp` is on). Whether the PowerShell lines of both
 hooks files call a bare `bash` or the Git-bash hand-off `scripts/bash.ps1` is the build setting
 `se.toml` `[plugin] powershell_hooks` (`powershell_hooks`); unset, a bare `bash`. `check` refuses when any generated file
 differs from what `build` would write, so a hand edit to a generated file fails. Both refuse a Copilot agent or a skill its host would reject or skip, as the standalone
@@ -158,8 +159,9 @@ PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 COPILOT_MANIFEST_PLACES = {"github": PurePosixPath(".github/plugin/plugin.json"),
                            "root": PurePosixPath("plugin.json")}
 COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
-# The MCP door (README "MCP door"), declared per host: Copilot's project file, and the root file
-# Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`).
+# The MCP door (README "MCP door"), declared per host: Copilot's project file, the root file
+# Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`), and the
+# Claude Code manifest's mcpServers, written only where [plugin] claude_mcp is on (`claude_mcp`).
 COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
 ROOT_MCP_FILE = PurePosixPath(".mcp.json")
 MANIFESTS = (PurePosixPath(".claude-plugin/plugin.json"), PurePosixPath(".claude-plugin/marketplace.json"),
@@ -177,6 +179,7 @@ MANIFEST_LOOKUPS = {
 MCP_SERVER = "se"
 LAUNCHER = "scripts/se_mcp.sh"
 COPILOT_PLUGIN_ROOT = "${PLUGIN_ROOT}"
+CLAUDE_PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"
 # The session's folder, which Copilot expands in a server's env, so a plugin install's door can tell
 # the session's project from the plugin's folder; a launcher reads it only with PLUGIN_ROOT set.
 SESSION_CWD_ENV = {"SE_SESSION_CWD": "${COPILOT_SESSION_CWD}"}
@@ -382,12 +385,14 @@ def _plugin_settings(root: Path) -> dict:
         table = tomllib.load(handle).get("plugin", {})
     drafts = table.get("draft_skills", []) if isinstance(table, dict) else []
     if (not isinstance(table, dict)
-            or set(table) - {"root_mcp", "copilot_manifest", "powershell_hooks", "draft_skills"}
+            or set(table) - {"root_mcp", "claude_mcp", "copilot_manifest", "powershell_hooks", "draft_skills"}
             or not isinstance(table.get("root_mcp", False), bool)
+            or not isinstance(table.get("claude_mcp", False), bool)
             or not isinstance(drafts, list) or not all(isinstance(name, str) for name in drafts)
             or table.get("copilot_manifest", "github") not in COPILOT_MANIFEST_PLACES
             or table.get("powershell_hooks", "bash") not in POWERSHELL_HOOKS):
         raise SourceError(f"{root / 'se.toml'}: [plugin] holds only `root_mcp = true|false`, "
+                          "`claude_mcp = true|false`, "
                           f"`copilot_manifest = {'|'.join(map(json.dumps, COPILOT_MANIFEST_PLACES))}` and "
                           f"`powershell_hooks = {'|'.join(map(json.dumps, POWERSHELL_HOOKS))}` and "
                           '`draft_skills = ["<draft>", ...]`')
@@ -398,6 +403,12 @@ def root_mcp(root: Path) -> bool:
     """`se.toml` `[plugin] root_mcp`: whether the build writes a root `.mcp.json`, which Claude Code
     reads too; off by default."""
     return _plugin_settings(root).get("root_mcp", False)
+
+
+def claude_mcp(root: Path) -> bool:
+    """`se.toml` `[plugin] claude_mcp`: whether the build declares the door in the Claude Code
+    manifest, `.claude-plugin/plugin.json`, run from the plugin's root; off by default."""
+    return _plugin_settings(root).get("claude_mcp", False)
 
 
 def copilot_manifest(root: Path) -> PurePosixPath:
@@ -536,6 +547,8 @@ def _manifests(root: Path, copilot: bool = True) -> dict[PurePosixPath, bytes]:
         **{event: [{"hooks": [{"type": "command", "command": kern_hook(event)}]}]
            for event in KERN_EVENTS},
     }
+    if claude_mcp(root):
+        plugin["mcpServers"] = {MCP_SERVER: mcp_server(f"{CLAUDE_PLUGIN_ROOT}/{LAUNCHER}")}
     marketplace = {
         "name": PLUGIN,
         "owner": {"name": "SE"},

@@ -345,18 +345,34 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   - `.github/mcp.json` for Copilot in a checkout of SE;
   - the `mcpServers` entry of Copilot's plugin manifest `.github/plugin/plugin.json` for a plugin
     install, the plugin's root `${PLUGIN_ROOT}` in an argument only;
+  - the `mcpServers` entry of the Claude Code manifest `.claude-plugin/plugin.json` only where
+    `se.toml` `[plugin] claude_mcp` is on, the launcher run from `${CLAUDE_PLUGIN_ROOT}`; every
+    Claude Code session with SE's plugin then starts the door, and Claude Code names its tools
+    `mcp__plugin_se_se__<tool>` (`mcp__plugin_se_se__forms`);
   - a root `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on; it is off, as Claude Code
-    reads that file too.
+    reads that file in every checkout.
 - **A plugin install** runs the launcher in the plugin's folder with `--root .`; the launcher then
-  serves the session's repository. It reads `SE_SESSION_CWD`, else `COPILOT_SESSION_CWD`, else, on
-  Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>: root
-  <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
+  serves the session's repository. It reads `SE_SESSION_CWD`, else the host's session folder,
+  else, on Linux and macOS, its parent's working directory, and writes one line, `plugin <folder>:
+  root <root> from <source>`, to that root's `.se/.runtime/mcp.log` ([scripts/se_mcp.sh](scripts/se_mcp.sh)).
+  - Copilot's plugin root is `PLUGIN_ROOT`, its session folder `COPILOT_SESSION_CWD`; Claude
+    Code's are `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PROJECT_DIR`, each read only under its own host.
+  - Claude Code starts a plugin's server in the project itself, measured
+    ([scripts/host-limits.toml](scripts/host-limits.toml), "plugin MCP door"), so there `--root .`
+    is the project already.
   - A session folder that is no checkout gets no `.se`: that line goes to `~/.se/.runtime/mcp.log`.
 - **A host that reads neither file**: `copilot mcp add se -- bash <se>/scripts/se_mcp.sh --root .`,
   or in VS Code `code --add-mcp
   '{"name":"se","command":"bash","args":["<se>/scripts/se_mcp.sh","--root","${workspaceFolder}"]}'`.
   - An installed plugin's `se` outranks `copilot mcp add`; then the door goes by hand, per
     session ([docs/copilot.md "The door by hand"](docs/copilot.md#the-door-by-hand)).
+- **What the door does not cover.**
+  - Where the `se` binary is not in place as the server starts (a fresh machine, or a cloud
+    snapshot older than the pin), the door offers only `status` for that whole session; the way to
+    a form there is the command line, `forms.py draft <form> --json`.
+  - In a claude.ai cloud session the plugin is the clone in `~/.claude/skills/se` (`se@skills-dir`,
+    [Claude Code cloud](#claude-code-cloud)); whether Claude Code starts that plugin's
+    `mcpServers` is not measured.
 - **In another repository**, one without a `wiring.toml` of its own, the door serves SE's tools
   from the SE the launcher lies in (the plugin's root, or the pinned module under
   `.se/modules/se`), and runs their commands against the project: kern's `--home` (its
@@ -378,6 +394,7 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 | `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
+| `forms` | `list`, `draft`, `check` | `components/forms` |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
@@ -390,6 +407,8 @@ through it as tools. The host spawns it as the session starts; nobody starts any
   neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
   `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
   through "Chat: Manage Tool Approval".
+  - The door the Claude Code plugin declares takes the rule `mcp__plugin_se_se__<tool>`, such as
+    `mcp__plugin_se_se__forms` for a session whose permission mode asks before a tool runs.
 - **Checked.** The door's catalog check refuses a read-only command without an `mcp` line, and
   so does `work_tickets.py docs`, which writes it. `components/cmd/se/mcp_test.go` holds SE's
   catalog to the check, and the door to its contract with the Go SDK's client against the built
@@ -615,9 +634,15 @@ setting `landing` below. `work_tickets.py integrate` does all of it:
      Goal>`, never a commit's subject. Tracker references (pub-004's forms) are dropped from it,
      with an aside such as `(PR #<n>)` that holds one, and its punctuation tidied; without a
      usable Goal, or with fewer than two words left, it is `Integrate <branch>` alone.
-   - A Goal that opens with a list's lead-in gives that lead-in. A sentence over 120 characters
-     ends at its last clause boundary (a comma, semicolon, colon or dash) within them, never with
-     "...", or at its first within 200 (`work_tickets.py` `at_boundary`).
+   - A Goal that opens with a list's lead-in gives that lead-in. A sentence of up to 200
+     characters stays whole, and a long branch name lowers the 200 so the title keeps within
+     GitHub's 256. A longer one ends at its last clause end (a comma, semicolon, colon or dash)
+     within them before "and", "but", "so" or "while", else at its last, never with "..."
+     (`work_tickets.py` `at_boundary`).
+   - A clause end inside brackets, quotes or code does not count, nor the one that closes a
+     leading clause such as "Where ...", "If ..." or "With ..."; without one that counts, the
+     sentence ends at its last word within them. The work form warns where a Goal's first
+     sentence runs past 120 characters.
    - Its description is always a link, never the report, so it fits GitHub's body limit and any
      tool argument whatever the report's size: `Refs <work issue>`, the work pull request, and the
      marker `<!-- se:field-report-in <n> -->`.
@@ -981,6 +1006,8 @@ What it judges:
     `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
   - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
     sub-agent end and says why.
+- Where se.toml `[forms] files` is `check`, it also refuses in any checkout it judges, worker or
+  not, while a changed file a form claims breaks it ([Forms](#forms)).
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
@@ -1194,6 +1221,11 @@ se's own suite writes such a report, `se.xml`, from `tests/conftest.py`.
     slow setup 6.0 s tests.test_ui::test_a (browser, worker gw0)
     setup browser paid on 2 workers (gw0, gw1): 12.5 s; group its tests on one worker
 ```
+
+CI's suite step keeps that report as the artifact `test-reports` (`suite --keep-test-reports DIR`,
+also from a failed run), with the runner's `cpu` and each test's `started`, its seconds from the
+session's start. `work_tickets.py test-seconds` prints, per run, its wall, cpu and when each worker
+started and finished, then the slowest tests' medians over CI's recent runs.
 
 Without reports the gate reads pytest's lines
 (it adds `--durations=<N>` to a pytest command), and where neither names a test it says so and names
@@ -1474,6 +1506,7 @@ obs = "~/src/obs"                     # use this checkout of module obs if the d
 | A local checkout's version | `sync` and `status` report the version its `se.toml` sets, and whether the module's `version` range admits it. A malformed version, or none where the module pins a range, is an error naming that file. |
 | `[urls]` | prefix rewrites applied to `url` before any git step, for example a private mirror of a public host. The longest matching prefix wins. |
 | `[hooks] core = "off"` | or `SE_HOOK_CORE=off` in the environment, which answers first: SE's session hooks then start no core and post to none, and nothing is uninstalled. The start still refreshes, syncs and greets, and the Stop check still answers. |
+| `SE_FORMS_GATE=off` | in the environment: SE's form gate judges no GitHub write on this machine, whatever se.toml `[forms] gate` says; unset, it follows se.toml ([Forms](#forms)). |
 | `[paths] se = "<the installed SE's folder>"` | this machine's SE stays at its version, because the start's refresh leaves a local path alone ([Start and refresh](#start-and-refresh)). |
 
 `[hooks] core = "off"`:
@@ -1534,6 +1567,8 @@ uv run python <se>/scripts/se_workflows.py check
   and `release.yml`, and the actions `integrator-pass`, `suite-shard` and `suite-time` (`SHIPPED` in
   `scripts/se_workflows.py`). `write` writes the files it names, or regenerates those the project
   holds; each is a generated file whose first line names its source path, the pin and SE's place.
+- SE's own workflows beside them are not shipped: `check.yml`, `docs.yml` and the forms backstop,
+  `forms.yml`, run on SE's own events ([Forms](#forms)).
 - The pin is `[modules.se]`'s ([Modules](#modules)), else the one the copies carry, as in an
   application `se new app` made, or `--ref`.
 - SE's place, how CI reaches it: a module URL `../<name>.git` is `${{ github.repository_owner
@@ -1711,9 +1746,9 @@ gated push and the pull request, and the Stop hook's check.
 | `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, in the form of .github/pull_request_template.md |
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
-| `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where all its acceptance shows before the merge, else Refs <issue>, then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
-| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
+| `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where the report is complete and all its acceptance shows before the merge, else Refs <issue> (every partial, and acceptance seen only after the merge), then the field report between its markers |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Where se.toml [forms] files is check it also refuses, in any checkout, while a changed file a form claims breaks it (se_forms.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
 
@@ -1742,9 +1777,10 @@ settings checks and the generated docs.
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
 | `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
-| `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
+| `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
+| `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
 
 #### Review
 
@@ -1799,6 +1835,21 @@ checkout.
 |---|---|---|
 | `se.py component add` | `se.py component add [--root ROOT] name` | scaffold an ad hoc component under the ignored .se/components/ |
 | `se.py new app` | `se.py new app --path PATH name` | create an application on kern from kern's template at SE's kern pin |
+
+#### Forms
+
+`components/forms`: SE's forms: list names them, draft gives a form's fields, their instructions and
+their shape, and check finds everything SE's filing commands would refuse in a text, or gives the
+Markdown to file.
+
+| Command | Usage | What it does |
+|---|---|---|
+| `se_forms.py backstop` | `se_forms.py backstop --event-name EVENT_NAME --event EVENT [--backstop {off,on}] [--worktree WORKTREE]` | plan the label or failure a GitHub event's off-form text gets |
+| `se_forms.py check` | `se_forms.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [form]` | check a text against a form as SE's filing commands would |
+| `se_forms.py check-files` | `se_forms.py check-files [--changed REF] [--root ROOT] [--forms FORMS] [PATH ...]` | check the files a form claims, given or changed since a ref |
+| `se_forms.py draft` | `se_forms.py draft [--markdown] [--tree] form` | print a form's fields, their instructions, their shape and its schema |
+| `se_forms.py gate` | `se_forms.py gate [--gate {off,warn,refuse}] [--files {off,check,write}] [--forms FORMS] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its form |
+| `se_forms.py list` | `se_forms.py list [--tree]` | name every form with its actions |
 <!-- generated by `work_tickets.py docs`: end -->
 
 `scripts/review.py` holds the review commands, which load `work_tickets.py` for its GitHub door.
@@ -2042,6 +2093,29 @@ A `file.write` form claims files by its `[applies] paths` globs, such as a miles
 or the conditions pick, refuses one none picks and leaves unclaimed files free; the front matter
 and `#` title stay as they are. `--forms <folder>` reads the forms from another folder.
 
+Where se.toml `[forms] files` is `check` or `write` (default `off`), a claimed file that breaks
+its form cannot end a turn, be pushed or pass CI; each refusal names the file, the form and each
+finding.
+
+- `scripts/se_forms.py check-files` with `--changed` and a ref checks every claimed file changed
+  since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
+- `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
+  `check` job against the pull request's base. It reads `[forms] files` as `enforce` is read.
+- Under Copilot the Stop hook only advises. SE's own se.toml leaves it off: no form of SE's claims
+  a path yet.
+- `files = "write"` does all `check` does and holds the form at the write too: SE's form gate
+  denies a Write, Edit or MultiEdit of a claimed file whose result breaks its form, before it runs,
+  naming the form and each finding. An Edit is judged on the whole file it would leave, never on
+  its fragment; `push_files` and `create_or_update_file` are judged per path.
+  - SE's start writes the switch into `.se/.runtime/forms-files`, so `scripts/se_hook.sh` picks
+    the file tools with builtins only where it is on; a change takes effect at the next session's
+    start. `scripts/se_forms.py`'s docstring (The file tools) owns the rest.
+
+An agent asks for a form through the MCP door's tool `forms`, `scripts/se_forms.py`: `list`
+names the forms, `draft <form>` gives `draft --json`'s answer, and `check` finds all the filing
+commands below would refuse (private terms, the name rule, SE's commands too) or gives the
+Markdown to file. It only reads; its first line is `passes` or `refused: <n> findings`.
+
 The commands that file issues check with them where se.toml `[forms] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
 `--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
@@ -2065,3 +2139,38 @@ always rendered through the form.
   private `.public-check.local`, which nothing committed refers to, where it holds one.
   - A hit names the field and the list, never the term: stop and ask the owner. `--hold` never
     files such a text.
+
+SE's form gate holds the writes an agent sends through the GitHub MCP tools (`issue_write`,
+`add_issue_comment`, `create_pull_request` and the other five of `scripts/se_forms.py`'s table) to
+the same checks, where se.toml `[forms] gate` says so: `off` (the default), `warn` (the agent gets
+the findings) or `refuse` (the call is denied, naming the form, every finding and the forms tool).
+
+- `scripts/se_hook.sh` picks the guarded calls with bash builtins and runs `se_forms.py gate` for
+  them alone, whose docstring owns the table, the answers and the failure rule.
+- A shell call that names `gh` is guarded too: the gate reads each `gh issue`, `gh pr` and `gh api`
+  write in it as the same write through the GitHub tools; its docstring owns the commands it reads.
+  - A body it cannot read, such as one from `$(...)` or `--fill`, is refused where a form applies,
+    naming `--body-file`.
+  - It does not see `gh api graphql`, `curl` or another program that calls GitHub's API.
+- It reads `[forms] gate` as `enforce` is read, from the se.toml of the project whose home holds
+  the target, else of SE itself; a write elsewhere, without a body or that no form covers runs as
+  before. `SE_FORMS_GATE=off` turns it off for a machine.
+- From `refusals` on, a refused issue write may be sent again labelled `off-form` and without
+  `ready`, the hold `--hold` files; a private term is never held.
+- It fails open when it is slow: past 10 s, or where the host cancels it, the call runs.
+  It fails open where it cannot judge (no Python 3.11, a payload it cannot read), and logs it in
+  `.se/.runtime/forms-gate.log`; it fails closed only on a crash once it knows a form applies.
+
+SE's forms backstop marks what reaches GitHub past every hook, where se.toml `[forms] backstop` is
+`on` (default `off`): a person's write on github.com, a session without SE's hooks, a label change.
+
+The workflow `.github/workflows/forms.yml` runs on each issue and comment event and hands the event
+to `scripts/se_forms.py backstop`, whose docstring owns what it checks and its plan.
+
+- A fleet issue (the fleet marker, or labelled `work`) whose text breaks its form gets the label
+  `off-form`, and the run's summary lists the findings and the `unhold` line; a marked comment that
+  breaks its form gets a failed run, as `unhold` reads the issue's body alone.
+- Outside reporters' issues, unmarked comments and passing text are left alone. The workflow never
+  comments and never removes a label; `work_tickets.py unhold` stays the way back.
+- SE's own se.toml leaves it `off`: open issues SE's commands filed from an older form would be
+  labelled.

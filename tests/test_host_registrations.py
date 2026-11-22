@@ -37,7 +37,7 @@ def test_every_place_is_a_host_fact_of_a_known_surface_with_source_and_register_
     assert {p.kind for p in places} == {"hooks", "mcp"}
     assert {p.base for p in places} <= {"project", "home", "checkout", "plugin", "copilot-plugin"}
     for p in places:
-        assert p.source and p.read == "2026-11-14" and p.register[""] and p.files[""]
+        assert p.source and p.read >= "2026-11-14" and p.register[""] and p.files[""]
         assert "\n" not in p.fix("windows", FILL) and "{" + "launcher" not in p.fix("linux", FILL)
     assert any(not p.outside for p in places) and any(p.outside for p in places)
 

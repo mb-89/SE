@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from xml.etree import ElementTree
 
 import git_door
 import pytest
@@ -4074,19 +4075,20 @@ LONG_CLAUSE = "while a call waits it captures stdout and stderr for the whole pr
 
 @pytest.mark.parametrize(("goal", "summary"), [
     # The landing title "...: A Python component handles one call at a time, and while a call
-    # waits it captures stdout and stderr for the whole...": it ends at the clause instead.
+    # waits it captures stdout and stderr for the whole...": within 200, it stays whole.
     ("A Python component handles one call at a time, and while a call waits it captures stdout "
      "and stderr for the whole process, so a second call waits.",
-     "A Python component handles one call at a time"),
+     "A Python component handles one call at a time, and while a call waits it captures stdout "
+     "and stderr for the whole process, so a second call waits."),
     # A Goal that opens with a list's lead-in is that lead-in.
     ("The last kern landings left findings, bundled here:\n- kern never tells a component;\n"
      "- calls have no order.", "The last kern landings left findings, bundled here"),
-    # The last clause end within 120 characters, of several.
+    # Several clause ends, within 200: the whole sentence.
     ("Fix one thing, then a second thing, then a third thing, and then " + LONG_CLAUSE + " waits.",
-     "Fix one thing, then a second thing, then a third thing"),
-    # No clause end within 120: the first within 200.
+     "Fix one thing, then a second thing, then a third thing, and then " + LONG_CLAUSE + " waits."),
+    # A clause end past 120, within 200: the whole sentence.
     ("Run " + LONG_CLAUSE + " and its sibling waits behind it, then ship it.",
-     "Run " + LONG_CLAUSE + " and its sibling waits behind it"),
+     "Run " + LONG_CLAUSE + " and its sibling waits behind it, then ship it."),
     # No clause end at all, within 200: the whole sentence.
     ("Run " + LONG_CLAUSE + " waits.", "Run " + LONG_CLAUSE + " waits."),
 ])
@@ -4094,6 +4096,88 @@ def test_a_long_goal_summary_ends_at_a_sentence_or_clause_boundary(goal, summary
     got = work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\npatch\n")
     assert got == summary
     assert not got.endswith("...") and len(got) <= work_tickets.SUMMARY_MAX
+
+
+GATE_SENTENCE = (
+    "Where SE's forms are switched on, a GitHub write through the GitHub MCP tools whose body "
+    "breaks its form is refused before it runs, and the refusal names the form, every finding "
+    "and the tool call that gets the form.")
+GUARD_SENTENCE = (
+    "A test that connects beyond this machine from its own process, or runs far longer than the "
+    "slowest test, fails with its name and what to do.")
+HOOKS_SENTENCE = (
+    'One setting per machine, `SE_HOOK_CORE=off` in the environment or `[hooks] core = "off"` '
+    'in `~/.se/local.toml` (the per-machine settings file), keeps the hooks from starting or '
+    'using the core, while the refresh, the greeting and the Stop check still work.')
+COST_SENTENCE = (
+    "One command reads a folder of transcripts and shows, per session and in total, the tokens "
+    "of each kind (new input, input read from the prompt cache, input written to it, output), "
+    "their price weight per model, the share used by sub-agents and the share spent before the "
+    "first edit.")
+GUARD_LONG_SENTENCE = (
+    GUARD_SENTENCE[:-1] + ", naming the host it tried, the seconds it ran and the setting it needs.")
+BRACKETS_SENTENCE = (
+    "The public check reads every file in the tree and reports each hit with its line, and it "
+    "skips the files its lists name (the committed base list, the local list, and the vendored "
+    "folders) before it reads any of them.")
+DEFAULT_SENTENCE = (
+    "By default the gate only warns about a write whose body breaks its form, and with `refuse` "
+    "set in the project's settings it refuses that write before it reaches GitHub through the "
+    "GitHub MCP tools or through gh on any machine.")
+WHERE_SENTENCE = (
+    "Where a project sets the gate to refuse in its settings, every write that the GitHub MCP "
+    "tools send to an issue or a pull request in one of its home repositories is checked against "
+    "its form before it is sent to GitHub at all.")
+
+
+def before(sentence: str, mark: str) -> str:
+    return sentence[:sentence.index(mark)]
+
+
+@pytest.mark.parametrize(("goal", "summary"), [
+    # form-gate-github-writes landed as "Where SE's forms are switched on": it keeps its main
+    # clause, up to "is refused before it runs".
+    (GATE_SENTENCE + "\n- A write that passes runs as today.\n- With the switch off, as on main.",
+     before(GATE_SENTENCE, ", and the refusal")),
+    # feat/hooks-off-switch-per-machine-20261114: the subject keeps its verb.
+    (HOOKS_SENTENCE, before(HOOKS_SENTENCE, ", while")),
+    # feat/session-cost-from-transcripts-20261116: the last clause end within 200, after "output)".
+    (COST_SENTENCE, before(COST_SENTENCE, ", their price")),
+    # feat/forms-filing-commands-20261116, test-network-guard-and-timeout and
+    # feat/forms-adapters-20261116: within 200, each stays whole.
+    ("With the new switch on, the three filing commands check the title and the body against "
+     "their form before anything is written.",
+     "With the new switch on, the three filing commands check the title and the body against "
+     "their form before anything is written."),
+    (GUARD_SENTENCE, GUARD_SENTENCE),
+    ("Every text that SE's own commands send to GitHub either selects exactly one registered form "
+     "and passes it, or is free by a stated rule.",
+     "Every text that SE's own commands send to GitHub either selects exactly one registered form "
+     "and passes it, or is free by a stated rule."),
+    # A clause end before "or" gets no preference: never at "from its own process".
+    (GUARD_LONG_SENTENCE, before(GUARD_LONG_SENTENCE, ", the seconds")),
+    # A clause end inside brackets does not count.
+    (BRACKETS_SENTENCE, before(BRACKETS_SENTENCE, ", and it skips")),
+    # "By default" opens no leading clause: its first clause end counts.
+    (DEFAULT_SENTENCE, before(DEFAULT_SENTENCE, ", and with")),
+    # The only clause end closes the leading "Where ..." clause: cut at the last word within 200.
+    (WHERE_SENTENCE, WHERE_SENTENCE[:201].rsplit(" ", 1)[0]),
+])
+def test_a_landing_title_summary_is_a_complete_statement(goal, summary):
+    got = work_tickets.goal_summary(f"## Goal\n\n{goal}\n\n## Package kind\n\nfix\n")
+    assert got == summary
+    assert "..." not in got and len(got) <= work_tickets.SUMMARY_MAX
+
+
+@pytest.mark.parametrize("public", [True, False])
+def test_a_landing_title_stays_within_github_s_title_limit(public):
+    sentence = " ".join(["word"] * 39) + " last."
+    assert len(sentence) == 200 and not work_tickets.CLAUSE_END.search(sentence)
+    branch = "feat/" + "a" * 55
+    title = work_tickets.integration_merge_message(
+        branch, 12345, 12346, public, f"## Goal\n\n{sentence}\n")
+    assert len(title) <= work_tickets.TITLE_MAX and "..." not in title
+    assert title.startswith(f"Integrate {branch}: Word word")
 
 
 def landing_as_read(main_checkout: Path, footer: str = "\n---\n_Generated by a host_\n") -> Path:
@@ -4211,6 +4295,73 @@ def test_integrate_keeps_a_planned_splits_issue_open_and_comments_the_pieces_lef
     assert '"state": "closed", "state_reason": "completed"' not in out
     assert "#5 stays open for its planned pieces left; its last piece closes it" in out
     assert github.calls == []
+
+
+def partial_without_pieces(report: str, left: str = "- Requirement 2: blocked by the host.") -> str:
+    """`report` as a partial delivery whose "Not delivered" names no planned piece."""
+    return report.replace("**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone", "## Not delivered\n\n" + left)
+
+
+def test_partial_left_is_what_a_partial_without_planned_pieces_left():
+    def left(text: str) -> list[str]:
+        return work_tickets.partial_left(partial_without_pieces(COMPLETE_REPORT, text))
+
+    assert left("- **R8, the off switch:** kern cannot.\n  More on it.\n"
+                "* **R9.** Later.\n- Requirement 2: blocked by the host.\n  - a sub-bullet") == [
+        "R8, the off switch", "R9", "Requirement 2: blocked by the host."]
+    assert left("Some context first.\n\n- **R8:** the off switch.") == ["R8"]
+    assert left("The off switch waits on kern,\nas decided.\n\nA second paragraph.") == [
+        "The off switch waits on kern, as decided."]
+    assert left("None") == ["nothing named under Not delivered"]
+    assert work_tickets.partial_left(COMPLETE_REPORT.replace(
+        "**Result:** complete", "**Result:** partial").replace(
+        "## Not delivered\n\nNone\n", "## Not delivered\n\n")) == [
+        "nothing named under Not delivered"]
+    assert work_tickets.partial_left(COMPLETE_REPORT) == []
+    assert work_tickets.partial_left(planned_split(COMPLETE_REPORT)) == []
+
+
+def test_pr_body_names_a_partial_without_planned_pieces_with_refs():
+    issue = {"number": 5, "url": URL, "body": BODY}
+    body = work_tickets.pull_request_body(issue, partial_without_pieces(COMPLETE_REPORT))
+    assert body.startswith(f"Refs {URL}\n")
+
+
+def test_integrate_read_back_keeps_a_partial_without_pieces_open_and_hands_the_rest_to_se(
+        main_checkout, monkeypatch, github, capsys):
+    """A partial naming no planned piece lands: the close-out keeps the issue open, takes `ready`
+    off, labels it `escalated` and names what the delivery left, for SE; a hand-off file written
+    before `left` existed still closes the issue."""
+    head, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    (main_checkout.parent / "saved" / "pr.md").write_text(
+        partial_without_pieces(reported_at(head), "- **R8, the off switch:** kern cannot yet."),
+        encoding="utf-8")
+    assert run(main_checkout, *arguments) == 0
+    handoff = main_checkout / ".se" / "handoff" / "feature-worker.json"
+    state = json.loads(handoff.read_text(encoding="utf-8"))
+    assert state["left"] == ["R8, the off switch"]
+    session_squash(main_checkout, "refs/heads/land/feature/worker")
+    capsys.readouterr()
+
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+
+    out = capsys.readouterr().out
+    assert '"state_reason": "completed"' not in out
+    assert "<the issue's labels without in-progress>" in out
+    assert out.index("<the issue's labels without ready>") < out.index(
+        "<the issue's labels with escalated>")
+    assert "Stays open for what this partial delivery left, which SE re-scopes: R8, the off switch" in out
+    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
+            "take it to the owner: R8, the off switch") in out
+    assert github.calls == []
+
+    del state["left"]  # a hand-off written before the change
+    handoff.write_text(json.dumps(state), encoding="utf-8")
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+    out = capsys.readouterr().out
+    assert '"state": "closed", "state_reason": "completed"' in out
+    assert "escalated" not in out
 
 
 def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_pushes_main(
@@ -4874,6 +5025,72 @@ def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(workt
     parts = out.split("Parts:\n", 1)[1].split("Slowest tests:", 1)[0]
     assert parts.startswith("  se: ") and " / 1 worker = " in parts
     assert "    slow setup " in parts and ", worker gw0)" in parts
+
+
+def reporting_suite_reports(monkeypatch, tmp_path: Path) -> dict[str, bytes]:
+    """The reports REPORTING_SUITE writes, byte for byte, by name."""
+    written = tmp_path / "written"
+    written.mkdir()
+    monkeypatch.setenv("SE_TEST_REPORTS", str(written))
+    exec(REPORTING_SUITE, {})
+    monkeypatch.delenv("SE_TEST_REPORTS")
+    return {path.name: path.read_bytes() for path in written.iterdir()}
+
+
+def test_suite_keeps_its_test_reports_where_asked_also_when_it_fails(worktree, monkeypatch, capsys, tmp_path):
+    expected = reporting_suite_reports(monkeypatch, tmp_path)
+    capsys.readouterr()
+    failing = REPORTING_SUITE.replace('print("13 passed")', 'print("1 failed")\nraise SystemExit(1)')
+    for name, script, code in (("passed", REPORTING_SUITE, 0), ("failed", failing, 1)):
+        fake_suite(worktree, monkeypatch, 5.0)
+        (worktree / "suite.py").write_text(script, encoding="utf-8")
+        kept = tmp_path / name / "reports"
+        assert run(worktree, "suite", "--keep-test-reports", str(kept)) == code
+        assert {path.name: path.read_bytes() for path in kept.iterdir()} == expected
+        out = capsys.readouterr().out
+        assert out.splitlines()[0] == f"Test reports kept in {kept}: browser.xml, unit.xml"
+
+    assert run(worktree, "suite", "--compare", "main", "--keep-test-reports", str(tmp_path / "x")) == 1
+    error = capsys.readouterr().err
+    assert "--keep-test-reports" in error and "--compare" in error
+    assert not (tmp_path / "x").exists()
+
+
+def test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before(worktree, monkeypatch, capsys, tmp_path):
+    outputs = []
+    for extra in ([], ["--keep-test-reports", str(tmp_path / "kept")]):
+        fake_suite(worktree, monkeypatch, 5.0)
+        (worktree / "suite.py").write_text(REPORTING_SUITE, encoding="utf-8")
+        assert run(worktree, "suite", *extra) == 0
+        outputs.append(capsys.readouterr())
+        assert (tmp_path / "kept").exists() == bool(extra)
+    without, kept = outputs
+    line = f"Test reports kept in {tmp_path / 'kept'}: browser.xml, unit.xml\n"
+    assert line in kept.out and kept.out.replace(line, "", 1) == without.out
+    assert kept.err == without.err
+
+
+def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypatch, capsys, tmp_path):
+    """se's conftest writes the host's cpu and each test's start into se.xml (README "Test budget")."""
+    root = Path(__file__).resolve().parents[1]
+    command = [sys.executable, "-m", "pytest", "-q", "-n", "1", "-p", "no:cacheprovider",
+               "--rootdir", str(root), str(root / "tests" / "test_se_home.py")]
+    (worktree / "se.toml").write_text(f"[tests]\ncommand = {json.dumps(command)}\n", encoding="utf-8")
+    readings = iter([0.0, 5.0])
+    monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
+
+    assert run(worktree, "suite", "--keep-test-reports", str(tmp_path / "kept")) == 0
+    assert "Test reports kept in" in capsys.readouterr().out
+    suite = ElementTree.parse(tmp_path / "kept" / "se.xml").getroot().find("testsuite")
+    named = {prop.get("name"): prop.get("value") for prop in suite.findall("properties/property")}
+    assert re.fullmatch(r".+ x\d+", named["cpu"])
+    wall = float(suite.get("time"))
+    cases = suite.findall("testcase")
+    started = [float({prop.get("name"): prop.get("value") for prop in case.iter("property")}["started"])
+               for case in cases]
+    assert cases and len(started) == len(cases)
+    assert all(0 <= value <= wall for value in started)
+    assert started == sorted(started)  # one worker: each case starts no earlier than the one before
 
 
 def test_suite_without_reports_or_durations_names_the_remedy_once(worktree, monkeypatch, capsys):
@@ -6229,6 +6446,49 @@ def test_integrate_leaves_an_issue_with_post_merge_acceptance_open_and_reports_g
     output = capsys.readouterr().out
     assert "Issue #5: OPEN on GitHub after the merge" in output
     assert "Close #5 once its post-merge acceptance is seen" in output
+
+
+def test_integrate_keeps_a_partial_without_pieces_open_through_gh(main_checkout, monkeypatch, capsys):
+    worker = main_checkout.parent / "worker"
+    git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", "feature/worker", str(worker))
+    (worker / "worker.txt").write_text("worker\n", encoding="utf-8")
+    git_ok("-C", str(worker), "add", "worker.txt")
+    git_ok("-C", str(worker), "commit", "-q", "-m", "worker")
+    git_ok("-C", str(worker), "push", "-q", "origin", "feature/worker")
+    head = git_run(worker, "rev-parse", "HEAD", check=True).stdout.strip()
+    monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
+    calls = integration_fakes(monkeypatch, head)
+    report = {"body": partial_without_pieces(reported_at(head))}
+    monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: (
+        {"body": BODY} if number == 5 else report))
+    closed: set[str] = set()
+    bodies: list[str] = []
+
+    def gh_call(root, args):
+        calls.append(args)
+        if args[:2] == ["pr", "view"]:
+            return json.dumps({"headRefName": "feature/worker", "headRefOid": head, "body": report["body"],
+                               "url": "https://git.example/owner/repo/pull/7"})
+        if args[:2] == ["issue", "close"]:
+            closed.add(args[2])
+        if args[:2] == ["issue", "view"]:
+            return "CLOSED\n" if args[2] in closed else "OPEN\n"
+        return ""
+    monkeypatch.setattr(work_tickets, "run_gh", gh_call)
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, args, body: calls.append(args) or bodies.append(body) or "")
+
+    work_tickets.integrate(main_checkout, 7, None, None)
+    assert [call for call in calls if call[:2] == ["issue", "close"]] == []
+    edits = [call[2:5] for call in calls if call[:2] == ["issue", "edit"]]
+    assert ["5", "--remove-label", "ready"] in edits and ["5", "--add-label", "escalated"] in edits
+    line = "Requirement 2: blocked by the host."
+    assert len(bodies) == 1 and (
+        "Stays open for what this partial delivery left, which SE re-scopes: " + line) in bodies[0]
+    output = capsys.readouterr().out
+    assert "Issue #5: OPEN on GitHub after the merge" in output
+    assert ("escalated #5: stays open for what its partial delivery left; re-scope the issue or "
+            "take it to the owner: " + line) in output
 
 
 def test_integrate_leaves_an_issue_with_open_points_of_the_landed_head_open(

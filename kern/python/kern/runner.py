@@ -280,7 +280,8 @@ class Runner:
         waits for a long step as long as this process lives (docs/go-core.md "Progress and
         long calls"). With `send`, the step's answer goes out through it before the beat ends,
         so the core never waits in silence between the step's end and its answer; an answer
-        that is no JSON goes out as the step's error instead of nothing."""
+        that is no JSON goes out as the step's error instead of nothing. It returns once its beat
+        has ended, so no beat follows it."""
         call, step = str(body.get("call", "")), int(body.get("step", 1))
         done = threading.Event()
 
@@ -292,7 +293,8 @@ class Runner:
                 except NatsError:
                     return
 
-        threading.Thread(target=beat, name="kern-step-beat", daemon=True).start()
+        beating = threading.Thread(target=beat, name="kern-step-beat", daemon=True)
+        beating.start()
         try:
             answer = self._run_step(name, body, call, step)
             if send is not None:
@@ -308,6 +310,9 @@ class Runner:
             return answer
         finally:
             done.set()
+            # A beat that woke before `done` was set lands before the step returns; bounded by
+            # BEAT, so a beat that never stops fails its caller's look instead of hanging it.
+            beating.join(BEAT)
 
     def _run_step(self, name: str, body: dict[str, Any], call: str, step: int) -> dict[str, Any]:
         def say(line: str) -> None:

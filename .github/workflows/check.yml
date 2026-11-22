@@ -119,6 +119,13 @@ jobs:
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
+      # The changed files a form claims (README "Forms"): the command reads se.toml [forms] files
+      # at origin/<integration branch> itself and passes where it is off.
+      - name: The changed files a form claims follow their forms
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: uv run python scripts/se_forms.py check-files --changed "origin/$BASE_REF"
       # kern, the Go core incubated under kern/ (kern/README.md "Tests"), on the Go its go.mod
       # pins: vetted here; its tests run in the suite step below, as se.toml [tests.beside.kern]
       # declares them, with their own time and budget.
@@ -157,7 +164,7 @@ jobs:
         run: |
           full=()
           if [ "$EVENT" = schedule ]; then full=(--full); fi
-          uv run python scripts/work_tickets.py suite --worktree . "${full[@]}" --record-file-seconds "$RUNNER_TEMP/file-seconds.json"
+          uv run python scripts/work_tickets.py suite --worktree . "${full[@]}" --record-file-seconds "$RUNNER_TEMP/file-seconds.json" --keep-test-reports "$RUNNER_TEMP/test-reports"
       # The seconds each test file took in this run, the PowerShell cases among them: the run's
       # artifact file-seconds, from which `work_tickets.py file-seconds` writes tests/file-seconds.json.
       - name: Keep the suite's file seconds
@@ -167,6 +174,15 @@ jobs:
           name: file-seconds
           path: ${{ runner.temp }}/file-seconds.json
           if-no-files-found: error
+      # The suite's JUnit reports, also from a failed run: se.xml holds every test's seconds, setup
+      # time, worker and start, and the runner's cpu; `work_tickets.py test-seconds` reads them.
+      - name: Keep the suite's test reports
+        if: ${{ !cancelled() && needs.trust.outputs.trusted != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: ${{ runner.temp }}/test-reports
+          if-no-files-found: ignore
       - name: kern and SE's start and hook passed on Windows
         env:
           PLATFORMS: ${{ needs.kern-platforms.result }}

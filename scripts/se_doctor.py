@@ -3,7 +3,7 @@
     uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline] [--probe] [--write]
 
 It measures the host, the SE checkout against its upstream, the installed plugin and the `se`
-binary against the pins, the core (standing file, pid, boot id, the last lines of its log), each
+binary against the pins, whether the plugin's manifest declares the MCP door for Claude Code, the core (standing file, pid, boot id, the last lines of its log), each
 hook and MCP server registration a host reads, `gh` and the reach of the hosts SE fetches from,
 and the instruction files a host may read beside or instead of AGENTS.md (`CLAUDE.md`,
 `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.github/copilot-instructions.md`) in the project and each
@@ -217,10 +217,21 @@ def _plugin_roots(claude_dir: Path, registry: Path) -> list[Path]:
     return list(dict.fromkeys(roots))
 
 
+def _declares_door(manifest: dict) -> bool:
+    """Whether a Claude Code manifest declares SE's MCP door, its `mcpServers` naming `se`."""
+    servers = manifest.get("mcpServers")
+    return isinstance(servers, dict) and isinstance(servers.get("se"), dict)
+
+
 def gather_plugins(roots: list[Path], checkout: Path, home: Path) -> list[dict]:
-    return [{"where": shown(root, checkout, home),
-             "version": (_json(root / se_start.PLUGIN_MANIFEST) or {}).get("version"),
-             "exists": root.is_dir()} for root in roots]
+    """Each installed SE plugin: where, its version, and whether its manifest declares the door
+    for Claude Code (se.toml [plugin] claude_mcp, README "The MCP door")."""
+    found = []
+    for root in roots:
+        manifest = _json(root / se_start.PLUGIN_MANIFEST) or {}
+        found.append({"where": shown(root, checkout, home), "version": manifest.get("version"),
+                      "exists": root.is_dir(), "door": _declares_door(manifest)})
+    return found
 
 
 def gather_latest(cache_path: Path, now: float, se_url: str | None = None) -> dict | None:
@@ -705,6 +716,10 @@ def check_plugins(plugins: list[dict] | None, checkout: dict | None, latest: dic
                                     f"stale plugin: SE {version} at {where} is behind " + " and ".join(behind)))
         else:
             findings.append(Finding("plugin", SEEN, OK, f"SE {version} at {where}, current"))
+        if "door" in plugin:
+            findings.append(Finding("plugin", SEEN, OK, f"SE plugin at {where}: " + (
+                f"{se_start.PLUGIN_MANIFEST} declares the MCP door for Claude Code" if plugin["door"] else
+                f"{se_start.PLUGIN_MANIFEST} declares no MCP door for Claude Code (se.toml [plugin] claude_mcp off)")))
     return findings
 
 

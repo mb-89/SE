@@ -27,7 +27,8 @@ DEFAULTS = {"refuse_stop": False, "start_sessions": True}
 
 def settings(root: Path | None) -> dict[str, bool]:
     """Each guard's setting in the project's se.toml `[copilot]`, built-in default where unset. Raises
-    ValueError for a setting that is not true or false, or an se.toml that does not parse."""
+        ValueError for a `copilot` value that is not a table, a setting that is not true or false, or
+        an se.toml that does not parse."""
     table: object = {}
     path = root / "se.toml" if root is not None else None
     if path is not None and path.is_file():
@@ -36,7 +37,8 @@ def settings(root: Path | None) -> dict[str, bool]:
         except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
             raise ValueError(f"cannot read {path}: {error}") from error
     if not isinstance(table, dict):
-        table = {}
+        raise ValueError(f"{TABLE} in {path} must be a table; fix it or remove it for the built-in "
+                         "defaults")
     found = {}
     for name, default in DEFAULTS.items():
         value = table.get(name, default)

@@ -58,7 +58,9 @@ fills it), `says` (what belongs there, the fix's wording and the draft's comment
 back as it stands). Besides: `source = "title"` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
 `numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `max_words`,
-`actor`, `one_sentence`, `not_picked` and `shape`, a title's (rule `title-shape`).
+`first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
+should have, 0 for none), `actor`, `one_sentence`, `not_picked` and `shape`, a title's (rule
+`title-shape`).
 
 A field may name code as `"<module>:<NAME>"`, a script beside this one, as an adapter's keys do;
 `load` resolves it and refuses one that does not resolve, naming the form file and the key.
@@ -123,9 +125,11 @@ Refuse rules: `required` (missing, empty or placeholder, or the field's own `say
 `choice`, `not-picked` (no `Not picked:` line), `duplicate` (the same text in two fields) and
 `dangling` (an SE command that does not exist, through `references.dangling` as
 `work_tickets.refuse_dangling` calls it); an adapter refuses with `checker`, `line` and `title`.
-Warn-only rules, never refused: `words`, `actor`, `one-sentence`, `bare-number`, `board` (Status,
-Labels, Priority, Assignee or Milestone lines), `terms` (`forms/terms.toml`), `unnamed-entry` (a
-blocker without a name) and `title-shape`.
+Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, taken as
+`work_tickets.goal_summary` takes it, runs past `first_sentence_chars`: a work issue's Goal's
+becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
+Priority, Assignee or Milestone lines), `terms` (`forms/terms.toml`), `unnamed-entry` (a blocker
+without a name) and `title-shape`.
 
 **Interface** for the pieces that build on it: `load(root, tree=False)` reads `forms/` at
 `origin/<integration branch>` through `git_door` where that ref holds forms, else from the working
@@ -158,7 +162,7 @@ exits 0 when nothing refuses, 1 when something does, 2 on a usage error.
 `forms.py draft (<form> | --path FILE [--root DIR]) [--json]` prints the empty form. Its JSON holds `form`, `says`, `fields`
 (each field's empty value) and `field_says`, then `field_shape`, each field's `kind` and, where
 the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved), `max_words`,
-`numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
+`first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
 (`schema`). `forms.py list` names every form with its actions, then the paths it claims and, for an
 adapter, its checker. `--tree` reads the working tree's `forms/`; `--forms DIR`, on all three, reads
@@ -194,11 +198,11 @@ KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code
 REFUSE, WARN, OFF = "refuse", "warn", "off"
 REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
 ADAPTER_RULES = ("checker", "line", "title", "form")  # always refuse; an adapter has no [rules]
-WARN_RULES = ("words", "actor", "one-sentence", "bare-number", "board", "terms", "unnamed-entry",
-              "title-shape")
+WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
+              "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
-              "lang", "max_words", "actor", "one_sentence", "not_picked", "shape"}
+              "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape"}
 FORM_KEYS = {"name", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
@@ -229,6 +233,10 @@ LINK = re.compile(r"\[[^\]]*\]\([^)]*\)|https?://\S+")
 PATH_LIKE = re.compile(r"^\S*[/\\]\S*$|^\S+\.(py|md|toml|go|json|yml|yaml|sh|ps1)$")
 BARE_ISSUE = re.compile(r"^(?:[\w.-]+/[\w.-]+)?#\d+$|^<?https?://\S+>?$")
 SENTENCE_END = re.compile(r"[.!?](?=[ \t]+[A-Z(\"'`])")
+#: Where a text's list starts, and where its first sentence ends, as `work_tickets.goal_summary`
+#: reads a Goal (rule `first-sentence`).
+LIST_START = re.compile(r"\n[ \t]*(?:[-*+]|\d+[.)])[ \t]")
+FIRST_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 
 
 class FormError(Exception):
@@ -255,6 +263,7 @@ class Field:
     markers: bool = False
     lang: str = "sh"
     max_words: int = 0
+    first_sentence_chars: int = 0
     actor: bool = False
     one_sentence: bool = False
     not_picked: bool = False
@@ -632,6 +641,10 @@ def _field(entry: dict, where: str) -> Field:
         if not isinstance(rule, re.Pattern) and not callable(rule):
             raise FormError(f"{where}: field {name} shape: {shape} is no pattern or function; "
                             "name a compiled pattern or a function that gives the warning")
+    chars = entry.get("first_sentence_chars", 0)
+    if type(chars) is not int or chars < 0:
+        raise FormError(f"{where}: field {name} first_sentence_chars is {chars!r}; write a whole "
+                        "number, 0 for none")
     made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices))}, rule=rule)
     if made.in_body and not made.heading:
         raise FormError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
@@ -1137,8 +1150,8 @@ def draft_fields(form: Form) -> dict[str, object]:
 
 
 #: The keys `field_shape` gives, each where the field sets it.
-SHAPE_KEYS = ("kind", "heading", "required", "none_ok", "choices", "max_words", "numbered",
-              "label", "source")
+SHAPE_KEYS = ("kind", "heading", "required", "none_ok", "choices", "max_words",
+              "first_sentence_chars", "numbered", "label", "source")
 #: The only keywords `schema` writes: none that strict tool use on the Claude API refuses.
 SCHEMA_KEYWORDS = ("$schema", "type", "properties", "required", "additionalProperties", "items",
                    "enum", "description")
@@ -1410,6 +1423,16 @@ def _prose(text: str) -> str:
     return LINK.sub(" ", CODE_SPAN.sub(" ", text))
 
 
+def first_sentence(text: str) -> str:
+    """The first sentence of `text` as `work_tickets.goal_summary` takes a Goal's: HTML comments
+    dropped, a list's lead-in where the text opens with one, up to the first ".", "!" or "?"
+    before a space, its whitespace joined."""
+    text = COMMENT.sub("", text)
+    lead = LIST_START.split("\n" + text.strip(), maxsplit=1)[0]
+    text = " ".join((lead if lead.strip() else text).split())
+    return FIRST_SENTENCE_END.split(text, maxsplit=1)[0]
+
+
 def _entries(value: object) -> list[str]:
     if isinstance(value, list):
         return [entry.get("text", "") if isinstance(entry, dict) else str(entry)
@@ -1468,6 +1491,12 @@ def check(form: Form, document: Document, *, root: Path = ROOT,
             if words > item.max_words:
                 add("words", item.name, f"{item.heading} has {words} words; keep it to "
                     f"{item.max_words}")
+        if item.first_sentence_chars:
+            chars = len(first_sentence(text))
+            if chars > item.first_sentence_chars:
+                add("first-sentence", item.name, f"{item.heading}'s first sentence has {chars} "
+                    f"characters; keep it to {item.first_sentence_chars}, one complete statement: "
+                    "it becomes the landing title")
         if item.actor and form.actors:
             names = [re.compile(rf"\b{re.escape(actor)}\b", re.IGNORECASE) for actor in form.actors]
             for number, entry in enumerate(_entries(value), 1):
@@ -1711,6 +1740,13 @@ def _field_at(form: Form, document: Document, line: int) -> str:
 
 #: se.toml `[forms] enforce`: the values the filing commands know, `off` the default.
 ENFORCE_VALUES = (OFF, WARN, REFUSE)
+#: se.toml `[forms] gate`: the values SE's form gate on GitHub writes knows (se_forms.py gate),
+#: `off` the default.
+GATE_VALUES = (OFF, WARN, REFUSE)
+#: se.toml `[forms] files`: whether SE's checks before work is done check the files a form claims
+#: (se_forms.py check-files), and with `write` also the gate at each write; `off` the default.
+CHECK, WRITE = "check", "write"
+FILES_VALUES = (OFF, CHECK, WRITE)
 #: se.toml `[forms] refusals`: how many refusals of one issue open `--hold`.
 DEFAULT_REFUSALS = 2
 PRIVATE_RULE = "private"
@@ -1724,6 +1760,8 @@ class Enforcement:
     enforce: str = OFF
     refusals: int = DEFAULT_REFUSALS
     where: str = "se.toml"
+    gate: str = OFF
+    files: str = OFF
 
 
 def enforcement(root: Path) -> Enforcement:
@@ -1751,11 +1789,19 @@ def enforcement(root: Path) -> Enforcement:
     if enforce not in ENFORCE_VALUES:
         raise FormError(f"forms: [forms] enforce = {enforce!r} in {where} is none of "
                         f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Forms\")")
+    gate = table.get("gate", OFF)
+    if gate not in GATE_VALUES:
+        raise FormError(f"forms: [forms] gate = {gate!r} in {where} is none of "
+                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Forms\")")
+    files = table.get("files", OFF)
+    if files not in FILES_VALUES:
+        raise FormError(f"forms: [forms] files = {files!r} in {where} is none of "
+                        f"{', '.join(FILES_VALUES)}; set one of them (README \"Forms\")")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise FormError(f"forms: [forms] refusals = {refusals!r} in {where} must be a whole "
                         "number of at least 1")
-    return Enforcement(enforce, refusals, where)
+    return Enforcement(enforce, refusals, where, gate, files)
 
 
 def formed(form: Form, *, body: str | None = None, fields: dict | None = None,
@@ -1830,11 +1876,14 @@ def _fit(head: list[str], lines: list[str], tail: list[str]) -> list[str]:
 
 
 def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
-           hold: str = "", scripts: Path = ROOT / "scripts") -> str:
+           hold: str = "", scripts: Path = ROOT / "scripts", gate: bool = False) -> str:
     """The text a filing command prints for `findings` against `form`, at most REFUSAL_LINES
     lines: every refused finding with its fix, the warnings after ALSO, the `draft` command with
     the real path of SE's scripts and, with `hold` (the label it files with), the `--hold` way
-    out. It never counts tries."""
+    out. It never counts tries. With `gate` (se_forms.py gate, a write through the GitHub tools)
+    its tail lines name the MCP door's forms tool before the `draft` command, and the hold names
+    both ways out: the filing command with `--hold`, or the same issue write labelled `hold` and
+    without `ready`."""
     refusing = [f"  {_line(form, item)}" for item in findings if item.severity == REFUSE]
     warning = [_line(form, item) for item in findings if item.severity != REFUSE]
     if refused:
@@ -1847,8 +1896,17 @@ def report(command: str, form: Form, findings: list[Finding], *, refused: bool,
                 "anyway:"]
         lines = [f"  {_line(form, item)}" for item in findings]
         tail = []
-    tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
-    if hold:
+    if gate:
+        tail.append(f"Get the form: the se server's forms tool, command \"se_forms.py draft\", "
+                    f"args [\"{form.name}\"] (or uv run python {scripts / 'forms.py'} draft "
+                    f"{form.name} --json)")
+    else:
+        tail.append(f"The empty form: uv run python {scripts / 'forms.py'} draft {form.name}")
+    if hold and gate:
+        tail.append("Or file it with the filing command and --hold, or send the same issue write "
+                    f"with the label {hold} and without ready; then fix its text on the issue "
+                    "itself and run work_tickets.py unhold <issue>")
+    elif hold:
         tail.append("Or run it again with --hold: it files the text as given, labelled "
                     f"{hold} and not ready; then fix its text on the issue itself and run "
                     "work_tickets.py unhold <issue>")
