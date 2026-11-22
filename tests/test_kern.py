@@ -37,11 +37,12 @@ def test_the_required_check_vets_ses_go_components_on_kern_at_the_pin_their_go_m
     [(major, inputs)] = setups
     assert int(major) >= SETUP_GO_NODE_24, "setup-go below v6 runs on Node 20"
     assert "go-version-file: components/go.mod" in inputs and "cache-dependency-path: components/go.sum" in inputs
-    # Go is set up, kern placed at its pin and the lock held to the require before the vet, and
-    # the suite step runs the components' tests as se.toml declares them.
+    # kern is placed at its pin and the lock held to the require before anything reads kern (the
+    # command reference imports its SDK), Go is set up before the vet, and the suite step runs the
+    # components' tests as se.toml declares them.
     check = re.search(r"(?ms)^  check:\n(.*?)(?=^  \w|\Z)", jobs)[1]
-    steps = ["actions/setup-go", "uv run python scripts/se_modules.py sync kern",
-             "git diff --exit-code -- se.lock", "time go vet ./...",
+    steps = ["uv run python scripts/se_modules.py sync kern", "git diff --exit-code -- se.lock",
+             "scripts/work_tickets.py docs --check", "actions/setup-go", "time go vet ./...",
              "scripts/work_tickets.py suite --worktree .", "needs.kern-platforms.result"]
     assert [check.index(step) for step in steps] == sorted(check.index(step) for step in steps)
     assert "        working-directory: components\n        run: time go vet ./...\n" in check

@@ -76,6 +76,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/pr_issues.py
       - uses: astral-sh/setup-uv@v7
+      # kern at the version components/go.mod requires (se.toml [modules.kern], README "Modules"),
+      # in .se/modules/kern, which go.mod's replace names; a committed se.lock that lags the require
+      # fails here. First, as the command reference (kern's SDK) and the suite read it.
+      - name: kern at the pin components/go.mod requires
+        run: |
+          uv run python scripts/se_modules.py sync kern
+          if ! git diff --exit-code -- se.lock; then
+            echo "::error::se.lock does not lock the kern components/go.mod requires: run uv run python scripts/se_modules.py sync kern and commit se.lock"
+            exit 1
+          fi
       # Before the suite, whose start regenerates the layouts (tests/conftest.py).
       - name: The generated layouts match src/
         run: uv run python scripts/se_plugin.py check
@@ -134,16 +144,6 @@ jobs:
         with:
           go-version-file: components/go.mod
           cache-dependency-path: components/go.sum
-      # kern at the version components/go.mod requires (se.toml [modules.kern], README "Modules"),
-      # in .se/modules/kern, which go.mod's replace names; a committed se.lock that lags the require
-      # fails here.
-      - name: kern at the pin components/go.mod requires
-        run: |
-          uv run python scripts/se_modules.py sync kern
-          if ! git diff --exit-code -- se.lock; then
-            echo "::error::se.lock does not lock the kern components/go.mod requires: run uv run python scripts/se_modules.py sync kern and commit se.lock"
-            exit 1
-          fi
       # SE's Go components (components/README.md "Tests"), on kern at its pin: vetted here; their
       # tests run in the suite step below, as se.toml [tests.beside.go-components] declares.
       - name: SE's Go components vet
