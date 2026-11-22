@@ -534,3 +534,33 @@ def test_no_form_of_ses_claims_a_path_and_ses_own_se_toml_leaves_files_off():
     """Requirement "SE's value": SE's own check-files has nothing to check yet."""
     assert not any(form.paths for form in CATALOG.values())
     assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["forms"]
+
+
+@pytest_hook
+def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
+        tmp_path, shared_fake_git):
+    """SE's own se.toml, read from this checkout, at the fixture's `origin/main`: the hook denies an
+    off-form `issue_write` naming Problem and passes the form's own body. The working tree's copy
+    lacks the gate, so the integration branch's decides."""
+    import git_door
+    import fake_git
+
+    own = (ROOT / "se.toml").read_text(encoding="utf-8")
+    root = hook_project(tmp_path, None)
+    fake_git.init(root)
+    fake_git.git("-C", str(root), "remote", "add", "origin",
+                 f"https://git.example/{OWNER}/{REPO_NAME}.git")
+    (root / "se.toml").write_text(own, encoding="utf-8")
+    fake_git.git("-C", str(root), "add", "se.toml")
+    fake_git.git("-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com",
+                 "commit", "-q", "-m", "SE's se.toml")
+    fake_git.git("-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD")
+    (root / "se.toml").write_text(own.replace('gate = "refuse"', ""), encoding="utf-8")
+    variables = {"CLAUDE_PROJECT_DIR": sh(root), git_door.VARIABLE: f"fake:{shared_fake_git.path}"}
+    given = {"method": "create", "title": TITLE, "labels": ["work"]}
+    result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=THIN, **given),
+                    **variables)
+    assert result.returncode == 0 and "Problem" in denial(result.stdout)
+    result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=GOOD_WORK, **given),
+                    **variables)
+    assert result.returncode == 0 and result.stdout == ""
