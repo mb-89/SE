@@ -74,6 +74,27 @@ exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), 
   GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
   tool call for the host's own hook timeout.
 
+**Claimed files.** `se_forms.py check-files [PATH ...] [--changed REF] [--root DIR] [--forms DIR]`
+checks the files a `file.write` form claims by its `[applies] paths`, each as `forms.py check
+--path` checks one. It is neither the door's nor the gate's: `work_tickets.py stop-check`, `push`
+and CI's `check` job run it (README "Forms").
+
+- Which files: the PATHs given; or, with `--changed REF`, every file that differs between REF's
+  merge base with HEAD and the working tree (committed, staged or not) and every untracked file
+  git does not ignore, where a form claims its path. A deleted file is not checked. `--root` is
+  the project root the forms' paths are relative to (default: the git checkout holding the
+  working directory).
+- Which forms: `--forms DIR`'s; else the root's `forms/` (at `origin/<integration branch>` where
+  it holds them, `forms.load`); where the root has none, SE's own.
+- The switch: with `--changed` it reads se.toml `[forms] files` of the root (`forms.enforcement`,
+  at `origin/<integration branch>`, so a branch cannot switch its own check off): `off` (the
+  default) checks nothing and says so in one line; `check` checks. Given PATHs are always checked.
+- Its answer: per file that breaks its form, one line a refused finding, `<path> (<form>):
+  <field>: <fix>`, at most CHECK_FILES_LINES lines in all with a count of the rest, then the line
+  that names `forms.py draft --path`; exit code 1. Where nothing is claimed or nothing refuses, one
+  line, exit code 0; a usage error, exit code 2. `changed_refusal` gives stop-check and push the
+  same lines.
+
 Standard library only; it imports `forms` and `work_tickets` as the scripts beside it."""
 
 from __future__ import annotations
@@ -116,6 +137,9 @@ GATE_TOOLS = {
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
 GATE_FAILED = "SE's form gate failed on this write ({kind}), so it was not sent"
+CHECK_FILES = "se_forms.py check-files"
+#: check-files' refusal: its lines in all, the `draft` line among them.
+CHECK_FILES_LINES = 10
 
 
 def sibling(name: str):
@@ -133,7 +157,7 @@ COMPONENTS = (sibling("se_components").Group(
     "SE's forms: list names them, draft gives a form's fields, their instructions and their shape, "
     "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
     "to file.",
-    ("list", "draft", "check", "gate")),)
+    ("list", "draft", "check", "gate", "check-files")),)
 #: The commands that go through kern where it runs (se_components.routed): all three only read.
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
@@ -191,9 +215,22 @@ def make_parser() -> argparse.ArgumentParser:
                     "nothing (the module docstring: The gate). It exits 0.")
     gating.add_argument("--gate", choices=sibling("forms").GATE_VALUES,
                         help="for tests only: the switch for this run, whatever se.toml says")
-    for command in (listing, drafting, checking, gating):
+    files = commands.add_parser(
+        "check-files", help="check the files a form claims, given or changed since a ref",
+        description="Check each claimed file as forms.py check --path does: the PATHs given, or "
+                    "with --changed every claimed file changed since REF's merge base, committed "
+                    "or not, where se.toml [forms] files is check. It exits 1 where one refuses.")
+    files.add_argument("paths", nargs="*", type=Path, metavar="PATH", help="a file to check")
+    files.add_argument("--changed", metavar="REF",
+                       help="check every claimed file changed since REF's merge base with HEAD, "
+                            "untracked ones too, where [forms] files is check")
+    files.add_argument("--root", type=Path, help="the project root of the forms' paths (default: "
+                                                 "the git checkout holding the working directory)")
+    files.add_argument("--forms", type=Path, help="read the forms from this folder instead")
+    for command in (listing, drafting, checking, gating, files):
         command.set_defaults(run={"list": run_list, "draft": run_draft, "check": run_check,
-                                  "gate": run_gate}[command.prog.split()[-1]])
+                                  "gate": run_gate, "check-files": run_check_files}[
+                                      command.prog.split()[-1]])
     return top
 
 
@@ -604,6 +641,152 @@ def run_gate(options: argparse.Namespace) -> int:
     if answer[0]:
         print(answer[0])
     return 0
+
+
+def project_root(given: Path | None) -> Path:
+    """`--root`, else the git checkout holding the working directory, else that directory."""
+    if given is not None:
+        return given.resolve()
+    here = Path.cwd().resolve()
+    return checkout(str(here)) or here
+
+
+def claim_forms(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
+    """The forms check-files checks against and the folder `forms.py draft --forms` reads them
+    from (None: SE's own): `folder`'s, else the root's, else SE's where the root has none."""
+    forms = sibling("forms")
+    if folder is not None:
+        return forms.load(root, folder=folder), folder.resolve()
+    if root.resolve() == forms.ROOT.resolve():
+        return forms.load(forms.ROOT), None
+    try:
+        catalog = forms.load(root)
+    except forms.FormError:
+        if (root / forms.FORMS).is_dir():
+            raise
+        return forms.load(forms.ROOT), None
+    own = root / forms.FORMS
+    return catalog, own if own.is_dir() else None
+
+
+def changed_files(root: Path, ref: str) -> list[Path]:
+    """Every file under `root` that differs between `ref`'s merge base with HEAD and the working
+    tree, and every untracked file git does not ignore; a deleted one is not among them."""
+    forms, door = sibling("forms"), sibling("git_door")
+    base = door.run("merge-base", ref, "HEAD", root=root)
+    if base.returncode != 0 or not base.stdout.strip():
+        why = (base.stderr.strip().splitlines() or ["no merge base"])[0]
+        raise forms.FormError(f"{CHECK_FILES}: --changed {ref}: no merge base with HEAD in "
+                              f"{root} ({why}); fetch {ref}, or name another ref")
+    top = door.run("rev-parse", "--show-toplevel", root=root)
+    if top.returncode != 0 or not top.stdout.strip():
+        raise forms.FormError(f"{CHECK_FILES}: {root} is no git checkout; give --root")
+    names: list[str] = []
+    committed = door.run("diff", "--name-status", "-z", f"{base.stdout.strip()}..HEAD", root=root)
+    status = door.run("status", "--porcelain", "-z", "--untracked-files=all", root=root)
+    for done, what in ((committed, "diff"), (status, "status")):
+        if done.returncode != 0:
+            raise forms.FormError(f"{CHECK_FILES}: git {what} failed in {root}: "
+                                  f"{(done.stderr.strip().splitlines() or [''])[0]}")
+    tokens = [token for token in committed.stdout.split("\0") if token]
+    while tokens:
+        kind = tokens.pop(0)
+        count = 2 if kind[:1] in ("R", "C") else 1
+        names += tokens[:count]
+        tokens = tokens[count:]
+    tokens = [token for token in status.stdout.split("\0") if token]
+    while tokens:
+        entry = tokens.pop(0)
+        names.append(entry[3:])
+        if entry[:1] in ("R", "C") and tokens:
+            names.append(tokens.pop(0))  # the origin of a rename, gone where it moved
+    folder = Path(top.stdout.strip())
+    found: list[Path] = []
+    for name in dict.fromkeys(names):
+        path = folder / name
+        if path.is_file() and path.resolve().is_relative_to(root.resolve()):
+            found.append(path)
+    return found
+
+
+def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None,
+               claimed_only: bool = False) -> tuple[list[str], int]:
+    """check-files' lines for `paths` and its exit code: the refused findings and the `draft`
+    line (1), or the one line that says what passed (0). `claimed_only` skips, before reading
+    them, the files no form claims (--changed)."""
+    forms = sibling("forms")
+    refusing: list[str] = []
+    checked = 0
+    for path in paths:
+        relative = forms._relative(path, root, CHECK_FILES)
+        if claimed_only and not any(form.is_file and form.claims(relative)
+                                    for form in catalog.values()):
+            continue
+        text = forms._file_text(path, CHECK_FILES)
+        chosen = forms.select(catalog, forms.FILE_ACTION, text, None, path=relative)
+        if chosen.form is None and not chosen.findings:
+            continue
+        checked += 1
+        found = list(chosen.findings)
+        if chosen.form is not None:
+            found += forms.check(chosen.form, forms.parse(chosen.form, text), root=root)
+        for item in found:
+            if item.severity != forms.REFUSE:
+                continue
+            if chosen.form is None:
+                refusing.append(f"{relative} (no form): {item.field}: {item.fix}")
+            else:
+                refusing.append(f"{relative} ({chosen.form.name}): "
+                                f"{forms._line(chosen.form, item)}")
+    if not refusing:
+        if not checked:
+            return [f"{CHECK_FILES}: no form claims a file checked"], 0
+        return [f"{CHECK_FILES}: {checked} claimed "
+                + ("file passes its form" if checked == 1 else "files pass their forms")], 0
+    room = CHECK_FILES_LINES - 1
+    if len(refusing) > room:
+        refusing = refusing[:room - 1] + [f"... and {len(refusing) - room + 1} more findings"]
+    draft = f"uv run python {HERE / 'forms.py'} draft --path <file> --root {root}"
+    if source is not None:
+        draft += f" --forms {source}"
+    return [*refusing, f"The empty form of each: {draft}"], 1
+
+
+def changed_refusal(root: Path, ref: str) -> list[str] | None:
+    """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
+    lines where se.toml `[forms] files` is `check` and a changed claimed file breaks its form;
+    None where the switch is off or every such file passes. Errors raise."""
+    forms = sibling("forms")
+    if forms.enforcement(root).files != forms.CHECK:
+        return None
+    catalog, source = claim_forms(root, None)
+    lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
+    return lines if code else None
+
+
+def run_check_files(options: argparse.Namespace) -> int:
+    """check-files (the module docstring: Claimed files)."""
+    forms = sibling("forms")
+    if bool(options.paths) == bool(options.changed):
+        raise Usage(f"{CHECK_FILES}: give the files to check, or --changed REF, not both")
+    root = project_root(options.root)
+    try:
+        if options.changed:
+            switch = forms.enforcement(root)
+            if switch.files != forms.CHECK:
+                print(f"{CHECK_FILES}: [forms] files is {switch.files} in {switch.where}; "
+                      "nothing checked")
+                return 0
+            catalog, source = claim_forms(root, options.forms)
+            paths = changed_files(root, options.changed)
+        else:
+            catalog, source = claim_forms(root, options.forms)
+            paths = [path if path.is_absolute() else Path.cwd() / path for path in options.paths]
+        lines, code = file_lines(catalog, root, paths, source, claimed_only=bool(options.changed))
+    except forms.FormError as error:
+        raise Usage(str(error)) from error
+    print("\n".join(lines))
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:

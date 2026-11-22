@@ -1,7 +1,7 @@
 # SE's switches, forms group: the form check of the commands that file issues (`file`,
-# `backlog file`, `route`) and the form gate on writes through the GitHub tools, read from se.toml
-# at origin's integration branch; core.toml's header
-# owns the keys of a row, scripts/se_switches.py's docstring the format.
+# `backlog file`, `route`), the form gate on writes through the GitHub tools and the check of the
+# files a form claims, read from se.toml at origin's integration branch; core.toml's header owns
+# the keys of a row, scripts/se_switches.py's docstring the format.
 
 [[switch]]
 name = "[forms] enforce"
@@ -36,6 +36,18 @@ off = ["off"]
 other = "on"
 help = "README.md#forms"
 note = "off (or unset): GitHub writes through the GitHub tools run unchecked; warn hands the findings to the agent; refuse denies a write whose body breaks its form (scripts/se_forms.py gate)"
+
+[[switch]]
+name = "[forms] files"
+kind = "se.toml"
+reader = "scripts/forms.py"
+default = "off"
+layers = ["se.toml"]
+key = "forms.files"
+off = ["off"]
+other = "on"
+help = "README.md#forms"
+note = "off (or unset): no check reads a claimed file; check: stop-check, push and CI's check job refuse a changed file a form claims that breaks it (scripts/se_forms.py check-files)"
 
 [[switch]]
 name = "SE_FORMS_GATE"

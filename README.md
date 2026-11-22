@@ -995,6 +995,8 @@ What it judges:
     `agent_transcript_path`) last touched, a path into `.se/work/` or a `--worktree`;
   - only where neither names one, the hook's `cwd`; where that holds none either, it lets the
     sub-agent end and says why.
+- Where se.toml `[forms] files` is `check`, it also refuses in any checkout it judges, worker or
+  not, while a changed file a form claims breaks it ([Forms](#forms)).
 - Anywhere else (SE's own session, a person's session) it never refuses. Where it cannot judge it
   lets the turn end and says why: advice fails open.
 - Without gh it judges by the answer file `.se/work/pull-request.json`, which
@@ -1727,8 +1729,8 @@ gated push and the pull request, and the Stop hook's check.
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |
 | `work_tickets.py pr-body` | `work_tickets.py pr-body [--worktree WORKTREE] --issue-body ISSUE_BODY --issue-url ISSUE_URL --field-report FILE` | print the pull request description deliver writes: Fixes <issue> where all its acceptance shows before the merge, else Refs <issue>, then the field report between its markers |
-| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
-| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
+| `work_tickets.py push` | `work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]` | where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed |
+| `work_tickets.py stop-check` | `work_tickets.py stop-check [--worktree WORKTREE] [--pull NUMBER] [--pr-description FILE] [--hook JSON]` | the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue is for a work issue, refuse the turn's end while its branch has no open pull request whose description carries a field report that passes field-report --check at the branch tip, naming what is missing and the commands; at most [stop] refusals times in a row (se.toml, built in 5); under Copilot it only says what is undelivered unless [copilot] refuse_stop is true. Where se.toml [forms] files is check it also refuses, in any checkout, while a changed file a form claims breaks it (se_forms.py check-files). Anywhere else, for a sub-agent that is no worker, and where it cannot judge (no gh and no recorded pull request) it lets the turn end. It reads the hook's JSON on stdin and answers the hook's JSON on stdout |
 | `work_tickets.py sync` | `work_tickets.py sync --worktree WORKTREE` | merge the newest integration branch (se.toml project.integration_branch, default main) from origin, or locally without origin |
 | `work_tickets.py verified` | `work_tickets.py verified [--worktree WORKTREE] remote_ref commit` | the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = "refuse" is refused (README "Late push") |
 
@@ -1824,6 +1826,7 @@ Markdown to file.
 | Command | Usage | What it does |
 |---|---|---|
 | `se_forms.py check` | `se_forms.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [form]` | check a text against a form as SE's filing commands would |
+| `se_forms.py check-files` | `se_forms.py check-files [--changed REF] [--root ROOT] [--forms FORMS] [PATH ...]` | check the files a form claims, given or changed since a ref |
 | `se_forms.py draft` | `se_forms.py draft [--markdown] [--tree] form` | print a form's fields, their instructions, their shape and its schema |
 | `se_forms.py gate` | `se_forms.py gate [--gate {off,warn,refuse}]` | SE's hook: judge one GitHub write's body against its form |
 | `se_forms.py list` | `se_forms.py list [--tree]` | name every form with its actions |
@@ -2069,6 +2072,16 @@ A `file.write` form claims files by its `[applies] paths` globs, such as a miles
 `forms.py check --path <file>` checks one against the form its front matter's `form:` line names
 or the conditions pick, refuses one none picks and leaves unclaimed files free; the front matter
 and `#` title stay as they are. `--forms <folder>` reads the forms from another folder.
+
+Where se.toml `[forms] files` is `check` (default `off`), a claimed file that breaks its form
+cannot end a turn, be pushed or pass CI; each refusal names the file, the form and each finding.
+
+- `scripts/se_forms.py check-files` with `--changed` and a ref checks every claimed file changed
+  since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
+- `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
+  `check` job against the pull request's base. It reads `[forms] files` as `enforce` is read.
+- Under Copilot the Stop hook only advises. SE's own se.toml leaves it off: no form of SE's claims
+  a path yet.
 
 An agent asks for a form through the MCP door's tool `forms`, `scripts/se_forms.py`: `list`
 names the forms, `draft <form>` gives `draft --json`'s answer, and `check` finds all the filing

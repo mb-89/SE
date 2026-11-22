@@ -5,6 +5,7 @@ filing commands refuse, and nothing it does writes."""
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -437,3 +438,99 @@ def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path
         result = hooked(tmp_path, text, CLAUDE_PROJECT_DIR=sh(root), **variables)
         assert result.returncode == 0 and result.stdout == '{"kern": "answer"}\n'
     assert pythons.read_text(encoding="utf-8").count(" gate") == 1
+
+
+# check-files: the files a form claims (the module docstring: Claimed files).
+
+STEP_FORM = '''name = "step-risks"
+reader = "owner"
+says = "Risks: what could go wrong."
+
+[applies]
+actions = ["file.write"]
+paths = ["book/*/steps/*.md"]
+
+[rules]
+required = "refuse"
+
+[[fields]]
+name = "risks"
+kind = "list"
+heading = "Risks"
+required = true
+says = "One item per risk, or None."
+'''
+GOOD_STEP = "---\nform: step-risks\n---\n\n# Risks\n\n## Risks\n\n- The scan misses a tool.\n"
+EMPTY_STEP = "---\nform: step-risks\n---\n\n# Risks\n\n## Risks\n\n"
+
+
+def step_book(root: Path, **steps: str) -> Path:
+    """`root` with forms/step-risks.toml and one step file per keyword, book/m1/steps/<name>.md."""
+    (root / "forms").mkdir(parents=True, exist_ok=True)
+    (root / "forms" / "step-risks.toml").write_text(STEP_FORM, encoding="utf-8")
+    (root / "book" / "m1" / "steps").mkdir(parents=True, exist_ok=True)
+    for name, text in steps.items():
+        (root / "book" / "m1" / "steps" / f"{name}.md").write_text(text, encoding="utf-8")
+    return root / "book" / "m1" / "steps"
+
+
+def test_check_files_checks_each_claimed_file_given_and_names_path_form_and_field(capsys, tmp_path):
+    steps = step_book(tmp_path, good=GOOD_STEP, empty=EMPTY_STEP)
+    (tmp_path / "free.md").write_text("# Free\n", encoding="utf-8")
+    given = ["--forms", str(tmp_path / "forms"), "--root", str(tmp_path)]
+    assert run(capsys, "check-files", *given, str(steps / "good.md"))[:2] == (
+        0, "se_forms.py check-files: 1 claimed file passes its form\n")
+    assert run(capsys, "check-files", *given, str(tmp_path / "free.md"))[:2] == (
+        0, "se_forms.py check-files: no form claims a file checked\n")
+    code, out, _ = run(capsys, "check-files", *given, str(steps / "good.md"), str(steps / "empty.md"))
+    lines = out.splitlines()
+    assert code == 1
+    assert lines[0].startswith("book/m1/steps/empty.md (step-risks): Risks: empty")
+    assert lines[-1].startswith("The empty form of each: uv run python ")
+    assert f"forms.py draft --path <file> --root {tmp_path.resolve()} --forms" in lines[-1]
+
+
+def test_check_files_names_at_most_ten_lines_with_a_count_of_the_rest(capsys, tmp_path):
+    step_book(tmp_path, **{f"s{number:02}": EMPTY_STEP for number in range(12)})
+    files = sorted(str(path) for path in (tmp_path / "book" / "m1" / "steps").iterdir())
+    code, out, _ = run(capsys, "check-files", "--root", str(tmp_path), *files)
+    lines = out.splitlines()
+    assert code == 1 and len(lines) == se_forms.CHECK_FILES_LINES
+    assert lines[-2] == "... and 4 more findings"
+
+
+def test_check_files_changed_finds_an_untracked_claimed_file_and_skips_a_deleted_one(
+        capsys, tmp_path, fake_git_door):
+    import fake_git
+    import git_door
+    steps = step_book(tmp_path, kept=GOOD_STEP, gone=GOOD_STEP)
+    (tmp_path / "se.toml").write_text('[forms]\nfiles = "check"\n', encoding="utf-8")
+    fake_git.init(tmp_path, "-b", "main")
+    for arguments in (("config", "user.name", "alice"), ("config", "user.email", "alice@example.com"),
+                      ("add", "."), ("commit", "-q", "-m", "steps"),
+                      ("update-ref", "refs/remotes/origin/main", "HEAD")):
+        assert git_door.run(*arguments, root=tmp_path).returncode == 0
+    (steps / "gone.md").unlink()
+    (steps / "kept.md").write_text(EMPTY_STEP, encoding="utf-8")
+    (steps / "new.md").write_text(EMPTY_STEP, encoding="utf-8")
+    code, out, _ = run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path))
+    assert code == 1
+    assert "book/m1/steps/kept.md (step-risks): Risks" in out
+    assert "book/m1/steps/new.md (step-risks): Risks" in out
+    assert "gone.md" not in out
+    assert run(capsys, "check-files", "--changed", "no-such-ref", "--root", str(tmp_path))[0] == 2
+
+
+def test_check_files_usage_errors_and_a_wrong_files_value(capsys, worktree):
+    assert run(capsys, "check-files")[0] == 2
+    assert run(capsys, "check-files", "a.md", "--changed", "origin/main")[0] == 2
+    (worktree / "se.toml").write_text('[forms]\nfiles = "refuse"\n', encoding="utf-8")
+    with pytest.raises(forms.FormError, match=r"\[forms\] files = 'refuse' in se.toml"):
+        forms.enforcement(worktree)
+    assert forms.enforcement(worktree.parent).files == forms.OFF  # unset: off
+
+
+def test_no_form_of_ses_claims_a_path_and_ses_own_se_toml_leaves_files_off():
+    """Requirement "SE's value": SE's own check-files has nothing to check yet."""
+    assert not any(form.paths for form in CATALOG.values())
+    assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["forms"]
