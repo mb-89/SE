@@ -489,3 +489,44 @@ def test_an_ages_value_other_than_true_or_false_is_refused(tmp_path, value):
         timeline.main(["--config", config(tmp_path, value), "--destination", str(tmp_path / "t.html")],
                       post=AgesGitHub(AGES_REPOSITORIES))
     assert not (tmp_path / "t.html").exists()
+
+
+# --- kern's lane and a repository that cannot be read (work issue "timeline-shows-kern") ---
+
+
+def three_repositories_config(tmp_path):
+    config = tmp_path / "se.toml"
+    config.write_text('[timeline]\nrepositories = ["alice/SE", "alice/obs", "alice/kern"]\n', encoding="utf-8")
+    return config
+
+
+@pytest.mark.parametrize("refusal", ["refused", "no repository"])
+def test_a_repository_that_cannot_be_read_is_named_and_the_page_still_builds(tmp_path, capsys, refusal):
+    github = FakeGitHub({name: {"issues": [node(1, labels={"nodes": [{"name": "ready"}]})], "tags": []}
+                         for name in ("alice/SE", "alice/obs")})
+
+    def post(query, variables):
+        if variables["name"] != "kern":
+            return github(query, variables)
+        if refusal == "refused":
+            raise timeline.ReadError("GitHub refused the read: Could not resolve to a Repository with the name 'alice/kern'.")
+        return {"repository": None}
+
+    destination, saved = tmp_path / "t.html", tmp_path / "snap.json"
+    assert timeline.main(["--config", str(three_repositories_config(tmp_path)), "--destination", str(destination),
+                          "--save-snapshot", str(saved)], post=post) == 0
+    text = destination.read_text(encoding="utf-8")
+    assert '--lanes: 2' in text and "<span>SE</span><span>obs</span></div>" in text
+    assert re.search(r'<p class="gap">Not shown: alice/kern could not be read \(GitHub [^<]*\)\.</p>', text)
+    assert "alice/kern could not be read" in capsys.readouterr().err
+    snap = json.loads(saved.read_text(encoding="utf-8"))
+    assert list(snap["repositories"]) == ["alice/SE", "alice/obs"] and list(snap["unreadable"]) == ["alice/kern"]
+    rebuilt = tmp_path / "rebuilt.html"
+    assert timeline.main(["--snapshot", str(saved), "--destination", str(rebuilt)]) == 0
+    assert rebuilt.read_text(encoding="utf-8") == text
+
+
+def test_a_snapshot_with_every_repository_read_names_no_gap():
+    page = timeline.model(snapshot(issue(1, "ready")))
+    assert page["unreadable"] == {}
+    assert 'class="gap"' not in timeline.render(page)
