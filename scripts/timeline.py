@@ -552,8 +552,7 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
         destination.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html",
-             "--adapter-config", str(obs / "adapters.json"), "--config", str(config),
+            ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html", "--config", str(config),
              "--source", str(folder / "manifest.md"), "--destination", str(destination.resolve())],
             cwd=ROOT, capture_output=True, text=True, env=environment)
         output = (result.stdout + result.stderr).replace(str(folder), "<timeline notes>")

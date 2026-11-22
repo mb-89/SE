@@ -509,9 +509,11 @@ def opened(page: Path, answer: dict[str, list] | None = None, turn: bool = False
 
 
 def test_obs_proves_the_live_declaration_against_every_saved_row(page, obs):
-    result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), "obs-html", "--check-rendered", str(page)],
-                            capture_output=True, text=True, env=timeline.sibling("build_docs").child_environment(),
-                            timeout=300)
+    build_docs = timeline.sibling("build_docs")
+    adapter, refusal = build_docs.html_adapter(obs)
+    assert refusal == ""
+    result = subprocess.run(["uv", "run", "--quiet", "--project", adapter["folder"], "obs-html", "--check-rendered",
+                             str(page)], capture_output=True, text=True, env=build_docs.child_environment(), timeout=300)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "0 console errors" in result.stdout
 
