@@ -467,6 +467,16 @@ session list."
   turn. No blocking waits (`read_agent` with `wait`, polling loops, `Start-Sleep`).
 - Where a host has no way to start a session, the role files or queues the work, or gives the
   person the line that starts it; it never runs the work in-chat.
+- **The effort ceiling**: no session starts another at an effort above its own. The owner: "I
+  don't want your workers ever running higher than you are. Lower is okay if it makes sense, but
+  not higher."
+  - The SE agent's effort is the ceiling for every integrator and worker it starts, and for every
+    session those start in turn.
+  - A role reads its own effort (`get_session` without an id) and passes that level, or a lower
+    one where the work is lighter, as the session tool's `effort` (`create_session`).
+  - A scheduled task that starts an integrator, such as the
+    [dispatcher's](../../README.md#dispatcher), is set at or below the SE agent's effort; the
+    person sets it when creating the task.
 
 Every session SE's roles start carries the tag `SE` and a title by one scheme, so the host's
 sidebar shows one SE section, each role's sessions nested under the session that started them.

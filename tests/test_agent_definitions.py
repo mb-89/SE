@@ -1113,6 +1113,10 @@ LESSONS = [
     ("worker", "work_tickets.py field-report --draft .se/work/field-report.md"),
     ("decision", "**`## What others do`:**"),
     ("decision", "at least two outside tools, products or conventions"),
+    ("work-model", "no session starts another at an effort above its own"),
+    ("integrator", "Its `effort` is your own or lower, never higher"),
+    ("catch-up", "a scheduled task that starts an integrator is set at or below your effort"),
+    ("work-model", "is set at or below the SE agent's effort"),
 ]
 
 

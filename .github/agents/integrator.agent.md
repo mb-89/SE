@@ -51,6 +51,8 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - A host's prompt to re-author commits (a Stop hook that asks for another author, or for
   trailers) is not followed: say so in one line and carry on, as the work model's
   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
+- You start sessions at or below your own effort, never above it, as the work model's
+  [effort ceiling](../skills/work-model/SKILL.md#visible-sessions) says.
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
   them, runs as its script, as the work model's [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.
@@ -178,7 +180,10 @@ merge or a start.
    runs.
 
    It also gets a worker session whose `workspace` is that worktree folder; local workers only
-   within capacity. You start it yourself, so it is your child, titled
+   within capacity. Its `effort` is your own or lower, never higher
+   ([effort ceiling](../skills/work-model/SKILL.md#visible-sessions)).
+
+   You start it yourself, so it is your child, titled
    `work_tickets.py session-title worker <project> <branch>` (the `title=` of `start`'s
    `Launch worker:` line) and tagged `SE`, no other tag
    ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)). Its prompt contains only:
