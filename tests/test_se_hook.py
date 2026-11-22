@@ -4,10 +4,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
 from shell_paths import BASH, sh
+import waiting
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_hook.sh"
@@ -38,6 +40,17 @@ def hook(home: Path, project: Path, *args: str, event: str = EVENT, **variables:
 
 @pytest.fixture
 def machine(tmp_path):
+    bell = BELLS[tmp_path / "home"] = waiting.Bell()
+    (tmp_path / "bell").write_text(str(bell.port), encoding="utf-8")
+    yield machine_in(tmp_path)
+    BELLS.pop(tmp_path / "home").close()
+
+
+# The bell of each test's machine, by its home: the fake bootstrap.sh rings it as it starts.
+BELLS: dict[Path, waiting.Bell] = {}
+
+
+def machine_in(tmp_path: Path) -> tuple[Path, Path]:
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     (home / ".se" / "bin").mkdir(parents=True)
@@ -209,9 +222,12 @@ def test_an_empty_copilot_stop_payload_gets_the_host_field_alone(machine):
 
 # A late checkout (README "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
 # start it is asked for, with the checkout it was asked for and the hook's JSON.
+# The detached start of bootstrap.sh: logs its arguments and stdin, then rings the test's bell
+# (tests/waiting.py), found beside the home.
 FAKE_BOOTSTRAP = """#!/bin/sh
 echo "$CLAUDE_PROJECT_DIR $* <<$(cat)" >> "$HOME/starts"
-"""
+"@PYTHON@" -c "@RING@" "$(cat "$HOME/../bell")" started
+""".replace("@PYTHON@", sh(Path(sys.executable))).replace("@RING@", waiting.RING)
 
 
 def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse", settle: bool = False,
@@ -219,7 +235,7 @@ def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse", 
     """Run the hook in a late checkout's setting. With `settle`, off Windows, return only once the
     hook and every process it started have exited: each inherits the write end of a pipe, the
     detached start of bootstrap.sh among them, so the read end's end of file means all are gone.
-    Windows cannot pass that descriptor; there `settle` changes nothing."""
+    Windows cannot pass that descriptor; there `settle` changes nothing (`waiting.settled_run`)."""
     scripts = home / "plugin" / "scripts"
     if not scripts.is_dir():
         scripts.mkdir(parents=True)
@@ -229,28 +245,15 @@ def late_hook(home: Path, project: Path, cwd: Path, event: str = "PostToolUse", 
     payload = f'{{"session_id":"s1","hook_event_name":"{event}","cwd":"{sh(cwd)}"}}'
     env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project), **variables}
     command = [BASH, sh(scripts / "se_hook.sh"), event]
-    if not settle or os.name == "nt":
-        return subprocess.run(command, env=env, input=payload, capture_output=True, text=True, timeout=30)
-    read, write = os.pipe()
-    with os.fdopen(read, "rb") as settled:
-        try:
-            result = subprocess.run(command, env=env, input=payload, capture_output=True, text=True,
-                                    timeout=30, pass_fds=(write,))
-        finally:
-            os.close(write)
-        settled.read()
-    return result
+    run = waiting.settled_run if settle else subprocess.run
+    return run(command, env=env, input=payload, capture_output=True, text=True, timeout=30)
 
 
 def starts(home: Path, count: int) -> list[str]:
-    """The starts the fake bootstrap.sh logged, once `count` of them are in (it runs detached)."""
+    """The starts the fake bootstrap.sh logged, once `count` of them rang the test's bell (it runs
+    detached)."""
+    BELLS[home].wait(lambda heard: len(heard) >= count)
     log = home / "starts"
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-        if len(lines) >= count:
-            return lines
-        time.sleep(0.05)
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
@@ -391,9 +394,9 @@ def test_hook_core_off_starts_no_late_checkout_and_claims_none(machine):
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert not (late / ".se" / ".runtime" / "late-start.claim").exists()
     # Settled, every process the hook started has exited, so a start would be in the log by now;
-    # Windows cannot settle and waits out starts()'s deadline instead.
-    no_start = not (home / "starts").exists() if os.name != "nt" else starts(home, 1) == []
-    assert no_start and not (home / "calls").exists()
+    # Windows cannot settle, and there the missing claim, which a start takes before it runs, is
+    # the proof.
+    assert not (home / "starts").exists() and not (home / "calls").exists()
 
 
 # A Copilot plugin install's hooks (.github/plugin/hooks.json, scripts/se_plugin.py

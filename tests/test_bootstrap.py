@@ -7,11 +7,11 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import time
 import tomllib
 import zipfile
 
 import pytest
+import waiting
 from shell_paths import BASH, WINDOWS, drop_tool, link_tools, sh, tool_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,10 +83,31 @@ UV_INSTALL = ("powershell -NoProfile -ExecutionPolicy ByPass -c irm https://astr
               if WINDOWS else "curl -LsSf https://astral.sh/uv/install.sh")
 
 
+# The bash on PATH, which runs the background half of kern's first start (bootstrap.sh
+# kern_background): it runs the real bash, then, for that half and where the test's bell is up,
+# rings it as it ends (tests/waiting.py), so a test waits for that end, not for a time.
+BASH_RINGS = """#!/bin/sh
+"@BASH@" "$@"
+status=$?
+case "$2" in --kern-*)
+  [ -f "@BELL@" ] && "@PYTHON@" -c "@RING@" "$(cat "@BELL@")" "background $2 ended" ;;
+esac
+exit $status
+"""
+
+
 def fake_bin(base: Path, *, git: bool = True) -> Path:
-    """A PATH holding only the shell tools the script uses, a fake curl and, optionally, git."""
+    """A PATH holding only the shell tools the script uses, a fake curl, a bash that rings the
+    test's bell as the background half ends (`settled`) and, optionally, git."""
     # setsid, shasum and unzip are not everywhere; bootstrap.sh does without them
     folder = link_tools(base / "bin", TOOLS)
+    real = shutil.which("bash")
+    if real is not None:  # off the link, which writing through would change the real bash
+        (folder / "bash").unlink()
+        (folder / "bash").write_text(BASH_RINGS.replace("@BASH@", sh(Path(real))).replace(
+            "@BELL@", sh(base / "bell")).replace("@PYTHON@", sh(Path(sys.executable))).replace(
+            "@RING@", waiting.RING), encoding="utf-8", newline="\n")
+        (folder / "bash").chmod(0o755)
     for name, script in (("curl", FAKE_CURL), ("powershell", FAKE_POWERSHELL)):
         (folder / name).write_text(script, encoding="utf-8", newline="\n")
         (folder / name).chmod(0o755)
@@ -108,8 +129,19 @@ def calls(home: Path) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+# The bell of each test's machine, by its home: the background half rings it as it ends.
+BELLS: dict[Path, waiting.Bell] = {}
+
+
 @pytest.fixture
 def machine(tmp_path):
+    bell = BELLS[tmp_path / "home"] = waiting.Bell()
+    (tmp_path / "bell").write_text(str(bell.port), encoding="utf-8")
+    yield machine_in(tmp_path)
+    BELLS.pop(tmp_path / "home").close()
+
+
+def machine_in(tmp_path: Path) -> tuple[Path, Path, Path]:
     home = tmp_path / "home"
     project = tmp_path / "project"
     home.mkdir()
@@ -316,12 +348,10 @@ def greeting_call(home: Path) -> str:
     return start
 
 
-def until(home: Path, text: str) -> list[str]:
-    """The calls once one holds text: the background half of kern's first start runs on its own."""
-    end = time.monotonic() + 20
-    while not any(text in line for line in calls(home)):
-        assert time.monotonic() < end, f"no call holds {text!r}: {calls(home)}"
-        time.sleep(0.02)
+def settled(home: Path) -> list[str]:
+    """The calls once the background half of kern's first start has ended: its bash rings the
+    test's bell as it exits (BASH_RINGS)."""
+    BELLS[home].wait(lambda heard: any(line.startswith("background --kern-") for line in heard))
     return calls(home)
 
 
@@ -570,7 +600,7 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert greeting_call(home).endswith(f"--kern-starting fetching the {NAME} {APP_VERSION} release for {PLATFORM} "
                                         "in the background")
-    log = until(home, "kern hook SessionStart")
+    log = settled(home)
     assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/{NAME}-{APP_VERSION}.SHA256SUMS {APP_BASE}/SHA256SUMS" in log
     assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log
     assert f"kern hook SessionStart --root {sh(project)} <<{START}" in log
@@ -588,8 +618,7 @@ def test_an_archive_that_fails_its_checksum_is_never_run(machine):
     release(home, corrupt=True)
     (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    until(home, ASSET)
-    time.sleep(0.5)
+    assert any(ASSET in line for line in settled(home))
     assert not kern_bin(home).exists()
     assert not any(line.startswith("kern ") for line in calls(home))
 
@@ -610,7 +639,7 @@ chmod +x "$3"
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-starting no {NAME} {APP_VERSION} release at {APP_BASE}; "
                                         f"building it from {sh(ROOT)}/{BUILD_DIR} in the background")
-    log = until(home, "kern hook SessionStart")
+    log = settled(home)
     assert any(line.startswith("go build -o ") and line.endswith(f"{PACKAGE} in {sh(ROOT)}/{BUILD_DIR}") for line in log)
     assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log and os.access(kern_bin(home), os.X_OK)
 

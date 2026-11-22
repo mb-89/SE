@@ -10,12 +10,12 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
 import git_door
 import fake_git
+import waiting
 
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPTS = PROJECT / "scripts"
@@ -54,18 +54,47 @@ def test_the_budgets_are_declared_once_and_every_interactive_run_notes_its_own(t
     assert metrics.overruns(over) == ["wall time 11.5 s over its budget 5 s"]
 
 
+class WatcherTurn:
+    """`feedback.threading` for one test: its Event's timed wait, the watcher's check of whether a
+    line came within half the budget, runs only once the body hands it its turn (`turn`), and the
+    body goes on only once it ran (`taken`). The check itself then times out at once: which of
+    the two came first is the body's order, not the clock's."""
+
+    def __init__(self) -> None:
+        self.turn, self.taken = threading.Event(), threading.Event()
+        turn, taken = self.turn, self.taken
+
+        class Event(threading.Event):
+            def wait(self, timeout=None):
+                if timeout is None:
+                    return super().wait()
+                assert turn.wait(waiting.DEADLINE_SECONDS), "the body never handed the watcher its turn"
+                try:
+                    return super().wait(0)
+                finally:
+                    taken.set()
+
+        self.Event, self.Thread = Event, threading.Thread
+
+    def hand_over(self) -> None:
+        self.turn.set()
+        assert self.taken.wait(waiting.DEADLINE_SECONDS), "the watcher never checked"
+
+
 def test_a_run_silent_past_half_its_first_line_budget_says_it_is_working(monkeypatch, capsys):
-    monkeypatch.setattr(feedback, "FIRST_LINE_SECONDS", 0.2)
+    watcher = WatcherTurn()
+    monkeypatch.setattr(feedback, "threading", watcher)
     with feedback.watched("work_tickets.py sync"):
-        time.sleep(0.4)
+        watcher.hand_over()  # half the budget passes with nothing shown
     assert capsys.readouterr().err == "work_tickets.py sync: working, nothing to show yet\n"
 
 
 def test_a_run_that_speaks_at_once_gets_no_extra_line(monkeypatch, capsys):
-    monkeypatch.setattr(feedback, "FIRST_LINE_SECONDS", 0.2)
+    watcher = WatcherTurn()
+    monkeypatch.setattr(feedback, "threading", watcher)
     with feedback.watched("work_tickets.py sync"):
         print("Synced")
-        time.sleep(0.3)
+        watcher.hand_over()  # half the budget passes after the line
     assert capsys.readouterr() == ("Synced\n", "")
 
 
@@ -134,7 +163,17 @@ def log(event):
 output = os.environ.get("FAKE_GH_OUTPUT")
 shown = open(output, encoding="utf-8", errors="replace").read() if output else ""
 log({"event": "start", "pid": os.getpid(), "shown": shown, "argv": sys.argv[1:3]})
-time.sleep(float(os.environ["FAKE_GH_DELAY"]))
+rounds = os.environ.get("FAKE_GH_ROUNDS")  # the calls of each round, e.g. "1,7,5"
+if rounds:  # a call ends only once every call of its round has started
+    def starts():
+        lines = open(os.environ["FAKE_GH_LOG"], encoding="utf-8").read().splitlines()
+        return [json.loads(line)["pid"] for line in lines if '"start"' in line]
+    place = starts().index(os.getpid()) + 1
+    bounds = [sum(int(n) for n in rounds.split(",")[:i + 1]) for i in range(len(rounds.split(",")))]
+    bound = next((b for b in bounds if b >= place), 0)
+    deadline = time.monotonic() + 30  # a failure bound: a call its round never joins
+    while len(starts()) < bound and time.monotonic() < deadline:
+        time.sleep(0.001)
 log({"event": "end", "pid": os.getpid()})
 a = sys.argv[1:]
 if a[:2] == ["issue", "list"]:
@@ -216,49 +255,27 @@ def interactive(checkout: Path) -> dict[str, list[str]]:
     }
 
 
-def first_line(argv: list[str], environment: dict[str, str], base: Path,
-               deadline: float) -> tuple[float, str, list[dict]]:
-    """The seconds until `argv` shows its first line (stdout or stderr, into a file the door
-    reads as each of its calls starts), the line, and the door's log once its first call has
-    started or the command has ended; the process is stopped then."""
+def first_line(argv: list[str], environment: dict[str, str], base: Path) -> tuple[str, list[dict]]:
+    """The first line `argv` shows (stdout or stderr, into a file the door reads as each of its
+    calls starts) and the door's log, once the command has ended."""
     base.mkdir()
-    log, output = base / "door.jsonl", base / "output.txt"  # its own: a stopped run's call
-    environment = {**environment, DOOR_LOG: str(log), DOOR_OUTPUT: str(output)}  # may start late
-    started = time.perf_counter()
-    found: tuple[float, str] | None = None
+    log, output = base / "door.jsonl", base / "output.txt"
+    environment = {**environment, DOOR_LOG: str(log), DOOR_OUTPUT: str(output)}
     with output.open("w", encoding="utf-8") as sink:
-        process = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT,
-                                   stdin=subprocess.DEVNULL, env=environment)
-        try:
-            while time.perf_counter() - started < deadline:
-                ended = process.poll() is not None
-                text = output.read_text(encoding="utf-8", errors="replace")
-                if found is None and "\n" in text:
-                    found = time.perf_counter() - started, text.split("\n", 1)[0]
-                called = any(event["event"] == "start" for event in door_events(log))
-                if ended or (found is not None and called):
-                    break
-                time.sleep(0.01)
-        finally:
-            process.kill()
-            process.wait()
-    assert found is not None, f"no line within {deadline} s from {argv}"
-    return (*found, door_events(log))
-
-
-DOOR_DELAY = 10.0  # the door's answer; far past every budget, so no answer can be what is shown
+        subprocess.run(argv, stdout=sink, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                       env=environment, timeout=waiting.DEADLINE_SECONDS, check=False)
+    text = output.read_text(encoding="utf-8", errors="replace")
+    assert "\n" in text, f"no line from {argv}: {text!r}"
+    return text.split("\n", 1)[0], door_events(log)
 
 
 def assert_first_line_before_the_door(command: str, argv: list[str], environment: dict[str, str],
                                       base: Path) -> None:
     """`command` shows a line before its first door call starts: the door, as it starts, already
-    finds a line of the command's own (not the watcher's) in its output. A command that calls no
-    door shows its first line before the door's delay has passed: the margin over the first-line
-    budget is the delay less that budget, so a slow machine's start-up cannot fail it."""
-    environment = {**environment, "FAKE_GH_DELAY": str(DOOR_DELAY)}
-    seconds, line, events = first_line(argv, environment, base, DOOR_DELAY)
+    finds a line of the command's own (not the watcher's) in its output. The door answers at
+    once, so the order of the log, not the clock, is what is checked."""
+    line, events = first_line(argv, environment, base)
     assert line.strip(), command
-    assert seconds < DOOR_DELAY, (command, seconds, line)
     starts = [event for event in events if event["event"] == "start"]
     if starts:  # the first call has started; what had the command shown by then?
         shown = [text for text in starts[0]["shown"].splitlines() if text.strip()]
@@ -281,6 +298,7 @@ sys.path.insert(0, sys.argv[1])
 import feedback
 with feedback.watched("work_tickets.py silent"):
     subprocess.run(["gh", "issue", "list"], capture_output=True, check=False)
+    print("listed")
 '''
 
 
@@ -294,7 +312,10 @@ def test_a_command_whose_first_line_comes_after_its_door_call_fails_the_check(sl
                                           tmp_path / "silent")
 
 
-BUDGET_DOOR_DELAY = 1.0  # the door's answer for the budget tests
+# The queue's rounds of door calls, as FAKE_GH_ROUNDS holds them: the sign-in check, the listings,
+# then the reads of the candidates (and, with FAKE_GH_BLOCKERS, of the blockers they name).
+QUEUE_ROUNDS = "1,6,5"
+BLOCKER_ROUNDS = "1,6,11"
 
 
 def queue_checkout(tmp_path: Path) -> Path:
@@ -322,13 +343,11 @@ def run_in_process(argv: list[str], environment: dict[str, str], monkeypatch) ->
 
 
 def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_path, fake_git_door, monkeypatch):
-    """The queue's twelve door calls (the sign-in check, then seven listings at once, then five
+    """The queue's twelve door calls (the sign-in check, then six listings at once, then the
     blockers at once) wait for the door in three rounds, not twelve: proven by the door's own
-    log. Its wall time is checked against the door's delay only: under eleven delays, a margin of
-    eight over the three it waits, never against the budget itself."""
+    log, as a call ends only once its whole round has started. No wall time is checked."""
     log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], "FAKE_GH_DELAY": str(BUDGET_DOOR_DELAY),
-                   DOOR_LOG: str(log)}
+    environment = {**slow_door["env"], "FAKE_GH_ROUNDS": QUEUE_ROUNDS, DOOR_LOG: str(log)}
     slow_door["metrics"].unlink(missing_ok=True)
     checkout = queue_checkout(tmp_path)
     result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
@@ -340,7 +359,6 @@ def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_pat
     assert len([event for event in door_events(log) if event["event"] == "start"]) == 12
     assert door_depth(door_events(log)) == 3
     assert line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
-    assert line["wall_seconds"] < line["gh_calls"] * BUDGET_DOOR_DELAY
 
 
 def test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads(
@@ -349,8 +367,8 @@ def test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads(
     at once with the candidates' own reads, so the queue still waits for the door in three
     rounds."""
     log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], "FAKE_GH_DELAY": str(BUDGET_DOOR_DELAY),
-                   DOOR_LOG: str(log), "FAKE_GH_BLOCKERS": "1"}
+    environment = {**slow_door["env"], "FAKE_GH_ROUNDS": BLOCKER_ROUNDS, DOOR_LOG: str(log),
+                   "FAKE_GH_BLOCKERS": "1"}
     checkout = queue_checkout(tmp_path)
     result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
                             environment, monkeypatch)
@@ -368,8 +386,7 @@ def test_paused_reads_the_door_once_and_declares_its_budget(slow_door, tmp_path)
     """The sign-in check, then one read: two door delays in sequence, proven by the door's own
     log. No wall time is checked: two calls in sequence are what any run waits."""
     log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], "FAKE_GH_DELAY": str(BUDGET_DOOR_DELAY),
-                   DOOR_LOG: str(log)}
+    environment = {**slow_door["env"], DOOR_LOG: str(log)}
     slow_door["metrics"].unlink(missing_ok=True)
     result = subprocess.run(interactive(slow_door["checkout"])["work_tickets.py paused"],
                             capture_output=True, text=True, env=environment, check=False)
