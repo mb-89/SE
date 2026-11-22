@@ -96,11 +96,43 @@ def test_the_se_agent_asks_with_no_question_dialog_and_decisions_go_only_as_a_de
             assert asks not in text, asks
 
 
+# #1567's decision: "'dispatcher' then names only the scheduled work check" (README "Dispatcher").
+DISPATCHER_OWNER = ("#dispatcher", 'readme "dispatcher"')
+BLOCK_START = re.compile(r"^\s*(?:[-*]|\d+\.)\s|^#")
+
+
+def dispatcher_misnamed(text: str) -> list[str]:
+    """The paragraphs and list items of `text` that say "dispatcher" without naming the
+    scheduled work check's owner (a link to README "Dispatcher", or that name), outside
+    README's own "### Dispatcher" section: there "dispatcher" could name the person's session."""
+    text = re.sub(r"^### Dispatcher\n.*?(?=^#)", "", text, flags=re.MULTILINE | re.DOTALL)
+    blocks: list[list[str]] = [[]]
+    for line in text.splitlines():
+        if not line.strip() or BLOCK_START.match(line):
+            blocks.append([])
+        if line.strip():
+            blocks[-1].append(line)
+    return [" ".join(block) for block in blocks
+            if "dispatcher" in " ".join(block).casefold()
+            and not any(owner in " ".join(block).casefold() for owner in DISPATCHER_OWNER)]
+
+
+@pytest.mark.parametrize(("text", "misnamed"), [
+    ("SE, the dispatcher, talks to the person.\n", True),
+    ("- Ask the dispatcher.\n- See [README](README.md#dispatcher).\n", True),
+    ("The [dispatcher](README.md#dispatcher) fires the integrator.\n", False),
+    ("the dispatcher (README \"Dispatcher\") lists work\n", False),
+    ("### Dispatcher\n\nThe dispatcher runs.\n\n### Next\n", False),
+])
+def test_dispatcher_may_name_only_the_scheduled_work_check(text, misnamed):
+    assert bool(dispatcher_misnamed(text)) is misnamed
+
+
 def test_no_instruction_calls_the_session_the_person_talks_to_the_dispatcher():
     instructions = [*SOURCE.rglob("*.md"), ROOT / "README.md", ROOT / "AGENTS.md"]
-    named = [path.relative_to(ROOT).as_posix() for path in instructions
-             if "dispatcher" in path.read_text(encoding="utf-8").casefold()]
-    assert named == []
+    named = {path.relative_to(ROOT).as_posix(): found for path in instructions
+             if (found := dispatcher_misnamed(path.read_text(encoding="utf-8")))}
+    assert named == {}
 
 
 def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():

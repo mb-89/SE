@@ -499,7 +499,7 @@ Pull requests built on an old `main` cause most integration trouble.
 - Nobody watches for deliveries. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
   SE turn, so a missed notification is handled as soon as either session is talked to; in the
-  cloud only, the dispatcher's scheduled task.
+  cloud only, the scheduled task of the [dispatcher](../../README.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its form); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
