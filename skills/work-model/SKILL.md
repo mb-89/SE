@@ -349,6 +349,9 @@ application's copy after the framework provides it. A framework never names, spe
 depends on an application; for public repositories, the public check's local list enforces this
 boundary.
 
+- **Two texts that contradict**: the person's decision wins, otherwise the newer, more specific
+  text, otherwise the note that owns the rule; the change that finds a contradiction corrects the
+  losing text.
 - Packages are worker-sized: one separately reviewable change. Larger work is split into issues
   linked by "Blocked by", each owning its part of shared files.
 - Packages that touch the same hot file get one owner or run one after the other; the next one

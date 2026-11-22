@@ -1156,6 +1156,27 @@ def test_the_worked_example_draws_its_current_situation_as_a_diagram():
     assert "```mermaid\n" in situation
 
 
+# The guidance the person settled on 22 Nov (SE#1672): each pair keeps one text, its winner, in one
+# owner, and none of its losing texts. The search covers the authored prose, the guidance notes,
+# the template notes and the README.
+SETTLED = sorted([*PROSE, *(ROOT / "guidance").rglob("*.md"), *(ROOT / "templates").glob("*.md"),
+                  ROOT / "README.md"])
+
+
+@pytest.mark.parametrize(("winner", "owner", "losers"), [
+    pytest.param("the person's decision wins, otherwise the newer, more specific text, otherwise "
+                 "the note that owns the rule", "src/skills/work-model/SKILL.md", (),
+                 id="later-contradictions"),
+])
+def test_a_settled_contradiction_leaves_one_text(winner, owner, losers):
+    def holding(text):
+        return [path.relative_to(ROOT).as_posix() for path in SETTLED
+                if text.casefold() in normalized(path).casefold()]
+
+    assert holding(winner) == [owner]
+    assert {loser: holding(loser) for loser in losers} == {loser: [] for loser in losers}
+
+
 def test_the_worker_definition_names_the_guidance_notes_of_kern_and_go():
     worker = normalized(AGENTS / "worker.md")
     for note in ("flake-at-base", "test-paths-on-windows", "platform-code-legs"):
