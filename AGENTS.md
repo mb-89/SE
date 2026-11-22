@@ -94,7 +94,9 @@
 ## Neutral home
 
 - No tracked file names where SE lives: no host, owner or repository of SE. The same tree may live
-  on more than one Git host, and only a machine that holds both remotes knows that.
+  on more than one Git host, and only a machine that holds both remotes knows that; how changes
+  move between them is the work model's
+  [More than one remote](src/skills/work-model/SKILL.md#more-than-one-remote).
 - Where SE needs its own location, it derives it from the checkout's origin through
   `scripts/se_home.py`, one helper for every Python reader: the home, the tracker, the docs URL and
   module URLs relative to origin (`../obs.git`). Docs write `<owner>/<repository>`, explained once.
