@@ -42,7 +42,7 @@ class = "batch"
 usage = "work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]"
 summary = "where se.toml [forms] files is check, se_forms.py check-files ..."
 group = "Delivery"
-help = "where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate, then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
+help = "where se.toml [forms] files is check, se_forms.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README \"Work publication\"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
 class = "batch"
 
 [commands."work_tickets.py verified"]

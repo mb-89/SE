@@ -67,6 +67,15 @@ def checkout(tmp_path: Path, monkeypatch, door_fake) -> Path:
     return tmp_path / "main"
 
 
+def work_issue(root: Path, branch: str, *labels: str, repo: str = "git.example/o/origin") -> None:
+    """Record the work issue titled `branch` in `root`, as intake does; by default it is for the
+    repository origin names (origin.git), by its `repo:` label."""
+    work_tickets.save_snapshot(root, {
+        "repo": repo, "number": 7, "url": f"https://{repo}/issues/7", "title": branch,
+        "body": "", "labels": [{"name": label} for label in (labels or ("repo:origin",))],
+    })
+
+
 def test_the_fixture_commits_no_machine_path(checkout):
     """A checkout under /home/<name> (a CI runner's) would fail the fixture's own public check."""
     text = (checkout / "se.toml").read_text(encoding="utf-8")
@@ -131,6 +140,7 @@ def test_push_and_the_hook_agree_on_the_suite_verdict(checkout, capfd, pusher, c
 def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, capfd):
     git(checkout, "switch", "-q", "-c", "topic")
     commit(checkout)
+    work_issue(checkout, "topic")
     assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
     git(checkout, "config", "core.hooksPath", str(PROJECT / ".githooks"))
     commit(checkout, name="later.txt")
@@ -152,6 +162,7 @@ def test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_on
         git(checkout, "push", "-q", "origin", "main")
     git(checkout, "switch", "-q", "-c", "topic")
     commit(checkout, name="topic.txt")
+    work_issue(checkout, "topic")
     assert work_tickets.main(["push", "topic", "--worktree", str(checkout)]) == 0
     origin = tmp_path / "origin.git"
     main = git(origin, "rev-parse", "refs/heads/main")
@@ -223,6 +234,7 @@ def test_push_refuses_a_branch_carrying_history_only_another_remote_holds(checko
                         root=tmp_path / "origin.git").returncode != 0
     git(checkout, "switch", "-q", "-c", "clean", "origin/main")
     commit(checkout, name="clean.txt")
+    work_issue(checkout, "clean")
     assert work_tickets.main(["push", "clean", "--worktree", str(checkout)]) == 0
 
 
@@ -368,6 +380,7 @@ def delivered_work_branch(root: Path) -> str:
     """The work branch, pushed and delivered at its tip (as deliver records it); its tip."""
     git(root, "switch", "-q", "-c", WORK_BRANCH)
     tip = commit(root, name="fix.txt")
+    work_issue(root, WORK_BRANCH)
     assert work_tickets.main(["push", "--worktree", str(root)]) == 0
     work_tickets.record_delivered_tip(root, WORK_BRANCH, tip)
     return tip
@@ -572,3 +585,107 @@ def test_a_pushed_commit_cannot_turn_ci_off_for_itself(checkout, host, capsys):
     host.write(checkout, head)
     assert verified(checkout) == 1
     assert host.reads == []  # its parent keeps CI on: no status is read
+
+
+# Work publication (README "Work publication"): a work branch goes only to the repository its
+# recorded work issue is for, never to whatever origin happens to be.
+def origin_has(root: Path, branch: str) -> bool:
+    return git_door.run("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}",
+                        root=root.parent / "origin.git").returncode == 0
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
+def test_a_work_branch_is_never_published_to_an_origin_its_work_issue_is_not_for(checkout, capsys):
+    """The reproduction: deliver pushes through push, which ran git push -u origin <branch>
+    whatever repository origin is; a work issue for another repository now stops it first."""
+    git(checkout, "switch", "-q", "-c", WORK_BRANCH)
+    commit(checkout, name="fix.txt")
+    work_issue(checkout, WORK_BRANCH, "repo:elsewhere")
+
+    assert work_tickets.main(["push", "--worktree", str(checkout)]) == 1
+
+    error = capsys.readouterr().err
+    assert ("push: origin is the repository origin, but work issue #7 is for elsewhere; nothing "
+            f"was pushed to origin; {WORK_BRANCH} is a work branch") in error
+    assert "git remote set-url origin" in error
+    assert not origin_has(checkout, WORK_BRANCH)
+
+
+def test_deliver_opens_no_pull_request_where_the_push_is_refused(checkout, monkeypatch):
+    """deliver's pull request goes to origin too, so the refused push stops it before gh runs."""
+    git(checkout, "switch", "-q", "-c", WORK_BRANCH)
+    commit(checkout, name="fix.txt")
+    work_issue(checkout, WORK_BRANCH, "repo:elsewhere")
+    monkeypatch.setattr(work_tickets, "push_gate", lambda root, branch: None)
+    asked: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "open_pull_request_number",
+                        lambda *arguments: asked.append(["list"]))
+    monkeypatch.setattr(work_tickets, "run_gh_with_body",
+                        lambda root, arguments, body: asked.append(arguments))
+
+    with pytest.raises(work_tickets.QueueError, match="is for elsewhere; nothing was pushed"):
+        work_tickets.delivered_pull_request(checkout, "git.example/o/origin", WORK_BRANCH, "report")
+
+    assert asked == [] and not origin_has(checkout, WORK_BRANCH)
+
+
+UNRESOLVED = {
+    "no work issue recorded": (None, "this checkout records no work issue, so where "
+                                     f"{WORK_BRANCH} belongs is unknown"),
+    "another branch's work issue": (("other-branch", "repo:origin"),
+                                    "the recorded work issue #7 is titled 'other-branch'"),
+    "two repo labels": ((WORK_BRANCH, "repo:origin", "repo:elsewhere"),
+                        "carries 2 repo: labels (repo:elsewhere, repo:origin)"),
+}
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
+@pytest.mark.parametrize("case", UNRESOLVED)
+def test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_push(
+        checkout, capsys, case):
+    recorded, refusal = UNRESOLVED[case]
+    git(checkout, "switch", "-q", "-c", WORK_BRANCH)
+    commit(checkout, name="fix.txt")
+    if recorded is not None:
+        work_issue(checkout, *recorded)
+
+    assert work_tickets.main(["push", "--worktree", str(checkout)]) == 1
+
+    error = capsys.readouterr().err
+    assert refusal in error and "nothing was pushed to origin" in error
+    assert not origin_has(checkout, WORK_BRANCH)
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
+@pytest.mark.parametrize(("labels", "repo", "tracker"), [
+    (("repo:ORIGIN",), "git.example/o/tracker", None),
+    ((), "git.example/someone/origin", None),
+    ((), "git.example/o/tracker", "git.example/o/tracker"),
+], ids=["its repo label in any case", "the repository holding it", "the checkout's tracker"])
+def test_a_work_branch_is_published_where_its_work_issue_is_for(checkout, tmp_path, monkeypatch,
+                                                                labels, repo, tracker):
+    if tracker is not None:
+        local = tmp_path / "local.toml"
+        local.write_text(f'[trackers]\nmain = "{tracker}"\n', encoding="utf-8")
+        monkeypatch.setattr(work_tickets, "local_config_path", lambda: local)
+    git(checkout, "switch", "-q", "-c", WORK_BRANCH)
+    tip = commit(checkout, name="fix.txt")
+    work_tickets.save_snapshot(checkout, {
+        "repo": repo, "number": 7, "title": WORK_BRANCH, "body": "",
+        "labels": [{"name": label} for label in labels]})
+
+    assert work_tickets.main(["push", "--worktree", str(checkout)]) == 0
+
+    assert git(checkout.parent / "origin.git", "rev-parse", WORK_BRANCH) == tip
+
+
+@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+def test_the_integration_branch_is_pushed_whatever_work_issue_the_checkout_records(checkout):
+    """Work publication guards work branches only: the integration branch keeps its own guard."""
+    work_issue(checkout, WORK_BRANCH, "repo:elsewhere")
+    commit(checkout)
+    run_suite(checkout)
+
+    assert work_tickets.main(["push", "main", "--worktree", str(checkout)]) == 0
+
+    assert origin_main(checkout) == git(checkout, "rev-parse", "HEAD")
