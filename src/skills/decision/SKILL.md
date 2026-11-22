@@ -34,8 +34,10 @@ it, and which solutions there are.
   - `context` and `concern`: the situation and the concern the decision answers, for its
     one-sentence summary.
   - The criteria are weighted before any option is marked.
-  - The datum is the strongest rival; every other option is marked against it. "Keep what we have"
-    is an option whenever something exists.
+  - "Keep what we have" is an option whenever something exists. The datum is what exists today
+    wherever something exists, never an option not yet built; every other option is marked
+    against it. Only where nothing exists is the datum the strongest rival
+    ([dec-003](../work-model/references/rules.md#dec-003-keep-what-we-have)).
   - Every option says what it is and its own wins and losses.
   - Every option carries `success`, its success criterion
     ([dec-010](../work-model/references/rules.md#dec-010-a-success-criterion)).

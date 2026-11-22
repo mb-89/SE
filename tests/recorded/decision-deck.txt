@@ -360,7 +360,7 @@
                     },
                     {
                       "item": "Keep what we have",
-                      "answer": "B is what we have and the datum; C scores -2 against it, so no rival is stronger.",
+                      "answer": "B is what we have, so it is the datum, and every option is marked against it, never against one not yet built.",
                       "pass": true
                     },
                     {
@@ -417,7 +417,7 @@
         }
       },
       "bless": {
-        "version": "94ae3d1f6bbe0c247c9bb98789ed823ffc4c42f67803d36a355f33c8c127a11c"
+        "version": "ff4ac4b1a9eeb808e2d4fc205e79a7abf0d5cb32fb9628059678376c46e2f014"
       }
     }
   ],

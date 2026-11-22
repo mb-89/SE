@@ -718,12 +718,15 @@ A decision names what shows its problem exists: a failure, a measurement or the 
 ### dec-003 Keep what we have
 
 Where something exists, keeping it is an option, and the datum every option is marked against is
-the strongest rival.
+what exists today, never an option not yet built; only where nothing exists is it the strongest
+rival.
 
-- **Why:** change costs something, so a new option must beat what exists, and against a weak datum
+- **Why:** what exists is the one option whose marks are known, so a new option must beat it; a
+  datum on an option not yet built marks everything against a guess, and against a weak datum
   every option looks good.
-- **Without it:** decisions replace what works with what merely sounds better.
-- **Prevents:** churn that replaces a working solution; a matrix rigged by a weak datum.
+- **Without it:** decisions replace what works with what merely sounds better, and a matrix
+  measured from an unbuilt option favours whatever is closest to it.
+- **Prevents:** churn that replaces a working solution; a matrix rigged by its datum.
 - **Implementations:**
   - se: checklist item 3 of the [decision skill](../../decision/SKILL.md#the-checklist).
 - **Related:** dec-004

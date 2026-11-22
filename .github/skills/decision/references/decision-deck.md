@@ -67,7 +67,7 @@ checklist:
     answer: The person's words ("one decision in the end should be a one-pager") and chat answers that had to be copied into issues by hand.
     pass: true
   - item: Keep what we have
-    answer: B is what we have and the datum; C scores -2 against it, so no rival is stronger.
+    answer: B is what we have, so it is the datum, and every option is marked against it, never against one not yet built.
     pass: true
   - item: A named loser
     answer: B loses on the record and on one decision per turn; C loses on the person's effort and on crowding the work queue.
