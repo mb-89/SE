@@ -138,9 +138,12 @@ every package, so work issues and session prompts never repeat it.
      from another's code, its test may be a test-only commit. The field report names each such
      grouping.
 5. **Deliver, always, even when partial**:
-   - Complete the field report in `.se/work/field-report.md` (`work_tickets.py field-report
-     --draft` writes it from the template, between the markers the integration reads; without
-     gh, add `--issue-body <file>`).
+   - Complete the field report in `.se/work/field-report.md`. This command writes it from the
+     template, between the markers the integration reads; without gh, add `--issue-body <file>`:
+
+     ```sh
+     work_tickets.py field-report --draft .se/work/field-report.md --worktree <worktree>
+     ```
    - Where the issue asks for "not slower", run `work_tickets.py suite --compare <integration
      branch>` and quote its verdict line in the evidence table.
    - Where the acceptance names the public check, run it on the branch's commits with
