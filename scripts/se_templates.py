@@ -1,45 +1,45 @@
 #!/usr/bin/env python3
-"""SE's side of forms: the forms engine (`forms.py`) with the checks SE's filing commands add, as
-the command component `forms` that kern's MCP door serves as its tool `forms` (README "Forms"),
-and the form gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
+"""SE's side of templates: the templates engine (`templates.py`) with the checks SE's filing commands add, as
+the command component `templates` that kern's MCP door serves as its tool `templates` (README "Templates"),
+and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
 
 The engine stays free of SE's own scripts; this script joins it to them. Its three door commands
 only read: nothing is filed, written or sent through them, and none calls GitHub or starts a
 model. The fourth, `gate`, is the hook's and not the door's; it writes only its count of refusals
 and its log.
 
-- `se_forms.py list [--tree]` prints what `forms.py list` prints: every form of SE's with its
+- `se_templates.py list [--tree]` prints what `templates.py list` prints: every template of SE's with its
   actions and, for an adapter, its checker.
-- `se_forms.py draft <form> [--markdown] [--tree]` prints the JSON `forms.py draft --json` prints:
-  `form`, `says`, `fields`, `field_says`, `field_shape` and `schema`; `--markdown` the Markdown
-  draft `forms.py draft` prints. An unknown form is answered with the list of forms, exit code 2.
-- `se_forms.py check` takes what `forms.py check` takes: a form, or `--action` with `--repo`,
+- `se_templates.py draft <template> [--markdown] [--tree]` prints the JSON `templates.py draft --json` prints:
+  `template`, `says`, `fields`, `field_says`, `field_shape` and `schema`; `--markdown` the Markdown
+  draft `templates.py draft` prints. An unknown template is answered with the list of templates, exit code 2.
+- `se_templates.py check` takes what `templates.py check` takes: a template, or `--action` with `--repo`,
   `--labels` and `--base` to select one as a write would; the text as one of `--body`,
   `--body-file`, `--fields` and `--fields-json`; `--title`; `--render`; `--tree`. Besides,
   `--worktree` names the project whose local list of private terms is read (default: the
   directory it runs in). It checks the text and the title as a filing command would file them
-  (`forms.formed` with `[forms] enforce = "refuse"`, a fields object always rendered):
-  - the form's own check (`forms.check`, through `work_tickets.form_findings`, or
-    `forms.select`'s refused markers with `--action`);
-  - the private terms of `forms.private_findings` for the project's root, as
-    `work_tickets.form_findings` runs them: a finding names the field and the list, never the term;
-  - the name rule, `work_tickets.name_refusal` (what `checked_name` refuses), where the form's
+  (`templates.filled` with `[templates] enforce = "refuse"`, a fields object always rendered):
+  - the template's own check (`templates.check`, through `work_tickets.template_findings`, or
+    `templates.select`'s refused markers with `--action`);
+  - the private terms of `templates.private_findings` for the project's root, as
+    `work_tickets.template_findings` runs them: a finding names the field and the list, never the term;
+  - the name rule, `work_tickets.name_refusal` (what `checked_name` refuses), where the template's
     title field takes `work_tickets:name_refusal` as its shape (`ticket`, `work`) and a title is
-    given; it replaces the form's own warning of that shape;
-  - for a form of an issue, the SE commands that do not exist, as `work_tickets.refuse_dangling`
-    finds them, where the form's own check named none.
+    given; it replaces the template's own warning of that shape;
+  - for a template of an issue, the SE commands that do not exist, as `work_tickets.refuse_dangling`
+    finds them, where the template's own check named none.
 
 **Its answer.** `check` exits 0 whatever it finds, and 2 on a usage error only, as kern's door
 answers any other exit code as `command-failed` with a remedy about usage. Its first line is the
 verdict, `passes` or `refused: <n> findings` (n the refused ones). A refusal goes on with every
-finding as `forms.report` writes it, at most REFUSAL_LINES lines, ending with the line that names
-`se_forms.py draft <form>`. A pass goes on with its warnings, one a line, or with `--render` with
-the Markdown to file (the warnings then on stderr). Where no form applies to `--action`, it passes
-and says `free: no form applies (<action>)` (on stderr with `--render`, the text as given after).
+finding as `templates.report` writes it, at most REFUSAL_LINES lines, ending with the line that names
+`se_templates.py draft <template>`. A pass goes on with its warnings, one a line, or with `--render` with
+the Markdown to file (the warnings then on stderr). Where no template applies to `--action`, it passes
+and says `free: no template applies (<action>)` (on stderr with `--render`, the text as given after).
 
-**The gate.** `se_forms.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
+**The gate.** `se_templates.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
 Copilot's with `toolName` and `toolArgs`) and answers on stdout one JSON object or nothing; it
-exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Forms"), with
+exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Templates"), with
 `--no-python-downloads`, and the hook prints its answer as its whole stdout. The file tools are
 judged by their own rules (The file tools, below).
 
@@ -70,42 +70,42 @@ judged by their own rules (The file tools, below).
   - A body it cannot read (UNREAD): from `$(...)`, backticks or a variable, a pipe into
     `--body-file -`, an unquoted heredoc holding `$` or a backtick, a file that does not exist yet,
     or one gh writes itself (GH_OWN_BODY: `--fill`, `--fill-first`, `--fill-verbose`, `--template`,
-    `--editor`). It is judged as an empty body: where that selects a form, the write is denied
+    `--editor`). It is judged as an empty body: where that selects a template, the write is denied
     (with `warn`, told) naming the remedy, `--body-file <file>` (`-F body=@<file>` for `gh api`);
     where none applies, as for an unmarked comment, it passes and logs one line. The reader
     never runs the command or any part of it.
   - A command it cannot split (an unclosed quote) passes and logs. The first deny among the
     command's writes is the answer.
 - Which se.toml decides: the project's (the checkout holding the payload's `cwd`) where its home
-  repositories (`forms.home_repositories`) hold the target, else that of the SE this script runs
-  from where its home holds it, else the write is free. Its `[forms] gate` (`forms.enforcement`,
+  repositories (`templates.home_repositories`) hold the target, else that of the SE this script runs
+  from where its home holds it, else the write is free. Its `[templates] gate` (`templates.enforcement`,
   read at `origin/<integration branch>`) is `off` (the default), `warn` or `refuse`;
-  `SE_FORMS_GATE=off` in the environment turns it off for the machine whatever se.toml says, and
-  `--gate`, for tests only, sets it for the run. The forms are SE's (`forms.load`).
-- Selection: `forms.select` for the action, with the call's labels and base. Where the call
-  carries no labels or no base, the body's own `<!-- se:form <name> -->` picks among the action's
-  forms without that filter; an unmarked body is selected as if the call had no labels. It never
+  `SE_TEMPLATES_GATE=off` in the environment turns it off for the machine whatever se.toml says, and
+  `--gate`, for tests only, sets it for the run. The templates are SE's (`templates.load`).
+- Selection: `templates.select` for the action, with the call's labels and base. Where the call
+  carries no labels or no base, the body's own template marker picks among the action's
+  templates without that filter; an unmarked body is selected as if the call had no labels. It never
   reads GitHub.
 - The check is `check`'s: the same `filed` and `findings`, the private terms read from the
   project's local list.
-- The answers: with `refuse` and a refused finding, a `deny` whose reason is `forms.report`'s, its
-  tail naming the forms tool (`gate=True`); with `warn` and any finding, `additionalContext` with
+- The answers: with `refuse` and a refused finding, a `deny` whose reason is `templates.report`'s, its
+  tail naming the templates tool (`gate=True`); with `warn` and any finding, `additionalContext` with
   the findings; else nothing. Never an `allow`, which would skip the person's prompt.
-- The cap and the hold: each refusal is counted (`forms.count_refusal`) under `forms.target`
-  (form, repository, action, the issue's number or the title) in the payload's `session_id`. From
-  `[forms] refusals` on, the refusal offers the hold; an issue write labelled `off-form` and not
+- The cap and the hold: each refusal is counted (`templates.count_refusal`) under `templates.target`
+  (template, repository, action, the issue's number or the title) in the payload's `session_id`. From
+  `[templates] refusals` on, the refusal offers the hold; an issue write labelled `off-template` and not
   `ready` then passes. A private term is never held; comments and pull requests have no hold.
 - The failure rule: a payload it cannot read, or any error before it knows that the target is at
-  home and a form applies, passes and appends one line, the error and never the body, to
-  `<project>/.se/.runtime/forms-gate.log` (GATE_LOG). An error after that denies with
-  GATE_FAILED, naming the command to use instead and `SE_FORMS_GATE=off`. A run past
+  home and a template applies, passes and appends one line, the error and never the body, to
+  `<project>/.se/.runtime/templates-gate.log` (GATE_LOG). An error after that denies with
+  GATE_FAILED, naming the command to use instead and `SE_TEMPLATES_GATE=off`. A run past
   GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
   tool call for the host's own hook timeout.
 
-**The file tools.** Where the project's se.toml `[forms] files` is `write`, the gate also judges
+**The file tools.** Where the project's se.toml `[templates] files` is `write`, the gate also judges
 a file tool's call by the file it would leave (FILE_TOOLS, GITHUB_FILE_TOOLS); `scripts/se_hook.sh`
 runs it for one only where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) left
-`write` in `<project>/.se/.runtime/forms-files` (FILES_RUNTIME).
+`write` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME).
 
 - Claude Code's `Write`, `Edit` and `MultiEdit`, by their whole name: the project is the checkout
   holding `file_path`, whose se.toml decides; a path outside it is free. The result is built in
@@ -116,60 +116,60 @@ runs it for one only where SE's start (`gate --runtime <project>`, scripts/boots
 - The GitHub tools `push_files` (each of its `files`) and `create_or_update_file`: each path
   relative to the target repository's root, where the target is at home as for a GitHub write
   (Which se.toml decides) and that se.toml's `files` is `write`.
-- The check: the forms check-files reads (Claimed files); a path no form claims passes, one that
-  breaks its form is denied with check-files' lines, each refused finding and the line naming
-  `forms.py draft --path`. Each refusal is counted (`forms.count_refusal`, its target the form,
-  the repository or project, `file.write` and the path); there is no hold for a file. `[forms]
-  gate` does not change it; `SE_FORMS_GATE=off` turns it off as it turns the gate off.
-- The failure rule and the bound are the gate's: an error before it knows that a form claims the
+- The check: the templates check-files reads (Claimed files); a path no template claims passes, one that
+  breaks its template is denied with check-files' lines, each refused finding and the line naming
+  `templates.py draft --path`. Each refusal is counted (`templates.count_refusal`, its target the template,
+  the repository or project, `file.write` and the path); there is no hold for a file. `[templates]
+  gate` does not change it; `SE_TEMPLATES_GATE=off` turns it off as it turns the gate off.
+- The failure rule and the bound are the gate's: an error before it knows that a template claims the
   file passes and logs, one after it denies with GATE_FAILED.
-- For tests only, `--files`, `--forms` and `--root` set the switch, the forms' folder and the
+- For tests only, `--files`, `--templates` and `--root` set the switch, the templates' folder and the
   project root for the run; the hook never passes them.
 
-**Claimed files.** `se_forms.py check-files [PATH ...] [--changed REF] [--root DIR] [--forms DIR]`
-checks the files a `file.write` form claims by its `[applies] paths`, each as `forms.py check
+**Claimed files.** `se_templates.py check-files [PATH ...] [--changed REF] [--root DIR] [--templates DIR]`
+checks the files a `file.write` template claims by its `[applies] paths`, each as `templates.py check
 --path` checks one. It is neither the door's nor the gate's: `work_tickets.py stop-check`, `push`
-and CI's `check` job run it (README "Forms").
+and CI's `check` job run it (README "Templates").
 
 - Which files: the PATHs given; or, with `--changed REF`, every file that differs between REF's
   merge base with HEAD and the working tree (committed, staged or not) and every untracked file
-  git does not ignore, where a form claims its path. A deleted file is not checked. `--root` is
-  the project root the forms' paths are relative to (default: the git checkout holding the
+  git does not ignore, where a template claims its path. A deleted file is not checked. `--root` is
+  the project root the templates' paths are relative to (default: the git checkout holding the
   working directory).
-- Which forms: `--forms DIR`'s; else the root's `forms/` (at `origin/<integration branch>` where
-  it holds them, `forms.load`); where the root has none, SE's own.
-- The switch: with `--changed` it reads se.toml `[forms] files` of the root (`forms.enforcement`,
+- Which templates: `--templates DIR`'s; else the root's `templates/` (at `origin/<integration branch>` where
+  it holds them, `templates.load`); where the root has none, SE's own.
+- The switch: with `--changed` it reads se.toml `[templates] files` of the root (`templates.enforcement`,
   at `origin/<integration branch>`, so a branch cannot switch its own check off): `off` (the
   default) checks nothing and says so in one line; `check` and `write` check. Given PATHs are
   always checked.
-- Its answer: per file that breaks its form, one line a refused finding, `<path> (<form>):
+- Its answer: per file that breaks its template, one line a refused finding, `<path> (<template>):
   <field>: <fix>`, at most CHECK_FILES_LINES lines in all with a count of the rest, then the line
-  that names `forms.py draft --path`; exit code 1. Where nothing is claimed or nothing refuses, one
+  that names `templates.py draft --path`; exit code 1. Where nothing is claimed or nothing refuses, one
   line, exit code 0; a usage error, exit code 2. `changed_refusal` gives stop-check and push the
   same lines.
 
-**The backstop.** `se_forms.py backstop --event-name NAME --event FILE [--backstop off|on]
-[--worktree DIR]` reads one GitHub event, as `.github/workflows/forms.yml` hands it over from
+**The backstop.** `se_templates.py backstop --event-name NAME --event FILE [--backstop off|on]
+[--worktree DIR]` reads one GitHub event, as `.github/workflows/templates.yml` hands it over from
 `$GITHUB_EVENT_PATH`, and prints one JSON plan, `{"repo", "number", "add_labels", "summary",
-"failed"}`; it never calls GitHub and exits 0, 2 on a usage error (README "Forms").
+"failed"}`; it never calls GitHub and exits 0, 2 on a usage error (README "Templates").
 
 - What it checks (BACKSTOP_EVENTS): `issues` opened (`issue.create`), edited, reopened or labeled
   (`issue.edit`), for an issue whose body carries the fleet marker or whose labels hold `work`,
   its labels from the event; `issue_comment` created or edited (`comment.create`,
-  `comment.edit`), for a comment whose body carries a form's marker (`<!-- se:review -->`, a
-  `<!-- se:form <name> -->` line), as selection reads it. Every other event, an outside
+  `comment.edit`), for a comment whose body carries a template's marker (`<!-- se:review -->`, a
+  `<!-- se:template <repository>/<name> <version> <digest> -->` line), as selection reads it. Every other event, an outside
   reporter's issue and an unmarked comment among them, gives an empty plan.
-- The check is `check`'s for the event's repository, through the gate's selection (`gate_form`):
-  the form, the private terms of `--worktree`'s local list (default: the directory it runs in;
+- The check is `check`'s for the event's repository, through the gate's selection (`gate_template`):
+  the template, the private terms of `--worktree`'s local list (default: the directory it runs in;
   a finding names the field and the list, never the term), the name rule and SE's commands.
-- The plan: an issue whose text refuses and that lacks `off-form` gets `add_labels: ["off-form"]`;
+- The plan: an issue whose text refuses and that lacks `off-template` gets `add_labels: ["off-template"]`;
   its summary is `refusal`'s, at most REFUSAL_LINES lines, and the `unhold` line. A comment whose
   text refuses gets none and `failed: true`, as `unhold` reads the issue's body, never its
   comments. The plan never removes a label and never holds a comment to write.
-- The switch: se.toml `[forms] backstop` of `--worktree`'s checkout, `off` (the default) or `on`,
+- The switch: se.toml `[templates] backstop` of `--worktree`'s checkout, `off` (the default) or `on`,
   another value a usage error naming the file; `--backstop`, for tests, sets it for the run.
 
-Standard library only; it imports `forms` and `work_tickets` as the scripts beside it."""
+Standard library only; it imports `templates` and `work_tickets` as the scripts beside it."""
 
 from __future__ import annotations
 
@@ -186,18 +186,18 @@ import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-#: The title shape of the forms whose title is a ticket's name (forms/ticket.toml, forms/work.toml).
+#: The title shape of the templates whose title is a ticket's name (templates/ticket.toml, templates/work.toml).
 NAME_SHAPE = "work_tickets:name_refusal"
 NAME_RULE = "name"
 DANGLING_RULE = "dangling"
-COMMAND = "se_forms.py check"
+COMMAND = "se_templates.py check"
 PASSES = "passes"
 #: The gate's bound on its own run, from its start to its answer: past it, the write passes.
 GATE_SECONDS = 10.0
 #: The gate's log of the writes it let pass without judging, under the project.
-GATE_LOG = Path(".se") / ".runtime" / "forms-gate.log"
+GATE_LOG = Path(".se") / ".runtime" / "templates-gate.log"
 #: The machine's switch of the gate (README "Machine-local `~/.se/local.toml`").
-GATE_SWITCH = "SE_FORMS_GATE"
+GATE_SWITCH = "SE_TEMPLATES_GATE"
 #: The server part of a guarded tool's name holds this.
 GATE_SERVER = "github"
 #: The guarded tools: each maps to (action, body, title, labels, base), the arguments that hold
@@ -212,14 +212,14 @@ GATE_TOOLS = {
     "add_comment_to_pending_review": ("comment.create", "body", None, None, None),
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
 }
-GATE_FAILED = "SE's form gate failed on this write ({kind}), so it was not sent"
-#: The file tools (the module docstring: The file tools), guarded where `[forms] files` is
+GATE_FAILED = "SE's template gate failed on this write ({kind}), so it was not sent"
+#: The file tools (the module docstring: The file tools), guarded where `[templates] files` is
 #: `write`: Claude Code's own, by their whole name, and the GitHub tools that write files.
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
 GITHUB_FILE_TOOLS = ("push_files", "create_or_update_file")
 #: The switch's line SE's start writes for se_hook.sh (`gate --runtime`): there only where
-#: `[forms] files` is `write`.
-FILES_RUNTIME = Path(".se") / ".runtime" / "forms-files"
+#: `[templates] files` is `write`.
+FILES_RUNTIME = Path(".se") / ".runtime" / "templates-files"
 #: The shell reader (the module docstring: The shell reader). The input keys of a shell tool.
 SHELL_KEYS = ("command", "input", "script")
 #: `gh` as a word followed by a space, as se_hook.sh's filter finds it (`\n` and `\t` as JSON
@@ -255,8 +255,8 @@ GH_API_PATHS = ((re.compile(r"issues"), "issue.create", None),
 #: a heredoc by its index.
 COMPUTED, HEREDOC = "", ""
 HEREDOC_OPEN = re.compile(r"<<(-?)[ \t]*(\\|'|\")?([A-Za-z0-9_.-]+)(?(2)['\"]?)")
-UNREAD = ("{said}: SE cannot read this body ({why}), so it cannot check it against the {form} "
-          "form. Write the body to a file and pass {remedy}.")
+UNREAD = ("{said}: SE cannot read this body ({why}), so it cannot check it against the {template} "
+          "template. Write the body to a file and pass {remedy}.")
 COMPUTED_WHY = "the shell computes it: $(...), backticks or a variable"
 
 
@@ -602,7 +602,7 @@ def shell_writes(write: "Write", project: Path | None) -> list[ShellWrite]:
     return calls
 
 
-CHECK_FILES = "se_forms.py check-files"
+CHECK_FILES = "se_templates.py check-files"
 #: check-files' refusal: its lines in all, the `draft` line among them.
 CHECK_FILES_LINES = 10
 
@@ -615,11 +615,11 @@ def sibling(name: str):
     return importlib.import_module(name)
 
 
-#: se_forms.py's commands as one kern component (README "Commands as components"); each command's
+#: se_templates.py's commands as one kern component (README "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
-    "forms", "Forms",
-    "SE's forms: list names them, draft gives a form's fields, their instructions and their shape, "
+    "templates", "Templates",
+    "SE's templates: list names them, draft gives a template's fields, their instructions and their shape, "
     "and check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
     "to file.",
     ("list", "draft", "check", "gate", "check-files", "backstop")),)
@@ -627,36 +627,36 @@ COMPONENTS = (sibling("se_components").Group(
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
 READ_ONLY_COMMANDS = {
-    "list": "Lists SE's forms with the actions each shapes. Use it to find the form for a text "
+    "list": "Lists SE's templates with the actions each shapes. Use it to find the template for a text "
             "before writing it.",
-    "draft": "Gives a form's fields, what belongs in each (field_says), their shape and a JSON "
+    "draft": "Gives a template's fields, what belongs in each (field_says), their shape and a JSON "
              "Schema of them. Use it before writing an issue, a pull request or a report SE "
              "checks.",
-    "check": "Checks a text or a fields object against a form as SE's filing commands would: its "
+    "check": "Checks a text or a fields object against a template as SE's filing commands would: its "
              "first line is passes or refused, then every finding or, with --render, the Markdown "
              "to file. Use it before filing; it files nothing.",
 }
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se_forms.py", description=__doc__.splitlines()[0])
+    top = argparse.ArgumentParser(prog="se_templates.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
-    tree = {"action": "store_true", "help": "read the working tree's forms/ (default: forms/ at "
+    tree = {"action": "store_true", "help": "read the working tree's templates/ (default: templates/ at "
                                             "origin/<integration branch> where it holds them)"}
-    listing = commands.add_parser("list", help="name every form with its actions")
+    listing = commands.add_parser("list", help="name every template with its actions")
     listing.add_argument("--tree", **tree)
     drafting = commands.add_parser(
-        "draft", help="print a form's fields, their instructions, their shape and its schema",
-        description="Print the JSON forms.py draft --json prints; --markdown the empty form.")
-    drafting.add_argument("form", help="the form, as list names it")
+        "draft", help="print a template's fields, their instructions, their shape and its schema",
+        description="Print the JSON templates.py draft --json prints; --markdown the empty template.")
+    drafting.add_argument("template", help="the template, as list names it")
     drafting.add_argument("--markdown", action="store_true", help="print the Markdown draft")
     drafting.add_argument("--tree", **tree)
     checking = commands.add_parser(
-        "check", help="check a text against a form as SE's filing commands would",
+        "check", help="check a text against a template as SE's filing commands would",
         description="Check a body or a fields object as a filing command would file it: the "
-                    "form's check, the private terms, the name rule and SE's commands. It exits "
+                    "template's check, the private terms, the name rule and SE's commands. It exits "
                     "0; its first line is passes or refused: <n> findings.")
-    checking.add_argument("form", nargs="?", help="the form; without it, --action selects one")
+    checking.add_argument("template", nargs="?", help="the template; without it, --action selects one")
     given = checking.add_mutually_exclusive_group(required=True)
     given.add_argument("--body-file", type=Path, help="the body as a file")
     given.add_argument("--fields", type=Path, help="the field values as a JSON file")
@@ -665,9 +665,9 @@ def make_parser() -> argparse.ArgumentParser:
     checking.add_argument("--title", help="the title it would be filed with")
     checking.add_argument("--render", action="store_true",
                           help="where it passes, the Markdown to file after the first line")
-    checking.add_argument("--action", choices=sibling("forms").ACTIONS, metavar="ACTION",
-                          help="select the form as a write of this action would: one of "
-                               + ", ".join(sibling("forms").ACTIONS))
+    checking.add_argument("--action", choices=sibling("templates").ACTIONS, metavar="ACTION",
+                          help="select the template as a write of this action would: one of "
+                               + ", ".join(sibling("templates").ACTIONS))
     checking.add_argument("--repo", help="with --action: the repository written to")
     checking.add_argument("--labels", help="with --action: the labels, comma-separated")
     checking.add_argument("--base", help="with --action: a pull request's base branch")
@@ -676,36 +676,36 @@ def make_parser() -> argparse.ArgumentParser:
     checking.add_argument("--tree", **tree)
     gating = commands.add_parser(
         "gate",
-        help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its form",
+        help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its template",
         description="Read a PreToolUse payload on stdin and answer a deny, the findings, or "
                     "nothing (the module docstring: The gate). It exits 0.")
-    gating.add_argument("--gate", choices=sibling("forms").GATE_VALUES,
+    gating.add_argument("--gate", choices=sibling("templates").GATE_VALUES,
                         help="for tests only: the switch for this run, whatever se.toml says")
-    gating.add_argument("--files", choices=sibling("forms").FILES_VALUES,
-                        help="for tests only: [forms] files for this run, whatever se.toml says")
-    gating.add_argument("--forms", type=Path,
-                        help="for tests only: read the forms that claim files from this folder")
+    gating.add_argument("--files", choices=sibling("templates").FILES_VALUES,
+                        help="for tests only: [templates] files for this run, whatever se.toml says")
+    gating.add_argument("--templates", type=Path,
+                        help="for tests only: read the templates that claim files from this folder")
     gating.add_argument("--root", type=Path,
                         help="for tests only: the project root of a file tool's path")
     gating.add_argument("--runtime", type=Path, metavar="ROOT",
-                        help="SE's start: write ROOT/.se/.runtime/forms-files where se.toml "
-                             "[forms] files is write, remove it otherwise; reads no payload")
+                        help="SE's start: write ROOT/.se/.runtime/templates-files where se.toml "
+                             "[templates] files is write, remove it otherwise; reads no payload")
     files = commands.add_parser(
-        "check-files", help="check the files a form claims, given or changed since a ref",
-        description="Check each claimed file as forms.py check --path does: the PATHs given, or "
+        "check-files", help="check the files a template claims, given or changed since a ref",
+        description="Check each claimed file as templates.py check --path does: the PATHs given, or "
                     "with --changed every claimed file changed since REF's merge base, committed "
-                    "or not, where se.toml [forms] files is check. It exits 1 where one refuses.")
+                    "or not, where se.toml [templates] files is check. It exits 1 where one refuses.")
     files.add_argument("paths", nargs="*", type=Path, metavar="PATH", help="a file to check")
     files.add_argument("--changed", metavar="REF",
                        help="check every claimed file changed since REF's merge base with HEAD, "
-                            "untracked ones too, where [forms] files is check")
-    files.add_argument("--root", type=Path, help="the project root of the forms' paths (default: "
+                            "untracked ones too, where [templates] files is check")
+    files.add_argument("--root", type=Path, help="the project root of the templates' paths (default: "
                                                  "the git checkout holding the working directory)")
-    files.add_argument("--forms", type=Path, help="read the forms from this folder instead")
+    files.add_argument("--templates", type=Path, help="read the templates from this folder instead")
     backstop = commands.add_parser(
-        "backstop", help="plan the label or failure a GitHub event's off-form text gets",
+        "backstop", help="plan the label or failure a GitHub event's off-template text gets",
         description="Read one GitHub issues or issue_comment event and print the JSON plan "
-                    "forms.yml applies (the module docstring: The backstop). It never calls "
+                    "templates.yml applies (the module docstring: The backstop). It never calls "
                     "GitHub and exits 0.")
     backstop.add_argument("--event-name", required=True, help="the event's name, as "
                                                               "$GITHUB_EVENT_NAME holds it")
@@ -728,39 +728,39 @@ class Usage(Exception):
 
 
 def loaded(options: argparse.Namespace) -> dict:
-    forms = sibling("forms")
+    templates = sibling("templates")
     try:
-        return forms.load(forms.ROOT, tree=options.tree)
-    except forms.FormError as error:
+        return templates.load(templates.ROOT, tree=options.tree)
+    except templates.TemplateError as error:
         raise Usage(str(error)) from error
 
 
-def named(forms_by_name: dict, name: str, command: str):
-    """The form `name`, or a Usage error answering with the list of forms."""
-    if name not in forms_by_name:
-        raise Usage("\n".join([f"{command}: no form {name!r}; the forms are:",
-                               *sibling("forms").list_forms(forms_by_name)]))
-    return forms_by_name[name]
+def named(templates_by_name: dict, name: str, command: str):
+    """The template `name`, or a Usage error answering with the list of templates."""
+    if name not in templates_by_name:
+        raise Usage("\n".join([f"{command}: no template {name!r}; the templates are:",
+                               *sibling("templates").list_templates(templates_by_name)]))
+    return templates_by_name[name]
 
 
 def run_list(options: argparse.Namespace) -> int:
-    print("\n".join(sibling("forms").list_forms(loaded(options))))
+    print("\n".join(sibling("templates").list_templates(loaded(options))))
     return 0
 
 
 def run_draft(options: argparse.Namespace) -> int:
-    forms = sibling("forms")
-    form = named(loaded(options), options.form, "se_forms.py draft")
+    templates = sibling("templates")
+    template = named(loaded(options), options.template, "se_templates.py draft")
     if options.markdown:
-        print(forms.draft(form), end="")
+        print(templates.draft(template), end="")
     else:
-        print(json.dumps(forms.draft_fields(form), indent=2))
+        print(json.dumps(templates.draft_fields(template), indent=2))
     return 0
 
 
 def given_text(options: argparse.Namespace) -> tuple[str | None, dict | None]:
     """The body or the field values `check` was given, by whichever of its four options."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     try:
         if options.body is not None:
             return options.body, None
@@ -771,52 +771,52 @@ def given_text(options: argparse.Namespace) -> tuple[str | None, dict | None]:
                 raise Usage(f"{COMMAND}: cannot read --body-file {options.body_file} "
                             f"({error})") from error
         if options.fields_json is not None:
-            return None, forms.fields_data(options.fields_json, "--fields-json", COMMAND)
-        return None, forms.fields_file(options.fields, COMMAND)
-    except forms.FormError as error:
+            return None, templates.fields_data(options.fields_json, "--fields-json", COMMAND)
+        return None, templates.fields_file(options.fields, COMMAND)
+    except templates.TemplateError as error:
         raise Usage(str(error)) from error
 
 
-def filed(form, body: str | None, values: dict | None, title: str | None) -> tuple[str, str | None]:
-    """The body and the title as a filing command files them: fields rendered through the form,
-    a body parsed and rendered again as with `[forms] enforce = "refuse"`."""
-    forms = sibling("forms")
+def filed(template, body: str | None, values: dict | None, title: str | None) -> tuple[str, str | None]:
+    """The body and the title as a filing command files them: fields rendered through the template,
+    a body parsed and rendered again as with `[templates] enforce = "refuse"`."""
+    templates = sibling("templates")
     if values is None:
-        return forms.formed(form, body=body, enforce=forms.REFUSE), title
-    values = forms.answer(form, values)
-    title_field = next((item.name for item in form.fields if item.source == "title"), None)
+        return templates.filled(template, body=body, enforce=templates.REFUSE), title
+    values = templates.answer(template, values)
+    title_field = next((item.name for item in template.fields if item.source == "title"), None)
     if title_field:
         if title is not None:
             values[title_field] = title
         elif isinstance(values.get(title_field), str):
             title = values[title_field]
-    return forms.render(form, values), title
+    return templates.render(template, values), title
 
 
-def chosen(forms_by_name: dict, options: argparse.Namespace, body: str):
-    """The form `check` checks against (None: free) and the refused markers selection met."""
-    forms = sibling("forms")
-    if options.form is None and options.action is None:
-        raise Usage(f"{COMMAND}: name a form, or give --action to select one as a write would")
-    if options.form is not None and options.action is not None:
-        raise Usage(f"{COMMAND}: give a form or --action, not both")
+def chosen(templates_by_name: dict, options: argparse.Namespace, body: str):
+    """The template `check` checks against (None: free) and the refused markers selection met."""
+    templates = sibling("templates")
+    if options.template is None and options.action is None:
+        raise Usage(f"{COMMAND}: name a template, or give --action to select one as a write would")
+    if options.template is not None and options.action is not None:
+        raise Usage(f"{COMMAND}: give a template or --action, not both")
     if options.action is None and any(value is not None for value in
                                       (options.repo, options.labels, options.base)):
-        raise Usage(f"{COMMAND}: --repo, --labels and --base select a form; give them with "
+        raise Usage(f"{COMMAND}: --repo, --labels and --base select a template; give them with "
                     "--action")
-    if options.form is not None:
-        return named(forms_by_name, options.form, COMMAND), ()
+    if options.template is not None:
+        return named(templates_by_name, options.template, COMMAND), ()
     work_tickets = sibling("work_tickets")
     labels = [label.strip() for label in (options.labels or "").split(",") if label.strip()]
     try:
         where: dict[str, object] = {"labels": labels, "base": options.base,
-                                    "integration": work_tickets.integration_branch(forms.ROOT)}
+                                    "integration": work_tickets.integration_branch(templates.ROOT)}
         if options.repo is not None:
-            where.update(repo=options.repo, home=forms.home_repositories(forms.ROOT))
-        selection = forms.select(forms_by_name, options.action, body, options.title, **where)
-    except (forms.FormError, work_tickets.QueueError) as error:
+            where.update(repo=options.repo, home=templates.home_repositories(templates.ROOT))
+        selection = templates.select(templates_by_name, options.action, body, options.title, **where)
+    except (templates.TemplateError, work_tickets.QueueError) as error:
         raise Usage(str(error)) from error
-    return selection.form, selection.findings
+    return selection.template, selection.findings
 
 
 def repository(root: Path, given: str | None) -> str:
@@ -829,14 +829,14 @@ def repository(root: Path, given: str | None) -> str:
         return ""
 
 
-def findings(form, root: Path, repo: str, title: str | None, body: str) -> list:
+def findings(template, root: Path, repo: str, title: str | None, body: str) -> list:
     """Every finding a filing command would refuse or warn of for `title` and `body`."""
-    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
     try:
-        _, found = work_tickets.form_findings(root, repo, form, title or "", body)
+        _, found = work_tickets.template_findings(root, repo, template, title or "", body)
     except work_tickets.QueueError as error:
         raise Usage(str(error)) from error
-    title_field = next((item for item in form.fields if item.source == "title"), None)
+    title_field = next((item for item in template.fields if item.source == "title"), None)
     if title is None:  # no title given: the body alone is checked
         found = [item for item in found if title_field is None or item.field != title_field.name]
     elif title_field is not None and title_field.shape == NAME_SHAPE:
@@ -844,55 +844,55 @@ def findings(form, root: Path, repo: str, title: str | None, body: str) -> list:
         if refusal:
             found = [item for item in found if not (item.field == title_field.name
                                                     and item.fix == refusal)]
-            found.insert(0, forms.Finding(title_field.name, NAME_RULE, forms.REFUSE, refusal))
-    if set(form.actions) & set(forms.ISSUE_ACTIONS) and not any(
+            found.insert(0, templates.Finding(title_field.name, NAME_RULE, templates.REFUSE, refusal))
+    if set(template.actions) & set(templates.ISSUE_ACTIONS) and not any(
             item.rule == DANGLING_RULE for item in found):
         try:
             work_tickets.refuse_dangling(repo, COMMAND, body)
         except work_tickets.QueueError as error:
-            found += [forms.Finding("body", DANGLING_RULE, forms.REFUSE,
+            found += [templates.Finding("body", DANGLING_RULE, templates.REFUSE,
                                     f"{line.strip()}: correct it, or say in Requirements that "
                                     "this issue adds it")
                       for line in str(error).splitlines()[1:] if line.strip()]
-    return sorted(found, key=lambda item: item.severity != forms.REFUSE)
+    return sorted(found, key=lambda item: item.severity != templates.REFUSE)
 
 
-def refusal(form, found: list) -> list[str]:
-    """`forms.report`'s refusal, its last line naming this script's draft."""
-    forms = sibling("forms")
-    if form is None:
-        return [f"  {item.field}: {item.fix}" for item in found if item.severity == forms.REFUSE]
-    lines = forms.report(COMMAND, form, found, refused=True).splitlines()
-    lines[-1] = f"The empty form: uv run python {HERE / 'se_forms.py'} draft {form.name}"
+def refusal(template, found: list) -> list[str]:
+    """`templates.report`'s refusal, its last line naming this script's draft."""
+    templates = sibling("templates")
+    if template is None:
+        return [f"  {item.field}: {item.fix}" for item in found if item.severity == templates.REFUSE]
+    lines = templates.report(COMMAND, template, found, refused=True).splitlines()
+    lines[-1] = f"The empty template: uv run python {HERE / 'se_templates.py'} draft {template.name}"
     return lines
 
 
 def run_check(options: argparse.Namespace) -> int:
-    forms = sibling("forms")
-    forms_by_name = loaded(options)
+    templates = sibling("templates")
+    templates_by_name = loaded(options)
     body, values = given_text(options)
-    form, met = chosen(forms_by_name, options, body or "")
+    template, met = chosen(templates_by_name, options, body or "")
     found = list(met)
     title = options.title
-    if form is None:
+    if template is None:
         rendered = body if body is not None else json.dumps(values)
     else:
         try:
-            rendered, title = filed(form, body, values, title)
-        except forms.FormError as error:
+            rendered, title = filed(template, body, values, title)
+        except templates.TemplateError as error:
             raise Usage(str(error)) from error
         root = options.worktree.resolve()
-        found += findings(form, root, repository(root, options.repo), title, rendered)
-    refused = sum(item.severity == forms.REFUSE for item in found)
+        found += findings(template, root, repository(root, options.repo), title, rendered)
+    refused = sum(item.severity == templates.REFUSE for item in found)
     if refused:
-        print("\n".join([f"refused: {refused} findings", *refusal(form, found)]))
+        print("\n".join([f"refused: {refused} findings", *refusal(template, found)]))
         return 0
     warnings = [str(item) for item in found]
-    if len(warnings) > forms.REFUSAL_LINES:
-        warnings = warnings[:forms.REFUSAL_LINES - 1] + [
-            f"... and {len(warnings) - forms.REFUSAL_LINES + 1} more findings"]
-    if form is None:
-        warnings.insert(0, f"free: no form applies ({options.action})")
+    if len(warnings) > templates.REFUSAL_LINES:
+        warnings = warnings[:templates.REFUSAL_LINES - 1] + [
+            f"... and {len(warnings) - templates.REFUSAL_LINES + 1} more findings"]
+    if template is None:
+        warnings.insert(0, f"free: no template applies ({options.action})")
     if options.render:
         if warnings:
             print("\n".join(warnings), file=sys.stderr)
@@ -968,7 +968,7 @@ def checkout(cwd: str) -> Path | None:
 
 
 class Judged(Exception):
-    """An error after the gate knows that the target is at home and a form applies."""
+    """An error after the gate knows that the target is at home and a template applies."""
 
     def __init__(self, error: BaseException, write: Write) -> None:
         super().__init__(str(error))
@@ -1006,51 +1006,51 @@ def context(text: str) -> str:
 def deciding(write: Write, project: Path | None) -> Path | None:
     """The checkout whose se.toml decides for `write`: the project's where its home holds the
     target, else SE's own where its home does; None: the write is free."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     roots = [project] if project is not None and (project / "se.toml").is_file() else []
     for root in (*roots, HERE.parent):
-        if forms._at_home(write.repo, forms.home_repositories(root)):
+        if templates._at_home(write.repo, templates.home_repositories(root)):
             return root
     return None
 
 
-def gate_form(catalog: dict, write: Write, root: Path):
-    """The form that shapes `write` (None: free), and the refused markers selection met."""
-    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+def gate_template(catalog: dict, write: Write, root: Path):
+    """The template that shapes `write` (None: free), and the refused markers selection met."""
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
     body = write.body or ""
     integration = work_tickets.integration_branch(root)
     if write.labels is None or write.base is None:
         have = {label.casefold() for label in write.labels or ()}
-        for name in dict.fromkeys(forms.FORM_MARKER_PATTERN.findall(body)):
-            form = catalog.get(name)
-            if form is None or write.action not in form.actions:
+        for name in dict.fromkeys(templates.TEMPLATE_MARKER_PATTERN.findall(body)):
+            template = catalog.get(name)
+            if template is None or write.action not in template.actions:
                 continue
             if write.labels is not None and not all(label.casefold() in have
-                                                    for label in form.labels):
+                                                    for label in template.labels):
                 continue
-            if write.base is not None and form.base and write.base != integration:
+            if write.base is not None and template.base and write.base != integration:
                 continue
-            return form, ()
-    selection = forms.select(catalog, write.action, body, write.title, labels=write.labels or (),
+            return template, ()
+    selection = templates.select(catalog, write.action, body, write.title, labels=write.labels or (),
                              base=write.base, integration=integration)
-    return selection.form, selection.findings
+    return selection.template, selection.findings
 
 
 def instead(write: Write) -> str:
     if write.files:
-        return (f"write it as uv run python {HERE / 'forms.py'} draft --path <file> gives it, "
+        return (f"write it as uv run python {HERE / 'templates.py'} draft --path <file> gives it, "
                 "and fill every field")
-    if write.action in sibling("forms").ISSUE_ACTIONS:
+    if write.action in sibling("templates").ISSUE_ACTIONS:
         return (f"file it with uv run python {HERE / 'work_tickets.py'} file (backlog file for a "
                 "ticket)")
-    return "check it with the se server's forms tool (se_forms.py check) and send it again"
+    return "check it with the se server's templates tool (se_templates.py check) and send it again"
 
 
 def judge(text: str, switch: str | None, seen: dict,
           given: argparse.Namespace | None = None) -> str:
     """The gate's answer for the payload `text`: a JSON object, or "" (it passes); `seen` gets
     the project, where the log goes. A shell call is judged write by write, its first deny the
-    answer. `given` holds the test-only `--files`, `--forms` and `--root`."""
+    answer. `given` holds the test-only `--files`, `--templates` and `--root`."""
     project: Path | None = None
     try:
         payload = json.loads(text)
@@ -1070,67 +1070,67 @@ def judge(text: str, switch: str | None, seen: dict,
 
 def judge_one(write, project: Path | None, switch: str | None) -> str:
     """The answer for one write, a GitHub tool's or one gh command's of a shell call."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     unread = getattr(write, "unread", None)
     try:
         if (write.body is None and unread is None) or write.repo.startswith("/") \
                 or write.repo.endswith("/"):
             return ""
-        if switch is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == forms.OFF:
+        if switch is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
             return ""
         root = deciding(write, project)
         if root is None:
             return ""
-        gate = forms.enforcement(root)
+        gate = templates.enforcement(root)
         switch = switch or gate.gate
-        if switch == forms.OFF:
+        if switch == templates.OFF:
             return ""
         if getattr(write, "default_base", False):  # gh's default base, taken as the integration
             write.base = sibling("work_tickets").integration_branch(root)
-        catalog = forms.load(forms.ROOT)
-        form, met = gate_form(catalog, write, root)
-        if form is None:
+        catalog = templates.load(templates.ROOT)
+        template, met = gate_template(catalog, write, root)
+        if template is None:
             if unread:
                 log_line(project, f"{write.said} in {write.repo}: SE cannot read its body "
-                                  f"({unread}), and no form applies to an empty one")
+                                  f"({unread}), and no template applies to an empty one")
             return ""
     except Exception as error:  # it cannot judge: the write passes, and the log says why
         log_line(project, error)
         return ""
     if unread:
-        said = UNREAD.format(said=write.said, why=unread, form=form.name, remedy=write.remedy)
-        return context(said) if switch == forms.WARN else deny(said)
+        said = UNREAD.format(said=write.said, why=unread, template=template.name, remedy=write.remedy)
+        return context(said) if switch == templates.WARN else deny(said)
     try:
-        return judged(write, form, list(met), project or root, gate, switch)
+        return judged(write, template, list(met), project or root, gate, switch)
     except Exception as error:
         raise Judged(error, write) from error
 
 
-def judged(write: Write, form, found: list, root: Path, gate, switch: str) -> str:
-    """The answer for `write` once `form` applies: its findings judged by `switch`."""
-    forms, work_tickets = sibling("forms"), sibling("work_tickets")
-    rendered, title = filed(form, write.body, None, write.title)
-    found += findings(form, root, write.repo, title, rendered)
+def judged(write: Write, template, found: list, root: Path, gate, switch: str) -> str:
+    """The answer for `write` once `template` applies: its findings judged by `switch`."""
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
+    rendered, title = filed(template, write.body, None, write.title)
+    found += findings(template, root, write.repo, title, rendered)
     if not found:
         return ""
     command = f"{write.action} in {write.repo}"
-    if switch == forms.WARN:
-        return context(forms.report(command, form, found, refused=False, gate=True).replace(
-            "([forms] enforce = warn); filed anyway", "([forms] gate = warn); sent anyway"))
-    if not any(item.severity == forms.REFUSE for item in found):
+    if switch == templates.WARN:
+        return context(templates.report(command, template, found, refused=False, gate=True).replace(
+            "([templates] enforce = warn); filed anyway", "([templates] gate = warn); sent anyway"))
+    if not any(item.severity == templates.REFUSE for item in found):
         return ""
-    private = any(item.rule == forms.PRIVATE_RULE for item in found)
+    private = any(item.rule == templates.PRIVATE_RULE for item in found)
     environ = {"SE_SESSION": write.session} if write.session else None
-    key = forms.target(form.name, write.repo, write.action, number=write.number,
+    key = templates.target(template.name, write.repo, write.action, number=write.number,
                        title=write.title or "")
-    issue = write.action in forms.ISSUE_ACTIONS
+    issue = write.action in templates.ISSUE_ACTIONS
     labels = {label.casefold() for label in write.labels or ()}
-    held = issue and work_tickets.OFF_FORM_LABEL in labels and "ready" not in labels
-    if held and not private and forms.refusals(key, environ) >= gate.refusals:
+    held = issue and work_tickets.OFF_TEMPLATE_LABEL in labels and "ready" not in labels
+    if held and not private and templates.refusals(key, environ) >= gate.refusals:
         return ""
-    count = forms.count_refusal(key, environ)
-    offer = work_tickets.OFF_FORM_LABEL if issue and not private and count >= gate.refusals else ""
-    return deny(forms.report(command, form, found, refused=True, hold=offer, gate=True))
+    count = templates.count_refusal(key, environ)
+    offer = work_tickets.OFF_TEMPLATE_LABEL if issue and not private and count >= gate.refusals else ""
+    return deny(templates.report(command, template, found, refused=True, hold=offer, gate=True))
 
 
 def left_by(write: Write, path: Path) -> str | None:
@@ -1172,11 +1172,11 @@ def github_files(write: Write) -> list[tuple[str, str]]:
 
 def judge_files(write: Write, project: Path | None, given: argparse.Namespace | None) -> str:
     """The answer for a file tool's call (the module docstring: The file tools)."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     level = getattr(given, "files", None)
-    folder = getattr(given, "forms", None)
+    folder = getattr(given, "templates", None)
     try:
-        if level is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == forms.OFF:
+        if level is None and os.environ.get(GATE_SWITCH, "").strip().casefold() == templates.OFF:
             return ""
         if write.name in FILE_TOOLS:
             raw = str(write.input.get("file_path") or "")
@@ -1196,11 +1196,11 @@ def judge_files(write: Write, project: Path | None, given: argparse.Namespace | 
                 return ""
             claims = github_files(write)
             what, repo = f"{write.tool} in {write.repo}", write.repo
-        if (level or forms.enforcement(root).files) != forms.WRITE:
+        if (level or templates.enforcement(root).files) != templates.WRITE:
             return ""
-        catalog, source = claim_forms(root, folder)
+        catalog, source = claim_templates(root, folder)
         claims = [(relative, text) for relative, text in claims
-                  if any(form.is_file and form.claims(relative) for form in catalog.values())]
+                  if any(template.is_file and template.claims(relative) for template in catalog.values())]
         if not claims:
             return ""
     except Exception as error:  # it cannot judge: the write passes, and the log says why
@@ -1220,35 +1220,35 @@ def judge_files(write: Write, project: Path | None, given: argparse.Namespace | 
 def judged_files(write: Write, what: str, repo: str, catalog: dict, root: Path,
                  claims: list[tuple[str, str]], source: Path | None) -> str:
     """The deny for the claimed files `claims` (path, the text the call leaves) where one breaks
-    its form, each refusal counted for the cap; "" where every one passes."""
-    forms = sibling("forms")
+    its template, each refusal counted for the cap; "" where every one passes."""
+    templates = sibling("templates")
     lines, code, refused = text_lines(catalog, root, claims, source)
     if not code:
         return ""
     environ = {"SE_SESSION": write.session} if write.session else None
-    for form, relative in refused:
-        forms.count_refusal(forms.target(form, repo, forms.FILE_ACTION, title=relative), environ)
-    return deny("\n".join([f"{what}: a file a form claims would break it; fix every finding and "
+    for template, relative in refused:
+        templates.count_refusal(templates.target(template, repo, templates.FILE_ACTION, title=relative), environ)
+    return deny("\n".join([f"{what}: a file a template claims would break it; fix every finding and "
                            "write it again:", *(f"  {line}" for line in lines[:-1]), lines[-1]]))
 
 
 def run_runtime(root: Path) -> int:
-    """`gate --runtime`: write FILES_RUNTIME under `root` where its se.toml's `[forms] files`
+    """`gate --runtime`: write FILES_RUNTIME under `root` where its se.toml's `[templates] files`
     (at origin/<integration branch>) is `write`, remove it otherwise; exit 0, 1 where it fails."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     path = root / FILES_RUNTIME
     try:
         try:
-            level = forms.enforcement(root).files
-        except forms.FormError:
-            level = forms.OFF
-        if level == forms.WRITE:
+            level = templates.enforcement(root).files
+        except templates.TemplateError:
+            level = templates.OFF
+        if level == templates.WRITE:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{forms.WRITE}\n", encoding="utf-8")
+            path.write_text(f"{templates.WRITE}\n", encoding="utf-8")
         else:
             path.unlink(missing_ok=True)
     except OSError as error:
-        print(f"se_forms.py gate --runtime: {path}: {error}", file=sys.stderr)
+        print(f"se_templates.py gate --runtime: {path}: {error}", file=sys.stderr)
         return 1
     return 0
 
@@ -1291,42 +1291,42 @@ def project_root(given: Path | None) -> Path:
     return checkout(str(here)) or here
 
 
-def claim_forms(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
-    """The forms check-files checks against and the folder `forms.py draft --forms` reads them
+def claim_templates(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
+    """The templates check-files checks against and the folder `templates.py draft --templates` reads them
     from (None: SE's own): `folder`'s, else the root's, else SE's where the root has none."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     if folder is not None:
-        return forms.load(root, folder=folder), folder.resolve()
-    if root.resolve() == forms.ROOT.resolve():
-        return forms.load(forms.ROOT), None
+        return templates.load(root, folder=folder), folder.resolve()
+    if root.resolve() == templates.ROOT.resolve():
+        return templates.load(templates.ROOT), None
     try:
-        catalog = forms.load(root)
-    except forms.FormError:
-        if (root / forms.FORMS).is_dir():
+        catalog = templates.load(root)
+    except templates.TemplateError:
+        if (root / templates.TEMPLATES).is_dir():
             raise
-        return forms.load(forms.ROOT), None
-    own = root / forms.FORMS
+        return templates.load(templates.ROOT), None
+    own = root / templates.TEMPLATES
     return catalog, own if own.is_dir() else None
 
 
 def changed_files(root: Path, ref: str) -> list[Path]:
     """Every file under `root` that differs between `ref`'s merge base with HEAD and the working
     tree, and every untracked file git does not ignore; a deleted one is not among them."""
-    forms, door = sibling("forms"), sibling("git_door")
+    templates, door = sibling("templates"), sibling("git_door")
     base = door.run("merge-base", ref, "HEAD", root=root)
     if base.returncode != 0 or not base.stdout.strip():
         why = (base.stderr.strip().splitlines() or ["no merge base"])[0]
-        raise forms.FormError(f"{CHECK_FILES}: --changed {ref}: no merge base with HEAD in "
+        raise templates.TemplateError(f"{CHECK_FILES}: --changed {ref}: no merge base with HEAD in "
                               f"{root} ({why}); fetch {ref}, or name another ref")
     top = door.run("rev-parse", "--show-toplevel", root=root)
     if top.returncode != 0 or not top.stdout.strip():
-        raise forms.FormError(f"{CHECK_FILES}: {root} is no git checkout; give --root")
+        raise templates.TemplateError(f"{CHECK_FILES}: {root} is no git checkout; give --root")
     names: list[str] = []
     committed = door.run("diff", "--name-status", "-z", f"{base.stdout.strip()}..HEAD", root=root)
     status = door.run("status", "--porcelain", "-z", "--untracked-files=all", root=root)
     for done, what in ((committed, "diff"), (status, "status")):
         if done.returncode != 0:
-            raise forms.FormError(f"{CHECK_FILES}: git {what} failed in {root}: "
+            raise templates.TemplateError(f"{CHECK_FILES}: git {what} failed in {root}: "
                                   f"{(done.stderr.strip().splitlines() or [''])[0]}")
     tokens = [token for token in committed.stdout.split("\0") if token]
     while tokens:
@@ -1353,15 +1353,15 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
                claimed_only: bool = False) -> tuple[list[str], int]:
     """check-files' lines for `paths` and its exit code: the refused findings and the `draft`
     line (1), or the one line that says what passed (0). `claimed_only` skips, before reading
-    them, the files no form claims (--changed)."""
-    forms = sibling("forms")
+    them, the files no template claims (--changed)."""
+    templates = sibling("templates")
     texts: list[tuple[str, str]] = []
     for path in paths:
-        relative = forms._relative(path, root, CHECK_FILES)
-        if claimed_only and not any(form.is_file and form.claims(relative)
-                                    for form in catalog.values()):
+        relative = templates._relative(path, root, CHECK_FILES)
+        if claimed_only and not any(template.is_file and template.claims(relative)
+                                    for template in catalog.values()):
             continue
-        texts.append((relative, forms._file_text(path, CHECK_FILES)))
+        texts.append((relative, templates._file_text(path, CHECK_FILES)))
     lines, code, _ = text_lines(catalog, root, texts, source)
     return lines, code
 
@@ -1369,75 +1369,75 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
 def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: Path | None
                ) -> tuple[list[str], int, list[tuple[str, str]]]:
     """file_lines' answer for `texts` (each file's path relative to `root`, and its text), with
-    the (form, path) of each file that refuses; the gate judges a file tool's result by it."""
-    forms = sibling("forms")
+    the (template, path) of each file that refuses; the gate judges a file tool's result by it."""
+    templates = sibling("templates")
     refusing: list[str] = []
     refused: list[tuple[str, str]] = []
     checked = 0
     for relative, text in texts:
-        chosen = forms.select(catalog, forms.FILE_ACTION, text, None, path=relative)
-        if chosen.form is None and not chosen.findings:
+        chosen = templates.select(catalog, templates.FILE_ACTION, text, None, path=relative)
+        if chosen.template is None and not chosen.findings:
             continue
         checked += 1
         found = list(chosen.findings)
-        if chosen.form is not None:
-            found += forms.check(chosen.form, forms.parse(chosen.form, text), root=root)
-        if any(item.severity == forms.REFUSE for item in found):
-            refused.append((chosen.form.name if chosen.form else "", relative))
+        if chosen.template is not None:
+            found += templates.check(chosen.template, templates.parse(chosen.template, text), root=root)
+        if any(item.severity == templates.REFUSE for item in found):
+            refused.append((chosen.template.name if chosen.template else "", relative))
         for item in found:
-            if item.severity != forms.REFUSE:
+            if item.severity != templates.REFUSE:
                 continue
-            if chosen.form is None:
-                refusing.append(f"{relative} (no form): {item.field}: {item.fix}")
+            if chosen.template is None:
+                refusing.append(f"{relative} (no template): {item.field}: {item.fix}")
             else:
-                refusing.append(f"{relative} ({chosen.form.name}): "
-                                f"{forms._line(chosen.form, item)}")
+                refusing.append(f"{relative} ({chosen.template.name}): "
+                                f"{templates._line(chosen.template, item)}")
     if not refusing:
         if not checked:
-            return [f"{CHECK_FILES}: no form claims a file checked"], 0, refused
-        passed = "file passes its form" if checked == 1 else "files pass their forms"
+            return [f"{CHECK_FILES}: no template claims a file checked"], 0, refused
+        passed = "file passes its template" if checked == 1 else "files pass their templates"
         return [f"{CHECK_FILES}: {checked} claimed {passed}"], 0, refused
     room = CHECK_FILES_LINES - 1
     if len(refusing) > room:
         refusing = refusing[:room - 1] + [f"... and {len(refusing) - room + 1} more findings"]
-    draft = f"uv run python {HERE / 'forms.py'} draft --path <file> --root {root}"
+    draft = f"uv run python {HERE / 'templates.py'} draft --path <file> --root {root}"
     if source is not None:
-        draft += f" --forms {source}"
-    return [*refusing, f"The empty form of each: {draft}"], 1, refused
+        draft += f" --templates {source}"
+    return [*refusing, f"The empty template of each: {draft}"], 1, refused
 
 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
-    lines where se.toml `[forms] files` is `check` and a changed claimed file breaks its form;
+    lines where se.toml `[templates] files` is `check` and a changed claimed file breaks its template;
     None where the switch is off or every such file passes. Errors raise."""
-    forms = sibling("forms")
-    if forms.enforcement(root).files not in (forms.CHECK, forms.WRITE):
+    templates = sibling("templates")
+    if templates.enforcement(root).files not in (templates.CHECK, templates.WRITE):
         return None
-    catalog, source = claim_forms(root, None)
+    catalog, source = claim_templates(root, None)
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
 
 
 def run_check_files(options: argparse.Namespace) -> int:
     """check-files (the module docstring: Claimed files)."""
-    forms = sibling("forms")
+    templates = sibling("templates")
     if bool(options.paths) == bool(options.changed):
         raise Usage(f"{CHECK_FILES}: give the files to check, or --changed REF, not both")
     root = project_root(options.root)
     try:
         if options.changed:
-            switch = forms.enforcement(root)
-            if switch.files not in (forms.CHECK, forms.WRITE):
-                print(f"{CHECK_FILES}: [forms] files is {switch.files} in {switch.where}; "
+            switch = templates.enforcement(root)
+            if switch.files not in (templates.CHECK, templates.WRITE):
+                print(f"{CHECK_FILES}: [templates] files is {switch.files} in {switch.where}; "
                       "nothing checked")
                 return 0
-            catalog, source = claim_forms(root, options.forms)
+            catalog, source = claim_templates(root, options.templates)
             paths = changed_files(root, options.changed)
         else:
-            catalog, source = claim_forms(root, options.forms)
+            catalog, source = claim_templates(root, options.templates)
             paths = [path if path.is_absolute() else Path.cwd() / path for path in options.paths]
         lines, code = file_lines(catalog, root, paths, source, claimed_only=bool(options.changed))
-    except forms.FormError as error:
+    except templates.TemplateError as error:
         raise Usage(str(error)) from error
     print("\n".join(lines))
     return code
@@ -1450,28 +1450,28 @@ BACKSTOP_EVENTS = {
     "issue_comment": {"created": "comment.create", "edited": "comment.edit"},
 }
 BACKSTOP_VALUES = ("off", "on")
-BACKSTOP_COMMAND = "se_forms.py backstop"
+BACKSTOP_COMMAND = "se_templates.py backstop"
 
 
 def backstop_switch(root: Path) -> str:
-    """se.toml `[forms] backstop` of the checkout `root`: `off` (the default) or `on`."""
+    """se.toml `[templates] backstop` of the checkout `root`: `off` (the default) or `on`."""
     path = root / "se.toml"
     try:
         table = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise Usage(f"{BACKSTOP_COMMAND}: cannot read {path} ({error}); fix it") from error
-    section = table.get("forms", {})
+    section = table.get("templates", {})
     value = section.get("backstop", "off") if isinstance(section, dict) else "off"
     if value not in BACKSTOP_VALUES:
-        raise Usage(f"{BACKSTOP_COMMAND}: [forms] backstop = {value!r} in {path} is none of "
-                    f"{', '.join(BACKSTOP_VALUES)}; set one of them (README \"Forms\")")
+        raise Usage(f"{BACKSTOP_COMMAND}: [templates] backstop = {value!r} in {path} is none of "
+                    f"{', '.join(BACKSTOP_VALUES)}; set one of them (README \"Templates\")")
     return value
 
 
 def backstop_plan(name: str, event: dict, root: Path, switch: str) -> dict:
     """The backstop's plan for the GitHub event `event` of the kind `name` (the module
     docstring: The backstop)."""
-    forms, work_tickets = sibling("forms"), sibling("work_tickets")
+    templates, work_tickets = sibling("templates"), sibling("work_tickets")
     repository_of_event = event.get("repository") if isinstance(event.get("repository"), dict) else {}
     issue = event.get("issue") if isinstance(event.get("issue"), dict) else {}
     number = issue.get("number") if isinstance(issue.get("number"), int) else None
@@ -1489,28 +1489,28 @@ def backstop_plan(name: str, event: dict, root: Path, switch: str) -> dict:
         title, with_labels = None, None
     else:
         body = str(issue.get("body") or "")
-        if forms.FLEET_MARKER not in body and "work" not in labels:
+        if templates.FLEET_MARKER not in body and "work" not in labels:
             return plan
         title, with_labels = str(issue.get("title") or ""), labels
     write = argparse.Namespace(action=action, body=body, title=title, labels=with_labels,
                                base=None)
-    catalog = forms.load(forms.ROOT)
-    form, met = gate_form(catalog, write, root)
-    if form is None:
+    catalog = templates.load(templates.ROOT)
+    template, met = gate_template(catalog, write, root)
+    if template is None:
         return plan
-    rendered, title = filed(form, body, None, title)
-    found = [*met, *findings(form, root, plan["repo"], title, rendered)]
-    if not any(item.severity == forms.REFUSE for item in found):
+    rendered, title = filed(template, body, None, title)
+    found = [*met, *findings(template, root, plan["repo"], title, rendered)]
+    if not any(item.severity == templates.REFUSE for item in found):
         return plan
     where = f"{'a comment on' if comment else 'issue'} #{number} in {plan['repo']}"
-    lines = refusal(form, found)
+    lines = refusal(template, found)
     lines[0] = lines[0].replace(COMMAND, f"{BACKSTOP_COMMAND}, {where}", 1).replace(
         "and run it again:", "on GitHub:")
     if comment:
         plan["failed"] = True
     else:
-        if work_tickets.OFF_FORM_LABEL not in labels:
-            plan["add_labels"] = [work_tickets.OFF_FORM_LABEL]
+        if work_tickets.OFF_TEMPLATE_LABEL not in labels:
+            plan["add_labels"] = [work_tickets.OFF_TEMPLATE_LABEL]
         lines.append(work_tickets.unhold_hint(number).capitalize())
     plan["summary"] = "\n".join(lines)
     return plan
@@ -1529,7 +1529,7 @@ def run_backstop(options: argparse.Namespace) -> int:
     switch = options.backstop or backstop_switch(root)
     try:
         plan = backstop_plan(options.event_name, event, root, switch)
-    except sibling("forms").FormError as error:
+    except sibling("templates").TemplateError as error:
         raise Usage(f"{BACKSTOP_COMMAND}: {error}") from error
     print(json.dumps(plan, indent=2))
     return 0

@@ -1,5 +1,5 @@
 # The owner's ticket schema: a title that is a name under the name rule, then Situation, Problem,
-# Goal, Approach, Steps, Check and an optional Depends on. scripts/forms.py's docstring owns this
+# Goal, Approach, Steps, Check and an optional Depends on. scripts/templates.py's docstring owns this
 # file's format.
 name = "ticket"
 reader = "owner"

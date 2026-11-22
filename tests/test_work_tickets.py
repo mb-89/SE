@@ -2924,10 +2924,10 @@ def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeyp
     assert "CI's suite time on main: skipped on the relay path" in out
 
 
-# se.toml `[forms] files = "check"`: stop-check and push refuse a changed file a form claims that
-# breaks it (README "Forms", scripts/se_forms.py check-files).
+# se.toml `[templates] files = "check"`: stop-check and push refuse a changed file a template claims that
+# breaks it (README "Templates", scripts/se_templates.py check-files).
 
-NOTE_FORM = '''name = "note"
+NOTE_TEMPLATE = '''name = "note"
 reader = "owner"
 says = "A note: its risks."
 
@@ -2945,21 +2945,21 @@ heading = "Risks"
 required = true
 says = "One item per risk, or None."
 '''
-OFF_FORM_NOTE = "---\nform: note\n---\n\n# A note\n\n## Risks\n\n"
-ON_FORM_NOTE = "---\nform: note\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
+OFF_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n"
+ON_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
 
 
 def claimed_checkout(tmp_path: Path, monkeypatch, files: str | None, note: str) -> Path:
-    """A checkout, no worker's, whose origin/main holds the form `note` claiming notes/*.md and
-    an se.toml with `[forms] files` (unset where `files` is None); notes/a.md untracked."""
+    """A checkout, no worker's, whose origin/main holds the template `note` claiming notes/*.md and
+    an se.toml with `[templates] files` (unset where `files` is None); notes/a.md untracked."""
     root = stop_checkout(tmp_path, monkeypatch, queue=False)
-    (root / "forms").mkdir()
-    (root / "forms" / "note.toml").write_text(NOTE_FORM, encoding="utf-8")
+    (root / "templates").mkdir()
+    (root / "templates" / "note.toml").write_text(NOTE_TEMPLATE, encoding="utf-8")
     (root / "se.toml").write_text(
-        '[project]\nidentity = "Worker test <worker-test@example.invalid>"\n\n[forms]\n'
+        '[project]\nidentity = "Worker test <worker-test@example.invalid>"\n\n[templates]\n'
         + (f'files = "{files}"\n' if files else ""), encoding="utf-8")
     assert git(root, "add", ".").returncode == 0
-    assert git(root, "commit", "-q", "-m", "forms").returncode == 0
+    assert git(root, "commit", "-q", "-m", "templates").returncode == 0
     assert git(root, "update-ref", "refs/remotes/origin/main", "HEAD").returncode == 0
     (root / "notes").mkdir()
     (root / "notes" / "a.md").write_text(note, encoding="utf-8")
@@ -2987,58 +2987,58 @@ def pushed(root: Path, monkeypatch) -> str:
 
 
 def check_files(root: Path, capsys) -> tuple[int, str]:
-    import se_forms
-    code = se_forms.main(["check-files", "--changed", "origin/main", "--root", str(root)])
+    import se_templates
+    code = se_templates.main(["check-files", "--changed", "origin/main", "--root", str(root)])
     return code, capsys.readouterr().out
 
 
-def test_claimed_files_off_form_refuse_stop_push_and_check_files(tmp_path, monkeypatch, capsys):
-    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_FORM_NOTE)
+def test_claimed_files_off_template_refuse_stop_push_and_check_files(tmp_path, monkeypatch, capsys):
+    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_TEMPLATE_NOTE)
     answer = stop_hook(root, monkeypatch, capsys)
     assert answer["decision"] == "block"
     assert "(1 of 5 in a row)" in answer["reason"]
     assert "notes/a.md (note): Risks: empty" in answer["reason"]
-    assert "forms.py draft --path <file>" in answer["reason"]
+    assert "templates.py draft --path <file>" in answer["reason"]
     advice = stop_hook(root, monkeypatch, capsys, se_host="copilot")
     assert "decision" not in advice
     assert advice["systemMessage"].startswith("se Stop hook, advice only under Copilot")
     assert "notes/a.md (note): Risks" in advice["systemMessage"]
     refusal = pushed(root, monkeypatch)
-    assert refusal.startswith("push: A changed file a form claims breaks its form")
+    assert refusal.startswith("push: A changed file a template claims breaks its template")
     assert "notes/a.md (note): Risks" in refusal
     code, out = check_files(root, capsys)
     assert code == 1 and "notes/a.md (note): Risks" in out
 
 
-def test_claimed_files_on_form_let_stop_push_and_check_files_through(tmp_path, monkeypatch,
+def test_claimed_files_on_template_let_stop_push_and_check_files_through(tmp_path, monkeypatch,
                                                                      capsys):
-    root = claimed_checkout(tmp_path, monkeypatch, "check", ON_FORM_NOTE)
+    root = claimed_checkout(tmp_path, monkeypatch, "check", ON_TEMPLATE_NOTE)
     assert stop_hook(root, monkeypatch, capsys) == {}
     assert pushed(root, monkeypatch) == "gated"
-    assert check_files(root, capsys) == (0, "se_forms.py check-files: 1 claimed file passes its "
-                                            "form\n")
+    assert check_files(root, capsys) == (0, "se_templates.py check-files: 1 claimed file passes its "
+                                            "template\n")
 
 
 def test_claimed_files_unset_answer_stop_and_push_as_before(tmp_path, monkeypatch, capsys):
-    root = claimed_checkout(tmp_path, monkeypatch, None, OFF_FORM_NOTE)
+    root = claimed_checkout(tmp_path, monkeypatch, None, OFF_TEMPLATE_NOTE)
     assert stop_hook(root, monkeypatch, capsys) == {}
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()
     assert pushed(root, monkeypatch) == "gated"
     code, out = check_files(root, capsys)
-    assert code == 0 and out.startswith("se_forms.py check-files: [forms] files is off in "
+    assert code == 0 and out.startswith("se_templates.py check-files: [templates] files is off in "
                                         "origin/main:se.toml")
 
 
 def test_claimed_files_are_read_from_origin_so_a_branch_cannot_switch_them_off(
         tmp_path, monkeypatch, capsys):
-    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_FORM_NOTE)
-    (root / "se.toml").write_text('[forms]\nfiles = "off"\n', encoding="utf-8")
+    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_TEMPLATE_NOTE)
+    (root / "se.toml").write_text('[templates]\nfiles = "off"\n', encoding="utf-8")
     assert stop_hook(root, monkeypatch, capsys)["decision"] == "block"
 
 
 def test_claimed_files_join_a_workers_undelivered_refusal_and_an_error_lets_the_turn_end(
         tmp_path, monkeypatch, capsys):
-    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_FORM_NOTE)
+    root = claimed_checkout(tmp_path, monkeypatch, "check", OFF_TEMPLATE_NOTE)
     (root / ".se" / "work").mkdir(parents=True, exist_ok=True)
     (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
     fake_pull_requests(monkeypatch, root, None)
@@ -3046,10 +3046,10 @@ def test_claimed_files_join_a_workers_undelivered_refusal_and_an_error_lets_the_
     assert "has no open pull request to main" in reason and "notes/a.md (note): Risks" in reason
 
     def broken(*_):
-        raise RuntimeError("the forms broke")
+        raise RuntimeError("the templates broke")
 
     monkeypatch.setattr(work_tickets, "claimed_files_problem", broken)
-    other = claimed_checkout(tmp_path / "other", monkeypatch, "check", OFF_FORM_NOTE)
+    other = claimed_checkout(tmp_path / "other", monkeypatch, "check", OFF_TEMPLATE_NOTE)
     answer = stop_hook(other, monkeypatch, capsys)
     assert "decision" not in answer
     assert answer["systemMessage"].startswith("se Stop hook: cannot check the claimed files")

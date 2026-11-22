@@ -225,11 +225,11 @@ def test_a_project_without_suite_time_or_shards_passes_as_before(world, tmp_path
     assert se_workflows.shard_mismatches(bare) == [], "an invalid setting is the budget's to refuse"
 
 
-def test_ses_own_forms_backstop_is_not_shipped_and_lets_no_event_text_into_a_run_line() -> None:
-    """forms.yml (README "Forms"): SE's own workflow on issue and comment events, with only the
+def test_ses_own_templates_backstop_is_not_shipped_and_lets_no_event_text_into_a_run_line() -> None:
+    """templates.yml (README "Templates"): SE's own workflow on issue and comment events, with only the
     permissions it needs, and no `${{ github.event` expression in any `run:` line, as anyone can
     open an issue."""
-    path = ".github/workflows/forms.yml"
+    path = ".github/workflows/templates.yml"
     assert path not in se_workflows.SHIPPED
     text = (ROOT / path).read_text(encoding="utf-8")
     data = loaded(text)
@@ -238,7 +238,7 @@ def test_ses_own_forms_backstop_is_not_shipped_and_lets_no_event_text_into_a_run
     assert data["permissions"] == {"contents": "read", "issues": "write"}
     steps = [step for job in data["jobs"].values() for step in job["steps"]]
     runs = [step["run"] for step in steps if "run" in step]
-    assert any("se_forms.py backstop" in run and '"$GITHUB_EVENT_PATH"' in run for run in runs)
+    assert any("se_templates.py backstop" in run and '"$GITHUB_EVENT_PATH"' in run for run in runs)
     assert any("gh issue edit" in run and "--add-label" in run for run in runs)
     assert not any("${{" in run for run in runs)
     assert not any("remove-label" in run or "gh issue comment" in run for run in runs)

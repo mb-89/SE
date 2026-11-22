@@ -22,8 +22,8 @@ import references  # noqa: E402
 
 HOLE = "{}"  # an f-string's hole, a placeholder like `<name>`
 ALLOWED = (
-    ("scripts/forms.py", "forms.py and",
-     "prose: \"a script beside scripts/forms.py and what it defines\", no command"),
+    ("scripts/templates.py", "templates.py and",
+     "prose: \"a script beside scripts/templates.py and what it defines\", no command"),
     ("scripts/se_modules.py", "se_modules.py resolved",
      "prose: the lock file's header line says what wrote it, no command"),
     ("scripts/timeline.py", "deck.py builds",
@@ -239,7 +239,7 @@ def test_an_allow_list_entry_that_matches_nothing_fails() -> None:
 def test_the_scripts_name_only_commands_and_options_they_define(fake_git_door) -> None:
     scripts = ROOT / "scripts"
     with_subcommands = {path.name for path in scripts.glob("*.py") if references.command_tree(path)}
-    assert {"work_tickets.py", "forms.py", "review.py"} <= with_subcommands
+    assert {"work_tickets.py", "templates.py", "review.py"} <= with_subcommands
     assert "--rev" in references.command_options(scripts / "public_check.py")
     message = verdict(sweep(ROOT))
     if message:

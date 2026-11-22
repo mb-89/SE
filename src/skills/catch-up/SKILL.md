@@ -123,7 +123,7 @@ project's commands and hot files by the project's `AGENTS.md`.
      carrying only the task, filed with `work_tickets.py file --title <branch> --body-file <filled
      template> --repo <target repository>`, which labels it as the work model's
      [Issues](../work-model/SKILL.md#issues) says.
-     - Generic rules (the box, paths, delivery, the field report's form) live in the worker definition
+     - Generic rules (the box, paths, delivery, the field report's template) live in the worker definition
        and are never repeated in issues.
      - Name blockers in its "Blocked by" field and pass each as `--blocked-by <m>`, so `file`
        links them as native dependencies before it adds `ready`; then notify that repository's

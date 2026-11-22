@@ -75,9 +75,9 @@ class = "batch"
 
 [commands."work_tickets.py unhold"]
 usage = "work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue"
-summary = "for SE: check an issue filed with --hold against its form again and, ..."
+summary = "for SE: check an issue filed with --hold against its template again ..."
 group = "Issues"
-help = "for SE: check an issue filed with --hold against its form again and, where it passes, remove off-form and give a work issue ready back"
+help = "for SE: check an issue filed with --hold against its template again and, where it passes, remove off-template and give a work issue ready back"
 class = "batch"
 
 [commands."work_tickets.py paused"]
