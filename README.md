@@ -2299,8 +2299,10 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
-line names or the conditions pick, refuses one none picks and leaves unclaimed files free; the
-front matter and `#` title stay as they are.
+line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
+
+The front matter and `#` title stay as they are, but for the `template`, `version` and `overlay`
+lines the front matter records its template by.
 
 `--templates <folder>` reads the templates from another folder.
 

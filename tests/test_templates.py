@@ -1101,20 +1101,49 @@ def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
         templates.select(catalog, "file.write", STEP)
 
 
+def recorded(template: templates.Template) -> str:
+    """The front matter lines a claimed file records its template by."""
+    return (f"template: project/{template.name}\nversion: {template.version}\n"
+            f"overlay: {template.digest}\n")
+
+
 def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_template(tmp_path):
     template = step_templates(tmp_path, risks="")["risks"]
     document = templates.parse(template, STEP)
     assert document.fields == {"risks": ["The scan misses a tool."]}
     rendered = templates.render(template, document)
-    assert rendered == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert rendered == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(template))
     assert templates.FLEET_MARKER not in rendered and "se:template" not in rendered
     assert templates.parse(template, rendered).fields == document.fields
     assert templates.render(template, templates.parse(template, rendered)) == rendered
     bare = templates.render(template, templates.parse(template, "# Risks\n\n## Risks\n\nNone\n"))
-    assert bare == "---\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    assert bare == f"---\n{recorded(template)}---\n\n# Risks\n\n## Risks\n\nNone\n"
     fresh = templates.render(template, {"risks": ["One."]})
-    assert fresh == "---\ntemplate: risks\n---\n\n## Risks\n\n- One.\n"
+    assert fresh == f"---\n{recorded(template)}---\n\n## Risks\n\n- One.\n"
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
+
+
+def test_render_records_template_version_and_overlay_in_place_and_selection_reads_them(tmp_path):
+    template = step_templates(tmp_path, risks="")["risks"]
+    old = "---\nversion: 0.1.0\nid: S5B\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    rendered = templates.render(template, templates.parse(template, old))
+    assert rendered == ("---\nversion: 1.0.0\n"
+                        f"overlay: {template.digest}\nid: S5B\ntemplate: project/risks\n---\n\n"
+                        "# Risks\n\n## Risks\n\nNone\n")
+    crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
+                                                         "## Risks\r\n\r\nNone\r\n"))
+    assert crlf.startswith("---\r\nid: S5B\r\n" + recorded(template).replace("\n", "\r\n") + "---")
+    assert templates.select(templates.load(tmp_path, folder=tmp_path / "templates"), "file.write",
+                            rendered, path="book/m1/steps/x.md").name == "risks"
+    assert templates.draft(template).startswith(f"---\n{recorded(template)}---\n")
+
+
+def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
+    work = catalog["work"]
+    rendered = templates.render(work, work_fields(catalog))
+    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.0.0 ", " 0.9.0 "))
+    assert old != rendered
+    assert templates.render(work, templates.parse(work, old)) == rendered
 
 
 def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
@@ -1125,7 +1154,7 @@ def test_a_page_title_that_reads_like_a_field_is_no_field(tmp_path):
 
 
 def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, capsys):
-    step_templates(tmp_path, risks='marker_pattern: "id: S5B"')
+    risks = step_templates(tmp_path, risks='marker_pattern: "id: S5B"')["risks"]
     steps = tmp_path / "book" / "m1" / "steps"
     steps.mkdir(parents=True)
     (steps / "51-S5B.md").write_text(STEP, encoding="utf-8")
@@ -1134,7 +1163,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     where = ["--templates", str(tmp_path / "templates"), "--root", str(tmp_path)]
     run = lambda *arguments: (templates.main([*arguments, *where]), capsys.readouterr())
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--render")
-    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\ntemplate: risks\n")
+    assert code == 0 and out.out == STEP.replace("name: Risks\n", "name: Risks\n" + recorded(risks))
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
@@ -1144,7 +1173,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
     assert code == 0 and json.loads(out.out)["template"] == "risks"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"))
-    assert out.out.startswith("---\ntemplate: risks\n---\n\n## Risks\n") and "se:fleet" not in out.out
+    assert out.out.startswith(f"---\n{recorded(risks)}---\n\n## Risks\n") and "se:fleet" not in out.out
     assert run("draft", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     assert templates.main(["list", "--templates", str(tmp_path / "templates")]) == 0
