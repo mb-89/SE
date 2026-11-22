@@ -71,8 +71,9 @@ optional = true                   # absent: required
   later as a half-working command.
 - SE's list is `kern` and `obs`, both required: SE needs kern for everything mechanical, and obs for
   every deck, its documentation, its Timeline and its templates (the person, 22 Nov 2026).
-- obs's list holds `se` (its public check and RUNME) and the adapters and styles that leave its tree;
-  kern's holds `se`. Each host says required or optional for its own entries only.
+- obs's list holds the adapters and styles that leave its tree. Neither obs's nor kern's list holds
+  `se`: SE is not a component, but the method that works on them, and no project pins it
+  ([method.md](method.md)). Each host says required or optional for its own entries only.
 
 The key `url` goes: a committed address is provenance, and finding by name answers where a component
 comes from. A machine that needs another place, such as a mirror or a local checkout, says so in the
@@ -118,8 +119,8 @@ resolved the same way.
   release for every host that names it; where the pins admit none in common, the resolution fails
   naming both paths and both pins. obs installs one version of a component per machine for the same
   reason (obs's `spec/design_input/components.md`, Installed components).
-- **A name already on the path** is that component: kern's and obs's entry `se` is the root itself
-  when SE is the root, and its pin is checked against the root's version, not resolved again.
+- **A name already on the path** is that component: an entry that names a host above it on the
+  path is that host itself, and its pin is checked against that host's version, not resolved again.
 - **Placing is the host's**: SE places its components as clones in `.se/modules/<name>`, as
   `se_modules.py sync` does today; obs places its own in its machine folder through its install
   command. Finding is shared; where a host keeps what it found is not.
@@ -154,32 +155,34 @@ lists:
   records stops the start naming both commits and the remedy, `se_modules.py update <name>`, so a
   stand-in never replaces a locked component silently.
 
-obs and kern, run as roots of their own checkouts, check their own lists the same way, through the
-same finder ([The one owner](#the-one-owner)).
+obs and kern, run as roots of their own checkouts, check their own lists the same way, by the same
+rules ([The one owner](#the-one-owner)).
 
 ## The one owner
 
-The one owner of finding is SE's module resolution, `scripts/se_modules.py`: its finder answers, for
-a checkout and a name, the repository and the releases offered, in the order above. obs's
-`obs-components` and SE's start both call it; obs reaches it through its own required component
-`se`, which it already pins for its public check.
+This note owns the rules of finding; SE's module resolution, `scripts/se_modules.py`, is SE's
+finder: it answers, for a checkout and a name, the repository and the releases offered, in the
+order above, and SE's start calls it. obs pins no SE ([method.md](method.md)), so obs's
+`obs-components` cannot call it: obs's command implements the same rules itself, and points here
+for them.
 
 - obs's command keeps what is obs's: its kinds and entry files, installing into its machine folder,
-  `components.json`, and recording what built a page. It gives up its own listing and tag reading,
-  and with them the topic `obs-component` and the tag form `obs-component/<kind>/<name>/v<version>`.
+  `components.json`, and recording what built a page. Its listing and tag reading follow this note's
+  rules, and give up the topic `obs-component` and the tag form `obs-component/<kind>/<name>/v<version>`.
 - Moving to the generic mark: obs's component repositories carry the topic `component`, are named
   after their component, and tag `v<version>`. The adapter `html` keeps living in obs's tree until it
   leaves it, a component of the first kind until then.
 
-Why se_modules, and not a kern component or obs's command reused:
+Why se_modules for SE, and not a kern component or obs's command reused:
 
 - **It runs before kern exists.** Finding kern is the first step of a fresh clone's start: the clone
   that `sync kern` places is what the `se` binary is built from. A finder inside kern cannot find
   kern; one inside obs cannot find obs.
 - **It already does most of it.** se_modules reads pins, resolves origin-relative addresses through
   se_home, reads release tags and locks commits; finding by name is its address step replaced.
-- **Every host already has it.** obs and kern both pin se; obs's command needs no second copy of
-  listing, tag reading and remote order, which is the second discovery the issue rules out.
+- **One rule, two finders.** A shared finder would need a component both SE and obs require; obs
+  requires none of SE's, so the rules stay one, here, and each of the two finders is held to them by
+  its own tests of this note's cases.
 
 When SE's start moves to the Go core ([go-core.md "Migration"](go-core.md#migration)), the finder
 moves with it as one component, as every script does, keeping this note's rules and its tests.
@@ -208,8 +211,8 @@ Once the finder lands, `url` leaves `[components.kern]` and the relative address
 Adding a topic to a repository is the owner's step, one line each, before SE's start checks its list
 ([The packages](#the-packages), 3):
 
-- add the topic `component` to the repositories `kern` and `obs` and to SE's own repository (SE is a
-  component of kern and obs, which each require `se`).
+- add the topic `component` to the repositories `kern` and `obs`. SE's own repository needs none:
+  SE is no component ([method.md](method.md)).
 
 ## Open points
 
@@ -227,18 +230,16 @@ In order; each is one work issue.
    `optional`, refuse `url`, check a found tag against `se.lock`'s commit, resolve the tree
    recursively; `scripts/se_home.py` for remote addresses; `se.toml` `[modules]` to `[components]`;
    README [Modules](../README.md#modules); `tests/test_se_modules.py` on the fake door
-   (`tests/fake_git.py`) with a fake host listing. Dropping `url` and renaming the table break every
-   host that pins se `^5`, so it lands as se 6.0.0.
+   (`tests/fake_git.py`) with a fake host listing. Dropping `url` and renaming the table change the
+   format of every `se.toml` SE reads, so it lands as se 6.0.0.
 2. **se: the start check** (`start-checks-required-components`). `scripts/se_start.py` (`start`
    resolves the tree from what is placed, stops on a required component missing, one line for an
    optional one), `scripts/bootstrap.sh` (the hook shows the stop), README
    [Start and refresh](../README.md#start-and-refresh), `tests/test_se_start.py`.
-3. **The person's step**: the topic `component` on `kern`, `obs` and SE's own repository, before
-   package 2's release reaches a session.
-4. **kern: its list** (kern's repository). `se.toml` `[modules.se]` to `[components.se]` without
-   `url`, its range to `^6`; kern's README where it names its se module.
-5. **obs: components on the one finder** (obs's repository, follows obs#860). `src/obs/components.py`
-   lists and reads through se's finder and the topic `component`; release tags `v<version>` in a
-   repository named after its component; `se.toml` `[components]` with `se` and its adapters and
-   styles, each required or optional; `spec/design_input/components.md` points here for finding;
+3. **The person's step**: the topic `component` on `kern` and `obs`, before package 2's release
+   reaches a session.
+4. **obs: components by the one rule** (obs's repository, follows obs#860). `src/obs/components.py`
+   lists and reads by this note's rules and the topic `component`; release tags `v<version>` in a
+   repository named after its component; `se.toml` `[components]` with its adapters and styles,
+   each required or optional, and no `se`; `spec/design_input/components.md` points here for finding;
    `test/test_components.py`. It waits for the [open point](#open-points).
