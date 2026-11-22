@@ -1,4 +1,4 @@
-"""kern, the Go core, as SE uses it from kern's repository at the pin se.toml [modules.kern] reads
+"""kern, the Go core, as SE uses it from kern's repository at the pin se.toml [components.kern] reads
 from components/go.mod: the check main requires, the release of `se` on it, the battery every
 application calls, and kern's application template in the pinned clone."""
 
@@ -295,7 +295,7 @@ def lock_check(folder: Path, lock: str | None, gomod: str) -> tuple[subprocess.C
     return result, output.read_text(encoding="utf-8")
 
 
-LOCKED = '[modules.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
+LOCKED = '[components.kern]\nversion = "0.14.1"\nref = "' + "a" * 40 + '"\n'
 REQUIRES = "module se/components\n\nrequire (\n\tgolang.org/x/sys v0.41.0\n\tkern v{}\n)\n\nreplace kern => ../.se/modules/kern\n"
 
 
@@ -304,7 +304,7 @@ def test_the_release_places_the_kern_se_lock_locks_and_refuses_a_lock_off_the_re
     assert result.returncode == 0 and output == f"ref={'a' * 40}\n", result.stdout + result.stderr
     result, output = lock_check(tmp_path / "off", LOCKED, REQUIRES.format("0.15.0"))
     assert result.returncode == 1 and output == ""
-    assert ('se.lock [modules.kern] version = "0.14.1" but app/go.mod says require kern v0.15.0: run uv run '
+    assert ('se.lock [components.kern] version = "0.14.1" but app/go.mod says require kern v0.15.0: run uv run '
             "python scripts/se_modules.py sync kern and commit se.lock") in result.stdout
     # An application's copy whose se.lock locks no kern carries kern's source and builds as before.
     for name, lock in (("none", None), ("other", '[modules.obs]\nversion = "4.0.1"\nref = "' + "b" * 40 + '"\n')):

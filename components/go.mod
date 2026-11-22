@@ -30,5 +30,5 @@ require (
 )
 
 // kern at the version required above, which `uv run python scripts/se_modules.py sync kern` places
-// there (se.toml [modules.kern]).
+// there (se.toml [components.kern]).
 replace kern => ../.se/modules/kern

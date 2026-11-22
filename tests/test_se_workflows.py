@@ -33,14 +33,16 @@ def loaded(text: str) -> dict:
 # The copy, pure.
 
 
-def test_a_module_url_names_how_ci_reaches_se_without_an_owner_where_it_is_relative() -> None:
-    assert se_workflows.repository_expression("../SE.git") == PLACE
-    assert se_workflows.repository_expression("../se") == "${{ github.repository_owner }}/se"
+def test_where_se_was_found_names_how_ci_reaches_se_without_the_projects_own_owner() -> None:
+    project = se_workflows.se_home.Home("example.com", "alice", "project")
+    assert se_workflows.repository_expression("https://example.com/alice/SE.git", project) == PLACE
+    assert se_workflows.repository_expression("git@example.com:Alice/se", project) == "${{ github.repository_owner }}/se"
+    assert se_workflows.repository_expression("https://example.com/bob/SE.git", project) == "bob/SE"
     assert se_workflows.repository_expression("https://example.com/alice/SE.git") == "alice/SE"
     assert se_workflows.repository_expression("git@example.com:alice/SE.git") == "alice/SE"
-    for url in ("../../team/SE.git", "./SE.git", "/srv/se", ""):
+    for url in ("../SE.git", "/srv/se", ""):
         with pytest.raises(se_workflows.WorkflowError):
-            se_workflows.repository_expression(url)
+            se_workflows.repository_expression(url, project)
 
 
 def test_every_file_se_ships_generates_a_copy_that_names_no_home_and_reaches_se_at_the_pin() -> None:
@@ -113,9 +115,10 @@ def world(tmp_path: Path, fake_git_door):
     write(se / RELEASE, files[RELEASE] + "# two\n")
     git_door.run("-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-am", "two", root=se)
     second = git_door.run("rev-parse", "HEAD", root=se).stdout.strip()
+    git_door.run("remote", "add", "origin", "https://example.com/alice/SE.git", root=se)  # where it was found
     project = fake_git.init(tmp_path / "project", "-b", "main")
     git_door.run("remote", "add", "origin", "https://example.com/alice/project.git", root=project)
-    write(project / "se.toml", f'[modules.se]\nurl = "../SE.git"\nref = "{first}"\n')
+    write(project / "se.toml", f'[components.se]\nref = "{first}"\n')
     return se, project, first, second
 
 
@@ -135,7 +138,7 @@ def test_check_names_a_hand_edited_copy_and_one_behind_the_pin(world, capsys) ->
     se, project, first, second = world
     se_workflows.write(project, se_workflows.plan(project, [RELEASE, SHARD], source=se))
     write(project / SHARD, (project / SHARD).read_text() + "# edited\n")
-    write(project / "se.toml", f'[modules.se]\nurl = "../SE.git"\nref = "{second}"\n')
+    write(project / "se.toml", f'[components.se]\nref = "{second}"\n')
     assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == [
         f"{RELEASE}: differs from SE's file at the pin {second[:12]}; run se_workflows.py write",
         f"{SHARD}: differs from SE's file at the pin {second[:12]}; run se_workflows.py write",
@@ -151,7 +154,7 @@ def test_without_a_pin_or_a_copy_the_plan_names_its_remedy(world, capsys) -> Non
     with pytest.raises(se_workflows.WorkflowError, match="holds no copy of SE's files; name the ones it calls"):
         se_workflows.plan(project, [], source=se)
     (project / "se.toml").write_text("[project]\n")
-    with pytest.raises(se_workflows.WorkflowError, match=r"no pin for SE's files .*\[modules.se\]"):
+    with pytest.raises(se_workflows.WorkflowError, match=r"no pin for SE's files .*\[components.se\]"):
         se_workflows.plan(project, [RELEASE], source=se)
     with pytest.raises(se_workflows.WorkflowError, match="SE ships no .github/workflows/check.yml"):
         se_workflows.plan(project, [".github/workflows/check.yml"], ref="HEAD", repository=PLACE, source=se)
@@ -193,7 +196,7 @@ def test_suite_time_s_literal_shards_are_read_from_its_step_alone() -> None:
 def test_check_fails_where_suite_time_s_shards_differ_from_se_toml_s(world) -> None:
     se, project, first, _ = world
     se_workflows.write(project, se_workflows.plan(project, [SHARD], source=se))
-    manifest = f'[modules.se]\nurl = "../SE.git"\nref = "{first}"\n'
+    manifest = f'[components.se]\nref = "{first}"\n'
     write(project / CHECK, calling("2"))
     write(project / "se.toml", manifest + "\n[tests]\nshards = 2\n")
     assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == []
@@ -215,7 +218,7 @@ def test_a_project_without_suite_time_or_shards_passes_as_before(world, tmp_path
     se, project, first, _ = world
     se_workflows.write(project, se_workflows.plan(project, [SHARD], source=se))
     write(project / CHECK, calling("2").replace("suite-time", "suite-shard"))
-    write(project / "se.toml", f'[modules.se]\nurl = "../SE.git"\nref = "{first}"\n\n[tests]\nshards = 4\n')
+    write(project / "se.toml", f'[components.se]\nref = "{first}"\n\n[tests]\nshards = 4\n')
     assert se_workflows.check(project, se_workflows.plan(project, [], source=se)) == []
     bare = tmp_path / "bare"
     bare.mkdir()

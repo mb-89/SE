@@ -150,7 +150,7 @@ def machine_in(tmp_path: Path) -> tuple[Path, Path, Path]:
     # se_modules.py app-binary: name, version, download base, build folder, package.
     (home / "app-binary").write_text(f"{NAME} {APP_VERSION} {APP_BASE} {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
                                      newline="\n")
-    (project / "se.toml").write_text('[modules.obs]\nurl = "https://example.com/obs.git"\nref = "%s"\n' % ("0" * 40),
+    (project / "se.toml").write_text('[components.obs]\nref = "%s"\n' % ("0" * 40),
                                      encoding="utf-8", newline="\n")
     return home, project, tmp_path
 
@@ -902,7 +902,7 @@ def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machi
 
 
 # kern for the installed SE (scripts/bootstrap.sh kern_place, README "Modules"): an SE that pins kern
-# by [modules.kern] gets its clone synced before the core starts where it is missing or off the
+# by [components.kern] gets its clone synced before the core starts where it is missing or off the
 # commit se.lock locks; at that commit, no process starts.
 LOCKED = "b" * 40
 
@@ -910,10 +910,10 @@ LOCKED = "b" * 40
 def pinning_se(base: Path, head: str | None) -> Path:
     """A copy of SE's start scripts in a folder of its own that pins kern, its clone at `head`."""
     root = binary_root(base)
-    (root / "se.toml").write_text('[modules.kern]\nurl = "../kern.git"\ngo = "components/go.mod"\n',
+    (root / "se.toml").write_text('[components.kern]\ngo = "components/go.mod"\n',
                                   encoding="utf-8", newline="\n")
-    (root / "se.lock").write_text(f'[modules.obs]\nversion = "4.0.1"\nref = "{"a" * 40}"\n\n'
-                                  f'[modules.kern]\nversion = "0.14.1"\nref = "{LOCKED}"\n',
+    (root / "se.lock").write_text(f'[components.obs]\nversion = "4.0.1"\nref = "{"a" * 40}"\n\n'
+                                  f'[components.kern]\nversion = "0.14.1"\nref = "{LOCKED}"\n',
                                   encoding="utf-8", newline="\n")
     if head is not None:
         (root / ".se" / "modules" / "kern" / ".git").mkdir(parents=True)

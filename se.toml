@@ -48,7 +48,7 @@ target_seconds = 60
 limit_seconds = 120
 
 # SE's Go components (components/README.md "Tests"), on kern at its pin: setup places it, the
-# clone components/go.mod replaces kern by (se.toml [modules.kern]); kern's own tests run in kern's
+# clone components/go.mod replaces kern by (se.toml [components.kern]); kern's own tests run in kern's
 # repository. Their agreement test runs SE's Python fleet check and retro count beside the Go ones.
 [tests.beside.go-components]
 setup = ["uv", "run", "python", "../scripts/se_modules.py", "sync", "kern"]
@@ -108,15 +108,14 @@ command = ["uv", "run", "python", "scripts/copilot.py", "self-test", "--build"]
 target_seconds = 30
 limit_seconds = 90
 
-# obs builds the documentation (README "Documentation").
-[modules.obs]
-url = "../obs.git"
+# SE's components, found by name under the owners of the checkout's remotes (README "Modules"),
+# both required. obs builds the documentation (README "Documentation").
+[components.obs]
 version = "^5.0"
 
 # kern, the Go core SE's binary is built on (docs/go-core.md "Pinning it"): its pin is the version
 # components/go.mod requires, so a move of that line is a change of se's inputs (README "Modules").
-[modules.kern]
-url = "../kern.git"
+[components.kern]
 go = "components/go.mod"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside

@@ -1229,13 +1229,13 @@ def se_module_at_lock(root: Path) -> None:
         source = modules.resolve(root, module, local)
         if source.kind != "pinned":
             return
-        source = modules.resolve(root, modules.lock_range(root, module, local), local)
         before = modules.git(clone, "rev-parse", "HEAD")
-        line = modules.sync_module(source)
+        line = modules.sync_tree(root, local, [SE_MODULE])[0]
+        after = modules.git(clone, "rev-parse", "HEAD")
     except modules.ModuleError as error:
         raise QueueError(f"sync: cannot move {clone} to the pin se.lock names: {error}; run "
                          "se_modules.py sync se") from None
-    if source.module.ref != before:
+    if after != before:
         print(f"Moved {line}")
 
 

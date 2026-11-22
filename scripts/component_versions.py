@@ -6,7 +6,7 @@ A work branch that changes the `se` binary states its release kind in its field 
 versions at that moment, into the landing's merge. A branch that still claims a number in its
 `release.toml` is landed too: the claim gives the kind, and the number is replaced by the next free
 one of that kind. The binary's folder is its inputs: for SE `components/`, where `go.mod`'s
-`require kern` is the kern it is built on (se.toml [modules.kern]), so a move of that pin is a
+`require kern` is the kern it is built on (se.toml [components.kern]), so a move of that pin is a
 change of `se`. kern releases from kern's own repository.
 
 Every other file that pins a component's release tag, `PINS`, moves with its number in the same

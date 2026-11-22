@@ -120,7 +120,7 @@ def suite_hash(root: Path, rev: str | None = None) -> str:
     record's format; a record naming another is stale."""
     data = project(root, rev)
     suite = {"format": RECORD_FORMAT, "tests": data.get("tests") or {},
-             "se": (data.get("modules") or {}).get("se")}
+             "se": (data.get("components") or {}).get("se")}
     text = json.dumps(suite, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

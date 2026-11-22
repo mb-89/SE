@@ -30,7 +30,7 @@ SE_RELEASE = ('version = "{version}"\n'
 # landing's list names it in these tests (`listed`); none does in SE.
 TEMPLATE = "docs/example/.github/workflows/check.yml"
 PINNED = "jobs:\n  check:\n    uses: example/se/.github/workflows/se.yml@se-v{version}\n"
-# components/go.mod, whose require kern is the kern the se binary is built on (se.toml [modules.kern]).
+# components/go.mod, whose require kern is the kern the se binary is built on (se.toml [components.kern]).
 GO_MOD = "module se/components\n\ngo 1.25.0\n\nrequire kern v{kern}\n\nreplace kern => ../.se/modules/kern\n"
 
 
@@ -263,7 +263,7 @@ def test_the_completeness_check_fails_on_a_made_up_file_with_a_stale_pin(tmp_pat
 
 def test_a_branch_that_moves_only_the_kern_require_and_states_se_patch_gets_ses_next_patch(
         main_checkout, monkeypatch, github, capsys):
-    """kern's pin is components/go.mod's require kern (se.toml [modules.kern]): moving it changes
+    """kern's pin is components/go.mod's require kern (se.toml [components.kern]): moving it changes
     an input of se, so its stated kind gives se its next version, the listed pin moved with it."""
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
     components_on_main(main_checkout, se="0.5.1")

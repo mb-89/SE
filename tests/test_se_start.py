@@ -100,28 +100,26 @@ def setup(tmp_path, monkeypatch):
     local_dir = tmp_path / "local-lib"
     write(local_dir / "se.toml", '[project]\nversion = "3.1.0"\n')
     write(project / "se.toml", f"""
-[modules.lib]
-url = "{LIB_URL}"
+[components.lib]
 version = "^1.2"
 
-[modules.tool]
-url = "{TOOL_URL}"
+[components.tool]
 version = "~2.0.1"
 
-[modules.mine]
-url = "https://git.example.org/team/mine.git"
+[components.mine]
 version = "^3"
 
-[modules.obs]
-url = "{OBS_URL}"
+[components.obs]
 ref = "{SHA}"
 """)
+    # Where each placed component was found: its clone's origin (se_start._found_at).
+    monkeypatch.setattr(se_start, "_found_at", lambda clone: f"https://git.example.org/team/{clone.name}.git")
     write(project / "se.lock", f"""
-[modules.lib]
+[components.lib]
 version = "1.2.0"
 ref = "{SHA}"
 
-[modules.tool]
+[components.tool]
 version = "2.0.3"
 ref = "{SHA}"
 """)
@@ -179,10 +177,10 @@ def test_up_to_date_out_of_date_newer_major_local_path_and_commit_pin(setup):
     assert states["obs"].due is None and states["obs"].latest == (0, 9, 0)
     lines = se_start.full(report(setup), setup["se"])
     assert any(line.startswith("tool: in use 2.0.3; latest 2.1.0; up to date; 2.1.0 is outside ~2.0.1, never "
-                               "applied by refresh; to take it, set version = \"^2.1\" in [modules.tool] of ")
+                               "applied by refresh; to take it, set version = \"^2.1\" in [components.tool] of ")
                for line in lines)
     assert any(line.startswith("lib: in use 1.2.0; latest 2.0.0; update due to 1.4.1; 2.0.0 is outside ^1.2, "
-                               "never applied by refresh; to take it, set version = \"^2.0\" in [modules.lib] of ")
+                               "never applied by refresh; to take it, set version = \"^2.0\" in [components.lib] of ")
                for line in lines)
     assert any(line.startswith("mine: in use 3.1.0 (local path ") and line.endswith("local, refresh never touches it")
                for line in lines)
@@ -201,9 +199,9 @@ def test_the_greeting_names_only_what_is_out_of_date_and_the_refresh(setup):
         "  SE: 2.0.0 is outside SE's major 1; refresh never applies it; to take it, install SE 2.0.0 "
         "again as README \"Install\" says",
         f"  lib: 2.0.0 is outside ^1.2; refresh never applies it; to take it, set version = \"^2.0\" in "
-        f"[modules.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
+        f"[components.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
         f"  tool: 2.1.0 is outside ~2.0.1; refresh never applies it; to take it, set version = \"^2.1\" in "
-        f"[modules.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
+        f"[components.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
         f"Refresh: uv run python {setup['se'].as_posix()}/scripts/se_start.py refresh",
     ]
 
@@ -249,10 +247,10 @@ def test_offline_marks_the_check_as_not_done(setup):
 
 
 def test_a_bad_manifest_is_named_and_the_greeting_still_appears(setup):
-    write(setup["project"] / "se.toml", "[modules.lib]\nurl = 1\n")
+    write(setup["project"] / "se.toml", "[components.lib]\nurl = 1\n")
     lines = se_start.greeting(report(setup, offline=True), setup["se"])
     assert lines[0].startswith("SE 1.2.0 started: ")
-    assert any("modules of" in line and "url is required" in line for line in lines)
+    assert any("modules of" in line and "url is refused" in line for line in lines)
 
 
 def test_an_installed_copy_is_checked_against_its_plugin_manifests_repository(setup):
@@ -321,7 +319,7 @@ def test_no_cache_yet_says_the_check_runs_in_the_background(setup):
 
 def test_a_new_module_without_a_cached_answer_starts_a_check(setup):
     report(setup, "check")
-    write(setup["project"] / "se.toml", f'[modules.new]\nurl = "https://git.example.org/team/new.git"\nversion = "^1"\n')
+    write(setup["project"] / "se.toml", f'[components.new]\nversion = "^1"\n')
     report(setup)
     assert len(setup["world"].spawn) == 1
 
@@ -413,10 +411,10 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
 # kern's state, as bootstrap.sh hands it over (README "Kern").
 
 def bare_kern(se: Path) -> None:
-    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [modules.kern]), its clone placed."""
+    """The installed SE pins kern 0.2.0 by its go.mod (se.toml [components.kern]), its clone placed."""
     manifest = se / "se.toml"
     text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
-    write(manifest, text + '\n[modules.kern]\nurl = "../kern.git"\ngo = true\n')
+    write(manifest, text + '\n[components.kern]\ngo = true\n')
     write(se / "go.mod", "module se\n\nrequire kern v0.2.0\n")
     write(se / ".se" / "modules" / "kern" / "release.toml",
           'version = "0.2.0"\ndownload = "https://example.com/alice/kern/releases/download/v{version}"\n')
@@ -885,21 +883,22 @@ def repos(tmp_path, isolated_git):
     git(se, "reset", "-q", "--hard", "v1.0.0")
     remotes = {}
     for name, versions in {"lib": ("1.0.0", "1.1.0", "2.0.0"), "tool": ("1.0.0",)}.items():
-        remote = tmp_path / f"{name}-remote"
-        remote.mkdir()
+        remote = tmp_path / "hosts" / name  # beside the project's origin, as its [urls] rewrites it
+        remote.mkdir(parents=True)
         fake_git.init(remote, "-b", "main")
         for version in versions:
             release(remote, version)
         remotes[name] = remote
-    project = tmp_path / "project"
+    project = fake_git.init(tmp_path / "project")
+    git(project, "remote", "add", "origin", "https://git.example.org/team/project")
     local_dir = tmp_path / "local-lib"
     write(local_dir / "se.toml", '[project]\nversion = "0.1.0"\n')
-    write(project / "se.toml", "".join(
-        f'[modules.{name}]\nurl = "{remote.as_uri()}"\nversion = "^1"\n\n' for name, remote in remotes.items())
-        + f'[modules.mine]\nurl = "{remotes["lib"].as_uri()}"\nversion = "^0.1"\n')
-    config = write(tmp_path / "local.toml", f'[paths]\nmine = "{local_dir.as_posix()}"\n')
-    for name, remote in remotes.items():
-        se_modules.write_lock(project, name, "1.0.0", git(remote, "rev-parse", "v1.0.0"))
+    write(project / "se.toml", "".join(f'[components.{name}]\nversion = "^1"\n\n' for name in remotes)
+          + '[components.mine]\nversion = "^0.1"\n')
+    config = write(tmp_path / "local.toml", f'[urls]\n"https://git.example.org/team/" = '
+                                            f'"{(tmp_path / "hosts").as_posix()}/"\n\n[paths]\nmine = "{local_dir.as_posix()}"\n')
+    se_modules.write_lock(project, {name: ("1.0.0", git(remote, "rev-parse", "v1.0.0"))
+                                    for name, remote in remotes.items()})
     assert se_modules.main(["--root", str(project), "--local", str(config), "sync"]) == 0
     clock = Clock()
     world = se_start.World(clock=clock, spawn=Spawns(), work=Work())
@@ -962,7 +961,7 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert not failed, lines
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)
     assert "lib: 1.0.0 -> 1.1.0 (se.lock; commit it)" in lines
-    assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [modules.lib] of "
+    assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [components.lib] of "
             f"{(repos['project'] / 'se.toml').as_posix()}, then run: uv run python {repos['se'].as_posix()}"
             "/scripts/se_modules.py update lib") in lines
     assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as README "
@@ -1300,7 +1299,7 @@ def test_start_hooks_takes_the_hooks_of_the_se_module_a_project_pins_else_this_s
     clone = fresh_clone(base, "pinning")
     module = base / "se-module"
     write(module / ".githooks" / "se-script", "#!/bin/sh\n")
-    write(clone / "se.toml", '[modules.se]\nurl = "https://example.com/se.git"\nref = "%s"\n' % ("0" * 40))
+    write(clone / "se.toml", '[components.se]\nref = "%s"\n' % ("0" * 40))
     config = write(base / "local.toml", f'[paths]\nse = "{module.as_posix()}"\n')
     assert se_start.start_hooks(plugin, clone, config) == ""
     assert hooks_path(clone) == (module / ".githooks").as_posix()  # the pinned se's, as its setup.sh sets
