@@ -523,6 +523,135 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert "No removed protected content found." in guarded.stdout
 
 
+MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
+
+
+def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, str]:
+    """A clone on the branch `move-html` that deletes the folder `adapters/html` with its two tests
+    and the test `test_outside` beside it, its origin `<case>/app.git`; beside it the repository
+    `html.git` holds `destination_tests` as `tests/test_html.py` (the folder's
+    `tests/test_html.py`, moved to its root) at the commit returned, or is missing where it is None."""
+    case.mkdir()
+    repository = case / "clone"
+    repository.mkdir()
+    fake_git.init(repository, "-b", "main")
+    for key, value in (("user.name", "Guard test"), ("user.email", "guard-test@example.invalid")):
+        assert git(repository, "config", key, value).returncode == 0
+    assert git(repository, "remote", "add", "origin", str(case / "app.git")).returncode == 0
+    folder = repository / "adapters" / "html" / "tests"
+    folder.mkdir(parents=True)
+    (folder / "test_html.py").write_text(MOVED_TESTS, encoding="utf-8")
+    (repository / "tests").mkdir()
+    (repository / "tests" / "test_app.py").write_text(
+        "def test_outside():\n    pass\n", encoding="utf-8")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-qm", "baseline").returncode == 0
+    assert git(repository, "checkout", "-q", "-b", "move-html").returncode == 0
+    shutil.rmtree(repository / "adapters")
+    shutil.rmtree(repository / "tests")
+    assert git(repository, "add", "-A").returncode == 0
+    assert git(repository, "commit", "-qm", "move the html adapter out").returncode == 0
+    if destination_tests is None:
+        return repository, "0123456789abcdef0123456789abcdef01234567"
+    destination = case / "html-work"
+    destination.mkdir()
+    fake_git.init(destination, "-b", "main")
+    for key, value in (("user.name", "Guard test"), ("user.email", "guard-test@example.invalid")):
+        assert git(destination, "config", key, value).returncode == 0
+    (destination / "tests").mkdir()
+    (destination / "tests" / "test_html.py").write_text(destination_tests, encoding="utf-8")
+    assert git(destination, "add", ".").returncode == 0
+    assert git(destination, "commit", "-qm", "the html adapter").returncode == 0
+    fake_git.init(case / "html.git", "--bare", "-b", "main")
+    assert git(destination, "remote", "add", "origin", str(case / "html.git")).returncode == 0
+    assert git(destination, "push", "-q", "origin", "main").returncode == 0
+    return repository, git(destination, "rev-parse", "HEAD").stdout.strip()
+
+
+def removed_report(*lines: str) -> str:
+    return ("<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and "
+            "authored prose\n\n" + "".join(f"- {line}\n" for line in lines)
+            + "<!-- se:field-report:end -->\n")
+
+
+@pytest.mark.parametrize("abbreviated", [False, True])
+def test_guard_passes_a_moved_folder_whose_tests_its_destination_commit_holds(
+    worktree: Path, abbreviated: bool,
+) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-folder-case", MOVED_TESTS)
+    named = commit[:7] if abbreviated else commit
+    report = removed_report(f"Moved: `adapters/html` to `html` at `{named}`.", "`test_outside`")
+
+    removed = work_tickets.guard(repository, "move-html", report)
+
+    assert removed == ["test_renders_a_page", "test_renders_a_link", "test_outside"]
+
+
+def test_guard_rebases_a_moved_folder_to_its_as_path(worktree: Path) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-as-case", MOVED_TESTS)
+    rebased = removed_report(f"Moved: adapters/html/tests to html at {commit} as tests",
+                             "test_outside")
+    at_root = removed_report(f"Moved: adapters/html/tests to html at {commit}", "test_outside")
+
+    assert "test_outside" in work_tickets.guard(repository, "move-html", rebased)
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", at_root)
+    assert "test_renders_a_page, test_renders_a_link," in str(refused.value)
+
+
+def test_guard_refuses_a_moved_folder_whose_destination_lacks_a_deleted_test(
+    worktree: Path,
+) -> None:
+    repository, commit = moved_folder_case(
+        worktree.parent / "moved-missing-case", "def test_renders_a_page():\n    pass\n")
+    line = f"Moved: adapters/html to html at {commit}"
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", removed_report(line, "test_outside"))
+
+    message = str(refused.value)
+    assert message.startswith(
+        "Field report must name each deleted or renamed test and authored sentence: "
+        "test_renders_a_link, each compared")
+    assert "test_renders_a_page" not in message
+    assert f"checked at their destination by {line!r}" in message
+    named = removed_report(line, "test_outside", "test_renders_a_link")
+    assert work_tickets.guard(repository, "move-html", named)[1] == "test_renders_a_link"
+
+
+def test_guard_still_requires_by_name_a_deleted_test_outside_the_moved_folder(
+    worktree: Path,
+) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-outside-case", MOVED_TESTS)
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html",
+                           removed_report(f"Moved: adapters/html to html at {commit}"))
+
+    message = str(refused.value)
+    assert message.startswith("Field report must name each deleted or renamed test and authored "
+                              "sentence: test_outside, each compared")
+
+
+@pytest.mark.parametrize("commit", [None, "fedcba9876543210fedcba9876543210fedcba98"])
+def test_guard_refuses_a_moved_folder_whose_destination_cannot_be_fetched(
+    worktree: Path, commit: str | None,
+) -> None:
+    """A repository that is missing, or that lacks the commit, passes no move."""
+    case = worktree.parent / f"moved-unfetched-{bool(commit)}"
+    repository, held = moved_folder_case(case, None if commit is None else MOVED_TESTS)
+    line = f"Moved: adapters/html to html at {commit or held}"
+    report = removed_report(line, "test_outside", "test_renders_a_page", "test_renders_a_link")
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", report)
+
+    message = str(refused.value)
+    assert message.startswith(f"Cannot check the moved-folder line {line!r}: html at ")
+    assert "cannot be fetched" in message
+    assert "name each test the branch deletes under adapters/html under Removed behaviour" in message
+
+
 def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_request(
     worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
