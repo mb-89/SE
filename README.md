@@ -1104,7 +1104,7 @@ over_limit = "fail" # optional, or "warn"
 shards = 1 # optional: how many shards CI runs the suite in
 
 [tests.beside.go-components] # optional, one table per suite in another toolchain
-setup = ["uv", "run", "python", "../scripts/se_modules.py", "sync", "kern"] # optional
+setup = ["go", "test", "-run", "^$", "./..."] # optional
 command = ["go", "test", "./..."]
 directory = "components"
 target_seconds = 30
