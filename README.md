@@ -585,6 +585,11 @@ a local branch, never a refspec, tag or commit, and refuses one that carries com
 holds but origin does not: a project kept on two hosts shares trees, not histories. Only origin's
 remote-tracking branches count as held by origin; a local tag proves nothing about it.
 
+The check before every push knows its destination remote: it gates each commit that remote does
+not hold yet, and a local-list line `remote:<remote name> <regex>` stops only the pushes to that
+remote, so one checkout with two remotes keeps a term from one while the other may receive it.
+The local list's line forms are [Public safety](AGENTS.md#public-safety)'s.
+
 `version = "MAJOR.MINOR.PATCH"` is the project's one semantic version, published as the git tag
 `vMAJOR.MINOR.PATCH` on its integration branch; consumers pin ranges of it
 ([`se.toml`](#setoml)). Nobody types it after the first: `integrate` releases, on its landing
