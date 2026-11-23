@@ -26,6 +26,10 @@ import fake_git
 import git_door
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# A suite beside the suite runs the real programs it holds to their contract (scripts/spawn_guard.py).
+pytestmark = pytest.mark.spawns("contract: the real se binary, built from kern and SE's Go components, serving "
+                                "a checkout, beside the suite")
 GROUPS = ["delivery", "guidance", "templates", "integration", "issues", "overhaul", "render",
           "retro", "review", "scaffold", "tickets"]  # SE's Python command groups, each placed
 GO = ["clock", "fleet", "github", "origin", "retro-due", "template"]  # the Go components in the se binary (components/README.md)

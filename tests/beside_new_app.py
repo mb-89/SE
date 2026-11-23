@@ -26,6 +26,10 @@ import pytest
 import se_modules
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# A suite beside the suite runs the real programs it holds to their contract (scripts/spawn_guard.py).
+pytestmark = pytest.mark.spawns("contract: an application `se new app` creates, its Go built and its own "
+                                "suite run, beside the suite")
 NAME = "ledger"
 # kern at its pin, and its Go module path, as its go.mod names it: this file names no home of its own.
 KERN_DIR = se_modules.kern_dir(ROOT)

@@ -15,7 +15,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+
+# A suite beside the suite runs the real programs it holds to their contract (scripts/spawn_guard.py).
+pytestmark = pytest.mark.spawns("contract: the real kern binary counting the ad hoc scripts' runs, beside the suite")
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 

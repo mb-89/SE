@@ -25,6 +25,9 @@ import pytest
 import fake_git
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# A suite beside the suite runs the real programs it holds to their contract (scripts/spawn_guard.py).
+pytestmark = pytest.mark.spawns("contract: the real kern binary's GitHub relay, beside the suite")
 sys.path.insert(0, str(ROOT / "scripts"))
 from se_modules import kern_dir  # noqa: E402
 
