@@ -12358,8 +12358,6 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
       "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
-#: What the header of these components' declarations says they are generated from.
-COMPONENT_SOURCE = "its command registry"
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(

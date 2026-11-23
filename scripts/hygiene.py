@@ -20,7 +20,11 @@ each named with its check.
   `<owner>/<repository>`, which `scripts/se_home.py` reads from origin (AGENTS.md "Neutral home"),
   outside HOME_ALLOWED; a workflow or action (`.github/workflows/`, `.github/actions/`, at any depth)
   is checked even inside an allowed folder, as it calls SE's files as local copies
-  (`scripts/se_workflows.py`); a checkout whose home cannot be known skips it, naming why.
+  (`scripts/se_workflows.py`); a checkout whose home cannot be known skips it, naming why;
+- generated: every file a program writes is marked and declared in `generated.yaml`, and each
+  generator's fresh run reproduces it (`scripts/generated.py`, the guidance note
+  generated-files-are-marked); the commit hook runs it without the fresh runs (se.toml
+  `[commit_checks]`).
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -34,6 +38,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import generated
 import git_door
 import references
 import se_home
@@ -280,6 +285,14 @@ def home_skip(root: Path) -> str:
     return ""
 
 
+def generated_findings(root: Path) -> list[str]:
+    """What the generated-files check finds in `root`, its fresh runs included."""
+    try:
+        return generated.findings(root)
+    except generated.DeclarationError as error:
+        raise HygieneError(str(error)) from error
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -291,6 +304,7 @@ def checks(root: Path) -> dict[str, list[str]]:
         "public": public_findings(root),
         "neutral-home": ([] if (home := se_home.find(root)) is None
                          else home_findings(root, HOME_ALLOWED, home)),
+        "generated": generated_findings(root),
     }
 
 

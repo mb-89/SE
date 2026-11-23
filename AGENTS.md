@@ -79,6 +79,10 @@
   - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
     list, and to the child processes it starts: only the contract suite, `tests/test_git_door.py`.
     A test that reaches real git without the fake fails, naming the command.
+  - It also fails where a file a program writes is not marked, a marked file is not declared in
+    `generated.yaml`, or a generator's fresh run differs (`scripts/generated.py`, the guidance
+    note `generated-files-are-marked`); the commit hook runs the same check without the fresh runs
+    (`se.toml` `[commit_checks]`).
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:

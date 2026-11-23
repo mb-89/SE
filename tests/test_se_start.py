@@ -896,7 +896,7 @@ def repos(tmp_path, isolated_git):
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "se_modules.py", "se_home.py", "public_check.py",
                              "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
-                             "public-check-terms.toml")}
+                             "generated.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")
