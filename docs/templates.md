@@ -134,6 +134,38 @@ write through the tracker's tools of a claimed path that does not come from the 
 naming the template and the fill to use. The gate is on wherever a template claims a path, with
 no se.toml switch to keep it off.
 
+## The filled template is a type
+
+The person decided on 22 Nov, in the deck "Files, templates and agent tools", that typed templates
+are blessed: a filled template is a type that only the template component constructs, after
+checking, and every templated target accepts only that type. Parse, don't validate
+([parse-dont-validate](../guidance/parse-dont-validate.md)): the fill checks a document once, and
+a target relies on its type and checks nothing again.
+
+- **The type.** `template.Filled` in SE's Go components carries its template, version, digest,
+  fields, title and document. Its fields are unexported, so only `template.Fill`, which makes one
+  where nothing refuses, constructs it; the zero value is none. Across the bus its JSON carries a
+  seal that decoding verifies, so JSON of its shape written by hand is no filled template.
+- **The constructor.** The template component's verb `fill` answers it (components/README.md
+  [The template engine in Go](../components/README.md#the-template-engine-in-go)); a refused fill
+  answers every finding and makes nothing.
+- **The targets.** A Go verb that takes a `template.Filled` is never handed a text: kern's index
+  refuses a request of another type. A target that reads JSON calls `template.Accept`, which
+  refuses free text, a body, field values and a value whose seal does not hold, naming the
+  template to fill.
+
+The two targets the decision names are kern's, each a change in kern's repository that SE's work
+issue drafts:
+
+- **The GitHub door's writing tools** (kern#19): `issue-create` and `issue-comment` take a filled
+  template instead of a template's name and its fields, and write its document and title as they
+  stand, refusing anything else, naming the template to fill.
+- **The files module's template-only paths**: a `write` of a path a template claims takes a filled
+  template of that template, and refuses free text, naming it.
+
+Until those land, SE's filing commands and its gate keep checking after the fact, as
+[Fill](#fill) says.
+
 ## Template repositories
 
 A template repository is a plugin: public or private, found and pinned as plugins are, through
