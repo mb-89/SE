@@ -1189,17 +1189,22 @@ def test_fill_usage_errors_exit_2(capsys, arguments, error):
 
 def test_fill_is_a_writing_command_of_the_templates_component_with_its_request_ports():
     """The door serves fill in the tool templates_write: it writes only through the request ports
-    file-issue and file-comment, which the wiring binds to the GitHub component's write verbs."""
+    fill-template, which the wiring binds to the template component's fill, and file-issue and
+    file-comment, bound to the GitHub component's write verbs, whose port template-accept the
+    wiring binds to the template component's accept."""
     assert "fill" in se_templates.WRITING_COMMANDS and "fill" not in se_templates.READ_ONLY_COMMANDS
     assert "fill" in se_templates.INTERACTIVE_COMMANDS and "fill" in se_templates.COMPONENTS[0].commands
     declared = tomllib.loads((ROOT / "components" / "templates" / "component.toml").read_text(
         encoding="utf-8"))
     assert declared["commands"]["se_templates.py fill"]["writes"] is True
     assert {port: request["type"] for port, request in declared["requests"].items()} == {
-        "file-issue": "github.issue-create", "file-comment": "github.issue-comment"}
+        "fill-template": "template.fill", "file-issue": "github.issue-create",
+        "file-comment": "github.issue-comment"}
     wires = tomllib.loads((ROOT / "wiring.toml").read_text(encoding="utf-8"))["wires"]
+    assert wires["templates.fill-template"] == "template.fill"
     assert wires["templates.file-issue"] == "github.issue-create"
     assert wires["templates.file-comment"] == "github.issue-comment"
+    assert wires["github.template-accept"] == "template.accept"
 
 
 # Filing through kern (docs/templates.md "Fill"): a fill with --repo files the document it checked
@@ -1222,16 +1227,22 @@ def filing_fake():
                      KERN_TEMPLATES / "expect.toml")
 
 
+def made_by_fill() -> dict:
+    """The filled template the template component's fill answers in the expectations."""
+    expectations = tomllib.loads((KERN_TEMPLATES / "expect.toml").read_text(encoding="utf-8"))["expect"]
+    return next(item["answer"] for item in expectations if item["request"] == "fill-template")
+
+
 def checkout(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
     return tmp_path
 
 
 def test_a_fill_of_the_work_template_files_an_issue_through_kern_s_github_component(tmp_path):
-    """Acceptance: the work fill passes SE's checks, then asks the request port file-issue, which
-    the wiring binds to the GitHub component's verb issue-create, with the template's name and
-    the fields kern renders the checked document from, never a body; kern reads the template it
-    wrote; the answer links the issue."""
+    """Acceptance: the work fill passes SE's checks, then asks the request port fill-template,
+    the template component's fill, for the filled template of its fields and raw input, and hands
+    that value to file-issue, the GitHub component's verb issue-create, never a body or fields;
+    the answer links the issue."""
     import se_components
 
     root = checkout(tmp_path)
@@ -1240,15 +1251,13 @@ def test_a_fill_of_the_work_template_files_an_issue_through_kern_s_github_compon
                    "--worktree", str(root), "--repo", "alice/demo", "--label", "work",
                    "--input-text", WORK_RAW, "--fields-json", json.dumps(FIELDS))
     assert out == "passes\nfiled alice/demo#21: https://github.com/alice/demo/issues/21"
-    [asked] = fake.requests
-    document = templates.render(WORK, FIELDS)
+    fill, asked = fake.requests
+    assert fill.port == "fill-template"
+    assert fill.value == {"template": "work", "fields": FIELDS, "raw": WORK_RAW, "title": TITLE}
     assert asked.port == "file-issue"
-    assert asked.value == {"owner": "alice", "repo": "demo", "template": "work", "labels": ["work"],
-                           "fields": se_templates.kern_fields(WORK, document, TITLE)}
-    assert "body" not in asked.value and "body" not in asked.value["fields"]
-    written = json.loads((root / se_templates.KERN_TEMPLATES / "work.json").read_text(encoding="utf-8"))
-    assert written == se_templates.kern_template(WORK)
-    assert written["markers"] == document.splitlines()[:2]
+    assert asked.value == {"owner": "alice", "repo": "demo", "labels": ["work"],
+                           "filled": made_by_fill()}
+    assert not {"body", "title", "template", "fields"} & set(asked.value)
 
 
 def test_a_fill_the_checks_refuse_files_nothing(tmp_path):
@@ -1261,22 +1270,7 @@ def test_a_fill_the_checks_refuse_files_nothing(tmp_path):
                    "--worktree", str(root), "--repo", "alice/demo",
                    "--input-text", WORK_RAW, "--fields-json", json.dumps(fields))
     assert out.splitlines()[0] == "refused: 1 findings" and "requirements" in out
-    assert fake.requests == [] and not (root / se_templates.KERN_TEMPLATES).exists()
-
-
-def test_a_fill_kern_would_file_otherwise_than_it_was_checked_files_nothing(tmp_path):
-    """A value SE renders and kern would not, here a choice outside its choices, is refused
-    before anything reaches kern, naming the field."""
-    import se_components
-
-    root = checkout(tmp_path)
-    fake = filing_fake()
-    fields = {**FIELDS, "package_kind": "TBD"}
-    out = fake.run("se_templates.py fill", se_components.CWD + str(root), "work", "--tree",
-                   "--worktree", str(root), "--repo", "alice/demo",
-                   "--input-text", WORK_RAW + "\nTBD", "--fields-json", json.dumps(fields))
-    assert out.splitlines()[0] == "refused: 1 findings", out
-    assert "package_kind is one of its choices" in out and fake.requests == []
+    assert fake.requests == []
 
 
 def test_a_comment_template_s_fill_comments_through_kern_after_its_quote_check(tmp_path):
@@ -1297,10 +1291,10 @@ def test_a_comment_template_s_fill_comments_through_kern_after_its_quote_check(t
     assert out.splitlines()[0] == "refused: 1 findings" and fake.requests == []
     out = fake.run("se_templates.py fill", *where, "--fields-json", json.dumps(test_templates.FILLED))
     assert out == "passes\ncommented on alice/demo#7: https://github.com/alice/demo/issues/7#issuecomment-99"
-    [asked] = fake.requests
+    fill, asked = fake.requests
+    assert fill.port == "fill-template" and fill.value["fields"] == test_templates.FILLED
     assert asked.port == "file-comment" and asked.value["number"] == 7
-    assert asked.value["fields"] == {"seen": test_templates.FILLED["seen"],
-                                     "impact": test_templates.FILLED["impact"]}
+    assert asked.value["filled"] == made_by_fill() and "fields" not in asked.value
 
 
 def test_a_fill_run_directly_files_nothing_and_names_kern(capsys, tmp_path):
@@ -1308,7 +1302,6 @@ def test_a_fill_run_directly_files_nothing_and_names_kern(capsys, tmp_path):
     code, out, _ = run(capsys, "fill", "work", "--tree", "--worktree", str(root), "--repo",
                        "alice/demo", "--input-text", WORK_RAW, "--fields-json", json.dumps(FIELDS))
     assert code == 2 and "nothing was filed" in out and "kern" in out
-    assert not (root / se_templates.KERN_TEMPLATES).exists()
 
 
 @pytest.mark.parametrize("arguments, error", [
@@ -1323,10 +1316,10 @@ def test_filing_usage_errors_exit_2(capsys, arguments, error):
     assert code == 2 and error in out, out
 
 
-def test_a_template_kern_cannot_render_is_not_filed(capsys):
-    code, out, _ = run(capsys, "fill", "raid-register", "--tree", "--repo", "alice/demo",
+def test_a_template_that_makes_no_whole_issue_is_not_filed(capsys):
+    code, out, _ = run(capsys, "fill", "review", "--tree", "--repo", "alice/demo", "--number", "7",
                        "--input-text", "x", "--fields-json", "{}")
-    assert code == 2 and "kern cannot file raid-register" in out and "register" in out, out
+    assert code == 2 and "kern cannot file review: review is an adapter template" in out, out
     code, out, _ = run(capsys, "fill", "decision", "--tree", "--repo", "alice/demo",
                        "--input-text", "x", "--fields-json", "{}")
     assert code == 2 and out.strip().endswith("decision serves deck.build, not issue.create"), out

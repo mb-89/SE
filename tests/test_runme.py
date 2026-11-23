@@ -14,8 +14,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import generated
 import pytest
 import se_modules
+import se_workflows
 from shell_paths import BASH, WINDOWS, link_tools, sh, tool_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -343,6 +345,18 @@ def test_every_runme_conf_names_gits_winget_id():
         assert re.search(r"(?m)^get git winget \S+$", path.read_text(encoding="utf-8")), path
 
 
+def unmarked(text: str) -> str:
+    """kern's copy of a file of the pair without the marker se_workflows.py write gives it (kern
+    2.1.0 marks every generated file); a copy without that marker fails."""
+    text = text.replace("\r\n", "\n")
+    marker = generated.marker_at(text, "hash")
+    assert marker is not None and marker.generator == se_workflows.GENERATOR, (
+        "kern's copy names no se_workflows.py write as its generator")
+    lines = text.split("\n")
+    del lines[generated.place(text, "hash")]
+    return "\n".join(lines)
+
+
 def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
     named: set[str] = set()
     for path in confs():
@@ -353,9 +367,10 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
             named.update(re.findall(r"https?://\S+", line))
     for name in PAIR:
         data = (ROOT / name).read_bytes()
-        # Line endings are the checkout's (git's autocrlf on Windows), not the file's.
-        assert (TEMPLATE / name).read_bytes().replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"), (
-            f"kern's template/{name} differs from {name}")
+        # Line endings are the checkout's (git's autocrlf on Windows), not the file's; kern's copy is
+        # SE's file with the marker of its generator.
+        assert unmarked((TEMPLATE / name).read_text(encoding="utf-8")) == data.decode("ascii").replace("\r\n", "\n"), (
+            f"kern's template/{name}, without its marker, differs from {name}")
         text = data.decode("ascii")  # ASCII, for Windows PowerShell 5.1
         assert len(text.splitlines()) <= CEILINGS[name]
         if name == "RUNME.sh":  # sh reads LF only (.gitattributes); PowerShell reads either

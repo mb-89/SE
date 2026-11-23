@@ -441,7 +441,7 @@ as tools. The host spawns it as the session starts; nobody starts anything else.
 | `tickets` | `work_tickets.py status` | `components/tickets` |
 | `templates` | `list`, `draft`, `check` | `components/templates` |
 | `templates_write` | `fill`, which with `--repo` files the document it checked ([docs/templates.md "Fill"](docs/templates.md#fill)) | `components/templates` |
-| `github_write` | `github issue-create`, `github issue-comment`, from a template's fields | kern's GitHub component |
+| `github_write` | `github issue-create`, `github issue-comment`, from a filled template the template component made | kern's GitHub component |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py

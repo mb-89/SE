@@ -60,12 +60,17 @@ group = "Templates"
 help = "plan the label or failure a GitHub event's off-template text gets"
 class = "batch"
 
+[requests.fill-template]
+type = "template.fill"
+answer = "template.filled"
+help = "Makes the filled template of a fill it checked through SE's template component: the template's name, the fields and the raw input."
+
 [requests.file-issue]
 type = "github.issue-create"
 answer = "github.written"
-help = "Files the issue a fill checked through kern's GitHub component: the template's name and its fields, never a body."
+help = "Files the issue a fill checked through kern's GitHub component: the filled template the template component made, never a body."
 
 [requests.file-comment]
 type = "github.issue-comment"
 answer = "github.written"
-help = "Comments on an issue or a pull request from a fill it checked, through kern's GitHub component: the template's name and its fields, never a body."
+help = "Comments on an issue or a pull request from a fill it checked, through kern's GitHub component: the filled template the template component made, never a body."

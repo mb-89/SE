@@ -108,16 +108,15 @@ and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
 door's tool `templates_write`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
-rule `quote`) and `scripts/se_templates.py` (its `fill`, `kern_template`) own what is built.
+rule `quote`) and `scripts/se_templates.py` (its `fill`, `file_document`) own what is built.
 
 - **Filing.** With `--repo`, a fill files an issue, or with `--number` a comment, through kern's
-  GitHub component, after the same checks as any fill: its request ports, which `wiring.toml`
-  binds to the component's write verbs, carry the template's name and fields, never a body.
-  `templates.py fill --repo` hands its call to the tool's `fill`, so one place files.
-- **What kern files is what was checked.** kern renders the body from the fields, so the fill
-  writes the template as kern reads it and refuses a value kern would write otherwise;
-  `components/template/kern_test.go` holds kern's render to SE's for every fill of the templates
-  kern can file (work, ticket, handover).
+  GitHub component, after the same checks as any fill. It asks the template component's `fill`
+  for the filled template and hands that value to the component's write verbs, never a body or
+  fields. `templates.py fill --repo` hands its call to the tool's `fill`, so one place files.
+- **What kern files is what was checked.** The write verbs ask the template component's `accept`
+  through the port `github.template-accept`, which `wiring.toml` binds to `template.accept`, and
+  write the title and document it answers as they stand; free text is refused before GitHub.
 - **Not yet.** A message has no writing tool in kern's door, and the tool's `fill` writes no
   claimed file: `templates.py fill --path` writes it, until kern's files module takes only filled
   templates (The filled template is a type).
@@ -168,18 +167,17 @@ a target relies on its type and checks nothing again.
   title of the filled template it was handed, of the template required or of the one that claims
   the path written, refuses anything else, and answers a path no template claims as free.
 
-The two targets the decision names are kern's, each a change in kern's repository that SE's work
-issue drafts:
+The two targets the decision names are kern's, both released in kern 2.0.0:
 
-- **The GitHub door's writing tools** (kern#19): `issue-create` and `issue-comment` take a filled
+- **The GitHub door's writing tools** (kern 2.0.0): `issue-create` and `issue-comment` take a filled
   template instead of a template's name and its fields, pass it to `accept` through a request port
   the wiring binds to the template component, and write the document and title it answers as they
   stand; a refusal reaches GitHub not at all.
 - **The files module's template-only paths**: a `write` asks `accept` with its path; a path a
   template claims takes only a filled template of that template, and every other path stays free.
 
-Until those land, SE's filing commands and its gate keep checking after the fact, as
-[Fill](#fill) says.
+SE's wiring binds the GitHub door's port (`github.template-accept`); it places no files module,
+so its gate keeps checking claimed paths after the fact, as [Fill](#fill) says.
 
 ## Template repositories
 

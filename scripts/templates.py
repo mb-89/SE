@@ -323,7 +323,8 @@ fields.
   checks it as above and files it through kern's GitHub component (`_filed`), so the engine
   itself calls no GitHub. Not with `--path` or `--out`. A message is not filed (kern's door has
   no tool that sends one). A usage error exits 2 and writes nothing.
-- What kern reads of a template and of its fields is `se_templates.py`'s (`kern_template`).
+- What kern files of a fill is the filled template SE's template component makes (`se_templates.py`
+  `file_document`).
 """
 
 from __future__ import annotations

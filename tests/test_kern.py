@@ -331,6 +331,29 @@ def test_the_action_places_kern_at_the_commit_se_lock_locks_for_the_go_mod_se_to
         assert result.stdout == f"kern-at-pin: kern 0.14.1 at {'a' * 12} into {name}/.se/modules/kern\n"
 
 
+def test_the_action_reads_a_require_above_major_1_as_go_spells_it(tmp_path, monkeypatch, capsys) -> None:
+    """kern 2 is required as v2.1.0+incompatible (se_modules.go_version); the lock's version is
+    2.1.0. The step's script runs in this process, its exit caught, so the test starts none."""
+    folder = tmp_path / "se"
+    locked = '[components.kern]\nversion = "2.1.0"\nref = "' + "c" * 40 + '"\n'
+    for name, text in {"se.toml": SE_PIN, "se.lock": locked,
+                       "components/go.mod": REQUIRES.format("2.1.0+incompatible")}.items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8")
+    output = tmp_path / "output"
+    output.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FOLDER", "se")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    script = step(yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"], "The kern se.lock locks")["run"]
+    try:
+        exec(compile(script, str(ACTION), "exec"), {"__name__": "__main__"})
+    except SystemExit as stop:
+        assert not stop.code, capsys.readouterr().out
+    assert output.read_text(encoding="utf-8") == f"ref={'c' * 40}\npath=se/.se/modules/kern\n"
+    assert capsys.readouterr().out == f"kern-at-pin: kern 2.1.0 at {'c' * 12} into se/.se/modules/kern\n"
+
+
 def test_the_action_refuses_a_lock_off_the_require_naming_both_lines(tmp_path) -> None:
     result, output = kern_at_pin(tmp_path / "off", {"se.toml": SE_PIN, "se.lock": LOCKED,
                                                     "components/go.mod": REQUIRES.format("0.15.0")})

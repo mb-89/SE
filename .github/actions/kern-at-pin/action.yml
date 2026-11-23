@@ -43,7 +43,8 @@ runs:
             refuse(f"{manifest.as_posix()} [components.kern] names no go: set go = true, or the path of the go.mod that requires kern")
         gomod = folder / "go.mod" if go is True else folder / go
         text = gomod.read_text(encoding="utf-8") if gomod.is_file() else ""
-        required = re.search(r"(?m)^\s*(?:require\s+)?kern\s+v(\S+)", text)
+        # Above major 1 Go spells the require v<version>+incompatible (se_modules.go_version).
+        required = re.search(r"(?m)^\s*(?:require\s+)?kern\s+v(\S+?)(?:\+incompatible)?(?=\s|$)", text)
         if not required or required[1] != locked["version"]:
             line = f"require kern v{required[1]}" if required else "no require kern"
             refuse(f"{lock.as_posix()} [components.kern] version = \"{locked['version']}\" but {gomod.as_posix()} says {line}: run se_modules.py sync kern and commit se.lock")

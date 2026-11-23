@@ -665,7 +665,9 @@ components.
 that requires it (README [Modules](../README.md#modules)): the version that `go.mod` requires of
 `kern` is the pin, resolved to the tag `v<version>` and locked in `se.lock`, so the pin has one
 owner. SE's is `components/go.mod`, which requires `kern v<version>` and replaces it by
-`../.se/modules/kern`; CI's `check` syncs kern and fails where the committed `se.lock` lags the
+`../.se/modules/kern`. Above major 1 it requires `kern v<version>+incompatible`, as Go spells a
+major above 1 of a module path without `/v<major>`, and the pin is the version without it
+(`se_modules.go_version`). CI's `check` syncs kern and fails where the committed `se.lock` lags the
 require. Every session hook runs `scripts/se_hook.sh <event>`, which execs the `se` binary: bash
 builtins up to one exec, not Python, whose interpreter start alone costs about twice kern's whole
 hook, and through `uv` six to ten times (README [Kern](../README.md#kern) owns the measurements).

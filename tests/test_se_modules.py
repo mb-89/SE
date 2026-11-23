@@ -923,6 +923,14 @@ def test_go_true_names_the_roots_go_mod(go_pinned):
     assert se_modules.load_manifest(go_pinned.root)[0].version == "2.0.0"
 
 
+def test_a_go_pin_above_major_1_reads_the_version_go_spells_as_incompatible(go_pinned):
+    """Go requires a module whose path has no /v<major> at a major above 1 as
+    v<version>+incompatible (kern's module path is kern at every major); the pin is the version."""
+    go_pinned.gomod.write_text(GO_MOD.format(version="2.1.0+incompatible"))
+    assert se_modules.load_manifest(go_pinned.root)[0].version == "2.1.0"
+    assert [se_modules.go_version(v) for v in ("1.5.0", "2.1.0")] == ["v1.5.0", "v2.1.0+incompatible"]
+
+
 @pytest.mark.parametrize(("gomod", "message"), [
     ("module x\n\nrequire other v1.0.0\n", "components/go.mod has no require lib v<version>; add one"),
     ("module x\n\nrequire lib v0.0.0-20260101000000-abcdefabcdef\n", "not vMAJOR.MINOR.PATCH"),
