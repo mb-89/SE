@@ -945,7 +945,8 @@ def test_no_prose_files_finds_or_closes_a_field_report_issue():
 
 
 # Only SE asks the person (rule-book dec-012): no other role's file sends the person to its session.
-SE_FILES = {AGENTS / "se.md", *(SOURCE / "skills" / "catch-up").rglob("*.md")}
+# SE's files, and the retro agent's, which dec-012 counts as SE: it runs a retro with the person.
+SE_FILES = {AGENTS / "se.md", AGENTS / "retro.md", *(SOURCE / "skills" / "catch-up").rglob("*.md")}
 NON_SE_FILES = sorted({*AGENTS.glob("*.md"), *(SOURCE / "skills").rglob("*.md")} - SE_FILES)
 PERSON = re.compile(r"\b(?:person|owner|human|user)(?:'s)?\b", re.IGNORECASE)
 OWN_SESSION = re.compile(

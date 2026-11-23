@@ -106,7 +106,7 @@ help = "start a ready work issue: worktree from the newest main, label in-progre
 class = "batch"
 
 [commands."work_tickets.py session-title"]
-usage = "work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]\n                              [topic]"
+usage = "work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike}\n                              [project] [topic]"
 summary = "print the title of a session a role starts: `SE`, ..."
 group = "Integration"
 help = "print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions)"

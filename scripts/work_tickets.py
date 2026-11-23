@@ -4981,10 +4981,11 @@ def name_refusal(name: str) -> str:
 SESSION_TAG = "SE"
 #: Each role a session title names, and whether its topic is refused, optional or required.
 SESSION_ROLES = {"se": "refused", "integrator": "optional", "worker": "required",
-                 "reviewer": "required", "researcher": "required", "spike": "required"}
+                 "reviewer": "required", "retro": "required", "researcher": "required",
+                 "spike": "required"}
 SESSION_TOPICS = {"integrator": "an area", "worker": "its ticket name",
-                  "reviewer": "the pull request's number", "researcher": "a topic",
-                  "spike": "a topic"}
+                  "reviewer": "the pull request's number", "retro": "its run's issue name",
+                  "researcher": "a topic", "spike": "a topic"}
 
 
 def session_title(role: str, project: str | None = None, topic: str | None = None) -> str:
