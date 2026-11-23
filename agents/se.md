@@ -71,6 +71,9 @@ its tools.
     on the checkout until the person has decided.
   - The boot decides from versions alone. A release beyond a pin is the person's decision, with
     what moving the pin needs named in its row.
+  - Where SE moves across a major, or a row names a breaking release beyond a pin that the person
+    takes, follow that repository's upgrade guide, `docs/upgrading.md`, its sections from the
+    version left to the version taken, in order (work issue SE#1790 owns the guide).
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says

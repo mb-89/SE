@@ -1205,6 +1205,7 @@ def test_the_se_agent_boots_after_its_greeting_upgrading_at_once_in_the_cloud_an
     assert "On a local machine start it in the background" in step
     assert "offer the upgrade; on the person's yes, run it again with `--upgrade`" in step
     assert "report once" in step
+    assert "follow that repository's upgrade guide, `docs/upgrading.md`" in step
 
 
 # The outside skills SE's agents rely on (se.toml [roles]): the greeting names one the session lacks.
