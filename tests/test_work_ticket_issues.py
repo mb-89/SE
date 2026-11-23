@@ -1940,7 +1940,7 @@ def test_six_startable_issues_with_a_limit_of_four_start_four_and_a_fifth_when_o
     monkeypatch.setattr(work_tickets, "ready_issues", fleet.ready)
     monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "start_worktree",
-                        lambda root, branch, worktree_root, create: worktree / branch)
+                        lambda root, number, repo, branch, worktree_root, create: worktree / branch)
 
     assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (4, 2)
     assert fleet.running() == [1, 2, 3, 4]
@@ -2329,6 +2329,126 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
     ] in fake.calls
 
 
+ISSUE_REMOTE = "https://git.example/owner/repo.git"  # the host of the issue's repository
+MIRROR_REMOTE = "https://mirror.example/other/repo.git"  # another remote of the same project
+
+
+def hosted(fake: fake_git.FakeGit, monkeypatch, **repositories: Path) -> None:
+    """The fake host: each URL given reaches its bare repository, as the host's would; a push that
+    creates a branch the repository already holds is refused there (tests/fake_git.py)."""
+    urls = {url.replace("_", "."): path.resolve() for url, path in repositories.items()}
+    reach = fake.remote
+
+    def remote(repository, name):
+        url = repository.config.get(f"remote.{name}.url", name)
+        return fake.find(urls[url]) if url in urls else reach(repository, name)
+
+    monkeypatch.setattr(fake, "remote", remote)
+
+
+def two_checkouts(tmp_path: Path, fake, monkeypatch) -> tuple[Path, Path, Path, Path]:
+    """The issue's repository on its host and a mirror of it elsewhere, each holding main; one
+    checkout whose origin is the issue's remote, another whose origin is the mirror and which
+    reaches the issue's remote as `upstream`. (issue host, mirror, first, second checkout)"""
+    host = fake_git.init(tmp_path / "host" / "repo.git", "--bare", "-b", "main")
+    mirror = fake_git.init(tmp_path / "mirror" / "repo.git", "--bare", "-b", "main")
+    hosted(fake, monkeypatch, **{ISSUE_REMOTE.replace(".", "_"): host,
+                                 MIRROR_REMOTE.replace(".", "_"): mirror})
+    first, second = tmp_path / "first" / "main", tmp_path / "second" / "main"
+    fake_git.clone(host, first)
+    git_ok("-C", str(first), "remote", "set-url", "origin", ISSUE_REMOTE)
+    (first / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    git_ok("-C", str(first), "add", "se.toml")
+    git_ok("-C", str(first), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q", "-m", "base")
+    git_ok("-C", str(first), "push", "-q", "origin", "HEAD:main")
+    git_ok("-C", str(first), "push", "-q", str(mirror), "HEAD:main")
+    fake_git.clone(mirror, second)
+    git_ok("-C", str(second), "remote", "set-url", "origin", MIRROR_REMOTE)
+    git_ok("-C", str(second), "remote", "add", "upstream", ISSUE_REMOTE)
+    return host, mirror, first, second
+
+
+def claim_fakes(monkeypatch) -> StartGh:
+    """gh for a start of issue #5 of the issue's repository, ready, one slot free; the remotes as
+    each checkout's git names them."""
+    fake = StartGh()
+    monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "ready_issues",
+                        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
+    return fake
+
+
+def test_the_first_of_two_starts_from_checkouts_with_different_origins_claims_the_issue(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, mirror, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+
+    assert run(second, "start", "5", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    claimed = git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip()
+    assert claimed == git_run(second, "rev-parse", "origin/main", check=True).stdout.strip()
+    assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
+    worktree = second.parent / "main.worktrees" / "feature-example-20261104"
+    assert f"worktree={worktree}" in out
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
+    assert git_run(worktree, "rev-parse", "HEAD").stdout.strip() == claimed
+    labelled = [call for call in fake.calls if call[:2] == ["issue", "edit"]]
+    assert len(labelled) == 1
+
+    assert run(first, "start", "5", "--repo", "git.example/owner/repo") == 1
+    err = capsys.readouterr().err
+    assert f"its branch {BRANCH} exists on origin, so another start holds its claim" in err
+    assert not (first.parent / "main.worktrees").exists()
+    assert [call for call in fake.calls if call[:2] == ["issue", "edit"]] == labelled
+    assert git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == claimed
+
+
+def test_a_cloud_start_claims_the_branch_before_it_changes_a_label_and_a_second_changes_nothing(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: None)
+    arguments = ("start", "5", "--repo", "git.example/owner/repo", "--cloud-agent", "worker-login")
+
+    assert run(first, *arguments) == 0
+    assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+    assert run(second, *arguments) == 1
+    err = capsys.readouterr().err
+    assert f"its branch {BRANCH} exists on upstream" in err
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+
+def test_claim_creates_the_branch_on_the_issue_remote_for_a_session_tool_start_and_refuses_a_second(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, mirror, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+
+    assert run(second, "claim", "5", "--repo", "git.example/owner/repo") == 0
+    assert capsys.readouterr().out.endswith(f"Claimed #5: branch {BRANCH} on upstream\n")
+    assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
+    assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
+
+    assert run(first, "claim", "5", "--repo", "git.example/owner/repo") == 1
+    assert f"its branch {BRANCH} exists on origin" in capsys.readouterr().err
+    assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)  # the labels follow
+
+
+def test_the_issue_remote_is_the_remote_naming_the_issue_repository_else_its_url(
+        tmp_path, fake_git_door, monkeypatch):
+    _, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+
+    assert work_tickets.issue_remote(first, "git.example/owner/repo") == "origin"
+    assert work_tickets.issue_remote(second, "git.example/owner/repo") == "upstream"
+    assert work_tickets.issue_remote(second, "Owner/Repo") == "upstream"
+    assert work_tickets.issue_remote(second, "mirror.example/other/repo") == "origin"
+    assert work_tickets.issue_remote(first, "elsewhere.example/owner/repo") == \
+        "https://elsewhere.example/owner/repo.git"
+
+
 def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
     """No usable gh, as in Claude's cloud, whose worker limit is open by default: every gh call fails
     the test; the issue as the GitHub tools answer it."""
@@ -2469,6 +2589,7 @@ def test_start_without_gh_starts_once_its_blocker_is_closed_as_completed(
     git_ok("-C", str(main_checkout), "worktree", "remove", "--force",
            str(main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"))
     git_ok("-C", str(main_checkout), "branch", "-D", BRANCH)
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", f":refs/heads/{BRANCH}")  # its claim
 
     answer = blocked_answer(tmp_path, blocked_by("#4"))
     assert run(main_checkout, "start", "5", "--issue-body", str(answer),
@@ -6137,7 +6258,7 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     monkeypatch.setattr(work_tickets, "run_gh", github)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     body = worktree / "work.md"
     body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
     routing = worktree / "route.md"
@@ -7727,7 +7848,7 @@ def test_hold_files_as_given_after_two_refusals_off_template_and_never_started(
     monkeypatch.setattr(work_tickets, "run_gh", github)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     enforce(worktree, "refuse")
     body = worktree / "body.md"
     body.write_text("Only a line, no template.\n", encoding="utf-8")
@@ -7793,7 +7914,7 @@ def held_work_issue(worktree: Path, monkeypatch, capsys) -> tuple[LabelledGh, li
         calls.append(list(arguments)) or github(root, arguments)))
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     enforce(worktree, "refuse", refusals=1)
     body = worktree / "body.md"
     body.write_text("Only a line, no template.\n", encoding="utf-8")

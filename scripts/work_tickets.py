@@ -789,8 +789,17 @@ SCP_REMOTE_PATTERN = re.compile(r"^(?:[^@/]+@)?(?P<host>[^/:@]{2,}):(?P<path>[^\
 
 def remote_repo(root: Path) -> str | None:
     """`<host>/<owner>/<repo>` of the checkout's `origin` remote, without credentials."""
-    result = run_git(root, "remote", "get-url", "origin")
-    url = result.stdout.strip() if result.returncode == 0 else ""
+    return named_remote_repo(root, "origin")
+
+
+def named_remote_repo(root: Path, name: str) -> str | None:
+    """`<host>/<owner>/<repo>` of the checkout's remote `name`, without credentials."""
+    result = run_git(root, "remote", "get-url", name)
+    return url_repo(result.stdout.strip() if result.returncode == 0 else "")
+
+
+def url_repo(url: str) -> str | None:
+    """`<host>/<owner>/<repo>` a remote URL names, without credentials; None for another form."""
     match = REMOTE_URL_PATTERN.match(url) or SCP_REMOTE_PATTERN.match(url)
     if match is None:
         return None
@@ -4064,6 +4073,59 @@ def mark_in_progress(root: Path, number: int, repo: str) -> None:
     )
 
 
+def same_repo(found: str, repo: str) -> bool:
+    """Whether `found` (`<host>/<owner>/<repo>`) is the repository `repo` (`[host/]owner/repo`)
+    names: owner and name alike in any case, and the host where `repo` names one."""
+    found_parts, parts = found.lower().split("/"), repo.lower().split("/")
+    return found_parts[-2:] == parts[-2:] and (len(parts) < 3 or found_parts[0] == parts[0])
+
+
+def issue_remote(root: Path, repo: str) -> str:
+    """The remote that hosts the work issue's repository `repo`, found from the issue, not from
+    `origin`: the checkout's remote whose URL names it, `origin` first; where none does, that
+    repository's URL on its host (gh's default host where `repo` names none)."""
+    origin = remote_repo(root)
+    if origin is not None and same_repo(origin, repo):
+        return "origin"
+    listed = run_git(root, "remote")
+    for name in (listed.stdout.split() if listed.returncode == 0 else []):
+        found = None if name == "origin" else named_remote_repo(root, name)
+        if found is not None and same_repo(found, repo):
+            return name
+    home = sibling("se_home")
+    return home.Home(repo_host(repo) or home.GITHUB, *api_repo(repo).split("/")).url + ".git"
+
+
+def newest_integration_commit(root: Path) -> str:
+    """The integration branch's newest commit on origin, fetched."""
+    fetched = run_git(root, "fetch", "origin")
+    if fetched.returncode != 0:
+        raise QueueError(f"git fetch failed: {failure_detail(fetched)}")
+    return checked_git(root, "rev-parse", f"origin/{integration_branch(root)}^{{commit}}").strip()
+
+
+def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+    """Claim work issue #`number`: create its branch at `commit` on the remote that hosts its
+    repository (`issue_remote`), as a push that holds only while the branch does not exist there,
+    so of two starts the host lets the first create it and refuses the second. Only a push that
+    reports the branch new claims it: git passes a branch already at `commit` as up to date before
+    it checks the lease. The remote."""
+    remote = issue_remote(root, repo)
+    ref = f"refs/heads/{branch}"
+    pushed = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:", remote,
+                                 f"{commit}:{ref}"])
+    if pushed.returncode == 0 and any(
+            line.startswith("*\t") and line.split("\t")[1].endswith(f":{ref}")
+            for line in pushed.stdout.splitlines()):
+        return remote
+    listed = run_git(root, "ls-remote", remote, ref)
+    if listed.returncode == 0 and listed.stdout.strip():
+        raise QueueError(f"Issue #{number} is not startable: its branch {branch} exists on "
+                         f"{remote}, so another start holds its claim; nothing was changed")
+    raise QueueError(f"Issue #{number} is not startable: its branch {branch} could not be "
+                     f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
+
+
 def start(
     root: Path,
     number: int,
@@ -4095,6 +4157,7 @@ def start(
     if cloud:
         if not agent:
             raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
+        claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
         run_gh(
             root,
             [
@@ -4112,14 +4175,17 @@ def start(
         )
         return None
 
-    path = start_worktree(root, str(issue["title"]), worktree_root, create)
+    path = start_worktree(root, number, repo, str(issue["title"]), worktree_root, create)
     mark_in_progress(root, number, repo)
     return path
 
 
-def start_worktree(root: Path, branch: str, worktree_root: str | None, create: bool) -> Path:
-    """The worker's worktree of `branch`: created from the newest integration branch, or with
-    `create` off the one the project's own script created, synced."""
+def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
+                   create: bool) -> Path:
+    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`): with
+    `create`, the branch created at the newest integration branch on the issue's remote and the
+    worktree created from it there; without, the one the project's own script created, its branch
+    claimed at its commit; synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -4127,20 +4193,23 @@ def start_worktree(root: Path, branch: str, worktree_root: str | None, create: b
             Path(directory).expanduser().resolve()
             if directory is not None else default_worktree_root(root)
         )
-        try:
-            directory_path.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            raise QueueError(f"Cannot create worktree root {directory_path}: {error}") from error
         path = directory_path / branch.replace("/", "-")
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
-        for arguments in (("fetch", "origin"),
-                          ("worktree", "add", "-b", branch, str(path),
-                           f"origin/{integration_branch(root)}")):
-            result = run_git(root, *arguments)
-            if result.returncode != 0:
-                detail = failure_detail(result)
-                raise QueueError(f"git {arguments[0]} failed: {detail}")
+        remote = claim(root, number, repo, branch, newest_integration_commit(root))
+        try:
+            directory_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise QueueError(f"Cannot create worktree root {directory_path}: {error}; #{number}'s "
+                             f"branch {branch} is claimed on {remote}, its labels unchanged") from error
+        fetched = run_git(root, "fetch", remote, f"refs/heads/{branch}")
+        claimed = (checked_git(root, "rev-parse", "FETCH_HEAD^{commit}").strip()
+                   if fetched.returncode == 0 else "")
+        added = run_git(root, "worktree", "add", "-b", branch, str(path), claimed) if claimed else fetched
+        if added.returncode != 0:
+            raise QueueError(f"git {'worktree' if claimed else 'fetch'} failed: "
+                             f"{failure_detail(added)}; #{number}'s branch {branch} is claimed on "
+                             f"{remote}, its labels unchanged")
     else:
         listed = run_git(root, "worktree", "list", "--porcelain")
         if listed.returncode != 0:
@@ -4158,6 +4227,7 @@ def start_worktree(root: Path, branch: str, worktree_root: str | None, create: b
             raise QueueError(f"No worktree exists for branch {branch}")
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
+        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip())
         sync(path)
     return path
 
@@ -4317,7 +4387,9 @@ def start_handed_off(
     if cloud and not agent:
         raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
     branch = str(issue["title"])
-    path = None if cloud else start_worktree(root, branch, worktree_root, create)
+    if cloud:
+        claim(root, number, repo, branch, newest_integration_commit(root))
+    path = None if cloud else start_worktree(root, number, repo, branch, worktree_root, create)
     plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
     if door is None:
         print(plan.text())
@@ -4355,14 +4427,15 @@ def issue_ownership(issue: dict[str, object]) -> set[str]:
     }
 
 
-def branch_exists(root: Path, branch: str) -> bool:
+def branch_exists(root: Path, branch: str, repo: str) -> bool:
+    """Whether `branch` exists here or on the remote that hosts the issue's repository `repo`."""
     local = run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
     if local.returncode == 0:
         return True
     origin = run_git(root, "remote", "get-url", "origin")
     if origin.returncode != 0:
         return False
-    remote = run_git(root, "ls-remote", "--heads", "origin", branch)
+    remote = run_git(root, "ls-remote", issue_remote(root, repo), f"refs/heads/{branch}")
     if remote.returncode != 0:
         raise QueueError(f"Cannot check whether branch {branch} exists")
     return bool(remote.stdout.strip())
@@ -4407,7 +4480,7 @@ def ready_issues(
         detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
         blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
         return blockers == 0 and (allow_existing_branch
-                                  or not branch_exists(root, str(candidate["title"])))
+                                  or not branch_exists(root, str(candidate["title"]), repo))
 
     def state(number: int) -> dict[str, object] | None:
         try:
@@ -11412,7 +11485,8 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("start", "start a ready work issue: worktree from the newest main, label in-progress; "
+@command("start", "start a ready work issue: claim its branch on the issue's remote, worktree "
+                  "from it, label in-progress; "
                   "without gh, the label change and the Started comment as GitHub steps, or "
                   "through kern's relay where it serves the checkout",
          WORKTREE,
@@ -11454,6 +11528,43 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
           f"Started #{args.issue} here; run the GitHub steps above to label it and post its "
           "Started comment")
     return 0
+
+
+@command("claim", "claim a ready work issue for a worker your session tool starts: create its "
+                  "branch at the newest main on the remote that hosts the issue's repository; "
+                  "refused, changing nothing, where that branch exists there",
+         WORKTREE,
+         arg("issue", type=int),
+         REPO,
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
+                  "(method get) answered it, for its branch name"))
+def run_claim(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    branch = issue_branch(root, args.issue, repo, args.issue_body)
+    remote = claim(root, args.issue, repo, branch, newest_integration_commit(root))
+    print(f"Claimed #{args.issue}: branch {branch} on {remote}")
+    return 0
+
+
+def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) -> str:
+    """Work issue #`number`'s branch, its title: read with gh, else through kern's relay, else from
+    `issue_file`, the GitHub tools' issue_read answer."""
+    if not hand_off():
+        issue = fetch_issue(root, number, repo)
+    elif (door := relay_door(root, repo)) is not None:
+        issue = door.ask("issue_read", {"method": "get", "issue_number": number})
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"claim: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if not isinstance(issue, dict) or int(issue.get("number") or number) != number \
+            or not issue.get("title"):
+        raise QueueError(f"claim: the issue read is not #{number}: give issue_read's answer of it")
+    return str(issue["title"])
 
 
 @command("session-title", "print the title of a session a role starts: `SE`, "
@@ -11891,7 +12002,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
 #: What the header of these components' declarations says they are generated from.
