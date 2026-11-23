@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import fake_processes as fakes
 import git_door
 import se_modules
 from test_work_ticket_issues import (  # noqa: F401  (the landing's fixtures: checkout, GitHub, config)
@@ -359,10 +360,18 @@ GENERATE = ("import json, pathlib, tomllib; version = tomllib.loads(pathlib.Path
             "json.dumps({'version': version}) + '\\n')")
 
 
+def generate(invocation: fakes.Invocation) -> fakes.Answer:
+    """The build `python -c GENERATE`, in this process as the child would run it."""
+    assert invocation.words[1:] == ["-c", GENERATE], invocation.text()
+    code = compile(GENERATE, "<string>", "exec")
+    return fakes.run_main(lambda _arguments: exec(code, {"__name__": "__main__"}), invocation)
+
+
 def test_a_branch_adding_a_generated_file_with_the_version_lands_after_main_released(
-        main_checkout, monkeypatch, github, capsys):
+        main_checkout, monkeypatch, github, capsys, fake_processes):
     monkeypatch.setattr(work_tickets, "public_check_enabled", lambda root: False)
     build = [work_tickets.sys.executable, "-c", GENERATE]
+    fake_processes.on(lambda invocation: invocation.words == build, generate)
     git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
     git_ok("-C", str(main_checkout), "reset", "-q", "--hard", "origin/main")
     settings = main_checkout / "se.toml"
@@ -377,7 +386,7 @@ def test_a_branch_adding_a_generated_file_with_the_version_lands_after_main_rele
     git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
 
     def suite(root, **_):  # the real suite's start rebuilds the layouts (tests/conftest.py)
-        work_tickets.subprocess.run(build, cwd=root, check=True)
+        work_tickets.process_door.run(build, cwd=root, check=True)
         work_tickets.record_suite_verdict(root, work_tickets.clean_commit(root), True, 1.0)
         return "1 passed"
 
@@ -405,6 +414,8 @@ GUARD_MOD = "module se/components\n\ngo 1.25.0\n\nrequire kern v{kern}\n\nreplac
 
 
 @pytest.mark.skipif(shutil.which("go") is None, reason="Go is not installed")
+@pytest.mark.spawns("go: builds and runs kern's release guard (kern/tools/release), a Go program, with "
+                    "`go run`; the one test of the guard on SE's components/go.mod")
 def test_the_guard_refuses_a_branch_that_moves_only_the_kern_require_without_a_stated_kind(
         tmp_path, shared_fake_git):
     """kern's release guard (kern/tools/release, run as se.toml [tests.beside.release-guard] runs
