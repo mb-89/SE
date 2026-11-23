@@ -108,7 +108,7 @@ def merge_settings(repo: Path, found: se_home.Home | None = None) -> str:
     if merged == existing:
         return f"{SETTINGS}: already enables {PLUGIN_KEY}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8", newline="\n")
     return f"{SETTINGS}: enables {PLUGIN_KEY} from the marketplace {found.tracker}"
 
 
@@ -135,7 +135,7 @@ def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
     block = f'[components.se]\nversion = "{wanted}"\n'
     if text and not text.endswith("\n"):
         text += "\n"
-    path.write_text(text + ("\n" if text else "") + block, encoding="utf-8")
+    path.write_text(text + ("\n" if text else "") + block, encoding="utf-8", newline="\n")
     return f"se.toml: pins [components.se] at version {wanted}"
 
 
@@ -170,7 +170,7 @@ def ignore_se(repo: Path) -> str:
         return ".gitignore: already ignores .se/"
     if text and not text.endswith("\n"):
         text += "\n"
-    path.write_text(text + IGNORED + "\n", encoding="utf-8")
+    path.write_text(text + IGNORED + "\n", encoding="utf-8", newline="\n")
     return ".gitignore: ignores .se/"
 
 

@@ -85,8 +85,8 @@ def add(root: Path, name: str) -> list[str]:
     if folder.exists():
         raise ComponentError(f"{folder} already exists: an ad hoc component {name} is already here")
     folder.mkdir(parents=True)
-    (folder / "component.toml").write_text(component_toml(name), encoding="utf-8")
-    (folder / "__init__.py").write_text(init_py(name), encoding="utf-8")
+    (folder / "component.toml").write_text(component_toml(name), encoding="utf-8", newline="\n")
+    (folder / "__init__.py").write_text(init_py(name), encoding="utf-8", newline="\n")
 
     overlay = root / OVERLAY
     block = instance_block(name)
@@ -94,11 +94,11 @@ def add(root: Path, name: str) -> list[str]:
         text = overlay.read_text(encoding="utf-8")
         if re.search(rf'(?m)^\[instances\."?{re.escape(name)}"?\]', text):
             raise ComponentError(f"{overlay} already places an instance {name}")
-        overlay.write_text(text.rstrip("\n") + "\n\n" + block, encoding="utf-8")
+        overlay.write_text(text.rstrip("\n") + "\n\n" + block, encoding="utf-8", newline="\n")
     else:
         header = ("# Ad hoc components' wiring, read after wiring.toml (kern/index/wiring.go Merge).\n"
                   "# `se component add` writes it under the ignored .se/; it is never tracked.\n\n")
-        overlay.write_text(header + block, encoding="utf-8")
+        overlay.write_text(header + block, encoding="utf-8", newline="\n")
 
     return [f"Scaffolded the ad hoc component {name}:",
             f"  {(COMPONENTS / name / 'component.toml').as_posix()}",

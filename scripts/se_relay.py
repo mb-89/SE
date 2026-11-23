@@ -172,7 +172,7 @@ class Relay:
         path = self.root / ANSWERS / f"{family}-{key(owner, repo, number)}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(found["data"], ensure_ascii=False, indent=1) + "\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="\n")
         return path
 
 

@@ -118,7 +118,8 @@ class Transport:
     def write_log(self, path: Path) -> None:
         """Writes the audit log as JSON lines."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("".join(json.dumps(entry, sort_keys=True) + "\n" for entry in self.log), encoding="utf-8")
+        path.write_text("".join(json.dumps(entry, sort_keys=True) + "\n" for entry in self.log),
+                        encoding="utf-8", newline="\n")
 
     def _record(self, method: str, path: str, status: int | str) -> None:
         # Headers and bodies never enter the log: they are where secrets travel.
@@ -161,4 +162,4 @@ def preflight(changes: Iterable[Mapping[str, Any]], revisions: Mapping[str, Any]
 def write_artifact(path: Path, data: Any) -> None:
     """Writes a plan or result file as sorted, indented JSON, so runs compare line by line."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")

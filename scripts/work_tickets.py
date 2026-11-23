@@ -6588,7 +6588,7 @@ def record_shard(root: Path, name: str, directory: Path, command: list[str]) -> 
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.json"
     path.write_text(json.dumps({"shard": name, "seconds": round(seconds, 3), "exit_code": code}),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     print(f"Shard {name}: {seconds:.1f} s, exit code {code}; recorded in {path}")
     return code
 
@@ -7704,7 +7704,7 @@ class GitHub:
             return run_gh(self.root, arguments)
         with tempfile.TemporaryDirectory() as directory:
             body = Path(directory) / "body.json"
-            body.write_text(json.dumps(data), encoding="utf-8")
+            body.write_text(json.dumps(data), encoding="utf-8", newline="\n")
             return run_gh(self.root, [*arguments, "--input", str(body)])
 
     def api(self, path: str, method: str = "GET", data: dict[str, object] | None = None) -> object:
@@ -8424,7 +8424,7 @@ def integrate(
             path = handoff_path(root, branch)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({**state, "plan": plan.data(), "relay": relay is not None},
-                                       indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                                       indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
             checked_git(root, "switch", "-q", target)
             through = ("kern's GitHub relay serves this checkout, so no answer is retyped: run "
                        "these GitHub tool calls and their answers reach the command through kern's "
@@ -8692,7 +8692,7 @@ def record_fix(root: Path, branch: str) -> str:
                         str(state["tracker"]), record, SQUASH)
     state.update(landed=new, suite=suite_result, plan=plan.data(),
                  fixes=[*(state.get("fixes") or []), *fixes])
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     print(f"Recorded {len(fixes)} fix commit(s) on {landing}, now the tested landing at "
           f"{new[:12]} (was {old[:12]}):\n" + "\n".join(
               f"- {fix['sha'][:12]} {fix['subject']}" for fix in fixes))
@@ -9108,7 +9108,7 @@ class StepReads:
                                     number_arg: number}, f"read the {what}")
         path = self.root / relay.ANSWERS / f"{family}-{relay.key(owner, repo, number)}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8", newline="\n")
         return path
 
 
@@ -10571,7 +10571,7 @@ def write_file_seconds(root: Path, source: Path, where: str) -> list[str]:
     path = root / FILE_SECONDS_TABLE
     old = read_file_seconds(path, str(path)) if path.exists() else {}
     new = merged_file_seconds(root, run, old)
-    path.write_text(file_seconds_text(new), encoding="utf-8")
+    path.write_text(file_seconds_text(new), encoding="utf-8", newline="\n")
     rounded = {name: round(seconds, 1) for name, seconds in new.items()}
     moved = moved_file_seconds(old, rounded)
     kept = len(new.keys() - run.keys())
@@ -11103,7 +11103,7 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     checked_git(root, "switch", "-q", "-C", branch, tip)
     try:
         (root / REHEARSAL_FILE).write_text(
-            f"A rehearsal of a landing through kern's relay on {base}, {stamp}.\n", encoding="utf-8")
+            f"A rehearsal of a landing through kern's relay on {base}, {stamp}.\n", encoding="utf-8", newline="\n")
         checked_git(root, "add", REHEARSAL_FILE)
         checked_git(root, "commit", "-q", "-m", title)
         slept = 0.0
@@ -11244,7 +11244,7 @@ def land_release(root: Path, repo: str | None) -> str | None:
         path = handoff_path(root, RELEASE_HANDOFF)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({**state, "plan": plan.data()}, indent=2, sort_keys=True) + "\n",
-                        encoding="utf-8")
+                        encoding="utf-8", newline="\n")
         checked_git(root, "switch", "-q", target)
         print(f"Pushed {landing} at {landed[:12]}; gh is not signed in, so the session runs these "
               f"GitHub steps with its GitHub tools (kept in {path}):")

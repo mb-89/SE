@@ -2849,7 +2849,7 @@ def count_refusal(key: str, environ: dict[str, str] | None = None) -> int:
     counts = _counts(path)
     counts[key] = counts.get(key, 0) + 1
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return counts[key]
 
 
@@ -3133,7 +3133,7 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
         print(rendered, end="")
         return 0
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(rendered, encoding="utf-8")
+    target.write_text(rendered, encoding="utf-8", newline="\n")
     print(f"wrote {relative if relative is not None else target}: {template.name} {template.version}")
     return 0
 

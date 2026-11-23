@@ -208,7 +208,7 @@ def build(source: Path, destination: Path, document: Path | None = None) -> int:
         if runme(vault, folder):
             return 2
         config = Path(scratch) / "obs-config.json"
-        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
+        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8", newline="\n")
         written = ["--document", str(document.resolve())] if document else []
         code = obs_document(obs, ["--config", str(config), "--source", str(vault / source.name), *written,
                                   "--destination", str(destination), "--execute-commands"], "build_docs",
@@ -248,7 +248,7 @@ def reading_copy(folder: Path, copy: Path) -> Path:
         text = note.read_text(encoding="utf-8")
         changed = without_verdict(text)
         if changed != text:
-            note.write_text(changed, encoding="utf-8")
+            note.write_text(changed, encoding="utf-8", newline="\n")
     return copy
 
 
@@ -269,9 +269,9 @@ def rule_table(vault: Path) -> None:
         if (book.parent / name).exists():
             raise FileExistsError(f"the rule note {(BOOK.parent / name).as_posix()} would overwrite the file "
                                   "of that name beside the rule book; rename that file")
-    book.write_text(shown.page, encoding="utf-8")
+    book.write_text(shown.page, encoding="utf-8", newline="\n")
     for name, text in shown.notes.items():
-        (book.parent / name).write_text(text, encoding="utf-8")
+        (book.parent / name).write_text(text, encoding="utf-8", newline="\n")
 
     def pointed(match: re.Match) -> str:
         rule = shown.anchors.get(match[3])
@@ -285,7 +285,7 @@ def rule_table(vault: Path) -> None:
         text = note.read_text(encoding="utf-8")
         changed = LINK.sub(pointed, text)
         if changed != text:
-            note.write_text(changed, encoding="utf-8")
+            note.write_text(changed, encoding="utf-8", newline="\n")
 
 
 def without_verdict(text: str) -> str:

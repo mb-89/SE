@@ -592,7 +592,7 @@ def run_new(args: argparse.Namespace) -> int:
     title = pattern.replace("<yyyymmdd>", work_tickets.today_stamp())
     with work_tickets.tempfile.TemporaryDirectory() as directory:
         file = Path(directory) / "overhaul.md"
-        file.write_text(body, encoding="utf-8")
+        file.write_text(body, encoding="utf-8", newline="\n")
         print(work_tickets.file_work_issue(root, title, file, [], args.repo, (OVERHAUL_LABEL,)))
     return 0
 
@@ -1091,7 +1091,7 @@ def run_read(args: argparse.Namespace) -> int:
     output = (json.dumps(found.data(), indent=2, ensure_ascii=False) + "\n" if args.json
               else draft(found))
     if args.out:
-        args.out.write_text(output, encoding="utf-8")
+        args.out.write_text(output, encoding="utf-8", newline="\n")
         print(f"Wrote the overhaul draft of #{args.overhaul} to {args.out}: {len(found.rules)} "
               f"rules, {len(found.retros)} retro(s) since the last overhaul")
     else:

@@ -1300,7 +1300,7 @@ def run_runtime(root: Path) -> int:
             claimed = False
         if claimed:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{FILES_CLAIMED}\n", encoding="utf-8")
+            path.write_text(f"{FILES_CLAIMED}\n", encoding="utf-8", newline="\n")
         else:
             path.unlink(missing_ok=True)
     except OSError as error:
