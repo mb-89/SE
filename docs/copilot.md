@@ -264,7 +264,7 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    then `copilot --agent se`, trusting the folder ([trust](#remedies)), and say `status`.
    - Expect `copilot self-test: 11 passed, 0 failed, 0 skipped, 1 noted`, the noted line being the
      [open point](#what-a-token-less-copilot-cli-showed), `mcp-root`.
-   - Expect the greeting `SE <version> started: ...` once (#1121: the agents, skills and
+   - Expect the start report, `SE <version> started` and its table, once (#1121: the agents, skills and
      `SessionStart` load with `SE_HOOK_HOST`; #1123: the greeting reaches the session, and where
      kern fails, the line `SE runs without kern: ...` too).
    - Expect `se-status` to answer `se: running in <checkout>, ...` and `copilot mcp get se` to list
