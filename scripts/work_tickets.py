@@ -8648,6 +8648,35 @@ def landed_metrics(state: dict[str, object], landing_pull: int, description: str
             f"#{landing_pull}), save it again and read back again; nothing was closed")
 
 
+def relayed_landing_description(root: Path, state: dict[str, object], landing_pull: int) -> str:
+    """The landing pull request's description from kern's relay, for a read-back without
+    --landing-description. Where the relay holds no snapshot of it, the refusal names that cause
+    and the GitHub tool call that takes the snapshot; for a fast-forward landing it adds that the
+    pull request is never merged on GitHub, so no refusal reads like "merge first"."""
+    se_relay = sibling("se_relay")
+    owner, name = api_repo(str(state["remote"])).split("/")
+    rule = ("; nothing was pushed. " + NEVER_MERGE_ON_GITHUB.format(target=state["target"])
+            if state.get("landing_mode") == FAST_FORWARD else "")
+    read = se_relay.tool_call("pulls", owner, name, landing_pull)
+    relay = relay_for(root) if state.get("relay") else None
+    if relay is None and state.get("relay"):
+        raise QueueError(
+            f"kern's relay served this integrate but does not serve {root} now, so it holds no "
+            f"snapshot of the landing pull request #{landing_pull}: start kern for this checkout "
+            f"and read it with the GitHub tool {read}, or save that tool's answer's body and pass "
+            f"it as --landing-description <file>; then run --read-back again{rule}")
+    if relay is None:
+        raise QueueError(
+            "--read-back needs --landing-description <file>: the landing pull request's "
+            f"description as the GitHub tool {read} reads it once the plan's last step passed, "
+            f"or a checkout kern's relay served the integrate{rule}")
+    try:
+        path = relay.answer_file("pulls", owner, name, landing_pull, "landing pull request")
+    except se_relay.RelayError as error:
+        raise QueueError(f"{error}{rule}") from None
+    return str(json.loads(path.read_text(encoding="utf-8")).get("body") or "")
+
+
 def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str,
                           description: str | None) -> str:
     """The hand-off's second half: check the landing pull request's `description` for its
@@ -8661,15 +8690,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
     if description is None:
-        relay = relay_for(root) if state.get("relay") else None
-        if relay is None:
-            raise QueueError(
-                "--read-back needs --landing-description <file>, the landing pull request's "
-                "description after the merge, or a checkout kern's relay served the integrate")
-        owner, name = api_repo(str(state["remote"])).split("/")
-        description = str(json.loads(
-            relay.answer_file("pulls", owner, name, landing_pull, "landing pull request")
-            .read_text(encoding="utf-8")).get("body") or "")
+        description = relayed_landing_description(root, state, landing_pull)
     metrics.note(issue=state["work_number"])
     landed_metrics(state, landing_pull, description)
     merged = None
@@ -11085,8 +11106,8 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--landing-description", type=Path, metavar="FILE",
-             help="with --read-back: the landing pull request's description after the merge, "
-                  "saved to a file; it must end in the plan's metrics line"),
+             help="with --read-back: the landing pull request's description once the plan's "
+                  "last step passed, saved to a file; it must end in the plan's metrics line"),
          arg("--build-command", help="project's output regeneration command"),
          INCLUDE_LATE,
          arg("--check-command", type=parse_check_commands, metavar="JSON",
@@ -11108,8 +11129,6 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
         return 0
     if args.read_back is not None:
         read_back_arguments(args, "landing_pull", "check_run")
-        if args.landing_description is None and relay_for(root) is None:
-            read_back_arguments(args, "landing_description")  # no relay to read it from
         description = (read_file(args.landing_description, "the landing pull request's description")
                        if args.landing_description is not None else None)
         commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run,

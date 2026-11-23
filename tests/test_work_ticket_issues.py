@@ -4662,6 +4662,65 @@ def test_a_squash_landing_plan_merges_through_its_own_step_and_says_no_fast_forw
     assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") not in capsys.readouterr().out
 
 
+def relayed_fast_forward_hand_off(main_checkout: Path, monkeypatch, github) -> tuple[str, Path]:
+    """A fast-forward landing handed off through kern's relay, its plan's steps run up to the
+    check: (origin's main, the hand-off's state file)."""
+    fast_forward_landings(main_checkout)
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    handoff = main_checkout / ".se" / "handoff" / "feature-worker.json"
+    state = json.loads(handoff.read_text(encoding="utf-8"))
+    handoff.write_text(json.dumps({**state, "relay": True}), encoding="utf-8")
+    return origin_main(main_checkout), handoff
+
+
+def read_back_from_relay(main_checkout: Path) -> int:
+    return run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull", "20",
+               "--check-run", "https://git.example/owner/repo/runs/4")
+
+
+def test_a_read_back_without_the_relays_snapshot_names_it_and_the_read_never_a_merge(
+        main_checkout, monkeypatch, github, capsys):
+    """kern's relay holds no snapshot of the landing pull request: the refusal names that cause
+    and the GitHub tool call that takes the snapshot, and that the landing pull request is never
+    merged on GitHub, as the read-back pushes main itself; nothing is pushed."""
+    base, handoff = relayed_fast_forward_hand_off(main_checkout, monkeypatch, github)
+    se_relay = work_tickets.sibling("se_relay")
+    monkeypatch.setattr(work_tickets, "relay_for",
+                        lambda root: se_relay.Relay(root, lambda name: None))
+    capsys.readouterr()
+
+    assert read_back_from_relay(main_checkout) == 1
+
+    err = capsys.readouterr().err
+    assert "kern's relay holds no landing pull request of owner/repo#20" in err
+    assert ('pull_request_read {"method": "get", "owner": "owner", "pullNumber": 20, '
+            '"repo": "repo"}') in err
+    assert "then run this command again" in err
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") in err
+    assert "after the merge" not in err
+    assert origin_main(main_checkout) == base and handoff.is_file()
+
+
+def test_a_read_back_where_the_relay_no_longer_serves_names_that_cause_and_both_remedies(
+        main_checkout, monkeypatch, github, capsys):
+    base, handoff = relayed_fast_forward_hand_off(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "relay_for", lambda root: None)
+    capsys.readouterr()
+
+    assert read_back_from_relay(main_checkout) == 1
+
+    err = capsys.readouterr().err
+    assert "kern's relay served this integrate but does not serve" in err
+    assert "so it holds no snapshot of the landing pull request #20" in err
+    assert ('pull_request_read {"method": "get", "owner": "owner", "pullNumber": 20, '
+            '"repo": "repo"}') in err
+    assert "--landing-description <file>" in err
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") in err
+    assert "after the merge" not in err
+    assert origin_main(main_checkout) == base and handoff.is_file()
+
+
 def closeout_comments(monkeypatch) -> list[str]:
     """The integrate comments the close-out plans carry, as closeout_plan is given them."""
     comments: list[str] = []
@@ -4970,11 +5029,11 @@ def test_integrate_read_back_refuses_a_landing_without_its_metrics_line(
     assert f"The landing pull request #20's {message}: it ends in `{line}`" in err
     assert "update_pull_request #20" in err and "nothing was closed" in err
     assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
-    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
-    assert squashed_onto_origin(main_checkout, commit)
     assert run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull",
                "20", "--check-run", "url") == 1
     assert "--read-back needs --landing-description" in capsys.readouterr().err
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+    assert squashed_onto_origin(main_checkout, commit)
 
 
 def test_integrate_chooses_the_hand_off_where_gh_is_not_signed_in(
