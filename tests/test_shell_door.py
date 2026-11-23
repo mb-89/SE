@@ -4,8 +4,8 @@ real shell and against the fake every other test gets (tests/fake_processes.py b
 The real side is one test, `test_the_real_shell_answers_as_its_fake`, the door's own contract:
 it starts one `sh` per case. The contract tests of SE's shell programs (scripts/bootstrap.sh,
 se_hook.sh, se_mcp.sh, RUNME.sh and the rest), marked `contract: shell, ...` in their own files,
-are the door's contract too. Every other case here runs in-process: what a shell is, the two doors
-refusing each other's commands, the fake answering by the test's handlers.
+are the door's contract too. Every other case here runs in-process: what a shell is, the process
+door handing a shell over and the shell door refusing a program that is none, the fake answering by the test's handlers.
 """
 
 from __future__ import annotations
@@ -70,10 +70,15 @@ def test_no_other_program_is_a_shell(argv) -> None:
     assert not shell_door.is_shell(argv)
 
 
-def test_the_process_door_refuses_a_shell_naming_the_shell_door() -> None:
-    for argv, options in ((["bash", "-c", "true"], {}), ("true", {"shell": True}), (["git", "status"], {"shell": True})):
-        with pytest.raises(ValueError, match="scripts/shell_door.py"):
-            process_door.run(argv, **options)
+def test_the_process_door_hands_a_shell_to_the_shell_door(fake_shell: fakes.FakeProcesses,
+                                                          fake_processes: fakes.FakeProcesses) -> None:
+    fake_shell.on(lambda _invocation: True, lambda invocation: 5)
+    for argv, options in ((["bash", "-c", "true"], {}), ("true", {"shell": True}), (["git", "status"], {"shell": True}),
+                          (["scripts/check.sh"], {})):
+        assert process_door.run(argv, **options).returncode == 5
+    assert [call.argv for call in fake_shell.calls] == [["bash", "-c", "true"], "true", ["git", "status"],
+                                                        ["scripts/check.sh"]]
+    assert fake_processes.calls == []
 
 
 def test_the_shell_door_refuses_a_program_that_is_no_shell_naming_the_process_door() -> None:

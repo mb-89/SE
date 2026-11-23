@@ -66,7 +66,7 @@
     fake, `tests/fake_processes.py`, which answers SE's scripts and hooks in-process and `gh` or a
     suite command by the test's handlers (`fake_processes` fixture).
   - The shell is a door, like git, gh and the network; a test never starts a shell. Every shell
-    starts through `scripts/shell_door.py`, which the process door refuses to stand in for; a
+    starts through `scripts/shell_door.py`, to which the process door hands a shell command; a
     test's code reaches its fake (`fake_shell` fixture). Only the shell door's contract,
     `tests/test_shell_door.py` and the tests of SE's shell programs marked `contract: shell`,
     starts a real one.

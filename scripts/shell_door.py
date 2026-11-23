@@ -13,8 +13,8 @@ marked `contract: shell`, naming the call.
 
 What counts as a shell (`is_shell`): a command line (`shell=True`, a string command, `os.system`),
 a program whose name is one of SHELLS (with or without `.exe`), or a shell script run as the
-program itself (SCRIPT_SUFFIXES). The process door (scripts/process_door.py) refuses each of them,
-naming this door, so no shell leaves through it.
+program itself (SCRIPT_SUFFIXES). The process door (scripts/process_door.py) hands each of them to
+this door, so a command a project configures as a shell script passes through it too.
 
 The door adds nothing to what the shell is asked: `run` takes `subprocess.run`'s arguments and
 answers its `CompletedProcess`, each caller keeping its own error type and message.
