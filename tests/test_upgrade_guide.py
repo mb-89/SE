@@ -35,6 +35,10 @@ What others do.
 
 Kern 2.
 
+## kern 2.1
+
+A minor whose consumers act.
+
 ## obs-html 0.3
 
 The style component.
@@ -56,6 +60,7 @@ def test_the_sections_between_two_versions_are_the_named_ones_oldest_first():
     assert titles(upgrade_guide.sections(GUIDE, "SE", (6, 0, 0), (7, 0, 0))) == ["SE 7"]
     assert titles(upgrade_guide.sections(GUIDE, "SE", (12, 0, 0), (12, 0, 1))) == []
     assert titles(upgrade_guide.sections(GUIDE, "obs-html", (0, 2, 5), (0, 5, 0))) == ["obs-html 0.3"]
+    assert titles(upgrade_guide.sections(GUIDE, "kern", (1, 5, 0), (2, 1, 0))) == ["kern 2.1"]
     assert upgrade_guide.sections(GUIDE, "obs-html", (0, 2, 5), (0, 5, 0))[0].text.endswith(
         "The style component.\n")
 
@@ -83,6 +88,8 @@ def test_a_breaking_release_without_its_section_is_refused(tmp_path):
     (tmp_path / "docs" / "upgrading.md").write_text(GUIDE, encoding="utf-8")
     assert upgrade_guide.missing(tmp_path, "se", (12, 0, 0)) is None
     assert upgrade_guide.missing(tmp_path, "obs-html", (0, 3, 0)) is None
+    assert upgrade_guide.missing(tmp_path, "kern", (2, 0, 0)).startswith(  # 2.1's is not 2's
+        "docs/upgrading.md has no section `## kern 2`")
     assert upgrade_guide.missing(tmp_path, "obs-html", (0, 4, 0)).startswith(
         "docs/upgrading.md has no section `## obs-html 0.4`")
 

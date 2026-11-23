@@ -39,10 +39,12 @@ class Section:
     name: str
     version: Version
     text: str
+    #: The heading's version as written: `12`, `0.5`, or `2.1` for a minor's own section.
+    written: str = ""
 
     @property
     def title(self) -> str:
-        return f"{self.name} {label(self.version)}"
+        return f"{self.name} {self.written or label(self.version)}"
 
 
 def parse(text: str) -> Version:
@@ -66,7 +68,8 @@ def read(text: str) -> list[Section]:
     found = []
     for match in headings:
         end = next(start for start in starts if start > match.start())
-        found.append(Section(match["name"], parse(match["version"]), text[match.start():end].rstrip() + "\n"))
+        found.append(Section(match["name"], parse(match["version"]), text[match.start():end].rstrip() + "\n",
+                             match["version"]))
     return found
 
 
@@ -86,7 +89,8 @@ def missing(root: Path, name: str, version: Version) -> str | None:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         text = ""
-    if any(s.name.lower() == name.lower() and label(s.version) == label(version) for s in read(text)):
+    breaking = parse(label(version))
+    if any(s.name.lower() == name.lower() and s.version == breaking for s in read(text)):
         return None
     return (f"{GUIDE.as_posix()} has no section `{want}` for this breaking release: add it, with "
             "each change, the steps a project takes and the check that each is done, in the "
