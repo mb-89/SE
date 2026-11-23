@@ -1,0 +1,100 @@
+{
+  "template": "se/boot-report",
+  "version": "1.0.0",
+  "says": "SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command.",
+  "message": "SE {version} started\n[{skills} skills]({skills_page})\n[{rules} rules]({rules_page})\n[{subagents} sub-agents]({subagents_page})\n[Documentation]({docs})\n\n| component | loaded | newest |\n|---|---|---|\n{components}\n\n{update}",
+  "rows": {
+    "components": "| {name} | {loaded} | {newest} |"
+  },
+  "cases": {
+    "update": {
+      "due": "To update: /se:update",
+      "current": "Everything is current.",
+      "unknown": "Newest versions not read yet; the next start shows them."
+    }
+  },
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "string",
+        "description": "The version of the SE that runs, as its se.toml names it."
+      },
+      "skills": {
+        "type": "string",
+        "description": "How many skills loaded, guidance notes aside."
+      },
+      "skills_page": {
+        "type": "string",
+        "description": "The documentation's page that lists the skills."
+      },
+      "rules": {
+        "type": "string",
+        "description": "How many rules are in force: the rule book's and every guidance note."
+      },
+      "rules_page": {
+        "type": "string",
+        "description": "The documentation's page that lists the rules."
+      },
+      "subagents": {
+        "type": "string",
+        "description": "How many sub-agents loaded: every agent but SE."
+      },
+      "subagents_page": {
+        "type": "string",
+        "description": "The documentation's page that lists the sub-agents."
+      },
+      "docs": {
+        "type": "string",
+        "description": "The documentation's home."
+      },
+      "components": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "loaded": {
+              "type": "string"
+            },
+            "newest": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "loaded",
+            "newest"
+          ],
+          "additionalProperties": false
+        },
+        "description": "SE first, then every component of the project's tree, nested ones included: its name, the version loaded and the newest release."
+      },
+      "update": {
+        "type": "string",
+        "enum": [
+          "due",
+          "current",
+          "unknown"
+        ],
+        "description": "due where a newer release than one loaded exists, current where none does, unknown where a newest version is not read."
+      }
+    },
+    "required": [
+      "version",
+      "skills",
+      "skills_page",
+      "rules",
+      "rules_page",
+      "subagents",
+      "subagents_page",
+      "docs",
+      "components",
+      "update"
+    ],
+    "additionalProperties": false
+  }
+}

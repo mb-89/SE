@@ -124,7 +124,7 @@ ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review"
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("delivery-notice", "escalation", "handover")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
 EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
 
 
@@ -295,7 +295,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_nineteen_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -307,7 +307,7 @@ def test_each_of_the_nineteen_templates_renders_and_parses_its_example_back(cata
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 19
+    assert len(catalog) == 20
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
@@ -2271,7 +2271,7 @@ def every_field_not_in_input(template: templates.Template) -> dict[str, object]:
 
 def test_not_in_input_passes_every_field_of_every_template_whatever_its_rules(catalog):
     for template in catalog.values():
-        if template.is_adapter:
+        if template.is_adapter or template.is_snippet:  # a snippet's writer is code, never a fill
             continue
         for values in (every_field_not_in_input(template),
                        {item.name: templates.NOT_IN_INPUT for item in template.fields}):

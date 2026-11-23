@@ -45,7 +45,7 @@ are refused until quoted. It declares:
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is;
 - `fields`, a list of the fields (below), in order;
-- `message` (an interface's alone, below): the one line its document is;
+- `message` (an interface's alone, below): the one line its document is, or a snippet's lines;
 - `imported` (an imported note's alone): `sha256:<hex>` of what scripts/template_import.py wrote it
   from, which its adapter reads to tell whether the source changed.
 
@@ -131,6 +131,7 @@ An entry of `choices` may be such a reference too: it stands for the items of th
 keys of that mapping.
 
 **Field kinds** and their values: `line` and `choice` a string, its first line; `text` a string;
+`rows` and `case` a snippet's (scripts/interfaces.py "A snippet");
 `list` a list of strings, its items without their numbers or bullets (with `markers`, a line that
 is one whole HTML comment is an item of its own, kept as it is); `object` a mapping of `Key: value`
 lines; `issue` a list of entries, one per line (`#12`, a link, `None`); `checklist` a list of
@@ -357,7 +358,10 @@ MESSAGE_ACTION = "message.send"
 ACTIONS = (*ISSUE_ACTIONS, "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit",
            "deck.build", FILE_ACTION, MESSAGE_ACTION)
 READERS = ("owner", "fleet")
-KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register")
+KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register",
+         "rows", "case")
+#: The kinds only a snippet holds, a message of several lines (scripts/interfaces.py "A snippet").
+SNIPPET_KINDS = ("rows", "case")
 #: The kinds of a node field (`node:`, `entries:`): its text is checked by another template.
 NODE_KINDS = ("node", "register")
 #: A node's or a register's pin, `<template>@<version>` (docs/templates.md "Nesting").
@@ -383,7 +387,7 @@ WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number",
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
-              "quote", "node", "entries", "fence"}
+              "quote", "node", "entries", "fence", "row", "cases"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message", "imported"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
@@ -461,6 +465,10 @@ class Field:
     pin: str = ""
     #: A node with no section: the info word of the fence that is its text (`fence:`).
     fence: str = ""
+    #: A `rows` field's one line per row, its columns as `{<column>}`.
+    row: str = ""
+    #: A `case` field's lines by key, as (key, line) pairs in their order.
+    cases: tuple[tuple[str, str], ...] = ()
     #: What `shape` names, loaded: a pattern or a function (the module docstring: Fields).
     rule: object = dataclass_field(default=None, compare=False, repr=False)
     #: The template `node` names, loaded (`load`): it checks the field's text.
@@ -511,6 +519,17 @@ class Template:
     digest: str = ""
     #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
     message: str = ""
+
+    @property
+    def is_snippet(self) -> bool:
+        """A message of several lines (scripts/interfaces.py "A snippet")."""
+        return "\n" in self.message
+
+    @property
+    def snippet_parts(self) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+        """A snippet's rows lines and cases by field, as its generated file carries them."""
+        return ({item.name: item.row for item in self.fields if item.kind == "rows"},
+                {item.name: dict(item.cases) for item in self.fields if item.kind == "case"})
 
     @property
     def marker_line(self) -> str:
@@ -1316,11 +1335,15 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
 
 def _message(message: object, kind: object, fields: list[Field], parent: Template | None,
              where: str) -> None:
-    """Refuse a `message` that is not an interface's one line naming each of its fields once."""
+    """Refuse a `message` that is not an interface's one line, or snippet, naming each of its fields
+    once (scripts/interfaces.py "A snippet")."""
     if not message:
         return
-    if not isinstance(message, str) or "\n" in message:
+    if not isinstance(message, str):
         raise TemplateError(f"{where}: message is one line, its fields as {{<field>}}")
+    if "\n" in message:
+        _snippet(message, kind, fields, parent, where)
+        return
     if kind != INTERFACE or parent is not None or not fields:
         raise TemplateError(f"{where}: message is an interface's own line: kind interface, with "
                             "fields, extending no template")
@@ -1333,6 +1356,19 @@ def _message(message: object, kind: object, fields: list[Field], parent: Templat
         if item.kind not in ("line", "choice") or item.source or item.label or item.node:
             raise TemplateError(f"{where}: field {item.name} of a message is a line or a choice, "
                                 "one line of the message")
+
+
+def _snippet(message: str, kind: object, fields: list[Field], parent: Template | None,
+             where: str) -> None:
+    """Refuse a snippet scripts/interfaces.py `snippet_problem` refuses."""
+    if kind != INTERFACE or parent is not None or not fields:
+        raise TemplateError(f"{where}: message is an interface's own line: kind interface, with "
+                            "fields, extending no template")
+    problem = _sibling("interfaces").snippet_problem(
+        message, [(item.name, item.kind if not (item.source or item.label or item.node) else "", dict(item.cases))
+                  for item in fields])
+    if problem:
+        raise TemplateError(f"{where}: {problem}")
 
 
 def glob_pattern(glob: str) -> re.Pattern:
@@ -1433,7 +1469,17 @@ def _field(entry: dict, where: str, *, sectioned: bool = True) -> Field:
     if type(chars) is not int or chars < 0:
         raise TemplateError(f"{where}: field {name} first_sentence_chars is {chars!r}; write a whole "
                         "number, 0 for none")
-    made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices))}, rule=rule)
+    cases = entry.get("cases", {})
+    if not isinstance(cases, dict) or not all(isinstance(key, str) and isinstance(text, str) and "\n" not in text
+                                              for key, text in cases.items()):
+        raise TemplateError(f"{where}: field {name} cases is a mapping of a key to one line")
+    if not isinstance(entry.get("row", ""), str) or "\n" in entry.get("row", ""):
+        raise TemplateError(f"{where}: field {name} row is one line, its columns as {{<column>}}")
+    if (entry.get("kind") == "rows") != bool(entry.get("row")) or (entry.get("kind") == "case") != bool(cases):
+        raise TemplateError(f"{where}: field {name}: a rows field, and only it, has a row; a case field, "
+                            "and only it, has cases")
+    made = Field(**{**entry, "choices": tuple(dict.fromkeys(choices)), "cases": tuple(cases.items())},
+                 rule=rule)
     if sectioned and made.in_body and not made.heading:
         raise TemplateError(f"{where}: field {name} needs a heading (or source = \"title\", or a label)")
     if made.kind == "choice" and not made.choices:
@@ -1694,8 +1740,9 @@ def parse(template: Template, body: str, title: str | None = None) -> Document:
     if template.is_adapter:  # the body as it stands: its own check reads it
         fields = {} if title is None else {"title": title}
         return Document(template=template.name, fields=fields, source=body, read=dict(fields))
-    if template.message:  # one line, read as scripts/interfaces.py reads it
-        found = _sibling("interfaces").fields_of(template.message, body) or {}
+    if template.message:  # one line or a snippet, read as scripts/interfaces.py reads it
+        found = (_sibling("interfaces").snippet_fields(template.message, body, *template.snippet_parts)
+                 if template.is_snippet else _sibling("interfaces").fields_of(template.message, body)) or {}
         return Document(template=template.name, fields=dict(found), source=body, read=dict(found))
     if template.is_file:
         return _parse_file(template, body)
@@ -1979,7 +2026,9 @@ def render(template: Template, document: Document | dict) -> str:
     if not isinstance(document, Document):
         document = Document(template=template.name, fields=answer(template, document))
     values = document.fields
-    if template.message:  # one line, never marked: scripts/interfaces.py writes it so
+    if template.message:  # one line or a snippet, never marked: scripts/interfaces.py writes it so
+        if template.is_snippet:
+            return _sibling("interfaces").text(template.message, values, *template.snippet_parts) + "\n"
         return _sibling("interfaces").line(template.message, values) + "\n"
     marker = template.marker_line
     hashes = "#" * template.level
@@ -2205,6 +2254,10 @@ def _property(item: Field) -> dict[str, object]:
             "required": ["done", "text"], "additionalProperties": False}}
     elif item.kind == "object":  # pairs, as strict mode takes no open mapping
         made = {"type": "array", "items": _pairs(("key", "value"))}
+    elif item.kind == "rows":
+        made = {"type": "array", "items": _pairs(tuple(_sibling("interfaces").placeholders(item.row)))}
+    elif item.kind == "case":
+        made = {"type": "string", "enum": [key for key, _ in item.cases]}
     else:  # line, text and code
         made = {"type": "string"}
     return {**made, "description": item.says}
@@ -2228,6 +2281,8 @@ def interface_files(templates: dict[str, Template]) -> dict[str, str]:
             continue
         data = {"template": f"{template.repository}/{template.name}", "version": template.version,
                 "says": template.says, **({"message": template.message} if template.message else {}),
+                **({"rows": template.snippet_parts[0]} if template.snippet_parts[0] else {}),
+                **({"cases": template.snippet_parts[1]} if template.snippet_parts[1] else {}),
                 "schema": schema(template)}
         made[f"{template.name}.json"] = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     return made
@@ -2452,8 +2507,9 @@ def _plain(value: object) -> str:
     if isinstance(value, dict):
         return "\n".join(f"{key}: {text}" for key, text in value.items())
     if isinstance(value, list):
-        return "\n".join(entry.get("text", "") if isinstance(entry, dict) else str(entry)
-                         for entry in value if not WHOLE_COMMENT.match(str(entry)))
+        return "\n".join((entry.get("text", "") if "text" in entry or "done" in entry
+                           else " | ".join(map(str, entry.values()))) if isinstance(entry, dict) else str(entry)
+                          for entry in value if not WHOLE_COMMENT.match(str(entry)))
     return str(value or "")
 
 
@@ -2599,6 +2655,9 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
             continue
         if item.quote:
             found += [Finding(item.name, QUOTE_RULE, REFUSE, fix) for fix in quoted(item, text, raw)]
+        if item.kind == "case" and text.strip() not in dict(item.cases):
+            add("choice", item.name, f"{item.name} is {text.strip()!r}: write one of "
+                f"{', '.join(key for key, _ in item.cases)}")
         if item.kind == "choice":
             word = re.split(r"[\s,.;:]+", text.strip().casefold(), maxsplit=1)[0]
             if word not in item.choices:

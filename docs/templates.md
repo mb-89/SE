@@ -255,6 +255,7 @@ SE's nineteen templates are notes; the term list stays a TOML list until the gui
 | `templates/delivery-notice.md` | `delivery-notice`: a worker's message to its integrator | interface | SE |
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
+| `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
@@ -266,8 +267,12 @@ SE's nineteen templates are notes; the term list stays a TOML list until the gui
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
 owns.
 
-SE's free texts are interface templates: the worker's delivery notice, an escalation and the
-handover; a design note's outline is still to come. Each one's schema is generated into
+SE's free texts are interface templates: the worker's delivery notice, an escalation, the
+handover and the start report; a design note's outline is still to come.
+
+Fixed text SE shows the person comes from a template, short snippets included (the person's
+decision of 23 Nov 2026). A snippet is a message of several lines: a `rows` field writes one line
+per row, as a table's, and a `case` field one of its lines, such as "everything is current". Each one's schema is generated into
 `scripts/interfaces/`, beside `scripts/work_tickets.py`, which writes the two messages through it;
 the docstrings of `scripts/interfaces.py` and `scripts/templates.py` (Interfaces) own the rest.
 
