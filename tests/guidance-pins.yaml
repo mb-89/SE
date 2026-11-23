@@ -32,6 +32,9 @@ merge-message:
 overhaul:
   - discover-cheap-load-late
   - guidance-comes-first
+overhaul-questions:
+  - discover-cheap-load-late
+  - guidance-comes-first
 pugh:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -48,6 +51,9 @@ review:
   - discover-cheap-load-late
   - guidance-comes-first
 routed:
+  - discover-cheap-load-late
+  - guidance-comes-first
+standing-questions:
   - discover-cheap-load-late
   - guidance-comes-first
 ticket:
