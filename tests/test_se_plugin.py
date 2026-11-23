@@ -28,6 +28,7 @@ def checkout(tmp_path_factory):
     # The guidance notes the agents link, built as skills, and the templates they reach.
     shutil.copytree(ROOT / "guidance", root / "guidance")
     shutil.copytree(ROOT / "templates", root / "templates")
+    shutil.copytree(ROOT / "docs", root / "docs")  # the pages the agents and skills link
     shutil.copytree(ROOT / "scripts", root / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(ROOT / ".github" / "ISSUE_TEMPLATE", root / ".github" / "ISSUE_TEMPLATE")
     shutil.copy(ROOT / ".github" / "pull_request_template.md", root / ".github")
@@ -820,7 +821,9 @@ def test_a_listed_draft_is_built_into_the_layout_and_adds_only_its_folders(tmp_p
     files = se_plugin.expected(root)
     added = {path for path in files if path not in without}
     assert added == {PurePosixPath("skills", "try", name) for name in ("SKILL.md", "references/more.md")}
-    assert {path: data for path, data in files.items() if path in without} == without
+    assert {path: data for path, data in files.items() if path in without and path not in se_plugin.PAGES} == {
+        path: data for path, data in without.items() if path not in se_plugin.PAGES}
+    assert b"| `try` | Does one thing. |" in files[PurePosixPath("docs/skills.md")]
     text = files[PurePosixPath("skills/try/SKILL.md")].decode("utf-8")
     assert text.startswith(DRAFT.format(name="try").split("\n\n")[0] + "\n")
     assert se_plugin.notice("drafts/skills/try/SKILL.md") in text
@@ -828,8 +831,9 @@ def test_a_listed_draft_is_built_into_the_layout_and_adds_only_its_folders(tmp_p
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     assert se_plugin.differences(root) == []
     (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8", newline="\n")
-    assert se_plugin.differences(root) == [f"skills/try/{name}: not generated from src/; remove it or add "
-                                           "its source" for name in ("SKILL.md", "references/more.md")]
+    assert se_plugin.differences(root) == ["docs/skills.md: differs from its source (edited by hand?)"] + [
+        f"skills/try/{name}: not generated from src/; remove it or add its source"
+        for name in ("SKILL.md", "references/more.md")]
 
 
 @pytest.mark.parametrize(("setting", "change", "refusal"), [
@@ -900,8 +904,11 @@ def test_build_writes_each_guidance_note_as_a_skill(tmp_path, capsys):
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     capsys.readouterr()
     assert se_plugin.main(["check", "--root", str(root)]) == 0, capsys.readouterr().err
+    assert b"| `repeat-count` |" in files[PurePosixPath("docs/rules.md")]
+    assert b"repeat-count" not in files[PurePosixPath("docs/skills.md")], "a note is a rule, not a skill"
     (root / "guidance" / "work" / "testing" / "repeat-count.md").unlink()
-    assert se_plugin.differences(root) == ["skills/repeat-count/SKILL.md: not generated from src/; remove "
+    assert se_plugin.differences(root) == ["docs/rules.md: differs from its source (edited by hand?)",
+                                           "skills/repeat-count/SKILL.md: not generated from src/; remove "
                                            "it or add its source"]
 
 
