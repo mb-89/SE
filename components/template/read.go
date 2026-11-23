@@ -305,6 +305,9 @@ func Parse(t *Template, body string, title *string) *Document {
 	}
 	if t.Message != "" {
 		found := fieldsOf(t.Message, body)
+		if t.IsSnippet() {
+			found = snippetFields(t, body)
+		}
 		return &Document{Template: t.Name, Fields: found, Source: body, Read: found.Copy(), Misses: map[string]string{}}
 	}
 	if t.IsFile() {

@@ -199,6 +199,9 @@ func Render(t *Template, doc *Document) (string, error) {
 		return doc.Source, nil
 	}
 	values := doc.Fields
+	if t.IsSnippet() {
+		return snippetText(t, values) + "\n", nil
+	}
 	if t.Message != "" {
 		return messageLine(t.Message, values) + "\n", nil
 	}
@@ -517,6 +520,14 @@ func property(item *Field) Object {
 		made = Object{{"type", "array"}, {"items", Object{{"type", "object"}, {"properties", Object{{"done", Object{{"type", "boolean"}}}, {"text", Object{{"type", "string"}}}}}, {"required", []any{"done", "text"}}, {"additionalProperties", false}}}}
 	case "object":
 		made = Object{{"type", "array"}, {"items", pairsSchema("key", "value")}}
+	case "rows":
+		made = Object{{"type", "array"}, {"items", pairsSchema(placeholders(item.Row)...)}}
+	case "case":
+		keys := make([]string, len(item.Cases))
+		for i, pair := range item.Cases {
+			keys[i] = pair.Key
+		}
+		made = Object{{"type", "string"}, {"enum", toAny(keys)}}
 	default:
 		made = Object{{"type", "string"}}
 	}
