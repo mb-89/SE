@@ -663,7 +663,7 @@ def overhaul_countdown(closed: list, opened: list, settings: dict[str, int], now
     reason = retro.due_reason("overhaul", len(moments), "retros closed", settings["due_after"],
                               settings["days"], elapsed)
     return retro.Countdown("overhaul", newest.created_at or newest.closed_at if newest else None,
-                           newest.number if newest else None, len(moments), 0, len(moments),
+                           newest.number if newest else None, 0, 0, len(moments),
                            settings["due_after"], settings["days"], elapsed, bool(reason), reason,
                            sorted(issue.number for issue in opened if is_overhaul(issue)))
 
