@@ -224,7 +224,18 @@ def _check_subpath(name: str, value: object) -> str:
     return value
 
 
-GO_REQUIRE = re.compile(r"^(?:require\s+)?(?P<module>\S+)\s+v(?P<version>\S+)(?:\s*//.*)?$")
+GO_REQUIRE = re.compile(r"^(?:require\s+)?(?P<module>\S+)\s+v(?P<version>\S+?)"
+                        r"(?P<incompatible>\+incompatible)?(?:\s*//.*)?$")
+#: Go's mark on a require above major 1 of a module whose path has no /v<major>, as kern's is
+#: `kern` at every major: Go refuses `kern v2.1.0` and takes `kern v2.1.0+incompatible`.
+INCOMPATIBLE = "+incompatible"
+
+
+def go_version(version: str) -> str:
+    """`version` as a go.mod's require spells it for a module path without /v<major>: v<version>,
+    with INCOMPATIBLE above major 1."""
+    parsed = parse_version(version)
+    return f"v{version}{INCOMPATIBLE if parsed is not None and parsed[0] > 1 else ''}"
 
 
 def go_require(root: Path, name: str, value: object) -> tuple[str, str]:
