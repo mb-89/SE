@@ -31,13 +31,13 @@ read-only = true
 mcp = "Checks a text or a fields object against a template as SE's filing commands would: its first line is passes or refused, then every finding or, with --render, the Markdown to file. Use it before filing; it files nothing."
 
 [commands."se_templates.py fill"]
-usage = "se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT]\n                     [--fields FIELDS | --fields-json FIELDS_JSON] [--title TITLE]\n                     [--worktree WORKTREE] [--templates TEMPLATES] [--tree]\n                     [--session SESSION] [--page PAGE]\n                     template"
+usage = "se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT]\n                     [--fields FIELDS | --fields-json FIELDS_JSON] [--title TITLE]\n                     [--repo OWNER/REPO] [--number NUMBER] [--label LABEL]\n                     [--worktree WORKTREE] [--templates TEMPLATES] [--tree]\n                     [--session SESSION] [--page PAGE]\n                     template"
 summary = "fill a template from the raw input: the instructions, or the checked ..."
 group = "Templates"
 help = "fill a template from the raw input: the instructions, or the checked document"
 class = "interactive"
-read-only = true
-mcp = "Fills a template from the raw input: without fields it gives the template's guidance first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, then the document to write or file, or refused, then every finding. Use it to write any text a template shapes; it writes nothing."
+writes = true
+mcp = "Fills a template from the raw input: without fields it gives the template's guidance first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, then the document, or refused, then every finding. With --repo it files the document it checked through kern's GitHub component: an issue, or with --number a comment, and answers its link. Use it to write any text a template shapes, and to file an issue or a comment."
 
 [commands."se_templates.py gate"]
 usage = "se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT]\n                     [--runtime ROOT]"
@@ -59,3 +59,13 @@ summary = "plan the label or failure a GitHub event's off-template text gets"
 group = "Templates"
 help = "plan the label or failure a GitHub event's off-template text gets"
 class = "batch"
+
+[requests.file-issue]
+type = "github.issue-create"
+answer = "github.written"
+help = "Files the issue a fill checked through kern's GitHub component: the template's name and its fields, never a body."
+
+[requests.file-comment]
+type = "github.issue-comment"
+answer = "github.written"
+help = "Comments on an issue or a pull request from a fill it checked, through kern's GitHub component: the template's name and its fields, never a body."

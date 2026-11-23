@@ -370,8 +370,11 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 `se mcp --root <checkout>` is SE's MCP server over stdio, kern's door (kern's README "The MCP
 door"), for every agent host that reads an `mcp.json` (Claude Code,
-Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
-through it as tools. The host spawns it as the session starts; nobody starts anything else.
+Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's commands through it
+as tools. The host spawns it as the session starts; nobody starts anything else.
+
+- **What it offers.** SE's read-only commands, and the commands that write only through kern's
+  GitHub component (Writing, through requests only, below).
 
 - **What the host runs.** The launcher `scripts/se_mcp.sh --root <project>`, or its PowerShell
   twin `se_mcp.ps1`: standalone, it reads only the release pin (`components/release.toml`).
@@ -436,17 +439,23 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 | `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
-| `templates` | `list`, `draft`, `check`, `fill` | `components/templates` |
+| `templates` | `list`, `draft`, `check` | `components/templates` |
+| `templates_write` | `fill`, which with `--repo` files the document it checked ([docs/templates.md "Fill"](docs/templates.md#fill)) | `components/templates` |
+| `github_write` | `github issue-create`, `github issue-comment`, from a template's fields | kern's GitHub component |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
   docs` writes `read-only = true` and that `mcp` line into its declaration. `work_tickets.py queue`
-  syncs the checkout (git fetch and merge), so no tool offers it, and no command that writes.
+  syncs the checkout (git fetch and merge), so no tool offers it.
+- **Writing, through requests only.** A command its script names in `WRITING_COMMANDS`, with its
+  MCP description, writes only through the request ports its `REQUESTS` declares, which
+  `wiring.toml` binds to an I/O verb; `work_tickets.py docs` writes `writes = true` and the ports,
+  and kern's door offers it in the tool `<instance>_write` (`templates_write`).
 - **Generated, never written per tool.** A command group with read-only commands is one tool,
   named in snake_case: `command` is one of them, `args` its arguments, `page` the page of a long
   answer.
-- **Approvals stay the host's.** Every tool says `readOnlyHint` and not `destructiveHint`, which
-  neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
+- **Approvals stay the host's.** Every read-only tool says `readOnlyHint` and not
+  `destructiveHint`, which neither grants nor forces an approval; a writing tool says it writes. Allow a tool once per host: Copilot's CLI with
   `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
   through "Chat: Manage Tool Approval".
   - The door the Claude Code plugin declares takes the rule `mcp__plugin_se_se__<tool>`, such as
@@ -2184,7 +2193,7 @@ document.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 

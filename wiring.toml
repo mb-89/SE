@@ -101,6 +101,10 @@ component = "template"
 # The streamed commands' GitHub steps (README "Hand-offs through the relay").
 "integration.step" = "github.step"
 "issues.step" = "github.step"
+# A template fill files the issue or the comment it checked through the GitHub component's write
+# verbs (docs/templates.md "Fill").
+"templates.file-issue" = "github.issue-create"
+"templates.file-comment" = "github.issue-comment"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.
