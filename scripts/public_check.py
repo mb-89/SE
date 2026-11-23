@@ -4,7 +4,8 @@ machine, account or internal host. The rule is owned by AGENTS.md, section "Publ
 
 Scans tracked file names and contents (binary files as bytes), commit messages and author and
 committer identities against the public term list (public-check-terms.toml, beside this script)
-and the source's local list (.public-check.local at its root, never checked in), which adds the
+and the source's local list (.public-check.local at its root, never checked in; a linked git
+worktree without its own reads its main checkout's, `local_list_path`), which adds the
 source's own terms and switches public entries off for it; its `remote:<remote name> <regex>` line
 is a term only of a push to that remote (--remote, which the pre-push hook and work_tickets.py
 push pass), whose gate is every commit that remote does not hold yet, and a refusal there names
@@ -376,12 +377,31 @@ def check_untracked(root: Path, rev: str | None) -> None:
                          f"{UNTRACK_REMEDY}")
 
 
+def local_list_path(root: Path) -> Path:
+    """The local list of the source at ``root``: its own, or, in a linked git worktree that has
+    none, its main checkout's, so a worktree is checked with the same private terms as the
+    checkout it was made from rather than passing with only the public list."""
+    own = root / LOCAL_FILE
+    dot_git = root / ".git"
+    if own.is_file() or not dot_git.is_file():
+        return own
+    text = dot_git.read_text(encoding="utf-8").strip()
+    if not text.startswith("gitdir:"):
+        return own
+    gitdir = (root / text[len("gitdir:"):].strip()).resolve()
+    commondir = gitdir / "commondir"
+    common = ((gitdir / commondir.read_text(encoding="utf-8").strip()).resolve()
+              if commondir.is_file() else gitdir.parent.parent)
+    main = common.parent / LOCAL_FILE
+    return main if main.is_file() else own
+
+
 def load_local(root: Path, remote: str | None = None) -> LocalList | None:
     """The local list at the source's root, or None where it has none. Hits name only its line
     number, never the term. A `remote:<remote name> <regex>` line is a term only of a push to
     that remote (`remote`, None where the check names no destination), and so is the
     `allow:` line of its term; every other term applies to every check."""
-    path = root / LOCAL_FILE
+    path = local_list_path(root)
     if not path.is_file():
         return None
     public = {pattern.label for pattern in GENERIC_PATTERNS}

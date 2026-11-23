@@ -356,6 +356,22 @@ def test_a_local_term_found_without_printing_the_term(repo: Path, local: Path) -
     assert "secret" not in result.stdout.lower()
 
 
+def test_a_linked_worktree_without_a_local_list_uses_its_main_checkouts(tmp_path: Path) -> None:
+    main, worktree = tmp_path / "main", tmp_path / "worktree"
+    gitdir = main / ".git" / "worktrees" / "worktree"
+    gitdir.mkdir(parents=True)
+    worktree.mkdir()
+    (gitdir / "commondir").write_text("../..\n", encoding="utf-8")
+    (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    (main / public_check.LOCAL_FILE).write_text("example-secret\\w*\n", encoding="utf-8")
+
+    found = public_check.load_local(worktree)
+
+    assert found is not None and [term.label for term in found.terms] == ["local-term:1"]
+    (worktree / public_check.LOCAL_FILE).write_text("other\n", encoding="utf-8")
+    assert public_check.local_list_path(worktree) == worktree / public_check.LOCAL_FILE
+
+
 def test_paths_with_local_terms_are_redacted(repo: Path, local: Path) -> None:
     local.write_text("example-secret\\w*\n", encoding="utf-8")
     commit(repo, {"src/example-secretTools/app.py": "x = 1\nbuilt by example-secret\n",

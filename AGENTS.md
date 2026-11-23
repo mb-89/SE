@@ -178,7 +178,7 @@ pass it; they refuse:
 | List | Where it lives | What it holds |
 |---|---|---|
 | The public list | `scripts/public-check-terms.toml`, read from the se module the check runs from | the generic patterns every source is checked against: user profile paths (`X:\Users\<name>`, `/home/<name>`, `/Users/<name>`), e-mail addresses other than `*@users.noreply.github.com` and `example.*`, enterprise GitHub hosts (GitHub Enterprise Cloud subdomains), machine names in UNC paths |
-| The local list | `.public-check.local` at the root of each source (a repository or a vault) | terms that must never be written down here |
+| The local list | `.public-check.local` at the root of each source (a repository or a vault); a linked git worktree without one uses its main checkout's | terms that must never be written down here |
 | The machine-level list (retired) | `~/.se/private-terms.txt`, `SE_PRIVATE_TERMS` | while one is configured, the check stops and names where its terms go, `<source>/.public-check.local` |
 
 - The public list: the fixed addresses services write into commits themselves, `noreply` at
