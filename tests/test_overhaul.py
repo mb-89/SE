@@ -416,38 +416,45 @@ def test_with_the_countdown_on_a_finding_still_open_is_too_early_to_score(checko
     DOCS.pop((sha, path))
 
 
-def test_an_overhaul_is_due_after_the_third_retro_and_resets_with_an_overhaul(tmp_path):
+def test_an_overhaul_is_due_after_three_retros_or_thirty_days_and_resets_at_its_start(tmp_path):
     """The countdown retro-due counts too (components/retro-due), a pure function of the runs it
-    is given: the retros closed since the last overhaul closed, a duplicate retro not among them;
-    the next overhaul resets it, and an open overhaul with none closed starts it at its creation.
-    Its setting is off where absent or 0."""
+    is given: the retros closed since the newest overhaul started, a duplicate retro not among
+    them; the next overhaul resets it at its start, open or closed. Due at 3 retros or 30 days
+    after that start with a retro closed; each rule is off at 0."""
     given = answers()
     given["issues.json"].append(issue(48, "docs/retro-20261106", "2026-11-06T00:00:00Z",
                                       reason="duplicate"))
-    assert overhaul.retros_since_overhaul(FakeDoor(given)) == 3  # #42, #43 and #46
     closed = [retro.issue_of(item) for item in given["issues.json"]]
-    opened = [retro.issue_of(item) for item in given["open-issues.json"]]
-    assert overhaul.retros_since(closed, opened) == 3
-    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "docs/overhaul-20261107",
-                                                              "2026-11-07T00:00:00Z"))], []) == 0
-    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "overhaul-20261107",
-                                                              "2026-11-07T00:00:00Z"))], []) == 0
+    built_in = retro.settings(tmp_path, "overhaul")
+    assert built_in == {"due_after": 3, "days": 30} and overhaul.countdown_on(tmp_path)
+
+    def counted(closed, opened=(), now=NOW, settings=built_in):
+        return overhaul.overhaul_countdown(closed, list(opened), settings, now)
+
+    found = counted(closed)
+    assert (found.since_run, found.count, found.due) == (40, 3, True)  # #42, #43 and #46
+    assert found.reason == "3 retros closed since the last overhaul (due at 3)"
+    for title in ("docs/overhaul-20261107", "overhaul-20261107"):
+        found = counted(closed + [retro.issue_of(issue(49, title, "2026-11-07T00:00:00Z"))])
+        assert (found.since_run, found.count, found.due) == (49, 0, False)
     # A work ticket whose name starts like an overhaul's is no overhaul.
-    assert overhaul.retros_since(closed + [retro.issue_of(issue(49, "overhaul-the-docs",
-                                                              "2026-11-07T00:00:00Z"))], []) == 3
+    assert counted(closed + [retro.issue_of(issue(49, "overhaul-the-docs",
+                                                  "2026-11-07T00:00:00Z"))]).count == 3
     without = [item for item in closed if not overhaul.is_overhaul(item)]
     open_overhaul = retro.issue_of({**issue(THIS, "docs/overhaul-20261112", None),
                                     "created_at": "2026-10-25T00:00:00Z"})
-    assert overhaul.retros_since(without, [open_overhaul]) == 2  # #43 and #46
-    assert overhaul.retros_since(without, []) == 4  # the whole history: #41 too
-    assert overhaul.DUE_AFTER == 0 and overhaul.due_after(tmp_path) == 0  # off
-    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
-    assert overhaul.due_after(tmp_path) == 3
-    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 0\n", encoding="utf-8")
-    assert overhaul.due_after(tmp_path) == 0
+    found = counted(without, [open_overhaul])
+    assert (found.count, found.open, found.due) == (2, [THIS], False)  # #43 and #46
+    found = counted(without, [open_overhaul], datetime(2026, 11, 24, 0, tzinfo=timezone.utc))
+    assert found.due and found.reason == ("30 days since the last overhaul with 2 retros closed "
+                                          "(due after 30 days)")
+    assert counted(without).count == 4  # the whole history: #41 too
+    assert not counted(without, settings={"due_after": 0, "days": 0}).due
+    (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
+    assert not overhaul.countdown_on(tmp_path)
     (tmp_path / "se.toml").write_text("[overhaul]\ndue_after = -1\n", encoding="utf-8")
     with pytest.raises(work_tickets.QueueError, match="must be a whole number, 0 for off"):
-        overhaul.due_after(tmp_path)
+        overhaul.countdown_on(tmp_path)
 
 
 def test_without_a_closed_overhaul_the_window_is_the_whole_history(checkout):
