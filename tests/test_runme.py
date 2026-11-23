@@ -326,7 +326,9 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
             named.update(re.findall(r"https?://\S+", line))
     for name in PAIR:
         data = (ROOT / name).read_bytes()
-        assert (TEMPLATE / name).read_bytes() == data, f"kern's template/{name} differs from {name}"
+        # Line endings are the checkout's (git's autocrlf on Windows), not the file's.
+        assert (TEMPLATE / name).read_bytes().replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"), (
+            f"kern's template/{name} differs from {name}")
         text = data.decode("ascii")  # ASCII, for Windows PowerShell 5.1
         assert len(text.splitlines()) <= CEILINGS[name]
         if name == "RUNME.sh":  # sh reads LF only (.gitattributes); PowerShell reads either
