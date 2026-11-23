@@ -19,6 +19,8 @@ TOOLS = ("sh", "awk", "sed", "dirname", "cat", "chmod", "mkdir", "printf", "unam
 pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="RUNME.sh runs in sh")
 
 
+@pytest.mark.spawns("contract: se_runtimes.Machine.version, the machine door's probe, runs the runtime's own "
+                    "command (python --version) that the start's fake machine stands in for")
 def test_the_probe_reads_a_runtimes_version_from_its_own_command():
     machine = se_runtimes.Machine(path=str(Path(sys.executable).parent))
 
@@ -26,6 +28,8 @@ def test_the_probe_reads_a_runtimes_version_from_its_own_command():
     assert se_runtimes.Machine(path="").version("python") is None, "none on PATH: missing"
 
 
+@pytest.mark.spawns("contract: se_runtimes.Machine.runme; shell: RUNME.sh's get line runs only as a process, "
+                    "and the probe then runs the node it wrote")
 def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()
@@ -45,6 +49,7 @@ def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, m
     assert (root / "runtimes" / "node").is_file(), "the get line ran in the root, as RUNME runs it there"
 
 
+@pytest.mark.spawns("shell: RUNME.sh's own remedy for a get line that fails is shell, run only as a process")
 def test_runmes_own_remedy_names_a_runtime_it_could_not_get(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()

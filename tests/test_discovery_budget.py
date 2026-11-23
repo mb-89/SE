@@ -9,7 +9,9 @@ time is the fastest of three runs, as the suite runs beside other tests; a tripw
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import re
 import subprocess
@@ -66,13 +68,23 @@ def command_list(root: Path) -> list[str]:
     return [entry["command"] for entry in json.loads(done.stdout)]
 
 
+def command_list_in_process(root: Path) -> list[str]:
+    """The command list through `se_components.main`, in this process."""
+    import se_components
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert se_components.main(["commands", "--json", "--root", str(root)]) == 0
+    return [entry["command"] for entry in json.loads(out.getvalue())]
+
+
 def loading_list(root: Path) -> list[str]:
     """A listing that loads each component's code before it reads the declarations: what the
     budget exists to refuse."""
     for init in sorted((root / "components").glob("*/__init__.py")):
         spec = importlib.util.spec_from_file_location(f"loaded_{init.parent.name}", init)
         spec.loader.exec_module(importlib.util.module_from_spec(spec))
-    return command_list(root)
+    return command_list_in_process(root)
 
 
 def budget_findings(listing: Listing, root: Path, tripwires: Path, expected: list[str]) -> list[str]:
@@ -102,6 +114,8 @@ def fixtures(tmp_path: Path) -> tuple[Path, Path, list[str]]:
     return root, tripwires, expected
 
 
+@pytest.mark.spawns("entry: scripts/se_components.py; its budget counts the interpreter's start "
+                    "(guidance note discover-cheap-load-late), so the listing runs as a person runs it")
 def test_the_command_list_reads_every_declaration_within_the_budget_and_loads_none(fixtures):
     root, tripwires, expected = fixtures
     assert len(expected) == BUDGET["components"] * BUDGET["commands_per_component"]

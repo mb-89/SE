@@ -83,9 +83,14 @@ RECORDINGS = {
     "doctor": doctor_report,
 }
 NEEDS_OBS = {"decision-deck"}
+# A recording obs builds runs obs-document, an outside program in obs's own environment (`uv run
+# --project <obs>`, scripts/build_docs.py), so its test starts processes.
+OBS_RUNS = pytest.mark.spawns("obs: the deck is obs-document's output, which runs in obs's own environment "
+                              "(scripts/build_docs.py), an outside program SE's process cannot import")
 
 
-@pytest.mark.parametrize("name", RECORDINGS)
+@pytest.mark.parametrize("name", [pytest.param(name, marks=OBS_RUNS) if name in NEEDS_OBS else name
+                                  for name in RECORDINGS])
 def test_the_output_is_its_recording(name, tmp_path, request):
     if name in NEEDS_OBS:
         request.getfixturevalue("obs")

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import fake_processes as fake_programs
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -75,11 +77,13 @@ def test_relay_is_none_when_switched_off(tmp_path: Path, monkeypatch) -> None:
 # The reads wired into the commands.
 
 @pytest.fixture
-def served(tmp_path: Path, monkeypatch):
-    """A worktree whose GitHub reads come from a fake relay, gh unusable (the cloud)."""
+def served(tmp_path: Path, monkeypatch, fake_processes):
+    """A worktree whose GitHub reads come from a fake relay, gh unusable (the cloud): where one is
+    on PATH, it is not signed in."""
     worktree = tmp_path / "wt"
     (worktree / ".git").mkdir(parents=True)
     names: dict[str, object] = {}
+    fake_processes.on("gh", lambda call: fake_programs.Answer(1, "", "You are not logged into any GitHub hosts.\n"))
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
     monkeypatch.setattr(work_tickets, "relay_for", lambda root: FakeRelay(Path(root), names))
     return worktree, names

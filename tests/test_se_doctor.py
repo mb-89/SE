@@ -325,6 +325,9 @@ def mcp_script(tmp_path: Path, body: str) -> list[str]:
     return [sys.executable, str(script)]
 
 
+@pytest.mark.spawns("contract: se_doctor.initialize, the probe's one door to an MCP command: a live stdio "
+                    "session with a child (Popen, its pipes, a timeout and its exit code), which the "
+                    "process door's run cannot hold")
 def test_initialize_reads_one_answer_and_names_a_silent_or_exiting_command(tmp_path: Path):
     answers = mcp_script(tmp_path, "import sys, json\nsys.stdin.readline()\nprint(json.dumps({'jsonrpc': '2.0', "
                                    "'id': 1, 'result': {'serverInfo': {'name': 'se', 'version': '0.4.0'}}}), flush=True)\n"
