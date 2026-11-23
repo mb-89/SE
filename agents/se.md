@@ -57,6 +57,15 @@ its tools.
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../README.md#fleet-check)).
+- **Breaking releases**: right after the greeting, never before or instead of it, start
+  `uv run python <se>/scripts/se_modules.py --root <main checkout> breaking` in the background (in
+  Claude Code, Bash's `run_in_background`) and go on with the turn without waiting for it.
+  - When it ends with findings, tell the person once, in your next message: each line it printed,
+    which names the component, its pin and the newest release.
+  - Its one line where nothing moved needs no message; a failure is one line naming the check and
+    its message.
+  - The check changes nothing: what to do about a finding is the person's decision
+    ([README "Commands"](../README.md#commands)).
 
 - **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main

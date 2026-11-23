@@ -191,6 +191,31 @@ resolved the same way.
 The order of remotes puts `origin` first rather than in Git's alphabetical order alone, so that a
 fresh clone takes each component from the owner it came from ([Finding kern](#finding-kern)).
 
+### Breaking releases beyond a pin
+
+A component cannot know who relies on it, so only its host sees that it moved past the host's pin
+(work issue SE#1719). `se_modules.py breaking` looks, for every pin in the tree:
+
+- **The pins**: the root's and each component's own, read as [the tree](#several-hosts-one-tree)
+  resolves them, nested ones included. Where two hosts' pins admit no common release, `sync`
+  refuses; the check reports each pin instead.
+- **The newest release**: the highest `v` tag of the component's first offer in the order of
+  [Finding a component](#finding-a-component), read without fetching objects.
+- **Breaking**: the newest release lies beyond what the pin admits and has a higher major than
+  the pin's base, or below 1.0 a higher minor (SE#1647). The base is a range's lowest version, a
+  `go` pin's version, or a `ref` pin's release at its commit; a `ref` without one is not judged.
+
+It prints one line per finding, naming the holder, the pin and the newest release (`obs-html pins
+obs ^10, newest 11.0.0`), and the path for a nested holder. Where nothing moved it prints one line
+saying so; `--all` lists every pin with its verdict and the run's notes. It exits 0 either way,
+and 1 with a message only where the listing fails: the tree does not resolve, or no offer names a
+component's releases.
+
+The check changes no pin, no lock and no checkout, and files no issue: what to do is the person's
+decision. It places a release in `.se/modules/<name>` where `sync` would, to read that
+component's own list. SE runs it in the background after its start greeting
+([se agent](../src/agents/se.md#tools)) and at every retro (`retro.py collect`).
+
 ## Runtimes
 
 kern runs components in Go or, over its bus, in Python, and a component may need a browser or Node
