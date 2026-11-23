@@ -44,7 +44,8 @@ WINDOWS = sys.platform == "win32"
 SLOWEST_SECONDS = WINDOWS_SLOWEST_SECONDS if WINDOWS else LINUX_SLOWEST_SECONDS
 BOUND = WINDOWS_BOUND if WINDOWS else LINUX_BOUND
 #: How many times slower this platform runs the suite than the Linux host its bound was measured
-#: on: a test that holds a time of its own (tests/test_discovery_budget.py) scales it by this.
+#: on: a test that holds a time of its own (tests/test_discovery_budget.py, the facts budget of
+#: tests/test_overhaul.py) scales it by this.
 SCALE = SLOWEST_SECONDS / LINUX_SLOWEST_SECONDS
 
 

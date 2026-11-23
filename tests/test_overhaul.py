@@ -13,6 +13,7 @@ import pytest
 import git_door
 import overhaul
 import fake_git
+import time_bound
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -173,7 +174,9 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     """The promise is facts' own work on SE in 10 s, judged by CPU time: facts reads no network,
     and a loaded runner stretches the wall clock (11.1 s with 16 busy processes on 4 cores, for
     2.2 s of work, both on a 4-CPU Linux container, Intel Xeon at 2.30 GHz), not the work. SE's
-    files are committed once in the fake git."""
+    files are committed once in the fake git. A platform that runs the suite slower scales the
+    budget as the time bound does (tests/time_bound.py SCALE): on a loaded Windows host the file
+    reads count as CPU time too."""
     root = tmp_path / "se"
     fake_git.init(root)
     for part in SE_PARTS:
@@ -185,7 +188,7 @@ def test_facts_on_se_answer_within_the_budget(capsys, tmp_path: Path, fake_git_d
     git(root, "commit", "-q", "-m", "se")
     started = cpu_seconds()
     found = facts(root, capsys)
-    assert cpu_seconds() - started < 10
+    assert cpu_seconds() - started < 10 * time_bound.SCALE
     assert {row["script"] for row in found["sizes"]} >= {"scripts/work_tickets.py"}
 
 
