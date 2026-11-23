@@ -30,11 +30,11 @@ from __future__ import annotations
 import argparse
 import ast
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 import git_door
+import process_door
 import references
 import se_home
 
@@ -226,7 +226,7 @@ def se_line(root: Path) -> str:
 def public_findings(root: Path) -> list[str]:
     """The public check's verdict on `root` with SE's own line of history, where it refuses: its
     lines, which name locations and pattern labels, never the matched text."""
-    done = subprocess.run(
+    done = process_door.run(
         [sys.executable, str(ROOT / "scripts" / "public_check.py"), "--repo", str(root),
          "--history", se_line(root)], capture_output=True, text=True, check=False)
     if done.returncode == 0:

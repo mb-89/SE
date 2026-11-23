@@ -85,7 +85,8 @@ def test_the_allow_lists_say_why() -> None:
 
 
 # The command CI's `check` job runs (scripts/hygiene.py): it refuses what each check finds, naming
-# the check, and passes a clean checkout; the public check runs as its child, on the shared fake.
+# the check, and passes a clean checkout; the public check, its child through the process door, is
+# answered in-process by its main (tests/fake_processes.py), on the fake in memory.
 
 @pytest.fixture
 def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,7 +95,7 @@ def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(hygiene, name, {})
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the public check runs as its child
+@pytest.mark.usefixtures("fake_git_door")
 def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsys) -> None:
     commit(repo, {"README.md": "# Clean\n\nSee [agents](AGENTS.md).\n", "AGENTS.md": "# Agents\n",
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
@@ -104,7 +105,7 @@ def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsy
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the public check runs as its child
+@pytest.mark.usefixtures("fake_git_door")
 def test_hygiene_refuses_what_each_check_finds_naming_the_check(
         repo: Path, no_allow_lists: None, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(hygiene, "MAX_BYTES", 100)
