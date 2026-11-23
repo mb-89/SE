@@ -587,9 +587,11 @@ system, it becomes a component and attaches through the core, in Go or in anothe
 - **Promoted:** a component the system keeps goes to `components/<name>/` in the application, or
   into the core's repository when every application needs it. It is tested against the fake core
   like any other.
-- **Python may stay Python.** It is ported to Go only where porting pays, below.
+- **The system tends to Go.** What the system keeps is ported to Go, and Python stays where the
+  table below keeps it ([python-ad-hoc-go-system](../guidance/python-ad-hoc-go-system.md), the
+  person's principle of 22 Nov).
 
-| port a Python component to Go when | keep it Python when |
+| porting a Python component to Go pays most when | keep it Python when |
 |---|---|
 | it is on a hook's or the greeting's path: an interpreter costs 30 to 60 ms a run, a Go call 5 ms | it wraps Python itself: pytest, the overhaul's AST facts |
 | a person waits on it and it runs often | it renders a page or a deck |
