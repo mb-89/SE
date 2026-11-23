@@ -1362,6 +1362,13 @@ paths = ["components/", "se.lock"] # optional: run only where the change touches
   - A suite beside that passed without running a test is named in one line after its time, and
     its verdict stands; `scripts/suite_runs.py` says which output counts as no test run.
 
+Before either runs, a checkout that still holds a moved folder's output is refused: a folder
+with ignored files and no tracked one, where git deleted tracked files before, as a move to another
+repository leaves its tool environments and bytecode behind.
+
+The refusal names each folder and its remedy, `git clean -fdX <folder>`; a folder git never
+tracked, such as `.venv`, is no such folder.
+
 The two budgets are apart, and neither spends the other's time:
 
 - Each run prints and reports both times, `Suite: <result>; <time> (target, limit); go-components passed

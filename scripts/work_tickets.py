@@ -6380,6 +6380,53 @@ def clean_commit(root: Path) -> str | None:
     return head.stdout.strip()
 
 
+def leftover_folders(root: Path) -> list[str]:
+    """The topmost folders of the checkout that hold ignored output and no tracked file, where git
+    deleted tracked files before: what a move of a folder to another repository leaves behind, as
+    git removes only its tracked files. A folder git never tracked (`.venv`, `__pycache__`) is
+    ignored output by design and none of these. None where git cannot list them (no checkout)."""
+    listed = run_git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory",
+                     "-z")
+    files = run_git(root, "ls-files", "-z")
+    if listed.returncode != 0 or files.returncode != 0:
+        return []
+    ignored = [entry for entry in listed.stdout.split("\0") if entry]
+    tracked: set[str] = set()
+    for path in files.stdout.split("\0"):
+        parts = path.split("/")[:-1]
+        tracked.update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+    candidates: set[str] = set()
+    for entry in ignored:
+        parts = entry.rstrip("/").split("/")
+        for depth in range(1, len(parts) + 1):
+            folder = "/".join(parts[:depth])
+            if folder not in tracked:
+                if depth < len(parts) or entry.endswith("/"):
+                    candidates.add(folder)
+                break
+    if not candidates:
+        return []
+    deleted = checked_git(root, "log", "--format=", "--name-only", "--no-renames", "--diff-filter=D",
+                          "--", *sorted(candidates)).splitlines()
+    return sorted(folder for folder in candidates
+                  if any(path.startswith(folder + "/") for path in deleted))
+
+
+def refuse_leftover_folders(root: Path) -> None:
+    """Refuse a checkout that holds a `leftover_folders` folder, naming each and its remedy: a run
+    there would read the folder's stale output (an importable package of stale bytecode, a stale
+    tool environment) as the moved folder's, and fail without naming it."""
+    folders = leftover_folders(root)
+    if folders:
+        raise QueueError(
+            f"{root} still holds the ignored output of {len(folders)} folder(s) whose tracked files "
+            f"git deleted, as a move to another repository leaves them: {', '.join(folders)}; a run "
+            "here would read that output as theirs. Remove it with "
+            + " and ".join(f"`git clean -fdX {folder}`" for folder in folders)
+            + ", then run again"
+        )
+
+
 def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: float) -> None:
     """Record the suite's verdict on `commit`'s tree, where the checkout still holds exactly it."""
     if commit is None or clean_commit(root) != commit:
@@ -6651,7 +6698,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     A suite beside that passed without running a test, as its output reads (suite_runs.py), is
     named in one line after its time; its verdict stands.
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
-    push reads it before the integration branch is pushed."""
+    push reads it before the integration branch is pushed. First refuses a checkout that still
+    holds a moved folder's ignored output (refuse_leftover_folders)."""
+    refuse_leftover_folders(root)
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:

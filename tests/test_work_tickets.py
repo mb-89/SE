@@ -2665,6 +2665,49 @@ def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monk
     assert "::notice title=se suite time::Suite time: 40.0 s (limit 120 s)" in capsys.readouterr().out
 
 
+def test_leftover_folders_are_a_moved_folders_ignored_output_never_a_folder_git_never_tracked(
+        tmp_path, monkeypatch):
+    """`adapters/html` holds ignored output only, where git deleted its files; `.venv` and
+    `scripts/__pycache__` were never tracked, and `notes.log` is a file, no folder."""
+    asked = []
+
+    def git(root, *arguments, **_):
+        asked.append(arguments)
+        answers = {
+            "--others": ".venv/\0scripts/__pycache__/\0adapters/html/.venv/\0adapters/html/src/x.pyc\0"
+                        "notes.log\0",
+            "-z": "scripts/a.py\0adapters/README.md\0",
+            "log": "adapters/html/pyproject.toml\nadapters/html/src/x.py\n",
+        }
+        key = "log" if arguments[0] == "log" else arguments[1]
+        return subprocess.CompletedProcess(["git", *arguments], 0, answers[key], "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+
+    assert work_tickets.leftover_folders(tmp_path) == ["adapters/html"]
+    assert asked[-1][-4:] == ("--", ".venv", "adapters/html", "scripts/__pycache__")
+    assert "--no-renames" in asked[-1] and "--diff-filter=D" in asked[-1]
+
+
+def test_a_checkout_git_cannot_list_has_no_leftover_folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(work_tickets, "run_git", lambda root, *arguments, **_: (
+        subprocess.CompletedProcess(["git", *arguments], 128, "", "fatal: not a git repository")))
+    assert work_tickets.leftover_folders(tmp_path) == []
+
+
+def test_suite_refuses_a_checkout_that_holds_a_moved_folders_output_naming_the_remedy(
+        worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "leftover_folders", lambda root: ["adapters/html", "kern"])
+    monkeypatch.setattr(work_tickets, "suite_budget", lambda root: pytest.fail("the suite ran"))
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+
+    error = capsys.readouterr().err
+    assert "still holds the ignored output of 2 folder(s) whose tracked files git deleted" in error
+    assert "adapters/html, kern" in error
+    assert "`git clean -fdX adapters/html` and `git clean -fdX kern`, then run again" in error
+
+
 def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, monkeypatch, capsys):
     reads = budget_suite(worktree, monkeypatch, 40.0, 45.0)
 
