@@ -71,6 +71,10 @@ its tools.
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main
   checkout>` to surface field reports and startable ready work; local sessions have no scheduled
   agent.
+  - Stale claims, which `work_tickets.py ready` names (without gh, `ready --claimed` on the
+    queue plan's read), go to the person. Releasing one is the person's step: prepare its
+    branch's deletion and the removal of `in-progress` and the beat line, and run them on the
+    person's yes ([README "Workers"](../README.md#workers)).
 - **Work issues** from [work.md](../.github/ISSUE_TEMPLATE/work.md), filed with
   `work_tickets.py file`, labelled as the work model's [Issues](../skills/work-model/SKILL.md#issues)
   says: title = branch name, carrying only the task (goal, the user's requirement verbatim, design owner, numbered

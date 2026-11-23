@@ -115,6 +115,11 @@ pull request carries its field report.
   - `ready` is the GitHub record that SE checked the issue and it may be worked; `ready` and
     `start` take only `work` + `ready`, never a `backlogged`, `field-report` or `in-progress`
     issue.
+  - `in-progress` is the claim's flag; its heartbeat is one beat line in the issue's body, which
+    the worker's hook renews, so `ready` names a claim live or stale from the issue alone
+    ([README "Workers"](../../../README.md#workers)).
+  - Nothing frees a stale claim on its own: releasing it (its branch deleted, `in-progress` and
+    the beat line removed) is the person's step, which SE prepares.
   - `file --blocked-by <n>` links the blockers before it adds `ready`.
 - **No dangling references**: `file`, `backlog file` and `route` refuse a body that names an se
   command or subcommand, or an se script file, that se does not have, naming each.
@@ -555,6 +560,8 @@ Pull requests built on an old `main` cause most integration trouble.
   `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
   `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
   issue.
+  - `start` writes the first beat line with the label, and the close-out removes it with the
+    label. A worker started after `claim` beats on its first tool call, as intake finds no beat.
   - The label change follows the [claim](#worktrees) and is no lock: two starters can both read
     `ready`, and only the claim refuses the second.
 - After each integration the integrator starts every startable work issue that has no branch yet

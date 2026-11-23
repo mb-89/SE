@@ -761,11 +761,13 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 [workers]
 local = 4
 cloud = 8
+claim_timeout_hours = 12
 ```
 
 `[workers]` limits how many working agents run at once. `local` holds a local device's limit,
 default 4; `cloud` holds the cloud's (a Claude Code cloud session, a CI runner), and unset leaves
-the cloud open. Each is a whole number of at least 1; other keys are refused.
+the cloud open. Each is a whole number of at least 1. `claim_timeout_hours` is the claim timeout
+below, a positive number of hours, default 12; other keys are refused.
 
 - **What counts.** A worker runs while its work issue is open and labelled `in-progress`.
   `work_tickets.py capacity` prints how many more may start: the limit less those running, on a
@@ -776,6 +778,22 @@ the cloud open. Each is a whole number of at least 1; other keys are refused.
   finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
   reached.
 - **Not limited.** Integrators, reviewers and SE's own session.
+- **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
+  one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
+  with the claim, and the close-out removes it.
+  - The worker's `intake` records its due time in `.se/work/beat.yaml`. On every tool call the
+    plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
+    passed it starts `work_tickets.py beat` in the background, which sets the line to now.
+  - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
+    so the session runs its read and write when the hook tells it.
+  - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
+    and the template check ignore it.
+- **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
+  claim timeout) or stale (older, or no beat), with the beat's age; neither is startable. Its
+  last line names the stale ones for SE to pass to the person; without gh, `ready --claimed
+  <file>` judges the `list_issues` answer that `queue`'s plan reads.
+  - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
+    delete its branch, take off `in-progress` and remove the beat line.
 
 #### Commit checks
 
