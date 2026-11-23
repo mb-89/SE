@@ -48,14 +48,14 @@ def suite_run(checkout: Path) -> subprocess.CompletedProcess:
                                                   if name not in ("conftest.py", "fake_git.py",
                                                                   "network_guard.py", "time_bound.py",
                                                                   "waiting.py")])
-    (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8", newline="\n")
     (checkout / "tests" / "test_probe.py").write_text(
         "from pathlib import Path\n"
         "def test_the_layout_has_the_change():\n"
         "    root = Path(__file__).resolve().parents[1]\n"
         "    for layout in ('skills', '.github/skills'):\n"
         "        text = (root / layout / 'work-model' / 'SKILL.md').read_text(encoding='utf-8')\n"
-        "        assert 'unbuilt change' in text\n", encoding="utf-8")
+        "        assert 'unbuilt change' in text\n", encoding="utf-8", newline="\n")
     return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                            "tests/test_probe.py"],
                           cwd=checkout, capture_output=True, text=True, check=False)
@@ -68,7 +68,7 @@ def test_the_suite_builds_an_unbuilt_source_change_before_its_tests(tmp_path):
     shutil.copy(ROOT / "se.toml", tmp_path)
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
     source = tmp_path / "src" / "skills" / "work-model" / "SKILL.md"
-    source.write_text(source.read_text(encoding="utf-8") + "\nAn unbuilt change.\n", encoding="utf-8")
+    source.write_text(source.read_text(encoding="utf-8") + "\nAn unbuilt change.\n", encoding="utf-8", newline="\n")
     assert se_plugin.differences(tmp_path)
     result = suite_run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -92,7 +92,7 @@ def test_check_refuses_a_hand_edit_and_passes_after_rebuild(checkout, capsys):
 def test_check_refuses_a_generated_file_without_source_and_build_removes_it(checkout, capsys):
     stray = checkout / ".github" / "skills" / "stray" / "SKILL.md"
     stray.parent.mkdir(parents=True)
-    stray.write_text("---\nname: stray\n---\n", encoding="utf-8")
+    stray.write_text("---\nname: stray\n---\n", encoding="utf-8", newline="\n")
     assert se_plugin.main(["check", "--root", str(checkout)]) == 1
     assert ".github/skills/stray/SKILL.md: not generated from src/" in capsys.readouterr().err
     assert se_plugin.main(["build", "--root", str(checkout)]) == 0
@@ -276,24 +276,24 @@ def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_
 def test_a_source_naming_a_script_without_ses_root_is_refused(checkout, capsys, named):
     source = checkout / "src" / "skills" / "decision" / "SKILL.md"
     original = source.read_text(encoding="utf-8")
-    source.write_text(original + f"\nRun {named}.\n", encoding="utf-8")
+    source.write_text(original + f"\nRun {named}.\n", encoding="utf-8", newline="\n")
     try:
         assert se_plugin.main(["check", "--root", str(checkout)]) == 2
         assert "src/skills/decision/SKILL.md:" in capsys.readouterr().err
         assert se_plugin.main(["build", "--root", str(checkout)]) == 2
     finally:
-        source.write_text(original, encoding="utf-8")
+        source.write_text(original, encoding="utf-8", newline="\n")
 
 
 def test_a_script_under_ses_root_a_relative_link_and_another_folder_pass(checkout):
     source = checkout / "src" / "skills" / "decision" / "SKILL.md"
     original = source.read_text(encoding="utf-8")
     source.write_text(original + "\nRun `uv run python <se>/scripts/deck.py`, see "
-                      "[it](../../../scripts/deck.py) and `src/scripts/`.\n", encoding="utf-8")
+                      "[it](../../../scripts/deck.py) and `src/scripts/`.\n", encoding="utf-8", newline="\n")
     try:
         assert se_plugin.main(["build", "--root", str(checkout)]) == 0
     finally:
-        source.write_text(original, encoding="utf-8")
+        source.write_text(original, encoding="utf-8", newline="\n")
         assert se_plugin.main(["build", "--root", str(checkout)]) == 0
 
 
@@ -301,7 +301,7 @@ def roles_copy(tmp_path: Path, roles: str) -> Path:
     """A copy of the sources whose se.toml declares `roles` in place of its own [roles]."""
     shutil.copytree(ROOT / "src", tmp_path / "src")
     manifest = (ROOT / "se.toml").read_text(encoding="utf-8").split("\n[roles.", 1)[0]
-    (tmp_path / "se.toml").write_text(manifest + "\n" + roles, encoding="utf-8")
+    (tmp_path / "se.toml").write_text(manifest + "\n" + roles, encoding="utf-8", newline="\n")
     return tmp_path
 
 
@@ -339,7 +339,7 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
     root = roles_copy(tmp_path, "")
     source = root / "src" / "agents" / "worker.md"
     source.write_text(source.read_text(encoding="utf-8").replace("---\n", "---\nclaude.skills: x\n", 1),
-                      encoding="utf-8")
+                      encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(root)]) == 2
     assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
 
@@ -405,9 +405,9 @@ def test_a_skill_vs_code_would_skip_is_refused_naming_it(tmp_path, capsys, name,
 
 def write_source(root: Path, path: str, text: str) -> None:
     if not (root / "se.toml").exists():
-        (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+        (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8", newline="\n")
     (root / path).parent.mkdir(parents=True, exist_ok=True)
-    (root / path).write_text(text, encoding="utf-8")
+    (root / path).write_text(text, encoding="utf-8", newline="\n")
 
 
 def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp_path):
@@ -452,7 +452,7 @@ def test_the_door_runs_the_launcher_and_a_plugin_root_only_in_its_arguments(chec
         root = tmp_path / "on"
         shutil.copytree(checkout / "src", root / "src")
         (root / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
-            "root_mcp = false", "root_mcp = true"), encoding="utf-8")
+            "root_mcp = false", "root_mcp = true"), encoding="utf-8", newline="\n")
         se_plugin.build(root)
     [server] = json.loads((root / name).read_text(encoding="utf-8"))["mcpServers"].values()
     assert server["command"] == "bash" and "$" not in server["command"]
@@ -463,7 +463,7 @@ def test_the_door_runs_the_launcher_and_a_plugin_root_only_in_its_arguments(chec
 def test_no_root_mcp_json_with_the_setting_off_and_check_refuses_a_stray_one(checkout, capsys):
     assert se_plugin.root_mcp(ROOT) is False, "se.toml [plugin] root_mcp is off by default"
     assert not (ROOT / ".mcp.json").exists() and not (checkout / ".mcp.json").exists()
-    (checkout / ".mcp.json").write_text("{}\n", encoding="utf-8")
+    (checkout / ".mcp.json").write_text("{}\n", encoding="utf-8", newline="\n")
     assert se_plugin.main(["check", "--root", str(checkout)]) == 1
     assert ".mcp.json: not generated from src/" in capsys.readouterr().err
     assert se_plugin.main(["build", "--root", str(checkout)]) == 0
@@ -475,7 +475,7 @@ def claude_manifest(tmp_path: Path, setting: str) -> bytes:
     root = tmp_path / "claude-mcp"
     shutil.copytree(ROOT / "src", root / "src")
     version = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
-    (root / "se.toml").write_text(f'[project]\nversion = "{version}"\n[plugin]\n{setting}\n', encoding="utf-8")
+    (root / "se.toml").write_text(f'[project]\nversion = "{version}"\n[plugin]\n{setting}\n', encoding="utf-8", newline="\n")
     return se_plugin.expected(root, copilot=False)[PurePosixPath(".claude-plugin/plugin.json")]
 
 
@@ -508,7 +508,7 @@ def test_the_committed_claude_manifest_follows_ses_own_claude_mcp():
 
 def test_a_claude_mcp_that_is_no_boolean_is_refused(tmp_path, capsys):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
-    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nclaude_mcp = "on"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nclaude_mcp = "on"\n', encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert "`claude_mcp = true|false`" in capsys.readouterr().err
 
@@ -538,7 +538,7 @@ def test_check_covers_the_copilot_manifest_and_mcp_file(checkout, capsys, name):
 
 def test_a_plugin_setting_the_build_cannot_read_is_refused(tmp_path, capsys):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
-    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nroot_mcp = "yes"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nroot_mcp = "yes"\n', encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert "[plugin] holds only `root_mcp = true|false`" in capsys.readouterr().err
 
@@ -665,12 +665,12 @@ def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_conten
     shutil.copytree(checkout / "src", stripped / "src")
     shutil.copytree(checkout / "guidance", stripped / "guidance")
     (stripped / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
-        'version = "', 'version = "0.0.', 1), encoding="utf-8")
+        'version = "', 'version = "0.0.', 1), encoding="utf-8", newline="\n")
     parts = 0
     for path in (stripped / "src").rglob("*.md"):
         text = path.read_text(encoding="utf-8")
         parts += text.count(se_plugin.COPILOT_OPEN + "\n")
-        path.write_text(re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", text), encoding="utf-8")
+        path.write_text(re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", text), encoding="utf-8", newline="\n")
     assert parts >= 3, "the se, worker and work-model sources carry Copilot parts"
     without = se_plugin.expected(stripped, copilot=False)
     assert not any(path.parts[0] == ".github" for path in without)
@@ -683,7 +683,7 @@ def built_with_manifest_setting(checkout: Path, root: Path, line: str | None) ->
     text = (checkout / "se.toml").read_text(encoding="utf-8")
     if line is not None:
         text = text.replace("[plugin]\n", f"[plugin]\n{line}\n", 1)
-    (root / "se.toml").write_text(text, encoding="utf-8")
+    (root / "se.toml").write_text(text, encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     return {se_plugin.PurePosixPath(path.relative_to(root).as_posix()): path.read_bytes()
             for path in root.rglob("*") if path.is_file() and path.parts[len(root.parts)] not in ("src", "se.toml")}
@@ -701,7 +701,7 @@ def test_the_copilot_manifest_setting_is_unset_and_unset_builds_todays_files_byt
     for folder in ("src", "guidance"):
         shutil.copytree(ROOT / folder, tmp_path / folder)
     (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
-        "[plugin]\n", '[plugin]\ncopilot_manifest = "github"\n', 1), encoding="utf-8")
+        "[plugin]\n", '[plugin]\ncopilot_manifest = "github"\n', 1), encoding="utf-8", newline="\n")
     assert se_plugin.expected(tmp_path) == committed
 
 
@@ -729,7 +729,7 @@ def test_check_names_a_copilot_manifest_at_the_other_place_as_not_generated(chec
     root = tmp_path / "tree"
     built_with_manifest_setting(checkout, root, setting)
     (root / leftover).parent.mkdir(parents=True, exist_ok=True)
-    (root / leftover).write_text("{}\n", encoding="utf-8")
+    (root / leftover).write_text("{}\n", encoding="utf-8", newline="\n")
     capsys.readouterr()
     assert se_plugin.main(["check", "--root", str(root)]) == 1
     assert f"{leftover}: not generated from src/" in capsys.readouterr().err
@@ -741,7 +741,7 @@ def test_check_names_a_copilot_manifest_at_the_other_place_as_not_generated(chec
 def test_a_copilot_manifest_place_the_build_cannot_read_is_refused(tmp_path, capsys):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
     (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\ncopilot_manifest = ".plugin"\n',
-                                      encoding="utf-8")
+                                      encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert '`copilot_manifest = "github"|"root"`' in capsys.readouterr().err
 
@@ -785,7 +785,7 @@ def test_the_powershell_hooks_setting_is_unset_and_unset_builds_todays_files_byt
     for folder in ("src", "guidance"):
         shutil.copytree(ROOT / folder, tmp_path / folder)
     (tmp_path / "se.toml").write_text((ROOT / "se.toml").read_text(encoding="utf-8").replace(
-        "[plugin]\n", '[plugin]\npowershell_hooks = "bash"\n', 1), encoding="utf-8")
+        "[plugin]\n", '[plugin]\npowershell_hooks = "bash"\n', 1), encoding="utf-8", newline="\n")
     assert se_plugin.expected(tmp_path) == committed
 
 
@@ -825,7 +825,7 @@ def test_the_handoff_lines_name_the_same_script_and_arguments():
 def test_a_powershell_hooks_value_the_build_cannot_read_is_refused(tmp_path, capsys):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
     (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\npowershell_hooks = "pwsh"\n',
-                                      encoding="utf-8")
+                                      encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     assert '`powershell_hooks = "bash"|"handoff"`' in capsys.readouterr().err
 
@@ -842,7 +842,7 @@ def drafts_copy(tmp_path: Path, setting: str = "") -> Path:
     write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
     write_source(tmp_path, "drafts/skills/try/SKILL.md", DRAFT.format(name="try"))
     write_source(tmp_path, "drafts/skills/try/references/more.md", "More.\n")
-    (tmp_path / "se.toml").write_text(f'[project]\nversion = "1.0.0"\n[plugin]\n{setting}\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text(f'[project]\nversion = "1.0.0"\n[plugin]\n{setting}\n', encoding="utf-8", newline="\n")
     return tmp_path
 
 
@@ -869,7 +869,7 @@ def test_a_listed_draft_is_built_into_both_layouts_and_adds_only_its_folders(tmp
     assert "](references/more.md)" in text and "](../x/SKILL.md)" in text
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     assert se_plugin.differences(root) == []
-    (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+    (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8", newline="\n")
     assert se_plugin.differences(root) == [f"{layout}/try/{name}: not generated from src/; remove it or add "
                                            "its source" for layout in (".github/skills", "skills")
                                            for name in ("SKILL.md", "references/more.md")]
@@ -890,7 +890,7 @@ def test_a_draft_skills_entry_the_build_cannot_include_is_refused_naming_it(tmp_
     root = drafts_copy(tmp_path, setting)
     if change:
         skill = root / "drafts" / "skills" / "try" / "SKILL.md"
-        skill.write_text(skill.read_text(encoding="utf-8").replace(*change), encoding="utf-8")
+        skill.write_text(skill.read_text(encoding="utf-8").replace(*change), encoding="utf-8", newline="\n")
     assert se_plugin.main(["build", "--root", str(root)]) == 2
     assert refusal in capsys.readouterr().err
     assert not (root / "skills").exists()
