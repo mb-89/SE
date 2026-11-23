@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 import pytest
 import git_door
 import fake_git
+import fake_processes as fake_processes_module
 
 
 # Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py.
@@ -47,6 +49,28 @@ def run_helper(*args: str) -> subprocess.CompletedProcess[str]:
             if isinstance(exit_.code, str):
                 print(exit_.code, file=sys.stderr)
     return subprocess.CompletedProcess(["work_tickets.py", *args], code, out.getvalue(), err.getvalue())
+
+
+def python_in_process(call: fake_processes_module.Invocation) -> fake_processes_module.Answer:
+    """`python -c <code> <arguments>` or `python <file>.py <arguments>`, as the process door's fake
+    answers it: the code run in this process as the interpreter would run it, in the call's working
+    directory and environment, its `sys.argv`, output and exit code the child's."""
+    words = call.words[1:]
+
+    def main(_arguments: list[str]) -> None:
+        if words[0] == "-c":
+            sys.argv[:] = ["-c", *words[2:]]
+            exec(compile(words[1], "<string>", "exec"), {"__name__": "__main__"})
+        else:
+            sys.argv[:] = words
+            runpy.run_path(words[0], run_name="__main__")
+
+    return fake_processes_module.run_main(main, call)
+
+
+def runs_python(fake_processes: fake_processes_module.FakeProcesses) -> None:
+    """The interpreter, as the code under test runs it, answered by `python_in_process`."""
+    fake_processes.on(lambda call: fake_processes_module.python(call.words[0]), python_in_process)
 
 
 def command(worktree: Path, *args: str) -> list[str]:
@@ -89,7 +113,8 @@ def git_worktree(case_root: Path) -> tuple[Path, Path]:
     return coordinator, worker
 
 
-def test_project_checks_run_all_commands_and_report_failures(tmp_path: Path) -> None:
+def test_project_checks_run_all_commands_and_report_failures(tmp_path: Path, fake_processes) -> None:
+    runs_python(fake_processes)
     passed = tmp_path / "passed.txt"
     first_failed = tmp_path / "first-failed.txt"
     second_failed = tmp_path / "second-failed.txt"
@@ -2600,11 +2625,12 @@ def test_route_routes_nothing_while_paused(worktree, monkeypatch, capsys):
 BUDGET_SUITE = 'print("0.20s call     tests/test_fast.py::test_quick")\nprint("3 passed")\n'
 
 
-def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
+def budget_suite(root: Path, monkeypatch, fake_processes, seconds: float, ci: float | None,
                  extra: str = "") -> list[int]:
     """A suite in se.toml `[tests]` (limit 120 s, plus the `extra` lines) that a fake clock times
-    at `seconds`, and CI's suite time on main faked as `ci` (None: unknown); returns a list
-    that counts CI reads."""
+    at `seconds`, run in this process (`runs_python`), and CI's suite time on main faked as `ci`
+    (None: unknown); returns a list that counts CI reads."""
+    runs_python(fake_processes)
     (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8")
     (root / "se.toml").write_text(
         f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
@@ -2624,10 +2650,10 @@ def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
 
 
 def test_a_slow_local_suite_with_a_fast_ci_time_passes_with_a_warning_and_notes_both_times(
-        worktree, monkeypatch, capsys):
+        worktree, monkeypatch, capsys, fake_processes):
     path = worktree / "metrics.jsonl"
     monkeypatch.setenv("SE_METRICS", str(path))
-    budget_suite(worktree, monkeypatch, 130.0, 45.0)
+    budget_suite(worktree, monkeypatch, fake_processes, 130.0, 45.0)
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
 
@@ -2643,8 +2669,8 @@ def test_a_slow_local_suite_with_a_fast_ci_time_passes_with_a_warning_and_notes_
 
 @pytest.mark.parametrize("ci", [108.0, 130.0, None])
 def test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses(
-        worktree, monkeypatch, capsys, ci):
-    budget_suite(worktree, monkeypatch, 130.0, ci)
+        worktree, monkeypatch, capsys, ci, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 130.0, ci)
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == \
         work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
@@ -2660,9 +2686,9 @@ def test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses(
 
 
 def test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests(
-        worktree, monkeypatch, capsys):
+        worktree, monkeypatch, capsys, fake_processes):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    reads = budget_suite(worktree, monkeypatch, 130.0, 10.0)
+    reads = budget_suite(worktree, monkeypatch, fake_processes, 130.0, 10.0)
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == \
         work_tickets.SUITE_OVER_LIMIT_EXIT_CODE
@@ -2677,10 +2703,10 @@ def test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests(
 
 @pytest.mark.parametrize("reference", [True, False], ids=["ci", "local"])
 def test_an_overrun_only_warns_where_the_project_declares_warn_only(
-        worktree, monkeypatch, capsys, reference):
+        worktree, monkeypatch, capsys, reference, fake_processes):
     if reference:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    budget_suite(worktree, monkeypatch, 130.0, 118.0, 'over_limit = "warn"\n')
+    budget_suite(worktree, monkeypatch, fake_processes, 130.0, 118.0, 'over_limit = "warn"\n')
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
 
@@ -2691,16 +2717,16 @@ def test_an_overrun_only_warns_where_the_project_declares_warn_only(
     assert "Suite: 3 passed; 130.0 s (target 60 s, limit 120 s)" in captured.out
 
 
-def test_over_limit_takes_fail_or_warn_only(worktree, monkeypatch, capsys):
-    budget_suite(worktree, monkeypatch, 40.0, None, 'over_limit = "ignore"\n')
+def test_over_limit_takes_fail_or_warn_only(worktree, monkeypatch, capsys, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 40.0, None, 'over_limit = "ignore"\n')
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
     assert 'over_limit must be "fail" (the default) or "warn"' in capsys.readouterr().err
 
 
-def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monkeypatch, capsys):
+def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monkeypatch, capsys, fake_processes):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    budget_suite(worktree, monkeypatch, 40.0, None)
+    budget_suite(worktree, monkeypatch, fake_processes, 40.0, None)
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
     assert "::notice title=se suite time::Suite time: 40.0 s (limit 120 s)" in capsys.readouterr().out
@@ -2749,8 +2775,8 @@ def test_suite_refuses_a_checkout_that_holds_a_moved_folders_output_naming_the_r
     assert "`git clean -fdX adapters/html` and `git clean -fdX kern`, then run again" in error
 
 
-def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, monkeypatch, capsys):
-    reads = budget_suite(worktree, monkeypatch, 40.0, 45.0)
+def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, monkeypatch, capsys, fake_processes):
+    reads = budget_suite(worktree, monkeypatch, fake_processes, 40.0, 45.0)
 
     work_tickets.run_suite(worktree)
     assert reads == []
@@ -2760,13 +2786,13 @@ def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, mo
 
 
 def test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_times_its_shards(
-        worktree, monkeypatch, capsys):
+        worktree, monkeypatch, capsys, fake_processes):
     """obs's CI keeps each of 2 shards under 120 s; a local run of the whole suite (147 s) is
     judged against 2 x 120 s, not against one shard's limit, so it does not warn on every landing;
     over its target (2 x 60 s) it still warns, naming both settings."""
     path = worktree / "metrics.jsonl"
     monkeypatch.setenv("SE_METRICS", str(path))
-    reads = budget_suite(worktree, monkeypatch, 147.0, 77.0, "shards = 2\n")
+    reads = budget_suite(worktree, monkeypatch, fake_processes, 147.0, 77.0, "shards = 2\n")
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
 
@@ -2781,8 +2807,8 @@ def test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_ti
 
 @pytest.mark.parametrize("ci, refused", [(77.0, False), (110.0, True)])
 def test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard(
-        worktree, monkeypatch, capsys, ci, refused):
-    budget_suite(worktree, monkeypatch, 250.0, ci, "shards = 2\n")
+        worktree, monkeypatch, capsys, ci, refused, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 250.0, ci, "shards = 2\n")
 
     code = work_tickets.main(["suite", "--worktree", str(worktree)])
 
@@ -2797,8 +2823,8 @@ def test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard(
 
 
 @pytest.mark.parametrize("value", ["0", "true", "1.5"])
-def test_shards_takes_a_whole_number_of_one_or_more(worktree, monkeypatch, capsys, value):
-    budget_suite(worktree, monkeypatch, 40.0, None, f"shards = {value}\n")
+def test_shards_takes_a_whole_number_of_one_or_more(worktree, monkeypatch, capsys, value, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 40.0, None, f"shards = {value}\n")
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
     assert "shards must be a whole number of 1 or more" in capsys.readouterr().err
@@ -2816,8 +2842,8 @@ def record_two_shards(root: Path, monkeypatch, fast: float, slow: float) -> Path
 
 
 def test_a_sharded_suite_reports_its_slowest_shard_as_ci_s_suite_time(
-        worktree, monkeypatch, capsys):
-    budget_suite(worktree, monkeypatch, 0.0, None)
+        worktree, monkeypatch, capsys, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 55.5)
     assert json.loads((records / "slow.json").read_text(encoding="utf-8")) == {
         "shard": "slow", "seconds": 55.5, "exit_code": 0}
@@ -2844,9 +2870,9 @@ def origin_main_of(root: Path, messages: list[str]) -> tuple[Path, list[str]]:
 
 
 def test_the_shards_notice_round_trips_through_ci_suite_time(
-        worktree, tmp_path, monkeypatch, capsys, fake_git_door):
+        worktree, tmp_path, monkeypatch, capsys, fake_git_door, fake_processes):
     read_ci = work_tickets.ci_suite_time  # the real one, reading the fake check run below
-    budget_suite(worktree, monkeypatch, 0.0, None)
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 55.5)
     work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
     notice, = (line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice"))
@@ -2866,8 +2892,8 @@ def test_the_shards_notice_round_trips_through_ci_suite_time(
 
 @pytest.mark.parametrize("warn_only", [False, True], ids=["fail", "warn"])
 def test_a_sharded_overrun_fails_unless_the_project_declares_warn_only(
-        worktree, monkeypatch, capsys, warn_only):
-    budget_suite(worktree, monkeypatch, 0.0, None, 'over_limit = "warn"\n' if warn_only else "")
+        worktree, monkeypatch, capsys, warn_only, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None, 'over_limit = "warn"\n' if warn_only else "")
     records = record_two_shards(worktree, monkeypatch, 20.0, 130.0)
 
     code = work_tickets.main(["suite-time", "--worktree", str(worktree), "--shards", str(records)])
@@ -2884,8 +2910,8 @@ def test_a_sharded_overrun_fails_unless_the_project_declares_warn_only(
         assert "over its limit ([tests] limit_seconds in se.toml)" in annotation
 
 
-def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, capsys):
-    budget_suite(worktree, monkeypatch, 0.0, None)
+def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, capsys, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 30.0)
     arguments = ["suite-time", "--worktree", str(worktree), "--shards", str(records)]
 
@@ -2905,8 +2931,8 @@ def test_a_failed_or_missing_shard_fails_the_suite_time(worktree, monkeypatch, c
     assert out.index("  red: 5.0 s, exit code 4") < out.index("::error::")
 
 
-def test_a_sharded_suite_over_its_target_warns_as_an_annotation(worktree, monkeypatch, capsys):
-    budget_suite(worktree, monkeypatch, 0.0, None)
+def test_a_sharded_suite_over_its_target_warns_as_an_annotation(worktree, monkeypatch, capsys, fake_processes):
+    budget_suite(worktree, monkeypatch, fake_processes, 0.0, None)
     records = record_two_shards(worktree, monkeypatch, 20.0, 70.0)
     capsys.readouterr()
 
@@ -3059,10 +3085,10 @@ def test_refs_request_runs_its_steps_through_kerns_relay_as_one_call(
     assert fake.comments_posted == [] and fake.dispatched == []  # nothing went through gh
 
 
-def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeypatch, capsys):
+def test_a_relay_landing_skips_cis_suite_time_and_says_so_once(worktree, monkeypatch, capsys, fake_processes):
     """On the relay path CI's suite time is not read past kern's relay: the one line says it was
     skipped, and the time counts as unknown."""
-    reads = budget_suite(worktree, monkeypatch, 40.0, 45.0)
+    reads = budget_suite(worktree, monkeypatch, fake_processes, 40.0, 45.0)
 
     work_tickets.run_suite(worktree, read_ci=True, ci_skipped=work_tickets.CI_SKIPPED_ON_RELAY)
 
