@@ -405,7 +405,9 @@ def test_integrate_lands_a_pull_request_end_to_end_through_the_relay(
             "pull_request_read get_check_runs", "merge_pull_request", "pull_request_read get",
             "pull_request_read get",  # the landing description, for its metrics line
             "add_issue_comment", "update_pull_request", "add_issue_comment",  # the close-out
-            "issue_read get_labels", "issue_write update", "issue_write update", "issue_read get",
+            "issue_read get_labels", "issue_write update",  # out of progress
+            "issue_read get",  # its beat line read: the issue holds none, so nothing is written
+            "issue_write update", "issue_read get",  # closed
         ], answered
         assert "Integrated pull request #7" in out, out
         assert len(nexts) == 1 and "1. list_issues {" in nexts[0], nexts  # se_relay.py next
