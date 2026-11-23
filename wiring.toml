@@ -1,7 +1,7 @@
 # SE as an application on kern: the core the `se` binary serves in this checkout (bootstrap.sh
 # starts it, SE's docs/go-core.md "How the binary arrives") places and carries every one of SE's
 # components. SE's command groups are Python, placed in a process each (README "Commands as
-# components"); SE's fleet, retro-due and origin are Go, compiled into the `se` binary with kern's
+# components"); SE's fleet, retro-due, origin and template are Go, compiled into the `se` binary with kern's
 # GitHub component (components/README.md). The `se` binary carries the Go ones, so this wiring may
 # name them; the bare `kern` could not, which is why they lived in components/wiring.toml until SE's
 # start served `se`.
@@ -72,6 +72,11 @@ config = { lease-hours = 3.0, repository = "SE", base = "main" }
 [instances.retro-due]
 component = "retro-due"
 config = { due-after = 10, base = "main" }
+
+# SE's template engine in Go (components/README.md "The template engine in Go"): its verb fill makes
+# the filled template, the one value a templated target takes, from SE's templates/.
+[instances.template]
+component = "template"
 
 [wires]
 "clock.second" = "clock/second"
