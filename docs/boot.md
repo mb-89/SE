@@ -11,10 +11,10 @@ SE's first message is its start report, the same on every start and generated fr
 
 ```text
 SE 12.0.1 started
-[3 skills](<docs>#docs-skills)
-[70 rules](<docs>#docs-rules)
-[4 sub-agents](<docs>#docs-sub-agents)
-[Documentation](<docs>)
+[3 skills](https://example.com/se/#docs-skills)
+[70 rules](https://example.com/se/#docs-rules)
+[4 sub-agents](https://example.com/se/#docs-sub-agents)
+[Documentation](https://example.com/se/)
 
 | component | loaded | newest |
 |---|---|---|

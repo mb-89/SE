@@ -25,7 +25,7 @@ is mechanical: the command decides from versions alone, and you follow what it p
    where it comes from. A section that names a command runs it; a check that fails is fixed before
    the next section.
 4. **Commit** what the update and the sections changed (`se.toml`, `se.lock`, a `go.mod`, the
-   sections' edits), one commit per section, where the work model lets this session commit
+   sections' edits), committing after each section, where the work model lets this session commit
    ([work-model](../work-model/SKILL.md)); else name the changed files for the person.
 5. **What another repository moves**: a line that names a component's own pin is a ticket for that
    component's repository, filed as the work model's tickets for other repositories are.
