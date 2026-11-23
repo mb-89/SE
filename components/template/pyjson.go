@@ -32,8 +32,8 @@ func pyJSON(text string) (any, error) {
 
 type jsonReader struct{ s []rune }
 
-// jsonError is Python's json.JSONDecodeError.
-type jsonError struct{ msg string }
+// jsonError is Python's json.JSONDecodeError: its text, and what, its msg without the place.
+type jsonError struct{ msg, what string }
 
 func (e *jsonError) Error() string { return e.msg }
 
@@ -49,7 +49,7 @@ func (d *jsonReader) fail(what string, at int) error {
 			line, col = line+1, at-i
 		}
 	}
-	return &jsonError{fmt.Sprintf("%s: line %d column %d (char %d)", what, line, col, at)}
+	return &jsonError{fmt.Sprintf("%s: line %d column %d (char %d)", what, line, col, at), what}
 }
 
 func jsonSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }

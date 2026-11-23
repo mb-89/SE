@@ -185,7 +185,9 @@ se.toml.
 - A repository that does not resolve, or whose pin cannot be fetched, refuses the fill with the
   name and the remedy; it never falls back to another repository's template of the same name.
 - `scripts/templates.py` (`catalog`) owns the resolution, `scripts/se_modules.py`
-  (`template_repositories`) the list and its pins.
+  (`template_repositories`) the list and its pins; the Go component `template` resolves the same
+  way, held to it by shared cases
+  ([components/README.md](../components/README.md#the-template-engine-in-go)).
 
 Each imported template lives with its overlay in its template repository:
 

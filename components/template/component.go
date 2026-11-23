@@ -141,14 +141,15 @@ func seCheckout() string {
 	return componentFolder(root, "se")
 }
 
-// Catalog reads the templates of the checkout the instance serves: its templates/ folder, each
-// marked with the instance's repository. It reads them at each call, so an edited template counts
-// at once.
+// catalog reads the templates a name resolves to for the checkout the instance serves, as
+// templates.py `catalog` does (CatalogAt): its own templates/ at origin's integration branch, else
+// its working tree's, marked with the instance's repository; then each template repository its
+// se.toml lists; then SE's. It reads them at each call, so a template that changed counts at once.
 func catalog() (Catalog, error) {
 	s.mu.Lock()
 	root, repository := s.root, s.repository
 	s.mu.Unlock()
-	return LoadFolder(filepath.Join(root, TemplatesFolder), repository)
+	return CatalogAt(root, repository, seCheckout())
 }
 
 // LoadFolder loads the template notes and the term list of one folder, marked with repository.

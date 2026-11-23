@@ -19,7 +19,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 | `fleet` | `github/issues`, `github/pulls`, `github/checks`, `github/issue-lists`, `github/pull-lists` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed, how many issues, pull requests and branches it read, whether that was a complete read of the open issue and pull-request lists (`complete`) and since when (`since`); only a complete read is `healthy` | `work_tickets.py` `fleet_findings` |
 | `retro-due` | `github/issues`, `github/pulls` whole; `origin/tracker`; config `due-after` (20), `failure-weight` (5), `days` (7), `overhaul-after` (3), `overhaul-days` (30), `base` | `retro-due/due`: what came back since the newest retro started (landed, failed, their weighted `count`), whether a retro is due and why, the retros open, where the window starts; the retros closed since the newest overhaul started, whether an overhaul is due and why, the overhauls open | `retro.py` `retro_countdown`, `overhaul.py` `overhaul_countdown` |
 | `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (kern's `kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
-| `template` | SE's `templates/` in the checkout its config `root` names, at each call; SE's scripts in the checkout its config `se` names (rule `dangling`) | nothing: its verbs answer. `fill` makes a filled template ([The template engine in Go](#the-template-engine-in-go)); `accept` is a templated target's gate across the bus; `check` gives a text's findings | `scripts/templates.py` |
+| `template` | at each call, the templates a name resolves to for the checkout its config `root` names, as `catalog` reads them ([The template engine in Go](#the-template-engine-in-go)); SE's scripts and templates in the checkout its config `se` names | nothing: its verbs answer. `fill` makes a filled template ([The template engine in Go](#the-template-engine-in-go)); `accept` is a templated target's gate across the bus; `check` gives a text's findings | `scripts/templates.py` |
 
 - **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the
@@ -58,6 +58,16 @@ answer as the Python functions of their names do.
   each name SE's templates use in `References` (`references.go`), `Checkers` and `Extractors`
   (`checkers.go`), and the cases hold each port to the Python one. A name Go holds no port of does
   not load; an adapter whose checker or reading Go does not hold fails its check, naming it.
+- **Where a name resolves.** `CatalogAt` (`repositories.go`) is `catalog`'s resolution: the
+  checkout's own `templates/` at origin's integration branch (se.toml `[project]
+  integration_branch`, through kern's git door), else in its working tree; then each template
+  repository se.toml `[templates] repositories` lists, a component pinned by `ref`, `version`
+  (with `se.lock`) or `go` and placed at its pin, or the machine's `~/.se/local.toml` `[paths]`
+  checkout; then SE's own. A repository that does not resolve refuses the catalog with
+  `se_modules.py`'s words; `overlays.go` applies each `<name>.overlay.md` and refuses one that
+  loosens its template. The cases hold checkouts with every kind of pin and refusal, their git
+  answered by a fake (`repositories.json`), and overlays that load and do not. A TOML file that
+  does not parse names go-toml's error, where Python names tomllib's.
 - **The rule `dangling`.** An SE command or script a text names that does not exist
   (`dangling.go`, the port of `scripts/references.py` `dangling`): Go reads each script's
   subcommands from its source (`commands.go`: the parser `main` parses, its `add_parser` calls, a
