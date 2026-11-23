@@ -65,7 +65,8 @@ judged by their own rules (The file tools, below).
 - The shell reader (SHELL_KEYS to shell_writes): a call of any other tool whose input holds a
   string `command`, `input` or `script` naming `gh` as a word followed by a space (GH_WORD, the
   filter se_hook.sh runs in builtins) is split with shlex at `&&`, `||`, `;`, `|`, `&` and line
-  breaks, each part's assignments and prefixes `env`, `command`, `timeout` and `nohup` dropped.
+  breaks, each part's assignments and prefixes `env`, `command`, `timeout` and `nohup` dropped;
+  in a `powershell` tool's command a backslash escapes nothing, so a Windows path is read whole.
   Each part that is one of these writes is judged as the GitHub tools' call of its action:
   - `gh issue` with `create`, `edit` or `comment` (`--edit-last`: `comment.edit`): `issue.create`,
     `issue.edit`, `comment.create`; `gh pr` with `create`, `edit`, `comment` or `review`:
@@ -277,10 +278,11 @@ class Shell(Exception):
     """A command the reader cannot split: the call passes, and the log says why."""
 
 
-def prepared(text: str) -> tuple[str, list[tuple[bool, str]]]:
+def prepared(text: str, powershell: bool = False) -> tuple[str, list[tuple[bool, str]]]:
     """The command with COMPUTED for each $ and backtick the shell expands, each heredoc's
     operator replaced by HEREDOC and its index, line breaks as `;`, comments and line
-    continuations dropped; and the heredocs, each (quoted, body)."""
+    continuations dropped; and the heredocs, each (quoted, body). In PowerShell (`powershell`)
+    a backslash is a character as any other, as in a Windows path."""
     out: list[str] = []
     docs: list[tuple[bool, str]] = []
     pending: list[tuple[str, bool, bool]] = []
@@ -293,7 +295,7 @@ def prepared(text: str) -> tuple[str, list[tuple[bool, str]]]:
             out.append(c)
             i += 1
             continue
-        if c == "\\" and i + 1 < n:
+        if c == "\\" and i + 1 < n and not powershell:
             following = text[i + 1]
             if following == "\n":
                 i += 2
@@ -352,13 +354,16 @@ def prepared(text: str) -> tuple[str, list[tuple[bool, str]]]:
     return "".join(out), docs
 
 
-def shell_parts(text: str) -> list[tuple[list[str], tuple[str, str] | None]]:
+def shell_parts(text: str, powershell: bool = False) -> list[tuple[list[str], tuple[str, str] | None]]:
     """The command split at `&&`, `||`, `;`, `|` and `&` with shlex: each part's words and its
-    stdin, ("text", <text>), ("file", <path>), ("pipe", ""), ("unread", <why>) or None."""
+    stdin, ("text", <text>), ("file", <path>), ("pipe", ""), ("unread", <why>) or None. In
+    PowerShell (`powershell`) a backslash escapes nothing."""
     import shlex
-    line, docs = prepared(text)
+    line, docs = prepared(text, powershell)
     lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
     lexer.whitespace_split, lexer.commenters = True, ""
+    if powershell:
+        lexer.escape = ""
     try:
         tokens = list(lexer)
     except ValueError as error:
@@ -608,7 +613,7 @@ def shell_writes(write: "Write", project: Path | None) -> list[ShellWrite]:
         return []
     origin = (sibling("work_tickets").remote_repo(project) or "") if project is not None else ""
     calls = []
-    for words, stdin in shell_parts(command):
+    for words, stdin in shell_parts(command, powershell=write.name.casefold() == "powershell"):
         call = gh_write(write, unprefixed(words), stdin, origin)
         if call is not None:
             calls.append(call)

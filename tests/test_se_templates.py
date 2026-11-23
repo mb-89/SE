@@ -386,10 +386,18 @@ def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
 
 def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh):
     """A judgement still running at the bound: the bound is zero and the judgement waits until
-    the gate has answered, so the order, not the clock, makes it late."""
-    released = threading.Event()
+    the gate has answered, so the order, not the clock, makes it late. The gate's wait starts once
+    the judgement is deciding, past finding the project, as no scheduler promises that order."""
+    released, reached = threading.Event(), threading.Event()
+
+    class Started(threading.Thread):
+        def start(self) -> None:
+            super().start()
+            reached.wait(60)
+
     monkeypatch.setattr(se_templates, "GATE_SECONDS", 0)
-    monkeypatch.setattr(se_templates, "deciding", lambda *_: released.wait(60))
+    monkeypatch.setattr(se_templates, "deciding", lambda *_: reached.set() or released.wait(60))
+    monkeypatch.setattr(se_templates.threading, "Thread", Started)
     text = payload("mcp__github__issue_write", project, method="create", title=TITLE,
                    labels=["work"], body=THIN)
     try:
@@ -518,11 +526,11 @@ def test_each_gh_write_is_denied_off_template_and_passes_its_template(row, capsy
                                                               gh):
     command, thin, good, template = GH_ROWS[row]
     path = body_file(project, thin, "thin.md")
-    reason = denial(gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)),
+    reason = denial(gate(capsys, monkeypatch, shell_payload(command.replace("{file}", path.as_posix()),
                                                             project), "--gate", "refuse"))
     assert f"the {template} template refuses" in reason
     path = body_file(project, good, "good.md")
-    assert gate(capsys, monkeypatch, shell_payload(command.replace("{file}", str(path)), project),
+    assert gate(capsys, monkeypatch, shell_payload(command.replace("{file}", path.as_posix()), project),
                 "--gate", "refuse") == ""
 
 
@@ -543,10 +551,18 @@ def test_a_gh_write_is_read_behind_prefixes_separators_and_quotes(command, capsy
         gate(capsys, monkeypatch, shell_payload(text, project), "--gate", "refuse"))
 
 
+def test_a_powershell_command_keeps_the_backslashes_of_a_windows_path():
+    command = r"gh issue create -t x --body-file C:\Users\me\body.md; gh pr create -F 'D:\a b\r.md'"
+    assert [words for words, _ in se_templates.shell_parts(command, powershell=True)] == [
+        ["gh", "issue", "create", "-t", "x", "--body-file", r"C:\Users\me\body.md"],
+        ["gh", "pr", "create", "-F", r"D:\a b\r.md"]]
+    assert se_templates.shell_parts(command)[0][0][-1] == "C:Usersmebody.md", "bash drops them"
+
+
 def test_gh_api_input_is_read_as_json_and_reads_pass(capsys, monkeypatch, project, gh):
     data = body_file(project, json.dumps({"title": TITLE, "body": THIN, "labels": ["work"]}),
                      "issue.json")
-    api = f"gh api repos/{OWNER}/{REPO_NAME}/issues --input {data}"
+    api = f"gh api repos/{OWNER}/{REPO_NAME}/issues --input {data.as_posix()}"
     assert "the work template refuses" in denial(
         gate(capsys, monkeypatch, shell_payload(api, project), "--gate", "refuse"))
     data.write_text(json.dumps({"title": TITLE, "body": GOOD_WORK, "labels": ["work"]}),
@@ -607,11 +623,11 @@ def test_gh_fill_into_the_integration_branch_is_denied_and_a_quoted_heredoc_is_r
 def test_other_commands_and_writes_elsewhere_print_nothing(capsys, monkeypatch, project, gh):
     thin = body_file(project, THIN, "thin.md")
     for command in ("ls -la", "git status", "echo through high enough ",
-                    f"gh issue create -R someone/elsewhere -t x -l work --body-file {thin}",
-                    f"gh api repos/someone/elsewhere/issues -F body=@{thin}",
+                    f"gh issue create -R someone/elsewhere -t x -l work --body-file {thin.as_posix()}",
+                    f"gh api repos/someone/elsewhere/issues -F body=@{thin.as_posix()}",
                     "echo 'unclosed"):
         assert gate(capsys, monkeypatch, shell_payload(command, project), "--gate", "refuse") == ""
-    text = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
+    text = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin.as_posix()}", project)
     assert gate(capsys, monkeypatch, text, "--gate", "off") == ""
     assert "work template" in denial(gate(capsys, monkeypatch, text, "--gate", "refuse"))
     copilot = json.dumps({"sessionId": SESSION, "cwd": str(project), "toolName": "powershell",
@@ -630,8 +646,8 @@ def test_an_unreadable_comment_passes_and_logs_one_line(capsys, monkeypatch, pro
 
 def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
     thin = body_file(project, THIN, "thin.md")
-    plain = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin}", project)
-    held = shell_payload(f"gh issue create -t {TITLE} -l work -l off-template --body-file {thin}",
+    plain = shell_payload(f"gh issue create -t {TITLE} -l work --body-file {thin.as_posix()}", project)
+    held = shell_payload(f"gh issue create -t {TITLE} -l work -l off-template --body-file {thin.as_posix()}",
                          project)
     assert "off-template" not in denial(gate(capsys, monkeypatch, plain, "--gate", "refuse"))
     assert "off-template" in denial(gate(capsys, monkeypatch, held, "--gate", "refuse"))
@@ -642,7 +658,7 @@ def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
 def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, "refuse")
     thin = body_file(root, THIN, "thin.md")
-    command = f"gh issue create -R {OWNER}/{REPO_NAME} -t {TITLE} -l work --body-file {thin}"
+    command = f"gh issue create -R {OWNER}/{REPO_NAME} -t {TITLE} -l work --body-file {thin.as_posix()}"
     result = hooked(tmp_path, shell_payload(command, root), CLAUDE_PROJECT_DIR=sh(root))
     assert result.returncode == 0 and "the work template refuses" in denial(result.stdout)
     pythons = tmp_path / "hook-home" / "pythons"
