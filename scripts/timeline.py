@@ -307,8 +307,39 @@ def status(issue: dict) -> str:
     return "open"
 
 
+# A code span as CommonMark reads it: a run of backticks, its text, and a run of the same length.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+# A wikilink or an embed, which obs reads as a link through every escape but a code span.
+WIKILINK = re.compile(r"!?\[\[.*?\]\]")
+
+
+def spans(value: str) -> list[tuple[str, bool]]:
+    """``value`` cut into its pieces, each with whether it is a code span (kept with its backticks)."""
+    pieces, at = [], 0
+    for match in CODE_SPAN.finditer(value):
+        pieces += [(value[at:match.start()], False), (match[0], True)]
+        at = match.end()
+    return [piece for piece in [*pieces, (value[at:], False)] if piece[0]]
+
+
+def code(value: str) -> str:
+    """``value`` as one code span, its fence longer than any backtick run inside."""
+    fence = "`" * (max(map(len, re.findall(r"`+", value)), default=0) + 1)
+    pad = " " if value.startswith("`") or value.endswith("`") else ""
+    return f"{fence}{pad}{value}{pad}{fence}"
+
+
+def quoted_links(value: str, plain=lambda piece: piece) -> str:
+    """``value`` with every wikilink outside a code span made a code span, so it stays text, and
+    every other piece outside one passed through ``plain``; its code spans are kept as they are."""
+    return "".join(piece if is_code else "".join(
+        code(part) if WIKILINK.fullmatch(part) else plain(part) for part in re.split(f"({WIKILINK.pattern})", piece))
+        for piece, is_code in spans(value))
+
+
 def goal(body: str) -> str:
-    """The first paragraph of the body's Goal section, or of the body where it has none, as plain text."""
+    """The first paragraph of the body's Goal section, or of the body where it has none, as one line
+    of Markdown: its code spans kept and its bold markers removed outside them."""
     text = re.sub(r"<!--.*?-->", "", body.replace("\r\n", "\n"), flags=re.S)
     section = re.search(r"^#{1,6}\s*Goal\s*\n(.*?)(?=^#{1,6}\s|\Z)", text, flags=re.S | re.M)
     source = section[1] if section else text
@@ -317,7 +348,7 @@ def goal(body: str) -> str:
         lines = [line for line in lines if line and not re.match(r"#{1,6}\s", line)]
         if lines:
             paragraph = " ".join(lines)
-            return re.sub(r"\*\*|__|`", "", paragraph)
+            return "".join(piece if is_code else re.sub(r"\*\*|__", "", piece) for piece, is_code in spans(paragraph))
     return ""
 
 
@@ -398,7 +429,7 @@ def rows(snapshot: dict, ages: bool = False) -> list[dict]:
             stamp = issue["closed_at"] if where == "done" else issue.get("created_at")
             found.append(({
                 "repository": lane, "number": issue["number"], "place": PLACES[where],
-                "date": day(stamp) if stamp else "", "subject": issue["title"], "status": status(issue),
+                "date": day(stamp) if stamp else "", "subject": quoted_links(issue["title"]), "status": status(issue),
                 "mark": mark(issue, where, today, ages, read_at), "state": issue["state"],
                 "state_reason": issue.get("state_reason"), "labels": sorted(issue["labels"]),
                 "path": f"entries/{lane}-{issue['number']}.md", "url": issue["url"], "goal": goal(issue["body"]),
@@ -484,9 +515,10 @@ def base(names: list[str]) -> dict:
 
 
 def text(value: object) -> str:
-    """``value`` as Markdown text that shows as written: every ASCII punctuation mark escaped, so issue
-    text never becomes a link, a tag, markup or HTML."""
-    return re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", " ".join(str(value).split()))
+    """``value`` as Markdown text that shows as written: its code spans kept, its wikilinks made code
+    spans (obs reads one through any backslash) and every other ASCII punctuation mark escaped, so
+    issue text never becomes a link, a tag, markup or HTML."""
+    return quoted_links(" ".join(str(value).split()), lambda piece: re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", piece))
 
 
 def frontmatter(fields: dict) -> str:
