@@ -163,13 +163,38 @@ def test_a_row_opens_on_the_first_paragraph_of_its_goal_and_its_link():
     body = "<!-- se:fleet -->\n## Goal\n\nA **timeline**\nof `SE`.\n\nMore.\n\n## Requirements\n\n1. x\n"
     files = notes(snapshot(issue(1, "ready", body=body)))
     assert files["entries/a-1.md"].endswith(
-        "\nA timeline of SE\\.\n\n[Open \\#1 on GitHub](<https://github.com/o/a/issues/1>)\n")
+        "\nA timeline of `SE`\\.\n\n[Open \\#1 on GitHub](<https://github.com/o/a/issues/1>)\n")
     assert timeline.goal("No sections.\n\nSecond.") == "No sections."
+
+
+# obs#274's Goal quotes obs's block-link syntax in a code span; deleting the backticks made it a live
+# link to a block the Timeline's note lacks, and obs refused the docs build.
+OBS_274_GOAL = "## Goal\n\nA block link such as `[[#^name]]` names a block id, and **obs** resolves it.\n"
+
+
+def test_a_goal_keeps_its_code_spans_so_quoted_link_syntax_stays_code():
+    files = notes(snapshot(issue(274, "ready", body=OBS_274_GOAL)))
+    assert ("\nA block link such as `[[#^name]]` names a block id\\, and obs resolves it\\.\n"
+            in files["entries/a-274.md"])
+
+
+def test_bold_markers_are_removed_outside_code_spans_only():
+    assert timeline.goal("## Goal\n\n**a** __b__ `**c**` ``d ` __e__``\n") == "a b `**c**` ``d ` __e__``"
+
+
+def test_link_syntax_outside_a_code_span_becomes_a_code_span():
+    files = notes(snapshot(issue(1, "ready", body="## Goal\n\nSee [[note]], ![[img.png]] and [[#^name]]`.\n")))
+    assert "\nSee `[[note]]`\\, `![[img.png]]` and `[[#^name]]`\\`\\.\n" in files["entries/a-1.md"]
+
+
+def test_a_title_quoting_link_syntax_keeps_it_as_text_in_the_frontmatter():
+    titled = issue(1, "ready") | {"title": "Fix [[note]] and `[[#^name]]`"}
+    assert front(notes(snapshot(titled))["entries/a-1.md"])["subject"] == "Fix `[[note]]` and `[[#^name]]`"
 
 
 def test_text_from_issues_shows_as_written_and_never_as_markup():
     files = notes(snapshot(issue(1, "ready", body="## Goal\n\n<script>x</script> [[note]] *a*")))
-    assert "\n\\<script\\>x\\<\\/script\\> \\[\\[note\\]\\] \\*a\\*\n" in files["entries/a-1.md"]
+    assert "\n\\<script\\>x\\<\\/script\\> `[[note]]` \\*a\\*\n" in files["entries/a-1.md"]
     assert front(files["entries/a-1.md"])["subject"] == "issue 1"
 
 
@@ -486,7 +511,8 @@ def large_snapshot() -> dict:
 def test_the_page_builds_through_obs_html_without_a_warning(tmp_path, obs, capsys):
     """The build itself, through obs and its adapter component obs-html, with no browser: CI's
     runner skips the tests that open one (`page`)."""
-    snap = snapshot(issue(1, "in-progress"), issue(2, "ready"))
+    unquoted = issue(4, "ready", body="## Goal\n\nSee [[note]] and [[#^name]].\n") | {"title": "Quote [[#^name]]"}
+    snap = snapshot(issue(1, "in-progress"), issue(2, "ready"), issue(3, "ready", body=OBS_274_GOAL), unquoted)
     destination = tmp_path / "timeline.html"
     assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
     assert "<html" in destination.read_text(encoding="utf-8")
