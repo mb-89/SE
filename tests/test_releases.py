@@ -39,6 +39,12 @@ def settings(version: str | None) -> str:
     return f"[project]\n# the released version\n{line}public_check = false\n{IDENTITY}"
 
 
+#: The project's upgrade guide: a section for each breaking release the tests make, named after the
+#: repository origin names (`REMOTE`), as the release check reads it.
+GUIDE = "# Upgrading\n\n" + "".join(f"## project {version}\n\nSteps.\n\n" for version in
+                                    [*(f"0.{minor}" for minor in range(1, 10)), *map(str, range(1, 10))])
+
+
 def build_checkout(tmp_path: Path) -> None:
     origin, root = tmp_path / "origin.git", tmp_path / "main"
     fake_git.init(origin, "--bare", "-b", "main")
@@ -46,7 +52,10 @@ def build_checkout(tmp_path: Path) -> None:
     git(root, "config", "user.name", "mb")
     git(root, "config", "user.email", "mb")
     (root / "se.toml").write_text(settings("1.2.3"), encoding="utf-8", newline="\n")
-    git(root, "add", "se.toml")
+    guide = root / "docs" / "upgrading.md"
+    guide.parent.mkdir()
+    guide.write_text(GUIDE, encoding="utf-8", newline="\n")
+    git(root, "add", "se.toml", "docs/upgrading.md")
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "v1.2.3")
     git(root, "push", "-q", "origin", "main", "v1.2.3")
@@ -349,6 +358,21 @@ def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
     assert release(checkout) == 0
     assert released(checkout) == ("2.0.0", "v2.0.0")
+
+
+def test_a_breaking_release_without_its_upgrade_section_is_refused_and_changes_nothing(checkout, capsys):
+    (checkout / "docs" / "upgrading.md").write_text("# Upgrading\n\n## project 3\n\nLater.\n",
+                                                    encoding="utf-8", newline="\n")
+    git(checkout, "commit", "-q", "-am", "no section for 2")
+    git(checkout, "push", "-q", "origin", "main")
+    integrate(checkout, "fix/topic-20261106",
+              report=declared("major", "- **Breaking:** made the `kind` field required"))
+    tip = git(checkout, "rev-parse", "HEAD")
+    assert release(checkout) != 0
+    assert ("Cannot release v2.0.0: docs/upgrading.md has no section `## project 2` for this breaking "
+            "release") in capsys.readouterr().err
+    assert git(checkout, "rev-parse", "main") == tip
+    assert git_door.run("rev-parse", "--verify", "--quiet", "refs/tags/v2.0.0", root=checkout).returncode != 0
 
 
 def released_at(root: Path, version: str) -> None:

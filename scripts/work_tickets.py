@@ -3258,6 +3258,11 @@ def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None
         return None
     kind = max((kind for _, kind in packages), key=RELEASE_ORDER.index)
     tag = f"v{version_text(released_version(version, kind))}"
+    if kind == "major":  # a breaking release, below 1.0 a minor: its upgrade section first
+        name = origin_repository_name(root) or root.name
+        refusal = sibling("upgrade_guide").missing(root, name, released_version(version, kind))
+        if refusal is not None:
+            raise QueueError(f"Cannot release {tag}: {refusal}")
     if tag in tags:
         raise QueueError(
             f"Cannot release {tag}: the tag exists already; fetch the tags (work_tickets.py sync) "
