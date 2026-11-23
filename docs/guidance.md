@@ -96,10 +96,9 @@ rules, not that system's code.
 
 ### The template command prints guidance first
 
-The command that hands an agent its template (`templates.py fill` and the fill tool,
-[docs/templates.md "Fill"](templates.md#fill); until they exist, `se_templates.py draft` and the
-templates tool's `draft`) prints the template's resolved guidance
-before the template itself. The agent cannot reach the template's fields without reading past the
+The command that hands an agent its template, the templates tool's `draft` and `fill`
+(`se_templates.py`, [docs/templates.md "Fill"](templates.md#fill)), prints the template's resolved
+guidance before the template itself. The agent cannot reach the template's fields without reading past the
 guidance, so reading it is the only way to the work.
 
 No evidence of a read is asked for: no quiz, no digest the agent repeats, no proof in the report.

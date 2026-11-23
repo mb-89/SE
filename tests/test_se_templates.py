@@ -47,16 +47,85 @@ def run(capsys, *arguments: str) -> tuple[int, str, str]:
     return code, captured.out, captured.err
 
 
+def drafted_template(out: str, name: str = "work") -> str:
+    """What an answer gives after its guidance: the template, on its last page."""
+    guidance, heading, template = out.partition(f"\n{se_templates.TEMPLATE_HEADING.format(name=name)}\n\n")
+    assert heading and guidance.startswith(f"Guidance for the template {name}: "), out[:200]
+    return template
+
+
 def test_list_and_draft_answer_what_the_engine_answers(capsys):
     code, out, _ = run(capsys, "list", "--tree")
     assert code == 0 and out.splitlines() == templates.list_templates(CATALOG)
     code, out, _ = run(capsys, "draft", "work", "--tree")
-    drafted = json.loads(out)
+    drafted = json.loads(drafted_template(out))
     assert code == 0 and drafted == templates.draft_fields(WORK)
     assert {"fields", "field_says", "field_shape", "schema"} <= set(drafted)
     assert drafted["field_shape"]["goal"]["required"] and drafted["schema"]["required"]
     code, out, _ = run(capsys, "draft", "work", "--markdown", "--tree")
-    assert code == 0 and out == templates.draft(WORK)
+    assert code == 0 and drafted_template(out) == templates.draft(WORK)
+
+
+def guided_project(root: Path) -> Path:
+    """A project whose guidance tree holds one note at depth 0 and one for issues."""
+    import test_guidance
+    root.mkdir(parents=True, exist_ok=True)
+    test_guidance.note(root, "guidance/first.md", "first", body="Read me first.")
+    test_guidance.note(root, "guidance/issue/issues.md", "issues", body="Issues say why.")
+    return root
+
+
+def test_a_draft_prints_the_templates_guidance_before_the_template(capsys, tmp_path):
+    root = guided_project(tmp_path / "project")
+    code, out, _ = run(capsys, "draft", "work", "--worktree", str(root), "--tree")
+    assert code == 0
+    assert out.splitlines()[0] == "Guidance for the template work: 2 notes, general before specific."
+    heading = se_templates.TEMPLATE_HEADING.format(name="work")
+    assert out.index("## first") < out.index("Read me first.") < out.index("## issues") \
+        < out.index("Issues say why.") < out.index(heading)
+    assert json.loads(drafted_template(out)) == templates.draft_fields(WORK)
+
+
+def test_a_second_draft_in_a_session_names_the_notes_already_printed(capsys, tmp_path):
+    root = guided_project(tmp_path / "project")
+    asked = ["--worktree", str(root), "--session", "s-1", "--tree"]
+    code, first, _ = run(capsys, "draft", "work", *asked)
+    assert code == 0 and "Read me first." in first
+    code, second, _ = run(capsys, "draft", "ticket", *asked)
+    assert code == 0 and "Read me first." not in second and "Issues say why." not in second
+    assert "already printed this session: first, issues" in second
+    assert second.splitlines()[0].endswith("; 2 already printed this session.")
+    # The template still comes, whole, after the names; fill names them as draft does.
+    assert json.loads(drafted_template(second, "ticket")) == templates.draft_fields(CATALOG["ticket"])
+    code, filled, _ = run(capsys, "fill", "work", *asked)
+    assert "already printed this session: first, issues" in filled and "Read me first." not in filled
+
+
+def test_a_draft_whose_guidance_passes_a_page_comes_in_pages_the_template_on_the_last(
+        capsys, tmp_path, monkeypatch):
+    import se_guidance
+    import test_guidance
+    root = guided_project(tmp_path / "project")
+    for index in range(4):
+        test_guidance.note(root, f"guidance/issue/n{index}.md", f"n{index}",
+                           body=f"n{index} " + "word " * 1200)
+    monkeypatch.setattr(se_guidance, "page_limit", lambda: 15000)
+    heading = se_templates.TEMPLATE_HEADING.format(name="work")
+    pages, page = [], 1
+    while True:
+        code, out, _ = run(capsys, "draft", "work", "--worktree", str(root), "--page", str(page),
+                           "--tree")
+        assert code == 0
+        pages.append(out)
+        if heading in out:
+            break
+        assert f"and --page {page + 1} for the next.]" in out
+        page += 1
+    assert len(pages) > 1 and all(len(text.encode("utf-8")) <= 15000 for text in pages)
+    # Pages break between notes: each note's text whole on one page.
+    for index in range(4):
+        assert sum((f"n{index} " + "word " * 1200).rstrip() in text for text in pages) == 1
+    assert json.loads(pages[-1].partition(f"\n{heading}\n\n")[2]) == templates.draft_fields(WORK)
 
 
 def test_an_unknown_template_is_answered_with_the_list_of_templates(capsys):
@@ -1064,8 +1133,11 @@ def test_fill_refuses_exactly_where_check_refuses(case, capsys, worktree, gh, te
 def test_fill_without_fields_answers_the_instructions_first(capsys, worktree):
     code, out, _ = run(capsys, "fill", "work", "--prompt", "File it.", "--worktree", str(worktree),
                        "--tree")
-    answer = json.loads(out)
-    assert code == 0 and answer == templates.instructions(WORK, "File it.", worktree.resolve())
+    answer = json.loads(drafted_template(out))
+    expected = templates.instructions(WORK, "File it.", worktree.resolve())
+    # The guidance's text comes before the template, so the instructions name its notes alone.
+    expected["guidance"] = [{"name": note["name"], "path": note["path"]} for note in expected["guidance"]]
+    assert code == 0 and answer == expected
     assert list(answer)[:5] == ["template", "prompt", "says", "rules", "guidance"]
 
 

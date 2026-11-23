@@ -2160,8 +2160,8 @@ document.
 | `se_templates.py backstop` | `se_templates.py backstop --event-name EVENT_NAME --event EVENT [--backstop {off,on}] [--worktree WORKTREE]` | plan the label or failure a GitHub event's off-template text gets |
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
-| `se_templates.py draft` | `se_templates.py draft [--markdown] [--tree] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -2485,7 +2485,13 @@ turn, be pushed or pass CI; each refusal names the file, the template and each f
 An agent asks for a template through the MCP door's tool `templates`, `scripts/se_templates.py`: `list`
 names the templates, `draft <template>` gives `draft --json`'s answer, and `check` finds all the filing
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
-Markdown to file. It only reads; its first line is `passes` or `refused: <n> findings`.
+Markdown to file.
+
+It only reads; `check`'s first line is `passes` or `refused: <n> findings`.
+
+- `draft` and `fill` give the template's guidance first, as
+  [docs/guidance.md "Delivery"](docs/guidance.md#delivery) states: once per session (`--session`),
+  in pages of kern's page limit, the template on the last page.
 
 `fill` is one step from raw input to document ([docs/templates.md "Fill"](docs/templates.md#fill)):
 it takes the template, the prompt, the raw input and the agent's fields.
