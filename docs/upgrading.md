@@ -294,6 +294,21 @@ Components are found by name under the owners of the checkout's remotes
 - **Check:** `ls tests/spawn-baseline.yaml 2>/dev/null; git grep -nE 'spawn.baseline|spawns\("(tool|shell):'`
   prints nothing.
 
+## SE 13
+
+On main, released as 13.0.0 at the next release.
+
+### A breaking release needs its upgrade section
+
+- **Change:** `work_tickets.py release` refuses a major release, below 1.0 a breaking minor, while
+  the project's `docs/upgrading.md` has no section `## <repository> <version>` for it, naming the
+  heading to add ([How the guide is kept](#how-the-guide-is-kept)).
+- **Steps:** before the project's next breaking release, add its section to `docs/upgrading.md`:
+  the heading `## <repository> <version>`, then each change since the last release with its
+  change, steps and check.
+- **Check:** `uv run python <se>/scripts/upgrade_guide.py show --guide docs/upgrading.md --name <repository> --from <released> --to <next>`
+  names the section.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:
