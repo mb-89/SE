@@ -1206,6 +1206,7 @@ class PinState:
     base: Version | None  # the release the pin is based on: a range's lowest, a go pin's, a ref's tag
     newest: Version | None  # None where no offer named a release
     reasons: tuple[str, ...] = ()  # why no offer named one
+    admitted: Version | None = None  # the newest release the pin admits, of the same offer
 
     @property
     def beyond(self) -> bool:
@@ -1323,8 +1324,9 @@ def breaking(root: Path, local: LocalConfig, finder: Finder | None = None) -> Br
             else:
                 base = next((version for version, commit in releases.items()
                              if commit.lower() == module.ref), None)
+            fits = [version for version, commit in releases.items() if module.admits(version, commit)]
             states.append(PinState(path, module, base, max(releases) if releases else None,
-                                   reasons if not releases else ()))
+                                   reasons if not releases else (), max(fits, default=None)))
     return Breaking(states, [*walk.finder.notes, *missing_lines])
 
 

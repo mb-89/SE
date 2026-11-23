@@ -213,8 +213,9 @@ component's releases.
 
 The check changes no pin, no lock and no checkout, and files no issue: what to do is the person's
 decision. It places a release in `.se/modules/<name>` where `sync` would, to read that
-component's own list. SE runs it in the background after its start greeting
-([se agent](../src/agents/se.md#tools)) and at every retro (`retro.py collect`).
+component's own list. Every retro runs it (`retro.py collect`), and SE's boot lists its pins with
+their locked versions after the start greeting, its `--upgrade` moving each lock within its pin
+([README "Boot"](../README.md#boot)).
 
 ## Runtimes
 
