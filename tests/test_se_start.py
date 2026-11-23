@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import fake_git
+import fake_processes as fake_programs
 
 # Its git is the fake in memory; a test whose scripts or binaries run git as child processes takes
 # the fake behind one state file, `shared_fake_git` (tests/conftest.py `door_fake`).
@@ -829,36 +830,60 @@ def test_a_setting_that_is_no_argument_array_is_one_warning_line(setup):
         'array; set it as components = ["uv", "run", "obs-components"]']
 
 
-def _script(tmp_path: Path, body: str) -> list[str]:
-    return [sys.executable, str(write(tmp_path / "listing.py", body))]
+# The listing is the project's own command (obs-components), answered by the process door's fake.
+LISTING_COMMAND = ["obs-components"]
 
 
-def test_the_listing_runs_in_the_checkout_and_its_table_is_read(tmp_path):
-    command = _script(tmp_path, "import os, sys\n"
-                                "sys.stderr.write('obs-components: warning: a host cannot be listed\\n')\n"
-                                f"print(os.getcwd() == {str(tmp_path / 'project')!r} and {LISTING!r})\n")
-    (tmp_path / "project").mkdir()
-    found = se_start.list_components(tmp_path / "project", command)
+def test_the_listing_runs_in_the_checkout_and_its_table_is_read(tmp_path, fake_processes):
+    project = tmp_path / "project"
+    project.mkdir()
+
+    def listing(call):
+        assert call.options["stdin"] == se_start.subprocess.DEVNULL, "read-only: it is asked nothing"
+        return fake_programs.Answer(0, LISTING if call.cwd == project else "elsewhere\n",
+                                    "obs-components: warning: a host cannot be listed\n")
+
+    fake_processes.on("obs-components", listing)
+    found = se_start.list_components(project, LISTING_COMMAND)
     assert [offer["name"] for offer in found["offers"]] == ["html", "dark", "plain", "gone"]
     assert found["offers"][1] == {"name": "dark", "kind": "style", "installed": "not installed",
                                   "newest": "2.0.0"}
 
 
-@pytest.mark.parametrize(("body", "error"), [
-    ("import sys\nsys.exit('obs-components: no remote')\n", " failed with exit code 1: obs-components: no remote"),
-    ("print('nothing here')\n", ": its output holds no table headed component  kind  installed  newest  repository"),
-    ("import time\ntime.sleep(5)\n", " took longer than 0.5 s"),
-])
-def test_a_listing_that_fails_or_takes_too_long_answers_its_error(tmp_path, monkeypatch, body, error):
+def taking(seconds: float, answer: fake_programs.Answer):
+    """A listing that answers `answer` after `seconds`: past the call's timeout, the door raises."""
+    def listing(call):
+        if call.options.get("timeout") is not None and call.options["timeout"] < seconds:
+            raise se_start.subprocess.TimeoutExpired(call.argv, call.options["timeout"])
+        return answer
+    return listing
+
+
+@pytest.mark.parametrize(("answer", "error"), [
+    (fake_programs.Answer(1, "", "obs-components: no remote\n"),
+     " failed with exit code 1: obs-components: no remote"),
+    (fake_programs.Answer(0, "nothing here\n"),
+     ": its output holds no table headed component  kind  installed  newest  repository"),
+    (None, " took longer than 0.5 s"),
+], ids=["fails", "no-table", "too-long"])
+def test_a_listing_that_fails_or_takes_too_long_answers_its_error(tmp_path, monkeypatch, fake_processes,
+                                                                  answer, error):
     monkeypatch.setattr(se_start, "COMPONENTS_TIMEOUT", 0.5)
-    command = _script(tmp_path, body)
-    found = se_start.list_components(tmp_path, command)
-    assert found == {"error": " ".join(command) + error}
+    fake_processes.on("obs-components", taking(5, fake_programs.Answer(0, LISTING)) if answer is None
+                      else taking(0, answer))
+    found = se_start.list_components(tmp_path, LISTING_COMMAND)
+    assert found == {"error": " ".join(LISTING_COMMAND) + error}
 
 
-def test_a_listing_that_does_not_start_answers_its_error(tmp_path):
-    found = se_start.list_components(tmp_path, [str(tmp_path / "no-such-command")])
-    assert found["error"].startswith(f"{(tmp_path / 'no-such-command')} did not start: ")
+def test_a_listing_that_does_not_start_answers_its_error(tmp_path, fake_processes):
+    missing = tmp_path / "no-such-command"
+
+    def not_found(call):
+        raise FileNotFoundError(2, "No such file or directory", str(missing))
+
+    fake_processes.on("no-such-command", not_found)
+    found = se_start.list_components(tmp_path, [str(missing)])
+    assert found["error"].startswith(f"{missing} did not start: ")
 
 
 # Requirement 3: refresh moves only what is due, on the fake git's repositories.
@@ -889,14 +914,35 @@ def release(repo: Path, version: str, files: dict[str, str] | None = None, *, sa
     git(repo, "tag", f"v{version}")
 
 
+def trial_start(call) -> fake_programs.Answer:
+    """SE's start in a refresh's trial (se_start.py `_starts`): the trial's own se_start.py, loaded
+    from its worktree and its `main` run in-process as the child would run it; its sibling scripts
+    are SE's, which the trial holds as copies."""
+    name = f"trial_se_start_{abs(hash(call.script.as_posix()))}"
+
+    def main(argv: list[str]) -> object:
+        spec = importlib.util.spec_from_file_location(name, call.script)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+            return module.main(argv)
+        finally:
+            sys.modules.pop(name, None)
+
+    return fake_programs.run_main(main, call)
+
+
 @pytest.fixture
-def repos(tmp_path, isolated_git):
+def repos(tmp_path, isolated_git, fake_processes):
     """An se remote with v1.0.0, v1.1.0 and v2.0.0, a clone of it at v1.0.0; module remotes lib
-    (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0."""
+    (v1.0.0, v1.1.0, v2.0.0) and tool (v1.0.0 only); a project locked at lib 1.0.0 and tool 1.0.0.
+    A refresh's trial start runs in-process (`trial_start`)."""
+    fake_processes.on("se_start.py", trial_start)
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
-               for name in ("se_start.py", "git_door.py", "se_modules.py", "se_home.py", "public_check.py",
-                             "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
-                             "public-check-terms.toml")}
+               for name in ("se_start.py", "git_door.py", "process_door.py", "se_modules.py", "se_home.py",
+                             "public_check.py", "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py",
+                             "agent_lint.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")
@@ -938,7 +984,6 @@ def refresh(r):
 # The refresh at the session's start (start_refresh): SE alone, in place, failing open.
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_start_refresh_moves_se_to_the_latest_release_of_its_major(repos):
     line, moved = se_start.start_refresh(repos["se"], repos["project"], repos["config"])
     assert moved and line == f"SE: 1.0.0 -> 1.1.0, refreshed at this start ({repos['se'].as_posix()})"
@@ -978,7 +1023,6 @@ def test_start_refresh_leaves_a_development_checkout_and_the_sessions_own_tree(r
     assert se_modules.checkout_version(repos["se"]) == (1, 0, 0)
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     lock_before = se_modules.read_lock(repos["project"])
     assert lock_before["lib"][0] == "1.0.0" and lock_before["tool"][0] == "1.0.0"
@@ -1008,7 +1052,6 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert cache["checked_at"] is not None  # the greeting after a refresh shows the new state
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use(repos):
     release(repos["remotes"]["lib"], "1.2.0", says="1.0.0")  # its se.toml names another version
     before = se_modules.read_lock(repos["project"])["lib"]
@@ -1023,7 +1066,6 @@ def test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use(repos):
     assert any(line.startswith("SE: ") and line.endswith(" -> v1.1.0") for line in lines)  # the rest moves
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_se_version_that_does_not_start_is_not_switched_to(repos):
     release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
     head = git(repos["se"], "rev-parse", "HEAD")
@@ -1089,7 +1131,6 @@ def as_plugin(repos, tmp_path, monkeypatch, serves: str) -> FakeClaude:
     return fake
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_installed_plugin_is_updated_through_claude_code(repos, tmp_path, monkeypatch):
     fake = as_plugin(repos, tmp_path, monkeypatch, "v1.1.0")
     lines, failed = refresh(repos)
@@ -1100,7 +1141,6 @@ def test_an_installed_plugin_is_updated_through_claude_code(repos, tmp_path, mon
     assert entry["version"] == "1.1.0" and se_modules.checkout_version(Path(entry["installPath"])) == (1, 1, 0)
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(repos, tmp_path, monkeypatch):
     release(repos["upstream"], "1.2.0", {"scripts/se_start.py": "raise SystemExit('broken start')\n"})
     fake = as_plugin(repos, tmp_path, monkeypatch, "v1.2.0")
@@ -1112,7 +1152,6 @@ def test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use(rep
     assert fake.record.read_bytes() == record
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_cloud_setup_script_clone_is_pulled_like_a_checkout(repos, tmp_path):
     git(repos["upstream"], "branch", "release", "v1.0.0")
     git(repos["upstream"], "symbolic-ref", "HEAD", "refs/heads/release")  # the clone takes the default
