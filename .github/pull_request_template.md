@@ -76,10 +76,11 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Retro
 
-<!-- Short, with the retro template's headings; propose concrete changes to agents, templates or rules. -->
+<!-- The standing questions, asked of the agent that did the work: one "### <question>" each, as
+     templates/standing-questions.md asks them (the retro and the overhaul ask the same); answer
+     each for this piece of work, "None" where it does not apply, and name target files and changes.
+     field-report --draft writes them in; the check refuses a report that leaves one out. -->
 
-- **Went well:**
-- **Cost time:**
-- **Proposed improvement:** <!-- target file and the change -->
+<!-- se:standing-questions -->
 
 <!-- se:field-report:end -->
