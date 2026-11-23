@@ -994,7 +994,7 @@ for example:
   the role files, this skill and the project's `AGENTS.md`:
 
   ```text
-  Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+  Act as the worker agent defined in <se>/agents/worker.md (read it first, plus the project's AGENTS.md).
   Work issue: <issue URL>
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
@@ -1032,8 +1032,6 @@ The hand-off steps that land a pull request, by hand:
     above says.
 - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
   as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
-
-<!-- copilot -->
 
 ## Host procedure under Copilot
 
@@ -1086,5 +1084,3 @@ harnesses.
 - **Ask tool** (`ask_user`): SE never uses it, on any host: a decision goes to the person as a deck,
   any other open point as the turn's last lines, as the catch-up skill ends every turn; workers and
   integrators never ask.
-
-<!-- /copilot -->

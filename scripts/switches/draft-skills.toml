@@ -11,4 +11,4 @@ key = "plugin.draft_skills"
 off = [[]]
 other = "on"
 help = "scripts/se_plugin.py"
-note = "off: no draft enters a layout; on: each listed drafts/skills/<name> is built into both layouts, by name only"
+note = "off: no draft enters a layout; on: each listed drafts/skills/<name> is built into the layout, by name only"

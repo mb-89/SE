@@ -5,7 +5,7 @@
 **Work issue:** #<n>  **Branch:** `<branch>`  **Result:** complete | partial
 **Tested against `<integration branch>`:** `<commit>` <!-- the integration-branch commit merged last before the pull request -->
 **Branch tip:** `<tip>` <!-- the branch commit this report describes; field-report --check --worktree <worktree> fills it from the branch -->
-**Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](skills/work-model/SKILL.md#release-kind) says, never the branch name; field-report --draft only proposes one -->
+**Release kind:** <kind> — <reason> <!-- patch, minor or major and a one-line reason: what changed decides it, as the [work model's Release kind](../skills/work-model/SKILL.md#release-kind) says, never the branch name; field-report --draft only proposes one -->
 <!-- A branch that changes the se binary (components/, its require kern among them) adds the line "**Component kinds:** se patch" here, one kind per component, and leaves the version in its release.toml alone: the landing assigns it (README "Component versions"). -->
 **Re-integration kind:** patch <!-- what a later integration of this branch releases once its first merge is on the integration branch: patch, minor or major -->
 
@@ -15,7 +15,7 @@
 
 ## Delivered
 
-<!-- Follow the [worker evidence rule](agents/worker.agent.md#procedure).
+<!-- Follow the [worker evidence rule](../agents/worker.md#procedure).
      Add one row per work-issue requirement and acceptance item; numbered items under "Changes
      after filing" are requirements, by their number, as are those under "Routing". Evidence
      the host cannot carry is replaced by the command that reproduces it: where images cannot
@@ -27,7 +27,7 @@
 **Commit groupings:** None <!-- or, per grouping the worker's commit rule allows: the commits, the
 requirements they share, and why (one function changed together, or a test-only commit) -->
 
-**Suite time:** None <!-- where the change adds tests, the [test rules](skills/work-model/SKILL.md#tests):
+**Suite time:** None <!-- where the change adds tests, the [test rules](../skills/work-model/SKILL.md#tests):
      `work_tickets.py suite` before and after, and each new test over 2 s with its reason -->
 
 ## Not delivered
@@ -39,13 +39,13 @@ requirements they share, and why (one function changed together, or a test-only 
 
 ## Removed behaviour, deleted or weakened tests, and authored prose
 
-<!-- Follow the [capability-preservation rule](skills/work-model/SKILL.md#rules-for-all-roles).
+<!-- Follow the [capability-preservation rule](../skills/work-model/SKILL.md#rules-for-all-roles).
      Each removed or renamed public item and each newly required field gets its own line
      "**Breaking:** <item>", which makes the Release kind major (minor below 1.0.0)
-     ([work model](skills/work-model/SKILL.md#release-kind)). "None" otherwise.
+     ([work model](../skills/work-model/SKILL.md#release-kind)). "None" otherwise.
      Name each deleted or renamed test; a folder moved with its tests to another repository is one
      line "Moved: <folder> to <repository> at <commit>" (with "as <path>" below its root there),
-     checked at that commit ([work model](skills/work-model/SKILL.md#tests)). -->
+     checked at that commit ([work model](../skills/work-model/SKILL.md#tests)). -->
 
 ## Review responses
 
@@ -71,7 +71,7 @@ requirements they share, and why (one function changed together, or a test-only 
 <!-- One block per ticket, ready for SE to file as a work issue there:
      ### <repo>: <title> / Goal / Requirements / Acceptance. Generic findings from an
      application become framework tickets and must not name the application. See the
-     [work model](skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and
+     [work model](../skills/work-model/SKILL.md#roles-and-flow) for the entry granularity and
      source-file requirement. "None" otherwise. -->
 
 ## Retro

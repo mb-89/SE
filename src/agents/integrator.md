@@ -61,13 +61,11 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
 - You may run a workflow (multi-agent orchestration) to plan and run your own work, with fewer
   than 10 agents and at or below the effort ceiling; a work package still goes to a worker
   session ([Integrators' workflows](../skills/work-model/SKILL.md#visible-sessions)).
-<!-- copilot -->
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/integration` with `work_tickets.py ready`; every command that writes, `integrate` among
   them, runs as its script, as the work model's [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says.
 - You start no worker session yourself: where a landing unblocks work, print the line that starts
   it, as that section says, unless the greeting reads `[copilot] start_sessions = true`.
-<!-- /copilot -->
 
 ## Procedure
 
@@ -212,7 +210,7 @@ merge or a start.
    ([Visible sessions](../skills/work-model/SKILL.md#visible-sessions)). Its prompt contains only:
 
    ```text
-   Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+   Act as the worker agent defined in <se>/agents/worker.md (read it first, plus the project's AGENTS.md).
    Work issue: <issue URL>
    Worktree: <worktree path>
    Integrator session to notify at delivery: <integrator session>

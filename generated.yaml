@@ -8,8 +8,6 @@ generators:
     outputs:
       - agents/*.md
       - skills/**
-      - .github/agents/*.agent.md
-      - .github/skills/**
       - .claude-plugin/*.json
       - .github/hooks/se.json
       - .github/plugin/*.json
