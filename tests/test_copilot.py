@@ -244,7 +244,7 @@ def test_the_synthetic_fixture_is_marked_until_a_real_run_is_recorded() -> None:
 def test_the_smoke_helper_passes_its_fixture(fixture: Path) -> None:
     passed, detail = copilot.smoke_verdict(fixture.read_text(encoding="utf-8").splitlines())
     assert passed, detail
-    assert "started:" in detail
+    assert "started`" in detail
     assert "status" in detail
 
 
@@ -253,7 +253,7 @@ def _without(lines: list[str], text: str) -> list[str]:
 
 
 @pytest.mark.parametrize(("change", "reason"), [
-    (lambda lines: _without(lines, "started:"), "no greeting"),
+    (lambda lines: _without(lines, "5.59.0 started"), "no greeting"),
     (lambda lines: _without(lines, "se-status"), "no call of an se tool"),
     (lambda lines: [line.replace('"success": true', '"success": false') for line in lines], "se tool call failed: status"),
     (lambda lines: [line.replace('"exitCode": 0', '"exitCode": 1') for line in lines], "copilot exited 1"),
@@ -267,9 +267,9 @@ def test_the_smoke_helper_fails_naming_what_is_missing(change, reason: str) -> N
 
 def test_the_smoke_helper_reads_vs_codes_and_claudes_tool_names_too() -> None:
     for name in ("se/status", "mcp__se__status"):
-        lines = [json.dumps({"type": "assistant.message", "data": {"content": "SE 1.2.3 started: x"}}),
+        lines = [json.dumps({"type": "assistant.message", "data": {"content": "SE 1.2.3 started\n[1 skills](d)"}}),
                  json.dumps({"type": "tool", "data": {"name": name, "success": True}})]
-        assert copilot.smoke_verdict(lines) == (True, "greeting `SE 1.2.3 started:` and se tool status answered")
+        assert copilot.smoke_verdict(lines) == (True, "greeting `SE 1.2.3 started` and se tool status answered")
 
 
 @pytest.mark.spawns("entry: scripts/copilot_smoke.sh")

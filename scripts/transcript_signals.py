@@ -91,8 +91,9 @@ _NOT_FOUND = re.compile(r"([^\s:'\"]+): command not found|command not found: ([^
                         r"|'([^'\s]+)' is not recognized as")
 EXIT_CODE = re.compile(r"\s*Exit code (-?\d+)")
 # SE's start greeting, singular forms included, any version (`none` among them).
+#: SE's start report as templates/boot-report.md shapes it: its version line, then its three counts.
 GREETING = re.compile(
-    r"SE \S+ started: (\d+) skills?, (\d+) rules?, (\d+) sub-agents?")
+    r"SE \S+ started\n\[(\d+) skills?\]\([^)\n]*\)\n\[(\d+) rules?\]\([^)\n]*\)\n\[(\d+) sub-agents?\]")
 # Per adapter, the tools that search or fetch, by exact name, and the argument each reads.
 RESEARCH_TOOLS: dict[str, dict[str, str]] = {
     "claude-code": {"WebSearch": "query", "WebFetch": "url"},
