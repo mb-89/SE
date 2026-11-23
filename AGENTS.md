@@ -122,6 +122,8 @@
 - Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
   `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
   `UV_SYSTEM_CERTS=1` in that shell.
+  - Each test runs in an empty home of its own (`own_home`, no global or system git config, obs's
+    components in `.se/obs-local`); the machine's tool caches stay (`machine_caches`).
 
 ## Neutral home
 
