@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import git_door  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DECLARATIONS = "generated.yaml"
@@ -275,6 +274,8 @@ def tracked(root: Path) -> list[str]:
     checkout (the commit hook's copy of the staged tree), every file in it."""
     if not (root / ".git").exists():
         return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+    import git_door  # only here, so a generator that writes markers needs no more scripts than this
+
     listed = git_door.run("ls-files", "-z", root=root)
     if listed.returncode != 0:
         raise DeclarationError(f"git ls-files in {root}: {listed.stderr.strip()}")
