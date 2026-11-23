@@ -1394,6 +1394,32 @@ def test_pre_push_hook_checks_pushed_commits(hooked: Path, tmp_path: Path) -> No
     assert f"(2 files, 1 commits, se {SE_HEAD[:7]})" in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("door", [
+    pytest.param("real", marks=pytest.mark.spawns(
+        "entry: .githooks (pre-commit, commit-msg, pre-push), the real hooks run once through sh and "
+        "se-script, held to their in-process logic (tests/fake_processes.py HOOKS)")),
+    "fake",
+])
+def test_ses_hooks_run_for_real_answer_as_their_logic_in_process(hooked: Path, tmp_path: Path, door: str) -> None:
+    """One commit and push through se's real hooks, and the same through tests/fake_processes.py's
+    HOOKS, which every other hook test runs: each hook lets the clean through and refuses its leak,
+    naming the label, alike under both."""
+    remote = tmp_path / "remote.git"
+    fake_git.init(remote, "--bare")
+    git(hooked, "remote", "add", "origin", str(remote))
+    (hooked / "clean.txt").write_text("clean\n", encoding="utf-8")
+    answers = [(try_commit(hooked).returncode, "")]
+    (hooked / "leak.txt").write_text("C:" + BS + "Users" + BS + "alice\n", encoding="utf-8")
+    refused = try_commit(hooked)
+    answers.append((refused.returncode != 0, "leak.txt:1:1: user-profile-path" in refused.stdout + refused.stderr))
+    (hooked / "leak.txt").unlink()
+    (hooked / "more.txt").write_text("more\n", encoding="utf-8")
+    refused = try_commit(hooked, "Copied from /" + "home/alice")
+    answers.append((refused.returncode != 0, "commit message:1: user-profile-path" in refused.stdout + refused.stderr))
+    answers.append((git_door.run("push", "-q", "origin", "main:topic", root=hooked).returncode, ""))
+    assert answers == [(0, ""), (True, True), (True, True), (0, "")]
+
+
 # SE's own line of history, which scripts/hygiene.py's public check covers.
 SE_LINE_MARKER, se_line = hygiene.SE_LINE_MARKER, hygiene.se_line
 
