@@ -126,6 +126,19 @@ PAUSE_LABEL = "pause"  # an open issue with it pauses the fleet (work model, Pau
 # label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
 WORK_LABELS = ("work", "ready")
 IN_PROGRESS_LABEL = "in-progress"
+# A claim's heartbeat, owned by the work model's "Issues": the claim is the issue's `in-progress`
+# label, its last beat one marker line in the issue's body, the UTC time to the minute. `start`
+# writes the first with the claim, the worker's hook the next once half the claim timeout passed
+# (`beat`), the close-out removes it; `ready` reads a claim as live or stale from label and beat.
+BEAT_PATTERN = re.compile(
+    r"^<!-- se:beat ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z) -->[ \t]*(?:\r?\n|\Z)", re.M)
+BEAT_FORMAT = "%Y-%m-%dT%H:%MZ"
+CLAIM_TIMEOUT_HOURS = 12  # [workers] claim_timeout_hours, unset; a beat is due after half of it
+# The worker's local record of its claim's beat, in .se/work beside the snapshot: intake writes it
+# for an issue in progress, `beat` keeps it, and the hook (scripts/se_hook.sh) reads its `due` line.
+BEAT_RECORD = "beat.yaml"
+BEAT_CLAIM = "beat.claim"  # the hook's claim on a beat it started, which `beat` removes
+BEAT_RETRY = timedelta(minutes=15)  # after a beat that failed, the next is due this much later
 # An issue filed with --hold past its template's refusals (README "Templates"): never started until fixed.
 OFF_TEMPLATE_LABEL = "off-template"
 NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_TEMPLATE_LABEL})
@@ -1486,9 +1499,10 @@ def record_comments_read(root: Path, state: dict[str, object]) -> None:
 
 
 def body_hash(body: str) -> str:
-    """What a read of the work issue's body records: the hash of its text, line endings and
-    surrounding whitespace aside, so a body read with gh and one saved by hand agree."""
-    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+    """What a read of the work issue's body records: the hash of its text, line endings,
+    surrounding whitespace and the beat line aside, so a body read with gh and one saved by hand
+    agree and a beat is no change."""
+    return hashlib.sha256(without_beat(body.replace("\r\n", "\n")).strip().encode("utf-8")).hexdigest()
 
 
 def body_read_path(root: Path) -> Path:
@@ -1885,6 +1899,7 @@ def intake(
     save_snapshot(root, issue)
     record_comments_read(root, comment_state(issue["comments"]))
     record_body_read(root, str(issue["body"]))
+    record_claim(root, issue)
     if answered is not None:
         reread_path(root).write_text(json.dumps({"updatedAt": issue["updatedAt"]}) + "\n",
                                      encoding="utf-8", newline="\n")
@@ -2142,8 +2157,8 @@ def issue_changes(previous: dict[str, object] | None, issue: dict[str, object]) 
     if previous is not None:
         if previous["title"] != issue["title"]:
             changes["title"] = [previous["title"], issue["title"]]
-        changes["body_diff"] = list(difflib.unified_diff(
-            previous["body"].splitlines(), issue["body"].splitlines(),
+        changes["body_diff"] = list(difflib.unified_diff(  # a beat is no change (without_beat)
+            without_beat(previous["body"]).splitlines(), without_beat(issue["body"]).splitlines(),
             "before", "now", lineterm="", n=1,
         ))
         old_items, new_items = requirement_items(previous["body"]), requirement_items(issue["body"])
@@ -4126,6 +4141,266 @@ def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
                      f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
 
 
+def utc_now() -> datetime:
+    """The time now, in UTC: the clock every beat reads, which tests replace (rule tst-002)."""
+    return datetime.now(timezone.utc)
+
+
+def beat_line(at: datetime) -> str:
+    """The beat marker line of `at`, the UTC time to the minute."""
+    return f"<!-- se:beat {at.astimezone(timezone.utc).strftime(BEAT_FORMAT)} -->"
+
+
+def beat_of(body: str) -> datetime | None:
+    """The time of the body's beat line, None where it has none."""
+    found = BEAT_PATTERN.search(body or "")
+    return datetime.strptime(found[1], BEAT_FORMAT).replace(tzinfo=timezone.utc) if found else None
+
+
+def without_beat(body: str) -> str:
+    """`body` without its beat line: the text every comparison of an issue's body reads, so a beat
+    is never a change to it."""
+    return BEAT_PATTERN.sub("", body or "")
+
+
+#: A marker line that opens a body (`<!-- se:fleet -->`, `<!-- se:form work -->`).
+MARKER_LINE = re.compile(r"^<!-- se:[^\n]*? -->[ \t]*\r?$")
+
+
+def with_beat(body: str, at: datetime) -> str:
+    """`body` with its beat line set to `at`: in place where it has one, else after the marker
+    lines that open it, else first."""
+    line = beat_line(at) + "\n"
+    body = body or ""
+    if BEAT_PATTERN.search(body):
+        return BEAT_PATTERN.sub(lambda _: line, body, count=1)
+    lines = body.splitlines(keepends=True)
+    index = 0
+    while index < len(lines) and MARKER_LINE.match(lines[index].rstrip("\n")):
+        index += 1
+    if index and not lines[index - 1].endswith("\n"):
+        lines[index - 1] += "\n"
+    return "".join([*lines[:index], line, *lines[index:]])
+
+
+def claim_timeout(root: Path) -> timedelta:
+    """`[workers] claim_timeout_hours` in se.toml: how long a claim stays live after its last
+    beat; built in CLAIM_TIMEOUT_HOURS. A beat is due once half of it passed."""
+    hours = se_table(root, "workers").get("claim_timeout_hours", CLAIM_TIMEOUT_HOURS)
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours <= 0:
+        raise QueueError(f"[workers] claim_timeout_hours in {root / 'se.toml'} must be a positive "
+                         f"number of hours, not {hours!r}; remove it for the built-in "
+                         f"{CLAIM_TIMEOUT_HOURS}")
+    return timedelta(hours=hours)
+
+
+@dataclass(frozen=True)
+class Claim:
+    """A claimed issue as `ready` reads it: live while its beat is younger than the claim
+    timeout, stale where it is older or there is none; its beat's age where it has one."""
+
+    number: int
+    title: str
+    live: bool
+    age: timedelta | None
+
+
+def claim_of(issue: dict[str, object], now: datetime, timeout: timedelta) -> Claim:
+    """The claim of an issue labelled in-progress, judged from its body's beat line at `now`."""
+    beat = beat_of(str(issue.get("body") or ""))
+    age = None if beat is None else max(now - beat, timedelta(0))
+    return Claim(int(issue["number"]), str(issue.get("title") or ""),
+                 age is not None and age < timeout, age)
+
+
+def hours_text(delta: timedelta) -> str:
+    """A duration as `<h> h <mm> min`, to the minute."""
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes // 60} h {minutes % 60:02d} min"
+
+
+def claim_line(claim: Claim, timeout: timedelta) -> str:
+    """How `ready` names a claim: live or stale, with its beat's age."""
+    if claim.live and claim.age is not None:
+        return f"claimed #{claim.number} {claim.title}: live, beat {hours_text(claim.age)} ago"
+    beat = "no beat" if claim.age is None else f"beat {hours_text(claim.age)} ago"
+    return (f"claimed #{claim.number} {claim.title}: stale, {beat}, past the "
+            f"{hours_text(timeout)} claim timeout")
+
+
+def stale_claims_line(claims: list[Claim]) -> str:
+    """The line that names the stale claims for SE to pass to the person, "" where none is."""
+    stale = [f"#{claim.number}" for claim in claims if not claim.live]
+    if not stale:
+        return ""
+    return (f"Stale claims for the person: {', '.join(stale)}. Nothing frees a claim on its own: "
+            "releasing one (deleting its branch, taking off in-progress and the beat line) is the "
+            "person's step, which SE prepares (work model, Issues)")
+
+
+def beat_step(repo: str, number: int, write: bool, at: datetime | None = None) -> Step:
+    """The plan step that sets the issue's beat line to `at` (`write`) or removes it."""
+    change = (f"its beat line set to {beat_line(at or utc_now())}" if write
+              else "its beat line (<!-- se:beat ... -->) removed")
+    return Step(f"beat:{'set' if write else 'remove'}", "issue_write", {
+        **owner_repo(repo), "method": "update", "issue_number": number,
+        "body": f"<the issue's body with {change}>",
+        "labels": "<the issue's labels, as issue_read get reads them>"},
+        note="issue_read get reads the body and the labels; a beat line takes the place of the one "
+             "it has, else it goes after the marker lines at its top; issue_write sets the whole "
+             "body, with the labels unchanged, by which the template gate judges it")
+
+
+def beaten(body: str, detail: str) -> str:
+    """The body a beat step writes: the beat set now (`set`) or removed (`remove`)."""
+    return with_beat(body, utc_now()) if detail == "set" else without_beat(body)
+
+
+def beat_action_gh(root: Path, repo: str) -> Action:
+    """The local runner of a beat step, through gh: read the body, write it with the change."""
+    def run(arguments: dict[str, object], detail: str) -> None:
+        number = str(arguments["issue_number"])
+        read = run_gh(root, ["issue", "view", number, "--json", "body", *repo_arguments(repo)])
+        try:
+            found = json.loads(read)
+        except ValueError:
+            found = None
+        if not isinstance(found, dict) or not isinstance(found.get("body"), str):
+            # no body read is none to keep: write none rather than erase it
+            print(f"beat: gh read no body of #{number}; its beat line is left as it is",
+                  file=sys.stderr)
+            return None
+        body = found["body"]
+        changed = beaten(body, detail)
+        if changed != body:
+            run_gh_with_body(root, ["issue", "edit", number, *repo_arguments(repo)], changed)
+    return run
+
+
+def beat_action_door(door: "RelayDoor") -> Action:
+    """The runner of a beat step through kern's relay: issue_read, then issue_write the body."""
+    def run(arguments: dict[str, object], detail: str) -> None:
+        number = int(arguments["issue_number"])
+        read = door.ask("issue_read", {"method": "get", "issue_number": number}, "read its beat")
+        if not isinstance(read, dict) or not isinstance(read.get("body"), str):
+            print(f"beat: the relay read no body of #{number}; its beat line is left as it is",
+                  file=sys.stderr)
+            return None
+        body = read["body"]
+        changed = beaten(body, detail)
+        if changed != body:  # with its labels, so the template gate judges it by its own template
+            door.ask("issue_write", {"method": "update", "issue_number": number, "body": changed,
+                                     "labels": sorted(issue_labels(read))})
+    return run
+
+
+def beat_record_path(root: Path) -> Path:
+    path = queue_paths(root)["todo"].parent / BEAT_RECORD
+    inside_root(root, path)
+    return path
+
+
+def write_beat_record(root: Path, number: int, repo: str, beat: datetime | None, due: datetime,
+                      error: str = "") -> None:
+    """Write the worker's beat record: its issue, the last beat it knows, when the next is due
+    (`due`, Unix seconds, the line the hook reads with builtins) and why the last one failed."""
+    initialize(root)
+    lines = [
+        "# The claim's heartbeat (work_tickets.py beat, README \"Workers\"): scripts/se_hook.sh",
+        "# starts a beat on a tool call once the Unix time `due` has passed.",
+        f"issue: {number}",
+        f"repo: {json.dumps(repo)}",
+        f"beat: {beat.strftime(BEAT_FORMAT) if beat else 'none'}",
+        f"due: {int(due.timestamp())}",
+        *([f"error: {json.dumps(error, ensure_ascii=False)}"] if error else []),
+    ]
+    beat_record_path(root).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def load_beat_record(root: Path) -> dict[str, object] | None:
+    """The beat record `write_beat_record` wrote, None where there is none."""
+    path = beat_record_path(root)
+    if not path.is_file():
+        return None
+    fields = dict(re.findall(r"^(\w+): (.*)$", path.read_text(encoding="utf-8"), re.M))
+    try:
+        beat = fields["beat"]
+        return {"issue": int(fields["issue"]), "repo": str(json.loads(fields["repo"])),
+                "beat": None if beat == "none" else datetime.strptime(beat, BEAT_FORMAT).replace(
+                    tzinfo=timezone.utc),
+                "due": datetime.fromtimestamp(int(fields["due"]), timezone.utc)}
+    except (KeyError, ValueError, TypeError) as error:
+        raise QueueError(f"Cannot read the beat record {path}: {error}; run intake again") from error
+
+
+def record_claim(root: Path, issue: dict[str, object]) -> None:
+    """After intake: where the work issue is claimed (labelled in-progress), record its beat, the
+    next one due half the claim timeout after its beat line, at once where it has none; else
+    remove a record, so no hook beats an issue nobody claims."""
+    path = beat_record_path(root)
+    if IN_PROGRESS_LABEL not in issue_labels(issue):
+        path.unlink(missing_ok=True)
+        return
+    last = beat_of(str(issue["body"]))
+    due = last + claim_timeout(root) / 2 if last else utc_now()
+    write_beat_record(root, int(issue["number"]), str(issue["repo"]), last, due)
+
+
+def claimed_issue_now(root: Path, number: int, repo: str, door: "RelayDoor | None") -> dict[str, object]:
+    """The issue's body, labels and state as GitHub has them now: through kern's relay where this
+    runs as one call through kern (`door`), else through gh."""
+    if door is not None:
+        read = door.ask("issue_read", {"method": "get", "issue_number": number}, "read its beat")
+        read = read if isinstance(read, dict) else {}
+    else:
+        read = json.loads(run_gh(root, ["issue", "view", str(number), "--json", "body,labels,state",
+                                        *repo_arguments(repo)]))
+    if not isinstance(read, dict) or not isinstance(read.get("body"), str):
+        raise QueueError(f"the read of #{number} holds no body, so no beat is written over it")
+    return {"body": read["body"].replace("\r\n", "\n"),
+            "labels": issue_labels(read), "state": str(read.get("state") or "").lower()}
+
+
+def beat(root: Path) -> str:
+    """One beat of the worker's claim, as the hook starts it: nothing read or written before the
+    record's `due`; then the issue is read and, while it is open and in progress, its beat line set
+    to now and the next due half the claim timeout later. A failed read or write is due again
+    after BEAT_RETRY; an issue no longer claimed removes the record. The hook's claim on the beat
+    is removed in every case."""
+    claimed = beat_record_path(root).parent / BEAT_CLAIM
+    try:
+        record = load_beat_record(root)
+        if record is None:
+            return "No claim to beat: intake recorded no work issue in progress in this worktree"
+        number, repo, now = int(record["issue"]), str(record["repo"]), utc_now()
+        if now < record["due"]:
+            return (f"The beat of #{number} is due at {record['due'].strftime(BEAT_FORMAT)}: "
+                    "nothing read or written")
+        door = relay_door(root, repo)
+        try:
+            issue = claimed_issue_now(root, number, repo, door)
+            if issue["state"] != "open" or IN_PROGRESS_LABEL not in issue["labels"]:
+                beat_record_path(root).unlink(missing_ok=True)
+                return (f"#{number} is no longer claimed (it is {issue['state'] or 'unread'}, "
+                        f"labelled {', '.join(sorted(issue['labels'])) or 'nothing'}): no beat "
+                        "written, its record removed")
+            body = with_beat(issue["body"], now)
+            if door is not None:  # with its labels, as beat_action_door writes them
+                door.ask("issue_write", {"method": "update", "issue_number": number, "body": body,
+                                         "labels": sorted(issue["labels"])})
+            else:
+                run_gh_with_body(root, ["issue", "edit", str(number), *repo_arguments(repo)], body)
+        except (QueueError, MissingGhError, sibling("se_relay").RelayError) as error:
+            write_beat_record(root, number, repo, record["beat"], now + BEAT_RETRY, said(error))
+            raise QueueError(f"The beat of #{number} failed: {said(error)}; the next is due "
+                             f"{hours_text(BEAT_RETRY)} later") from error
+        due = now + claim_timeout(root) / 2
+        write_beat_record(root, number, repo, now, due)
+        return f"Beat #{number}: {beat_line(now)}; the next is due at {due.strftime(BEAT_FORMAT)}"
+    finally:
+        claimed.unlink(missing_ok=True)
+
+
 def start(
     root: Path,
     number: int,
@@ -4173,10 +4448,12 @@ def start(
                 *repo_arguments(repo),
             ],
         )
+        beat_action_gh(root, repo)({"issue_number": number}, "set")
         return None
 
     path = start_worktree(root, number, repo, str(issue["title"]), worktree_root, create)
     mark_in_progress(root, number, repo)
+    beat_action_gh(root, repo)({"issue_number": number}, "set")
     return path
 
 
@@ -4237,12 +4514,14 @@ STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
 
 def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
     """The GitHub steps of a start where gh cannot take them: the pause search where `paused`
-    (the relay asks it before anything else), `ready` off and `in-progress` on, the cloud worker
+    (the relay asks it before anything else), `ready` off and `in-progress` on with the first
+    beat (`beat_step`), the cloud worker
     assigned where `agent` names one, and the Started comment fleet-check's lease counts from."""
     return Plan(f"start #{number}", (
         *((pause_step(repo),) if paused else ()),
         label_step(repo, number, "ready", add=False),
         label_step(repo, number, "in-progress", add=True),
+        beat_step(repo, number, write=True),
         *((Step("assign", "issue_write", {
             **owner_repo(repo), "method": "update", "issue_number": number,
             "assignees": [agent]}),) if agent else ()),
@@ -4398,7 +4677,7 @@ def start_handed_off(
             door.ask("issue_write", {key: value for key, value in arguments.items()
                                      if key not in ("owner", "repo")})
 
-        run_plan(plan, {**workflow_actions(door), "assign": assign})
+        run_plan(plan, {**workflow_actions(door), "assign": assign, "beat": beat_action_door(door)})
     return path, web_url(issue) or issue_url(repo, number), branch
 
 
@@ -4454,9 +4733,17 @@ def concurrently(*calls: Callable[[], object]) -> list[object]:
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
+    """The startable work issues (`ready_and_claimed`)."""
+    return ready_and_claimed(root, repo, all_repos, allow_existing_branch)[0]
+
+
+def ready_and_claimed(
+    root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
     (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
-    progress holds. The two listings are read at once,
+    progress holds; and the claimed ones, the open issues labelled in-progress, with their bodies
+    (`claim_of`). The two listings are read at once,
     then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
     candidates, active = (json.loads(listing) for listing in concurrently(
@@ -4503,7 +4790,7 @@ def ready_issues(
                       "read", file=sys.stderr)
         if verdict and not held:
             found.append(candidate)
-    return found
+    return found, active
 
 
 LOCAL_WORKERS = 4  # [workers] local, unset: at most this many working agents at once on a device
@@ -4519,10 +4806,10 @@ def worker_limit(root: Path, cloud: bool) -> int | None:
     """At most this many working agents run at once (README "Workers"): `se.toml` `[workers]`
     `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
     table = se_table(root, "workers")
-    unknown = sorted(set(table) - {"local", "cloud"})
+    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours"})
     if unknown:
         raise QueueError(f"[workers] in {root / 'se.toml'} holds unknown keys {', '.join(unknown)}; "
-                         "it holds local and cloud")
+                         "it holds local, cloud and claim_timeout_hours")
     key = "cloud" if cloud else "local"
     value = table.get(key, None if cloud else LOCAL_WORKERS)
     if value is None:
@@ -5381,7 +5668,8 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
             private += [finding for finding in templates.private_findings(chosen, title, given, root)
                         if finding not in private]
         moved = (templates.provenance(chosen, templates.parse(chosen, recorded, title))
-                 if recorded is not None and recorded != body and not chosen.is_adapter else [])
+                 if recorded is not None and without_beat(recorded) != without_beat(body)
+                 and not chosen.is_adapter else [])  # a beat is no change to the text
         return private, private + moved + templates.check(
             chosen, templates.parse(chosen, body, title), root=SE_ROOT,
             bare_scripts=own_scripts(repo))
@@ -7792,7 +8080,7 @@ def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
         run_gh(root, ["issue", "close", str(arguments["issue_number"]), *repo_arguments(repo)])
 
     return {"comment_issue": comment, "add_label": add_label, "remove_label": remove_label,
-            "close_issue": close}
+            "close_issue": close, "beat": beat_action_gh(root, repo)}
 
 
 def label_step(repo: str, number: int, label: str, add: bool) -> Step:
@@ -8259,10 +8547,10 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
 def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
-    take it out of progress and close it unless something keeps it open: `pending`, post-merge
-    acceptance, a review's open points or a planned split's pieces left; or `left`, what a
-    partial delivery naming no planned piece left (`partial_left`), which also takes any `ready`
-    off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
+    take it out of progress with its beat line, and close it unless something keeps it open:
+    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left; or
+    `left`, what a partial delivery naming no planned piece left (`partial_left`), which also takes
+    any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     escalate = (label_step(tracker, work_number, "ready", add=False),
@@ -8275,6 +8563,7 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int,
         Step("comment_issue", "add_issue_comment",
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
+        beat_step(tracker, work_number, write=False),
         *escalate,
         *(() if pending or left else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
@@ -8947,6 +9236,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             "add_label": lambda arguments, label: issues.add_label(
                 int(arguments["issue_number"]), label),
             "close_issue": lambda arguments, _: issues.close_issue(int(arguments["issue_number"])),
+            "beat": beat_action_door(issues),
         })
         print(f"Issue #{work_number}: {issues.issue_state(work_number)} on GitHub after the merge")
     else:
@@ -11634,10 +11924,28 @@ TRACKER_QUERY = (OPTIONAL_WORKTREE, REPO,
                      help="include tracker issues for every repository"))
 
 
-@command("ready", "list startable ready work issues", *TRACKER_QUERY)
+@command("ready", "list startable ready work issues, then each claimed one (labelled in-progress) "
+                  "as live or stale by its beat line, with the beat's age, and the stale ones for "
+                  "the person; neither is startable",
+         *TRACKER_QUERY,
+         arg("--claimed", type=Path, metavar="FILE",
+             help="without gh: judge only the claims, from the open issues labelled in-progress "
+                  "as your GitHub tools listed them (list_issues), the answer saved to FILE"))
 def run_ready(root: Path, args: argparse.Namespace) -> int:
-    for issue in ready_issues(root, resolve_repo(root, args.repo), args.all_repos):
-        print(f"#{issue['number']} {issue['title']}")
+    if args.claimed is not None:
+        claimed = tool_items(json_answer(args.claimed, "claimed issues"), "issues")
+        claimed = [issue for issue in claimed if IN_PROGRESS_LABEL in issue_labels(issue)
+                   and str(issue.get("state") or "open").lower() == "open"]
+    else:
+        startable, claimed = ready_and_claimed(root, resolve_repo(root, args.repo), args.all_repos)
+        for issue in startable:
+            print(f"#{issue['number']} {issue['title']}")
+    timeout, now = claim_timeout(root), utc_now()
+    claims = sorted((claim_of(issue, now, timeout) for issue in claimed), key=lambda c: c.number)
+    for claim in claims:
+        print(claim_line(claim, timeout))
+    if stale_claims_line(claims):
+        print(stale_claims_line(claims))
     return 0
 
 
@@ -11682,7 +11990,8 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
     """The queue's GitHub reads as a plan for the session's tools, where gh is not signed in: the
     pause search first, then the escalations, the delivered pull requests and the startable work
     issues, each with what keeps an item; the cloud's capacity is unlimited unless `[workers]`
-    `cloud` limits it, and then the workers running are read too."""
+    `cloud` limits it, and then the workers running are read too; last the claims, which
+    `ready --claimed` judges live or stale."""
     limit = worker_limit(root, cloud=True)
     where = owner_repo(repo)
     labels = [] if all_repos else [repository_label(root)]
@@ -11703,6 +12012,10 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
                   | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
                   "no branch yet and no file ownership an in-progress issue holds"),
         *([] if limit is None else [running_step(root, repo)]),
+        Step("claimed", "list_issues", {**where, "state": "OPEN",
+                                        "labels": ["work", "in-progress", *labels], "perPage": 100},
+             note="save the answer to a file and run work_tickets.py ready --claimed <file>: it "
+                  "names each claim live or stale by its beat, and the stale ones for the person"),
     ), then=capacity_line(limit))
 
 
@@ -11887,6 +12200,17 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
     return 1 if args.strict and any(line.kind == "difference" for line in lines) else 0
 
 
+@command("beat", "the worker's claim heartbeat, which the plugin's hook (scripts/se_hook.sh) starts "
+                 "on a tool call once the beat record intake wrote is due: it sets the work "
+                 "issue's beat line to now while the issue is open and in progress, and the next "
+                 "is due half the claim timeout later ([workers] claim_timeout_hours); before that "
+                 "it reads and writes nothing",
+         WORKTREE)
+def run_beat(root: Path, args: argparse.Namespace) -> int:
+    print(beat(root))
+    return 0
+
+
 @command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "
                        "is for a work issue, refuse the turn's end while its branch has no open "
                        "pull request whose description carries a field report that passes "
@@ -12023,9 +12347,9 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
       "backlog file", "backlog list", "block", "unhold", "paused")),
     ("delivery", "Delivery",
      "A worker's delivery: the field report and its guard, sync and identity, the gated push and "
-     "the pull request, and the Stop hook's check.",
+     "the pull request, the Stop hook's check and the claim's beat.",
      ("field-report", "guard", "sync", "identity", "deliver", "push", "verified", "pr-body",
-      "stop-check")),
+      "stop-check", "beat")),
     ("integration", "Integration",
      "The integrator's and SE's work: integrate, the release SE asks for, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
@@ -12074,7 +12398,7 @@ READ_ONLY_COMMANDS = {
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
 STREAMED_COMMANDS = frozenset(
     {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check",
-     "start"})
+     "start", "beat"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:
