@@ -450,8 +450,8 @@ def test_ses_check_gates_the_suite_and_kern_platforms_on_the_trust_job() -> None
     assert "needs: [trust, kern-platforms]" in jobs["check"]
     suite = re.search(r"(?ms)- name: The complete suite.*?\n(?=      - )", jobs["check"])[0]
     assert "if: needs.trust.outputs.suite == 'run'" in suite
-    # The cheap gates always run: the commits, the issue rule, the layouts, the reference, the report.
-    for step in ("Gate the commits", "names an open work issue", "layouts match",
+    # The cheap gates always run: the commits, the issue rule, the layout, the reference, the report.
+    for step in ("Gate the commits", "names an open work issue", "layout matches",
                  "command reference", "field report follows"):
         block = re.search(rf"(?ms)- name: [^\n]*{step}.*?\n(?=      - )", jobs["check"])[0]
         assert "needs.trust" not in block, step

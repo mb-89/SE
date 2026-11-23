@@ -1,4 +1,5 @@
-"""se_plugin.py generates the Copilot and Claude Code layouts from src/ and refuses hand edits."""
+"""se_plugin.py generates Claude Code's and Copilot's agents and their shared skills from src/ and
+refuses hand edits."""
 from pathlib import Path, PurePosixPath
 import importlib.util
 import json
@@ -21,7 +22,7 @@ LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 @pytest.fixture(scope="module")
 def checkout(tmp_path_factory):
-    """A copy of the sources and their generated layouts, built once."""
+    """A copy of the sources and their generated layout, built once."""
     root = tmp_path_factory.mktemp("se")
     shutil.copy(ROOT / "se.toml", root)
     shutil.copytree(ROOT / "src", root / "src")
@@ -37,7 +38,7 @@ def checkout(tmp_path_factory):
     return root
 
 
-def test_the_committed_layouts_match_their_source(capsys):
+def test_the_committed_layout_matches_its_source(capsys):
     assert se_plugin.main(["check"]) == 0, capsys.readouterr().err
 
 
@@ -53,9 +54,8 @@ def suite_run(checkout: Path) -> subprocess.CompletedProcess:
         "from pathlib import Path\n"
         "def test_the_layout_has_the_change():\n"
         "    root = Path(__file__).resolve().parents[1]\n"
-        "    for layout in ('skills', '.github/skills'):\n"
-        "        text = (root / layout / 'work-model' / 'SKILL.md').read_text(encoding='utf-8')\n"
-        "        assert 'unbuilt change' in text\n", encoding="utf-8")
+        "    text = (root / 'skills' / 'work-model' / 'SKILL.md').read_text(encoding='utf-8')\n"
+        "    assert 'unbuilt change' in text\n", encoding="utf-8")
     return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                            "tests/test_probe.py"],
                           cwd=checkout, capture_output=True, text=True, check=False)
@@ -90,41 +90,57 @@ def test_check_refuses_a_hand_edit_and_passes_after_rebuild(checkout, capsys):
 
 
 def test_check_refuses_a_generated_file_without_source_and_build_removes_it(checkout, capsys):
-    stray = checkout / ".github" / "skills" / "stray" / "SKILL.md"
+    stray = checkout / "skills" / "stray" / "SKILL.md"
     stray.parent.mkdir(parents=True)
     stray.write_text("---\nname: stray\n---\n", encoding="utf-8")
     assert se_plugin.main(["check", "--root", str(checkout)]) == 1
-    assert ".github/skills/stray/SKILL.md: not generated from src/" in capsys.readouterr().err
+    assert "skills/stray/SKILL.md: not generated from src/" in capsys.readouterr().err
     assert se_plugin.main(["build", "--root", str(checkout)]) == 0
     assert not stray.parent.exists()
     assert se_plugin.main(["check", "--root", str(checkout)]) == 0
 
 
-def test_each_agent_and_skill_has_one_source_and_both_layouts(checkout):
+def test_each_agent_and_skill_has_one_source_and_one_generated_file(checkout):
     for role in ("se", "integrator", "worker", "reviewer"):
         assert (checkout / "src" / "agents" / f"{role}.md").is_file()
-        assert (checkout / ".github" / "agents" / f"{role}.agent.md").is_file()
         assert (checkout / "agents" / f"{role}.md").is_file()
+        assert (checkout / ".github" / "agents" / f"{role}.agent.md").is_file()
     for skill in (checkout / "src" / "skills").iterdir():
-        assert (checkout / ".github" / "skills" / skill.name / "SKILL.md").is_file()
         assert (checkout / "skills" / skill.name / "SKILL.md").is_file()
+    assert not (checkout / ".github" / "skills").exists()
 
 
-def test_front_matter_keys_go_only_to_their_layout(checkout):
-    copilot = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
-    claude = (checkout / "agents" / "worker.md").read_text(encoding="utf-8")
-    copilot_front, claude_front = copilot.split("---")[1], claude.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in copilot_front
-    assert "disallowedTools" not in copilot_front
-    assert "disallowedTools: AskUserQuestion" in claude_front
-    assert "tools:" not in claude_front and "copilot." not in claude_front
-    assert "name: se\n" in (checkout / "agents" / "se.md").read_text(encoding="utf-8")
+def test_each_host_keeps_its_own_agent_front_matter(checkout):
+    """Claude Code's agents have every tool but AskUserQuestion; Copilot's worker and reviewer have
+    their allow-lists, the reviewer's without `edit`."""
     for role in ("se", "integrator", "worker", "reviewer"):
-        built = (checkout / "agents" / f"{role}.md").read_text(encoding="utf-8").split("---")[1]
-        assert "disallowedTools: AskUserQuestion" in built, role
+        claude = (checkout / "agents" / f"{role}.md").read_text(encoding="utf-8").split("---")[1]
+        copilot = (checkout / ".github" / "agents" / f"{role}.agent.md").read_text(encoding="utf-8").split("---")[1]
+        assert "disallowedTools: AskUserQuestion" in claude, role
+        assert "tools:" not in claude.replace("disallowedTools:", ""), role
+        assert "disallowedTools" not in copilot and "model:" not in copilot, role
+        assert ("strict-tools-list: true" in copilot) == (role in ("worker", "reviewer")), role
+    assert "model: inherit" in (checkout / "agents" / "reviewer.md").read_text(encoding="utf-8")
+    worker = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
+    reviewer = (checkout / ".github" / "agents" / "reviewer.agent.md").read_text(encoding="utf-8")
+    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in worker
+    assert "tools: ['execute', 'read', 'search', 'send_message', 'se/*']" in reviewer
 
 
-@pytest.mark.parametrize("layout", (".github/agents", ".github/skills", "agents", "skills"))
+def test_a_host_prefixed_key_goes_only_to_that_hosts_agent(tmp_path):
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
+                 "copilot.tools: ['read']\nclaude.model: inherit\n---\n# SE\n")
+    files = se_plugin.expected(tmp_path)
+    claude = files[PurePosixPath("agents/se.md")].decode()
+    copilot = files[PurePosixPath(".github/agents/se.agent.md")].decode()
+    assert "model: inherit" in claude and "tools:" not in claude
+    assert "tools: ['read']" in copilot and "model:" not in copilot
+    # VS Code's Copilot pickers skip a `vscode` agent, so each agent shows there once, as Copilot's.
+    assert "target: vscode" in claude and "target:" not in copilot
+    assert claude.split("---\n", 2)[2] == copilot.split("---\n", 2)[2]
+
+
+@pytest.mark.parametrize("layout", ("agents", "skills", ".github/agents"))
 def test_relative_links_resolve_in_each_layout(checkout, layout):
     for path in (checkout / layout).rglob("*.md"):
         for target in LINK.findall(path.read_text(encoding="utf-8")):
@@ -172,16 +188,6 @@ def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(ch
         assert hook["powershell"] == f"bash {command}{powershell_end}; exit 0"
         assert 30 < hook["timeoutSec"] <= 120, "an explicit timeout above Copilot's default of 30 s"
         assert (checkout / command.split()[0]).is_file()
-
-
-def test_copilots_hooks_are_a_build_setting_of_its_layout(tmp_path, monkeypatch):
-    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n")
-    assert se_plugin.COPILOT_HOOKS_FILE in se_plugin.expected(tmp_path)
-    off = (se_plugin.dataclasses.replace(se_plugin.LAYOUTS[0], hooks=False), se_plugin.LAYOUTS[1])
-    monkeypatch.setattr(se_plugin, "LAYOUTS", off)
-    files = se_plugin.expected(tmp_path)
-    assert se_plugin.COPILOT_HOOKS_FILE not in files and se_plugin.MANIFESTS[0] in files
-    assert se_plugin.PLUGIN_HOOKS_FILE not in files
 
 
 def test_a_plugin_install_runs_the_plugins_own_scripts_guarded_and_fail_open(checkout):
@@ -266,7 +272,7 @@ def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_
             assert f"`se:{name}`" in row, name
     work_model = (ROOT / "src" / "skills" / "work-model" / "SKILL.md").read_text(encoding="utf-8")
     prompts = re.findall(r"Act as the \w+ agent defined in <se>/(\S+?\.md)", cloud + work_model)
-    assert {"github/agents/se.agent.md", "github/agents/worker.agent.md"} <= {p.lstrip(".") for p in prompts}
+    assert {"agents/se.md", "agents/worker.md"} <= set(prompts)
     for path in prompts:
         assert (checkout / path).is_file(), path
 
@@ -314,14 +320,14 @@ def test_se_toml_names_every_role_and_each_relies_on_no_outside_skill_today():
                                  "worker": []}
 
 
-def test_a_roles_skills_are_preloaded_into_that_agent_where_the_host_reads_them(tmp_path):
+def test_a_roles_skills_are_preloaded_into_that_agent(tmp_path):
     root = roles_copy(tmp_path, '[roles.worker]\nskills = ["plugin-dev@claude-plugins-official:plugin-structure",'
                                 ' "example-skills@anthropic-agent-skills:skill-creator"]\n')
     se_plugin.build(root)
     assert front(root / "agents" / "worker.md")[-1] == (
         "skills: plugin-dev:plugin-structure, example-skills:skill-creator")
-    assert not any(line.startswith("skills:") for line in front(root / ".github" / "agents" / "worker.agent.md"))
     assert not any(line.startswith("skills:") for line in front(root / "agents" / "integrator.md"))
+    assert not any(line.startswith("skills:") for line in front(root / ".github" / "agents" / "worker.agent.md"))
 
 
 @pytest.mark.parametrize(("roles", "refusal"), (
@@ -339,28 +345,25 @@ def test_a_roles_list_the_build_cannot_write_is_refused_naming_it(tmp_path, caps
 def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys):
     root = roles_copy(tmp_path, "")
     source = root / "src" / "agents" / "worker.md"
-    source.write_text(source.read_text(encoding="utf-8").replace("---\n", "---\nclaude.skills: x\n", 1),
+    source.write_text(source.read_text(encoding="utf-8").replace("---\n", "---\nskills: x\n", 1),
                       encoding="utf-8")
     assert se_plugin.main(["build", "--root", str(root)]) == 2
     assert "skills come from se.toml [roles.<role>] skills" in capsys.readouterr().err
 
 
-def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
+def test_every_generated_agent_holds_to_copilots_fields_and_claude_codes_it_ignores(checkout):
     files = se_plugin.expected(checkout)
-    agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
+    agents = [path for path in files if path.parent.as_posix() == "agents"]
     assert len(agents) == 5 and se_plugin.validate(files) == []
     for path in agents:
         fields = agent_lint.fields(files[path].decode())
-        assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path
-    worker = agent_lint.fields(files[se_plugin.PurePosixPath(".github/agents/worker.agent.md")].decode())
-    assert worker["strict-tools-list"] == "true", "a Copilot field, kept as on main"
+        assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS | agent_lint.CLAUDE_AGENT_FIELDS, path
 
 
 def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
     files = se_plugin.expected(checkout)
     skills = [path for path in files if path.name == "SKILL.md"]
-    assert len(skills) == 2 * (len(list((checkout / "src" / "skills").iterdir()))
-                               + len(se_plugin.notes(checkout)))
+    assert len(skills) == len(list((checkout / "src" / "skills").iterdir())) + len(se_plugin.notes(checkout))
     for path in skills:
         fields = agent_lint.fields(files[path].decode())
         name = agent_lint.scalar(fields["name"])
@@ -369,22 +372,24 @@ def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
 
 
 @pytest.mark.parametrize("front, refusal", (
-    ("copilot.agents: []", "agents is no Copilot agent field"),
-    ("copilot.description: ''", "a Copilot agent needs a description"),
+    ("agents: []", "agents is no Copilot agent field"),
     ("copilot.target: cli", "target is one of github-copilot, vscode"),
     ("handoffs: []", "handoffs is no Copilot agent field"),
+    ("claude.handoffs: []", "handoffs is no Copilot agent field"),
+    ("target: vscode", "Claude Code's agent gets its target from the build"),
 ))
-def test_a_copilot_agent_its_host_would_reject_is_refused_naming_it(tmp_path, capsys, front, refusal):
+def test_an_agent_copilot_would_reject_is_refused_naming_it(tmp_path, capsys, front, refusal):
     write_source(tmp_path, "src/agents/se.md", f"---\nname: se\ndescription: 'SE.'\n{front}\n---\n# SE\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
-    assert f".github/agents/se.agent.md: {refusal}" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"/se.md: {refusal}" in err or f"/se.agent.md: {refusal}" in err, err
 
 
-def test_copilots_other_fields_an_unknown_tool_and_a_claude_only_key_pass(tmp_path):
+def test_copilots_other_fields_an_unknown_tool_and_a_field_copilot_ignores_pass(tmp_path):
     """Copilot ignores a tool it does not know (`send_message`); its other fields are its own."""
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
-                 "copilot.tools: ['read', 'github/*', 'send_message']\ncopilot.strict-tools-list: true\n"
-                 "copilot.reasoning-effort: high\ncopilot.mcp-servers: {}\ncopilot.model: ['a', 'b']\n"
+                 "tools: ['read', 'github/*', 'send_message']\nstrict-tools-list: true\n"
+                 "reasoning-effort: high\nmcp-servers: {}\nmodel: ['a', 'b']\n"
                  "claude.disallowedTools: AskUserQuestion\n---\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
 
@@ -401,7 +406,7 @@ def test_a_skill_vs_code_would_skip_is_refused_naming_it(tmp_path, capsys, name,
     write_source(tmp_path, "src/skills/decision/SKILL.md", f"---\nname: {name}\ndescription: '{description}'\n---\n")
     assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
     err = capsys.readouterr().err
-    assert f".github/skills/decision/SKILL.md: {refusal}" in err and f"skills/decision/SKILL.md: {refusal}" in err
+    assert f"skills/decision/SKILL.md: {refusal}" in err
 
 
 def write_source(root: Path, path: str, text: str) -> None:
@@ -411,23 +416,23 @@ def write_source(root: Path, path: str, text: str) -> None:
     (root / path).write_text(text, encoding="utf-8")
 
 
-def test_a_checkout_with_crlf_line_endings_builds_the_same_layouts(checkout, tmp_path):
-    """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layouts from it."""
+def test_a_checkout_with_crlf_line_endings_builds_the_same_layout(checkout, tmp_path):
+    """git on Windows checks src/ out with CRLF; the kern-platforms leg builds the layout from it."""
     crlf = tmp_path / "crlf"
     shutil.copytree(checkout / "src", crlf / "src")
     shutil.copytree(checkout / "guidance", crlf / "guidance")
     shutil.copy(checkout / "se.toml", crlf)
     for path in [*(crlf / "src").rglob("*.md"), *(crlf / "guidance").rglob("*.md")]:
-        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
     assert se_plugin.expected(crlf) == se_plugin.expected(checkout)
 
 
-def test_copilots_one_manifest_names_its_layout_its_hooks_and_the_door(checkout):
+def test_copilots_one_manifest_names_the_layout_its_hooks_and_the_door(checkout):
     manifest = json.loads((checkout / ".github" / "plugin" / "plugin.json").read_text(encoding="utf-8"))
     claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert {key: manifest[key] for key in ("name", "version", "description")} == {
         key: claude[key] for key in ("name", "version", "description")}
-    assert manifest["agents"] == ".github/agents/" and manifest["skills"] == ".github/skills/"
+    assert manifest["agents"] == ".github/agents/" and manifest["skills"] == "skills/"
     assert manifest["hooks"] == ".github/plugin/hooks.json"
     for key in ("agents", "skills", "hooks"):
         assert (checkout / manifest[key]).exists(), key
@@ -477,7 +482,7 @@ def claude_manifest(tmp_path: Path, setting: str) -> bytes:
     shutil.copytree(ROOT / "src", root / "src")
     version = tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
     (root / "se.toml").write_text(f'[project]\nversion = "{version}"\n[plugin]\n{setting}\n', encoding="utf-8")
-    return se_plugin.expected(root, copilot=False)[PurePosixPath(".claude-plugin/plugin.json")]
+    return se_plugin.expected(root)[PurePosixPath(".claude-plugin/plugin.json")]
 
 
 def test_claude_mcp_on_declares_the_door_run_from_the_plugin_root(tmp_path):
@@ -544,7 +549,7 @@ def test_a_plugin_setting_the_build_cannot_read_is_refused(tmp_path, capsys):
     assert "[plugin] holds only `root_mcp = true|false`" in capsys.readouterr().err
 
 
-LAYOUT_FOLDERS = ("agents", "skills", ".github/agents", ".github/skills")
+LAYOUT_FOLDERS = ("agents", "skills")
 
 
 def layout_links(root: Path) -> list[tuple[Path, str]]:
@@ -570,7 +575,7 @@ def test_every_layout_link_resolves_in_ses_checkout_and_in_an_installed_plugins_
             resolved = (path.parent / target).resolve()
             assert resolved.is_relative_to(root.resolve()) and resolved.exists(), where
             relative += 1
-    assert relative > 0, "the layouts link to the files beside them"
+    assert relative > 0, "the layout links to the files beside it"
 
 
 def test_a_layout_link_out_of_its_folder_stays_relative(tmp_path):
@@ -578,23 +583,17 @@ def test_a_layout_link_out_of_its_folder_stays_relative(tmp_path):
                  "See [the README](../../README.md#install) and [x](../skills/x/SKILL.md).\n")
     write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
     files = se_plugin.expected(tmp_path)
-    copilot = files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode()
-    claude = files[se_plugin.PurePosixPath("agents/se.md")].decode()
-    assert "See [the README](../../README.md#install) and [x](../skills/x/SKILL.md)." in copilot
-    assert "See [the README](../README.md#install) and [x](../skills/x/SKILL.md)." in claude
+    built = files[se_plugin.PurePosixPath("agents/se.md")].decode()
+    assert "See [the README](../README.md#install) and [x](../skills/x/SKILL.md)." in built
 
 
-@pytest.mark.parametrize("layout, readme, agent", (
-    (se_plugin.LAYOUTS[0], "../../../README.md", "../../agents/se.agent.md"),
-    (se_plugin.LAYOUTS[1], "../../README.md", "../../agents/se.md"),
-))
-def test_layout_links_use_url_separators(layout, readme, agent):
+def test_layout_links_use_url_separators():
     source = PurePosixPath("src/skills/x/SKILL.md")
     text = ("[readme](../../../README.md#install) [agent](../../agents/se.md) "
             "[sibling](../y/SKILL.md) [local](references/rules.md#rule) "
             "[folder](references/) [web](https://example.com/a/b#c) [anchor](#local)")
-    assert se_plugin._rewrite_links(text, source, se_plugin._target(source, layout), layout) == (
-        f"[readme]({readme}#install) [agent]({agent}) "
+    assert se_plugin._rewrite_links(text, source, se_plugin._target(source)) == (
+        "[readme](../../README.md#install) [agent](../../agents/se.md) "
         "[sibling](../y/SKILL.md) [local](references/rules.md#rule) "
         "[folder](references/) [web](https://example.com/a/b#c) [anchor](#local)")
 
@@ -609,7 +608,7 @@ def test_the_manifests_name_no_home(checkout):
 @pytest.mark.parametrize("crlf", (False, True), ids=("lf", "crlf"))
 def test_check_passes_in_an_lf_and_in_a_crlf_checkout(tmp_path, capsys, crlf):
     """git's autocrlf on Windows checks out text with CRLF line endings: the sources and the
-    generated layouts alike. `check` holds both to the same LF build."""
+    generated layout alike. `check` holds both to the same LF build."""
     root = tmp_path / "se"
     shutil.copytree(ROOT / "src", root / "src")
     shutil.copy(ROOT / "se.toml", root)
@@ -626,56 +625,11 @@ def test_check_passes_in_an_lf_and_in_a_crlf_checkout(tmp_path, capsys, crlf):
         "a build of an up-to-date CRLF checkout rewrites nothing"
 
 
-def test_a_copilot_part_goes_only_to_the_copilot_layout_without_its_markers(tmp_path):
-    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n\nBoth.\n\n"
-                 "<!-- copilot -->\nOnly Copilot, see [it](../skills/x/SKILL.md).\n\n<!-- /copilot -->\nBoth again.\n")
-    write_source(tmp_path, "src/skills/x/SKILL.md", "---\nname: x\ndescription: 'X.'\n---\n")
-    files = se_plugin.expected(tmp_path)
-    copilot = files[se_plugin.PurePosixPath(".github/agents/se.agent.md")].decode()
-    claude = files[se_plugin.PurePosixPath("agents/se.md")].decode()
-    assert claude.endswith("# SE\n\nBoth.\n\nBoth again.\n")
-    assert copilot.endswith("# SE\n\nBoth.\n\nOnly Copilot, see [it](../skills/x/SKILL.md).\n\nBoth again.\n")
-    assert "<!--" not in copilot.split("-->", 1)[1], "no marker line is left"
-
-
-@pytest.mark.parametrize("body, refusal", (
-    ("<!-- copilot -->\nx\n", "src/agents/se.md:6: <!-- copilot --> is never closed"),
-    ("x\n<!-- /copilot -->\n", "src/agents/se.md:7: <!-- /copilot --> without its <!-- copilot -->"),
-    ("<!-- copilot -->\n<!-- copilot -->\n<!-- /copilot -->\n", "src/agents/se.md:7: <!-- copilot --> inside another"),
-))
-def test_a_copilot_part_the_build_cannot_place_is_refused_naming_its_line(tmp_path, capsys, body, refusal):
-    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n# SE\n" + body)
-    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
-    assert refusal in capsys.readouterr().err
-
-
-
-def claude_layout(files: dict) -> dict:
-    """The Claude layout of a build: agents/, skills/ and .claude-plugin/, without the version line."""
-    return {path: re.sub(rb'\n  "version": "[^"]*",', b"", data) for path, data in files.items()
-            if path.parts[0] in ("agents", "skills", ".claude-plugin")}
-
-
-def test_the_claude_layout_is_byte_identical_with_and_without_the_copilot_content(checkout, tmp_path):
-    """Everything Copilot gains is additive: the Claude layout built from the sources is the one
-    built without any Copilot content, the Copilot parts of the bodies removed from the sources and
-    the Copilot layout and its files not built at all."""
-    files = se_plugin.expected(checkout)
-    assert se_plugin.COPILOT_MANIFEST in files and se_plugin.COPILOT_MCP_FILE in files
-    stripped = tmp_path / "stripped"
-    shutil.copytree(checkout / "src", stripped / "src")
-    shutil.copytree(checkout / "guidance", stripped / "guidance")
-    (stripped / "se.toml").write_text((checkout / "se.toml").read_text(encoding="utf-8").replace(
-        'version = "', 'version = "0.0.', 1), encoding="utf-8")
-    parts = 0
-    for path in (stripped / "src").rglob("*.md"):
-        text = path.read_text(encoding="utf-8")
-        parts += text.count(se_plugin.COPILOT_OPEN + "\n")
-        path.write_text(re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", text), encoding="utf-8")
-    assert parts >= 3, "the se, worker and work-model sources carry Copilot parts"
-    without = se_plugin.expected(stripped, copilot=False)
-    assert not any(path.parts[0] == ".github" for path in without)
-    assert claude_layout(without) == claude_layout(files)
+def test_a_marker_once_meant_for_one_host_is_copied_as_any_comment(tmp_path):
+    """One file serves both hosts: the build splits no part of a body by host."""
+    body = "# SE\n\n<!-- copilot -->\nUnder Copilot, this.\n<!-- /copilot -->\n"
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n---\n" + body)
+    assert se_plugin.expected(tmp_path)[se_plugin.PurePosixPath("agents/se.md")].decode().endswith(body)
 
 
 def built_with_manifest_setting(checkout: Path, root: Path, line: str | None) -> dict:
@@ -708,8 +662,7 @@ def test_the_copilot_manifest_setting_is_unset_and_unset_builds_todays_files_byt
 
 def test_a_root_copilot_manifest_moves_only_the_manifest(checkout, tmp_path):
     """Set to "root", the one Copilot manifest lies at the repository root with the same content,
-    its paths naming the same files under .github/; every other file, the Claude layout among them,
-    is byte-identical."""
+    its paths naming the same files; every other file, the layout among them, is byte-identical."""
     off = built_with_manifest_setting(checkout, tmp_path / "off", None)
     on = built_with_manifest_setting(checkout, tmp_path / "on", 'copilot_manifest = "root"')
     github, root = se_plugin.PurePosixPath(".github/plugin/plugin.json"), se_plugin.PurePosixPath("plugin.json")
@@ -717,10 +670,9 @@ def test_a_root_copilot_manifest_moves_only_the_manifest(checkout, tmp_path):
     assert on[root] == off[github]
     manifest = json.loads(on[root])
     for key in ("agents", "skills", "hooks"):
-        assert manifest[key].startswith(".github/") and (tmp_path / "on" / manifest[key]).exists(), key
+        assert (tmp_path / "on" / manifest[key]).exists(), key
     assert {path: data for path, data in on.items() if path != root} == \
         {path: data for path, data in off.items() if path != github}
-    assert claude_layout(on) == claude_layout(off) and claude_layout(on)
 
 
 @pytest.mark.parametrize("setting, leftover", ((None, "plugin.json"),
@@ -856,13 +808,12 @@ def test_unset_or_empty_draft_skills_builds_exactly_what_no_draft_builds(tmp_pat
     assert se_plugin.expected(root) == without
 
 
-def test_a_listed_draft_is_built_into_both_layouts_and_adds_only_its_folders(tmp_path):
+def test_a_listed_draft_is_built_into_the_layout_and_adds_only_its_folders(tmp_path):
     without = se_plugin.expected(drafts_copy(tmp_path / "unset"))
     root = drafts_copy(tmp_path / "set", 'draft_skills = ["try"]')
     files = se_plugin.expected(root)
     added = {path for path in files if path not in without}
-    assert added == {PurePosixPath(layout, "try", name) for layout in ("skills", ".github/skills")
-                     for name in ("SKILL.md", "references/more.md")}
+    assert added == {PurePosixPath("skills", "try", name) for name in ("SKILL.md", "references/more.md")}
     assert {path: data for path, data in files.items() if path in without} == without
     text = files[PurePosixPath("skills/try/SKILL.md")].decode("utf-8")
     assert text.startswith(DRAFT.format(name="try").split("\n\n")[0] + "\n")
@@ -871,9 +822,8 @@ def test_a_listed_draft_is_built_into_both_layouts_and_adds_only_its_folders(tmp
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     assert se_plugin.differences(root) == []
     (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
-    assert se_plugin.differences(root) == [f"{layout}/try/{name}: not generated from src/; remove it or add "
-                                           "its source" for layout in (".github/skills", "skills")
-                                           for name in ("SKILL.md", "references/more.md")]
+    assert se_plugin.differences(root) == [f"skills/try/{name}: not generated from src/; remove it or add "
+                                           "its source" for name in ("SKILL.md", "references/more.md")]
 
 
 @pytest.mark.parametrize(("setting", "change", "refusal"), [
@@ -915,7 +865,7 @@ def test_ses_own_se_toml_includes_no_draft():
     assert se_plugin.draft_skills(ROOT) == []
 
 
-# Guidance notes: each note of the project's guidance tree is also a skill in both layouts
+# Guidance notes: each note of the project's guidance tree is also a skill in the layout
 # (docs/guidance.md "Notes in folders"), and `check` runs the guidance check (se_guidance.py).
 NOTE = ("---\nname: {name}\ndescription: 'How to tell a flake from your own failure.'\n"
         "tags: [{tags}]\n---\n\nRerun it at base, see [the work model](../../../src/skills/x/SKILL.md).\n")
@@ -930,24 +880,23 @@ def guidance_copy(tmp_path: Path, tags: str = "worker") -> Path:
     return root
 
 
-def test_build_writes_each_guidance_note_as_a_skill_in_both_layouts(tmp_path, capsys):
+def test_build_writes_each_guidance_note_as_a_skill(tmp_path, capsys):
     without = se_plugin.expected(drafts_copy(tmp_path / "without"))
     root = guidance_copy(tmp_path / "with")
     files = se_plugin.expected(root)
     added = {path for path in files if path not in without}
-    assert added == {PurePosixPath(layout, "repeat-count", "SKILL.md") for layout in ("skills", ".github/skills")}
+    assert added == {PurePosixPath("skills", "repeat-count", "SKILL.md")}
     note = NOTE.format(name="repeat-count", tags="worker")
-    for layout in ("skills", ".github/skills"):
-        text = files[PurePosixPath(layout, "repeat-count", "SKILL.md")].decode("utf-8")
-        front, body = note.split("\n---\n", 1)
-        assert text.startswith(front + "\n---\n" + se_plugin.notice("guidance/work/testing/repeat-count.md"))
-        assert text.endswith(body.replace("../../../src/skills/x/SKILL.md", "../x/SKILL.md"))
+    text = files[PurePosixPath("skills", "repeat-count", "SKILL.md")].decode("utf-8")
+    front, body = note.split("\n---\n", 1)
+    assert text.startswith(front + "\n---\n" + se_plugin.notice("guidance/work/testing/repeat-count.md"))
+    assert text.endswith(body.replace("../../../src/skills/x/SKILL.md", "../x/SKILL.md"))
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     capsys.readouterr()
     assert se_plugin.main(["check", "--root", str(root)]) == 0, capsys.readouterr().err
     (root / "guidance" / "work" / "testing" / "repeat-count.md").unlink()
-    assert se_plugin.differences(root) == [f"{layout}/repeat-count/SKILL.md: not generated from src/; remove "
-                                           "it or add its source" for layout in (".github/skills", "skills")]
+    assert se_plugin.differences(root) == ["skills/repeat-count/SKILL.md: not generated from src/; remove "
+                                           "it or add its source"]
 
 
 def test_check_refuses_an_orphan_note_with_the_guidance_check(tmp_path, capsys):
@@ -975,13 +924,12 @@ def test_a_note_the_build_cannot_read_is_refused_naming_it(tmp_path, capsys):
     assert "guidance/bare.md: has no front matter" in capsys.readouterr().err
 
 
-def test_ses_own_notes_are_skills_of_both_layouts():
-    for layout in ("skills", ".github/skills"):
-        assert (ROOT / layout / "guidance-comes-first" / "SKILL.md").is_file(), layout
+def test_ses_own_notes_are_skills():
+    assert (ROOT / "skills" / "guidance-comes-first" / "SKILL.md").is_file()
 
 
 def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys):
-    """A copy of the generator alone (se_plugin.py, agent_lint.py) checks its layouts as before."""
+    """A copy of the generator alone (se_plugin.py, agent_lint.py) checks its layout as before."""
     root = drafts_copy(tmp_path)
     (root / "scripts").mkdir()
     for name in ("se_plugin.py", "agent_lint.py"):

@@ -247,11 +247,11 @@ def copy_plugin(plugin: Path, report: Report) -> None:
 
 
 def check_layout(plugin: Path, report: Report) -> None:
-    """The Copilot manifest names the Copilot layout, it holds SE's agents and skills, and the copy
-    matches its sources (`se_plugin.py check` of the copy)."""
+    """The Copilot manifest names Copilot's agents and the shared skills, they hold SE's agents and
+    skills, and the copy matches its sources (`se_plugin.py check` of the copy)."""
     manifest = _json_file(plugin / se_plugin.COPILOT_MANIFEST)
     agents, skills = plugin / manifest["agents"], plugin / manifest["skills"]
-    missing = [name for name in AGENTS if not (agents / f"{name}.agent.md").is_file()]
+    missing = [name for name in AGENTS if not (agents / f"{name}{se_plugin.COPILOT_AGENT_SUFFIX}").is_file()]
     missing += [name for name in SKILLS if not (skills / name / "SKILL.md").is_file()]
     if missing:
         report.add("failed", "layout", f"{se_plugin.COPILOT_MANIFEST} lacks {', '.join(missing)}")
@@ -472,7 +472,7 @@ def run_door(door: Door, project: Path, check: str, report: Report, quiet: bool)
 
 def check_cli(cli: str | None, plugin: Path, project: Path, env: dict[str, str], report: Report) -> None:
     """What a Copilot CLI reads of the plugin without signing in: the plugin, its skills from the
-    Copilot layout, and its MCP server."""
+    plugin's shared skills folder, and its MCP server."""
     if cli is None:
         report.add("skipped", "copilot-cli", "no Copilot CLI on PATH (or --cli); "
                    "`npm install -g @github/copilot` adds one")
@@ -494,15 +494,15 @@ def check_cli(cli: str | None, plugin: Path, project: Path, env: dict[str, str],
     paths = {item.get("name"): item.get("path", "") for item in skills if isinstance(item, dict)} \
         if isinstance(skills, list) else {}
     layout = [name for name in SKILLS if PurePosixPath(Path(paths.get(name, "")).as_posix()).parent
-              == PurePosixPath((plugin / ".github" / "skills").as_posix())]
+              == PurePosixPath((plugin / se_plugin.SKILLS).as_posix())]
     server = read("mcp", "get", se_plugin.MCP_SERVER)
     server = server.get(se_plugin.MCP_SERVER, {}) if isinstance(server, dict) else {}
     if not versions or len(layout) != len(SKILLS) or not server:
-        report.add("failed", "copilot-cli", f"plugin versions {versions}, skills from .github/skills "
+        report.add("failed", "copilot-cli", f"plugin versions {versions}, skills from {se_plugin.SKILLS} "
                    f"{layout}, server {bool(server)}")
         return
     report.add("passed", "copilot-cli", f"plugin {se_plugin.PLUGIN} {versions[0]}; skills "
-               f"{', '.join(layout)} from .github/skills; server {se_plugin.MCP_SERVER}: "
+               f"{', '.join(layout)} from {se_plugin.SKILLS}; server {se_plugin.MCP_SERVER}: "
                f"{server.get('command')} {' '.join(server.get('args', []))}, cwd {server.get('cwd', '(none)')}")
     if server.get("cwd") == se_plugin.COPILOT_PLUGIN_ROOT and "." in server.get("args", []):
         report.add("noted", "mcp-root", f"the CLI starts a plugin's server in {se_plugin.COPILOT_PLUGIN_ROOT}, "

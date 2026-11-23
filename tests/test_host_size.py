@@ -117,7 +117,7 @@ def test_nothing_in_se_calls_the_command():
     """Off by default: no hook, workflow, se.toml entry, build, check or generated layout names it."""
     places = [ROOT / "se.toml", ROOT / "wiring.toml", ROOT / ".claude-plugin" / "plugin.json",
               ROOT / "scripts" / "hygiene.py", ROOT / "scripts" / "se_plugin.py", ROOT / "scripts" / "agent_lint.py"]
-    for folder in (".githooks", ".github/workflows", ".github/agents", ".github/skills", "agents", "skills"):
+    for folder in (".githooks", ".github/workflows", "agents", "skills"):
         places += [path for path in (ROOT / folder).rglob("*") if path.is_file()]
     assert len(places) > 10
     callers = [path.relative_to(ROOT).as_posix() for path in places

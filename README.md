@@ -35,7 +35,7 @@ read it the same way.
   - Its setup script is the one under [Claude Code cloud](#claude-code-cloud), which clones SE into
     `~/.claude/skills/se`, and its variable `SE_DEFAULT_AGENT=se`.
   - Elsewhere, the first message picks the agent: `Act as the se agent defined in
-    <se>/.github/agents/se.agent.md.`, which works in Copilot too.
+    <se>/agents/se.md.`, which works in Copilot too.
 - **Cowork, untested:** give the Cowork session the folder that holds SE's clone, and send the
   first message above with that folder as `<se>`. Nobody has tried it yet.
 
@@ -49,10 +49,10 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | --- | --- | --- | --- |
 | Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:retro`, `se:reviewer` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:retro`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
-| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
-| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
-| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/`, `.github/skills/` and `.github/hooks/se.json`; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task and pick `se` | its `sessionStart` hook hands the session SE's greeting, as above |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/<owner>/<repository>`, open it, and install the plugin from the clone: **Chat: Install Plugin from Source** with the clone's folder (agent plugins, `chat.plugins.enabled`); VS Code reads the plugin through `.claude-plugin/plugin.json`, its agents from `agents/` and its skills from `skills/`, and the checkout's `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, each once with the session target Copilot (Claude Code's `agents/` say `target: vscode`, which those pickers skip, so Copilot's `.github/agents/` show; in this checkout the workspace's `.github/agents/` may add a second, [VS Code](docs/copilot.md#vs-code)), and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
+| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), which VS Code reads through `.claude-plugin/plugin.json`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
+| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with Copilot's agents, `.github/agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
+| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/` and `.github/hooks/se.json`; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task and pick the agent `se` | its `sessionStart` hook hands the session SE's greeting, as above |
 
 Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
 showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
@@ -101,11 +101,11 @@ repository's `.claude/settings.json` gives every session of that repository SE's
 workers included. So each session's first prompt names its role's file, `<se>` being
 `~/.claude/skills/se`:
 
-- SE: `Act as the se agent defined in <se>/.github/agents/se.agent.md.`
+- SE: `Act as the se agent defined in <se>/agents/se.md.`
 - Worker and integrator: the session prompt the work model's
   [Without gh](src/skills/work-model/SKILL.md#without-gh) names.
 - Reviewer, started by SE on "review PR #n": the line
-  `Act as the reviewer agent defined in <se>/.github/agents/reviewer.agent.md.`, then the pull
+  `Act as the reviewer agent defined in <se>/agents/reviewer.md.`, then the pull
   request, its repository and SE's session, one per line.
 
 An environment made for SE can set `SE_DEFAULT_AGENT=se` beside its setup script, in its
@@ -486,7 +486,7 @@ exits 1 on a problem; otherwise it exits 0.
 ### Host sizes
 
 `uv run python <se>/scripts/host_size.py report [--root DIR] [--tools FILE] [--json]` measures
-the generated layouts (`AGENTS.md`, `.github/agents`, `.github/skills`, `agents/`, `skills/`) and,
+the generated layout (`AGENTS.md`, `agents/`, `.github/agents`, `skills/`) and,
 with `--tools`, the JSON of a `tools/list` answer, against what each agent host caps.
 
 It prints one row per host, file or tool and subject, "over", "under" or "not measured", the
@@ -1178,7 +1178,7 @@ The same tree may be held by more than one remote or checkout
   source does not. Its content, presence and absence pass, and the command names it on one line,
   `lockfiles excluded:`. `work_tickets.py` `PARITY_LOCKFILES` owns the list; nothing else is excluded.
 - **Every other path fails:** a path that differs is listed as `changed:`, or `only in <ref>:` for
-  the side that holds it. Generated outputs (the layouts, `components/*/component.toml`) compare
+  the side that holds it. Generated outputs (the layout, `components/*/component.toml`) compare
   like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
   without (`tests/test_parity.py`).
 
@@ -1996,7 +1996,7 @@ and git's first commit on `main` as the [project identity](#project-settings).
 
 ## Host validators
 
-`uv run python scripts/host_validate.py` runs each host's own validator over the built layouts
+`uv run python scripts/host_validate.py` runs each host's own validator over the built layout
 (`claude plugin validate --strict` on both manifests, `skills-ref validate` on each skill folder) and
 reports; SE's own lint in the build stays the first line. Exit codes: 0 passed, 1 a host refused a
 layout, 2 a validator could not run; `--skips-pass` answers 0 where only a tool is absent.
@@ -2116,7 +2116,7 @@ settings checks and the generated docs.
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
 | `work_tickets.py file-seconds` | `work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]` | write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more |
 | `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
-| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
+| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layout (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
 | `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |

@@ -226,8 +226,7 @@ def tracked_text(paths) -> list[str]:
 
 
 def test_nothing_that_starts_or_loads_se_names_the_reader_or_the_record():
-    places = [ROOT / "src", ROOT / "agents", ROOT / "skills", ROOT / ".github" / "agents",
-              ROOT / ".github" / "skills", ROOT / ".github" / "hooks", ROOT / ".githooks",
+    places = [ROOT / "src", ROOT / "agents", ROOT / "skills", ROOT / ".github" / "hooks", ROOT / ".githooks",
               ROOT / ".claude-plugin", ROOT / "hooks", ROOT / "README.md", ROOT / "se.toml"]
     assert tracked_text([place for place in places if place.exists()]) == []
 

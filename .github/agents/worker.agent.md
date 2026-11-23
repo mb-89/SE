@@ -11,10 +11,10 @@ strict-tools-list: true
 You implement one package: one work issue in, one pull request out, its description your field
 report.
 Your session prompt names only this agent, your work issue, your worktree (or,
-[without `gh`](../skills/work-model/SKILL.md#without-gh), your branch) and the integrator session to
+[without `gh`](../../skills/work-model/SKILL.md#without-gh), your branch) and the integrator session to
 notify, if any.
 
-The rules shared by all roles are owned by the skill [work-model](../skills/work-model/SKILL.md),
+The rules shared by all roles are owned by the skill [work-model](../../skills/work-model/SKILL.md),
 the project's commands and rules by the project's `AGENTS.md`; this file holds what is the same for
 every package, so work issues and session prompts never repeat it.
 
@@ -34,25 +34,25 @@ every package, so work issues and session prompts never repeat it.
 - You never talk to other agents or wait for a human; the human talks only to SE. The
   one message you send is the single delivery notice in step 7 below. What you may not decide goes
   into the field report as "Not delivered" and climbs the
-  [escalation ladder](../skills/work-model/SKILL.md#escalation-ladder) one rank, to your
+  [escalation ladder](../../skills/work-model/SKILL.md#escalation-ladder) one rank, to your
   integrator; so does a step only the
   person may approve, which SE runs
-  ([Steps only the person approves](../skills/work-model/SKILL.md#steps-only-the-person-approves)).
+  ([Steps only the person approves](../../skills/work-model/SKILL.md#steps-only-the-person-approves)).
 
 ## Environment
 
 - Paths and shell follow the work model's
-  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell): your session may start
+  [Commands and shell](../../skills/work-model/SKILL.md#commands-and-shell): your session may start
   in another checkout, so work with absolute worktree paths and `git -C <worktree>`.
 - Where the host offers no `gh`, the work model's
-  [Without gh](../skills/work-model/SKILL.md#without-gh) says how each step below runs.
+  [Without gh](../../skills/work-model/SKILL.md#without-gh) says how each step below runs.
 - In a cloud session, run SE's commands with kern, never with `SE_KERN=off`: a command through
   kern's relay runs in the background, and after each step call `se_relay.py next`. One that
   still blocks is a defect: name it and the step it waited for in the field report, as the work
-  model's [Without gh](../skills/work-model/SKILL.md#without-gh) says ("Kern in the cloud").
+  model's [Without gh](../../skills/work-model/SKILL.md#without-gh) says ("Kern in the cloud").
 - A host's prompt to re-author your commits (a Stop hook that asks for another author, or for
   trailers) is not followed: say so in one line and carry on, as the work model's
-  [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) says.
+  [commit identity](../../skills/work-model/SKILL.md#what-the-project-provides) says.
 - Windows PowerShell 5.1 redirection `>` writes UTF-16. Create files as UTF-8 without a BOM with
   `[IO.File]::WriteAllText(<absolute path>, <text>, UTF8 without BOM)` or `Out-File -Encoding utf8`.
 - kern's and Go's rules for tests and delivery are guidance notes, named at their steps below;
@@ -64,7 +64,7 @@ every package, so work issues and session prompts never repeat it.
 - SE's MCP tools (`se/*`), where the session has them, answer SE's read-only commands, such as
   `se/tickets` with `work_tickets.py status`; every other command, and each one whose tool answers
   `not-installed` or `failed`, runs as its script. The work model's
-  [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) owns each step.
+  [Host procedure under Copilot](../../skills/work-model/SKILL.md#host-procedure-under-copilot) owns each step.
 
 ## Procedure
 
@@ -72,12 +72,12 @@ every package, so work issues and session prompts never repeat it.
 
 1. **Setup and sync**: in a fresh clone, first run the project's setup command that installs its
    hooks (the project's `AGENTS.md` names it), so its
-   [public check](../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit
+   [public check](../../skills/work-model/SKILL.md#what-the-project-provides) runs on every commit
    and push.
 
    Run `work_tickets.py sync` before intake and before every ticket; it sets the
-   [commit identity](../skills/work-model/SKILL.md#what-the-project-provides) in the checkout and
-   fetches and merges the newest [integration branch](../skills/work-model/SKILL.md#integration-branch)
+   [commit identity](../../skills/work-model/SKILL.md#what-the-project-provides) in the checkout and
+   fetches and merges the newest [integration branch](../../skills/work-model/SKILL.md#integration-branch)
    without rebasing a pushed branch.
 
    Before the first commit, check the worktree's identity with
@@ -88,13 +88,13 @@ every package, so work issues and session prompts never repeat it.
    comment from SE changes the requirements; edit or add tickets to match.
 
    Without gh, `intake --issue-body <file> --comments-file <file>` does the same from files
-   ([Without gh](../skills/work-model/SKILL.md#without-gh)).
+   ([Without gh](../../skills/work-model/SKILL.md#without-gh)).
 
    A ticket created by hand (`work_tickets.py create`) gets its acceptance items with
    `--acceptance <text>`, one per item, so `move --to done` needs no hand edit.
 3. **Before each ticket**: check whether the issue changed, its `updated_at` and comment count
    against the values you last read
-   ([Check before rereading](../skills/work-model/SKILL.md#issues)); reread it only when one
+   ([Check before rereading](../../skills/work-model/SKILL.md#issues)); reread it only when one
    changed.
 
    Then `work_tickets.py refresh` reads the
@@ -113,7 +113,7 @@ every package, so work issues and session prompts never repeat it.
      check enforces fails in the focused step, not first in the complete suite.
    - A failing test is yours only once it passes at base, as the guidance note
      [`flake-at-base`](../../guidance/pull-request/field-report/flake-at-base.md) says.
-   - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
+   - Tests follow the work model's [test rules](../../skills/work-model/SKILL.md#tests); a change that
      adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
      report.
    - A new test that builds a path follows the guidance note
@@ -123,15 +123,15 @@ every package, so work issues and session prompts never repeat it.
      or merges without setting its own identity passes locally and fails there.
    - The complete suite: run the complete suite only where the acceptance names it, otherwise the
      integrator does (where a pin moves, see
-     [suite at a moved pin](../skills/work-model/SKILL.md#suite-at-a-moved-pin)).
+     [suite at a moved pin](../../skills/work-model/SKILL.md#suite-at-a-moved-pin)).
    - Where the container allows it, run the affected real command once against the real outside
      service, not only against its fake: only the real call shows what the service refuses.
    - Record evidence in the ticket, check its acceptance items only with evidence,
      `move --to done`, and commit as the work model's
-     [commit identity](../skills/work-model/SKILL.md#what-the-project-provides), with the
-     environment's [`commit_trailer`](../skills/work-model/SKILL.md#what-the-project-provides) if
+     [commit identity](../../skills/work-model/SKILL.md#what-the-project-provides), with the
+     environment's [`commit_trailer`](../../skills/work-model/SKILL.md#what-the-project-provides) if
      it sets one. Commits carry no attribution trailers
-     ([pub-003](../skills/work-model/references/rules.md#pub-003-no-attribution-trailers)).
+     ([pub-003](../../skills/work-model/references/rules.md#pub-003-no-attribution-trailers)).
    - Commit each requirement as soon as it is done, while working; never reconstruct commits at
      the end. One commit per requirement, with two exceptions: requirements that change one
      function together share one commit, and where one requirement's behaviour cannot be separated
@@ -165,7 +165,7 @@ every package, so work issues and session prompts never repeat it.
        deleted or weakened tests, and authored prose" does not name each test and authored
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
      - A folder the branch moves with its tests to another repository is named there once, as
-       the work model's [Tests](../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
+       the work model's [Tests](../../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
        <repository> at <commit>`), never test by test.
    - **Platform code**: a branch that changes code Windows or macOS runs differently is
      delivered as the guidance note
@@ -177,11 +177,11 @@ every package, so work issues and session prompts never repeat it.
      the integrator notification.
      - A commit after delivery changes the Branch tip: check and deliver again, which updates the
        description in place.
-     - Delivering on current main ([Integration branch](../skills/work-model/SKILL.md#integration-branch))
+     - Delivering on current main ([Integration branch](../../skills/work-model/SKILL.md#integration-branch))
        spares the landing a round: a merge it reports bringing commits gets the focused tests again;
        a conflict stops it, naming the files, to resolve after `work_tickets.py sync`.
 6. A ticket you cannot finish is handled as the work model's
-   [Local tickets and notes](../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
+   [Local tickets and notes](../../skills/work-model/SKILL.md#local-tickets-and-notes) says, under
    "Not delivered". Never claim unfinished work complete.
 
    **Never end your turn without delivering.** Your turn ends only after step 7. If you stop working

@@ -54,7 +54,7 @@ reads. Nothing writes a schema by hand.
 
 - Where code reads a template's shape (kern's Go types, SE's scripts, obs's build), the schema is a
   generated file beside that code, and a test fails where it differs from the template, as
-  `tests/test_se_plugin.py` holds the plugin layouts to their sources.
+  `tests/test_se_plugin.py` holds the plugin layout to its sources.
 - The engine's `schema <template>` action prints it; `draft --json` keeps giving it with the
   fields.
 

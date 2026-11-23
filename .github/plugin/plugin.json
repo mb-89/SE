@@ -4,7 +4,7 @@
   "description": "SE, the agent a person talks to, with its integrator, worker and reviewer sub-agents and their skills.",
   "license": "MIT",
   "agents": ".github/agents/",
-  "skills": ".github/skills/",
+  "skills": "skills/",
   "hooks": ".github/plugin/hooks.json",
   "mcpServers": {
     "se": {

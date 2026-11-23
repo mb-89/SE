@@ -95,8 +95,8 @@ class Counts:
 
 
 def counts(se_root: Path) -> Counts:
-    """What the plugin loads: the skills and agents in its Claude Code layout (the Copilot layout
-    is generated from the same source), the rules the public check enforces, and every agent but
+    """What the plugin loads: the skills and agents in its Claude Code layout (Copilot's agents are
+    generated from the same source), the rules the public check enforces, and every agent but
     SE itself as a sub-agent."""
     agents = [name for name in _front_names(se_root / "agents", "*.md") if name != "se"]
     return Counts(len(_front_names(se_root / "skills", "*/SKILL.md")), len(public_check.RULES), len(agents))
@@ -1270,12 +1270,12 @@ def default_agent(se_root: Path, environment: Mapping[str, str] | None = None) -
     value = (os.environ if environment is None else environment).get(DEFAULT_AGENT_ENV, "")
     if not value:
         return "", ""
-    agent = se_root / ".github" / "agents" / f"{DEFAULT_AGENT}.agent.md"
+    agent = se_root / "agents" / f"{DEFAULT_AGENT}.md"
     if value != DEFAULT_AGENT or not agent.is_file():
         return "", f"SE: {DEFAULT_AGENT_ENV} names no agent a session starts as: {value}"
     return ("This session acts as the se agent unless it was started as another agent (--agent, an agent "
             "picker) or its first message names another agent file, also where a compaction summarized "
-            f"that message: read {se_root}/.github/agents/{DEFAULT_AGENT}.agent.md first and act as it defines."), ""
+            f"that message: read {se_root}/agents/{DEFAULT_AGENT}.md first and act as it defines."), ""
 
 
 def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude",

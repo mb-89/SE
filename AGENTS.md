@@ -14,25 +14,31 @@
 
 ## Agents and skills
 
-- Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`. Front
-  matter keys prefixed `copilot.` or `claude.` go only into that host's layout.
-- `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
-  (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
-  `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` checks they match.
-- Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into both
-  layouts as `skills/<name>/SKILL.md`, `<name>` its front matter's
+- Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`, for
+  both hosts: its body serves Claude Code and Copilot (prose for one host says so, such as "Under
+  Copilot"). An agent's front matter key prefixed `copilot.` or `claude.` goes only into that
+  host's agent file: the two hosts read the same `tools` key with different tool names, so one
+  shared list would take tools from one of them.
+- `uv run python scripts/se_plugin.py build` generates everything else from it: the Claude Code
+  plugin (`agents/`, `skills/`, `.claude-plugin/`), Copilot's agents (`.github/agents/`, which
+  Copilot's manifest names and the cloud agent reads), and Copilot's manifest with its own hooks
+  (`.github/plugin/`, `.github/hooks/`, `.github/mcp.json`); both hosts load the one `skills/`.
+  Claude Code's agents get `target: vscode`, so VS Code's Copilot pickers list each agent once, as
+  Copilot's ([docs/copilot.md "VS Code"](docs/copilot.md#vs-code)).
+  Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+- Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into
+  `skills/<name>/SKILL.md`, `<name>` its front matter's
   ([docs/guidance.md "Notes in folders"](docs/guidance.md#notes-in-folders)).
   `se_plugin.py check` also runs `scripts/se_guidance.py check`, so an orphan note fails there.
 - The outside skills a role relies on are one list, `se.toml` `[roles.<role>] skills`, never an
   agent's own front matter.
   - Each entry is `<plugin>@<marketplace>:<skill>`; a skill Claude Code ships loads by itself and
     is not listed.
-  - The build preloads it into that agent's `skills` field where the host reads one (Claude Code;
-    Copilot's agents have none).
+  - The build preloads it into that agent's `skills` field.
   - The start greeting names an entry the session lacks
     ([README "Start and refresh"](README.md#start-and-refresh)).
 - Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
-  tests stale layouts and nobody runs the build by hand before it; commit what it wrote.
+  tests a stale layout and nobody runs the build by hand before it; commit what it wrote.
 - Installing SE on a clean machine is the README's [Getting it running](README.md#getting-it-running);
   on a host, its [Install](README.md#install).
 
@@ -88,7 +94,7 @@
     ([Issues](src/skills/work-model/SKILL.md#issues)).
 - Fixes: `uv run python scripts/work_tickets.py format` writes what the `check` job's generated
   checks refuse; SE runs no code formatter or linter, and its other checks have no fix to apply.
-  - the layouts (`se_plugin.py check`);
+  - the layout (`se_plugin.py check`);
   - the interface templates' generated schemas (`templates.py interfaces --check`, held by
     `tests/test_interfaces.py`);
   - the README's command reference with its components' declarations (`work_tickets.py docs

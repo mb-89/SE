@@ -991,7 +991,7 @@ for example:
   the role files, this skill and the project's `AGENTS.md`:
 
   ```text
-  Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+  Act as the worker agent defined in <se>/agents/worker.md (read it first, plus the project's AGENTS.md).
   Work issue: <issue URL>
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
@@ -1030,3 +1030,54 @@ The hand-off steps that land a pull request, by hand:
 - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
   as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
 
+## Host procedure under Copilot
+
+Under GitHub Copilot (VS Code's Copilot harness, the Copilot CLI), every role follows its procedure
+as above; this section owns what changes. It branches on the tools the session has, never on the
+host's name or its layout. Out of scope: the Copilot cloud agent, and VS Code's Claude and Local
+harnesses.
+
+- **SE's commands through the `se` tools, where present**: the MCP door
+  ([README "The MCP door"](../../README.md#the-mcp-door)) offers SE's read-only commands as the
+  tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
+  `command`, `args` and `page`.
+  - Where a tool answers `starting`, call it again in a few seconds; where it answers
+    `not-installed` or `failed`, or the session has no `se` tools, run the same command as its
+    script, `uv run python <se>/scripts/<name>.py`.
+  - A command no tool offers, every one that writes among them, always runs as its script.
+- **Without kern**: where `gh` is signed in and no core runs, every step still works, through the
+  scripts and `gh`, as SE's own commands do without kern; the greeting then says
+  `SE runs without kern`, and so does SE in its first message.
+- **Every session costs the person**: each one is model calls they pay for, a worker's whole run
+  among them (SE's `docs/copilot.md`, "What a session costs").
+  So a role under Copilot starts no session by itself: it prints the line that starts it (the
+  session tool's call, or the CLI line below), says what it is for, and ends the turn; the person
+  runs it if they choose.
+  - The greeting's `Copilot guards:` line names the setting: only where it reads
+    `[copilot] start_sessions = true` does the role start sessions itself, as the next two points say.
+  - Where the greeting names no guards (no greeting, or an older SE), the guard is on.
+- **Starting a session, where the host has a session tool** (`create_session`): use it, as the
+  catch-up skill says, titled by `session-title` and tagged `SE`
+  ([Visible sessions](#visible-sessions)), and `send_message` for the one message a role sends.
+- **Where it has none**, the worker starts with the Copilot CLI, detached and logged, in its
+  worktree, its prompt the one [Without gh](#without-gh) names:
+
+  ```sh
+  nohup copilot -C <worktree> --agent worker --trust-folder --no-ask-user --allow-tool=<list> \
+    -n <title> -p '<prompt>' > <worktree>/.se/worker.log 2>&1 &
+  ```
+
+  - Windows: `Start-Process copilot -ArgumentList '-C','<worktree>','--agent','worker',
+    '--trust-folder','--no-ask-user','--allow-tool=<list>','-n','<title>','-p','<prompt>'
+    -RedirectStandardOutput <worktree>\.se\worker.log -WindowStyle Hidden`.
+  - `<title>` is the worker's title, `session-title worker <project> <branch>`, the `title=` of
+    `start`'s `Launch worker:` line.
+  - `<list>` holds the worker's tools: its shell, its file edits and the `se` server.
+  - `--trust-folder`: project MCP servers and hooks load only in a trusted folder.
+  - Where the session cannot run it, give the person that one line to run, and end the turn.
+  - `--max-ai-credits <n>` (at least 30) caps that session's spend; the person may add it.
+- **No message tool**: read the queue at each turn (`work_tickets.py queue`), which lists the
+  delivered pull requests a message would have announced; a role that would send one sends none.
+- **Ask tool** (`ask_user`): SE never uses it, on any host: a decision goes to the person as a deck,
+  any other open point as the turn's last lines, as the catch-up skill ends every turn; workers and
+  integrators never ask.

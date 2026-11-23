@@ -343,9 +343,9 @@ def test_copilots_hook_output_hands_the_same_greeting_as_its_one_field():
 
 
 def _agent_root(tmp_path: Path) -> Path:
-    agents = tmp_path / "se" / ".github" / "agents"
+    agents = tmp_path / "se" / "agents"
     agents.mkdir(parents=True)
-    (agents / "se.agent.md").write_text("# se\n", encoding="utf-8")
+    (agents / "se.md").write_text("# se\n", encoding="utf-8")
     return tmp_path / "se"
 
 
@@ -363,7 +363,7 @@ def test_default_agent_se_ends_the_hand_over_with_the_sentence_for_both_hosts(tm
     monkeypatch.setenv("SE_DEFAULT_AGENT", "se")
     sentence = ("This session acts as the se agent unless it was started as another agent (--agent, an agent "
                 "picker) or its first message names another agent file, also where a compaction summarized "
-                f"that message: read {root}/.github/agents/se.agent.md first and act as it defines.")
+                f"that message: read {root}/agents/se.md first and act as it defines.")
     for host, data in _contexts(root).items():
         assert _context(data).endswith("\n\n" + sentence), host
         assert _context(data).count(sentence) == 1

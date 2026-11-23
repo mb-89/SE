@@ -196,8 +196,7 @@ def test_a_usage_error_exits_2(tmp_path, fake_git_door, capsys):
 
 
 # Off by default: nothing SE runs or ships names the command.
-WIRED = (".github/workflows", ".github/hooks", ".github/actions", ".github/agents",
-         ".github/skills", ".githooks", ".claude-plugin", "agents", "skills", "src", "components",
+WIRED = (".github/workflows", ".github/hooks", ".github/actions", ".githooks", ".claude-plugin", "agents", "skills", "src", "components",
          "se.toml", "wiring.toml")
 
 

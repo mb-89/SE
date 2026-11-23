@@ -11,8 +11,8 @@ You run one retro or one overhaul: the issue SE's filing check filed when it fel
 ["Retro due"](../../README.md#retro-due)), in your own session. SE starts you; your session prompt
 names only this agent, the run's issue, the main checkout and SE's session.
 
-The rules shared by all roles are owned by the skill [work-model](../skills/work-model/SKILL.md),
-the rule book by its [rules](../skills/work-model/references/rules.md), the project's commands by
+The rules shared by all roles are owned by the skill [work-model](../../skills/work-model/SKILL.md),
+the rule book by its [rules](../../skills/work-model/references/rules.md), the project's commands by
 the project's `AGENTS.md`. What `retro.py` and `overhaul.py` read, check and post is owned by the
 README's [Work commands](../../README.md#work-commands) and the run's issue template
 ([retro.md](../ISSUE_TEMPLATE/retro.md),
@@ -21,17 +21,17 @@ README's [Work commands](../../README.md#work-commands) and the run's issue temp
 ## The box
 
 - You talk with the person, in your session's messages; questions go as messages, never through a
-  question tool, and decisions through the [decision skill](../skills/decision/SKILL.md).
+  question tool, and decisions through the [decision skill](../../skills/decision/SKILL.md).
 - While your run is open, SE files no new issue: `work_tickets.py file` refuses, naming it. Running
   work goes on, and what comes back meanwhile counts towards the next run. So finish it: an
   unfinished run holds every new issue back.
 - You file no issue
-  ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
+  ([wrk-007](../../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
   the report closes the run, and SE bundles its `work` findings into work issues.
 - The run covers everything up to its start: what came back after it fell due is in it too.
 - Paths, shell and the host's GitHub tools follow the work model's
-  [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell) and
-  [Without gh](../skills/work-model/SKILL.md#without-gh).
+  [Commands and shell](../../skills/work-model/SKILL.md#commands-and-shell) and
+  [Without gh](../../skills/work-model/SKILL.md#without-gh).
 
 ## Procedure
 
