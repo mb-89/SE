@@ -16,7 +16,7 @@ Placeholders, used throughout:
 
 ## Following the guide
 
-An SE that has the update (`se_start.py update`, from SE 13 on) runs steps 1 to 4 by itself:
+An SE that has the update (`se_start.py update`, from SE 13.1 on) runs steps 1 to 4 by itself:
 `/se:update` ([docs/boot.md "The update"](boot.md#the-update)). An older one follows them by hand.
 
 1. **Install the newest SE.** The start's refresh moves SE only within its major, so a newer major
