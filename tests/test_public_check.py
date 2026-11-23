@@ -372,6 +372,18 @@ def test_a_linked_worktree_without_a_local_list_uses_its_main_checkouts(tmp_path
     assert public_check.local_list_path(worktree) == worktree / public_check.LOCAL_FILE
 
 
+def test_a_submodule_without_a_local_list_does_not_use_its_superprojects(tmp_path: Path) -> None:
+    superproject, submodule = tmp_path / "super", tmp_path / "super" / "sub"
+    gitdir = superproject / ".git" / "modules" / "sub"
+    gitdir.mkdir(parents=True)
+    submodule.mkdir()
+    (submodule / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    (superproject / public_check.LOCAL_FILE).write_text("example-secret\\w*\n", encoding="utf-8")
+
+    assert public_check.local_list_path(submodule) == submodule / public_check.LOCAL_FILE
+    assert public_check.load_local(submodule) is None
+
+
 def test_paths_with_local_terms_are_redacted(repo: Path, local: Path) -> None:
     local.write_text("example-secret\\w*\n", encoding="utf-8")
     commit(repo, {"src/example-secretTools/app.py": "x = 1\nbuilt by example-secret\n",

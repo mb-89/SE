@@ -380,7 +380,8 @@ def check_untracked(root: Path, rev: str | None) -> None:
 def local_list_path(root: Path) -> Path:
     """The local list of the source at ``root``: its own, or, in a linked git worktree that has
     none, its main checkout's, so a worktree is checked with the same private terms as the
-    checkout it was made from rather than passing with only the public list."""
+    checkout it was made from rather than passing with only the public list. Only a linked
+    worktree's git directory has a `commondir`; a submodule's has none and keeps its own."""
     own = root / LOCAL_FILE
     dot_git = root / ".git"
     if own.is_file() or not dot_git.is_file():
@@ -390,9 +391,9 @@ def local_list_path(root: Path) -> Path:
         return own
     gitdir = (root / text[len("gitdir:"):].strip()).resolve()
     commondir = gitdir / "commondir"
-    common = ((gitdir / commondir.read_text(encoding="utf-8").strip()).resolve()
-              if commondir.is_file() else gitdir.parent.parent)
-    main = common.parent / LOCAL_FILE
+    if not commondir.is_file():  # a submodule: a source of its own, not a linked worktree
+        return own
+    main = (gitdir / commondir.read_text(encoding="utf-8").strip()).resolve().parent / LOCAL_FILE
     return main if main.is_file() else own
 
 
