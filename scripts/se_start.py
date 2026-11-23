@@ -1573,9 +1573,8 @@ def boot(se_root: Path, root: Path | None, local_config: Path | None, world: Wor
 # The update (docs/boot.md "The update"): the one command the start report names, which takes every
 # newer release, also across a breaking one, and hands over the upgrade guide's sections between.
 
-#: How the person runs the update: SE's skill `update`, which runs `update` below and then follows
-#: the sections it prints (src/skills/update/SKILL.md); the start report names it.
-UPDATE = "/se:update"
+# The person runs it as `/se:update`, SE's skill update (src/skills/update/SKILL.md), which runs
+# `update` below and follows the sections it prints; the start report's template names it.
 
 
 def set_range(root: Path, name: str, version: Version) -> str:
