@@ -18,6 +18,7 @@ import (
 	"se/components/fleet"
 	"se/components/origin"
 	retrodue "se/components/retro-due"
+	"se/components/template"
 )
 
 // still is a host clock that never moves: SE's wiring places kern's clock,
@@ -76,7 +77,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	origin.Tracker = func(string) string { return "alice/SE" }
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestSEsTrackedWiringLeavesTheSessionRecordOff(t *testing.T) {
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	rec := session.New(session.Options{Dir: dir})
 	c, err := host.Serve(host.Options{Root: root, Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, rec.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component, rec.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
