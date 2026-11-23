@@ -16,6 +16,10 @@ testpaths = ["tests"]
 # One worker per core (pytest-xdist); a file's tests share one worker and run in order there, the
 # heaviest file first by the cache's seconds, else tests/file-seconds.json's (tests/conftest.py).
 addopts = "-n auto --dist loadfile -p pytester"
+# The spawn guard's level (scripts/spawn_guard.py): `warn` while tests that start processes outside
+# a door's contract or an entry point's wiring test are converted (#1750); the landing that
+# converts the last one sets `error`.
+spawn_guard = "warn"
 
 [dependency-groups]
 dev = [

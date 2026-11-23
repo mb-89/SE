@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import shell_door
 from se_modules import ModuleError, version_bounds
 
 #: The se.toml table of the runtimes a component needs (docs/components.md "Runtimes").
@@ -139,7 +140,7 @@ class Machine:
             return 2, f"no {RUNME_SH} in {root} gets it"
         shutil.copy2(root / RUNME_SH, folder / RUNME_SH)
         try:
-            done = subprocess.run(["sh", str(folder / RUNME_SH)], capture_output=True, text=True,
+            done = shell_door.run(["sh", str(folder / RUNME_SH)], capture_output=True, text=True,
                                   stdin=subprocess.DEVNULL, check=False)
         except OSError as error:
             return 127, f"RUNME could not run: {error}"

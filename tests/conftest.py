@@ -23,6 +23,7 @@ import fake_processes as fake_programs  # noqa: E402
 import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import shell_door  # noqa: E402
 import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
 import waiting  # noqa: E402
@@ -53,6 +54,97 @@ RUNNER_PREFIX = "GITHUB_"
 def runner_variables(environment: Mapping[str, str]) -> list[str]:
     """The names in `environment` that a runner sets (RUNNER_VARIABLES, every GITHUB_*)."""
     return [name for name in environment if name in RUNNER_VARIABLES or name.startswith(RUNNER_PREFIX)]
+
+
+# Every test runs in a home of its own (`own_home`), its session and module fixtures in one of the
+# suite's (`suite_home`), so none reads the developer's home, config or credentials (~/.gitconfig,
+# gh's login, uv's or npm's config, ~/.se) and what one writes under ~ is its own. What the
+# machine's tools keep only to run faster, and which holds no config or credential, stays where
+# the machine keeps it: uv's cache and the Pythons uv installed, Go's build and module caches (the
+# toolchain go.mod asks for among them), npm's cache and Playwright's browsers. Their places are
+# read here, once, before any home moves, into the variables that name them, so an obs build or a
+# `go run` in a test neither downloads nor builds everything again; one already set keeps its value.
+HOME_VARIABLES = ("HOME", "USERPROFILE")
+XDG_VARIABLES = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
+GIT_CONFIG_VARIABLES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
+
+
+def machine_caches(environ: Mapping[str, str], platform: str = sys.platform) -> dict[str, str]:
+    """Where the machine's tools keep their caches, by the variable that names each, as each tool
+    finds it where the variable is unset: under the home `environ` names (USERPROFILE on Windows),
+    its XDG folders on Linux, Library/Caches on macOS and LOCALAPPDATA and APPDATA on Windows."""
+    windows, mac = platform == "win32", platform == "darwin"
+    home = Path(environ.get("USERPROFILE" if windows else "HOME") or Path.home())
+    local = Path(environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+    roaming = Path(environ.get("APPDATA") or home / "AppData" / "Roaming")
+    cache = Path(environ.get("XDG_CACHE_HOME") or home / ".cache")
+    data = Path(environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    user_cache = local if windows else home / "Library" / "Caches" if mac else cache  # Go's os.UserCacheDir
+    gopath = environ.get("GOPATH") or str(home / "go")
+    return {
+        "UV_CACHE_DIR": str(local / "uv" / "cache" if windows else cache / "uv"),
+        "UV_PYTHON_INSTALL_DIR": str(roaming / "uv" / "data" / "python" if windows else data / "uv" / "python"),
+        "GOCACHE": str(user_cache / "go-build"),
+        "GOPATH": gopath,
+        "GOMODCACHE": str(Path(gopath.split(os.pathsep)[0]) / "pkg" / "mod"),
+        "npm_config_cache": str(local / "npm-cache" if windows else home / ".npm"),
+        "PLAYWRIGHT_BROWSERS_PATH": str(user_cache / "ms-playwright"),
+    }
+
+
+for _name, _place in machine_caches(os.environ).items():
+    if not any(name.casefold() == _name.casefold() for name in os.environ):  # npm reads NPM_CONFIG_CACHE too
+        os.environ[_name] = _place
+
+# The machine's home as the session found it, for the suite's setup that fetches and builds its
+# modules through the machine's git, uv and gh (the obs fixture), and for nothing else.
+MACHINE_HOME = {name: os.environ.get(name) for name in (*HOME_VARIABLES, *XDG_VARIABLES, *GIT_CONFIG_VARIABLES)}
+
+# obs's machine folder, where its components are installed (obs's `local_folder`, which reads this
+# variable): the suite's own, in the checkout beside its obs module, never the developer's
+# ~/.config/obs, so every build of the suite runs the adapter obs-html the obs fixture installed
+# there, whatever the developer installed. A test of obs's lookup sets its own.
+os.environ["OBS_LOCAL_FOLDER"] = str(ROOT / ".se" / "obs-local")
+
+
+def use_home(patch: pytest.MonkeyPatch, home: Path) -> None:
+    """Point `patch`'s environment at `home`, an empty folder: HOME and USERPROFILE name it, the XDG
+    folders are unset, so each tool finds its own under it, and git reads no global configuration
+    beyond `home`'s nor the system's."""
+    for name in HOME_VARIABLES:
+        patch.setenv(name, str(home))
+    for name in XDG_VARIABLES:
+        patch.delenv(name, raising=False)
+    patch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def use_machine_home(patch: pytest.MonkeyPatch) -> None:
+    """Point `patch`'s environment back at the machine's home as the session found it (MACHINE_HOME)."""
+    for name, value in MACHINE_HOME.items():
+        if value is None:
+            patch.delenv(name, raising=False)
+        else:
+            patch.setenv(name, value)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def suite_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The home of the session's and the modules' fixtures, which run before any test's own."""
+    with pytest.MonkeyPatch.context() as patch:
+        home = tmp_path_factory.mktemp("suite-home")
+        use_home(patch, home)
+        yield home
+
+
+@pytest.fixture(autouse=True)
+def own_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """This test's home, a fresh empty folder beside its tmp_path (not in it, as many a test reads
+    all of tmp_path): what it writes under ~ is its own. A test that sets HOME itself wins."""
+    with pytest.MonkeyPatch.context() as patch:
+        home = tmp_path_factory.mktemp("home")
+        use_home(patch, home)
+        yield home
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -115,9 +207,20 @@ def process_backend(item: pytest.Item) -> process_door.Backend:
     return process_door.RealProcesses() if spawn_guard.allowed(item) else fake_programs.FakeProcesses()
 
 
+def shell_backend(item: pytest.Item) -> shell_door.Backend:
+    """What the shell door (scripts/shell_door.py) runs for `item`: the real shell for a test the
+    spawn guard lets start processes (a `spawns` mark; the guard judges whether a shell may be among
+    them), else the fake (tests/fake_processes.py), which answers by the test's handlers (the
+    `fake_shell` fixture)."""
+    if spawn_guard.allowed(item):
+        return shell_door.RealShell()
+    return fake_programs.FakeProcesses(scripts=False, hooks=False)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
     with git_door.use(door_backend(item)), process_door.use(process_backend(item)), \
+            shell_door.use(shell_backend(item)), \
             network_guard.running(item.nodeid), pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
@@ -200,8 +303,21 @@ def fake_processes() -> fake_programs.FakeProcesses:
     spawn guard lets start processes runs the real programs and cannot take it."""
     backend = process_door.BACKEND
     if not isinstance(backend, fake_programs.FakeProcesses):
-        pytest.fail("fake_processes: this test runs the real programs (a spawns mark, or the spawn baseline); "
-                    "drop the mark or its baseline entry to take the fake", pytrace=False)
+        pytest.fail("fake_processes: this test runs the real programs (a spawns mark); drop the mark to take the "
+                    "fake", pytrace=False)
+    return backend
+
+
+@pytest.fixture
+def fake_shell() -> fake_programs.FakeProcesses:
+    """The shell door's fake of this test (tests/fake_processes.py), for its handlers: each shell
+    the code under test starts (`sh RUNME.sh`, a command line) answered by `fake_shell.on(...)`; a
+    shell no handler answers fails the test, naming it. The shell door's contract (`contract:
+    shell`) runs the real shell and cannot take it."""
+    backend = shell_door.BACKEND
+    if not isinstance(backend, fake_programs.FakeProcesses):
+        pytest.fail("fake_shell: this test runs the real shell (a spawns mark); drop the mark to take the fake",
+                    pytrace=False)
     return backend
 
 
@@ -251,8 +367,11 @@ def obs() -> Path:
         except TimeoutError as error:
             pytest.fail(str(error))
         # Bringing SE's own checkout's obs module to its pin and building it is the suite's setup,
-        # not a test: it fetches the real module through real git and runs the real programs.
+        # not a test: it fetches the real module through real git and runs the real programs, in the
+        # machine's home, whose git configuration and gh login reach the module's and the adapter's
+        # remotes; it installs the adapter into the suite's obs folder (OBS_LOCAL_FOLDER above).
         with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
+            use_machine_home(patch)
             patch.setenv(git_door.VARIABLE, "real")
             directory = build_docs.obs_dir()
             subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,

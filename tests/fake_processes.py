@@ -16,6 +16,9 @@ handler that matches it, and none starts a process:
   command by a function. A handler takes the `Invocation` and answers an `Answer`, a
   `CompletedProcess`, an exit code or the standard output.
 
+The shell door (scripts/shell_door.py) has a fake of this class of its own, without SE's scripts
+and hooks (the `fake_shell` fixture), which answers each shell by the test's handlers only.
+
 A program no handler answers fails the test, naming the command and the remedy; a test failure,
 so no `except OSError` of the code under test swallows it. `calls` records every invocation.
 

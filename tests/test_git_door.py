@@ -1153,7 +1153,7 @@ def test_runs_git_in_process(shared_fake_git, tmp_path):
     assert git_door.run("init", "-q", str(tmp_path / "r"), root=tmp_path).returncode == 0
 
 
-@pytest.mark.spawns("its child process is what the state file is for")
+@pytest.mark.spawns("contract: git, its child process is what the state file is for")
 def test_runs_git_and_a_child(shared_fake_git, tmp_path):
     assert git_door.run("init", "-q", str(tmp_path / "r"), root=tmp_path).returncode == 0
     subprocess.run([sys.executable, "-c", "pass"], check=True)

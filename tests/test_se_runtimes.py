@@ -28,7 +28,7 @@ def test_the_probe_reads_a_runtimes_version_from_its_own_command():
     assert se_runtimes.Machine(path="").version("python") is None, "none on PATH: missing"
 
 
-@pytest.mark.spawns("contract: se_runtimes.Machine.runme; shell: RUNME.sh's get line runs only as a process, "
+@pytest.mark.spawns("shell: se_runtimes.Machine.runme runs RUNME.sh's get line through the shell door, "
                     "and the probe then runs the node it wrote")
 @pytest.mark.skipif(sys.platform == "win32", reason="the sealed PATH holds shell shims and the "
                     "runtime got is a shell script, neither of which Windows starts as a command")
