@@ -69,3 +69,21 @@ def explain(item: pytest.Item, report: pytest.TestReport) -> None:
         f"{OWNER}: {item.nodeid} ran past its time bound of {seconds} s and failed; the bound is set "
         f"and measured in {OWNER}. Remedy: run the test alone to find what it waits for; where it "
         f"rightly takes longer, measure the bound again as the comment beside BOUND in {OWNER} says.")))
+
+
+def crashed(crashitem: str, report: pytest.TestReport, sched) -> None:
+    """pytest-xdist's report of a test whose worker ended while it ran: names the test and the
+    likely cause, and keeps the test from running again. pytest-timeout's thread method, the only
+    one on Windows, ends the worker of a test past its bound; pytest-xdist would requeue the whole
+    file with it, so the test ends worker after worker until the run stops at its maximum of
+    crashed workers, the file's other tests never run and the summary names only crashes. Marking
+    it done in the requeued file's work (`--dist loadfile`) runs the file's other tests on a new
+    worker instead."""
+    for unit in getattr(sched, "workqueue", {}).values():
+        if crashitem in unit:
+            unit[crashitem] = True
+    report.longrepr = (
+        f"{report.longrepr}\n{OWNER}: {crashitem} ended its worker and failed; it is not run again, "
+        f"and its file's other tests go on. Where pytest-timeout stops a test past its time bound with "
+        f"its thread method, the only one on Windows, it ends the worker; the bound is set and measured "
+        f"in {OWNER}. Otherwise the test ended the process itself. Remedy: run the test alone.")

@@ -1,0 +1,446 @@
+# Tests still allowed to start processes, not converted yet (scripts/spawn_guard.py).
+# Generated: `pytest --spawn-baseline=write` drops each entry that ran and started none; it
+# never adds one. Convert a test and its entry goes; the guidance note tests-spawn-no-processes says how.
+tests:
+  "tests/test_agent_lint.py::test_an_unreadable_file_is_a_setup_error": 1
+  "tests/test_agent_lint.py::test_another_repositorys_valid_agent_and_skill_have_no_findings": 1
+  "tests/test_agent_lint.py::test_findings_name_each_file_and_exit_one": 1
+  "tests/test_bootstrap.py::test_a_component_check_that_fails_without_a_word_stops_naming_the_command": 1
+  "tests/test_bootstrap.py::test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hands_kern_snake_case": 2
+  "tests/test_bootstrap.py::test_a_copilot_start_with_a_claude_shaped_payload_greets_as_copilot": 2
+  "tests/test_bootstrap.py::test_a_failed_placement_is_named_in_the_greeting_and_the_start_goes_on": 2
+  "tests/test_bootstrap.py::test_a_failed_start_of_kern_is_named_with_its_cause": 2
+  "tests/test_bootstrap.py::test_a_local_file_that_does_not_say_off_leaves_the_hooks_on[[hooks]\\ncor = \"off\"\\n]": 2
+  "tests/test_bootstrap.py::test_a_local_file_that_does_not_say_off_leaves_the_hooks_on[[hooks]\\ncore = \"on\"\\n]": 2
+  "tests/test_bootstrap.py::test_a_local_file_that_does_not_say_off_leaves_the_hooks_on[[hooks]\\ncore = 1\\n]": 2
+  "tests/test_bootstrap.py::test_a_local_file_that_does_not_say_off_leaves_the_hooks_on[[hooks]\\ncore = true\\n]": 2
+  "tests/test_bootstrap.py::test_a_project_without_modules_syncs_nothing": 1
+  "tests/test_bootstrap.py::test_a_required_component_missing_stops_the_start_and_the_session_is_shown_why": 3
+  "tests/test_bootstrap.py::test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start": 2
+  "tests/test_bootstrap.py::test_a_start_after_a_compaction_skips_the_refresh_modules_identity_and_hooks_and_still_greets": 2
+  "tests/test_bootstrap.py::test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_core[linked-worktree]": 2
+  "tests/test_bootstrap.py::test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_core[subfolder]": 2
+  "tests/test_bootstrap.py::test_a_start_outside_a_git_checkout_starts_no_core": 2
+  "tests/test_bootstrap.py::test_a_start_places_the_installed_ses_kern_before_the_core_where_it_is_missing[missing]": 2
+  "tests/test_bootstrap.py::test_a_start_places_the_installed_ses_kern_before_the_core_where_it_is_missing[off-the-lock]": 2
+  "tests/test_bootstrap.py::test_a_start_that_moved_se_runs_once_more_carrying_what_it_said": 1
+  "tests/test_bootstrap.py::test_a_wrapper_first_on_path_still_reaches_the_tool_after_it_on_the_fake_path": 2
+  "tests/test_bootstrap.py::test_an_archive_that_fails_its_checksum_is_never_run": 2
+  "tests/test_bootstrap.py::test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quiet": 2
+  "tests/test_bootstrap.py::test_an_empty_hook_core_variable_starts_as_unset": 3
+  "tests/test_bootstrap.py::test_an_interrupted_first_start_finishes_when_run_again": 2
+  "tests/test_bootstrap.py::test_an_optional_component_missing_is_a_line_and_the_start_goes_on": 2
+  "tests/test_bootstrap.py::test_an_ses_kern_at_its_lock_starts_no_process": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[ off]": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[0]": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[]": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[false]": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[off ]": 2
+  "tests/test_bootstrap.py::test_any_other_hook_core_value_starts_the_core_as_today[on]": 2
+  "tests/test_bootstrap.py::test_binary_builds_with_go_where_no_release_matches": 1
+  "tests/test_bootstrap.py::test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothing": 1
+  "tests/test_bootstrap.py::test_binary_places_kern_before_it_builds_the_binary_on_it": 1
+  "tests/test_bootstrap.py::test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1": 1
+  "tests/test_bootstrap.py::test_bootstrap_outside_a_session_leaves_kern_alone": 2
+  "tests/test_bootstrap.py::test_claude_code_starts_are_not_guarded": 3
+  "tests/test_bootstrap.py::test_copilot_starts_a_session_once_however_many_sources_fire": 4
+  "tests/test_bootstrap.py::test_every_other_start_runs_every_step[\"source\":\"clear\"]": 2
+  "tests/test_bootstrap.py::test_every_other_start_runs_every_step[\"source\":\"resume\"]": 2
+  "tests/test_bootstrap.py::test_every_other_start_runs_every_step[\"source\":\"startup\"]": 2
+  "tests/test_bootstrap.py::test_every_other_start_runs_every_step[None]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[OFF]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[Off]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[environment first]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[local OFF]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[local false]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[local]": 2
+  "tests/test_bootstrap.py::test_hook_core_off_starts_no_core_and_says_so[off]": 2
+  "tests/test_bootstrap.py::test_missing_git_names_the_one_line_to_run": 1
+  "tests/test_bootstrap.py::test_the_core_starts_without_uvs_deprecated_tls_variable": 2
+  "tests/test_bootstrap.py::test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it[every-tool]": 2
+  "tests/test_bootstrap.py::test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it[shasum-no-setsid]": 2
+  "tests/test_bootstrap.py::test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said": 1
+  "tests/test_bootstrap.py::test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run": 2
+  "tests/test_bootstrap.py::test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload[claude]": 2
+  "tests/test_bootstrap.py::test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload[copilot PascalCase]": 2
+  "tests/test_bootstrap.py::test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload[copilot camelCase]": 2
+  "tests/test_bootstrap.py::test_the_hook_sets_the_projects_commit_identity_at_start": 2
+  "tests/test_bootstrap.py::test_the_session_finds_se_on_its_path_by_a_stable_name": 3
+  "tests/test_bootstrap.py::test_the_session_finds_uv_through_claudes_env_file": 1
+  "tests/test_bootstrap.py::test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml": 2
+  "tests/test_bootstrap.py::test_the_switch_rows_default_is_the_starts_behaviour": 2
+  "tests/test_bootstrap.py::test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_its_folder": 2
+  "tests/test_bootstrap.py::test_with_no_release_and_no_go_kern_failed_names_both": 2
+  "tests/test_bootstrap.py::test_with_no_release_kern_is_built_from_ses_kern_in_the_background_and_the_greeting_says_so": 2
+  "tests/test_bootstrap.py::test_without_a_pin_kern_is_left_alone": 2
+  "tests/test_bootstrap.py::test_without_hooks_in_the_local_file_the_start_reads_no_setting[None]": 2
+  "tests/test_bootstrap.py::test_without_hooks_in_the_local_file_the_start_reads_no_setting[[paths]\\nobs = \"~/src/obs\"\\n]": 2
+  "tests/test_ci_reuse.py::test_a_reused_failure_fails_check_naming_the_run_and_the_remedy": 1
+  "tests/test_ci_reuse.py::test_a_reused_pass_passes_naming_the_run_it_took": 2
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[-skipped-False]": 1
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[reused-skipped-True]": 1
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[run-failure-False]": 1
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[run-skipped-False]": 1
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[run-success-True]": 1
+  "tests/test_ci_reuse.py::test_the_platform_step_passes_only_on_run_legs_or_an_earlier_answer[trusted-skipped-True]": 1
+  "tests/test_commit_checks.py::test_a_check_runs_on_the_staged_tree_not_the_working_tree": 2
+  "tests/test_commit_checks.py::test_a_command_that_cannot_start_refuses_naming_the_check": 1
+  "tests/test_commit_checks.py::test_the_commit_hook_refuses_a_failing_check_by_name_and_lets_a_passing_one_through": 3
+  "tests/test_component_versions.py::test_a_branch_adding_a_generated_file_with_the_version_lands_after_main_released": 2
+  "tests/test_component_versions.py::test_the_guard_refuses_a_branch_that_moves_only_the_kern_require_without_a_stated_kind": 2
+  "tests/test_copilot.py::test_the_door_starts_in_the_plugin_folder_under_a_parent_in_the_project": 1
+  "tests/test_copilot.py::test_the_self_tests_plugin_copy_passes_its_layout_check": 1
+  "tests/test_copilot.py::test_the_smoke_script_reports_skipped_without_a_token": 1
+  "tests/test_deck.py::test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers": 1
+  "tests/test_deck.py::test_a_clean_built_deck_has_no_findings_and_writes_nothing": 2
+  "tests/test_deck.py::test_a_partial_send_without_a_notice_center_still_resolves": 1
+  "tests/test_deck.py::test_a_send_where_one_way_failed_posts_one_plain_warning[capability_disabled-ok-answers.json]": 1
+  "tests/test_deck.py::test_a_send_where_one_way_failed_posts_one_plain_warning[ok-claude_unavailable-comment]": 1
+  "tests/test_deck.py::test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers": 1
+  "tests/test_deck.py::test_build_serve_wait_and_send_from_the_browser_print_the_answers": 2
+  "tests/test_deck.py::test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude": 1
+  "tests/test_deck.py::test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data": 1
+  "tests/test_deck.py::test_when_both_ways_fail_it_rejects_in_plain_words_and_the_codes_go_to_the_console": 1
+  "tests/test_deck.py::test_where_obs_html_serve_served_the_page_the_sink_names_no_reader": 1
+  "tests/test_deck.py::test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows": 1
+  "tests/test_deck.py::test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends[no-decisions]": 1
+  "tests/test_deck.py::test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends[no-title]": 1
+  "tests/test_deck.py::test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends[none]": 1
+  "tests/test_deck_look.py::test_a_missing_page_is_a_setup_error": 1
+  "tests/test_deck_look.py::test_look_finds_the_planted_overflow_empty_chapter_and_script_error_and_shoots_on_request": 2
+  "tests/test_deck_look.py::test_without_node_look_says_so_in_one_line_and_passes": 1
+  "tests/test_discovery_budget.py::test_a_listing_that_loads_what_it_lists_fails_the_budget_naming_each_component": 1
+  "tests/test_discovery_budget.py::test_the_command_list_reads_every_declaration_within_the_budget_and_loads_none": 1
+  "tests/test_docs.py::test_a_build_installs_obs_html_where_it_is_missing": 1
+  "tests/test_docs.py::test_a_build_that_cannot_install_obs_html_fails_naming_the_command": 2
+  "tests/test_docs.py::test_a_destination_inside_the_manifest_folder_is_refused_before_any_copy": 1
+  "tests/test_docs.py::test_a_missing_note_fails_the_build": 1
+  "tests/test_docs.py::test_a_paragraph_over_obs_default_limit_fails_the_build": 1
+  "tests/test_docs.py::test_a_rule_note_that_would_overwrite_a_file_fails_the_build_naming_it": 1
+  "tests/test_docs.py::test_an_obs_html_installed_as_another_kind_is_refused_by_obs": 1
+  "tests/test_docs.py::test_each_rule_book_row_is_one_line_on_a_phone_in_both_views": 2
+  "tests/test_docs.py::test_obs_document_runs_on_obs_environments_python_not_through_uv_run": 1
+  "tests/test_docs.py::test_obs_finds_the_installed_obs_html_component_and_its_serve_command": 1
+  "tests/test_feedback.py::test_a_command_whose_first_line_comes_after_its_door_call_fails_the_check": 1
+  "tests/test_feedback.py::test_each_interactive_command_shows_its_first_line_before_its_first_door_call": 6
+  "tests/test_feedback.py::test_paused_reads_the_door_once_and_declares_its_budget": 1
+  "tests/test_feedback.py::test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads": 18
+  "tests/test_feedback.py::test_queue_reads_the_door_at_once_and_declares_its_budget": 12
+  "tests/test_file_order.py::test_a_parallel_run_records_each_files_seconds_and_the_next_run_collects_by_them": 2
+  "tests/test_file_order.py::test_a_run_that_writes_a_table_names_a_file_that_drifted_and_one_that_writes_none_names_none": 2
+  "tests/test_file_order.py::test_a_table_that_is_not_files_to_non_negative_seconds_is_refused_naming_it": 1
+  "tests/test_file_order.py::test_record_file_seconds_without_a_path_is_refused_naming_the_refresh_from_ci": 1
+  "tests/test_file_order.py::test_record_file_seconds_writes_nothing_after_a_run_of_part_of_the_files_and_says_why": 1
+  "tests/test_file_order.py::test_record_file_seconds_writes_the_files_of_a_passing_parallel_run": 2
+  "tests/test_file_order.py::test_with_nothing_recorded_the_table_orders_the_files": 2
+  "tests/test_git_door.py::test_a_child_process_reaches_the_fake_its_test_names_and_is_refused_without_it": 4
+  "tests/test_git_door.py::test_a_clone_has_a_commit_made_upstream_only_once_it_fetches_it[real]": 40
+  "tests/test_git_door.py::test_a_commit_and_a_merge_without_an_identity_are_refused[real]": 9
+  "tests/test_git_door.py::test_a_commit_carries_the_identity_the_door_sets_or_the_environment_names[real]": 10
+  "tests/test_git_door.py::test_a_conflicting_merge_fails_naming_the_file[real]": 16
+  "tests/test_git_door.py::test_a_merge_keeps_an_uncommitted_change_it_does_not_touch_and_refuses_one_it_does[real]": 22
+  "tests/test_git_door.py::test_a_merge_takes_both_sides_line_changes_and_lists_a_conflict_until_aborted[real]": 28
+  "tests/test_git_door.py::test_a_second_merge_of_a_branch_merges_from_its_last_merged_tip[real]": 19
+  "tests/test_git_door.py::test_a_shallow_clone_names_its_boundary_and_lists_no_commit_below_it[real]": 28
+  "tests/test_git_door.py::test_a_state_file_load_is_a_fresh_copy_and_sees_another_process": 2
+  "tests/test_git_door.py::test_a_tag_moves_only_with_force_locally_and_on_the_remote[real]": 28
+  "tests/test_git_door.py::test_a_test_that_runs_git_through_the_state_file_and_starts_no_child_is_refused": 1
+  "tests/test_git_door.py::test_a_three_dot_diff_names_the_branch_changes_since_the_merge_base[real]": 18
+  "tests/test_git_door.py::test_a_worktree_shares_the_branches_and_is_listed_until_it_is_removed[real]": 22
+  "tests/test_git_door.py::test_add_force_takes_an_excluded_file_and_rm_cached_untracks_it[real]": 14
+  "tests/test_git_door.py::test_an_orphan_branch_starts_without_files_or_parents_and_takes_another_branch_files[real]": 19
+  "tests/test_git_door.py::test_cat_file_merge_base_and_diff_compare_two_commits[real]": 18
+  "tests/test_git_door.py::test_check_ignore_and_add_follow_the_root_gitignore[real]": 10
+  "tests/test_git_door.py::test_checkout_and_switch_start_a_branch_at_a_commit_and_rm_and_add_stage_paths[real]": 20
+  "tests/test_git_door.py::test_checkout_detach_and_reset_hard_move_head_and_the_files_to_a_commit[real]": 19
+  "tests/test_git_door.py::test_clone_brings_the_branches_and_tags_and_checks_out_the_branch_asked[real]": 21
+  "tests/test_git_door.py::test_commit_all_takes_the_tracked_files_and_leaves_new_ones[real]": 11
+  "tests/test_git_door.py::test_commit_amend_replaces_head_on_its_parents[real]": 14
+  "tests/test_git_door.py::test_commit_tree_for_each_ref_and_plain_worktree_list[real]": 21
+  "tests/test_git_door.py::test_config_sets_and_gets_and_a_missing_key_fails[real]": 10
+  "tests/test_git_door.py::test_fetch_mirrors_the_remote_branches_with_prune_and_pull_merges_one[real]": 24
+  "tests/test_git_door.py::test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_refusal_stops_the_command[real]": 19
+  "tests/test_git_door.py::test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_refusal_stops_the_command[state]": 6
+  "tests/test_git_door.py::test_init_without_a_path_makes_the_working_directory_a_repository[real]": 3
+  "tests/test_git_door.py::test_log_and_rev_list_leave_out_excluded_revisions_and_merges[real]": 27
+  "tests/test_git_door.py::test_log_formats_the_dates_subjects_and_changed_paths[real]": 12
+  "tests/test_git_door.py::test_log_with_a_path_lists_the_main_line_commits_that_change_it_oldest_first[real]": 23
+  "tests/test_git_door.py::test_ls_files_ls_tree_and_cat_file_read_the_index_and_a_commit_by_blob[real]": 15
+  "tests/test_git_door.py::test_ls_files_status_and_archive_read_the_tracked_files[real]": 14
+  "tests/test_git_door.py::test_ls_remote_of_a_missing_remote_fails[real]": 1
+  "tests/test_git_door.py::test_ls_remote_reads_a_named_remote_by_pattern[real]": 13
+  "tests/test_git_door.py::test_merge_base_of_several_commits_and_a_fast_forward_only_merge[real]": 28
+  "tests/test_git_door.py::test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it[real]": 20
+  "tests/test_git_door.py::test_push_fetch_and_ls_remote_against_a_bare_origin[real]": 21
+  "tests/test_git_door.py::test_push_under_an_empty_lease_creates_a_branch_only_where_it_does_not_exist[real]": 16
+  "tests/test_git_door.py::test_rev_parse_names_a_bare_repository_and_a_checkout[real]": 6
+  "tests/test_git_door.py::test_rev_parse_names_commits_trees_branches_and_the_git_directory[real]": 20
+  "tests/test_git_door.py::test_show_reads_a_file_at_a_commit_and_refuses_a_missing_one[real]": 12
+  "tests/test_git_door.py::test_switch_brings_the_branch_files_and_a_no_ff_merge_makes_the_main_line[real]": 18
+  "tests/test_git_door.py::test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter": 94
+  "tests/test_git_door.py::test_update_ref_moves_and_deletes_a_ref_only_from_the_old_value_named[real]": 16
+  "tests/test_git_door.py::test_var_names_the_identity_a_commit_would_carry[real]": 5
+  "tests/test_kern.py::test_the_action_leaves_a_folder_carrying_kerns_source_as_it_is": 2
+  "tests/test_kern.py::test_the_action_places_kern_at_the_commit_se_lock_locks_for_the_go_mod_se_toml_names": 2
+  "tests/test_kern.py::test_the_action_refuses_a_folder_with_neither_naming_the_sync": 1
+  "tests/test_kern.py::test_the_action_refuses_a_lock_off_the_require_naming_both_lines": 2
+  "tests/test_public_check.py::test_ci_checks_a_landing_pull_requests_field_report_in_the_work_pull_request": 1
+  "tests/test_public_check.py::test_ci_checks_a_pull_requests_field_report_against_its_work_issue[-False]": 1
+  "tests/test_public_check.py::test_ci_checks_a_pull_requests_field_report_against_its_work_issue[Closes https://github.com/Alice/Example/issues/7-True]": 1
+  "tests/test_public_check.py::test_ci_checks_a_pull_requests_field_report_against_its_work_issue[Fixes https://github.com/alice/example/issues/7\\r-True]": 1
+  "tests/test_public_check.py::test_ci_checks_a_pull_requests_field_report_against_its_work_issue[Refs #7-True]": 1
+  "tests/test_public_check.py::test_ci_checks_a_pull_requests_field_report_against_its_work_issue[Refs https://github.com/alice/example/issues/7-True]": 1
+  "tests/test_public_check.py::test_ci_gates_a_new_branch_on_what_main_does_not_hold": 1
+  "tests/test_public_check.py::test_ci_gates_only_the_commits_a_work_branch_brings_past_main": 1
+  "tests/test_public_check.py::test_ci_gates_the_commits_of_a_pull_request[Fix the build-False]": 1
+  "tests/test_public_check.py::test_ci_gates_the_commits_of_a_pull_request[Fix the build\\n\\nco-authored-by: Copilot-True]": 1
+  "tests/test_public_check.py::test_ci_passes_a_clean_push": 1
+  "tests/test_public_check.py::test_ci_passes_an_allow_listed_co_author_commit": 1
+  "tests/test_public_check.py::test_ci_pull_request_gate_scans_the_merge_it_lands": 3
+  "tests/test_public_check.py::test_ci_refuses_a_field_report_that_names_no_work_issue[Refs https://github.com/bob/other/issues/7]": 1
+  "tests/test_public_check.py::test_ci_refuses_a_field_report_that_names_no_work_issue[]": 1
+  "tests/test_public_check.py::test_ci_refuses_a_foreign_landing_pushed_to_main": 1
+  "tests/test_public_check.py::test_ci_refuses_a_new_branch_made_from_a_foreign_commit_another_branch_holds": 1
+  "tests/test_public_check.py::test_ci_refuses_a_work_branchs_own_foreign_commit_naming_only_it": 1
+  "tests/test_public_check.py::test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remedy[False]": 1
+  "tests/test_public_check.py::test_ci_refuses_the_owners_pushed_co_author_line_naming_its_source_and_remedy[True]": 1
+  "tests/test_public_check.py::test_commit_msg_hook_accepts_csharp_and_include[sh]": 2
+  "tests/test_public_check.py::test_commit_msg_hook_blocks_a_leaky_message[sh]": 2
+  "tests/test_public_check.py::test_commit_msg_hook_refuses_a_repository_tracker_reference[sh]": 4
+  "tests/test_public_check.py::test_commit_msg_hook_refuses_a_tracker_reference[sh]": 2
+  "tests/test_public_check.py::test_pre_commit_hook_blocks_a_planted_user_path[sh]": 3
+  "tests/test_public_check.py::test_pre_push_hook_checks_pushed_commits[sh]": 4
+  "tests/test_public_check.py::test_pre_push_hook_refuses_a_tracker_reference_naming_the_commit[sh]": 1
+  "tests/test_public_check.py::test_push_range_gates_whole_where_se_toml_names_another_branch": 1
+  "tests/test_public_check.py::test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_identity[sh]": 2
+  "tests/test_public_check.py::test_setup_points_core_hooks_path_at_se_hooks_and_writes_nothing_for_copilot_without_it[sh]": 1
+  "tests/test_public_check.py::test_setup_with_copilot_merges_the_settings_pins_se_and_ignores_its_folder[sh]": 2
+  "tests/test_public_check.py::test_the_check_answers_alike_in_its_own_process": 2
+  "tests/test_push_guard.py::test_a_branch_other_than_the_integration_branch_needs_no_verdict": 4
+  "tests/test_push_guard.py::test_a_failed_redelivery_push_puts_the_record_back": 1
+  "tests/test_push_guard.py::test_a_line_without_remote_stops_the_push_to_every_remote[mirror]": 1
+  "tests/test_push_guard.py::test_a_line_without_remote_stops_the_push_to_every_remote[origin]": 1
+  "tests/test_push_guard.py::test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not[fast-forward]": 7
+  "tests/test_push_guard.py::test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not[squash]": 7
+  "tests/test_push_guard.py::test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through": 2
+  "tests/test_push_guard.py::test_a_push_before_any_delivery_names_no_late_push": 1
+  "tests/test_push_guard.py::test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push": 1
+  "tests/test_push_guard.py::test_a_release_commit_carries_its_parents_suite_verdict": 1
+  "tests/test_push_guard.py::test_a_remote_line_stops_a_push_to_its_remote_and_lets_the_commit_go_to_the_other[hook]": 2
+  "tests/test_push_guard.py::test_a_remote_line_stops_a_push_to_its_remote_and_lets_the_commit_go_to_the_other[push]": 3
+  "tests/test_push_guard.py::test_a_suite_over_its_limit_records_a_failure": 1
+  "tests/test_push_guard.py::test_a_work_branch_is_never_published_to_an_origin_its_work_issue_is_not_for": 1
+  "tests/test_push_guard.py::test_a_work_branch_is_published_where_its_work_issue_is_for[its repo label in any case]": 1
+  "tests/test_push_guard.py::test_a_work_branch_is_published_where_its_work_issue_is_for[the checkout's tracker]": 1
+  "tests/test_push_guard.py::test_a_work_branch_is_published_where_its_work_issue_is_for[the repository holding it]": 1
+  "tests/test_push_guard.py::test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_push[another branch's work issue]": 1
+  "tests/test_push_guard.py::test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_push[no work issue recorded]": 1
+  "tests/test_push_guard.py::test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_push[two repo labels]": 1
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a failing verdict-hook]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a failing verdict-push]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a passing verdict for another tree-hook]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a passing verdict for another tree-push]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a passing verdict for this tree-hook]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[a passing verdict for this tree-push]": 2
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[no verdict-hook]": 1
+  "tests/test_push_guard.py::test_push_and_the_hook_agree_on_the_suite_verdict[no verdict-push]": 1
+  "tests/test_push_guard.py::test_push_gates_its_branch_for_origin_with_the_remote_lines_for_origin": 1
+  "tests/test_push_guard.py::test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_it_through": 3
+  "tests/test_push_guard.py::test_push_refuses_a_branch_carrying_history_only_another_remote_holds[tagged-checked]": 1
+  "tests/test_push_guard.py::test_push_refuses_a_branch_carrying_history_only_another_remote_holds[tagged-unchecked]": 1
+  "tests/test_push_guard.py::test_push_refuses_a_branch_carrying_history_only_another_remote_holds[untagged-checked]": 1
+  "tests/test_push_guard.py::test_push_refuses_a_branch_carrying_history_only_another_remote_holds[untagged-unchecked]": 1
+  "tests/test_push_guard.py::test_the_integration_branch_is_pushed_whatever_work_issue_the_checkout_records": 2
+  "tests/test_push_guard.py::test_the_suite_notes_its_time_and_limit_in_the_metrics_line": 1
+  "tests/test_push_guard.py::test_the_suite_on_a_changed_checkout_records_nothing": 1
+  "tests/test_push_guard.py::test_the_suite_records_pass_and_fail_on_the_tree_of_its_commit": 2
+  "tests/test_push_guard.py::test_with_the_setting_on_a_push_after_the_delivery_is_refused": 2
+  "tests/test_push_guard.py::test_without_ci_push_accepts_the_status_as_the_hook_does": 1
+  "tests/test_recorded_outputs.py::test_the_output_is_its_recording[decision-deck]": 3
+  "tests/test_releases.py::test_a_failing_release_build_restores_se_toml_and_commits_nothing": 2
+  "tests/test_releases.py::test_the_release_commit_carries_what_release_build_regenerates": 3
+  "tests/test_repository.py::test_hygiene_passes_a_clean_checkout": 1
+  "tests/test_repository.py::test_hygiene_refuses_what_each_check_finds_naming_the_check": 1
+  "tests/test_runme.py::test_a_command_way_runs_in_the_projects_folder": 1
+  "tests/test_runme.py::test_a_file_need_counts_its_exe_twin": 1
+  "tests/test_runme.py::test_a_missing_need_runs_its_first_fitting_way_on_stderr_then_the_tool": 1
+  "tests/test_runme.py::test_a_need_no_way_fits_says_so_and_never_runs_the_tool": 1
+  "tests/test_runme.py::test_apt_get_runs_with_sudo_n_without_a_terminal_and_a_failed_install_names_sudo": 1
+  "tests/test_runme.py::test_dnf_where_apt_get_is_not": 1
+  "tests/test_runme.py::test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder[dashes-and-expansions]": 1
+  "tests/test_runme.py::test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder[help]": 1
+  "tests/test_runme.py::test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder[one]": 1
+  "tests/test_runme.py::test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder[spaces-quotes-empty]": 1
+  "tests/test_runme.py::test_on_linux_without_apt_get_and_dnf_the_line_names_the_first_other_way_that_fits": 1
+  "tests/test_runme.py::test_on_windows_winget_installs_and_path_is_read_again_from_the_registry": 1
+  "tests/test_runme.py::test_path_lines_come_after_the_callers_path_and_a_tilde_is_the_home": 1
+  "tests/test_runme.py::test_the_tools_exit_code_is_runmes": 1
+  "tests/test_runme.py::test_with_a_terminal_apt_get_runs_with_plain_sudo": 1
+  "tests/test_runme.py::test_with_an_older_se_in_the_home_runme_places_the_pinned_one_once_then_runs_it": 2
+  "tests/test_runme.py::test_with_nothing_missing_runme_installs_nothing_prints_nothing_and_runs_the_tool": 1
+  "tests/test_runme.py::test_without_a_conf_or_a_run_line_runme_says_so_and_exits_2": 2
+  "tests/test_se_components.py::test_two_overlapping_calls_of_one_component_each_answer_only_their_own_output": 2
+  "tests/test_se_doctor.py::test_initialize_reads_one_answer_and_names_a_silent_or_exiting_command": 4
+  "tests/test_se_hook.py::test_a_copilot_agent_stop_falls_back_to_stop_check_with_the_payload_in_snake_case": 1
+  "tests/test_se_hook.py::test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_snake_case": 1
+  "tests/test_se_hook.py::test_a_late_claim_older_than_ten_minutes_is_taken_anew": 2
+  "tests/test_se_hook.py::test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout[empty-bash]": 2
+  "tests/test_se_hook.py::test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout[se checkout-bash]": 2
+  "tests/test_se_hook.py::test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout[unset-bash]": 2
+  "tests/test_se_hook.py::test_a_plugin_hook_runs_only_the_plugins_own_script[SessionStart-bootstrap.sh --hook-bash]": 1
+  "tests/test_se_hook.py::test_a_plugin_hook_runs_only_the_plugins_own_script[Stop-se_hook.sh Stop-bash]": 1
+  "tests/test_se_hook.py::test_a_stop_kern_answers_is_its_output_and_runs_no_fallback": 3
+  "tests/test_se_hook.py::test_a_stop_no_command_of_kerns_answers_falls_back_to_stop_check_with_the_hooks_json": 2
+  "tests/test_se_hook.py::test_a_tool_call_starts_the_claims_beat_once_it_is_due_and_before_reads_the_record_alone": 5
+  "tests/test_se_hook.py::test_an_empty_copilot_stop_payload_gets_the_host_field_alone": 1
+  "tests/test_se_hook.py::test_an_empty_hook_core_variable_acts_as_unset[PostToolUse-{\"session_id\":\"s1\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\"}]": 2
+  "tests/test_se_hook.py::test_an_empty_hook_core_variable_acts_as_unset[Stop-{\"session_id\":\"s1\",\"hook_event_name\":\"Stop\",\"cwd\":\"/w\"}]": 2
+  "tests/test_se_hook.py::test_an_event_goes_to_the_pinned_kern_for_the_project_with_the_hosts_json": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[ off]": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[0]": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[]": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[false]": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[off ]": 1
+  "tests/test_se_hook.py::test_any_other_hook_core_value_posts_to_the_core_as_today[on]": 1
+  "tests/test_se_hook.py::test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does": 1
+  "tests/test_se_hook.py::test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else[0-0-bash]": 2
+  "tests/test_se_hook.py::test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else[1-0-bash]": 2
+  "tests/test_se_hook.py::test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else[2-2-bash]": 2
+  "tests/test_se_hook.py::test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_with_it": 15
+  "tests/test_se_hook.py::test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop[OFF]": 4
+  "tests/test_se_hook.py::test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop[Off]": 4
+  "tests/test_se_hook.py::test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop[off]": 4
+  "tests/test_se_hook.py::test_hook_core_off_starts_no_late_checkout_and_claims_none": 1
+  "tests/test_se_hook.py::test_hook_core_off_still_answers_a_stop_with_stop_check[OFF]": 2
+  "tests/test_se_hook.py::test_hook_core_off_still_answers_a_stop_with_stop_check[Off]": 2
+  "tests/test_se_hook.py::test_hook_core_off_still_answers_a_stop_with_stop_check[off]": 2
+  "tests/test_se_hook.py::test_hook_core_off_under_copilot_a_stops_advice_is_still_a_hook_warning": 1
+  "tests/test_se_hook.py::test_kerns_answer_is_the_hooks_output_and_its_errors_stay_quiet": 1
+  "tests/test_se_hook.py::test_no_late_start_in_the_project_or_a_checkout_without_se": 3
+  "tests/test_se_hook.py::test_the_first_hook_in_a_late_checkout_starts_its_core_once_and_then_posts_to_it": 3
+  "tests/test_se_hook.py::test_under_claude_code_a_stops_advice_stays_its_output": 1
+  "tests/test_se_hook.py::test_under_copilot_a_stops_advice_is_a_hook_warning_never_output[fallback]": 1
+  "tests/test_se_hook.py::test_under_copilot_a_stops_advice_is_a_hook_warning_never_output[kern]": 1
+  "tests/test_se_hook.py::test_without_a_project_variable_or_a_cwd_the_project_is_the_working_directory": 1
+  "tests/test_se_hook.py::test_without_kern_on_this_machine_the_hook_passes_silently": 3
+  "tests/test_se_mcp.py::test_a_claude_plugin_run_from_its_folder_serves_the_project_dir[bash]": 1
+  "tests/test_se_mcp.py::test_a_parent_folder_that_is_no_checkout_gets_no_se": 1
+  "tests/test_se_mcp.py::test_a_plugin_checkout_run_from_itself_stays_the_root_with_no_signal": 1
+  "tests/test_se_mcp.py::test_a_plugin_folder_that_is_the_session_checkout_stays_the_root_with_no_signal": 1
+  "tests/test_se_mcp.py::test_a_plugin_install_serves_the_checkout_of_the_session_folder[bash]": 1
+  "tests/test_se_mcp.py::test_a_release_being_fetched_says_so[bash]": 1
+  "tests/test_se_mcp.py::test_a_session_folder_inside_a_plain_plugin_folder_gets_no_signal": 1
+  "tests/test_se_mcp.py::test_a_session_folder_that_is_a_repositorys_root_logs_there[bash]": 1
+  "tests/test_se_mcp.py::test_a_session_folder_that_is_no_checkout_gets_no_se_and_the_log_is_at_home[bash]": 1
+  "tests/test_se_mcp.py::test_an_empty_or_unexpanded_se_session_folder_is_ignored[${COPILOT_SESSION_CWD}-bash]": 1
+  "tests/test_se_mcp.py::test_an_empty_or_unexpanded_se_session_folder_is_ignored[-bash]": 1
+  "tests/test_se_mcp.py::test_an_override_naming_no_binary_is_answered_not_run[bash]": 1
+  "tests/test_se_mcp.py::test_an_unset_home_is_taken_from_the_account": 1
+  "tests/test_se_mcp.py::test_another_se_checkout_is_served_by_its_own_launcher[bash]": 1
+  "tests/test_se_mcp.py::test_hook_variables_are_no_source[bash]": 1
+  "tests/test_se_mcp.py::test_outside_the_gate_the_binary_gets_todays_arguments": 5
+  "tests/test_se_mcp.py::test_the_binary_gets_the_project_and_this_se_and_only_its_protocol_reaches_stdout": 1
+  "tests/test_se_mcp.py::test_the_binary_gets_the_session_folder_and_its_stderr_lands_in_the_home_log": 1
+  "tests/test_se_mcp.py::test_the_checkouts_own_config_keeps_its_root_whatever_the_session_folder": 1
+  "tests/test_se_mcp.py::test_the_claude_manifests_door_as_claude_code_starts_it_serves_the_project": 2
+  "tests/test_se_mcp.py::test_the_escape_switch_keeps_the_plugin_folder[bash]": 1
+  "tests/test_se_mcp.py::test_the_plugin_config_serves_the_session_checkout[expanded]": 1
+  "tests/test_se_mcp.py::test_the_plugin_config_serves_the_session_checkout[unexpanded]": 1
+  "tests/test_se_mcp.py::test_the_se_session_folder_wins_over_copilots[bash]": 1
+  "tests/test_se_mcp.py::test_under_claude_code_the_se_session_folder_still_wins_and_copilots_is_no_source[bash]": 2
+  "tests/test_se_mcp.py::test_with_no_source_the_binary_is_told_the_plugin_folder": 1
+  "tests/test_se_mcp.py::test_with_no_variable_the_parent_process_folder_decides": 2
+  "tests/test_se_mcp.py::test_without_the_binary_the_launcher_answers_at_once_naming_the_setup[bash]": 1
+  "tests/test_se_modules.py::test_script_runs_as_a_command": 3
+  "tests/test_se_plugin.py::test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script": 1
+  "tests/test_se_plugin.py::test_the_suite_builds_an_unbuilt_source_change_before_its_tests": 1
+  "tests/test_se_relay.py::test_intake_reads_the_issue_and_comments_from_the_relay": 1
+  "tests/test_se_runtimes.py::test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes": 2
+  "tests/test_se_runtimes.py::test_runmes_own_remedy_names_a_runtime_it_could_not_get": 1
+  "tests/test_se_runtimes.py::test_the_probe_reads_a_runtimes_version_from_its_own_command": 1
+  "tests/test_se_start.py::test_a_cloud_setup_script_clone_is_pulled_like_a_checkout": 1
+  "tests/test_se_start.py::test_a_due_version_that_fails_its_trial_leaves_the_old_one_in_use": 1
+  "tests/test_se_start.py::test_a_listing_that_does_not_start_answers_its_error": 1
+  "tests/test_se_start.py::test_a_listing_that_fails_or_takes_too_long_answers_its_error[import sys\\nsys.exit('obs-components: no remote')\\n- failed with exit code 1: obs-components: no remote]": 1
+  "tests/test_se_start.py::test_a_listing_that_fails_or_takes_too_long_answers_its_error[import time\\ntime.sleep(5)\\n- took longer than 0.5 s]": 1
+  "tests/test_se_start.py::test_a_listing_that_fails_or_takes_too_long_answers_its_error[print('nothing here')\\n-: its output holds no table headed component  kind  installed  newest  repository]": 1
+  "tests/test_se_start.py::test_an_installed_plugin_is_updated_through_claude_code": 1
+  "tests/test_se_start.py::test_an_se_version_that_does_not_start_is_not_switched_to": 1
+  "tests/test_se_start.py::test_an_updated_plugin_that_does_not_start_leaves_the_old_install_in_use": 1
+  "tests/test_se_start.py::test_refresh_moves_only_what_is_due_and_twice_is_a_no_op": 1
+  "tests/test_se_start.py::test_start_refresh_moves_se_to_the_latest_release_of_its_major": 2
+  "tests/test_se_start.py::test_the_listing_runs_in_the_checkout_and_its_table_is_read": 1
+  "tests/test_se_templates.py::test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook": 2
+  "tests/test_se_templates.py::test_the_hook_denies_a_write_of_a_claimed_path_and_lets_its_fill_write_it": 4
+  "tests/test_se_templates.py::test_the_hook_gates_a_gh_shell_call_and_no_other": 5
+  "tests/test_se_templates.py::test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off": 4
+  "tests/test_se_templates.py::test_the_plugins_hook_line_prints_exactly_the_deny": 1
+  "tests/test_start_refresh.py::test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins": 2
+  "tests/test_start_refresh.py::test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line": 1
+  "tests/test_story_check.py::test_both_vaults_build_with_build_docs_without_a_warning": 2
+  "tests/test_time_bound.py::test_a_test_past_its_bound_fails_naming_itself_its_bound_and_the_remedy": 1
+  "tests/test_timeline.py::test_a_backlog_row_shows_as_waiting_for_your_input_in_the_page": 2
+  "tests/test_timeline.py::test_obs_proves_the_live_declaration_against_every_saved_row": 2
+  "tests/test_timeline.py::test_the_page_builds_through_obs_html_without_a_warning": 1
+  "tests/test_timeline.py::test_the_page_opens_on_the_newest_row_of_each_place_and_pages_the_rest": 2
+  "tests/test_timeline.py::test_the_page_shows_what_github_answers_when_it_opens": 2
+  "tests/test_windows_entry.py::test_a_detached_child_outlives_the_parent_that_started_it": 1
+  "tests/test_work_ticket_issues.py::test_a_failing_setup_beside_refuses_and_its_suite_does_not_run": 2
+  "tests/test_work_ticket_issues.py::test_a_failing_suite_beside_on_ci_is_an_annotation_naming_its_failed_test": 2
+  "tests/test_work_ticket_issues.py::test_a_failing_suite_beside_refuses_with_its_output_after_a_passing_suite": 2
+  "tests/test_work_ticket_issues.py::test_a_failing_suite_beside_that_ran_no_test_is_refused_and_not_named": 2
+  "tests/test_work_ticket_issues.py::test_a_key_these_scripts_do_not_know_beside_warns_off_ci_and_the_suite_runs": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone[False]": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone[True]": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_runs_its_setup_first_outside_its_budget": 3
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_runs_where_an_uncommitted_change_touches_its_paths": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_runs_where_the_change_touches_one_of_its_paths[kern/bus/bus.go]": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_runs_where_the_change_touches_one_of_its_paths[kern/go.mod]": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_that_passed_without_running_a_test_is_named_after_its_time": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_whose_command_is_missing_fails_naming_it": 2
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_whose_paths_the_change_does_not_touch_is_skipped_in_one_line": 1
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_whose_setup_alone_ran_no_test_is_not_named": 3
+  "tests/test_work_ticket_issues.py::test_a_suite_beside_with_paths_runs_where_the_integration_branch_is_not_fetched": 2
+  "tests/test_work_ticket_issues.py::test_integrate_refuses_a_failing_kern_test_after_a_passing_suite_and_escalates": 2
+  "tests/test_work_ticket_issues.py::test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times": 1
+  "tests/test_work_ticket_issues.py::test_ses_report_names_its_cpu_and_when_each_test_started": 1
+  "tests/test_work_ticket_issues.py::test_suite_between_target_and_limit_warns_and_names_the_slowest": 1
+  "tests/test_work_ticket_issues.py::test_suite_failing_says_failed_with_its_counts_and_exits_1[130.0]": 1
+  "tests/test_work_ticket_issues.py::test_suite_failing_says_failed_with_its_counts_and_exits_1[5.0]": 1
+  "tests/test_work_ticket_issues.py::test_suite_full_runs_a_suite_beside_whose_paths_the_change_does_not_touch": 2
+  "tests/test_work_ticket_issues.py::test_suite_keeps_its_test_reports_where_asked_also_when_it_fails": 2
+  "tests/test_work_ticket_issues.py::test_suite_lists_slow_setups_and_a_setup_paid_on_several_workers": 1
+  "tests/test_work_ticket_issues.py::test_suite_merges_the_slowest_ten_from_every_junit_report": 1
+  "tests/test_work_ticket_issues.py::test_suite_passing_over_the_limit_says_passed_and_refuses_with_its_own_exit_code": 1
+  "tests/test_work_ticket_issues.py::test_suite_passing_prints_the_last_lines_of_its_own_output": 1
+  "tests/test_work_ticket_issues.py::test_suite_runs_the_suite_beside_in_its_directory_and_reports_its_own_time": 2
+  "tests/test_work_ticket_issues.py::test_suite_setup_failing_stops_the_run_with_its_output": 1
+  "tests/test_work_ticket_issues.py::test_suite_setup_is_timed_apart_and_not_held_to_the_budget": 2
+  "tests/test_work_ticket_issues.py::test_suite_shows_each_parts_test_time_per_worker_and_slowest": 1
+  "tests/test_work_ticket_issues.py::test_suite_slowest_sets_how_many_tests_it_lists": 1
+  "tests/test_work_ticket_issues.py::test_suite_success_tail_shows_only_the_result_lines_of_stdout": 1
+  "tests/test_work_ticket_issues.py::test_suite_under_the_target_passes_quietly": 1
+  "tests/test_work_ticket_issues.py::test_suite_with_a_tier_function_prints_each_tiers_slowest_test": 1
+  "tests/test_work_ticket_issues.py::test_suite_without_a_tier_setting_prints_no_tiers": 1
+  "tests/test_work_ticket_issues.py::test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before": 2
+  "tests/test_work_ticket_issues.py::test_suite_without_reports_or_durations_names_the_remedy_once": 1
+  "tests/test_work_tickets.py::test_a_ci_suite_over_the_limit_fails_check_with_its_time_and_slowest_tests": 1
+  "tests/test_work_tickets.py::test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice": 1
+  "tests/test_work_tickets.py::test_a_failed_or_missing_shard_fails_the_suite_time": 3
+  "tests/test_work_tickets.py::test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses[108.0]": 1
+  "tests/test_work_tickets.py::test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses[130.0]": 1
+  "tests/test_work_tickets.py::test_a_local_overrun_with_ci_close_to_the_limit_or_unknown_refuses[None]": 1
+  "tests/test_work_tickets.py::test_a_local_suite_within_the_limit_reads_ci_only_for_integrate": 2
+  "tests/test_work_tickets.py::test_a_relay_landing_skips_cis_suite_time_and_says_so_once": 1
+  "tests/test_work_tickets.py::test_a_sharded_overrun_fails_unless_the_project_declares_warn_only[fail]": 2
+  "tests/test_work_tickets.py::test_a_sharded_overrun_fails_unless_the_project_declares_warn_only[warn]": 2
+  "tests/test_work_tickets.py::test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard[110.0-True]": 1
+  "tests/test_work_tickets.py::test_a_sharded_overrun_holds_cis_slowest_shard_to_the_limit_per_shard[77.0-False]": 1
+  "tests/test_work_tickets.py::test_a_sharded_projects_whole_suite_is_judged_against_the_limit_per_shard_times_its_shards": 1
+  "tests/test_work_tickets.py::test_a_sharded_suite_over_its_target_warns_as_an_annotation": 2
+  "tests/test_work_tickets.py::test_a_sharded_suite_reports_its_slowest_shard_as_ci_s_suite_time": 2
+  "tests/test_work_tickets.py::test_a_slow_local_suite_with_a_fast_ci_time_passes_with_a_warning_and_notes_both_times": 1
+  "tests/test_work_tickets.py::test_an_overrun_only_warns_where_the_project_declares_warn_only[ci]": 1
+  "tests/test_work_tickets.py::test_an_overrun_only_warns_where_the_project_declares_warn_only[local]": 1
+  "tests/test_work_tickets.py::test_project_checks_run_all_commands_and_report_failures": 3
+  "tests/test_work_tickets.py::test_the_shards_notice_round_trips_through_ci_suite_time": 2

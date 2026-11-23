@@ -21,6 +21,7 @@ import fake_git  # noqa: E402
 import git_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
 import waiting  # noqa: E402
 
@@ -109,32 +110,16 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem):
     with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
             pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
-        count_children(item, patch)
         yield
 
 
 # The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git: it
 # costs about 3 ms a git call, the fake in memory (`fake_git_door`) about 0.15 ms. So a test that ran
-# git through the state file and started no child process (`subprocess.Popen` in the test's process,
-# its setup and teardown included, a hook the state file runs among them) fails at its teardown,
+# git through the state file and started no child process (as the spawn guard counts them,
+# scripts/spawn_guard.py `started`, a hook the state file runs among them) fails at its teardown,
 # naming the remedy, unless its file is named here with its reason. The list may only shrink.
 IN_PROCESS_STATE_FILE: dict[str, str] = {
 }
-children_started = pytest.StashKey[list[int]]()
-
-
-def count_children(item: pytest.Item, patch: pytest.MonkeyPatch) -> None:
-    """Counts the child processes `item` starts, its setup and teardown included, in its stash."""
-    started = item.stash[children_started] = [0]
-    execute = subprocess.Popen._execute_child
-
-    def counted(self, *arguments, **options):
-        started[0] += 1
-        return execute(self, *arguments, **options)
-
-    patch.setattr(subprocess.Popen, "_execute_child", counted)
-
-
 def item_file(item: pytest.Item) -> str:
     """`item`'s file, relative to se's root where it lies inside it."""
     path = Path(item.path).resolve()
@@ -154,7 +139,7 @@ class WatchedStateFile(fake_git.StateFile):
 def state_file_refusal(item: pytest.Item, state: WatchedStateFile) -> str:
     """Why `item` may not have taken the state file, or "" where it may: it ran git through it and
     started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
-    started = item.stash.get(children_started, [0])[0]
+    started = spawn_guard.started(item)
     if not state.runs or started or item_file(item) in IN_PROCESS_STATE_FILE:
         return ""
     return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git) and "
@@ -175,6 +160,12 @@ class GuardReports:
         report = outcome.get_result()
         network_guard.fail(report)
         time_bound.explain(item, report)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched) -> None:
+    """A test that ended its pytest-xdist worker fails once, by name (tests/time_bound.py `crashed`)."""
+    time_bound.crashed(crashitem, report, sched)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -402,7 +393,8 @@ DRIFT_SECONDS, DRIFT_SHARE = 5.0, 0.5
 file_seconds_read = pytest.StashKey[dict[str, float]]()
 
 
-def pytest_addoption(parser: pytest.Parser) -> None:
+def pytest_addoption(parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager) -> None:
+    spawn_guard.register(pluginmanager)  # the spawn guard (scripts/spawn_guard.py) judges every test
     parser.addoption("--record-file-seconds", nargs="?", const="", default=None, metavar="PATH",
                      help="write this run's seconds per file to PATH at the end of a passing parallel "
                           "run of whole files, as CI's suite step does; the tracked table is CI's, "

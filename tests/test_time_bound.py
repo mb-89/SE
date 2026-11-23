@@ -89,3 +89,29 @@ def test_a_test_past_its_bound_fails_naming_itself_its_bound_and_the_remedy(tmp_
     assert ("tests/time_bound.py: test_planted.py::test_sleeps_past_its_bound ran past its time bound "
             "of 1 s") in output
     assert "Remedy: run the test alone to find what it waits for" in output
+
+
+class Scheduling:
+    """pytest-xdist's `--dist loadfile` scheduling as `time_bound.crashed` sees it: the requeued work
+    of each file, test to whether it is done."""
+
+    def __init__(self, workqueue: dict[str, dict[str, bool]]) -> None:
+        self.workqueue = workqueue
+
+
+def test_a_test_that_ends_its_worker_fails_once_by_name_and_its_file_goes_on():
+    """tests/conftest.py `pytest_handlecrashitem`: pytest-xdist requeues the file of a test whose
+    worker ended, the test with it, so it would end worker after worker until the run stops; the
+    crashed test is marked done, and its report names it, the likely cause and where the bound is."""
+    crashed = "tests/test_x.py::test_hangs"
+    sched = Scheduling({"tests/test_x.py": {"tests/test_x.py::test_before": True, crashed: False,
+                                            "tests/test_x.py::test_after": False}})
+    report = pytest.TestReport(crashed, ("tests/test_x.py", None, "tests/test_x.py"), {}, "failed",
+                               f"worker 'gw0' crashed while running '{crashed}'", "???")
+    time_bound.crashed(crashed, report, sched)
+    assert sched.workqueue["tests/test_x.py"] == {"tests/test_x.py::test_before": True, crashed: True,
+                                                  "tests/test_x.py::test_after": False}
+    text = str(report.longrepr)
+    assert text.startswith(f"worker 'gw0' crashed while running '{crashed}'")
+    assert f"{crashed} ended its worker and failed; it is not run again" in text
+    assert "thread method, the only one on Windows" in text and time_bound.OWNER in text
