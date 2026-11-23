@@ -117,10 +117,11 @@ def process_backend(item: pytest.Item) -> process_door.Backend:
 
 
 def shell_backend(item: pytest.Item) -> shell_door.Backend:
-    """What the shell door (scripts/shell_door.py) runs for `item`: the real shell for the shell
-    door's contract (a `contract: shell` mark, scripts/spawn_guard.py `shell_allowed`), else the
-    fake (tests/fake_processes.py), which answers by the test's handlers (the `fake_shell` fixture)."""
-    if spawn_guard.shell_allowed(item):
+    """What the shell door (scripts/shell_door.py) runs for `item`: the real shell for a test the
+    spawn guard lets start processes (a `spawns` mark; the guard judges whether a shell may be among
+    them), else the fake (tests/fake_processes.py), which answers by the test's handlers (the
+    `fake_shell` fixture)."""
+    if spawn_guard.allowed(item):
         return shell_door.RealShell()
     return fake_programs.FakeProcesses(scripts=False, hooks=False)
 
@@ -211,8 +212,8 @@ def fake_processes() -> fake_programs.FakeProcesses:
     spawn guard lets start processes runs the real programs and cannot take it."""
     backend = process_door.BACKEND
     if not isinstance(backend, fake_programs.FakeProcesses):
-        pytest.fail("fake_processes: this test runs the real programs (a spawns mark, or the spawn baseline); "
-                    "drop the mark or its baseline entry to take the fake", pytrace=False)
+        pytest.fail("fake_processes: this test runs the real programs (a spawns mark); drop the mark to take the "
+                    "fake", pytrace=False)
     return backend
 
 
@@ -224,8 +225,8 @@ def fake_shell() -> fake_programs.FakeProcesses:
     shell`) runs the real shell and cannot take it."""
     backend = shell_door.BACKEND
     if not isinstance(backend, fake_programs.FakeProcesses):
-        pytest.fail("fake_shell: this test is the shell door's contract (a `contract: shell` mark) and runs the "
-                    "real shell; drop the mark to take the fake", pytrace=False)
+        pytest.fail("fake_shell: this test runs the real shell (a spawns mark); drop the mark to take the fake",
+                    pytrace=False)
     return backend
 
 

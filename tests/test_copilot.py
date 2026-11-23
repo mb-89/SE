@@ -272,7 +272,7 @@ def test_the_smoke_helper_reads_vs_codes_and_claudes_tool_names_too() -> None:
         assert copilot.smoke_verdict(lines) == (True, "greeting `SE 1.2.3 started:` and se tool status answered")
 
 
-@pytest.mark.spawns("contract: shell, entry: scripts/copilot_smoke.sh")
+@pytest.mark.spawns("entry: scripts/copilot_smoke.sh")
 def test_the_smoke_script_reports_skipped_without_a_token(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if bash is None:

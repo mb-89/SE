@@ -67,7 +67,7 @@ LAUNCHERS = [pytest.param("bash", marks=needs_bash),
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 answer MCP themselves where the binary is missing; that "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 answer MCP themselves where the binary is missing; that "
                     "door is shell, run only as a process")
 def test_without_the_binary_the_launcher_answers_at_once_naming_the_setup(tmp_path, kind):
     home, project = tmp_path / "home", tmp_path / "project"
@@ -91,7 +91,7 @@ def test_without_the_binary_the_launcher_answers_at_once_naming_the_setup(tmp_pa
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 read ~/.se/bin for a release being fetched; shell, run "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 read ~/.se/bin for a release being fetched; shell, run "
                     "only as a process")
 def test_a_release_being_fetched_says_so(tmp_path, kind):
     home, project = tmp_path / "home", tmp_path / "project"
@@ -106,7 +106,7 @@ def test_a_release_being_fetched_says_so(tmp_path, kind):
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 answer an SE_MCP_BIN that names no binary; shell, run "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 answer an SE_MCP_BIN that names no binary; shell, run "
                     "only as a process")
 def test_an_override_naming_no_binary_is_answered_not_run(tmp_path, kind):
     home, project = tmp_path / "home", tmp_path / "project"
@@ -117,7 +117,7 @@ def test_an_override_naming_no_binary_is_answered_not_run(tmp_path, kind):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's exec of the binary, stdout the host's and stderr the log's, is shell, "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's exec of the binary, stdout the host's and stderr the log's, is shell, "
                     "run only as a process")
 def test_the_binary_gets_the_project_and_this_se_and_only_its_protocol_reaches_stdout(tmp_path):
     """The override names a local binary; its standard output is the host's, its stderr the log's."""
@@ -139,7 +139,7 @@ def test_the_binary_gets_the_project_and_this_se_and_only_its_protocol_reaches_s
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's log fallback to TMPDIR is shell, run only as a process")
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's log fallback to TMPDIR is shell, run only as a process")
 def test_a_project_it_cannot_write_logs_to_the_temporary_folder(tmp_path):
     if WINDOWS or os.geteuid() == 0:
         pytest.skip("a read-only folder needs POSIX permissions and no root")
@@ -238,7 +238,7 @@ def today(tmp_path: Path, plugin: Path, project: Path | None = None) -> list[str
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 from "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 from "
                     "COPILOT_SESSION_CWD is shell, run only as a process")
 def test_a_plugin_install_serves_the_checkout_of_the_session_folder(tmp_path, kind):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -251,7 +251,7 @@ def test_a_plugin_install_serves_the_checkout_of_the_session_folder(tmp_path, ki
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1, SE_SESSION_CWD first, "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1, SE_SESSION_CWD first, "
                     "is shell, run only as a process")
 def test_the_se_session_folder_wins_over_copilots(tmp_path, kind):
     plugin = se_copy(tmp_path / "plugin")
@@ -263,7 +263,7 @@ def test_the_se_session_folder_wins_over_copilots(tmp_path, kind):
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
 @pytest.mark.parametrize("value", ["", "${COPILOT_SESSION_CWD}"])
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 skips an unusable "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 skips an unusable "
                     "SE_SESSION_CWD; shell, run only as a process")
 def test_an_empty_or_unexpanded_se_session_folder_is_ignored(tmp_path, kind, value):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -272,7 +272,7 @@ def test_an_empty_or_unexpanded_se_session_folder_is_ignored(tmp_path, kind, val
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 ignores the hook "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 ignores the hook "
                     "variables; shell, run only as a process")
 def test_hook_variables_are_no_source(tmp_path, kind):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -284,7 +284,7 @@ def test_hook_variables_are_no_source(tmp_path, kind):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh hands the binary SE_MCP_PLUGIN_FOLDER where no source counts; shell, "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh hands the binary SE_MCP_PLUGIN_FOLDER where no source counts; shell, "
                     "run only as a process")
 def test_with_no_source_the_binary_is_told_the_plugin_folder(tmp_path):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -303,7 +303,7 @@ needs_parent_cwd = pytest.mark.skipif(BASH is None or not parent_cwd_readable(),
 
 
 @needs_parent_cwd
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
                     "run only as a process")
 def test_with_no_variable_the_parent_process_folder_decides(tmp_path):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -314,7 +314,7 @@ def test_with_no_variable_the_parent_process_folder_decides(tmp_path):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's plugin-install root choice keeps a plugin checkout as its root; "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's plugin-install root choice keeps a plugin checkout as its root; "
                     "shell, run only as a process")
 def test_a_plugin_folder_that_is_the_session_checkout_stays_the_root_with_no_signal(tmp_path):
     plugin = se_copy(tmp_path / "plugin", checkout=True)
@@ -322,7 +322,7 @@ def test_a_plugin_folder_that_is_the_session_checkout_stays_the_root_with_no_sig
 
 
 @needs_parent_cwd
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
                     "run only as a process")
 def test_a_plugin_checkout_run_from_itself_stays_the_root_with_no_signal(tmp_path):
     plugin = se_copy(tmp_path / "plugin", checkout=True)
@@ -330,7 +330,7 @@ def test_a_plugin_checkout_run_from_itself_stays_the_root_with_no_signal(tmp_pat
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's plugin-install root choice for a session folder in the plugin is "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's plugin-install root choice for a session folder in the plugin is "
                     "shell, run only as a process")
 def test_a_session_folder_inside_a_plain_plugin_folder_gets_no_signal(tmp_path):
     plugin = se_copy(tmp_path / "plugin")
@@ -338,7 +338,7 @@ def test_a_session_folder_inside_a_plain_plugin_folder_gets_no_signal(tmp_path):
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 hand over to another SE checkout's own launcher; shell, "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 hand over to another SE checkout's own launcher; shell, "
                     "run only as a process")
 def test_another_se_checkout_is_served_by_its_own_launcher(tmp_path, kind):
     plugin, other = se_copy(tmp_path / "plugin"), se_copy(tmp_path / "other", checkout=True)
@@ -352,7 +352,7 @@ def test_another_se_checkout_is_served_by_its_own_launcher(tmp_path, kind):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's gate of the plugin case, shut in each of five ways, is shell, run "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's gate of the plugin case, shut in each of five ways, is shell, run "
                     "only as a process")
 def test_outside_the_gate_the_binary_gets_todays_arguments(tmp_path):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -367,7 +367,7 @@ def test_outside_the_gate_the_binary_gets_todays_arguments(tmp_path):
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the SE_MCP_PLUGIN_PROJECT=off switch of scripts/se_mcp.sh and se_mcp.ps1 is shell, run "
+@pytest.mark.spawns("shell: the SE_MCP_PLUGIN_PROJECT=off switch of scripts/se_mcp.sh and se_mcp.ps1 is shell, run "
                     "only as a process")
 def test_the_escape_switch_keeps_the_plugin_folder(tmp_path, kind):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -378,7 +378,7 @@ def test_the_escape_switch_keeps_the_plugin_folder(tmp_path, kind):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh takes an unset HOME from the account; shell, run only as a process")
+@pytest.mark.spawns("shell: scripts/se_mcp.sh takes an unset HOME from the account; shell, run only as a process")
 def test_an_unset_home_is_taken_from_the_account(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
@@ -400,7 +400,7 @@ def expand(text: str, values: dict[str, str]) -> str:
 
 @needs_bash
 @pytest.mark.parametrize("expanded", [True, False], ids=["expanded", "unexpanded"])
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh run as the generated Copilot plugin config runs it, args, env and cwd; "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh run as the generated Copilot plugin config runs it, args, env and cwd; "
                     "shell, run only as a process")
 def test_the_plugin_config_serves_the_session_checkout(tmp_path, expanded):
     """The launcher as the generated Copilot plugin runs it: its args, its env, cwd the plugin folder.
@@ -424,7 +424,7 @@ def test_the_plugin_config_serves_the_session_checkout(tmp_path, expanded):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh run as .github/mcp.json runs it keeps its root; shell, run only as a "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh run as .github/mcp.json runs it keeps its root; shell, run only as a "
                     "process")
 def test_the_checkouts_own_config_keeps_its_root_whatever_the_session_folder(tmp_path):
     """.github/mcp.json runs the launcher of the checkout itself, no PLUGIN_ROOT: the gate stays shut,
@@ -455,7 +455,7 @@ def home_log(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 log at home for a session folder with no .git; shell, "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 log at home for a session folder with no .git; shell, "
                     "run only as a process")
 def test_a_session_folder_that_is_no_checkout_gets_no_se_and_the_log_is_at_home(tmp_path, kind):
     plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
@@ -469,7 +469,7 @@ def test_a_session_folder_that_is_no_checkout_gets_no_se_and_the_log_is_at_home(
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh and se_mcp.ps1 log in a session folder that is a repository's root; "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh and se_mcp.ps1 log in a session folder that is a repository's root; "
                     "shell, run only as a process")
 def test_a_session_folder_that_is_a_repositorys_root_logs_there(tmp_path, kind):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -480,7 +480,7 @@ def test_a_session_folder_that_is_a_repositorys_root_logs_there(tmp_path, kind):
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's exec of the binary for a session folder, its stderr in the home log, "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's exec of the binary for a session folder, its stderr in the home log, "
                     "is shell, run only as a process")
 def test_the_binary_gets_the_session_folder_and_its_stderr_lands_in_the_home_log(tmp_path):
     plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
@@ -500,7 +500,7 @@ def test_the_binary_gets_the_session_folder_and_its_stderr_lands_in_the_home_log
 
 
 @needs_parent_cwd
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh's parent-cwd backstop reads its parent shell's folder (/proc, lsof); "
                     "run only as a process")
 def test_a_parent_folder_that_is_no_checkout_gets_no_se(tmp_path):
     plugin, session = se_copy(tmp_path / "plugin"), session_folder(tmp_path)
@@ -516,7 +516,7 @@ def test_a_parent_folder_that_is_no_checkout_gets_no_se(tmp_path):
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 from "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 from "
                     "CLAUDE_PROJECT_DIR is shell, run only as a process")
 def test_a_claude_plugin_run_from_its_folder_serves_the_project_dir(tmp_path, kind):
     plugin, repo = se_copy(tmp_path / "plugin"), repository(tmp_path / "repo")
@@ -528,7 +528,7 @@ def test_a_claude_plugin_run_from_its_folder_serves_the_project_dir(tmp_path, ki
 
 
 @pytest.mark.parametrize("kind", LAUNCHERS)
-@pytest.mark.spawns("contract: shell, the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 under Claude Code is "
+@pytest.mark.spawns("shell: the plugin-install root choice of scripts/se_mcp.sh and se_mcp.ps1 under Claude Code is "
                     "shell, run only as a process")
 def test_under_claude_code_the_se_session_folder_still_wins_and_copilots_is_no_source(tmp_path, kind):
     plugin = se_copy(tmp_path / "plugin")
@@ -542,7 +542,7 @@ def test_under_claude_code_the_se_session_folder_still_wins_and_copilots_is_no_s
 
 
 @needs_bash
-@pytest.mark.spawns("contract: shell, scripts/se_mcp.sh run as Claude Code starts the manifest's server, from two folders; "
+@pytest.mark.spawns("shell: scripts/se_mcp.sh run as Claude Code starts the manifest's server, from two folders; "
                     "shell, run only as a process")
 def test_the_claude_manifests_door_as_claude_code_starts_it_serves_the_project(tmp_path):
     """The server as a build with [plugin] claude_mcp on declares it, started as Claude Code 2.1.330

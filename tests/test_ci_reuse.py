@@ -327,7 +327,7 @@ PLATFORM_STEP = "SE's start, hook and setup scripts passed on Windows"
 SOURCE = "https://github.com/alice/project/actions/runs/100"
 # The check job's steps are bash in .github/workflows/check.yml, which runs them as its runner
 # does: shell, run only as a process (the guidance note tests-spawn-no-processes).
-RUNS_A_STEP = pytest.mark.spawns("contract: shell, a step of check.yml's check job is bash, run only as a process, as the "
+RUNS_A_STEP = pytest.mark.spawns("shell: a step of check.yml's check job is bash, run only as a process, as the "
                                  "runner runs it")
 
 

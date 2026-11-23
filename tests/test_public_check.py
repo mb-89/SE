@@ -1243,7 +1243,7 @@ def setup_hooks(kind: str, target: Path, copilot: bool = False) -> subprocess.Co
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
-@pytest.mark.spawns("contract: shell, scripts/setup.sh (setup.ps1 on Windows) names the checkout's own hooks before it "
+@pytest.mark.spawns("shell: scripts/setup.sh (setup.ps1 on Windows) names the checkout's own hooks before it "
                     "moves core.hooksPath and appends the local list to a .gitignore without its last "
                     "newline in its own shell, run only as a process")
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
@@ -1290,7 +1290,7 @@ def se_as_a_local_module(repo: Path) -> None:
                      f"obs = '{obs.as_posix()}'\n", encoding="utf-8")
 
 
-@pytest.mark.spawns("contract: shell, scripts/setup.sh --copilot (setup.ps1 -Copilot on Windows) hands copilot.py "
+@pytest.mark.spawns("shell: scripts/setup.sh --copilot (setup.ps1 -Copilot on Windows) hands copilot.py "
                     "install the repository after its own steps, a wiring of the shell run only as a process")
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("kind", SETUPS)
@@ -1358,7 +1358,7 @@ def first_setup(kind: str, repo: Path,
     return result
 
 
-@pytest.mark.spawns("contract: shell, entry: scripts/setup.sh (scripts/setup.ps1 on Windows)")
+@pytest.mark.spawns("entry: scripts/setup.sh (scripts/setup.ps1 on Windows)")
 @pytest.mark.parametrize("kind", SETUPS)
 def test_setup_points_core_hooks_path_at_se_hooks_and_writes_nothing_for_copilot_without_it(
         kind: str, repo: Path, shared_fake_git: fake_git.StateFile) -> None:
@@ -1701,7 +1701,7 @@ def run_ci(tmp_path: Path, before: str, after: str, base_ref: str = "", branch: 
     return subprocess.CompletedProcess(result.args, 0, said + result.stdout, result.stderr)
 
 
-@pytest.mark.spawns("contract: shell, the check workflow's gate step is bash, run only as a process; this holds "
+@pytest.mark.spawns("shell: the check workflow's gate step is bash, run only as a process; this holds "
                     "run_ci, its reading in this process, to it on a push and a pull request, passed and refused")
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_ci_gate_answers_alike_in_its_own_process(repo: Path, tmp_path: Path) -> None:
@@ -1791,7 +1791,7 @@ def field_report_script() -> str:
 # for the report's, the Component kinds only off a landing) around gh, pr_issues.py and uv: its
 # tests run that shell, as a process, with gh and uv as scripts on its PATH.
 FIELD_REPORT_SHELL = pytest.mark.spawns(
-    "contract: shell, the check workflow's field-report step is bash (sed, grep, its landing branch) run only as a "
+    "shell: the check workflow's field-report step is bash (sed, grep, its landing branch) run only as a "
     "process, gh and uv as scripts on its PATH")
 
 

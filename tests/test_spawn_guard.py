@@ -64,7 +64,7 @@ def test_a_new_test_that_runs_git_is_refused_naming_the_call(pytester: pytest.Py
     assert "test_planted.py::test_runs_git started 1 process(es) in its call" in output, output
     assert "git status --short (test_planted.py:5)" in output, output
     assert "@pytest.mark.spawns" in output and "tests-spawn-no-processes" in output, output
-    assert "spawns: 1 processes started by 1 of 1 tests; 0 in marked tests, 0 in baseline tests, 1 refused" in output
+    assert "spawns: 1 processes started by 1 of 1 tests; 0 in contract and entry-point tests, 1 refused" in output
     assert no_starts == [spawn_guard.POPEN]
 
 
@@ -73,7 +73,7 @@ def test_a_marked_test_may_start_processes_and_is_counted(pytester: pytest.Pytes
         "def test_runs_git", "@pytest.mark.spawns('contract: git')\ndef test_runs_git"))
     result = run(pytester)
     result.assert_outcomes(passed=1)
-    assert "spawns: 1 processes started by 1 of 1 tests; 1 in marked tests" in result.stdout.str()
+    assert "spawns: 1 processes started by 1 of 1 tests; 1 in contract and entry-point tests" in result.stdout.str()
 
 
 def test_a_mark_without_a_reason_fails(pytester: pytest.Pytester, no_starts) -> None:
@@ -131,17 +131,12 @@ def test_a_shell_is_refused_in_a_test_marked_for_another_reason_naming_each_call
         in output, output
     assert "bash -c true (test_planted.py:8" in output and "shell: make docs (test_planted.py:8" in output, output
     assert "scripts/shell_door.py" in output and "contract: shell, <what it proves>" in output, output
-    assert "2 refused in 1 tests; 2 shells" in output, output
+    assert "2 refused in 1 tests (failed); 2 shells" in output, output
 
 
-def test_a_listed_test_may_not_start_a_shell(pytester: pytest.Pytester, no_starts) -> None:
-    pytester.makepyfile(test_planted=SHELL_TEST.replace('@pytest.mark.spawns("{reason}")\n', ""))
-    path = pytester.path / spawn_guard.DEFAULT_BASELINE
-    path.parent.mkdir()
-    spawn_guard.write_baseline(path, {"test_planted.py::test_runs_a_shell": 2})
-    result = run(pytester)
-    result.assert_outcomes(failed=1)
-    assert "started 2 shell(s) in its call" in result.stdout.str()
+def test_a_shell_scripts_entry_point_test_may_start_a_shell(pytester: pytest.Pytester, no_starts) -> None:
+    pytester.makepyfile(test_planted=SHELL_TEST.format(reason="entry: scripts/x.sh"))
+    run(pytester).assert_outcomes(passed=1)
 
 
 def test_the_shell_doors_contract_starts_a_shell_and_the_total_counts_it(pytester: pytest.Pytester,
@@ -149,15 +144,31 @@ def test_the_shell_doors_contract_starts_a_shell_and_the_total_counts_it(pyteste
     pytester.makepyfile(test_planted=SHELL_TEST.format(reason="contract: shell, x.sh's logic"))
     result = run(pytester)
     result.assert_outcomes(passed=1)
-    assert "spawns: 2 processes started by 1 of 1 tests; 2 in marked tests, 0 in baseline tests, 0 refused in 0 " \
-           "tests; 2 shells" in result.stdout.str()
+    assert "spawns: 2 processes started by 1 of 1 tests; 2 in contract and entry-point tests, 0 refused in 0 " \
+           "tests (failed); 2 shells" in result.stdout.str()
 
 
-@pytest.mark.parametrize("reason, contract", [("contract: shell", True), ("contract: shell, x.sh", True),
-                                              ("contract: shell; x", True), ("contract: shells", False),
-                                              ("entry: scripts/se_hook.sh", False), ("contract: git", False)])
-def test_only_the_shell_contract_reason_lets_a_test_start_a_shell(reason: str, contract: bool) -> None:
-    assert spawn_guard.shell_contract(reason) is contract
+@pytest.mark.parametrize("reason, kept, shell", [
+    ("contract: shell", True, True), ("contract: shell, x.sh", True, True), ("contract: shell; x", True, True),
+    ("contract: shells", True, False), ("contract: git", True, False), ("entry: scripts/se_hook.sh", True, True),
+    ("entry: scripts/se_hook.sh, its wiring", True, True), ("entry: scripts/work_tickets.py", True, False),
+    ("shell: scripts/bootstrap.sh's steps", False, False), ("tool: obs's build", False, False),
+    ("contract: ", False, False), ("entry:", False, False), ("", False, False), (None, False, False)])
+def test_only_a_contract_or_an_entry_point_may_start_processes_and_few_a_shell(reason, kept: bool,
+                                                                               shell: bool) -> None:
+    assert spawn_guard.kept(reason) is kept
+    assert spawn_guard.shell_kept(reason) is shell
+
+
+def test_a_test_marked_for_another_reason_is_refused_naming_the_reason(pytester: pytest.Pytester,
+                                                                        no_starts) -> None:
+    pytester.makepyfile(test_planted="import pytest\n" + GIT_TEST.replace(
+        "def test_runs_git", "@pytest.mark.spawns('tool: git is the tool')\ndef test_runs_git"))
+    result = run(pytester)
+    result.assert_outcomes(failed=1)
+    output = result.stdout.str()
+    assert "its mark's reason, 'tool: git is the tool', is no door's contract" in output, output
+    assert "git status --short (test_planted.py:7)" in output, output
 
 
 def test_asyncio_subprocesses_are_counted(pytester: pytest.Pytester, no_starts) -> None:
@@ -198,79 +209,38 @@ def test_a_fixture_wider_than_one_test_starts_processes_freely(pytester: pytest.
     assert no_starts == [spawn_guard.POPEN]
 
 
-def baseline(pytester: pytest.Pytester) -> dict[str, int]:
-    return spawn_guard.read_baseline(pytester.path / spawn_guard.DEFAULT_BASELINE)
-
-
 TWO_TESTS = GIT_TEST + "\n\ndef test_quiet():\n    pass\n"
 
 
-def test_init_writes_the_baseline_and_a_listed_test_then_passes(pytester: pytest.Pytester, no_starts) -> None:
+def test_under_warn_a_refused_start_passes_and_is_named_by_file(pytester: pytest.Pytester, no_starts) -> None:
     pytester.makepyfile(test_planted=TWO_TESTS)
-    (pytester.path / "tests").mkdir()
-    run(pytester, "--spawn-baseline=init").assert_outcomes(passed=2)
-    assert baseline(pytester) == {"test_planted.py::test_runs_git": 1}
-    result = run(pytester)
+    result = run(pytester, "--spawn-guard=warn")
     result.assert_outcomes(passed=2)
-    assert "1 in baseline tests" in result.stdout.str()
-    refused = run(pytester, "--spawn-baseline=init")
-    assert refused.ret == pytest.ExitCode.USAGE_ERROR
-    assert "may only shrink" in refused.stderr.str()
+    output = result.stdout.str()
+    assert "spawns: 1 processes started by 1 of 2 tests; 0 in contract and entry-point tests, 1 refused in 1 " \
+           "tests (warned); 0 shells (scripts/spawn_guard.py warn)" in output, output
+    assert "spawns: warn: the refused tests by file, each to convert (--spawn-guard=error names each call): " \
+           "test_planted.py 1" in output, output
 
 
-def test_the_baseline_only_shrinks(pytester: pytest.Pytester, no_starts) -> None:
-    pytester.makepyfile(test_planted=TWO_TESTS, test_new=GIT_TEST.replace("test_runs_git", "test_runs_git_too"))
-    path = pytester.path / spawn_guard.DEFAULT_BASELINE
-    path.parent.mkdir()
-    spawn_guard.write_baseline(path, {"test_planted.py::test_runs_git": 1, "test_planted.py::test_quiet": 2,
-                                      "test_planted.py::test_renamed": 1, "test_gone.py::test_elsewhere": 3})
-    result = run(pytester, "--spawn-baseline=write", "test_planted.py", "test_new.py")
-    result.assert_outcomes(passed=2, failed=1)  # the new spawning test is refused, never added
-    # test_quiet started nothing and test_renamed is no test of a file that ran whole: both go;
-    # test_elsewhere's file did not run, so it stays
-    assert baseline(pytester) == {"test_planted.py::test_runs_git": 1, "test_gone.py::test_elsewhere": 3}
-    run(pytester, "--spawn-baseline=write", "-k", "quiet", "test_planted.py")
-    assert baseline(pytester) == {"test_planted.py::test_runs_git": 1, "test_gone.py::test_elsewhere": 3}
-    assert "spawns: wrote" in result.stdout.str()
-
-
-def test_a_listed_test_that_starts_nothing_fails_naming_the_remedy(pytester: pytest.Pytester, no_starts) -> None:
-    pytester.makepyfile(test_planted="def test_quiet():\n    pass\n")
-    path = pytester.path / spawn_guard.DEFAULT_BASELINE
-    path.parent.mkdir()
-    spawn_guard.write_baseline(path, {"test_planted.py::test_quiet": 1})
-    result = run(pytester)
-    result.assert_outcomes(passed=1, errors=1)
-    assert "is in the spawn baseline" in result.stdout.str() and "--spawn-baseline=write" in result.stdout.str()
-
-
-def test_the_baseline_is_yaml_with_json_quoted_ids(tmp_path: Path) -> None:
-    yaml = pytest.importorskip("yaml")
-    path = tmp_path / "baseline.yaml"
-    entries = {"tests/test_x.py::test_y[a: b]": 2, 'tests/test_x.py::test_z["q"]': 1}
-    spawn_guard.write_baseline(path, entries)
-    assert yaml.safe_load(path.read_text(encoding="utf-8"))["tests"] == entries
-    assert spawn_guard.read_baseline(path) == entries
-    spawn_guard.write_baseline(path, {})
-    assert yaml.safe_load(path.read_text(encoding="utf-8"))["tests"] == {}
-    assert spawn_guard.read_baseline(path) == {}
-
-
-def test_a_malformed_baseline_line_is_refused_by_its_line(tmp_path: Path) -> None:
-    path = tmp_path / "baseline.yaml"
-    path.write_text("tests:\n  not an entry\n", encoding="utf-8")
-    with pytest.raises(pytest.UsageError, match=r"baseline.yaml:2"):
-        spawn_guard.read_baseline(path)
+def test_the_ini_value_sets_the_level_and_the_option_wins(pytester: pytest.Pytester, no_starts) -> None:
+    pytester.makepyfile(test_planted=GIT_TEST)
+    pytester.makeini("[pytest]\nspawn_guard = warn\n")
+    run(pytester).assert_outcomes(passed=1)
+    run(pytester, "--spawn-guard=error").assert_outcomes(failed=1)
+    pytester.makeini("[pytest]\nspawn_guard = loud\n")
+    refused = run(pytester)
+    assert refused.ret == pytest.ExitCode.USAGE_ERROR and "error or warn" in refused.stderr.str()
 
 
 def test_the_controller_adds_up_its_workers_counts() -> None:
     guard = spawn_guard.SpawnGuard()
-    for nodeid, value in [("a::t1", "2:marked:2"), ("a::t2", "3:listed:0"), ("a::t3", "1::1"), ("a::t4", "0::0")]:
+    for nodeid, value in [("a::t1", "2:kept:2"), ("a::t2", "3:kept:0"), ("a::t3", "1:refused:1"),
+                          ("a::t4", "0:kept:0")]:
         report = pytest.TestReport(nodeid, ("a", 0, nodeid), {}, "passed", None, "teardown",
                                    user_properties=[(spawn_guard.PROPERTY, value)])
         guard.pytest_runtest_logreport(report)
-    assert (sum(guard.ran.values()), guard.marked, guard.listed, guard.refused, guard.shells) == \
-        (6, 2, 3, ["a::t3"], 3)
+    assert (sum(guard.ran.values()), guard.kept, guard.refused, guard.shells) == (6, 5, ["a::t3"], 3)
 
 
 @pytest.mark.parametrize("argv, shown", [
@@ -284,38 +254,18 @@ def test_a_command_is_named_short(argv, shown: str) -> None:
     assert spawn_guard.command_text(argv) == shown
 
 
-def test_write_runs_a_listed_test_as_converted_and_keeps_it_where_it_fails(pytester: pytest.Pytester,
-                                                                           no_starts) -> None:
-    """Under --spawn-baseline=write a listed test is not `allowed` (a suite gives it its fakes), and
-    one that then fails stays listed."""
-    pytester.makeconftest("""\
-        import pytest
-        import spawn_guard
-
-        @pytest.fixture
-        def door(request):
-            return "real" if spawn_guard.allowed(request.node) else "fake"
-        """)
-    pytester.makepyfile(test_planted="def test_needs_the_real_door(door):\n    assert door == 'real'\n")
-    path = pytester.path / spawn_guard.DEFAULT_BASELINE
-    path.parent.mkdir()
-    spawn_guard.write_baseline(path, {"test_planted.py::test_needs_the_real_door": 1})
-    run(pytester).assert_outcomes(errors=1, passed=1)  # listed, it gets the real door and starts nothing
-    run(pytester, "--spawn-baseline=write").assert_outcomes(failed=1)
-    assert baseline(pytester) == {"test_planted.py::test_needs_the_real_door": 1}
-
-
 def test_the_suites_conftest_registers_the_guard(pytestconfig: pytest.Config) -> None:
     assert isinstance(pytestconfig.pluginmanager.get_plugin(spawn_guard.NAME), spawn_guard.SpawnGuard)
     assert subprocess.Popen._execute_child.__name__ == "wrapper"
-    assert json.loads(json.dumps(spawn_guard.DEFAULT_BASELINE)) == "tests/spawn-baseline.yaml"
+    assert not (ROOT / "tests" / "spawn-baseline.yaml").exists(), "there is no baseline"
+    assert pytestconfig.getini(spawn_guard.INI) in spawn_guard.LEVELS
 
 
 def test_the_suite_gate_prints_the_guards_total() -> None:
     """`work_tickets.py suite` prints the spawn guard's line of the suite's output, as the run read it."""
     import work_tickets
 
-    output = ("....\nspawns: 3 processes started by 2 of 9 tests; 3 in marked tests, 0 in baseline tests, "
-              "0 refused in 0 tests (scripts/spawn_guard.py)\n9 passed in 1.00s\n")
+    output = ("....\nspawns: 3 processes started by 2 of 9 tests; 3 in contract and entry-point tests, 0 refused "
+              "in 0 tests (failed); 0 shells (scripts/spawn_guard.py error)\n9 passed in 1.00s\n")
     assert work_tickets.spawns_line(output).startswith("spawns: 3 processes started by 2 of 9 tests")
     assert work_tickets.spawns_line("9 passed in 1.00s\n") == ""

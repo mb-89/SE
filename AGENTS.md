@@ -68,14 +68,12 @@
   - The shell is a door, like git, gh and the network; a test never starts a shell. Every shell
     starts through `scripts/shell_door.py`, to which the process door hands a shell command; a
     test's code reaches its fake (`fake_shell` fixture). Only the shell door's contract,
-    `tests/test_shell_door.py` and the tests of SE's shell programs marked `contract: shell`,
-    starts a real one.
-  - The spawn guard, `scripts/spawn_guard.py`, fails a test that starts a process unmarked, naming
-    each call; `@pytest.mark.spawns("<reason>")` marks a door's contract (`contract: <door>`), a
-    script's one entry-point test (`entry: <script>`) or a justified start, such as a tool; a shell
-    start passes only in the shell door's contract.
-  - `tests/spawn-baseline.yaml` holds the tests not converted yet and only shrinks:
-    `uv run pytest -q --spawn-baseline=write` drops each entry that ran and started nothing.
+    `tests/test_shell_door.py`, and a shell script's one entry-point test start a real one.
+  - The spawn guard, `scripts/spawn_guard.py`, refuses a start outside a door's contract
+    (`@pytest.mark.spawns("contract: <door>")`) or a script's one entry-point test (`entry:
+    <script>`), naming each call. There is no baseline: `pyproject.toml` sets it to `warn` while
+    the tests that still start processes are converted, and the landing that converts the last
+    sets `error`.
 - File order: `tests/file-seconds.json` holds CI's seconds per test file, as CI's runner runs the
   PowerShell cases and skips the Playwright ones; a change that moves a test file's time by
   several seconds refreshes it from its pull request's `check` run with

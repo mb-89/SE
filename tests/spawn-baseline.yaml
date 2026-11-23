@@ -1,4 +1,0 @@
-# Tests still allowed to start processes, not converted yet (scripts/spawn_guard.py).
-# Generated: `pytest --spawn-baseline=write` drops each entry that ran and started none; it
-# never adds one. Convert a test and its entry goes; the guidance note tests-spawn-no-processes says how.
-tests: {}

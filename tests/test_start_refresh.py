@@ -37,7 +37,7 @@ START = '{"session_id":"s1","hook_event_name":"SessionStart"}'
 # moved, runs itself again from the moved tree, whose pins the core starts from. That re-run is
 # shell, so these run the hook as a process; se_start.py's own refresh is tested in-process
 # (tests/test_se_start.py).
-REFRESH = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh runs se_start.py start-refresh through uv and "
+REFRESH = pytest.mark.spawns("shell: scripts/bootstrap.sh runs se_start.py start-refresh through uv and "
                              "re-runs itself from the moved tree, run only as a process")
 
 

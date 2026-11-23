@@ -20,20 +20,19 @@ The person's requirement of 23 Nov:
 - **The shell is a door.** "The shell is a door, like git, gh and the network; a test never starts a
   shell." Product code reaches `sh`, `bash`, PowerShell or a command line (`shell=True`) only
   through the shell door, `<se>/scripts/shell_door.py`, and a test gets its fake (in SE,
-  `fake_shell`). Only the shell door's contract starts a real shell: the door's own contract test
-  and the contract tests of the project's shell programs, each marked
-  `@pytest.mark.spawns("contract: shell, <what it proves>")`. The guard refuses a shell start in
-  every other test, whatever its other mark.
+  `fake_shell`). Only the shell door's contract, marked `@pytest.mark.spawns("contract: shell, <what
+  it proves>")`, and a shell script's one entry-point test start a real shell; the guard refuses a
+  shell start in every other test.
 - **No repository per test.** A test builds its repositories on the fake git door, or shares one
   session-scoped repository built once.
 - **One entry-point test.** A script or hook keeps one test that starts the real thing, to prove its
   wiring, marked `@pytest.mark.spawns("entry: <script>")`. A door's contract is marked
-  `@pytest.mark.spawns("contract: <door>")`. Any other start carries a reason that says why it
-  cannot run in-process, such as a tool the project drives.
+  `@pytest.mark.spawns("contract: <door>")`. No other reason lets a test start a process.
 - **The check.** SE's spawn guard, the pytest plugin `<se>/scripts/spawn_guard.py`, counts the
-  processes each test starts and fails an unmarked one, naming each call, and a shell outside the
-  shell door's contract. Its baseline, `tests/spawn-baseline.yaml`, lists what is not converted
-  yet and only shrinks: a converted test leaves it in its own change.
+  processes each test starts and refuses each start outside a contract or entry-point test, and a
+  shell outside the shell door's contract and a shell script's entry-point test, naming each call.
+  It keeps no baseline. Its level is the `spawn_guard` ini value: `error` fails the test, `warn`
+  only names it, while a suite converts its tests; once none is refused, the suite sets `error`.
 - **In a Python project.** A project that holds se as a module loads the guard from its
   top-level `conftest.py`, with `<se>/scripts` on `sys.path`:
 
@@ -45,7 +44,7 @@ def pytest_addoption(parser, pluginmanager):
     spawn_guard.register(pluginmanager)
 ```
 
-  `pytest --spawn-baseline=init` writes its first baseline, once.
+  It starts at `spawn_guard = "warn"` in the project's pytest settings, until every test is converted.
 
 Not picked: raising time bounds, or leaving folders out of the count. A slow suite is fixed by
 starting fewer processes.
