@@ -785,7 +785,8 @@ below, a positive number of hours, default 12; other keys are refused.
     plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
     passed it starts `work_tickets.py beat` in the background, which sets the line to now.
   - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
-    so the session runs its read and write when the hook tells it.
+    so the session runs its read and write when the hook tells it. The write carries the issue's
+    own labels, so the [template gate](#templates) judges it by the issue's own template.
   - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
     and the template check ignore it.
 - **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the

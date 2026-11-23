@@ -130,7 +130,8 @@ IN_PROGRESS_LABEL = "in-progress"
 # label, its last beat one marker line in the issue's body, the UTC time to the minute. `start`
 # writes the first with the claim, the worker's hook the next once half the claim timeout passed
 # (`beat`), the close-out removes it; `ready` reads a claim as live or stale from label and beat.
-BEAT_PATTERN = re.compile(r"^<!-- se:beat (\d{4}-\d\d-\d\dT\d\d:\d\dZ) -->[ \t]*(?:\r?\n|\Z)", re.M)
+BEAT_PATTERN = re.compile(
+    r"^<!-- se:beat ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z) -->[ \t]*(?:\r?\n|\Z)", re.M)
 BEAT_FORMAT = "%Y-%m-%dT%H:%MZ"
 CLAIM_TIMEOUT_HOURS = 12  # [workers] claim_timeout_hours, unset; a beat is due after half of it
 # The worker's local record of its claim's beat, in .se/work beside the snapshot: intake writes it
@@ -4243,9 +4244,11 @@ def beat_step(repo: str, number: int, write: bool, at: datetime | None = None) -
               else "its beat line (<!-- se:beat ... -->) removed")
     return Step(f"beat:{'set' if write else 'remove'}", "issue_write", {
         **owner_repo(repo), "method": "update", "issue_number": number,
-        "body": f"<the issue's body with {change}>"},
-        note="issue_read get reads the body; a beat line takes the place of the one it has, else "
-             "it goes after the marker lines at its top; issue_write sets the whole body")
+        "body": f"<the issue's body with {change}>",
+        "labels": "<the issue's labels, as issue_read get reads them>"},
+        note="issue_read get reads the body and the labels; a beat line takes the place of the one "
+             "it has, else it goes after the marker lines at its top; issue_write sets the whole "
+             "body, with the labels unchanged, by which the template gate judges it")
 
 
 def beaten(body: str, detail: str) -> str:
@@ -4285,8 +4288,9 @@ def beat_action_door(door: "RelayDoor") -> Action:
             return None
         body = read["body"]
         changed = beaten(body, detail)
-        if changed != body:
-            door.ask("issue_write", {"method": "update", "issue_number": number, "body": changed})
+        if changed != body:  # with its labels, so the template gate judges it by its own template
+            door.ask("issue_write", {"method": "update", "issue_number": number, "body": changed,
+                                     "labels": sorted(issue_labels(read))})
     return run
 
 
@@ -4381,8 +4385,9 @@ def beat(root: Path) -> str:
                         f"labelled {', '.join(sorted(issue['labels'])) or 'nothing'}): no beat "
                         "written, its record removed")
             body = with_beat(issue["body"], now)
-            if door is not None:
-                door.ask("issue_write", {"method": "update", "issue_number": number, "body": body})
+            if door is not None:  # with its labels, as beat_action_door writes them
+                door.ask("issue_write", {"method": "update", "issue_number": number, "body": body,
+                                         "labels": sorted(issue["labels"])})
             else:
                 run_gh_with_body(root, ["issue", "edit", str(number), *repo_arguments(repo)], body)
         except (QueueError, MissingGhError, sibling("se_relay").RelayError) as error:

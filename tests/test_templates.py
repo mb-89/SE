@@ -4,6 +4,7 @@ failing and a passing fixture, the command, and the contracts with the writers S
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -1850,6 +1851,20 @@ def duplicates(catalog, monkeypatch) -> list[Case]:
         step.action: FREE for step in steps})
 
 
+def beat_edit(catalog, monkeypatch) -> list[Case]:
+    """What every beat sends (work_tickets.py beat, start, the close-out): the work issue's own body
+    with its beat line set or removed, with its own labels, so the gate takes the work template."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 23, 8, 30, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", body, labels=WORK_LABELS)
+            for body in (beaten, work_tickets.without_beat(beaten))]
+
+
+def without_beats(plan):
+    """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
+    return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
+                                               if not step.action.startswith("beat:")), plan.then)
+
+
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
@@ -1866,8 +1881,12 @@ CONTRACT = {
     "work_tickets:block": ("the blocker linker", blocker_link),
     "work_tickets:delivered_pull_request": ("deliver", delivered),
     "work_tickets:start_plan": ("start", plan_of(
-        lambda: work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False),
+        lambda: without_beats(work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False)),
         {"assign": NO_BODY, "comment_issue": FREE})),
+    "work_tickets:beat_step": ("start and integrate", beat_edit),
+    "work_tickets:beat_action_gh.run": ("start and integrate", beat_edit),
+    "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
+    "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
     "work_tickets:escalation_plan": ("integrate", plan_of(
@@ -1876,8 +1895,8 @@ CONTRACT = {
     "work_tickets:tracker_actions.comment": ("retro.py, overhaul.py and escalations", tracker_comment),
     "work_tickets:landing_plan": ("integrate", landing),
     "work_tickets:closeout_plan": ("integrate", plan_of(
-        lambda: work_tickets.closeout_plan(REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n",
-                                           []),
+        lambda: without_beats(work_tickets.closeout_plan(
+            REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n", [])),
         {"comment_pull": FREE, "comment_issue": FREE})),
     "work_tickets:RelayDoor.create_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.create")),
     "work_tickets:RelayDoor.update_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.edit")),

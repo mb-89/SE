@@ -2668,6 +2668,7 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
         ("issue_read", "get"), ("issue_write", "update"), ("add_issue_comment", None)]
     assert labels == ["work", "in-progress"]
     assert body[0] == "<!-- se:fleet -->\n<!-- se:beat 2026-11-23T08:30Z -->\n\n## Situation\n"
+    assert asked[7][1]["labels"] == ["in-progress", "work"]  # the gate judges it by its template
     assert asked[-1][1]["body"] == f"Started: worker session on branch `{BRANCH}`\n"
     out = capsys.readouterr().out
     assert "GitHub plan:" not in out and "Started #5\n" in out
@@ -4107,6 +4108,7 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
     assert (labels["repo"], labels["issue_number"], labels["labels"]) == ("tracker", 5, ["work"])
     unbeaten = session.asked[14][1]
     assert (unbeaten["repo"], unbeaten["body"]) == ("tracker", "<!-- se:fleet -->\n\n## Situation\n")
+    assert "labels" in unbeaten  # its own, so the template gate takes the issue's template
     closed = session.asked[15][1]
     assert (closed["repo"], closed["state"], closed["state_reason"]) == ("tracker", "closed", "completed")
     commit = origin_main(main_checkout)
@@ -4498,7 +4500,8 @@ def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_cl
     assert '"repo": "tracker"' in out  # the work issue lives in the tracker
     assert "<the issue's labels without in-progress>" in out
     assert ('5. issue_write {"body": "<the issue\'s body with its beat line (<!-- se:beat ... -->) '
-            'removed>", "issue_number": 5, "method": "update", "owner": "owner", "repo": "tracker"}') in out
+            'removed>", "issue_number": 5, "labels": "<the issue\'s labels, as issue_read get reads '
+            'them>", "method": "update", "owner": "owner", "repo": "tracker"}') in out
     assert '6. issue_write {"issue_number": 5, "method": "update", "owner": "owner", "repo": ' \
            '"tracker", "state": "closed", "state_reason": "completed"}' in out
     assert "Started: none here" in out
