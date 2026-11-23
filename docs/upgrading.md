@@ -282,11 +282,7 @@ Components are found by name under the owners of the checkout's remotes
 - **Check:** `git grep -nE 'github (issue-create|issue-comment).*--(template|fields)\b'` prints
   nothing, and `ls .se/templates/*.json 2>/dev/null | wc -l` prints `0`.
 
-## SE 13
-
-On main, released as 13.0.0 at the next release.
-
-### The spawn guard has no baseline
+### The spawn guard has no baseline (12.0.1)
 
 - **Change:** a project that loads SE's spawn guard (`<se>/scripts/spawn_guard.py`) gets no
   baseline: `--spawn-baseline`, the `spawn_baseline` setting and `tests/spawn-baseline.yaml` are
