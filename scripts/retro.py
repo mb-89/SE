@@ -595,6 +595,7 @@ def chapters(issues: list[Closed]) -> list[dict]:
 
 def read_block(text: str, marker: str = BLOCK_MARKER) -> dict | None:
     """The data of the last block under `marker` in `text`; None where it has none."""
+    text = text.replace("\r\n", "\n")  # a draft saved on Windows
     at = text.rfind(marker)
     if at < 0:
         return None
@@ -2042,7 +2043,7 @@ def run_collect(args: argparse.Namespace) -> int:
     output = (json.dumps({**found.data(), **found.extras()}, indent=2, ensure_ascii=False) + "\n"
               if args.json else draft(found))
     if args.out:
-        args.out.write_text(output, encoding="utf-8")
+        args.out.write_text(output, encoding="utf-8", newline="\n")
         print(f"Wrote the retro draft of #{args.retro} to {args.out}: "
               + ", ".join(f"{value} {name}" for name, value in found.sizes.items()))
     else:

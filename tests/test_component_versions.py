@@ -85,10 +85,10 @@ def components_on_main(checkout: Path, se: str = "0.2.9") -> None:
     git_ok("-C", str(checkout), "reset", "-q", "--hard", "origin/main")
     (checkout / "components").mkdir()
     (checkout / TEMPLATE).parent.mkdir(parents=True)
-    (checkout / TEMPLATE).write_text(PINNED.format(version=se), encoding="utf-8")
-    (checkout / "components" / "release.toml").write_text(SE_RELEASE.format(version=se), encoding="utf-8")
-    (checkout / "components" / "se.go").write_text("package se\n", encoding="utf-8")
-    (checkout / "components" / "go.mod").write_text(GO_MOD.format(kern="0.14.1"), encoding="utf-8")
+    (checkout / TEMPLATE).write_text(PINNED.format(version=se), encoding="utf-8", newline="\n")
+    (checkout / "components" / "release.toml").write_text(SE_RELEASE.format(version=se), encoding="utf-8", newline="\n")
+    (checkout / "components" / "se.go").write_text("package se\n", encoding="utf-8", newline="\n")
+    (checkout / "components" / "go.mod").write_text(GO_MOD.format(kern="0.14.1"), encoding="utf-8", newline="\n")
     with (checkout / "se.toml").open("a", encoding="utf-8") as stream:
         stream.write('\n[binary]\nrelease = "components/release.toml"\n')
     git_ok("-C", str(checkout), "add", "-A")
@@ -103,7 +103,7 @@ def work_branch(checkout: Path, branch: str, changes: dict[str, str]) -> str:
     git_ok("-C", str(checkout), "worktree", "add", "-q", "-b", branch, str(worker), "origin/main")
     for name, text in changes.items():
         (worker / name).parent.mkdir(parents=True, exist_ok=True)
-        (worker / name).write_text(text, encoding="utf-8")
+        (worker / name).write_text(text, encoding="utf-8", newline="\n")
     git_ok("-C", str(worker), "add", "-A")
     git_ok("-C", str(worker), "commit", "-q", "-m", f"Change {branch}")
     git_ok("-C", str(worker), "push", "-q", "origin", branch)
@@ -253,9 +253,9 @@ def test_the_completeness_check_fails_on_a_made_up_file_with_a_stale_pin(tmp_pat
                        "docs/history.md": "se-v4.5.6 shipped; the template once said @se-v4.4.0\n",
                        ".se/work/note.md": "@se-v4.5.6\n"}.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / name).write_text(text, encoding="utf-8")
+        (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
     assert unlisted_pins_in(tmp_path) == ["docs/made-up.yml"]
-    (tmp_path / "docs" / "made-up.yml").write_text("uses: x@se-v4.5.6\n", encoding="utf-8")
+    (tmp_path / "docs" / "made-up.yml").write_text("uses: x@se-v4.5.6\n", encoding="utf-8", newline="\n")
     assert unlisted_pins_in(tmp_path) == ["docs/made-up.yml"]
 
 
@@ -328,7 +328,7 @@ def test_the_suite_gives_the_release_guard_the_work_branch_s_stated_kinds(
     git_ok("-C", str(main_checkout), "switch", "-q", "-c", "fix/kinds")
     report = main_checkout / ".se" / "work" / "field-report.md"
     report.parent.mkdir(parents=True)
-    report.write_text("**Component kinds:** se patch, kern minor\n", encoding="utf-8")
+    report.write_text("**Component kinds:** se patch, kern minor\n", encoding="utf-8", newline="\n")
     work_tickets.stated_component_kinds(main_checkout)
     assert work_tickets.os.environ[versions.ENVIRONMENT] == "kern=minor,se=patch"
     assert "the release guard reads fix/kinds's Component kinds: kern=minor,se=patch" in (
@@ -344,9 +344,9 @@ def test_field_report_check_appends_the_guard_s_environment_line(tmp_path, monke
     monkeypatch.setattr(work_tickets, "check_field_report", lambda *arguments: None)  # passes
     body = tmp_path / "body.md"
     body.write_text(reported_at("abc1234").replace(
-        "**Release kind:**", "**Component kinds:** se minor\n**Release kind:**", 1), encoding="utf-8")
+        "**Release kind:**", "**Component kinds:** se minor\n**Release kind:**", 1), encoding="utf-8", newline="\n")
     environment = tmp_path / "github-env"
-    environment.write_text("EARLIER=1\n", encoding="utf-8")
+    environment.write_text("EARLIER=1\n", encoding="utf-8", newline="\n")
     assert work_tickets.main(["field-report", "--check", str(body),
                               "--component-kinds-to", str(environment)]) == 0
     assert environment.read_text(encoding="utf-8") == "EARLIER=1\nSE_COMPONENT_KINDS=se=minor\n"
@@ -376,12 +376,12 @@ def test_a_branch_adding_a_generated_file_with_the_version_lands_after_main_rele
     git_ok("-C", str(main_checkout), "reset", "-q", "--hard", "origin/main")
     settings = main_checkout / "se.toml"
     base = settings.read_text(encoding="utf-8") + f"version = \"1.0.0\"\nrelease_build = {json.dumps(build)}\n"
-    settings.write_text(base, encoding="utf-8")
+    settings.write_text(base, encoding="utf-8", newline="\n")
     git_ok("-C", str(main_checkout), "commit", "-qam", "version")
     git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
     # The branch adds the generated file at 1.0.0; then main releases 1.0.1.
     head = work_branch(main_checkout, "fix/generated", {"gen.json": '{"version": "1.0.0"}\n'})
-    settings.write_text(base.replace('"1.0.0"', '"1.0.1"'), encoding="utf-8")
+    settings.write_text(base.replace('"1.0.0"', '"1.0.1"'), encoding="utf-8", newline="\n")
     git_ok("-C", str(main_checkout), "commit", "-qam", "Release v1.0.1")
     git_ok("-C", str(main_checkout), "push", "-q", "origin", "HEAD:main")
 
@@ -426,10 +426,10 @@ def test_the_guard_refuses_a_branch_that_moves_only_the_kern_require_without_a_s
     # The released tool imports no reader of the fake's state file; one file more in its package,
     # given to the build as an overlay, imports kern's gitfake, which registers it.
     reader = tmp_path / "fake_reader.go"
-    reader.write_text('package main\n\nimport _ "kern/git/gitfake"\n', encoding="utf-8")
+    reader.write_text('package main\n\nimport _ "kern/git/gitfake"\n', encoding="utf-8", newline="\n")
     overlay = tmp_path / "overlay.json"
     tool = se_modules.kern_dir(PROJECT) / "tools" / "release" / "zz_fake_reader.go"
-    overlay.write_text(json.dumps({"Replace": {str(tool): str(reader)}}), encoding="utf-8")
+    overlay.write_text(json.dumps({"Replace": {str(tool): str(reader)}}), encoding="utf-8", newline="\n")
 
     def guard(kinds: str | None) -> subprocess.CompletedProcess:
         environment = {k: v for k, v in os.environ.items() if k != versions.ENVIRONMENT}
@@ -459,12 +459,12 @@ def guard_repository(tmp_path: Path) -> Path:
              "components/kern/go.mod": "module kern\n\ngo 1.25.0\n"}
     for name, text in files.items():
         (repo / name).parent.mkdir(parents=True, exist_ok=True)
-        (repo / name).write_text(text, encoding="utf-8")
+        (repo / name).write_text(text, encoding="utf-8", newline="\n")
     identity = git_door.identity_environment(("alice", "alice@example.com"))
     git_ok("-C", str(repo), "add", "-A")
     assert git_door.run("commit", "-q", "-m", "se 0.2.9", root=repo, env=identity).returncode == 0
     git_ok("-C", str(repo), "tag", "se-v0.2.9")
-    (repo / "components" / "go.mod").write_text(GUARD_MOD.format(kern="0.15.0"), encoding="utf-8")
+    (repo / "components" / "go.mod").write_text(GUARD_MOD.format(kern="0.15.0"), encoding="utf-8", newline="\n")
     git_ok("-C", str(repo), "add", "-A")
     assert git_door.run("commit", "-q", "-m", "kern 0.15.0", root=repo, env=identity).returncode == 0
     return repo

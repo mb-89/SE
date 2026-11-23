@@ -375,7 +375,7 @@ def rewrite(repo: Path, identity: tuple[str, str]) -> tuple[Counts, dict[str, st
             raise SetupError(f"{name} carries another tree after the rewrite")
     map_file = Path(git(repo, "rev-parse", "--absolute-git-dir").strip()) / MAP_FILE
     map_file.write_text("".join(f"{old} {mapping[old]}\n" for old in sorted(mapping)),
-                        encoding="utf-8")
+                        encoding="utf-8", newline="\n")
     return counts, mapping, before, after
 
 

@@ -128,7 +128,7 @@ def fake_bin(base: Path, *, git: bool = True) -> Path:
     test's bell as the background half ends (`settled`) and, optionally, git."""
     # setsid, shasum and unzip are not everywhere; bootstrap.sh does without them
     folder = link_tools(base / "bin", TOOLS)
-    real = shutil.which("bash")
+    real = BASH
     if real is not None:  # off the link, which writing through would change the real bash
         (folder / "bash").unlink()
         (folder / "bash").write_text(BASH_RINGS.replace("@BASH@", sh(Path(real))).replace(

@@ -105,7 +105,7 @@ def build(folder: Path, destination: Path, answers: Path | None = None) -> int:
             written.unlink(missing_ok=True)
             print(f"deck: {refusal}", file=sys.stderr)
             return 1
-        (vault / BUNDLE_FILE).write_text(_bundle(document), encoding="utf-8")
+        (vault / BUNDLE_FILE).write_text(_bundle(document), encoding="utf-8", newline="\n")
         code = obs_document(obs, [
             "--source", str(vault), "--document", str(parsed), "--destination", str(destination.resolve()),
             "--adapter-option", f"trusted-runtime-bundle={BUNDLE_ID}={BUNDLE_FILE}", *recorded,
@@ -157,7 +157,7 @@ def _settings(vault: Path) -> None:
     text = path.read_text(encoding="utf-8") if path.is_file() else None
     merged = brief_notice(text)
     if merged != text:
-        path.write_text(merged, encoding="utf-8")
+        path.write_text(merged, encoding="utf-8", newline="\n")
 
 
 def _screens(vault: Path) -> None:
@@ -194,7 +194,7 @@ def _screens(vault: Path) -> None:
                 indent = re.match(r"\s*", children[0]).group() if children else "  "
                 if not any(re.match(re.escape(indent) + r"layout\s*:", line) for line in children):
                     lines.insert(start + 1, f"{indent}layout: screens")
-    manifest.write_text("\n".join(lines), encoding="utf-8")
+    manifest.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
 def _holds_pugh(nodes: list[dict]) -> bool:

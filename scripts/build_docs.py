@@ -135,11 +135,14 @@ ADAPTER_INSTALL = tuple(ADAPTER_REMEDY.split())
 
 def installed_adapter(obs: Path) -> tuple[dict | None, str]:
     """``ADAPTER`` as obs finds it among the machine's installed components: its manifest with the
-    folder its commands run from (``folder``), and ""; or None and obs's refusal, which names
+    folder its commands run from (``folder``) and the components it requires that are not installed
+    (``missing``, such as its default style), and ""; or None and obs's refusal, which names
     ``ADAPTER_REMEDY``."""
     code = ("import json; from obs.adapter import adapter_location, load_adapter; "
-            f"print(json.dumps({{**load_adapter({ADAPTER!r}), "
-            f"'folder': str(adapter_location({ADAPTER!r}).folder)}}))")
+            "from obs.components import installed, requirements; "
+            f"folder = adapter_location({ADAPTER!r}).folder; "
+            f"print(json.dumps({{**load_adapter({ADAPTER!r}), 'folder': str(folder), "
+            f"'missing': sorted(set(requirements(folder, {ADAPTER!r})) - set(installed()))}}))")
     result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c", code],
                             cwd=ROOT, capture_output=True, text=True, env=child_environment())
     said = result.stdout.strip().splitlines()
@@ -149,26 +152,45 @@ def installed_adapter(obs: Path) -> tuple[dict | None, str]:
     return json.loads(said[-1]), ""
 
 
+def install_adapter(obs: Path) -> tuple[int, str]:
+    """Run ``ADAPTER_REMEDY`` from ``obs``, which installs ``ADAPTER`` with the components it requires
+    (obs 10.3.2 or later): its exit code and the last line it said."""
+    result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
+                            capture_output=True, text=True, env=child_environment())
+    said = (result.stdout + result.stderr).strip().splitlines()
+    return result.returncode, said[-1] if said else f"exit code {result.returncode}"
+
+
 #: The adapters ``ready_adapter`` found in this process, by obs folder: a build asks obs once.
 _READY: dict[Path, dict] = {}
 
 
 def ready_adapter(obs: Path) -> tuple[dict | None, str]:
-    """``ADAPTER`` as obs finds it, installed first (``ADAPTER_REMEDY``) where it is missing: its
-    manifest with ``folder``, and ""; or None and why, naming the command and obs's refusal."""
+    """``ADAPTER`` with every component it requires, as obs finds them, installed first
+    (``ADAPTER_REMEDY``) where one is missing: its manifest with ``folder``, and ""; or None and why,
+    naming the command and obs's refusal, before any build."""
     if obs in _READY:
         return _READY[obs], ""
     adapter, refusal = installed_adapter(obs)
-    if adapter is None:
-        result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
-                                capture_output=True, text=True, env=child_environment())
+    if adapter is None or adapter.get("missing"):
+        _, said = install_adapter(obs)
+        before = adapter
         adapter, refusal = installed_adapter(obs)
         if adapter is None:
-            said = (result.stdout + result.stderr).strip().splitlines()
             return None, (f"obs finds no adapter component {ADAPTER} ({refusal}), and `{ADAPTER_REMEDY}` "
-                          f"from {obs} installed none ({said[-1] if said else f'exit code {result.returncode}'}). "
+                          f"from {obs} installed none ({said}). "
                           "Install it there, where obs's remotes reach a repository that offers it")
-        print(f"build_docs: installed obs's adapter component {ADAPTER} at {adapter['folder']}", file=sys.stderr)
+        if adapter.get("missing"):
+            missing = adapter["missing"]
+            commands = ", ".join(f"`obs-components install {name}`" for name in missing)
+            return None, (f"obs finds {ADAPTER} without the components it requires, {', '.join(missing)}, "
+                          f"and `{ADAPTER_REMEDY}` from {obs} installed none ({said}). Run {commands} there, "
+                          "where obs's remotes reach a repository that offers it")
+        if before is None:
+            print(f"build_docs: installed obs's adapter component {ADAPTER} at {adapter['folder']}", file=sys.stderr)
+        else:
+            print(f"build_docs: installed the components {ADAPTER} requires, {', '.join(before['missing'])}",
+                  file=sys.stderr)
     _READY[obs] = adapter
     return adapter, ""
 
@@ -209,7 +231,7 @@ def build(source: Path, destination: Path, document: Path | None = None) -> int:
         if runme(vault, folder):
             return 2
         config = Path(scratch) / "obs-config.json"
-        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
+        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8", newline="\n")
         written = ["--document", str(document.resolve())] if document else []
         code = obs_document(obs, ["--config", str(config), "--source", str(vault / source.name), *written,
                                   "--destination", str(destination), "--execute-commands"], "build_docs",
@@ -249,7 +271,7 @@ def reading_copy(folder: Path, copy: Path) -> Path:
         text = note.read_text(encoding="utf-8")
         changed = without_verdict(text)
         if changed != text:
-            note.write_text(changed, encoding="utf-8")
+            note.write_text(changed, encoding="utf-8", newline="\n")
     return copy
 
 
@@ -268,11 +290,11 @@ def rule_table(vault: Path) -> None:
     shown = rule_book.documentation(book.read_text(encoding="utf-8"))
     for name in shown.notes:
         if (book.parent / name).exists():
-            raise FileExistsError(f"the rule note {BOOK.parent / name} would overwrite the file of that "
-                                  "name beside the rule book; rename that file")
-    book.write_text(shown.page, encoding="utf-8")
+            raise FileExistsError(f"the rule note {(BOOK.parent / name).as_posix()} would overwrite the file "
+                                  "of that name beside the rule book; rename that file")
+    book.write_text(shown.page, encoding="utf-8", newline="\n")
     for name, text in shown.notes.items():
-        (book.parent / name).write_text(text, encoding="utf-8")
+        (book.parent / name).write_text(text, encoding="utf-8", newline="\n")
 
     def pointed(match: re.Match) -> str:
         rule = shown.anchors.get(match[3])
@@ -286,7 +308,7 @@ def rule_table(vault: Path) -> None:
         text = note.read_text(encoding="utf-8")
         changed = LINK.sub(pointed, text)
         if changed != text:
-            note.write_text(changed, encoding="utf-8")
+            note.write_text(changed, encoding="utf-8", newline="\n")
 
 
 def without_verdict(text: str) -> str:
@@ -380,8 +402,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--document", type=Path,
                         help="also write the obs Document the page was built from to this JSON file")
     parser.add_argument("--install-html", action="store_true",
-                        help="install obs's adapter component obs-html where it is missing (obs-components install obs-html) "
-                             "and stop")
+                        help="install obs's adapter component obs-html with the components it requires, its default style "
+                             "among them, where one is missing (obs-components install obs-html), and stop")
     arguments = parser.parse_args(argv)
     if arguments.install_html:
         return install_html(obs_dir())

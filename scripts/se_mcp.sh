@@ -54,13 +54,23 @@ logfile() { # <root> [<session folder: 1 or 0>]: the log the launcher writes for
   printf '%s' "$log"
 }
 note() { printf '%s se_mcp.sh: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log" 2>/dev/null; }
+# A folder's physical path, one name per folder: on Windows by its drive (/c/...), as MSYS names a
+# folder entered by its Windows path by its mount table instead (the temporary folder as /tmp).
+phys() { # <folder>
+  local p w
+  p="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  if w="$(cd "$1" && pwd -W 2>/dev/null)" && [[ "$w" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+    p="/${BASH_REMATCH[1],,}${BASH_REMATCH[2]}"
+  fi
+  printf '%s' "$p"
+}
 
 plugin_project() { # <plugin folder> <session variables>: the root a plugin install serves; fails where no source counts
   local plugin="$1" names="$2" name value dir="" source="" found=0
   usable() { case "$1" in /* | [A-Za-z]:[\\/]*) [ -d "$1" ] ;; *) false ;; esac; }
   for name in $names; do
     value="${!name:-}"
-    if usable "$value"; then dir="$(cd "$value" && pwd -P)" && { source="$name=$value"; break; }; fi
+    if usable "$value"; then dir="$(phys "$value")" && { source="$name=$value"; break; }; fi
   done
   if [ -z "$source" ]; then
     value=""
@@ -68,7 +78,7 @@ plugin_project() { # <plugin folder> <session variables>: the root a plugin inst
       Linux) value="$(cd -P "/proc/$PPID/cwd" 2>/dev/null && pwd -P)" ;;
       Darwin) value="$(lsof -a -p "$PPID" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)" ;;
     esac
-    if usable "$value" && dir="$(cd "$value" && pwd -P)"; then
+    if usable "$value" && dir="$(phys "$value")"; then
       case "$dir/" in "$plugin/"*) dir="" ;; *) source="parent cwd $value" ;; esac
     fi
   fi
@@ -101,8 +111,8 @@ if [ -z "$plugin_root" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   plugin_root="$CLAUDE_PLUGIN_ROOT" session_names="SE_SESSION_CWD CLAUDE_PROJECT_DIR"
 fi
 if [ -n "$plugin_root" ] && [ "${SE_MCP_PLUGIN_PROJECT:-}" != off ]; then
-  plugin="$(cd "$plugin_root" 2>/dev/null && pwd -P)" || plugin=""
-  if [ -n "$plugin" ] && [ "$plugin" = "$(cd "$se_root" && pwd -P)" ] && [ "$plugin" = "$(cd "$root" && pwd -P)" ]; then
+  plugin="$(phys "$plugin_root")" || plugin=""
+  if [ -n "$plugin" ] && [ "$plugin" = "$(phys "$se_root")" ] && [ "$plugin" = "$(phys "$root")" ]; then
     unset SE_MCP_PLUGIN_FOLDER
     if chosen="$(plugin_project "$plugin" "$session_names")"; then
       if [ "$chosen" != "$plugin" ]; then

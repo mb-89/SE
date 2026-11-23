@@ -50,21 +50,22 @@ RUNTIME = ROOT / ".se" / ".runtime" / "runme-se"
 CONF = ROOT / "RUNME.conf"
 
 
-def fakes(folder: Path, log: Path) -> None:
+def fakes(folder: Path, log: Path) -> Path:
     """Fill ``folder``, put first on PATH, with a fake for every need of SE's RUNME.conf, so the build's
     RUNME installs nothing and reaches no network: ``se`` prints FAKE_HELP; each other command need
-    that PATH lacks exits 0; ``bash``, called as RUNME's ``get se`` line, writes RUNME's se need in its
-    working folder and records that folder in ``log``, and hands every other call to the real bash."""
+    that PATH lacks exits 0. Returns the file to set as BASH_ENV, which every non-interactive bash
+    reads first: where bash runs RUNME's ``get se`` line, it writes RUNME's se need in its working
+    folder, records that folder in ``log`` and ends that bash; every other bash goes on. Not a fake
+    ``bash`` on PATH: Git for Windows' sh puts its own /usr/bin before PATH."""
     folder.mkdir()
     conf = CONF.read_text(encoding="utf-8")
     home = Path(os.environ.get("HOME", str(Path.home())))
     extra = [str(home / line.split()[1][2:]) for line in conf.splitlines() if line.startswith("path ~/")]
     lookup = os.pathsep.join([os.environ.get("PATH", ""), *extra])
-    real_bash = shutil.which("bash", path=lookup)
-    assert real_bash, "the build's RUNME needs a bash on PATH"
+    assert shutil.which("bash", path=lookup), "the build's RUNME needs a bash on PATH"
 
     def write(name: str, body: str) -> None:
-        (folder / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+        (folder / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8", newline="\n")
         (folder / name).chmod(0o755)
 
     write("se", f"printf '%s' '{FAKE_HELP}'\n")
@@ -72,11 +73,12 @@ def fakes(folder: Path, log: Path) -> None:
                         if line.startswith("need ") and line.split()[2] == "command"} - {"se", "bash"}):
         if not shutil.which(name, path=lookup):
             write(name, "exit 0\n")
-    write("bash", 'if [ "$*" = "scripts/bootstrap.sh --binary" ]; then\n'
-                  f'  pwd >>"{log}"\n'
-                  '  mkdir -p .se/.runtime && echo fake >.se/.runtime/runme-se\n'
-                  '  exit 0\nfi\n'
-                  f'exec "{real_bash}" "$@"\n')
+    bash_env = folder.parent / "bash-env.sh"
+    bash_env.write_text('if [ "$0 $*" = "scripts/bootstrap.sh --binary" ]; then\n'
+                        f'  pwd >>"{log.as_posix()}"\n'
+                        '  mkdir -p .se/.runtime && echo fake >.se/.runtime/runme-se\n'
+                        '  exit 0\nfi\n', encoding="utf-8", newline="\n")
+    return bash_env
 
 
 @pytest.fixture(scope="module")
@@ -86,8 +88,9 @@ def built(tmp_path_factory, obs):
     and RUNME need as they were before it."""
     folder = tmp_path_factory.mktemp("docs")
     log = folder / "bash.log"
-    fakes(folder / "bin", log)
-    env = dict(os.environ, PATH=os.pathsep.join([str(folder / "bin"), os.environ.get("PATH", "")]))
+    bash_env = fakes(folder / "bin", log)
+    env = dict(os.environ, PATH=os.pathsep.join([str(folder / "bin"), os.environ.get("PATH", "")]),
+               BASH_ENV=str(bash_env))
     before = snapshot()
     runtime = RUNTIME.read_bytes() if RUNTIME.exists() else None
     result = build("--destination", str(folder / "index.html"), "--document", str(folder / "docs.json"), env=env)
@@ -406,69 +409,78 @@ def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, 
     assert "--adapter: obs-html" in refusal and "not an adapter" in refusal
 
 
-def adapter_after(monkeypatch, missing: int, install: tuple[str, ...]) -> list[str]:
-    """Fake obs's finder: no adapter for its first ``missing`` reads, then one; the install runs
-    ``install`` (the test's fake_processes answers it). The returned list records each read."""
-    reads: list[str] = []
-    found = {"name": "obs-html", "serve": ["serve"], "folder": "/components/obs-html"}
+STYLE = "obs-html-style-generic"
+
+
+def fake_components(monkeypatch, listing: list[str], installs: list[str]) -> list[str]:
+    """Fake obs's machine folder as its listing ``listing``, the names of the installed components,
+    with no process started: obs's finder reads obs-html from it, with the components obs-html
+    requires (its default style) that the listing lacks; obs's install appends ``installs`` to it,
+    as obs 10.3.2 installs obs-html with the components it requires. The returned list records each
+    read and install."""
+    calls: list[str] = []
 
     def installed(folder):
-        reads.append("read")
-        if len(reads) <= missing:
+        calls.append("read")
+        if "obs-html" not in listing:
             return None, "--adapter: obs-html: no adapter component 'obs-html' is installed"
-        return found, ""
+        return {"name": "obs-html", "serve": ["serve"], "folder": "/components/obs-html",
+                "missing": [name for name in (STYLE,) if name not in listing]}, ""
+
+    def install(folder):
+        calls.append("install")
+        listing.extend(name for name in installs if name not in listing)
+        return (0, f"installed {', '.join(installs)}") if installs else (1, "no release offers obs-html")
 
     monkeypatch.setattr(build_docs, "_READY", {})
     monkeypatch.setattr(build_docs, "installed_adapter", installed)
-    monkeypatch.setattr(build_docs, "ADAPTER_INSTALL", install)
-    return reads
+    monkeypatch.setattr(build_docs, "install_adapter", install)
+    return calls
 
 
-def installs(fake_processes, answer: Answer) -> list[list[str]]:
-    """The install commands the build runs through uv, each answered with ``answer``."""
-    ran: list[list[str]] = []
-
-    def install(call):
-        ran.append(call.words)
-        return answer
-
-    fake_processes.on("uv", install)
-    return ran
-
-
-def test_a_build_installs_obs_html_where_it_is_missing(tmp_path, monkeypatch, capsys, fake_processes):
-    obs = tmp_path / "obs"
-    reads = adapter_after(monkeypatch, 1, ("obs-components", "install", "obs-html"))
-    ran = installs(fake_processes, Answer(0))
+def test_a_build_installs_obs_html_with_its_style_on_an_empty_machine_folder(obs, monkeypatch, capsys):
+    listing: list[str] = []
+    calls = fake_components(monkeypatch, listing, ["obs-html", STYLE])
     adapter, refusal = build_docs.ready_adapter(obs)
     assert refusal == "" and adapter["name"] == "obs-html"
-    assert reads == ["read", "read"]
-    assert ran == [["uv", "run", "--quiet", "--project", str(obs), "obs-components", "install", "obs-html"]]
+    assert listing == ["obs-html", STYLE]
+    assert calls == ["read", "install", "read"]
     assert "installed obs's adapter component obs-html at /components/obs-html" in capsys.readouterr().err
     assert build_docs.ready_adapter(obs) == (adapter, "")
-    assert reads == ["read", "read"]  # asked once per process
+    assert calls == ["read", "install", "read"]  # asked once per process
 
 
-def test_a_found_obs_html_is_not_installed_again(tmp_path, monkeypatch, capsys, fake_processes):
-    obs = tmp_path / "obs"
-    reads = adapter_after(monkeypatch, 0, ("obs-components", "install", "obs-html"))
-    ran = installs(fake_processes, Answer(1, "", "installed again"))
+def test_a_found_obs_html_without_its_style_installs_the_style(obs, monkeypatch, capsys):
+    listing = ["obs-html"]
+    calls = fake_components(monkeypatch, listing, [STYLE])
     assert build_docs.install_html(obs) == 0
-    assert reads == ["read"] and ran == []
+    assert listing == ["obs-html", STYLE] and calls == ["read", "install", "read"]
+    assert f"installed the components obs-html requires, {STYLE}" in capsys.readouterr().err
+
+
+def test_a_found_obs_html_with_its_style_is_not_installed_again(obs, monkeypatch, capsys):
+    calls = fake_components(monkeypatch, ["obs-html", STYLE], [])
+    assert build_docs.install_html(obs) == 0
+    assert calls == ["read"]
     assert capsys.readouterr().out == "build_docs: obs builds with obs-html at /components/obs-html\n"
 
 
-def test_a_build_that_cannot_install_obs_html_fails_naming_the_command(tmp_path, monkeypatch, capsys,
-                                                                        fake_processes):
-    obs = tmp_path / "obs"
-    adapter_after(monkeypatch, 99, ("obs-components", "install", "obs-html"))
-    ran = installs(fake_processes, Answer(1, "", "no release offers obs-html\n"))
+def test_a_build_that_cannot_install_obs_html_fails_naming_the_command(obs, monkeypatch, capsys):
+    fake_components(monkeypatch, [], [])
     assert build_docs.install_html(obs) == 1
     error = capsys.readouterr().err
     assert "`obs-components install obs-html`" in error and "no release offers obs-html" in error
     assert build_docs.obs_document(obs, ["--source", "unread.md"], "deck") == 1
     assert "deck: obs finds no adapter component obs-html" in capsys.readouterr().err
-    assert len(ran) == 2  # each build tried the install, and obs-document never ran
+
+
+def test_a_missing_default_style_fails_naming_its_install_before_any_build(obs, monkeypatch, capsys):
+    calls = fake_components(monkeypatch, ["obs-html"], [])
+    assert build_docs.install_html(obs) == 1
+    error = capsys.readouterr().err
+    assert f"`obs-components install {STYLE}`" in error and f"without the components it requires, {STYLE}" in error
+    assert build_docs.obs_document(obs, ["--source", "unread.md"], "deck") == 1
+    assert calls == ["read", "install", "read", "read", "install", "read"]  # no build ran
 
 
 def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():

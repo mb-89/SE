@@ -212,7 +212,9 @@ def test_the_door_starts_in_the_plugin_folder_under_a_parent_in_the_project(tmp_
     project.mkdir()
     script = ("import os, sys, json; sys.stdin.readline(); "
               "print(json.dumps({'id': 1, 'cwd': os.getcwd(), 'parent': os.getppid()}), flush=True)")
-    door = copilot.Door([sys.executable, "-c", script], plugin, dict(os.environ), parent_cwd=project)
+    # The base interpreter: a venv's on Windows is a launcher, the script its child.
+    python = getattr(sys, "_base_executable", sys.executable)
+    door = copilot.Door([python, "-c", script], plugin, dict(os.environ), parent_cwd=project)
     try:
         answer = door.send("ping")
     finally:

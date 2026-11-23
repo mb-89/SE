@@ -119,8 +119,8 @@ class PublicCheck:
 
     def __call__(self, arguments: list) -> subprocess.CompletedProcess[str]:
         self.runs.append([str(argument) for argument in arguments[2:]])
-        root, rev = (Path(arguments[arguments.index(flag) + 1]) for flag in ("--repo", "--rev"))
-        work_tickets.sibling("verdicts").record(root, "public-check", str(rev), self.hit is None)
+        root, rev = (arguments[arguments.index(flag) + 1] for flag in ("--repo", "--rev"))
+        work_tickets.sibling("verdicts").record(Path(root), "public-check", str(rev), self.hit is None)
         if self.hit is not None:
             return subprocess.CompletedProcess(arguments, 1, f"hit: {self.hit}\n", "")
         return subprocess.CompletedProcess(arguments, 0, "public-check: passed\n", "")

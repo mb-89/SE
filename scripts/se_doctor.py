@@ -520,9 +520,20 @@ def initialize(words: list[str], cwd: Path, timeout: float = MCP_TIMEOUT) -> dic
     reader.start()
     reader.join(timeout)
     line = None if reader.is_alive() else got.get("line")
-    for step in (proc.stdin.close, proc.terminate):
+    try:
+        proc.stdin.close()
+    except OSError:
+        pass
+    if line is not None and not line.strip():
+        # Its output closed as it exits: wait for its own exit code, which Windows'
+        # TerminateProcess would replace with 1.
         try:
-            step()
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    if proc.poll() is None:
+        try:
+            proc.terminate()
         except OSError:
             pass
     try:

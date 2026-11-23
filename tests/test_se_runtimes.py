@@ -30,6 +30,8 @@ def test_the_probe_reads_a_runtimes_version_from_its_own_command():
 
 @pytest.mark.spawns("contract: se_runtimes.Machine.runme; shell: RUNME.sh's get line runs only as a process, "
                     "and the probe then runs the node it wrote")
+@pytest.mark.skipif(sys.platform == "win32", reason="the sealed PATH holds shell shims and the "
+                    "runtime got is a shell script, neither of which Windows starts as a command")
 def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()
@@ -50,6 +52,8 @@ def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, m
 
 
 @pytest.mark.spawns("shell: RUNME.sh's own remedy for a get line that fails is shell, run only as a process")
+@pytest.mark.skipif(sys.platform == "win32", reason="the sealed PATH holds shell shims and the "
+                    "runtime got is a shell script, neither of which Windows starts as a command")
 def test_runmes_own_remedy_names_a_runtime_it_could_not_get(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()

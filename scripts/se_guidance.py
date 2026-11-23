@@ -312,7 +312,8 @@ def read_note(source: Source, path: Path, findings: list[str]) -> Note | None:
     folders = tuple(path.relative_to(source.root / TREE).parts[:-1])
     data = path.read_bytes()
     try:
-        text = data.decode("utf-8")
+        # A Windows checkout (git's autocrlf) holds the note with CRLF line endings.
+        text = data.decode("utf-8").replace("\r\n", "\n")
     except UnicodeDecodeError:
         findings.append(f"{where}: is not UTF-8 text; save it as UTF-8")
         return None

@@ -5,7 +5,9 @@ commands there are.
 
 Each fixture component's `__init__.py` is a tripwire: loading it records the component's name, and
 the budget fails on any record, naming the component, and on a listing slower than the budget. The
-time is the fastest of three runs, as the suite runs beside other tests; a tripwire fails at once."""
+time is the fastest of three runs, as the suite runs beside other tests; a tripwire fails at once.
+The note's seconds are the Linux host's the suite's time bound was measured on; on a platform that
+runs the suite slower, the budget scales as the time bound does (tests/time_bound.py SCALE)."""
 
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import time_bound
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "se_components.py"
@@ -30,6 +33,7 @@ BUDGET = tomllib.loads(re.search(r"^```toml\n(.*?)^```$",  # a CRLF checkout rea
                                  NOTE.read_text(encoding="utf-8").replace("\r\n", "\n"),
                                  re.MULTILINE | re.DOTALL).group(1))
 RUNS = 3
+SECONDS = BUDGET["budget_seconds"] * time_bound.SCALE
 
 Listing = Callable[[Path], list[str]]
 
@@ -98,12 +102,12 @@ def budget_findings(listing: Listing, root: Path, tripwires: Path, expected: lis
         loaded = sorted(p.name for p in tripwires.iterdir())
         if loaded:
             return [f"{name}: loaded at discovery" for name in loaded]
-        if fastest <= BUDGET["budget_seconds"]:
+        if fastest <= SECONDS:
             break
     findings = [f"{name}: not listed" for name in sorted(set(expected) - set(listed))]
-    if fastest > BUDGET["budget_seconds"]:
+    if fastest > SECONDS:
         findings.append(f"the fastest of {RUNS} listings took {fastest:.2f} s, over the budget of "
-                        f"{BUDGET['budget_seconds']} s")
+                        f"{SECONDS:.2f} s")
     return findings
 
 
