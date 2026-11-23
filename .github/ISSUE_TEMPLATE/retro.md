@@ -32,8 +32,9 @@ None.
 ## Requirements
 
 1. `uv run python <se>/scripts/retro.py collect <this issue> --out <draft>` writes the draft: the
-   window's sizes, the rule checks, the field reports' Retro and "Not delivered" sections, and the
-   previous retro's findings, scored.
+   window's sizes, the rule checks, the field reports' Retro and "Not delivered" sections, the
+   previous retro's findings, scored, and the breaking releases beyond the pins of the project's
+   component tree (`se_modules.py breaking`).
 2. The judge reads the draft, and `uv run python <se>/scripts/work_tickets.py metrics --since
    <window start>` on the machine the integrations ran on (README "Metrics"): its top spenders
    and overruns are findings where a command should be made cheaper. The judge fills its block's

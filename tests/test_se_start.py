@@ -1131,6 +1131,16 @@ def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
     assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
 
 
+def test_the_se_agent_starts_the_breaking_release_check_in_the_background_after_its_greeting():
+    text = (ROOT / "src" / "agents" / "se.md").read_text(encoding="utf-8")
+    greeting, check = text.index("- **Greeting**"), text.index("- **Breaking releases**")
+    step = text[check:text.index("- **Turn-start check**")]
+    assert greeting < check, "the check starts after the greeting, never before it"
+    assert "right after the greeting, never before or instead of it" in step
+    assert "`uv run python <se>/scripts/se_modules.py --root <main checkout> breaking` in the background" in " ".join(step.split())
+    assert "tell the person once" in step and "the component, its pin and the newest release" in step
+
+
 # The outside skills SE's agents rely on (se.toml [roles]): the greeting names one the session lacks.
 
 PLUGIN_DEV = "plugin-dev@claude-plugins-official:plugin-structure"

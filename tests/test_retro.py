@@ -3,6 +3,7 @@ answer files the session saved from the printed plans; the commits of main from 
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -1144,3 +1145,61 @@ def test_collect_reads_the_session_tools_answers_from_a_file(checkout, tmp_path,
     args.worktree = str(checkout)
     retro.run_collect(args)
     assert [session["title"] for session in seen["sessions"]] == ["SE/SE/integrator"]
+
+
+# Every retro runs the breaking-release check (work issue 1719) and its draft records the result.
+
+
+def run_collect_with(checkout, tmp_path, monkeypatch, found_breaking) -> tuple[str, dict, retro.Collected]:
+    """run_collect over the window's fake answers, its check answered by `found_breaking`: the
+    draft it writes, what the check was asked and the window."""
+    asked: dict = {}
+    se_modules = retro.sibling("se_modules")
+
+    def check(root, local, finder=None):
+        asked["root"] = root
+        return found_breaking(se_modules)
+
+    monkeypatch.setattr(se_modules, "breaking", check)
+    window = collected(checkout)
+    monkeypatch.setattr(retro, "collect", lambda *arguments: window)
+    monkeypatch.setattr(retro.work_tickets, "resolve_repo", lambda root, repo: REPO)
+    monkeypatch.setattr(retro.work_tickets, "hand_off", lambda: True)
+    (checkout / "se.toml").write_text('[components.obs]\nversion = "^5.0"\n', encoding="utf-8")
+    out = tmp_path / "draft.md"
+    args = retro.make_parser().parse_args(["collect", "30", "--out", str(out)])
+    args.worktree = str(checkout)
+    assert retro.run_collect(args) == 0
+    return out.read_text(encoding="utf-8"), asked, window
+
+
+def test_collect_runs_the_breaking_release_check_and_the_draft_names_each_finding(checkout, tmp_path,
+                                                                                  monkeypatch):
+    def behind(se_modules):
+        pin = se_modules.PinState(("SE",), se_modules.Module("obs", "", None, "^5.0"), (5, 0, 0), (10, 0, 0))
+        return se_modules.Breaking([pin], [])
+
+    text, asked, window = run_collect_with(checkout, tmp_path, monkeypatch, behind)
+
+    assert asked["root"] == checkout
+    assert ("## Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
+            "tree, as collect ran it; what to do about a finding is the person's decision.\n\n"
+            "```text\nSE pins obs ^5.0, newest 10.0.0\n```\n") in text
+    plain = retro.draft(dataclasses.replace(window, breaking=None))
+    assert without_block(text, "## Breaking releases beyond a pin") == plain, "the rest is as before"
+
+
+def test_a_breaking_release_check_that_fails_is_named_in_the_draft(checkout, tmp_path, monkeypatch):
+    def fails(se_modules):
+        raise se_modules.ModuleError("the required component obs is missing (SE -> obs).")
+
+    text, _, _ = run_collect_with(checkout, tmp_path, monkeypatch, fails)
+
+    assert ("## Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
+            "tree, as collect ran it; what to do about a finding is the person's decision.\n\n"
+            "The check failed: the required component obs is missing (SE -> obs).\n") in text
+
+
+def test_a_project_without_se_toml_pins_nothing_for_the_check(tmp_path):
+    assert retro.breaking_releases(tmp_path) == {
+        "lines": ["no breaking release beyond a pin: the project has no se.toml"], "error": None}
