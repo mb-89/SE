@@ -584,9 +584,10 @@ def build() -> dict[str, str]:
     return {name: json.dumps(data, ensure_ascii=False) + "\n" for name, data in made.items()}
 
 
-def drift() -> list[str]:
-    """One line per case file that differs from what `build` makes, is missing, or that it does not make."""
-    wanted = build()
+def drift(wanted: dict[str, str] | None = None) -> list[str]:
+    """One line per case file that differs from what `build` makes (or `wanted`, what it made), is
+    missing, or that it does not make."""
+    wanted = build() if wanted is None else wanted
     present = {path.name: path.read_text(encoding="utf-8") for path in sorted(OUT.glob("*.json"))} \
         if OUT.is_dir() else {}
     return ([f"{name}: missing" for name in wanted if name not in present]
