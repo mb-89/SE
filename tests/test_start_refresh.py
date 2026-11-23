@@ -134,18 +134,20 @@ def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the
     home, plugin, project, base = behind
     fake_git.init(project, "-b", "main")
     assert git_door.run("config", "--get", "core.hooksPath", root=project).returncode == 1
-    greeting = start(home, plugin, project, base)["systemMessage"].splitlines()
+    data = start(home, plugin, project, base)
+    greeting = data["systemMessage"].splitlines()
     assert git(project, "config", "--get", "core.hooksPath") == (plugin.resolve() / ".githooks").as_posix()
     assert tag_at_head(plugin) == "v5.0.1"
-    assert greeting[0] == f"SE: 5.0.0 -> 5.0.1, refreshed at this start ({plugin.resolve().as_posix()})"
-    assert greeting[1].startswith("SE 5.0.1 started: ")
+    assert greeting[0] == "SE 5.0.1 started"
+    assert (f"\nSE: 5.0.0 -> 5.0.1, refreshed at this start ({plugin.resolve().as_posix()})\n"
+            in data["hookSpecificOutput"]["additionalContext"])
     assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
     named = (project / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8").strip()
     assert Path(named).name.startswith("se-0.2.0")
     # The next start has nothing to move and says nothing of it.
     (home / "calls").unlink()
     again = start(home, plugin, project, base)["systemMessage"].splitlines()
-    assert again[0].startswith("SE 5.0.1 started: ")
+    assert again[0] == "SE 5.0.1 started"
     assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
 
 
@@ -153,8 +155,9 @@ def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the
 def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(behind):
     home, plugin, project, base = behind
     git(plugin, "remote", "set-url", "origin", (base / "gone").as_uri())
-    greeting = start(home, plugin, project, base)["systemMessage"].splitlines()
+    data = start(home, plugin, project, base)
     assert tag_at_head(plugin) == "v5.0.0"
-    assert greeting[0].startswith("SE: no refresh at start, this session starts with SE 5.0.0: cannot reach ")
-    assert greeting[1].startswith("SE 5.0.0 started: ")
+    assert data["systemMessage"].splitlines()[0] == "SE 5.0.0 started"
+    assert "\nSE: no refresh at start, this session starts with SE 5.0.0: cannot reach " in (
+        data["hookSpecificOutput"]["additionalContext"])
     assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart"]

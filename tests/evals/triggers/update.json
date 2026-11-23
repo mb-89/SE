@@ -1,0 +1,102 @@
+[
+  {
+    "query": "/se:update",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Yes, take the update the start report offers.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Update SE and all the components to their newest releases.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "SE 13 is out and we are on 12; bring us across the major.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "obs has a breaking release beyond our pin; move the pin and follow its upgrade guide.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Pull every dependency up to the newest version, breaking ones too.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "The report says To update: /se:update. Go ahead.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Get this project onto the newest kern and obs, whatever it takes.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "We are several SE majors behind; upgrade and walk the guide's sections in order.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Run the update and tell me what moved.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Write a release note for the components we just shipped.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Update the README's install section with the new flag.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Which obs releases work with kern 2? Just tell me, change nothing.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Start a worker session on the open issue about the report's table.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Review the pull request that moves the project's obs pin.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Draft the upgrade guide section for our next breaking release.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Explain what a breaking release means for a pin below 1.0.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Fix the failing test in the cloud session's setup script.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Decide whether the project should pin obs by range or by commit.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Summarise the session's work for the handover.",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]

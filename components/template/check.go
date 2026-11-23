@@ -67,6 +67,12 @@ func plain(value any) string {
 				text := ""
 				if v, has := o.Get("text"); has {
 					text = str(v)
+				} else if !o.Has("done") {
+					values := make([]string, len(o))
+					for i, pair := range o {
+						values[i] = str(pair.Value)
+					}
+					text = strings.Join(values, " | ")
 				}
 				lines = append(lines, text)
 			} else {
@@ -375,6 +381,13 @@ func fieldFindings(t *Template, doc *Document, raw *string) []Finding {
 			for _, fix := range quoted(item, text, raw) {
 				found = append(found, Finding{item.Name, quoteRule, Refuse, fix})
 			}
+		}
+		if _, has := item.Cases.Get(strip(text)); item.Kind == "case" && !has {
+			keys := make([]string, len(item.Cases))
+			for i, pair := range item.Cases {
+				keys[i] = pair.Key
+			}
+			add("choice", item.Name, fmt.Sprintf("%s is %s: write one of %s", item.Name, repr(strip(text)), joinStrings(keys)))
 		}
 		if item.Kind == "choice" {
 			word := casefold(strip(text))

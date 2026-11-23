@@ -16,6 +16,9 @@ Placeholders, used throughout:
 
 ## Following the guide
 
+An SE that has the update (`se_start.py update`, from SE 13.1 on) runs steps 1 to 4 by itself:
+`/se:update` ([docs/boot.md "The update"](boot.md#the-update)). An older one follows them by hand.
+
 1. **Install the newest SE.** The start's refresh moves SE only within its major, so a newer major
    is an install again, as README [Install](../README.md#install) says: for a clone,
    `git -C <se> fetch --tags` and `git -C <se> checkout v<newest>`; for the cloud, the
@@ -25,8 +28,8 @@ Placeholders, used throughout:
      `git -C <project> config core.hooksPath` names `<se>/.githooks`.
 2. **Take what the pins admit, then list what lies beyond them.** `uv run python
    <se>/scripts/se_start.py boot --upgrade` brings the checkout current and moves SE and every lock
-   to the newest release its pin admits ([README "Boot"](../README.md#boot)); its rows name each
-   release beyond a pin, `breaking` or `newer`, whose sections this guide holds.
+   to the newest release its pin admits ([docs/boot.md "The boot"](boot.md#the-boot)); its rows
+   name each release beyond a pin, `breaking` or `newer`, whose sections this guide holds.
    - A `se.toml` that still holds `[modules]` is refused from SE 8 on: there, run it after the
      [SE 8](#se-8) section.
 3. **List the sections to follow.** The start greeting names them on the line

@@ -6,6 +6,10 @@ document type: Documentation
 - [[README|se: systematic engineering]]
 - [[docs/command-line|Command line]]
 - [[docs/upgrading|Upgrading]]
+- [[docs/boot|Start and update]]
+- [[docs/skills|Skills]]
+- [[docs/rules|Rules]]
+- [[docs/sub-agents|Sub-agents]]
 - [[AGENTS|Agent guide]]
 - [[src/agents/se.md|SE]]
 - [[src/agents/integrator.md|Integrator]]
@@ -13,6 +17,7 @@ document type: Documentation
 - [[src/skills/work-model/SKILL|Work model]]
 - [[src/skills/catch-up/SKILL|Catch-up]]
 - [[src/skills/decision/SKILL|Decision]]
+- [[src/skills/update/SKILL|Update]]
 - [[src/skills/decision/references/decision-deck|A decision note]]
 - [[src/skills/work-model/references/rules|Rule book]]
 

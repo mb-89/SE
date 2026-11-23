@@ -47,32 +47,29 @@ its tools.
   [`<se>/scripts/bootstrap.sh`](../../scripts/bootstrap.sh) with `bash` once at the
   start of a session. It is quiet when nothing is missing; pass on any line it prints to the person
   as it is, since that line names what to run and why.
-- **Greeting**: your first message opens with SE's start greeting, as it is: the one the start hook
-  handed you, else the output of `uv run python <se>/scripts/se_start.py status --greeting`,
-  run first. Its lines name what is out of date and the one refresh command; run that command only
-  when the person asks ([Start and refresh](../../README.md#start-and-refresh)).
-  - Where gh is signed in it also names a retro or an overhaul that is due or open and the fleet's
-    findings, from the cached background check.
-    Without gh (the cloud) it names neither: at your first turn run
+- **Start report**: your first message opens with SE's start report, as it is, and adds nothing to
+  it: the one the start hook handed you, else the output of `uv run python <se>/scripts/se_start.py
+  status --greeting`, run first ([docs/boot.md](../../docs/boot.md#the-start-report)). It names
+  SE's version, what loaded, each component's loaded and newest version, and one update line.
+  - Below the report the hand-over names what the start found for you alone (`For the session`):
+    a retro or an overhaul due or open, the fleet's findings, kern's state, a skill the session
+    lacks. Act on it; tell the person only what needs their decision.
+  - Without gh (the cloud) it names no retro or fleet: at your first turn run
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
-- **Boot**: right after the greeting, never before or instead of it, run SE's boot,
-  `uv run python <se>/scripts/se_start.py --root <main checkout> boot`
-  ([README "Boot"](../../README.md#boot)): the checkout current, SE and every dependency listed.
-  - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) run it with `--upgrade` as your first
-    action, before any other work, and wait for it; then report once what it moved and what is
-    left: its `Moved:` and `Left:` lines and each row beyond a pin.
-  - On a local machine start it in the background (in Claude Code, Bash's `run_in_background`)
-    and go on with the turn. When it ends, report once what there is to take and what is left,
-    and offer the upgrade; on the person's yes, run it again with `--upgrade` and report what moved.
-  - A boot that stops names why in its `Checkout:` line: pass that line on, and start no other work
-    on the checkout until the person has decided.
-  - The boot decides from versions alone. A release beyond a pin is the person's decision, with
-    what moving the pin needs named in its row.
-  - Where SE moves across a major, or a row names a breaking release beyond a pin that the person
-    takes, follow that repository's upgrade guide, `docs/upgrading.md`, its sections from the
-    version left to the version taken, in order (work issue SE#1790 owns the guide).
+- **Update**: the report's last line names the one update, `/se:update`, the skill
+  [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
+  follows the upgrade guide's sections between ([docs/boot.md](../../docs/boot.md#the-update)).
+  - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) follow the update skill as your first
+    action, before any other work, right after the report, and wait for it; then report once what
+    moved and what is left.
+  - On a local machine the report's line offers it: follow the update skill on the person's yes or
+    their `/se:update`, never before.
+  - An update that stops names why in its `Checkout:` line: pass that line on, and start no other
+    work on the checkout until the person has decided.
+  - `se_start.py boot` lists every pin with its pinned, locked and newest version and changes
+    nothing: run it when the person asks what is behind.
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says

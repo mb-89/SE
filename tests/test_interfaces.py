@@ -14,7 +14,7 @@ import templates
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
-INTERFACES = ("delivery-notice", "escalation", "handover")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
 MESSAGES = ("delivery-notice", "escalation")
 
 
@@ -70,6 +70,46 @@ def test_a_message_written_through_its_schema_reads_back_and_the_engine_reads_it
     assert "\n" not in line and line + "\n" == templates.render(template, values)
     assert interfaces.read(name, f"before\n{line}\nafter") == values
     assert templates.parse(template, line).fields == values
+
+
+def test_a_snippet_writes_its_rows_and_its_case_and_reads_back_through_schema_and_engine(catalog):
+    template = catalog["boot-report"]
+    values = dict(template.example["fields"])
+    text = interfaces.write("boot-report", values)
+    assert text.splitlines()[-4:] == ["| SE | 12.0.1 | 13.0.0 |", "| obs | 10.3.2 | 10.3.2 |", "",
+                                      "To update: /se:update"]
+    assert text + "\n" == templates.render(template, values)
+    assert interfaces.read("boot-report", text) == values
+    assert templates.parse(template, text).fields == values
+    assert templates.check(template, templates.parse(template, text)) == []
+    one = [{"name": "SE", "loaded": "12.0.1", "newest": "12.0.1"}]
+    current = interfaces.write("boot-report", {**values, "components": one, "update": "current"})
+    assert current.endswith("|---|---|---|\n| SE | 12.0.1 | 12.0.1 |\n\nEverything is current.")
+    assert interfaces.read("boot-report", current)["components"] == one
+    assert interfaces.read("boot-report", text + "\nmore text") is None
+
+
+def test_a_snippet_refuses_a_case_it_does_not_hold_and_a_row_without_its_columns(catalog):
+    values = dict(catalog["boot-report"].example["fields"])
+    with pytest.raises(interfaces.InterfaceError, match="update is 'maybe'; one of due, current, unknown"):
+        interfaces.write("boot-report", {**values, "update": "maybe"})
+    with pytest.raises(interfaces.InterfaceError, match="components item 1: loaded is required"):
+        interfaces.write("boot-report", {**values, "components": [{"name": "SE"}]})
+
+
+def test_the_engine_refuses_a_snippet_that_names_a_field_twice_or_a_rows_field_inside_a_line(tmp_path):
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    head = ("---\nname: s\nversion: 1.0.0\nkind: interface\nreader: owner\nsays: \"S.\"\ntags: [\"message\"]\n"
+            "applies:\n  actions: [\"message.send\"]\n")
+    rows = ("fields:\n  - name: r\n    kind: rows\n    row: \"- {a}\"\n    says: \"Rows.\"\n"
+            "  - name: c\n    kind: case\n    cases:\n      yes: \"Yes.\"\n    says: \"Case.\"\n---\n")
+    (folder / "s.md").write_text(head + 'message: "Rows: {r}\\n{c}"\n' + rows, encoding="utf-8")
+    with pytest.raises(templates.TemplateError, match="rows field r stands alone on its line"):
+        templates.load(tmp_path, tree=True)
+    (folder / "s.md").write_text(head + 'message: "{r}\\n{c} {c}"\n' + rows, encoding="utf-8")
+    with pytest.raises(templates.TemplateError, match="names each field once"):
+        templates.load(tmp_path, tree=True)
 
 
 def test_the_delivery_notice_and_the_escalation_keep_the_lines_the_agents_send(catalog):

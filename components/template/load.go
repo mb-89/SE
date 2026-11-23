@@ -33,12 +33,12 @@ var (
 	// Actions are the writes a template shapes.
 	Actions        = []string{"issue.create", "issue.edit", "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit", "deck.build", FileAction, MessageAction}
 	readers        = []string{"owner", "fleet"}
-	fieldKinds     = []string{"line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register"}
+	fieldKinds     = []string{"line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register", "rows", "case"}
 	templateKinds  = []string{"document", "block", "entry", "interface"}
 	partKinds      = []string{"block", "entry"}
 	refuseRules    = []string{"required", "choice", "not-picked", "duplicate", "dangling"}
 	warnRules      = []string{"words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms", "unnamed-entry", "title-shape"}
-	fieldKeys      = set("name", "kind", "heading", "required", "none_ok", "says", "exact_heading", "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers", "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape", "quote", "node", "entries", "fence")
+	fieldKeys      = set("name", "kind", "heading", "required", "none_ok", "says", "exact_heading", "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers", "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape", "quote", "node", "entries", "fence", "row", "cases")
 	templateKeys   = set("name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown", "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message")
 	appliesKeys    = set("actions", "order", "marker", "marker_pattern", "title", "labels", "base", "fallback", "paths")
 	adapterKeys    = set("extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as", "title_as", "with", "none", "when", "result", "refusal", "title_rule", "lines")
@@ -103,7 +103,9 @@ type Field struct {
 	Node               string
 	Pin                string
 	Fence              string
-	rule               any // a *regexp.Regexp or a ShapeFunc that shape names
+	Row                string // a rows field's one line per row, its columns as {<column>}
+	Cases              Object // a case field's lines by key, in their order
+	rule               any    // a *regexp.Regexp or a ShapeFunc that shape names
 	nested             *Template
 }
 
@@ -858,8 +860,17 @@ func checkMessage(message, kind any, fields []*Field, parent *Template, where st
 		return nil
 	}
 	s, ok := message.(string)
-	if !ok || strings.Contains(s, "\n") {
+	if !ok {
 		return fail("%s: message is one line, its fields as {<field>}", where)
+	}
+	if strings.Contains(s, "\n") {
+		if kind != interfaceKind || parent != nil || len(fields) == 0 {
+			return fail("%s: message is an interface's own line: kind interface, with fields, extending no template", where)
+		}
+		if problem := snippetProblem(s, fields); problem != "" {
+			return fail("%s: %s", where, problem)
+		}
+		return nil
 	}
 	if kind != interfaceKind || parent != nil || len(fields) == 0 {
 		return fail("%s: message is an interface's own line: kind interface, with fields, extending no template", where)
@@ -1050,6 +1061,26 @@ func makeField(entry Object, where string, sectioned bool) (*Field, error) {
 	f.Node = optionalString(entry, "node")
 	f.Pin = optionalString(entry, "pin")
 	f.Fence = optionalString(entry, "fence")
+	f.Row = optionalString(entry, "row")
+	if c, ok := entry.Get("cases"); ok {
+		cases, isObject := c.(Object)
+		if !isObject {
+			return nil, fail("%s: field %s cases is a mapping of a key to one line", where, name)
+		}
+		for _, pair := range cases {
+			text, isString := pair.Value.(string)
+			if !isString || strings.Contains(text, "\n") {
+				return nil, fail("%s: field %s cases is a mapping of a key to one line", where, name)
+			}
+		}
+		f.Cases = cases
+	}
+	if strings.Contains(f.Row, "\n") {
+		return nil, fail("%s: field %s row is one line, its columns as {<column>}", where, name)
+	}
+	if (kind == "rows") != (f.Row != "") || (kind == "case") != (len(f.Cases) > 0) {
+		return nil, fail("%s: field %s: a rows field, and only it, has a row; a case field, and only it, has cases", where, name)
+	}
 	if entry.Has("lang") {
 		f.Lang = str(entry.Value("lang"))
 	}

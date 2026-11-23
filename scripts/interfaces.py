@@ -17,6 +17,19 @@ value is one line, and the text between two fields stands as it is written. scri
 reads and writes a message template's document through these two, so the engine and the code
 follow one format.
 
+**A snippet.** A message of several lines is a snippet, a short fixed text such as SE's start
+report (`templates/boot-report.md`). Beside `line` fields it may hold two kinds, which the generated
+file carries as `rows` and `cases` so its writer needs no engine:
+
+- a `rows` field stands alone on its message line, `{<field>}`, and is written as one line per row,
+  each its `row` line with the row's columns as `{<column>}` (none where there is no row); its value
+  is a list of mappings, column to text;
+- a `case` field is one of its `cases`, a mapping of a key to one line, which may name the
+  snippet's line fields that stand in no other line as `{<field>}`; its value is the key.
+
+`text` writes a snippet from the fields, `snippet_fields` reads them back from a text that is
+one, line by line; `line` and `fields_of` are its one-line case.
+
 **Use.** `write(name, values)` checks the values against the generated schema (`problems`: a
 required field missing or empty, a field the schema does not name, a value of another type, a
 choice outside its `enum`) and gives the line, or raises InterfaceError naming each problem and
@@ -66,6 +79,86 @@ def line(message: str, values: dict[str, object]) -> str:
                            message)
 
 
+def text(message: str, values: dict[str, object], rows: dict[str, str] | None = None,
+         cases: dict[str, dict[str, str]] | None = None) -> str:
+    """A snippet with each field's value: a `rows` field's line one line per row, a `case` field
+    its case's line filled in turn, every other field as `line` writes it."""
+    rows, cases = rows or {}, cases or {}
+    out = []
+    for template_line in message.split("\n"):
+        alone = PLACEHOLDER.fullmatch(template_line.strip())
+        if alone and alone.group(1) in rows:
+            out += [line(rows[alone.group(1)], row) for row in values.get(alone.group(1)) or []
+                    if isinstance(row, dict)]
+            continue
+        for name, chosen in cases.items():
+            if "{" + name + "}" in template_line:
+                template_line = template_line.replace("{" + name + "}", chosen.get(str(values.get(name)), ""))
+        out.append(line(template_line, values))
+    return "\n".join(out)
+
+
+def snippet_problem(message: str, fields: list[tuple[str, str, dict[str, str]]]) -> str:
+    """What is wrong with a snippet of `fields`, each (name, kind, cases), or "": each field named
+    once, in its lines or a case's; a rows field alone on its line; a field a case names a line;
+    every field a line, a choice, rows or a case."""
+    in_cases = {name for _, _, cases in fields for text in cases.values() for name in placeholders(text)}
+    named = placeholders(message) + sorted(in_cases)
+    names = [name for name, _, _ in fields]
+    if sorted(named) != sorted(names):
+        return (f"message names {', '.join(named) or 'no field'}; it names each field once, in its "
+                f"lines or a case's: {', '.join(names)}")
+    lines = [line.strip() for line in message.split("\n")]
+    for name, kind, _ in fields:
+        if kind not in ("line", "choice", "rows", "case"):
+            return f"field {name} of a snippet is a line, a choice, rows or a case"
+        if kind == "rows" and "{" + name + "}" not in lines:
+            return f"rows field {name} stands alone on its line, {{{name}}}"
+        if name in in_cases and kind != "line":
+            return f"field {name} named in a case is a line"
+    return ""
+
+
+def snippet_fields(message: str, written: str, rows: dict[str, str] | None = None,
+                   cases: dict[str, dict[str, str]] | None = None) -> dict[str, object] | None:
+    """The fields of `written` where it is the snippet `message`, line by line, trailing blank
+    lines aside; else None. A `rows` field takes every following line its row line matches."""
+    rows, cases = rows or {}, cases or {}
+    lines = written.rstrip("\n").split("\n")
+    found: dict[str, object] = {}
+    at = 0
+    for template_line in message.split("\n"):
+        alone = PLACEHOLDER.fullmatch(template_line.strip())
+        if alone and alone.group(1) in rows:
+            taken = []
+            while at < len(lines) and (row := fields_of(rows[alone.group(1)], lines[at])) is not None:
+                taken.append(row)
+                at += 1
+            found[alone.group(1)] = taken
+            continue
+        if at >= len(lines):
+            return None
+        options = [(None, template_line)]
+        for name, chosen in cases.items():
+            if "{" + name + "}" in template_line:
+                options = [(key, template_line.replace("{" + name + "}", case)) for key, case in chosen.items()]
+                break
+        for key, option in options:
+            if not PLACEHOLDER.search(option):
+                matched = {} if option.strip() == lines[at].strip() else None
+            else:
+                matched = fields_of(option, lines[at])
+            if matched is not None:
+                found.update(matched)
+                if key is not None:
+                    found[next(name for name in cases if "{" + name + "}" in template_line)] = key
+                break
+        else:
+            return None
+        at += 1
+    return found if all(not rest.strip() for rest in lines[at:]) else None
+
+
 def fields_of(message: str, text: str) -> dict[str, str] | None:
     """The fields of `text` where it is one `message` line, stripped; else None."""
     match = _pattern(message).fullmatch(text.strip())
@@ -100,8 +193,11 @@ def _type_problem(key: str, shape: dict, value: object) -> str:
         item = shape.get("items", {})
         return next((problem for number, entry in enumerate(value, 1)
                      if (problem := _type_problem(f"{key} item {number}", item, entry))), "")
-    elif kind == "object" and not isinstance(value, dict):
-        return f"{key} is {type(value).__name__}; the schema takes a mapping"
+    elif kind == "object":
+        if not isinstance(value, dict):
+            return f"{key} is {type(value).__name__}; the schema takes a mapping"
+        inner = problems(shape, value) if "properties" in shape else []
+        return f"{key}: {'; '.join(inner)}" if inner else ""
     elif kind == "boolean" and not isinstance(value, bool):
         return f"{key} is {type(value).__name__}; the schema takes true or false"
     return ""
@@ -130,13 +226,19 @@ def write(name: str, values: dict[str, object], folder: Path = GENERATED) -> str
     if found:
         raise InterfaceError(f"interfaces: the {name} message ({data.get('template')} "
                              f"{data.get('version')}) refuses: {'; '.join(found)}")
+    if "\n" in message:
+        return text(message, values, data.get("rows"), data.get("cases"))
     return line(message, values)
 
 
-def read(name: str, text: str, folder: Path = GENERATED) -> dict[str, str] | None:
-    """The fields of the first line of `text` that is interface `name`'s message, else None."""
-    message = str(generated(name, folder).get("message") or "")
+def read(name: str, text: str, folder: Path = GENERATED) -> dict[str, object] | None:
+    """The fields of the first line of `text` that is interface `name`'s message, else None; of a
+    snippet, the fields of `text` where all of it is the snippet."""
+    data = generated(name, folder)
+    message = str(data.get("message") or "")
     if not message:
         raise InterfaceError(f"interfaces: {name} is no message; its template declares no message line")
+    if "\n" in message:
+        return snippet_fields(message, text, data.get("rows"), data.get("cases"))
     return next((found for candidate in text.splitlines()
                  if (found := fields_of(message, candidate)) is not None), None)

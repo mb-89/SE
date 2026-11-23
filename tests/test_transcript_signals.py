@@ -383,7 +383,7 @@ def test_what_the_environment_lacked_is_found_by_class():
     assert [h.key for h in signals.lacked(windows)] == ["command-not-found rg"]
 
 
-GREETING = "SE 5.73.0 started: 3 skills, 6 rules, 3 sub-agents"
+GREETING = "SE 5.73.0 started\n[3 skills](d#docs-skills)\n[6 rules](d#docs-rules)\n[3 sub-agents](d#docs-sub-agents)"
 
 
 def context(file, line, text, sidechain=False):
@@ -395,7 +395,7 @@ def handed(file, line, text):
 
 
 def test_the_greeting_at_the_first_agent_message_is_classed():
-    other = "SE none started: 1 skill, 1 rule, 1 sub-agent"
+    other = "SE none started\n[1 skill](d#a)\n[1 rule](d#b)\n[1 sub-agent](d#c)"
     sessions = [
         context("same", 1, f"hello\n{GREETING}"), agent("same", 2, f"{GREETING}\nhi"),
         handed("tool", 1, GREETING), agent("tool", 2, GREETING),

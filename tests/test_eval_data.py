@@ -71,6 +71,7 @@ CASE_SKILL = {
     "catch-up-ends-the-turn": "catch-up",
     "decision-note-has-matrix": "decision",
     "work-model-field-report": "work-model",
+    "update-follows-the-guide": "update",
 }
 
 # For each case, the text its result grader reads: one a correct run writes, one it must refuse.
@@ -96,6 +97,13 @@ SAMPLES = {
                 "content": "# Settings source\n\n## The problem\n\nCI runners cannot edit it.\n\n"
                 "## Current situation\n\nOne file, app.toml.\n\n| option | score |\n|---|---|\n",
             }),
+        ),
+    },
+    "update-follows-the-guide": {
+        "sections-in-order": (
+            "SE moved 12.0.1 -> 13.0.0 and obs 10.3.2 -> 11.0.0. I followed SE 13, then obs 11; "
+            "neither needed a step here.",
+            "obs moved to 11.0.0 and SE to 13.0.0. I followed obs 11 first, then SE 13.",
         ),
     },
     "work-model-field-report": {
@@ -152,7 +160,7 @@ def test_one_case_per_skill():
             if is_skill_grader(grader):
                 fired |= {skill for skill in SKILLS if js_regex(grader["input_match"]).search(
                     stringify({"skill": f"se:{skill}"}))}
-    assert len(CASES) == 3 and fired == set(SKILLS)
+    assert len(CASES) == len(SKILLS) and fired == set(SKILLS)
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)

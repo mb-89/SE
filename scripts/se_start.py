@@ -97,11 +97,11 @@ class Counts:
 
 
 def counts(se_root: Path) -> Counts:
-    """What the plugin loads: the skills and agents in its Claude Code layout (Copilot's agents are
-    generated from the same source), the rules the public check enforces, and every agent but
-    SE itself as a sub-agent."""
-    agents = [name for name in _front_names(se_root / "agents", "*.md") if name != "se"]
-    return Counts(len(_front_names(se_root / "skills", "*/SKILL.md")), len(public_check.RULES), len(agents))
+    """What the plugin loads, as its layout holds it and the documentation's pages list it
+    (se_plugin.py `inventory`): the skills, guidance notes aside; the rules in force, the rule
+    book's and every guidance note; every agent but SE itself as a sub-agent."""
+    found = se_plugin.layout_inventory(se_root)
+    return Counts(len(found.skills), found.rules, len(found.subagents))
 
 
 def _project(root: Path) -> dict:
@@ -176,8 +176,12 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
     if root is not None and (root / se_modules.MANIFEST).is_file() and not errors:
         try:
             locked = se_modules.read_lock(root)
-            for module in se_modules.load_manifest(root):
+            modules = se_modules.load_manifest(root)
+            for module in modules:
                 items.append(_module_item(root, module, local, locked))
+            own = {module.name.lower() for module in modules}
+            items += [_nested_item(root, name, version) for name, (version, _) in sorted(locked.items())
+                      if name.lower() not in own]
         except ModuleError as error:
             errors.append(f"modules of {root / se_modules.MANIFEST}: {error}")
     try:
@@ -286,6 +290,13 @@ def _found_at(clone: Path) -> str | None:
         return None
     result = git_door.run("remote", "get-url", "origin", root=clone)
     return result.stdout.strip() or None if result.returncode == 0 else None
+
+
+def _nested_item(root: Path, name: str, version: str) -> Item:
+    """A component the project's tree holds through another one: its locked version, looked up where
+    its placed clone was found."""
+    return Item(name, "nested", se_modules.parse_version(version),
+                _found_at(root / se_modules.MODULES_DIR / name), note="held by a component of the tree")
 
 
 def _module_item(root: Path, module, local, locked) -> Item:
@@ -546,23 +557,62 @@ def refresh_command(se_root: Path) -> str:
     return f"uv run python {se_root.as_posix()}/scripts/se_start.py refresh"
 
 
+#: The template SE's start report is rendered from (templates/boot-report.md).
+REPORT = "boot-report"
+#: The documentation's page of each count, as se_plugin.py PAGES names them.
+PAGE_OF = {"skills_page": "docs/skills.md", "rules_page": "docs/rules.md",
+           "subagents_page": "docs/sub-agents.md"}
+
+
+def page_link(docs_url: str, page: str) -> str:
+    """The link to one page of the documentation: the page's chapter in obs's one HTML file, whose
+    anchor is the page's path without `.md`, every run of other characters than letters and digits
+    one dash (`docs/skills.md`: `#docs-skills`)."""
+    anchor = re.sub(r"[^a-z0-9]+", "-", page.removesuffix(".md").lower()).strip("-")
+    return f"{docs_url or '.'}#{anchor}"
+
+
+def report_row(state: State) -> dict[str, str]:
+    """One row of the report's table: the component, the version loaded and the newest release."""
+    item = state.item
+    newest = ("local" if item.kind == "local" else "unknown" if state.error or state.unchecked
+              or state.latest is None else _v(state.latest))
+    return {"name": item.name, "loaded": _v(item.version) if item.version else "none", "newest": newest}
+
+
+def update_case(states: list[State]) -> str:
+    """`due` where a newer release than one loaded is known, else `unknown` where a newest version
+    is not read, else `current`; from versions alone."""
+    if any(s.latest and s.item.kind != "local" and (s.item.version is None or s.latest > s.item.version)
+           for s in states if not s.error):
+        return "due"
+    if any(s.error or s.unchecked or (s.latest is None and s.item.url) for s in states if s.item.kind != "local"):
+        return "unknown"
+    return "current"
+
+
+def report_values(report: Report) -> dict[str, object]:
+    """The fields of the start report: SE's version, the counts and their pages, the table and the
+    update line's case."""
+    local, c = report.local, report.local.counts
+    states = [s for s in report.states if s.item.name != "se"]  # SE itself is its first row, "SE"
+    return {"version": _v(local.se_version), "skills": str(c.skills), "rules": str(c.rules),
+            "subagents": str(c.subagents), "docs": local.docs_url or ".",
+            **{key: page_link(local.docs_url, page) for key, page in PAGE_OF.items()},
+            "components": [report_row(state) for state in states], "update": update_case(states)}
+
+
 def greeting(report: Report, se_root: Path) -> list[str]:
-    """The first line, then only what is out of date, the refresh command and what failed."""
-    local = report.local
-    c = local.counts
-    lines = [f"SE {_v(local.se_version)} started: {_plural(c.skills, 'skill')}, {_plural(c.rules, 'rule')}, "
-             f"{_plural(c.subagents, 'sub-agent')}. Documentation: {local.docs_url or 'none set'}"]
-    lines += stale_plugin_lines(se_root, report.root)
-    due = [s for s in report.states if s.due]
-    for state in due:
-        lines.append(f"  {state.item.name}: {_v(state.item.version)} -> {_v(state.due)}")
-    for state in (s for s in report.states if s.outside):
-        lines.append(f"  {state.item.name}: {_v(state.outside)} is outside "
-                     f"{_range(state.item)}; refresh never applies it; {take_outside(state, report.root, se_root)}")
-    if due:
-        lines.append(f"Refresh: {refresh_command(se_root)}")
-    lines += _check_lines(report, se_root)
-    return lines + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root)
+    """SE's start report, rendered from its template (templates/boot-report.md) and nothing else:
+    what the session alone acts on is `session_lines`."""
+    return _load("interfaces").write(REPORT, report_values(report)).split("\n")
+
+
+def session_lines(report: Report, se_root: Path) -> list[str]:
+    """What the start found for the session, never shown to the person in the report: a stale plugin,
+    a check that failed, the project's components listing, missing skills, the work that is due."""
+    return (stale_plugin_lines(se_root, report.root) + _check_lines(report, se_root)
+            + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root))
 
 
 def _plugin_name(root: Path) -> str | None:
@@ -802,7 +852,7 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
     answer = ask(kern.binary, root)
     state = (answer or {}).get("state")
     if state == "running":
-        return [f"{name}: running, pid {answer.get('health', {}).get('pid')}"]
+        return [f"{name}: running"]
     if state == "starting":
         return [f"{name}: starting"]
     log = root / ".se" / ".runtime" / "core.log"
@@ -1246,7 +1296,7 @@ def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
     return f"SE: {_v(version)} -> {_v(due)}, refreshed at this start ({se_root.as_posix()})", True
 
 
-# The boot (README "Boot"): the checkout current, then every dependency with its pinned, locked and
+# The boot (docs/boot.md "The boot"): the checkout current, then every dependency with its pinned, locked and
 # newest version, then, with --upgrade, SE and every lock moved to the newest release its pin
 # admits; one report. It decides from versions alone.
 
@@ -1450,7 +1500,7 @@ def pin_row(pin, locked: dict, moved: dict, root: Path, se_root: Path, local_pat
 
 def boot(se_root: Path, root: Path | None, local_config: Path | None, world: World,
          upgrade: bool = False) -> tuple[list[str], bool]:
-    """SE's boot, each step mechanical (README "Boot"): the checkout current (current_checkout),
+    """SE's boot, each step mechanical (docs/boot.md "The boot"): the checkout current (current_checkout),
     SE and every pin of the project's component tree, nested ones included, with its pinned,
     locked and newest version (se_modules.breaking); with `upgrade`, SE moved to the newest release
     the project's pin of se admits (every release where it pins none) and every range's lock to the
@@ -1520,6 +1570,152 @@ def boot(se_root: Path, root: Path | None, local_config: Path | None, world: Wor
     return lines, failed
 
 
+# The update (docs/boot.md "The update"): the one command the start report names, which takes every
+# newer release, also across a breaking one, and hands over the upgrade guide's sections between.
+
+# The person runs it as `/se:update`, SE's skill update (src/skills/update/SKILL.md), which runs
+# `update` below and follows the sections it prints; the start report's template names it.
+
+
+def set_range(root: Path, name: str, version: Version) -> str:
+    """Set `[components.<name>] version` of the project's se.toml to `^<version>`; the old range."""
+    path = root / se_modules.MANIFEST
+    text = path.read_text(encoding="utf-8")
+    table = re.search(rf"(?ms)^\[components\.{re.escape(name)}\][^\n]*\n(?P<body>.*?)(?=^\[|\Z)", text)
+    line = table and re.search(r'(?m)^(?P<head>version\s*=\s*)"(?P<old>[^"]*)"', table["body"])
+    if not line:
+        raise ModuleError(f"{path.as_posix()}: [components.{name}] has no version line to move")
+    start = table.start("body") + line.start()
+    path.write_text(text[:start] + f'{line["head"]}"^{_v(version)}"' + text[table.start("body") + line.end():],
+                    encoding="utf-8", newline="")
+    return line["old"]
+
+
+def set_require(root: Path, module, version: Version) -> str:
+    """Set the require of `module` in the go.mod its go pin names to `version`; the old version."""
+    relative, old = se_modules.go_require(root, module.name, module.go)
+    path = root / relative
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(rf"(?m)^(?P<head>\s*(?:require\s+)?{re.escape(module.name)}\s+)v\S+")
+    if not pattern.search(text):
+        raise ModuleError(f"{path.as_posix()}: no require {module.name} to move")
+    path.write_text(pattern.sub(lambda m: m["head"] + se_modules.go_version(_v(version)), text, count=1),
+                    encoding="utf-8", newline="")
+    return old
+
+
+def move_pins(root: Path, pins) -> tuple[list[str], list[str]]:
+    """Move each of the project's own pins whose newest release lies beyond it to that release: a
+    range to `^<newest>` in se.toml, a go pin's require in its go.mod. The lines of what moved, and
+    of what only another repository moves (a component's own pin) or no pin moves (a commit pin)."""
+    moved, left = [], []
+    for pin in {(pin.path, pin.module.name): pin for pin in pins if pin.beyond}.values():
+        module, newest = pin.module, pin.newest
+        if len(pin.path) > 1:
+            left.append(f"{pin.line()}: {pin.path[-1]} moves it in its own repository (a ticket there)")
+        elif module.go:
+            old = set_require(root, module, newest)
+            moved.append(f"{module.name}: pin v{old} -> v{_v(newest)} ({module.go}; commit it)")
+        elif module.version:
+            old = set_range(root, module.name, newest)
+            moved.append(f"{module.name}: pin {old} -> ^{_v(newest)} ({se_modules.MANIFEST}; commit it)")
+        else:
+            left.append(f"{pin.line()}: pinned by commit; uv run python <se>/scripts/se_modules.py update "
+                        f"{module.name} --to v{_v(newest)} moves it")
+    return moved, left
+
+
+def guide_sections(guide: Path, name: str, old: Version | None, new: Version | None) -> list:
+    """The sections of the guide at `guide` that lead `name` from `old` to `new` (scripts/upgrade_guide.py)."""
+    if old is None or new is None or new <= old:
+        return []
+    try:
+        text = guide.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return upgrade_guide.sections(text, name, old, new)
+
+
+def update(se_root: Path, root: Path | None, local_config: Path | None, world: World) -> tuple[list[str], bool]:
+    """The update the start report names (docs/boot.md "The update"), each step decided from
+    versions alone: the checkout current; SE to its newest release, across a major too, the
+    project's `[components.se]` pin moved with it; each of the project's own pins whose newest
+    release lies beyond it moved to that release; every lock to the newest release its pin admits;
+    then the sections of the upgrade guides between the old and the new versions, of SE and of each
+    component, for the agent to follow in order. The lines, and whether a step failed."""
+    lines = [f"SE update of {root.as_posix() if root else 'no project'}"]
+    if root is not None:
+        try:
+            integration = _load("work_tickets").integration_branch(root)
+        except Exception as error:  # noqa: BLE001 - its own message names the setting
+            return lines + [f"Checkout: the integration branch cannot be read, the update stops: {error}"], True
+        line, stopped = current_checkout(root, integration)
+        lines.append(line.replace("the boot stops", "the update stops"))
+        if stopped:
+            return lines, True
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+    except ModuleError as error:
+        return lines + [f"Machine-local configuration: {error}"], True
+    failed = False
+    se = se_state(se_root, root, local, world)
+    old_se = se.item.version
+    new_se = old_se
+    if se.error:
+        failed = True
+        lines.append(f"SE: {se.error}")
+    elif se.newest and (old_se is None or se.newest > old_se) and not se.stays:
+        if se.pin and not se_modules.matches(se.newest, se_modules.version_bounds("se", se.pin)):
+            lines.append(f"se: pin {set_range(root, 'se', se.newest)} -> ^{_v(se.newest)} "
+                         f"({se_modules.MANIFEST}; commit it)")
+        moved, broke = upgrade_se(se_root, root, SEState(se.item, se.newest, se.newest, se.pin), world)
+        failed |= broke
+        lines.append(moved)
+        if not broke:
+            new_se = se.newest
+    else:
+        lines.append(f"SE: {_v(old_se)}, " + (se.stays if se.stays and se.newest and se.newest > (old_se or (0, 0, 0))
+                                              else "current"))
+    sections = [("SE", se_root / upgrade_guide.GUIDE, s) for s in guide_sections(
+        se_root / upgrade_guide.GUIDE, "SE", old_se, new_se)]
+    if root is not None and (root / se_modules.MANIFEST).is_file():
+        try:
+            found = se_modules.breaking(root, local)
+            before = se_modules.read_lock(root)
+            moved_pins, left = move_pins(root, [pin for pin in found.pins if pin.module.name != "se"])
+            lines += moved_pins
+            se_modules.place_tree(root, local, unlock=frozenset(pin.module.name for pin in found.pins))
+            after = se_modules.read_lock(root)
+        except ModuleError as error:
+            return lines + [f"Components: not updated: {error}"], True
+        for name, (version, _) in sorted(after.items()):
+            was = before.get(name, ("", ""))[0]
+            if was == version:
+                continue
+            lines.append(f"{name}: {was or 'none'} -> {version} ({se_modules.LOCK}; commit it)")
+            clone = root / se_modules.MODULES_DIR / name
+            own = clone / upgrade_guide.GUIDE
+            guide = own if own.is_file() and upgrade_guide.sections(
+                own.read_text(encoding="utf-8"), name, (0, 0, 0), (10 ** 6, 0, 0)) else se_root / upgrade_guide.GUIDE
+            sections += [(name, guide, s) for s in guide_sections(guide, name, se_modules.parse_version(was),
+                                                                  se_modules.parse_version(version))]
+        lines += left
+        unread = [pin for pin in found.unread
+                  if se_modules.resolve(root, pin.module, local).kind != "local"]
+        lines += [f"{pin.line()}: its releases could not be read: " + ("; ".join(pin.reasons) or
+                  "no remote offers it") for pin in unread]
+        failed |= bool(unread)
+    if not sections:
+        lines.append("Upgrade guide: no section lies between the versions; the update is done"
+                     if not failed else "The update did not finish; run it again once the cause is fixed")
+        return lines, failed
+    lines.append(f"Upgrade guide: follow {_plural(len(sections), 'section')} in this order, every step "
+                 "and then its check, and commit after each:")
+    for name, guide, section in sections:
+        lines += ["", f"<!-- {section.title}, from {guide.as_posix()} -->", section.text.rstrip("\n")]
+    return lines, failed
+
+
 #: The first words of the start's stop (docs/components.md "Required and optional at start").
 STOP = "SE cannot start"
 
@@ -1570,18 +1766,36 @@ def default_agent(se_root: Path, environment: Mapping[str, str] | None = None) -
             f"that message: read {se_root}/agents/{DEFAULT_AGENT}.md first and act as it defines."), ""
 
 
+#: The heading of what the start hands the session alone, below the start report.
+FOR_SESSION = "For the session, not part of the report:"
+
+
+def handed(lines: list[str], session: list[str]) -> str:
+    """The start report, then, where the start found any, what it found for the session alone."""
+    return "\n".join(lines + (["", FOR_SESSION, *session] if session else []))
+
+
+def shown_notes(notes: list[str]) -> list[str]:
+    """The notes of the start the person sees above the report: a stop (`STOP`) alone."""
+    return [note for note in notes if note.startswith(STOP)]
+
+
 def hook_output(lines: list[str], notes: list[str], se_root: Path, host: str = "claude",
-                environment: Mapping[str, str] | None = None) -> str:
-    """The SessionStart hook output of `host` (scripts/hosts.sh): the greeting handed to the session,
-    which opens its first message with it, and SE's root for the session. Claude Code also shows it
-    to the person (systemMessage); Copilot's sessionStart reads only `additionalContext`. Where
+                environment: Mapping[str, str] | None = None, session: list[str] | None = None) -> str:
+    """The SessionStart hook output of `host` (scripts/hosts.sh): the start report handed to the
+    session, which opens its first message with it, what the start found for the session alone,
+    and SE's root for the session. Claude Code also shows the person the report, a stop above it
+    (systemMessage); Copilot's sessionStart reads only `additionalContext`. Where
     `SE_DEFAULT_AGENT` counts, the hand-over ends with the agent the session acts as
     (`default_agent`)."""
     sentence, note = default_agent(se_root, environment)
-    text = "\n".join(([note] if note else []) + notes + lines)
+    shown_lines = shown_notes(notes) + lines
+    found = ([note] if note else []) + [n for n in notes if n not in shown_lines] + list(session or [])
+    text = "\n".join(shown_lines)
     shown = "" if host == "copilot" else ", already shown to the person"
-    context = (f"{text}\n\nSE's start greeting{shown}. As SE, open your first "
-               "message with it as it is; pass on any line that names a command to run.\n\n"
+    context = (f"{handed(shown_lines, found)}\n\nSE's start report{shown}. As SE, open your first "
+               "message with it as it is and add nothing to it; act on what the start found for the "
+               "session, and tell the person only what needs their decision.\n\n"
                f"{root_line(se_root)}\n`<se>` in SE's skills and agents is this path: run SE's scripts as "
                "`uv run python <se>/scripts/<name>.py`, never relative to the working directory.")
     if sentence:
@@ -1631,6 +1845,9 @@ def build_parser() -> argparse.ArgumentParser:
     boot_parser.add_argument("--upgrade", action="store_true", help="also move SE to its newest release "
                              "and every lock to the newest release its pin admits; a release beyond a pin "
                              "is never taken")
+    commands.add_parser("update", help="the update the start report names (/se:update): the checkout "
+                        "current, SE to its newest release across a major too, every pin and lock to the "
+                        "newest release, then the upgrade guide's sections between the versions")
     commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
                         "is a git checkout to its latest release; exit code 0 where it moved")
     commands.add_parser("start-components", help="bootstrap.sh at the session's start, before the core: resolve "
@@ -1689,6 +1906,10 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         lines, failed = boot(SE_ROOT, root, args.local, world, args.upgrade)
         print("\n".join(lines))
         return 1 if failed else 0
+    if args.command == "update":
+        lines, failed = update(SE_ROOT, root, args.local, world)
+        print("\n".join(lines))
+        return 1 if failed else 0
     if args.command == "refresh":
         lines, failed = refresh(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(lines))
@@ -1700,13 +1921,17 @@ def run(args: argparse.Namespace, world: World | None) -> int:
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
     kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
                      world.kern)
-    lines = (greeting if args.hook or args.greeting else full)(report, SE_ROOT)
-    lines = (lines[:1] + kern + without_kern(kern, args.host, args.kern_none) + lines[1:]
+    found = (kern + without_kern(kern, args.host, args.kern_none)
              + (_load("copilot_guards").greeting(root, args.host) if args.host == "copilot" else []))
+    if not (args.hook or args.greeting):
+        print("\n".join(args.note + full(report, SE_ROOT)[:1] + found + full(report, SE_ROOT)[1:]))
+        return 0
+    lines, session = greeting(report, SE_ROOT), found + session_lines(report, SE_ROOT)
     if args.hook:
-        print(hook_output(lines, args.note, SE_ROOT, args.host))
+        print(hook_output(lines, args.note, SE_ROOT, args.host, session=session))
     else:
-        print("\n".join(args.note + lines))
+        print(handed(shown_notes(args.note) + lines,
+                     [note for note in args.note if note not in shown_notes(args.note)] + session))
     return 0
 
 

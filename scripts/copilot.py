@@ -575,7 +575,7 @@ def self_test(build: bool = False, cli: str | None = None, keep: bool = False) -
 
 # --- smoke verdict --------------------------------------------------------------------------------
 
-GREETING = re.compile(r"SE \d+\.\d+\.\d+ started:")
+GREETING = re.compile(r"SE \d+\.\d+\.\d+ started$", re.M)
 # The names a host gives a tool of the server `se`: Copilot CLI's `se-<tool>`, VS Code's `se/<tool>`,
 # Claude Code's `mcp__se__<tool>`.
 SE_TOOL = re.compile(r"^(?:se[-/]|mcp__se__)(?P<tool>[a-z][a-z0-9-]*)$")
@@ -640,7 +640,7 @@ def smoke_verdict(lines: list[str], exit_code: int = 0) -> tuple[bool, str]:
     if code:
         problems.append(f"copilot exited {code}")
     if greeting is None:
-        problems.append("no greeting `SE <version> started:`")
+        problems.append("no greeting `SE <version> started`")
     if not calls:
         problems.append("no call of an se tool")
     if failed:
