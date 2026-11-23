@@ -228,3 +228,13 @@ def test_the_suites_conftest_registers_the_guard(pytestconfig: pytest.Config) ->
     assert isinstance(pytestconfig.pluginmanager.get_plugin(spawn_guard.NAME), spawn_guard.SpawnGuard)
     assert subprocess.Popen._execute_child.__name__ == "wrapper"
     assert json.loads(json.dumps(spawn_guard.DEFAULT_BASELINE)) == "tests/spawn-baseline.yaml"
+
+
+def test_the_suite_gate_prints_the_guards_total() -> None:
+    """`work_tickets.py suite` prints the spawn guard's line of the suite's output, as the run read it."""
+    import work_tickets
+
+    output = ("....\nspawns: 3 processes started by 2 of 9 tests; 3 in marked tests, 0 in baseline tests, "
+              "0 refused in 0 tests (scripts/spawn_guard.py)\n9 passed in 1.00s\n")
+    assert work_tickets.spawns_line(output).startswith("spawns: 3 processes started by 2 of 9 tests")
+    assert work_tickets.spawns_line("9 passed in 1.00s\n") == ""

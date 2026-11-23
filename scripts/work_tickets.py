@@ -6488,6 +6488,12 @@ def tier_lines(parts: list[SuitePart], tier_of) -> list[str]:
     return [f"{tier}: {line}" for tier, (_, line) in sorted(slowest.items())]
 
 
+def spawns_line(output: str) -> str:
+    """The spawn guard's total of the suite's process starts (scripts/spawn_guard.py), its last
+    `spawns:` line in the suite's output, or "" where the suite runs no guard."""
+    return next((line.strip() for line in reversed(output.splitlines()) if line.startswith("spawns: ")), "")
+
+
 def output_tail(output: str) -> str:
     """The last lines of a command's output, indented, for the person reading the run."""
     return "\n".join(f"  {line}" for line in output.splitlines()[-OUTPUT_TAIL_LINES:])
@@ -7151,6 +7157,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     if keep_reports is not None:
         print(kept_reports_line(keep_reports, result.kept or []))
     seconds, output, parts = result.seconds, result.output, result.parts
+    spawns = spawns_line(output)
+    if spawns:
+        print(spawns)
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
