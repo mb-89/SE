@@ -1873,8 +1873,14 @@ uv run python <se>/scripts/se_workflows.py check
 - What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
   and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `suite-shard` and
   `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
-- `write` writes the files it names, or regenerates those the project holds; each is a generated
-  file whose first line names its source path, the pin and SE's place.
+  - Beside them, the files a project holds as SE has them: `RUNME.sh` and `RUNME.ps1`, the
+    installer beside the project's own `RUNME.conf`, and `ref-maintenance.yml`, which its owner
+    triggers by hand; each keeps its triggers (`WHOLE`).
+- `write` writes the files it names, or regenerates those the project holds. Each is a generated
+  file whose marker (the guidance note
+  [generated-files-are-marked](guidance/generated-files-are-marked.md)) names `se_workflows.py
+  write` and, as its source, SE's file, the pin and SE's place: its first line, or the line after
+  `RUNME.sh`'s `#!`.
 - `kern-at-pin` checks kern out at the commit a folder's `se.lock` locks into its
   `.se/modules/kern`, refusing a lock whose version is not the `require kern` of the `go.mod` that
   the folder's `se.toml` `[components.kern]` `go` names, naming both lines. A folder whose `se.lock`
@@ -1891,7 +1897,8 @@ uv run python <se>/scripts/se_workflows.py check
   project's own owner on its host is `${{ github.repository_owner }}/<name>`, so the copies name no
   owner; any other names its own `<owner>/<name>`. SE is public, so the run's token reads it.
 - Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
-  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
+  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`,
+  unless it is held whole.
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
   from what the pin generates: a project adds it to its integration checks, as SE runs
   `se_plugin.py check`.
