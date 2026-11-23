@@ -56,5 +56,6 @@ ticket:
 work:
   - discover-cheap-load-late
   - guidance-comes-first
+  - generated-files-are-marked
   - parse-dont-validate
   - python-ad-hoc-go-system
