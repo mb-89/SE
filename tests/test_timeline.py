@@ -506,15 +506,14 @@ def need_browser():
 
 
 @pytest.fixture(scope="module")
-def page(tmp_path_factory, request):
+def page(tmp_path_factory, obs):
     """The Timeline obs built from `large_snapshot`; every test of it opens a browser, so it skips
-    before the build where none is installed. The build, and the suite's `obs` it takes, run through
-    the real process door: one build for the module, not a test's."""
+    before the build where none is installed. The build runs through the real process door: one
+    build for the module, not a test's."""
     need_browser()
     destination = tmp_path_factory.mktemp("timeline") / "timeline.html"
     snap = large_snapshot()
     with process_door.use(process_door.RealProcesses()):
-        request.getfixturevalue("obs")
         assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
     return destination
 

@@ -89,11 +89,16 @@ OBS_RUNS = pytest.mark.spawns("obs: the deck is obs-document's output, which run
                               "(scripts/build_docs.py), an outside program SE's process cannot import")
 
 
-@pytest.mark.parametrize("name", [pytest.param(name, marks=OBS_RUNS) if name in NEEDS_OBS else name
-                                  for name in RECORDINGS])
-def test_the_output_is_its_recording(name, tmp_path, request):
-    if name in NEEDS_OBS:
-        request.getfixturevalue("obs")
+@pytest.mark.parametrize("name", [name for name in RECORDINGS if name not in NEEDS_OBS])
+def test_the_output_is_its_recording(name, tmp_path):
+    r.recorded(name, RECORDINGS[name](tmp_path))
+
+
+@OBS_RUNS
+@pytest.mark.parametrize("name", sorted(NEEDS_OBS))
+def test_the_output_obs_builds_is_its_recording(name, tmp_path, obs):
+    """A recording obs builds takes the suite's `obs`, so its time bound counts obs's setup
+    (tests/time_bound.py)."""
     r.recorded(name, RECORDINGS[name](tmp_path))
 
 

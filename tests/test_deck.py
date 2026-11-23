@@ -29,7 +29,6 @@ sys.path.insert(0, str(SCRIPTS))
 import build_docs  # noqa: E402
 import deck  # noqa: E402
 import deck_look  # noqa: E402
-import process_door  # noqa: E402
 from fake_processes import Answer  # noqa: E402
 
 NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nThis is one case of how %s is chosen.\n"
@@ -112,18 +111,9 @@ def _deck(folder: Path, destination: Path) -> subprocess.CompletedProcess:
                            "--destination", str(destination)], capture_output=True, text=True)
 
 
-def real_obs(request: pytest.FixtureRequest) -> Path:
-    """The suite's `obs` (tests/conftest.py), set up through the real process door: its sync and its
-    adapter's install are the suite's setup, not a test's, which an unmarked test's fake door would answer."""
-    with process_door.use(process_door.RealProcesses()):
-        return request.getfixturevalue("obs")
-
-
 @pytest.fixture(scope="session")
-def decks(tmp_path_factory, request) -> dict[str, tuple[subprocess.CompletedProcess, Path]]:
+def decks(tmp_path_factory, obs) -> dict[str, tuple[subprocess.CompletedProcess, Path]]:
     """Each of DECKS built once with `deck.py build`, all at once: its build and its destination."""
-    real_obs(request)
-
     def built(name: str) -> tuple[subprocess.CompletedProcess, Path]:
         directory = directories[name]
         notes, manifest = DECKS[name]

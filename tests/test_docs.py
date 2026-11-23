@@ -22,7 +22,6 @@ NOTES = "src/skills/work-model/references/"
 BOOK = ROOT / NOTES / "rules.md"
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
-import process_door  # noqa: E402
 from fake_processes import Answer  # noqa: E402
 # Every build syncs the obs module into the checkout; the fixture `obs` (conftest.py) prepares it first,
 # once at a time.
@@ -81,13 +80,10 @@ def fakes(folder: Path, log: Path) -> None:
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory, request):
+def built(tmp_path_factory, obs):
     """The suite's one build of SE's manifest, with the fakes first on PATH: its result, its folder (the
     page index.html, the Document docs.json, the fake bash's log bash.log), and the checkout's notes
-    and RUNME need as they were before it. The suite's `obs` is set up through the real process door:
-    its sync and its adapter's install are the suite's setup, which a test's fake door would answer."""
-    with process_door.use(process_door.RealProcesses()):
-        request.getfixturevalue("obs")
+    and RUNME need as they were before it."""
     folder = tmp_path_factory.mktemp("docs")
     log = folder / "bash.log"
     fakes(folder / "bin", log)
