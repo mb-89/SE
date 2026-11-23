@@ -32,23 +32,23 @@ pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash"
 # What these tests prove is bootstrap.sh's own shell logic, which runs only as a process: each runs
 # the real script under bash, the programs it calls (uv, curl, go, kern) fakes on its PATH. The
 # spawn guard (scripts/spawn_guard.py) passes them by these marks, one per part of the script.
-UV_STEPS = pytest.mark.spawns("shell: scripts/bootstrap.sh's git, uv and Python steps (install, offline, "
+UV_STEPS = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh's git, uv and Python steps (install, offline, "
                               "the env file) are shell, run only as a process")
-HOOK_STEPS = pytest.mark.spawns("shell: scripts/bootstrap.sh's --hook start (its steps, their order, the "
+HOOK_STEPS = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh's --hook start (its steps, their order, the "
                                 "greeting's notes, the compaction skip) is shell, run only as a process")
-COMPONENTS = pytest.mark.spawns("shell: scripts/bootstrap.sh's components step (stop or go on, its lines as "
+COMPONENTS = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh's components step (stop or go on, its lines as "
                                 "notes) is shell, run only as a process")
-COPILOT = pytest.mark.spawns("shell: scripts/bootstrap.sh and hosts.sh read Copilot's payload and claim its "
+COPILOT = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh and hosts.sh read Copilot's payload and claim its "
                              "session in shell, run only as a process")
-KERN_STEP = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern step (checkout, locate, link, start, hand "
+KERN_STEP = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh's kern step (checkout, locate, link, start, hand "
                                "over the start) is shell, run only as a process against a fake kern")
-KERN_BACKGROUND = pytest.mark.spawns("shell: scripts/bootstrap.sh fetches or builds the binary in a detached "
+KERN_BACKGROUND = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh fetches or builds the binary in a detached "
                                      "bash of its own, run only as a process and awaited by its bell")
-SWITCH = pytest.mark.spawns("shell: scripts/bootstrap.sh reads the core switch (SE_HOOK_CORE, "
+SWITCH = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh reads the core switch (SE_HOOK_CORE, "
                             "~/.se/local.toml) in shell, run only as a process")
-BINARY = pytest.mark.spawns("shell: scripts/bootstrap.sh --binary (RUNME's `get se`) places the binary in "
+BINARY = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh --binary (RUNME's `get se`) places the binary in "
                             "shell, run only as a process")
-KERN_PLACE = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern_place reads se.lock and kern's HEAD in "
+KERN_PLACE = pytest.mark.spawns("contract: shell, scripts/bootstrap.sh's kern_place reads se.lock and kern's HEAD in "
                                 "shell, run only as a process")
 
 # A fake uv: `python find` fails until `python install` ran; the core switch's read
@@ -209,7 +209,7 @@ exit 127
 
 
 @pytest.mark.skipif(WINDOWS, reason="a shim runs its file by its path there: a wrapper finds no entry of its own")
-@pytest.mark.spawns("shell: the wrapper is an sh script; only bash running it shows it reaches the tool "
+@pytest.mark.spawns("contract: shell, the wrapper is an sh script; only bash running it shows it reaches the tool "
                     "past its own entry on the fake path")
 def test_a_wrapper_first_on_path_still_reaches_the_tool_after_it_on_the_fake_path(tmp_path, monkeypatch):
     wrapper, log, text = tmp_path / "wrapper", tmp_path / "log", tmp_path / "text"

@@ -31,11 +31,11 @@ POWERSHELLS = [shell for shell in ("powershell", "pwsh") if os.name == "nt" and 
 windows = pytest.mark.skipif(not POWERSHELLS, reason="the hand-off runs where PowerShell and Git's bash are: Windows")
 # What the Windows cases prove is PowerShell's and Git's bash's own work, which runs only as a
 # process: the spawn guard (scripts/spawn_guard.py) passes them on the Windows leg by these marks.
-SELECTS = pytest.mark.spawns("shell: Select-SeBash is PowerShell (scripts/bash.ps1), run only by a "
+SELECTS = pytest.mark.spawns("contract: shell, Select-SeBash is PowerShell (scripts/bash.ps1), run only by a "
                              "PowerShell process")
-HANDS_OFF = pytest.mark.spawns("shell: scripts/bash.ps1 hands off from a PowerShell process to Git's bash, "
+HANDS_OFF = pytest.mark.spawns("contract: shell, scripts/bash.ps1 hands off from a PowerShell process to Git's bash, "
                                "both run only as processes")
-HOOK_LINE = pytest.mark.spawns("shell: a generated PowerShell hook line runs scripts/bash.ps1 and Git's bash, "
+HOOK_LINE = pytest.mark.spawns("contract: shell, a generated PowerShell hook line runs scripts/bash.ps1 and Git's bash, "
                                "run only as processes")
 
 GIT = PureWindowsPath("C:/Program Files/Git")

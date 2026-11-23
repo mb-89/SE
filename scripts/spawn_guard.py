@@ -28,8 +28,13 @@ A test may start processes where it is
 Any other test that starts a process fails, its report naming each call: the command and the
 place that started it, as `git status (scripts/git_door.py:65, from tests/test_x.py:12)`.
 
+The shell is a door (scripts/shell_door.py): a start that runs a shell, a command line
+(`shell=True`, `os.system`), a shell program (`sh`, `bash`, PowerShell, `cmd`) or a shell script
+(`shell_door.is_shell`), is refused in every test but the shell door's contract, a test marked
+`contract: shell, <what it proves>`; neither another mark nor the baseline lets a test start one.
+
 The run's terminal summary prints one line: the processes started, in marked and in baseline
-tests, and the tests that failed for one (`spawns: ...`); under pytest-xdist the controller adds
+tests, the shells among them, and the tests that failed for one (`spawns: ...`); under pytest-xdist the controller adds
 up its workers' counts, which each test's report carries in its `user_properties` ("spawns").
 
 Loading it: SE's own suite registers it from `tests/conftest.py` (`pytest_addoption`); a Python
@@ -39,6 +44,7 @@ as the guidance note shows. It needs nothing but pytest.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -57,6 +63,11 @@ DEFAULT_BASELINE = "tests/spawn-baseline.yaml"
 PROPERTY = "spawns"
 OWNER = "scripts/spawn_guard.py"
 NOTE = "the guidance note tests-spawn-no-processes"
+SHELL_CONTRACT = "contract: shell"
+SHELL_REMEDY = (f"the shell is a door (scripts/shell_door.py) and a test never starts one: run the code "
+                f"under test with the door's fake (the fake_shell fixture), or, for the shell door's "
+                f"contract, mark the test @pytest.mark.{MARK}(\"{SHELL_CONTRACT}, <what it proves>\"); {NOTE} "
+                f"says how")
 REMEDY = (f"call the code in-process (a script through its `main(argv)`, git through its fake), or, "
           f"for a door's contract or a script's one entry-point test, mark it "
           f"@pytest.mark.{MARK}(\"contract: <door>\" or \"entry: <script>\"); {NOTE} says how")
@@ -70,21 +81,37 @@ SKIPPED_PATHS = tuple(str(Path(path)) for path in {sysconfig.get_paths()["stdlib
                                                    sysconfig.get_paths()["platlib"]})
 
 
+def _load_shell_door():
+    """scripts/shell_door.py beside this file, which owns what a shell is, loaded by its path so a
+    project that loads this plugin from its se module needs nothing on its path."""
+    spec = importlib.util.spec_from_file_location("_spawn_guard_shell_door", Path(__file__).with_name("shell_door.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+shell_door = _load_shell_door()
+
+
 @dataclass
 class Counter:
     """The starts of one session's running test; `paused` while a wider fixture sets up."""
 
     calls: list[str] = field(default_factory=list)
+    shells: list[str] = field(default_factory=list)  # the calls among them that started a shell
     active: bool = False
     paused: int = 0
 
-    def record(self, command: str) -> None:
+    def record(self, command: str, shell: bool = False) -> None:
         if self.active and not self.paused:
             self.calls.append(f"{command} ({where()})")
+            if shell:
+                self.shells.append(self.calls[-1])
 
-    def take(self) -> list[str]:
-        calls, self.calls = self.calls, []
-        return calls
+    def take(self) -> tuple[list[str], list[str]]:
+        """The calls since the last take, and the shells among them."""
+        calls, shells, self.calls, self.shells = self.calls, self.shells, [], []
+        return calls, shells
 
 
 # The counters of the sessions running in this process, innermost last: a test that runs pytest
@@ -138,16 +165,16 @@ def command_text(argv) -> str:
     return " ".join(words[:4]) + (" ..." if len(words) > 4 else "")
 
 
-def counted(name: str, command):
+def counted(name: str, command, shell=lambda arguments, options: False):
     """The start `_original[name]`, each call recorded on the innermost counter once, by
-    `command(arguments)`, however many starts it makes inside (`subprocess.Popen` through
-    `os.posix_spawn`). It looks the start up at each call, so a test of this plugin can stand a
-    fake in for it."""
+    `command(arguments)` and whether `shell(arguments, options)` says it starts a shell, however
+    many starts it makes inside (`subprocess.Popen` through `os.posix_spawn`). It looks the start
+    up at each call, so a test of this plugin can stand a fake in for it."""
 
     def wrapper(*arguments, **options):
         depth = getattr(_depth, "value", 0)
         if not depth and COUNTERS:
-            COUNTERS[-1].record(command(arguments))
+            COUNTERS[-1].record(command(arguments), bool(shell(arguments, options)))
         _depth.value = depth + 1
         try:
             return _original[name](*arguments, **options)
@@ -167,12 +194,20 @@ def argument_list(arguments: tuple, at: int) -> list:
     return [arguments[at - 1], *rest[1:]] if rest else [arguments[at - 1]]
 
 
+def popen_shell(arguments: tuple, options: dict) -> bool:
+    """Whether a `Popen._execute_child(self, args, executable, ..., shell, ...)` call starts a
+    shell: its command, its `shell` flag (the eleventh argument) or its `executable`."""
+    shell = arguments[10] if len(arguments) > 10 else options.get("shell", False)
+    executable = arguments[2] if len(arguments) > 2 else options.get("executable")
+    return shell_door.is_shell(arguments[1], bool(shell)) or bool(executable) and shell_door.shell_program(executable)
+
+
 def install() -> None:
     """Count the process starts of this process from now on; installing twice changes nothing."""
     if _original:
         return
     _original[POPEN] = subprocess.Popen._execute_child
-    subprocess.Popen._execute_child = counted(POPEN, lambda arguments: command_text(arguments[1]))
+    subprocess.Popen._execute_child = counted(POPEN, lambda arguments: command_text(arguments[1]), popen_shell)
     for name in OS_STARTS:
         start = getattr(os, name, None)
         if start is None:
@@ -180,13 +215,18 @@ def install() -> None:
         _original[name] = start
         if name == "system":
             command = lambda arguments: command_text(arguments[0])  # noqa: E731
+            shell = lambda arguments, options: True  # noqa: E731
         elif name.startswith("spawn"):
             command = lambda arguments: command_text(argument_list(arguments, 2))  # noqa: E731
+            shell = lambda arguments, options: shell_door.is_shell(argument_list(arguments, 2))  # noqa: E731
         elif name.startswith("posix_spawn"):
             command = lambda arguments: command_text(arguments[1])  # noqa: E731
+            shell = lambda arguments, options: (shell_door.shell_program(arguments[0])  # noqa: E731
+                                                or shell_door.is_shell(arguments[1]))
         else:
             command = lambda arguments: command_text(argument_list(arguments, 1))  # noqa: E731
-        setattr(os, name, counted(name, command))
+            shell = lambda arguments, options: shell_door.is_shell(argument_list(arguments, 1))  # noqa: E731
+        setattr(os, name, counted(name, command, shell))
 
 
 def uninstall() -> None:
@@ -232,6 +272,17 @@ def write_baseline(path: Path, entries: dict[str, int]) -> None:
     path.write_text("".join(lines), encoding="utf-8")
 
 
+def shell_contract(text: str | None) -> bool:
+    """Whether a spawns reason marks the shell door's contract (`contract: shell, ...`)."""
+    return bool(text) and (text == SHELL_CONTRACT or text.startswith((SHELL_CONTRACT + ",", SHELL_CONTRACT + ";",
+                                                                     SHELL_CONTRACT + ":", SHELL_CONTRACT + " ")))
+
+
+def shell_allowed(item: pytest.Item) -> bool:
+    """Whether `item` may start a shell: it is part of the shell door's contract."""
+    return shell_contract(reason(item))
+
+
 def reason(item: pytest.Item) -> str | None:
     """`item`'s spawns mark reason, "" for a mark without one, None where it carries none."""
     marker = item.get_closest_marker(MARK)
@@ -253,7 +304,7 @@ class SpawnGuard:
         self.failed: set[str] = set()  # the tests that failed a phase (the controller)
         self.written: tuple[int, int] | None = None
         self.counter = Counter()
-        self.marked = self.listed = 0
+        self.marked = self.listed = self.shells = 0
         self.refused: list[str] = []
 
     def pytest_addoption(self, parser: pytest.Parser) -> None:
@@ -293,6 +344,7 @@ class SpawnGuard:
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item: pytest.Item, nextitem):
         item.stash[STARTS] = 0
+        item.stash[SHELLS] = 0
         yield
 
     @pytest.hookimpl(hookwrapper=True)
@@ -305,10 +357,11 @@ class SpawnGuard:
     def pytest_runtest_makereport(self, item: pytest.Item, call):
         outcome = yield
         report = outcome.get_result()
-        calls = self.counter.take()
+        calls, shells = self.counter.take()
         if call.when == "teardown":
             self.counter.active = False
         item.stash[STARTS] = item.stash.get(STARTS, 0) + len(calls)
+        item.stash[SHELLS] = item.stash.get(SHELLS, 0) + len(shells)
         allowed = reason(item)
         if allowed == "" and call.when == "call":
             self.fail(report, f"{item.nodeid} carries @pytest.mark.{MARK} without a reason; give one "
@@ -317,11 +370,16 @@ class SpawnGuard:
             listing = "\n".join(f"  {text}" for text in calls)
             self.fail(report, f"{item.nodeid} started {len(calls)} process(es) in its {call.when}, and no test "
                               f"starts one unmarked:\n{listing}\nRemedy: {REMEDY}.")
+        if shells and not shell_contract(allowed) and self.mode != "init":
+            listing = "\n".join(f"  {text}" for text in shells)
+            self.fail(report, f"{item.nodeid} started {len(shells)} shell(s) in its {call.when}, and only the shell "
+                              f"door's contract starts one:\n{listing}\nRemedy: {SHELL_REMEDY}.")
         if call.when == "teardown":
             starts = item.stash[STARTS]
             listed = item.nodeid in self.baseline or self.mode == "init"
-            kind = "marked" if allowed else "listed" if listed else ""
-            report.user_properties.append((PROPERTY, f"{starts}:{kind}"))
+            refused_shell = item.stash[SHELLS] and not shell_contract(allowed) and self.mode != "init"
+            kind = "" if refused_shell else "marked" if allowed else "listed" if listed else ""
+            report.user_properties.append((PROPERTY, f"{starts}:{kind}:{item.stash[SHELLS]}"))
             if not starts and item.nodeid in self.baseline and allowed is None and self.mode == "check" \
                     and not report.failed:
                 self.fail(report, f"{item.nodeid} is in the spawn baseline {self.baseline_path} and started no "
@@ -341,9 +399,11 @@ class SpawnGuard:
         for name, value in report.user_properties:
             if name != PROPERTY:
                 continue
-            count, _, kind = str(value).partition(":")
+            count, _, rest = str(value).partition(":")
+            kind, _, shells = rest.partition(":")
             self.ran[report.nodeid] = int(count)
             self.kinds[report.nodeid] = kind
+            self.shells += int(shells or 0)
             if int(count):
                 self.marked += int(count) if kind == "marked" else 0
                 self.listed += int(count) if kind == "listed" else 0
@@ -373,13 +433,15 @@ class SpawnGuard:
         terminalreporter.write_line(
             f"spawns: {total} processes started by {sum(1 for count in self.ran.values() if count)} of "
             f"{len(self.ran)} tests; {self.marked} in marked tests, {self.listed} in baseline tests, "
-            f"{total - self.marked - self.listed} refused in {len(self.refused)} tests ({OWNER})")
+            f"{total - self.marked - self.listed} refused in {len(self.refused)} tests; {self.shells} shells "
+            f"({OWNER})")
         if self.written is not None:
             terminalreporter.write_line(f"spawns: wrote {self.baseline_path} with {self.written[0]} entries "
                                         f"(it held {self.written[1]})")
 
 
 STARTS = pytest.StashKey[int]()
+SHELLS = pytest.StashKey[int]()
 
 
 def started(item: pytest.Item) -> int:

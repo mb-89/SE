@@ -517,7 +517,7 @@ pytest_hook = pytest.mark.skipif(BASH is None or sys.platform == "win32",
 
 
 @pytest_hook
-@pytest.mark.spawns("shell: scripts/se_hook.sh hands a guarded GitHub write to se_templates.py gate, prints its "
+@pytest.mark.spawns("contract: shell, scripts/se_hook.sh hands a guarded GitHub write to se_templates.py gate, prints its "
                     "deny as its whole stdout and still posts kern the payload; that wiring is bash, run only "
                     "as a process")
 def test_the_plugins_hook_line_prints_exactly_the_deny(tmp_path, shared_fake_git):
@@ -533,7 +533,7 @@ def test_the_plugins_hook_line_prints_exactly_the_deny(tmp_path, shared_fake_git
 
 
 @pytest_hook
-@pytest.mark.spawns("shell: scripts/se_hook.sh's `guarded` test and its SE_TEMPLATES_GATE switch, bash builtins, "
+@pytest.mark.spawns("contract: shell, scripts/se_hook.sh's `guarded` test and its SE_TEMPLATES_GATE switch, bash builtins, "
                     "pick which calls run the gate; run only as a process")
 def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, None)
@@ -729,7 +729,7 @@ def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
 
 
 @pytest_hook
-@pytest.mark.spawns("shell: scripts/se_hook.sh's `shelled` test, bash builtins, finds `gh` as a word in a shell "
+@pytest.mark.spawns("contract: shell, scripts/se_hook.sh's `shelled` test, bash builtins, finds `gh` as a word in a shell "
                     "call's command; run only as a process")
 def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, "refuse")
@@ -998,7 +998,7 @@ def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(
 
 
 @pytest_hook
-@pytest.mark.spawns("shell: scripts/se_hook.sh's `filed` test, bash builtins, sends a Write of a project file to "
+@pytest.mark.spawns("contract: shell, scripts/se_hook.sh's `filed` test, bash builtins, sends a Write of a project file to "
                     "the gate only where templates-files says claimed, and the fill's shell call past it; run "
                     "only as a process")
 def test_the_hook_denies_a_write_of_a_claimed_path_and_lets_its_fill_write_it(

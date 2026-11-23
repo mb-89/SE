@@ -23,6 +23,7 @@ import fake_processes as fake_programs  # noqa: E402
 import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import shell_door  # noqa: E402
 import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
 import waiting  # noqa: E402
@@ -115,9 +116,19 @@ def process_backend(item: pytest.Item) -> process_door.Backend:
     return process_door.RealProcesses() if spawn_guard.allowed(item) else fake_programs.FakeProcesses()
 
 
+def shell_backend(item: pytest.Item) -> shell_door.Backend:
+    """What the shell door (scripts/shell_door.py) runs for `item`: the real shell for the shell
+    door's contract (a `contract: shell` mark, scripts/spawn_guard.py `shell_allowed`), else the
+    fake (tests/fake_processes.py), which answers by the test's handlers (the `fake_shell` fixture)."""
+    if spawn_guard.shell_allowed(item):
+        return shell_door.RealShell()
+    return fake_programs.FakeProcesses(scripts=False, hooks=False)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
     with git_door.use(door_backend(item)), process_door.use(process_backend(item)), \
+            shell_door.use(shell_backend(item)), \
             network_guard.running(item.nodeid), pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
@@ -202,6 +213,19 @@ def fake_processes() -> fake_programs.FakeProcesses:
     if not isinstance(backend, fake_programs.FakeProcesses):
         pytest.fail("fake_processes: this test runs the real programs (a spawns mark, or the spawn baseline); "
                     "drop the mark or its baseline entry to take the fake", pytrace=False)
+    return backend
+
+
+@pytest.fixture
+def fake_shell() -> fake_programs.FakeProcesses:
+    """The shell door's fake of this test (tests/fake_processes.py), for its handlers: each shell
+    the code under test starts (`sh RUNME.sh`, a command line) answered by `fake_shell.on(...)`; a
+    shell no handler answers fails the test, naming it. The shell door's contract (`contract:
+    shell`) runs the real shell and cannot take it."""
+    backend = shell_door.BACKEND
+    if not isinstance(backend, fake_programs.FakeProcesses):
+        pytest.fail("fake_shell: this test is the shell door's contract (a `contract: shell` mark) and runs the "
+                    "real shell; drop the mark to take the fake", pytrace=False)
     return backend
 
 

@@ -35,7 +35,7 @@ EVENT = '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}'
 # What runs as a process here, and why: se_hook.sh is bash, and every test below proves its own
 # logic, so each runs it (as the host does) against the fake programs it execs; one is its entry.
 def shell(logic: str) -> pytest.MarkDecorator:
-    return pytest.mark.spawns(f"shell: scripts/se_hook.sh's {logic} is bash, run only as a process")
+    return pytest.mark.spawns(f"contract: shell, scripts/se_hook.sh's {logic} is bash, run only as a process")
 
 
 KERN = shell("call of the kern bootstrap.sh named, and its fail-open, against a fake kern it execs")
@@ -46,7 +46,7 @@ LATE = shell("late-checkout start, claimed and detached, against a fake bootstra
 CORE = shell("SE_HOOK_CORE switch")
 GATE = shell("file-gate filter (templates-files, file tools in the project), against a fake uv")
 BEAT = shell("claim beat (its due line and claim, a detached work_tickets.py beat), against a fake uv")
-PLUGIN = pytest.mark.spawns("shell: .github/plugin/hooks.json's bash and PowerShell commands, which pick "
+PLUGIN = pytest.mark.spawns("contract: shell, .github/plugin/hooks.json's bash and PowerShell commands, which pick "
                             "PLUGIN_ROOT's script, run only as a process in the host's shell")
 
 
@@ -90,7 +90,7 @@ def install(home: Path, project: Path) -> Path:
     return binary
 
 
-@pytest.mark.spawns("entry: scripts/se_hook.sh")
+@pytest.mark.spawns("contract: shell, entry: scripts/se_hook.sh")
 def test_an_event_goes_to_the_pinned_kern_for_the_project_with_the_hosts_json(machine):
     home, project = machine
     install(home, project)

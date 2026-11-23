@@ -7,7 +7,8 @@ against the fake `tests/fake_processes.py`; every other test hands the door that
 `fake_processes` fixture of tests/conftest.py), which answers each program in-process: a script
 of SE through its `main(argv)`, `gh` from the test's answers, a project's suite or build command
 from a function the test gives. So the spawn guard (scripts/spawn_guard.py) counts no process
-for them. git has its own door, scripts/git_door.py.
+for them. git has its own door, scripts/git_door.py, and a shell its own, scripts/shell_door.py:
+`run` refuses a command that starts a shell (`shell_door.is_shell`), naming that door.
 
 The door adds nothing to what the program is asked: `run` takes `subprocess.run`'s arguments and
 answers its `CompletedProcess`, each caller keeping its own error type and message.
@@ -19,6 +20,8 @@ import subprocess
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Protocol
+
+import shell_door
 
 
 class Backend(Protocol):
@@ -49,5 +52,8 @@ def use(backend: Backend) -> Iterator[Backend]:
 
 
 def run(argv: Sequence[str] | str, **options: Any) -> subprocess.CompletedProcess:
-    """Run `argv` as `subprocess.run(argv, **options)` would, through the door's backend."""
+    """Run `argv` as `subprocess.run(argv, **options)` would, through the door's backend; a shell
+    belongs to the shell door and is refused."""
+    if shell_door.is_shell(argv, bool(options.get("shell"))):
+        raise ValueError(f"process_door: {argv!r} starts a shell; run it through scripts/shell_door.py")
     return BACKEND.run(argv if isinstance(argv, str) else [str(word) for word in argv], options)

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import process_door
 import rule_book
+import shell_door
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs.md"
@@ -248,7 +249,7 @@ def runme(vault: Path, folder: Path) -> int:
     on with the copy's folder named as ``folder``; no timeout. 1 where it fails, else 0."""
     if not (vault / "RUNME.sh").is_file():
         return 0
-    result = process_door.run(["sh", "RUNME.sh", "--help"], cwd=vault, stdout=subprocess.DEVNULL,
+    result = shell_door.run(["sh", "RUNME.sh", "--help"], cwd=vault, stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE, text=True, env=child_environment())
     if result.stderr:
         print(result.stderr.replace(str(vault), str(folder)), end="", file=sys.stderr)

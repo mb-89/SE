@@ -65,9 +65,15 @@
   - Every program but git starts through `scripts/process_door.py`; a test's code reaches the
     fake, `tests/fake_processes.py`, which answers SE's scripts and hooks in-process and `gh` or a
     suite command by the test's handlers (`fake_processes` fixture).
+  - The shell is a door, like git, gh and the network; a test never starts a shell. Every shell
+    starts through `scripts/shell_door.py`, which the process door refuses to stand in for; a
+    test's code reaches its fake (`fake_shell` fixture). Only the shell door's contract,
+    `tests/test_shell_door.py` and the tests of SE's shell programs marked `contract: shell`,
+    starts a real one.
   - The spawn guard, `scripts/spawn_guard.py`, fails a test that starts a process unmarked, naming
     each call; `@pytest.mark.spawns("<reason>")` marks a door's contract (`contract: <door>`), a
-    script's one entry-point test (`entry: <script>`) or a justified start, such as shell logic.
+    script's one entry-point test (`entry: <script>`) or a justified start, such as a tool; a shell
+    start passes only in the shell door's contract.
   - `tests/spawn-baseline.yaml` holds the tests not converted yet and only shrinks:
     `uv run pytest -q --spawn-baseline=write` drops each entry that ran and started nothing.
 - File order: `tests/file-seconds.json` holds CI's seconds per test file, as CI's runner runs the

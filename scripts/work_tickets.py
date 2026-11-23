@@ -32,6 +32,7 @@ from xml.etree import ElementTree
 
 import git_door
 import process_door
+import shell_door
 import se_home
 
 STATES = ("todo", "held", "done")
@@ -6286,7 +6287,7 @@ def pull_request_report(
 
 
 def run_project_command(root: Path, command: str, description: str) -> str:
-    result = process_door.run(
+    result = shell_door.run(
         command, cwd=root, shell=True, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=False,
     )

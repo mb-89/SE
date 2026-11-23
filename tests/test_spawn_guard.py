@@ -105,6 +105,61 @@ def test_each_kind_of_start_is_counted_and_named(pytester: pytest.Pytester, no_s
     assert f"{shown} (test_planted.py:6)" in result.stdout.str(), result.stdout.str()
 
 
+SHELL_TEST = """\
+import os
+import subprocess
+
+import pytest
+
+@pytest.mark.spawns("{reason}")
+def test_runs_a_shell(tmp_path):
+    for start in (lambda: subprocess.run(["bash", "-c", "true"]), lambda: os.system("make docs")):
+        try:
+            start()
+        except FileNotFoundError:
+            pass
+"""
+
+
+def test_a_shell_is_refused_in_a_test_marked_for_another_reason_naming_each_call(pytester: pytest.Pytester,
+                                                                               no_starts) -> None:
+    pytester.makepyfile(test_planted=SHELL_TEST.format(reason="entry: scripts/x.py"))
+    result = run(pytester)
+    result.assert_outcomes(failed=1)
+    output = result.stdout.str()
+    assert "test_planted.py::test_runs_a_shell started 2 shell(s) in its call, and only the shell door's contract" \
+        in output, output
+    assert "bash -c true (test_planted.py:8" in output and "shell: make docs (test_planted.py:8" in output, output
+    assert "scripts/shell_door.py" in output and "contract: shell, <what it proves>" in output, output
+    assert "2 refused in 1 tests; 2 shells" in output, output
+
+
+def test_a_listed_test_may_not_start_a_shell(pytester: pytest.Pytester, no_starts) -> None:
+    pytester.makepyfile(test_planted=SHELL_TEST.replace('@pytest.mark.spawns("{reason}")\n', ""))
+    path = pytester.path / spawn_guard.DEFAULT_BASELINE
+    path.parent.mkdir()
+    spawn_guard.write_baseline(path, {"test_planted.py::test_runs_a_shell": 2})
+    result = run(pytester)
+    result.assert_outcomes(failed=1)
+    assert "started 2 shell(s) in its call" in result.stdout.str()
+
+
+def test_the_shell_doors_contract_starts_a_shell_and_the_total_counts_it(pytester: pytest.Pytester,
+                                                                        no_starts) -> None:
+    pytester.makepyfile(test_planted=SHELL_TEST.format(reason="contract: shell, x.sh's logic"))
+    result = run(pytester)
+    result.assert_outcomes(passed=1)
+    assert "spawns: 2 processes started by 1 of 1 tests; 2 in marked tests, 0 in baseline tests, 0 refused in 0 " \
+           "tests; 2 shells" in result.stdout.str()
+
+
+@pytest.mark.parametrize("reason, contract", [("contract: shell", True), ("contract: shell, x.sh", True),
+                                              ("contract: shell; x", True), ("contract: shells", False),
+                                              ("entry: scripts/se_hook.sh", False), ("contract: git", False)])
+def test_only_the_shell_contract_reason_lets_a_test_start_a_shell(reason: str, contract: bool) -> None:
+    assert spawn_guard.shell_contract(reason) is contract
+
+
 def test_asyncio_subprocesses_are_counted(pytester: pytest.Pytester, no_starts) -> None:
     pytester.makepyfile(test_planted="import asyncio\n\ndef test_starts(tmp_path):\n    async def start():\n"
                                      "        try:\n            await asyncio.create_subprocess_exec(str(tmp_path / 'git'), 'gc')\n"
@@ -210,11 +265,12 @@ def test_a_malformed_baseline_line_is_refused_by_its_line(tmp_path: Path) -> Non
 
 def test_the_controller_adds_up_its_workers_counts() -> None:
     guard = spawn_guard.SpawnGuard()
-    for nodeid, value in [("a::t1", "2:marked"), ("a::t2", "3:listed"), ("a::t3", "1:"), ("a::t4", "0:")]:
+    for nodeid, value in [("a::t1", "2:marked:2"), ("a::t2", "3:listed:0"), ("a::t3", "1::1"), ("a::t4", "0::0")]:
         report = pytest.TestReport(nodeid, ("a", 0, nodeid), {}, "passed", None, "teardown",
                                    user_properties=[(spawn_guard.PROPERTY, value)])
         guard.pytest_runtest_logreport(report)
-    assert (sum(guard.ran.values()), guard.marked, guard.listed, guard.refused) == (6, 2, 3, ["a::t3"])
+    assert (sum(guard.ran.values()), guard.marked, guard.listed, guard.refused, guard.shells) == \
+        (6, 2, 3, ["a::t3"], 3)
 
 
 @pytest.mark.parametrize("argv, shown", [
