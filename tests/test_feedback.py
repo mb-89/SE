@@ -293,11 +293,11 @@ def test_each_interactive_command_shows_its_first_line_before_its_first_door_cal
 
 
 SILENT_DOOR = '''\
-import subprocess, sys
+import shutil, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import feedback
 with feedback.watched("work_tickets.py silent"):
-    subprocess.run(["gh", "issue", "list"], capture_output=True, check=False)
+    subprocess.run([shutil.which("gh") or "gh", "issue", "list"], capture_output=True, check=False)
     print("listed")
 '''
 
