@@ -686,15 +686,34 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
     return lines
 
 
+#: SE's upgrade guide, in SE's tree: one section per SE major, headed `SE <major>`, whose steps
+#: bring a checkout and its projects across that major.
+UPGRADE_GUIDE = "docs/upgrading.md"
+
+
+def upgrade_sections(in_use: int, newest: int) -> str:
+    """The sections of the upgrade guide that lead from major `in_use` to major `newest`."""
+    first = in_use + 1
+    if first >= newest:
+        return f"then follow SE's {UPGRADE_GUIDE}, section \"SE {newest}\""
+    return f"then follow SE's {UPGRADE_GUIDE}, sections \"SE {first}\" to \"SE {newest}\", in order"
+
+
 def take_outside(state: State, root: Path | None, se_root: Path) -> str:
     """The remedy for a version outside the range: the pin to change and where, and the command
-    that moves to it."""
+    that moves to it; for SE, installed or pinned as the component `se`, also the sections of the
+    upgrade guide between its major and the newer one."""
     item, outside = state.item, state.outside
     if item.kind == "se":
-        return f"to take it, install SE {_v(outside)} again as README \"Install\" says"
+        return (f"to take it, install SE {_v(outside)} again as README \"Install\" says, "
+                + upgrade_sections(item.version[0], outside[0]))
     where = (root / se_modules.MANIFEST).as_posix() if root else se_modules.MANIFEST
-    return (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [components.{item.name}] of {where}, "
-            f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
+    remedy = (f"to take it, set version = \"^{outside[0]}.{outside[1]}\" in [components.{item.name}] of {where}, "
+              f"then run: uv run python {se_root.as_posix()}/scripts/se_modules.py update {item.name}")
+    bounds = item.bounds() if item.name == "se" else None
+    if bounds is None:
+        return remedy
+    return f"{remedy}, {upgrade_sections((item.version or bounds[0])[0], outside[0])}"
 
 
 def _range(item: Item) -> str:
