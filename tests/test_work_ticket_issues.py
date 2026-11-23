@@ -1,10 +1,12 @@
 """work_tickets.py reads work issues and pull requests, and writes pull requests whose descriptions
 carry the field report, through gh (mocked here)."""
+import errno
 import importlib.util
 import io
 import json
 import os
 import re
+import runpy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
@@ -15,7 +17,9 @@ from xml.etree import ElementTree
 import git_door
 import pytest
 import fake_git
+import fake_processes as fake_programs
 import interfaces
+import process_door
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -27,8 +31,51 @@ TESTED_MAIN = work_tickets.tested_main
 REAL_GITHUB = work_tickets.GitHub
 REAL_HAND_OFF = work_tickets.hand_off
 
-# Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py.
-pytestmark = pytest.mark.usefixtures("fake_git_door")
+# Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py,
+# and the scripts a test plants for a project's commands run in this process (`planted_scripts`).
+pytestmark = pytest.mark.usefixtures("fake_git_door", "planted_scripts")
+
+
+def script_path(invocation: fake_programs.Invocation) -> Path | None:
+    """The Python script `invocation` runs (`python suite.py`), from the call's working directory."""
+    script = invocation.script
+    if script is None or not fake_programs.python(invocation.words[0]):
+        return None
+    return script if script.is_absolute() else (invocation.cwd or Path.cwd()) / script
+
+
+def planted(invocation: fake_programs.Invocation) -> bool:
+    """Whether the door is asked to run a Python script a test planted (`python suite.py` in the
+    checkout, se.toml's command), not one of SE's scripts."""
+    path = script_path(invocation)
+    return path is not None and path.resolve().parent != fake_programs.SCRIPTS.resolve()
+
+
+def run_planted(invocation: fake_programs.Invocation) -> fake_programs.Answer:
+    """The planted script run as `python <script>` would run it, in this process: its working
+    directory, environment, arguments and output the call's (tests/fake_processes.py `run_main`)."""
+    path = script_path(invocation)
+
+    def main(arguments: list[str]) -> None:
+        runpy.run_path(str(path), run_name="__main__")
+
+    return fake_programs.run_main(main, invocation, path.name)
+
+
+def missing_program(invocation: fake_programs.Invocation) -> None:
+    """A program that is not installed, refused as the operating system refuses to start it."""
+    name = invocation.words[0]
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+
+
+@pytest.fixture
+def planted_scripts() -> None:
+    """The scripts a test plants for a project's suite, its setup and the suites beside it (se.toml
+    `[tests]`), answered in this process by the process door's fake; a test that runs the real
+    programs (a spawns mark) runs them as processes."""
+    backend = process_door.BACKEND
+    if isinstance(backend, fake_programs.FakeProcesses):
+        backend.on(planted, run_planted)
 
 
 def git_run(root: Path | None, *arguments: str, env: dict | None = None,
@@ -5377,6 +5424,8 @@ def test_suite_refuses_a_tier_setting_it_cannot_load_before_running(
     assert refusal in captured.err and "Suite time:" not in captured.out
 
 
+@pytest.mark.spawns("contract: se's conftest writes the JUnit report `suite` reads, workers and setup "
+                    "times among it, only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(worktree, monkeypatch, capsys):
     """se's conftest writes the JUnit report `suite` reads (README "Test budget")."""
     root = Path(__file__).resolve().parents[1]
@@ -5437,6 +5486,8 @@ def test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before(work
     assert kept.err == without.err
 
 
+@pytest.mark.spawns("contract: se's conftest writes the host's cpu and each test's start into se.xml "
+                    "only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypatch, capsys, tmp_path):
     """se's conftest writes the host's cpu and each test's start into se.xml (README "Test budget")."""
     root = Path(__file__).resolve().parents[1]
@@ -5600,7 +5651,9 @@ def test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone(
         assert "CI's check, the reference, refuses it there" in error
 
 
-def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys):
+def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys,
+                                                                 fake_processes):
+    fake_processes.on("no-such-go", missing_program)
     beside_suite(worktree, monkeypatch, [5.0, 0.0])
     config = (worktree / "se.toml").read_text(encoding="utf-8")
     (worktree / "se.toml").write_text(config.replace(json.dumps([sys.executable, "kern.py"]),
