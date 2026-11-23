@@ -11,7 +11,9 @@ routes there, the plugin's as much as the checkout's own (`serves`).
 - **Declared:** a script that runs components names them in its `COMPONENTS` (each a `Group`) and
   its read-only commands in `INTERACTIVE_COMMANDS`, and builds its parser with `make_parser`; it
   names those that change nothing, each with its MCP description (when an agent uses it), in
-  `READ_ONLY_COMMANDS`, which kern's MCP door offers;
+  `READ_ONLY_COMMANDS`, which kern's MCP door offers; those that write only through requests, each
+  with its MCP description, in `WRITING_COMMANDS`, and the request ports they ask in `REQUESTS`
+  (`declaration` writes `writes = true` and the ports; the door offers them as `<instance>_write`);
   `SCRIPTS` lists those scripts. `declared` reads each group's commands, their usage and help from
   that argparse parser (a parser without subcommands is one command, the script itself, `""` in its
   group); `components` merges a group two scripts name into one component (render: timeline.py and
@@ -38,7 +40,8 @@ routes there, the plugin's as much as the checkout's own (`serves`).
 - **Streamed:** a batch command its script names in `STREAMED_COMMANDS` (`integrate`) runs as one
   call through kern where kern's GitHub relay serves the checkout: its progress lines print as they
   come, the call waits as long as kern says anything (`CALL_IDLE`), and each GitHub step it needs
-  is one `github.step` request (`Stepped`). A call kern refuses before it says anything runs
+  is one `github.step` request (`Stepped`). A writing command runs as `Stepped` too, and asks its
+  request ports through `requests`. A call kern refuses before it says anything runs
   directly, the file-based hand-off, and says that it fell back (`fell_back`); one that fails on
   the way is reported, never run twice.
 - **Placed:** `wiring.toml` places each component with `se_components.py run <name>`, which puts
@@ -134,6 +137,9 @@ class Declared:
     #: It changes nothing, and this is when an agent uses it: kern's MCP door offers it. Empty
     #: for a command not declared read-only.
     mcp: str = ""
+    #: It writes only through its requests, and `mcp` is when an agent uses it: kern's MCP door
+    #: offers it in the instance's writing tool (`WRITING_COMMANDS`).
+    writes: bool = False
 
 
 def summary(help_text: str) -> str:
@@ -152,10 +158,12 @@ class Group(NamedTuple):
 
 
 def declaration(name: str, help_text: str, group: str, commands: Iterable[Declared],
-                generator: str, source: str = "scripts/work_tickets.py", steps: bool = False) -> str:
+                generator: str, source: str = "scripts/work_tickets.py", steps: bool = False,
+                requests: Mapping[str, tuple[str, str, str]] | None = None) -> str:
     """The text of the component.toml of one command group, as `generator` writes it from
     `source`, its marker first (scripts/generated.py); with `steps`, the request port its streamed
-    commands ask GitHub steps on."""
+    commands ask GitHub steps on; with `requests`, each further request port by its name, as its
+    type, answer and help (`REQUESTS`)."""
     q = lambda value: json.dumps(value, ensure_ascii=False)  # a TOML basic string  # noqa: E731
     lines = [script("generated").line(generator, source, "hash"),
              f"name = {q(name)}", "contract = 1", f"help = {q(help_text)}"]
@@ -164,11 +172,14 @@ def declaration(name: str, help_text: str, group: str, commands: Iterable[Declar
                   f"summary = {q(summary(c.help))}", f"group = {q(group)}", f"help = {q(c.help)}",
                   f"class = {q('interactive' if c.interactive else 'batch')}"]
         if c.mcp:
-            lines += ["read-only = true", f"mcp = {q(c.mcp)}"]
+            lines += ["writes = true" if c.writes else "read-only = true", f"mcp = {q(c.mcp)}"]
     if steps:
         lines += ["", f"[requests.{STEP_PORT}]", f"type = {q(STEP_SHAPE)}",
                   f"answer = {q(STEP_ANSWER_SHAPE)}",
                   f"help = {q(STEP_HELP)}"]
+    for port, (shape, answer, help_) in (requests or {}).items():
+        lines += ["", f"[requests.{port}]", f"type = {q(shape)}", f"answer = {q(answer)}",
+                  f"help = {q(help_)}"]
     return "\n".join(lines) + "\n"
 
 
@@ -198,13 +209,14 @@ def usage(prog: str, parser: argparse.ArgumentParser, width: int = REFERENCE_WID
 
 
 def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
-             interactive: Iterable[str] = (), read_only: Mapping[str, str] | None = None
-             ) -> dict[str, tuple[Group, list[Declared]]]:
+             interactive: Iterable[str] = (), read_only: Mapping[str, str] | None = None,
+             writing: Mapping[str, str] | None = None) -> dict[str, tuple[Group, list[Declared]]]:
     """Each group with its commands by the group's name, read from the script's argparse parser:
     every command the parser runs belongs to exactly one group. A parser without subcommands is one
     command, the script itself, which a group names as `""`, its help the parser's description. A
     command named in `interactive` only reads (class interactive); every other is batch. A command
-    named in `read_only` changes nothing, and maps to its MCP description, which it needs."""
+    named in `read_only` changes nothing, and maps to its MCP description, which it needs; one
+    named in `writing` writes only through its requests, and maps to its MCP description too."""
     script = parser.prog
     found = {" ".join(words): (words, help_text, sub) for words, help_text, sub in
              leaves(parser) or [((), parser.description or "", parser)]}
@@ -214,34 +226,44 @@ def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],
         missing, extra = sorted(set(found) - set(grouped)), sorted(set(grouped) - set(found))
         raise ValueError(f"{script}: its components' commands differ from its parser: missing "
                          f"{missing}, unknown {extra}")
-    interactive, read_only = frozenset(interactive), dict(read_only or {})
-    unknown = sorted(set(read_only) - set(found))
-    undescribed = sorted(n for n, text in read_only.items() if not str(text).strip())
-    if unknown or undescribed:
-        raise ValueError(f"{script}: READ_ONLY_COMMANDS names commands its parser lacks {unknown}, "
-                         f"and commands without an MCP description {undescribed}: say when an "
-                         "agent uses each")
+    interactive, read_only, writing = frozenset(interactive), dict(read_only or {}), dict(writing or {})
+    for what, named in (("READ_ONLY_COMMANDS", read_only), ("WRITING_COMMANDS", writing)):
+        unknown = sorted(set(named) - set(found))
+        undescribed = sorted(n for n, text in named.items() if not str(text).strip())
+        if unknown or undescribed:
+            raise ValueError(f"{script}: {what} names commands its parser lacks {unknown}, "
+                             f"and commands without an MCP description {undescribed}: say when an "
+                             "agent uses each")
+    both = sorted(set(read_only) & set(writing))
+    if both:
+        raise ValueError(f"{script}: READ_ONLY_COMMANDS and WRITING_COMMANDS both name {both}: a "
+                         "command only reads or writes through its requests")
     return {group.name: (group, [Declared(" ".join((script, *found[n][0])),
                                           usage(" ".join((script, *found[n][0])), found[n][2]),
-                                          found[n][1], n in interactive, read_only.get(n, ""))
+                                          found[n][1], n in interactive,
+                                          read_only.get(n, "") or writing.get(n, ""),
+                                          n in writing)
                                  for n in group.commands])
             for group in groups}
 
 
 def declarations(parser: argparse.ArgumentParser, groups: Iterable[Group],
                  interactive: Iterable[str] = (), source: str | None = None,
-                 streamed: Iterable[str] = (), read_only: Mapping[str, str] | None = None
-                 ) -> dict[str, str]:
+                 streamed: Iterable[str] = (), read_only: Mapping[str, str] | None = None,
+                 writing: Mapping[str, str] | None = None,
+                 requests: Mapping[str, tuple[str, str, str]] | None = None) -> dict[str, str]:
     """Each group's component.toml text by its name, read from the script's argparse parser
     (`declared`). `source` names what the marker says the declaration is generated from, by
     default the script. A group holding a command named in `streamed` declares the
-    request port `step` (`Stepped`)."""
-    streamed = frozenset(streamed)
+    request port `step` (`Stepped`); one holding a command named in `writing` declares the
+    `requests` ports it writes through."""
+    streamed, writing = frozenset(streamed), dict(writing or {})
     return {name: declaration(name, group.help, group.title, commands, GENERATOR,
                               source or f"scripts/{parser.prog}",
-                              steps=bool(streamed & set(group.commands)))
+                              steps=bool(streamed & set(group.commands)),
+                              requests=requests if set(writing) & set(group.commands) else None)
             for name, (group, commands) in declared(parser, groups, interactive,
-                                                    read_only).items()}
+                                                    read_only, writing).items()}
 
 
 #: Held while a script loads, so a call beside it in another thread never reads it half loaded.
@@ -281,13 +303,15 @@ def components(root: Path) -> dict[Path, str]:
     its title and help included."""
     merged: dict[str, tuple[Group, list[Declared], list[str]]] = {}
     stepped: set[str] = set()
+    requested: dict[str, dict[str, tuple[str, str, str]]] = {}
     for name in SCRIPTS:
         module = script(name)
         parser = module.make_parser()
         source = f"scripts/{parser.prog}"
         for group_name, (group, commands) in declared(
                 parser, module.COMPONENTS, module.INTERACTIVE_COMMANDS,
-                getattr(module, "READ_ONLY_COMMANDS", None)).items():
+                getattr(module, "READ_ONLY_COMMANDS", None),
+                getattr(module, "WRITING_COMMANDS", None)).items():
             if group_name not in merged:
                 merged[group_name] = (group, [], [])
             first, into, sources = merged[group_name]
@@ -298,9 +322,12 @@ def components(root: Path) -> dict[Path, str]:
             sources.append(source)
             if set(getattr(module, "STREAMED_COMMANDS", ())) & set(group.commands):
                 stepped.add(group_name)
+            if set(getattr(module, "WRITING_COMMANDS", ())) & set(group.commands):
+                requested.setdefault(group_name, {}).update(getattr(module, "REQUESTS", {}))
     return {root / COMPONENTS / group_name / "component.toml":
             declaration(group_name, group.help, group.title, commands, GENERATOR,
-                        " and ".join(sources), steps=group_name in stepped)
+                        " and ".join(sources), steps=group_name in stepped,
+                        requests=requested.get(group_name))
             for group_name, (group, commands, sources) in merged.items()}
 
 
@@ -667,7 +694,8 @@ def attach(name: str, scripts: str | Iterable[str], folder: Path):
             raise kern.KernError(f"component {name} declares {command!r}, which "
                                  f"{' nor '.join(s + '.py' for s in scripts)} does not run")
         module = importlib.import_module(first.removesuffix(".py"))
-        streamed = " ".join(words) in getattr(module, "STREAMED_COMMANDS", frozenset())
+        streamed = " ".join(words) in {*getattr(module, "STREAMED_COMMANDS", ()),
+                                       *getattr(module, "WRITING_COMMANDS", ())}
         comp.command(command)((stepped if streamed else answer)(module, words))
     return comp
 
@@ -830,10 +858,33 @@ def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) 
     return 0
 
 
+#: The request of the call this thread runs in the component's process, where Stepped set it:
+#: ask(port, value) asks the component's request port and answers what the verb answered. None
+#: outside such a call. It is the thread's, as calls run side by side in one process.
+_asking = threading.local()
+
+
+def requests() -> Callable[[str, object], object] | None:
+    """The request of the call this thread runs through kern (`Stepped`), or None: a writing
+    command (`WRITING_COMMANDS`) asks its request ports through it, and run directly it has none."""
+    return getattr(_asking, "ask", None)
+
+
+@contextlib.contextmanager
+def requesting(ask: Callable[[str, object], object]):
+    """Run a command in this thread with `ask` as its request (`requests`)."""
+    before, _asking.ask = requests(), ask
+    try:
+        yield
+    finally:
+        _asking.ask = before
+
+
 class Stepped:
-    """A streamed command in the component's process: the script's main runs in a thread of its
-    own, with se_relay's step set, and each GitHub step it asks becomes one request on the
-    command's `step` port, which the wiring binds to the github component's verb step; the
+    """A streamed or writing command in the component's process: the script's main runs in a
+    thread of its own, with se_relay's step and this module's request set (`requests`). Each
+    GitHub step it asks becomes one request on the command's `step` port, which the wiring binds
+    to the github component's verb step, and each request it asks one on the port it names; the
     answer comes back through the request's continuation (kern's Requests and Then). Its stderr
     lines are said as they come. Calls run side by side, each its own thread and capture; while
     one waits for a step's answer it lets go of the working directory (`Directory.released`).
@@ -857,27 +908,33 @@ class Stepped:
 
     def step(self, tool: str, input_: dict, note: str, wait: str) -> object:
         """Ask one GitHub step from the command's thread; the tool's answer."""
-        import queue
-
-        if self.abandon.event.is_set():
-            raise RuntimeError(f"the call through kern stopped: kern gave it up: {self.abandon.reason}")
         ask = {"tool": tool, "input": input_, **({"note": note} if note else {}),
                **({"wait": wait} if wait else {})}
-        self.out.put(("ask", ask))
+        value = self.ask(STEP_PORT, ask, f"the step {tool}")
+        return value.get("data") if isinstance(value, dict) else value
+
+    def ask(self, port: str, value: object, what: str = "") -> object:
+        """Ask the component's request port from the command's thread; the verb's answer."""
+        import queue
+
+        what = what or f"the request on {port}"
+        if self.abandon.event.is_set():
+            raise RuntimeError(f"the call through kern stopped: kern gave it up: {self.abandon.reason}")
+        self.out.put(("ask", (port, value)))
         try:
             with DIRECTORY.released():
-                kind, value = self.answers.get(timeout=STEP_ANSWER_WAIT)
+                kind, answer = self.answers.get(timeout=STEP_ANSWER_WAIT)
         except queue.Empty:
-            kind, value = "stop", f"no answer to the step {tool} within {STEP_ANSWER_WAIT:.0f} s"
+            kind, answer = "stop", f"no answer to {what} within {STEP_ANSWER_WAIT:.0f} s"
         except GivenUp:
-            kind, value = "stop", f"kern gave it up: {self.abandon.reason}"
+            kind, answer = "stop", f"kern gave it up: {self.abandon.reason}"
         if kind == "stop":
-            raise RuntimeError(f"the call through kern stopped: {value}")
-        return value.get("data") if isinstance(value, dict) else value
+            raise RuntimeError(f"the call through kern stopped: {answer}")
+        return answer
 
     def _run(self, main, argv, cwd) -> None:
         try:
-            with relay_module().stepping(self.step):
+            with relay_module().stepping(self.step), requesting(self.ask):
                 done = run_main(main, argv, cwd, self.say, self.abandon)
         except BaseException as error:  # noqa: BLE001 - the command's thread reports, never dies
             done = (1, "", f"{error}\n")
@@ -889,10 +946,12 @@ class Stepped:
 
         kind, value = self.out.get()
         if kind == "ask":
+            port, asked = value
+
             def then(answers: list) -> object:
                 self.answers.put(("answer", answers[0] if answers else None))
                 return self.result()
-            return self.comp.result(requests=[self.comp.ask(STEP_PORT, value)], then=then)
+            return self.comp.result(requests=[self.comp.ask(port, asked)], then=then)
         code, out, err = value
         if code:
             raise kern.KernError(f"exit code {code}\n" + json.dumps({"stdout": out, "stderr": err}))
