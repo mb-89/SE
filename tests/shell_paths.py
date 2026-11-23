@@ -41,6 +41,16 @@ def sh(path: Path) -> str:
 LATER = ".later"
 
 
+def _search_path() -> list[str]:
+    """The folders `link_tools` looks in: PATH's, on Windows after the folder of Git's MSYS bash,
+    which holds the shell tools (cat, dirname, ...) that PATH, holding Git's launchers, lacks, and
+    whose find and tar are the ones bash expects, not System32's."""
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    if WINDOWS and BASH is not None:
+        entries.insert(0, str(Path(BASH).parent))
+    return entries
+
+
 def _ranks(folder: Path) -> list[Path]:
     """`folder`'s rank folders, `.later/1`, `.later/2`, ..., in order."""
     later = folder / LATER
@@ -63,7 +73,7 @@ def link_tools(folder: Path, tools) -> Path:
     for tool in tools:
         seen: list[str] = []
         files: list[str] = []
-        for entry in os.environ.get("PATH", "").split(os.pathsep):
+        for entry in _search_path():
             if not entry:
                 continue
             found = shutil.which(tool, path=entry)
