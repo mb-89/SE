@@ -325,8 +325,13 @@ def run_step(name: str, **env: str) -> subprocess.CompletedProcess[str]:
 REUSED_STEP = "The suite, the Go checks and kern-platforms of an earlier run of this tree"
 PLATFORM_STEP = "SE's start, hook and setup scripts passed on Windows"
 SOURCE = "https://github.com/alice/project/actions/runs/100"
+# The check job's steps are bash in .github/workflows/check.yml, which runs them as its runner
+# does: shell, run only as a process (the guidance note tests-spawn-no-processes).
+RUNS_A_STEP = pytest.mark.spawns("shell: a step of check.yml's check job is bash, run only as a process, as the "
+                                 "runner runs it")
 
 
+@RUNS_A_STEP
 def test_a_reused_pass_passes_naming_the_run_it_took() -> None:
     result = run_step(REUSED_STEP, SOURCE=SOURCE, RESULT="success", WHY="the run passed")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -339,6 +344,7 @@ def test_a_reused_pass_passes_naming_the_run_it_took() -> None:
     assert platforms.returncode == 0 and "the earlier run's" in platforms.stdout
 
 
+@RUNS_A_STEP
 def test_a_reused_failure_fails_check_naming_the_run_and_the_remedy() -> None:
     result = run_step(REUSED_STEP, SOURCE=SOURCE, RESULT="failure", WHY="the run failed the suite")
     assert result.returncode == 1
@@ -347,6 +353,7 @@ def test_a_reused_failure_fails_check_naming_the_run_and_the_remedy() -> None:
     assert "re-run all jobs of this run, which runs everything" in result.stdout
 
 
+@RUNS_A_STEP
 @pytest.mark.parametrize(("suite", "platforms", "passes"), [
     ("run", "success", True), ("run", "failure", False), ("run", "skipped", False),
     ("trusted", "skipped", True), ("reused", "skipped", True), ("", "skipped", False),
