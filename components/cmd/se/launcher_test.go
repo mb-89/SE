@@ -57,7 +57,7 @@ func TestAnEmptyFolderWithSEInstalledListsSEsToolsThroughTheLauncher(t *testing.
 		return strings.Join(names, " ")
 	}
 	launched := list(exec.Command(bash, filepath.Join(seRoot, "scripts", "se_mcp.sh"), "--root", project))
-	if launched != "github_write greeting guidance integration overhaul status templates tickets" {
+	if launched != "github_write greeting guidance integration overhaul status templates templates_write tickets" {
 		t.Fatalf("through the launcher an empty folder is offered %q, and wants SE's tools", launched)
 	}
 	if bare := list(exec.Command(se, "mcp", "--root", project)); bare != "status" {

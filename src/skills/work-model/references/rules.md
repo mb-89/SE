@@ -85,8 +85,8 @@ Every fact has one owner, and everything else links to it or is generated from i
 - **Prevents:** drift between two copies; a change applied in one place and missed in another.
 - **Implementations:**
   - se: [`AGENTS.md`](../../../../AGENTS.md) ("SPOT everywhere");
-    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) generates both host layouts from
-    `src/`, every pytest run builds them first (`tests/conftest.py`), and
+    [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py) generates both hosts' agents and
+    their shared skills from `src/`, every pytest run builds them first (`tests/conftest.py`), and
     `tests/test_se_plugin.py` checks they match; otherwise by judgment in review.
   - Go line (frozen): `se overhaul read` listed duplicates and near-duplicates.
 - **Related:** des-005, doc-001, gen-005
@@ -131,7 +131,7 @@ behaviour other than what the code does.
 - **Prevents:** prose that describes behaviour the code does not have; a generated file out of date
   with its source; a link to an anchor that no longer exists.
 - **Implementations:**
-  - se: the suite builds the generated layouts before its tests (`tests/conftest.py`), and
+  - se: the suite builds the generated layout before its tests (`tests/conftest.py`), and
     `tests/test_se_plugin.py` checks they match their source; `tests/test_agent_definitions.py`
     (every link and anchor resolves), [this book's check](../../../../scripts/rule_book.py); the
     reviewer, by judgment, for its change.
@@ -179,9 +179,9 @@ The logic lives in one place, and each host adapter is thin and generated from i
 - **Why:** a host is a way in, not a second implementation; logic in an adapter is logic written
   twice.
 - **Without it:** each host behaves a little differently, and fixes reach only one of them.
-- **Prevents:** drift between host layouts; behaviour that exists only on one host.
+- **Prevents:** drift between hosts; behaviour that exists only on one host.
 - **Implementations:**
-  - se: one source in `src/`, generated into the Copilot layout and the Claude Code plugin by
+  - se: one source in `src/`, generated into Claude Code's and Copilot's agents and their shared skills by
     [`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py); the
     [adapter sync contract](../SKILL.md#adapter-sync-contract).
   - Go line (frozen): the Go program owned the logic; the plugin, the CLI and the generated UI were
@@ -513,7 +513,7 @@ owners.
 - **Without it:** a reader finds two descriptions of one thing that disagree.
 - **Prevents:** drift between two copies; prose that restates a rule it does not own.
 - **Implementations:**
-  - se: generated layouts name their source
+  - se: generated files name their source
     ([`<se>/scripts/se_plugin.py`](../../../../scripts/se_plugin.py)); every place that names a rule
     links to it in this book; otherwise by judgment in review.
   - Go line (frozen): manifests regenerated identically, and every command, path and link named in

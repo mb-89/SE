@@ -76,8 +76,10 @@ sign-in before it starts any MCP server.
   `copilot plugin install se@se` installed `se@se` 5.59.0 from the generated
   `.claude-plugin/marketplace.json`. `copilot plugin install <owner>/<repository>` installed it
   too, with a warning that direct installs are deprecated.
-- The install takes the Copilot layout: `copilot skill list --json` gives `catch-up`, `decision`
-  and `work-model` from the plugin's `.github/skills/`. With `.github/plugin/plugin.json` and
+- The install takes the layout the Copilot manifest names: `copilot skill list --json` gave
+  `catch-up`, `decision` and `work-model` from the plugin's `.github/skills/`, then a Copilot copy;
+  the manifest now names `agents/`, the agents Claude Code reads too, and the skills folder Claude Code
+  reads too, `skills/`, which the CLI loads the same way (1.0.112, 23 Nov). With `.github/plugin/plugin.json` and
   `.github/mcp.json` removed, the CLI read `.claude-plugin/plugin.json` and gave no `se` server.
 - `copilot mcp get se --json` in another repository: the plugin's `.github/mcp.json`, not the
   manifest's `mcpServers`, with `"cwd": "${PLUGIN_ROOT}"` and `PLUGIN_ROOT` set in its `env`.
@@ -112,8 +114,12 @@ copilot --agent se --additional-mcp-config "{\"mcpServers\":{\"se\":{\"type\":\"
 - **Why this source.** An `--additional-mcp-config` server outranks a plugin's, as GitHub documents
   and as Copilot CLI 1.0.112 showed on 14 Nov: its `se` replaced the plugin's in `copilot mcp list`
   and `copilot mcp get se`. A signed-in session has not shown it yet.
-- **Why the name `se`.** The worker and the reviewer are strict on `se/*`: their tools list admits
-  the server `se` and no other. The se agent itself has no tools list.
+- **Why the name `se`.** The door's server is `se`, so its tools are `se/*`.
+- **One agent file for both hosts.** The Copilot CLI loads Claude Code's `agents/<name>.md`,
+  ignoring the fields it does not know ([doors](doors/copilot.md)), so Copilot's manifest names
+  `agents/` and SE ships no Copilot copy. No agent has a `tools` list: Claude Code reads the same key
+  as an allow-list, and one shared list would take tools from its agents (the worker's `Agent`,
+  for one).
 - **No user-level `se`.** A server added with `copilot mcp add` does not help while the plugin is
   installed: user config ranks below plugins, and it pins every session to one repository. In
   1.0.112 a user-level `se` stayed in `~/.copilot/mcp-config.json`, but `copilot mcp list` showed
@@ -163,7 +169,12 @@ relative `bash scripts/...` there runs that one, not SE's, so always name SE's b
 ### VS Code
 
 VS Code's own parser takes SE as a Claude-format plugin: it checks `.claude-plugin/plugin.json`
-before `.github/plugin/plugin.json`. So the plugin brings an `se` server there only where `se.toml`
+and never reads `.github/plugin/plugin.json`. It loads the agents from `agents/`, Claude Code's
+files, and the skills from `skills/`. Its Copilot runtime, the Copilot CLI's agent host, loads the
+same plugin through Copilot's manifest, which names the same `agents/`: one file per agent, so each
+agent shows once in every picker. (Until 23 Nov SE also wrote Copilot's own copies to
+`.github/agents/`, and VS Code listed every agent twice.) As VS Code reads Claude Code's
+manifest, the plugin brings an `se` server there only where `se.toml`
 `[plugin] claude_mcp` writes one into that manifest, which is not measured in VS Code, and its
 hooks use `${CLAUDE_PLUGIN_ROOT}`. Always add the user-level door, README's `code --add-mcp` line
 with `${workspaceFolder}` ([The MCP door](../README.md#the-mcp-door)).
@@ -272,10 +283,12 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
    - A draft skill by name: in a scratch copy, set `se.toml` `[plugin] draft_skills = ["<draft>"]`,
      build (`scripts/se_plugin.py`), run `copilot --agent se` there. Expect `/<draft>` to load it
      and no turn to load it unasked; note the result in step 1's record.
-2. **VS Code, SE's checkout.** Open the checkout with no install, trust it ([trust](#remedies)),
+2. **VS Code, SE's checkout.** Open the checkout, install the plugin from it (**Chat: Install
+   Plugin from Source** with the checkout's folder), trust it ([trust](#remedies)),
    add the door with the user-level line of README [The MCP door](../README.md#the-mcp-door)
    (`code --add-mcp ...`), pick the session target Copilot and the agent `se`, say `status`.
-   - Expect the agent list to hold `se`, `integrator`, `reviewer`, `worker`, the greeting once, and
+   - Expect the agent list to hold `se`, `integrator`, `retro`, `reviewer`, `worker`, each once in
+     every picker ([VS Code](#vs-code)), the greeting once, and
      `se/status` answering without an approval asked, as it says `readOnlyHint` (#1122). Then
      remove the user-level line and reload: expect the same from `.github/mcp.json`, read with its
      `mcpServers` key (#1123).
@@ -355,11 +368,13 @@ with `--agent` or its agent list keeps that agent, as does one whose first messa
 ## Cloud agent, optional and untested
 
 The docs disagree on whether Copilot's cloud agent loads plugins; they agree on where it takes its
-MCP servers from and that its runner needs `se` and `uv`. Nothing is generated for it.
+MCP servers from and that its runner needs `se` and `uv`. It reads the repository's own
+`.github/agents/`, and SE ships none there (one agent file, `agents/<name>.md`, serves both hosts),
+so the cloud agent offers no `se` agent.
 
 - **Try it**: on github.com, assign an issue of SE's repository to Copilot, or start a task in its
-  **Agents** tab, and pick `se`. Expect the session to open with SE's greeting, its agents and
-  skills loaded from `.github/` (#1121).
+  **Agents** tab whose first line is `Act as the se agent defined in agents/se.md.` Expect the
+  session to open with SE's greeting (#1121).
 - **The door**: in the repository's **Settings**, Copilot, cloud agent, MCP configuration, paste
   `{"mcpServers": {"se": {"type": "local", "command": "bash", "args": ["scripts/se_mcp.sh",
   "--root", "."], "tools": ["*"]}}}`; an agent file's `mcp-servers` takes the same entry.

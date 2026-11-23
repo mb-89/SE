@@ -63,7 +63,7 @@ None
 ## Requirements
 
 <!-- Numbered, checkable, in the order to do them; commits follow the
-     [worker's procedure](../agents/worker.agent.md#procedure). Keep a package worker-sized:
+     [worker's procedure](../../agents/worker.md#procedure). Keep a package worker-sized:
      one reviewable change, roughly one to five requirements. Split larger work
      (e.g. a scheduler with several commands) into separate issues linked by "Blocked by",
      each owning its part of shared files. Capabilities to remove must be named explicitly with
@@ -85,7 +85,7 @@ None
 ## Acceptance
 
 <!-- Checkable items with the evidence expected (test name, command, measurement). How tests are
-     written and how fast the suite must be are the work model's [test rules](../skills/work-model/SKILL.md#tests);
+     written and how fast the suite must be are the work model's [test rules](../../skills/work-model/SKILL.md#tests);
      point there, never restate them. An item that
      measures something that exists already (the project's own content, a figure, a count) is
      checked against that content and the pinned versions before it is written, so it can be

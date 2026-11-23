@@ -318,8 +318,12 @@ fields.
   the values alone. `--path` without a template selects as `check --path` does, so a new file
   names its template. Another template's document goes to `--out`, else to stdout as it stands.
   A write prints `wrote <path>: <template> <version>`, exit 0.
-- Filing a document as an issue, a comment or a message stays the filing commands' and the
-  tracker's tools': the engine calls no GitHub. A usage error exits 2 and writes nothing.
+- `--repo OWNER/REPO` (with `--number N`, a comment; with `--label`, the issue's labels) files the
+  document instead: the call goes whole to `se_templates.py fill`, the door's tool action, which
+  checks it as above and files it through kern's GitHub component (`_filed`), so the engine
+  itself calls no GitHub. Not with `--path` or `--out`. A message is not filed (kern's door has
+  no tool that sends one). A usage error exits 2 and writes nothing.
+- What kern reads of a template and of its fields is `se_templates.py`'s (`kern_template`).
 """
 
 from __future__ import annotations
@@ -3424,9 +3428,37 @@ def _text_option(options: argparse.Namespace, text: str, path: str, name: str) -
         raise TemplateError(f"{FILL}: cannot read --{name} {file} ({error})") from error
 
 
+def _filed(options: argparse.Namespace) -> int:
+    """`fill --repo`: the call as `se_templates.py fill` takes it, run there, which files through
+    kern's GitHub component after its checks (scripts/se_templates.py `file_document`)."""
+    if options.path is not None or options.out is not None or options.template is None:
+        raise TemplateError(f"{FILL}: --repo files the document of a template it names; give it "
+                            "without --path and --out")
+    prompt = _text_option(options, "prompt", "prompt_file", "prompt-file")
+    given = [options.template, "--repo", options.repo,
+             *(["--number", str(options.number)] if options.number is not None else []),
+             *(word for label in options.label for word in ("--label", label)),
+             *(["--prompt", prompt] if prompt is not None else []),
+             *(["--input", str(options.input)] if options.input is not None else []),
+             *(["--input-text", options.input_text] if options.input_text is not None else []),
+             *(["--fields", str(options.fields)] if options.fields is not None else []),
+             *(["--fields-json", options.fields_json] if options.fields_json is not None else []),
+             *(["--title", options.title] if options.title is not None else []),
+             *(["--templates", str(options.templates)] if options.templates is not None else []),
+             *(["--tree"] if options.tree else []),
+             *(["--worktree", str(options.root)] if options.root is not None else [])]
+    return _sibling("se_templates").main(["fill", *given])
+
+
 def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
     """`fill`: the instructions without fields; else the document checked against the raw input,
-    written to `--path` (a file template), to `--out` or to stdout, or refused, writing nothing."""
+    written to `--path` (a file template), to `--out` or to stdout, or refused, writing nothing.
+    With `--repo` the call is `se_templates.py fill`'s, which files it (`_filed`)."""
+    if options.repo is not None:
+        return _filed(options)
+    if options.number is not None or options.label:
+        raise TemplateError(f"{FILL}: --number and --label file the document: give --repo OWNER/REPO "
+                            "with them")
     if (options.template is None) == (options.path is None) and options.template is None:
         raise TemplateError(f"{FILL}: name a template, or give --path to take the template that claims "
                             "the file")
@@ -3547,6 +3579,12 @@ def main(arguments: list[str] | None = None) -> int:
     filling.add_argument("--title", help="the title, where the template has a title field")
     filling.add_argument("--out", type=Path, help="write the document of a template that claims no "
                          "file here (default: stdout)")
+    filling.add_argument("--repo", metavar="OWNER/REPO", help="file the document there instead, through "
+                         "kern's GitHub component: an issue, or with --number a comment "
+                         "(se_templates.py fill)")
+    filling.add_argument("--number", type=int, help="with --repo: comment on this issue or pull request")
+    filling.add_argument("--label", action="append", default=[],
+                         help="with --repo: a label the filed issue carries; repeatable")
     for command in (checking, drafting, schemas, filling):
         command.add_argument("--path", type=Path,
                              help=f"the file: the template that claims it ({FILE_ACTION})")

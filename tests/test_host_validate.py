@@ -1,4 +1,4 @@
-"""The hosts' validators over the generated layouts (scripts/host_validate.py), on a fake runner:
+"""The hosts' validators over the generated layout (scripts/host_validate.py), on a fake runner:
 each outcome gives its exit code and lines, and nothing in SE runs the command by default."""
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ import host_validate  # noqa: E402
 from host_validate import Answer  # noqa: E402
 
 PLUGIN, MARKETPLACE = ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"
-SKILLS = ("skills/decision", "skills/work-model", ".github/skills/decision")
+SKILLS = ("skills/decision", "skills/work-model")
 
 
 @pytest.fixture
 def layout(tmp_path: Path) -> Path:
-    """A built layout: both manifests and three skill folders."""
+    """A built layout: both manifests and two skill folders."""
     for name in (PLUGIN, MARKETPLACE):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text("{}\n", encoding="utf-8")
@@ -59,9 +59,9 @@ def test_every_validator_that_ran_passed(layout):
     assert code == 0
     assert f"passed Claude Code: claude plugin validate {PLUGIN}" in lines
     assert f"passed Claude Code: claude plugin validate {MARKETPLACE}" in lines
-    assert "passed Agent Skills: skills-ref validate .github/skills/decision" in lines
+    assert "passed Agent Skills: skills-ref validate skills/work-model" in lines
     assert "unchecked GitHub Copilot: Copilot CLI: no validator; checked by hand on the Monday checklist" in lines
-    assert lines[-1] == "host validators: 5 passed, 0 refused, 0 skipped, 1 without a validator"
+    assert lines[-1] == "host validators: 4 passed, 0 refused, 0 skipped, 1 without a validator"
 
 
 def test_the_runner_gets_each_layout_path_after_the_arguments(layout):
@@ -79,7 +79,7 @@ def test_a_refused_layout_prints_the_file_and_the_hosts_message(layout):
     assert code == 1
     at = lines.index(f"refused Claude Code: claude plugin validate {PLUGIN}:")
     assert lines[at + 2] == "      > name: Plugin name cannot contain spaces."
-    assert lines[-1] == "host validators: 4 passed, 1 refused, 0 skipped, 1 without a validator"
+    assert lines[-1] == "host validators: 3 passed, 1 refused, 0 skipped, 1 without a validator"
     # A refusal is never answered away as a skip.
     assert run(layout, FakeRunner({("claude", PLUGIN): Answer(1, message)}), skips_pass=True)[1] == 1
 
@@ -89,7 +89,7 @@ def test_an_absent_tool_is_a_skip_unless_skips_pass(layout):
     lines, code = run(layout, runner)
     assert code == 2
     assert "skipped Agent Skills: skills-ref validate: skills-ref not installed" in lines
-    assert lines[-1] == "host validators: 2 passed, 0 refused, 3 skipped, 1 without a validator"
+    assert lines[-1] == "host validators: 2 passed, 0 refused, 2 skipped, 1 without a validator"
     assert not any(call[:2] == ["skills-ref", "validate"] for call in runner.calls)
     assert run(layout, runner, skips_pass=True)[1] == 0
 
@@ -99,7 +99,7 @@ def test_an_older_version_than_the_pinned_one_is_a_skip_even_with_skips_pass(lay
     lines, code = run(layout, runner, skips_pass=True)
     assert code == 2
     assert "skipped Claude Code: claude plugin validate: claude version 2.0.9 is older than the pinned 2.1.325" in lines
-    assert lines[-1] == "host validators: 3 passed, 0 refused, 2 skipped, 1 without a validator"
+    assert lines[-1] == "host validators: 2 passed, 0 refused, 2 skipped, 1 without a validator"
 
 
 def test_a_newer_version_runs(layout):
@@ -112,7 +112,7 @@ def test_a_time_out_is_a_skip_even_with_skips_pass(layout):
     lines, code = run(layout, runner, skips_pass=True)
     assert code == 2
     assert "skipped Agent Skills: skills-ref validate skills/decision: skills-ref timed out" in lines
-    assert lines[-1] == "host validators: 4 passed, 0 refused, 1 skipped, 1 without a validator"
+    assert lines[-1] == "host validators: 3 passed, 0 refused, 1 skipped, 1 without a validator"
     lines, code = run(layout, FakeRunner({("claude", "--version"): Answer(timed_out=True)}))
     assert code == 2
     assert "skipped Claude Code: claude plugin validate: claude timed out reading its version" in lines
@@ -124,7 +124,7 @@ def test_an_unexpected_exit_code_is_not_a_refusal(layout):
     assert f"skipped Claude Code: claude plugin validate {MARKETPLACE}: claude exited 3" in lines
 
 
-def test_a_tree_without_built_layouts_is_a_skip(tmp_path):
+def test_a_tree_without_a_built_layout_is_a_skip(tmp_path):
     lines, code = run(tmp_path, FakeRunner())
     assert code == 2
     assert lines[-1] == "host validators: 0 passed, 0 refused, 2 skipped, 1 without a validator"
@@ -140,7 +140,7 @@ def test_main_prints_the_report_and_answers_its_code(layout, capsys):
     code = host_validate.main(["--root", str(layout)],
                               runner=FakeRunner({("claude", PLUGIN): Answer(1, "bad")}))
     assert code == 1
-    assert capsys.readouterr().out.splitlines()[-1].startswith("host validators: 4 passed, 1 refused")
+    assert capsys.readouterr().out.splitlines()[-1].startswith("host validators: 3 passed, 1 refused")
 
 
 def test_help_gives_the_switch(capsys):

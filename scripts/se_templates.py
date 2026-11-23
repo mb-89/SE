@@ -3,8 +3,9 @@
 the command component `templates` that kern's MCP door serves as its tool `templates` (README "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
 
-The engine stays free of SE's own scripts; this script joins it to them. Its four door commands
-only read: nothing is filed, written or sent through them, and none calls GitHub or starts a
+The engine stays free of SE's own scripts; this script joins it to them. Of its four door
+commands `list`, `draft` and `check` only read, and `fill` files only through its requests to
+kern's GitHub component (`WRITING_COMMANDS`, `REQUESTS`); none calls GitHub itself or starts a
 model. `gate` is the hook's and not the door's; it writes only its count of refusals and its log.
 
 - `se_templates.py list [--tree]` prints what `templates.py list` prints: every template of SE's with its
@@ -43,10 +44,19 @@ model. `gate` is the hook's and not the door's; it writes only its count of refu
     findings` or `passes` then the document (`templates.fill`): `check`'s findings for the title
     and the rendered text, and the `quote` findings against the raw input (`templates.quoted`); a
     refusal's last line names `se_templates.py fill <template>`.
-  - It writes nothing, as the door's tools only read: the agent writes the file or files the
-    document it answers, through the filing commands or the tracker's tools, which the gate checks.
-    `templates.py fill` writes a file template's file itself. `--templates` reads the templates
-    from that folder.
+  - With `--repo OWNER/REPO` it files what passed instead of printing it (`filing`,
+    `file_document`): an issue, `--label` its labels, or with `--number N` a comment on N, where
+    the template serves that action and kern can render it (`kern_problems`). It writes
+    the template as kern reads it to `<checkout>/.se/templates/<name>.json` (KERN_TEMPLATES) and
+    asks the request port `file-issue` or `file-comment` (FILE_PORTS), which `wiring.toml` binds
+    to the GitHub component's verbs `issue-create` and `issue-comment`, with the template's name
+    and `kern_fields`, never a body; it answers `passes` and `filed <repo>#<n>: <url>`
+    (`commented on ...`). A value kern would write otherwise is refused like a finding. Run
+    directly, without kern, it files nothing and exits 2 naming kern; `main` routes it through
+    kern as a streamed call, so its relay step runs in the background.
+  - Without `--repo` it writes nothing: the agent writes the file or files the document it
+    answers. `templates.py fill` writes a file template's file itself. `--templates` reads the
+    templates from that folder.
 
 **Its answer.** `check` exits 0 whatever it finds, and 2 on a usage error only, as kern's door
 answers any other exit code as `command-failed` with a remedy about usage. Its first line is the
@@ -211,6 +221,13 @@ DANGLING_RULE = "dangling"
 COMMAND = "se_templates.py check"
 FILL_COMMAND = "se_templates.py fill"
 PASSES = "passes"
+#: Where a fill writes the template kern's GitHub component reads, `<name>.json`
+#: (`kern_template`), under the checkout kern serves: kern's config `templates`, whose
+#: built-in this is (wiring.toml sets none).
+KERN_TEMPLATES = Path(".se") / "templates"
+#: The request ports a fill files through, by the action: each bound in wiring.toml to the verb of
+#: kern's GitHub component that writes it (kern's components/github README "Writes").
+FILE_PORTS = {"issue.create": "file-issue", "comment.create": "file-comment"}
 #: The line that opens the template on the last page of a draft's or a fill's answer, after its
 #: guidance (`guided`).
 TEMPLATE_HEADING = "## The template {name}"
@@ -650,7 +667,8 @@ COMPONENTS = (sibling("se_components").Group(
     "check finds everything SE's filing commands would refuse in a text, or gives the Markdown "
     "to file, and fill checks an agent's fields against the raw input and gives the document.",
     ("list", "draft", "check", "fill", "gate", "check-files", "backstop")),)
-#: The commands that go through kern where it runs (se_components.routed): all four only read.
+#: The commands that go through kern where it runs (se_components.routed): list, draft and check only
+#: read; fill files only through its requests, and only with --repo.
 INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check", "fill"})
 #: The commands that change nothing, each with when an agent uses it: kern's MCP door offers them.
 READ_ONLY_COMMANDS = {
@@ -663,11 +681,142 @@ READ_ONLY_COMMANDS = {
     "check": "Checks a text or a fields object against a template as SE's filing commands would: its "
              "first line is passes or refused, then every finding or, with --render, the Markdown "
              "to file. Use it before filing; it files nothing.",
-    "fill": "Fills a template from the raw input: without fields it gives the template's guidance "
-            "first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, "
-            "then the document to write or file, or refused, then every finding. Use it to write "
-            "any text a template shapes; it writes nothing.",
 }
+#: The commands that write only through their requests, each with when an agent uses it: kern's MCP
+#: door offers them in the tool templates_write.
+WRITING_COMMANDS = {
+    "fill": "Fills a template from the raw input: without fields it gives the template's guidance "
+            "first, once per session (--session) and in pages, then its instructions and empty "
+            "draft; with fields and the raw input its first line is passes, then the document, or "
+            "refused, then every finding. With --repo it files the document it checked through "
+            "kern's GitHub component: an issue, or with --number a comment, and answers its link. "
+            "Use it to write any text a template shapes, and to file an issue or a comment.",
+}
+#: The request ports the writing commands ask, each its type, answer and help (se_components
+#: `declaration`): kern's GitHub component's write verbs, as its shapes name them.
+REQUESTS = {
+    FILE_PORTS["issue.create"]: ("github.issue-create", "github.written",
+                                 "Files the issue a fill checked through kern's GitHub component: "
+                                 "the template's name and its fields, never a body."),
+    FILE_PORTS["comment.create"]: ("github.issue-comment", "github.written",
+                                   "Comments on an issue or a pull request from a fill it checked, "
+                                   "through kern's GitHub component: the template's name and its "
+                                   "fields, never a body."),
+}
+
+
+#: The writes kern's GitHub component files from a filled template (kern's form: `actions`).
+KERN_ACTIONS = ("issue.create", "comment.create")
+#: The field kinds kern's renderer writes, each as `_format` writes it.
+KERN_KINDS = ("line", "choice", "text", "list", "issue", "checklist", "object", "code")
+#: The keys of a field's shape kern reads beside `kind`; `max_words` stays out, since its rule
+#: `words` only warns here and kern would refuse it.
+KERN_SHAPE_KEYS = ("heading", "required", "none_ok", "choices", "numbered", "label", "source",
+                   "lang")
+
+
+def kern_problems(template) -> list[str]:
+    """Why kern's GitHub component cannot file `template`'s document as the engine renders it;
+    empty where it can (`kern_template`)."""
+    problems = []
+    if template.is_adapter or template.is_file or template.message or template.scope:
+        what = ("an adapter" if template.is_adapter else "a file's" if template.is_file
+                else "a message" if template.message else "scoped")
+        problems.append(f"{template.name} is {what} template, and kern renders a whole body from fields")
+    if not set(template.actions) & set(KERN_ACTIONS):
+        problems.append(f"{template.name} serves {', '.join(template.actions) or 'no action'}, and "
+                        f"kern files only {' and '.join(KERN_ACTIONS)}")
+    problems += [f"field {item.name} is a {item.kind}{' fence' if item.fence else ''}, which kern does "
+                 "not render" for item in template.fields
+                 if item.kind not in KERN_KINDS or item.fence or item.node]
+    return problems
+
+
+def kern_template(template) -> dict[str, object]:
+    """`template` as kern's GitHub component reads it, `<name>.json` in its config `templates`
+    (kern's components/github README "Templates", kern's form): its name (`form`), `says`, the
+    markers `render` opens a body with, the writes of KERN_ACTIONS it serves, its heading level,
+    each field's shape (KERN_SHAPE_KEYS; a choice's `choices` with templates.NOT_IN_INPUT) and `schema`.
+    kern then renders the document `render` writes from the fields `kern_fields` gives, which
+    components/template/kern_test.go holds for every such template's example. A template kern
+    cannot render raises TemplateError naming each reason (`kern_problems`)."""
+    templates = sibling("templates")
+    problems = kern_problems(template)
+    if problems:
+        raise templates.TemplateError(f"templates: kern cannot file {template.name}: " + "; ".join(problems))
+    shapes: dict[str, object] = {}
+    for item in template.fields:
+        shape: dict[str, object] = {"kind": item.kind}
+        for key in KERN_SHAPE_KEYS:
+            value = getattr(item, key)
+            if key == "choices":
+                value = [*value, templates.NOT_IN_INPUT] if item.kind == "choice" else []
+            elif key == "lang" and item.kind != "code":
+                value = ""
+            if value:
+                shape[key] = value
+        shapes[item.name] = shape
+    return {"form": template.name, "says": template.says,
+            "markers": [templates.FLEET_MARKER, template.marker_line],
+            "actions": [action for action in KERN_ACTIONS if action in template.actions],
+            "level": template.level, "field_shape": shapes, "schema": templates.schema(template)}
+
+
+def _kern_refusal(item, value: object) -> str:
+    """What kern refuses or writes otherwise of a field's filled `value`, as the end of a sentence
+    naming the remedy; "" where nothing."""
+    templates = sibling("templates")
+    if item.continue_numbers:
+        return (f"{item.name}, numbered after another list, is empty, as kern numbers each list "
+                "from 1: add it by an edit after the issue is filed")
+    if item.kind == "choice" and value not in (*item.choices, templates.NOT_IN_INPUT):
+        return f"{item.name} is one of its choices ({', '.join(item.choices)}) or {templates.NOT_IN_INPUT}"
+    if item.kind == "code" and templates.not_in_input(value):
+        return (f"{item.name}, a code block, holds code, as kern fences it: give the command, or "
+                "leave it out where it may be empty")
+    return ""
+
+
+def kern_fields(template, document: str, title: str | None = None) -> dict[str, object]:
+    """The fields kern's GitHub component files `document` from: its parse, each value in the
+    schema's shape (an object as `{"key", "value"}` pairs, a list given as text its one item),
+    empty ones left out, the title field `title`. What kern refuses or writes otherwise of a field
+    raises TemplateError naming it (`_kern_refusal`). kern renders these fields as `render` does (components/template/kern_test.go), so
+    where `render` of them is not `document` again, a section kern would leave out or write
+    otherwise (a placeholder, a list given as text, a list numbered after another), it raises
+    TemplateError naming the first line that differs: what kern filed would not be what was
+    checked."""
+    templates = sibling("templates")
+    parsed = templates.parse(template, document, title)
+    fields: dict[str, object] = {}
+    for item in template.fields:
+        value = title if item.source == "title" else parsed.fields.get(item.name)
+        if value in (None, "", [], {}):
+            continue
+        refusal = _kern_refusal(item, value)
+        if refusal:
+            raise templates.TemplateError(f"templates: kern files {template.name} only where {refusal}")
+        if item.kind == "object" and isinstance(value, dict):
+            value = [{"key": str(key), "value": str(text)} for key, text in value.items()]
+        elif isinstance(value, str) and item.kind in ("list", "issue"):
+            value = [value]
+        elif isinstance(value, str) and item.kind == "checklist":
+            value = [{"done": False, "text": value}]
+        elif isinstance(value, str) and item.kind == "object":
+            value = [{"key": value, "value": ""}]
+        fields[item.name] = value
+    again = templates.render(template, templates.answer(template, fields)).splitlines()
+    lines = document.splitlines()
+    if again != lines:
+        at = next((i for i, (one, other) in enumerate(zip(again, lines)) if one != other),
+                  min(len(again), len(lines)))
+        seen = lines[at] if at < len(lines) else "(the end)"
+        filed = again[at] if at < len(again) else "(the end)"
+        raise templates.TemplateError(f"templates: kern would file {template.name} otherwise than it was "
+                            f"checked: line {at + 1} is {seen!r}, and kern writes {filed!r} from "
+                            "the fields; fill that field with what it means, a list as its items, "
+                            "or leave it out")
+    return fields
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -712,7 +861,8 @@ def make_parser() -> argparse.ArgumentParser:
         "fill", help="fill a template from the raw input: the instructions, or the checked document",
         description="templates.py fill with the checks check adds: without fields, the template's "
                     "instructions, guidance and empty draft as JSON; with fields and the raw input, "
-                    "passes and the document, or refused: <n> findings. It writes nothing and exits 0.")
+                    "passes and the document, or refused: <n> findings, exit 0. With --repo it "
+                    "files the document through kern's GitHub component instead of printing it.")
     filling.add_argument("template", help="the template, as list names it")
     filling.add_argument("--prompt", help="what the agent was asked to write")
     raws = filling.add_mutually_exclusive_group()
@@ -722,6 +872,13 @@ def make_parser() -> argparse.ArgumentParser:
     values.add_argument("--fields", type=Path, help="the field values as a JSON file")
     values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
     filling.add_argument("--title", help="the title it would be filed with")
+    filling.add_argument("--repo", metavar="OWNER/REPO",
+                         help="file the document there through kern's GitHub component: an issue, "
+                              "or with --number a comment")
+    filling.add_argument("--number", type=int,
+                         help="with --repo: comment on this issue or pull request")
+    filling.add_argument("--label", action="append", default=[],
+                         help="with --repo: a label the filed issue carries; repeatable")
     filling.add_argument("--worktree", type=Path, default=Path("."),
                          help="the project whose private terms and guidance are read (default: .)")
     filling.add_argument("--templates", type=Path,
@@ -981,10 +1138,12 @@ def run_check(options: argparse.Namespace) -> int:
 
 def run_fill(options: argparse.Namespace) -> int:
     """`fill`: `templates.instructions` without fields; else `templates.fill`'s document against the
-    raw input with `check`'s findings, answered as `check --render` answers. It writes nothing."""
+    raw input with `check`'s findings, answered as `check --render` answers, or with `--repo`
+    filed through kern (`filing`, `file_document`)."""
     templates = sibling("templates")
     template = named(loaded(options), options.template, FILL_COMMAND)
     root = options.worktree.resolve()
+    action = filing(template, options)
     if options.fields is None and options.fields_json is None:
         answer = templates.instructions(template, options.prompt or "", root)
         answer["guidance"] = [{key: note[key] for key in ("name", "path")}
@@ -1008,7 +1167,7 @@ def run_fill(options: argparse.Namespace) -> int:
     except templates.TemplateError as error:
         raise Usage(str(error)) from error
     _, title = filed(template, None, values, options.title)
-    found = findings(template, root, repository(root, None), title, rendered)
+    found = findings(template, root, repository(root, options.repo), title, rendered)
     found += [item for item in own if item.rule == templates.QUOTE_RULE and item not in found]
     found.sort(key=lambda item: item.severity != templates.REFUSE)
     refused = sum(item.severity == templates.REFUSE for item in found)
@@ -1017,8 +1176,83 @@ def run_fill(options: argparse.Namespace) -> int:
         return 0
     if found:
         print("\n".join(str(item) for item in found[:templates.REFUSAL_LINES]), file=sys.stderr)
+    if action is not None:
+        return file_document(template, action, rendered, title, options, root)
     print(PASSES)
     print(rendered, end="")
+    return 0
+
+
+def filing(template, options: argparse.Namespace) -> str | None:
+    """The action a fill with `--repo` files, `issue.create`, or `comment.create` with `--number`;
+    None without `--repo`. A Usage error where the options do not go together, or where the
+    template serves no such action or kern cannot render it (`kern_problems`)."""
+    templates = sibling("templates")
+    if options.repo is None:
+        if options.number is not None or options.label:
+            raise Usage(f"{FILL_COMMAND}: --number and --label file the document: give --repo "
+                        "OWNER/REPO with them")
+        return None
+    owner, _, name = options.repo.partition("/")
+    if not owner or not name or "/" in name:
+        raise Usage(f"{FILL_COMMAND}: --repo is OWNER/REPO, not {options.repo!r}")
+    if options.number is not None and options.label:
+        raise Usage(f"{FILL_COMMAND}: a comment carries no label: give --label without --number")
+    action, other = (("comment.create", "issue.create") if options.number is not None
+                     else ("issue.create", "comment.create"))
+    if action not in template.actions:
+        remedy = ("leave out --number to file an issue" if action == "comment.create"
+                  else "give --number N to comment on N")
+        raise Usage(f"{FILL_COMMAND}: {template.name} serves {', '.join(template.actions) or 'no action'}, "
+                    f"not {action}" + (f": {remedy}" if other in template.actions else ""))
+    problems = kern_problems(template)
+    if problems:
+        raise Usage(f"{FILL_COMMAND}: kern cannot file {template.name}: " + "; ".join(problems))
+    return action
+
+
+def file_document(template, action: str, rendered: str, title: str | None,
+                  options: argparse.Namespace, root: Path) -> int:
+    """File the checked `rendered` document through kern's GitHub component (docs/templates.md
+    "Fill"): write the template as kern reads it to KERN_TEMPLATES under the checkout kern serves,
+    then ask the request port of `action` (FILE_PORTS) with the template's name and the fields
+    `kern_fields` gives, never a body, and answer `passes` and the link. Run directly,
+    with no kern to ask (`se_components.requests`), it files nothing and names where it runs."""
+    templates, components = sibling("templates"), sibling("se_components")
+    try:
+        fields = kern_fields(template, rendered, title)
+    except templates.TemplateError as error:
+        print("\n".join(["refused: 1 findings", f"  kern: {error}",
+                         f"{FILL_COMMAND}: nothing was filed; fix the field and fill again"]))
+        return 0
+    ask = components.requests()
+    if ask is None:
+        raise Usage(f"{FILL_COMMAND}: nothing was filed: a fill files through kern's GitHub component, "
+                    f"and no kern runs this call; run it where kern serves {root} (SE's start, "
+                    "scripts/bootstrap.sh, starts kern), or through the door's tool templates_write")
+    folder = (components.kern_root(root) or root) / KERN_TEMPLATES
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{template.name}.json").write_text(
+        json.dumps(kern_template(template), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    owner, _, name = options.repo.partition("/")
+    request: dict[str, object] = {"owner": owner, "repo": name, "template": template.name,
+                                  "fields": fields}
+    if action == "comment.create":
+        request["number"] = options.number
+    elif options.label:
+        request["labels"] = list(options.label)
+    try:
+        written = ask(FILE_PORTS[action], request)
+    except RuntimeError as error:
+        print("\n".join(["refused: 1 findings", f"  kern: {error}",
+                         f"{FILE_PORTS[action]}: nothing was filed"]))
+        return 0
+    written = written if isinstance(written, dict) else {}
+    what = "commented on" if action == "comment.create" else "filed"
+    print(PASSES)
+    print(f"{what} {written.get('repo', options.repo)}#{written.get('number', options.number)}: "
+          f"{written.get('url', '')}")
     return 0
 
 
@@ -1631,7 +1865,8 @@ def main(argv: list[str] | None = None) -> int:
     words = [args.command]
     routed = sibling("se_components").routed(
         Path(__file__), words, list(sys.argv[1 + len(words):] if argv is None else argv[len(words):]),
-        args.command in INTERACTIVE_COMMANDS)
+        args.command in INTERACTIVE_COMMANDS,
+        streamed=args.command == "fill" and getattr(args, "repo", None) is not None)
     if routed is not None:
         return routed
     try:

@@ -1,8 +1,8 @@
-# The Copilot layout and hooks: outside facts
+# The Copilot manifest and hooks: outside facts
 
-Reader: whoever changes SE's Copilot layout, its hooks or its Copilot checks
+Reader: whoever changes SE's Copilot manifest, its hooks or its Copilot checks
 ([scripts/se_plugin.py](../../scripts/se_plugin.py), [scripts/agent_lint.py](../../scripts/agent_lint.py)),
-or checks a Copilot fact they rest on. This note owns the outside facts that layout and those hooks
+or checks a Copilot fact they rest on. This note owns the outside facts that manifest and those hooks
 rely on that no script reads: each with its source, the day it was read and how sure SE is of it.
 Last read: 2026-11-14.
 
@@ -38,11 +38,36 @@ item links the file that assumes it.
   places, Claude's `.claude-plugin/plugin.json` among them; `.github/plugin/plugin.json` is not one
   of its places. Source: https://code.visualstudio.com/docs/agents/reference/agent-plugin-reference,
   read 2026-11-14. `documented`. SE acts on it in [docs/copilot.md "VS Code"](../copilot.md#vs-code).
-- **The install took the Copilot layout.** A Copilot CLI plugin install of SE read the Copilot
+- **The install took the Copilot manifest.** A Copilot CLI plugin install of SE read the Copilot
   manifest, not the Claude one, as recorded in
   [docs/copilot.md](../copilot.md#what-a-token-less-copilot-cli-showed): Copilot CLI 1.0.112, in a
   Linux cloud container, on 2026-11-14, without signing in. `seen`. SE acts on it in
   [scripts/se_plugin.py](../../scripts/se_plugin.py), which writes that manifest.
+- **Copilot's agents and Claude Code's skills.** The Copilot CLI loads Claude Code's skills folder
+  where the manifest's `skills` names it. It also loads agents written as Claude Code's
+  `agents/<name>.md`, warning `unknown field ignored: disallowedTools`, and reads Claude's tool
+  names as aliases; SE gives it exactly those files, with no Copilot copy and no `tools` list
+  ([docs/copilot.md](../copilot.md#the-door-by-hand)). A `model: inherit` it does
+  not inherit: it warns `Custom agent "probe" specifies model "inherit" which is not available;
+  using "auto" instead` and runs the agent. A `target` it ignores with `unknown field ignored:
+  target` and lists the agent. A relative link in an agent's body it resolves from the session's
+  folder, not the file's. Copilot CLI 1.0.112 on Windows, 2026-11-23. `seen`. SE acts on it in
+  [scripts/se_plugin.py](../../scripts/se_plugin.py), whose Copilot manifest names
+  `agents/` and `skills/`, and [scripts/agent_lint.py](../../scripts/agent_lint.py),
+  `CLAUDE_AGENT_FIELDS`.
+- **A `vscode` agent is not in VS Code's Copilot pickers.** The Chat view's mode picker, with the
+  session target Copilot, and the Agents window's list an agent only if its `target` is
+  `github-copilot` or unset; the local harness lists all. `target` otherwise sets which schema the
+  editor checks the file against, and `user-invocable: false` hides an agent from every picker.
+  VS Code reads a plugin with `.claude-plugin/plugin.json` as Claude-format, its agents from
+  `agents/`, while its Copilot runtime reads the plugin's Copilot manifest. Sources:
+  microsoft/vscode `src/vs/workbench/contrib/chat/browser/widget/input/modePickerActionItem.ts`
+  (`getActionsForCustomAgentTarget`), `.../sessions/providers/copilotChatSessions/browser/modePicker.ts`
+  (`getAvailableModes`), `.../chat/common/promptSyntax/languageProviders/promptFileAttributes.ts`
+  (`getTarget`) and `src/vs/platform/agentPlugins/common/pluginParsers.ts`
+  (`detectManifestPluginFormat`), main, read 2026-11-23; the custom agent file reference. `documented`.
+  SE sets no `target`: its one file per agent must show in every picker
+  ([docs/copilot.md "VS Code"](../copilot.md#vs-code)).
 
 ## Front matter
 

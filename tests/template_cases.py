@@ -34,6 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import se_templates  # noqa: E402
 import templates  # noqa: E402
 
 OUT = ROOT / "components" / "template" / "testdata" / "cases"
@@ -126,8 +127,15 @@ def _body(template: templates.Template, body: str, title: str | None) -> dict:
 
 def _fills(template: templates.Template, example: dict, title: str | None) -> list[dict]:
     """The base fill, then each field filled with each probe, its own `says`, another field's
-    value, or left out."""
-    cases = [_fill(template, example, title, RAW, keep=True)]
+    value, or left out (`_fill_inputs`)."""
+    return [_fill(template, example, *given, **options)
+            for given, options in _fill_inputs(template, example, title)]
+
+
+def _fill_inputs(template: templates.Template, example: dict, title: str | None
+                 ) -> list[tuple[tuple, dict]]:
+    """What each of `_fills`' cases fills: the title and raw input, and `_fill`'s options."""
+    cases: list[tuple[tuple, dict]] = [((title, RAW), {"keep": True})]
     others = [item for item in template.fields if item.source != "title"]
     for item in others:
         probes = [*PROBES, item.says]
@@ -141,12 +149,63 @@ def _fills(template: templates.Template, example: dict, title: str | None) -> li
         if item.first_sentence_chars:
             values.append("A first sentence " + "that runs " * item.first_sentence_chars + ". Then more.")
         for value in values:
-            cases.append(_fill(template, example, title, RAW, change={item.name: value}))
-        cases.append(_fill(template, example, title, RAW, drop=item.name))
+            cases.append(((title, RAW), {"change": {item.name: value}}))
+        cases.append(((title, RAW), {"drop": item.name}))
     if any(item.source == "title" for item in template.fields):
-        cases += [_fill(template, example, other, RAW) for other in TITLES if other != title]
-    cases.append(_fill(template, example, title, "Nothing of it."))
+        cases += [((other, RAW), {}) for other in TITLES if other != title]
+    cases.append(((title, "Nothing of it."), {}))
     return cases
+
+
+def _kern(loaded: dict[str, templates.Template]) -> dict:
+    """Each template kern's GitHub component can file (`se_templates.kern_problems`): its
+    `kern_template`, and per fill of `_fills` that nothing refuses, the fields `kern_fields` gives
+    and the digest of the document, which kern's render of those fields must give again
+    (components/template/kern_test.go). The base fill keeps its fields and its document as text,
+    each other fill the fields it sets apart from the base's (`set`) and those it leaves out
+    (`unset`). A fill `kern_fields` refuses keeps its error."""
+    made = {}
+    for template in sorted(loaded.values(), key=lambda item: item.name):
+        if se_templates.kern_problems(template):
+            continue
+        example = dict(template.example.get("fields", {})) if template.example else {}
+        title = template.example.get("title") if template.example else None
+        fills: list[dict] = []
+        base: dict = {}
+        for (named, raw), options in _fill_inputs(template, example, title):
+            values = {key: copy.deepcopy(value) for key, value in example.items()
+                      if key != options.get("drop")}
+            values.update(copy.deepcopy(options.get("change") or {}))
+            try:
+                document, found = templates.fill(template, values, raw, title=named)
+            except templates.TemplateError:
+                continue
+            if any(item.severity == templates.REFUSE for item in found):
+                continue
+            title_field = next((item.name for item in template.fields if item.source == "title"),
+                               None)
+            filed = (named if named is not None else values.get(title_field)) if title_field else None
+            case: dict[str, object] = {"change": options.get("change") or {},
+                                       "drop": options.get("drop", ""), "title": named}
+            try:
+                fields = se_templates.kern_fields(template, document,
+                                               filed if isinstance(filed, str) else None)
+            except templates.TemplateError as error:
+                case["error"] = str(error)
+            else:
+                if options.get("keep"):
+                    base = fields
+                    case["fields"] = fields
+                else:  # the fields that differ from the base fill's, so the file stays small
+                    case["set"] = {key: value for key, value in fields.items()
+                                   if base.get(key) != value}
+                    case["unset"] = [key for key in base if key not in fields]
+            case["digest"] = _digest(document)
+            if options.get("keep"):
+                case["document"] = document
+            fills.append(case)
+        made[template.name] = {"template": se_templates.kern_template(template), "fills": fills}
+    return made
 
 
 def _variants(template: templates.Template, document: str) -> list[str]:
@@ -547,6 +606,8 @@ def build() -> dict[str, str]:
         made[f"se-{name}.json"] = {"generated": se["generated"], "set": "se", "templates": {name: entry}}
     made["se-select.json"] = {"generated": se["generated"], "set": "se", "templates": {},
                               "select": se["select"]}
+    made["kern.json"] = {"generated": GENERATED.format(source="SE's templates/"), "set": "kern",
+                         "kern": _kern(templates.load(ROOT, tree=True))}
     step_files = {
         "risks.md": STEP_TEMPLATE.format(name="risks", paths='"book/*/steps/*.md"',
                                          extra='  marker_pattern: "id: S5B"\n'),

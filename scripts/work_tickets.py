@@ -12494,7 +12494,7 @@ def run_docs(root: None, args: argparse.Namespace) -> int:
 
 
 @command("format", "apply the fix of every check the check job runs that a fix can satisfy: write "
-                   "the generated layouts (se_plugin.py build), the interface templates' "
+                   "the generated layout (se_plugin.py build), the interface templates' "
                    "generated schemas (templates.py interfaces) and the command reference with "
                    "its declarations (docs); a second run writes nothing",
          arg("--root", type=Path, default=README.parent,
