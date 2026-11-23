@@ -1194,14 +1194,17 @@ def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
     assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
 
 
-def test_the_se_agent_starts_the_breaking_release_check_in_the_background_after_its_greeting():
+def test_the_se_agent_boots_after_its_greeting_upgrading_at_once_in_the_cloud_and_on_a_yes_locally():
     text = (ROOT / "src" / "agents" / "se.md").read_text(encoding="utf-8")
-    greeting, check = text.index("- **Greeting**"), text.index("- **Breaking releases**")
-    step = text[check:text.index("- **Turn-start check**")]
-    assert greeting < check, "the check starts after the greeting, never before it"
+    greeting, boot = text.index("- **Greeting**"), text.index("- **Boot**")
+    step = " ".join(text[boot:text.index("- **Under Copilot**")].split())
+    assert greeting < boot, "the boot starts after the greeting, never before it"
     assert "right after the greeting, never before or instead of it" in step
-    assert "`uv run python <se>/scripts/se_modules.py --root <main checkout> breaking` in the background" in " ".join(step.split())
-    assert "tell the person once" in step and "the component, its pin and the newest release" in step
+    assert "`uv run python <se>/scripts/se_start.py --root <main checkout> boot`" in step
+    assert "In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) run it with `--upgrade` as your first action" in step
+    assert "On a local machine start it in the background" in step
+    assert "offer the upgrade; on the person's yes, run it again with `--upgrade`" in step
+    assert "report once" in step
 
 
 # The outside skills SE's agents rely on (se.toml [roles]): the greeting names one the session lacks.
