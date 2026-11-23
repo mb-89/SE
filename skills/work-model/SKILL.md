@@ -556,6 +556,8 @@ Pull requests built on an old `main` cause most integration trouble.
   `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
   `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
   issue.
+  - The label change follows the [claim](#worktrees) and is no lock: two starters can both read
+    `ready`, and only the claim refuses the second.
 - After each integration the integrator starts every startable work issue that has no branch yet
   and whose file ownership does not clash with running workers, starts its session itself and
   comments on the landed issue what it started.
@@ -582,16 +584,26 @@ Pull requests built on an old `main` cause most integration trouble.
 
 ## Worktrees
 
+- **The claim**: a work issue is claimed by creating its branch on the remote that hosts the
+  issue's repository, before any worktree or label.
+  - That remote is found from the issue, not from `origin`: the checkout's remote whose URL names
+    the issue's repository, `origin` first, else that repository's URL on its host.
+  - The branch is created at the newest `main` with a push that holds only while the branch does
+    not exist there, so the host lets the first starter create it and refuses every other.
+  - A refused claim names the branch and the remote and changes nothing.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
   - it refuses an issue that is not startable (including open blockers, an existing branch, a
     file-ownership clash or exhausted capacity, the worker limit among it);
-  - it fetches, runs
-    `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> origin/main` and
-    changes the issue's `ready` label to `in-progress`;
+  - it fetches and claims the issue's branch, then runs
+    `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> <claimed branch>`,
+    from the issue's remote even where `origin` is another, and changes the issue's `ready` label
+    to `in-progress`;
   - it prints the worker launch line with the exact created path.
-  - In a cloud runner, pass `--cloud-agent <login>` (or set `SE_CLOUD_AGENT`) to assign the worker
-    and change the labels without creating a local worktree.
+  - In a cloud runner, pass `--cloud-agent <login>` (or set `SE_CLOUD_AGENT`) to claim, assign the
+    worker and change the labels without creating a local worktree.
+  - A worker started with the session tool (`create_session`) is claimed first with
+    `work_tickets.py claim <issue>`.
 - Copilot CLI offers a platform-enforced alternative, not the local-worker launch path:
   `copilot --agent worker --no-ask-user --allow-all-tools --prompt "<worker prompt>"`. Keep
   agent-host `create_session` workers as the default until a separate decision changes that path.
@@ -605,9 +617,9 @@ Pull requests built on an old `main` cause most integration trouble.
 - A project whose packages need more than one plain worktree (paired checkouts, a test environment
   file, linked dependency folders) provides its own creation and removal scripts and names them in
   its `AGENTS.md`; it creates the worktree from the newest `main` with its script.
-  - Then `start --no-create` verifies the linked worktree for the issue's branch, merges `main`
-    into it, then changes `ready` to `in-progress` and prints the launch line; without a worktree
-    it refuses. Cloud start (`--cloud-agent`) is unchanged.
+  - Then `start --no-create` verifies the linked worktree for the issue's branch, claims that
+    branch at its commit, merges `main` into it, then changes `ready` to `in-progress` and prints
+    the launch line; without a worktree it refuses.
 - Removal happens only after integration, with `work_tickets.py close --remove
   --integration-target main --worktree <worktree>` or the project's removal script, never
   `git worktree remove --force` (it follows links into other checkouts). Removal refuses while
