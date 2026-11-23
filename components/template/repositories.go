@@ -185,7 +185,7 @@ var (
 	localKeys     = []string{"paths", "urls", "integrator_session", "trackers", "worktree_roots", "repos", "mirrors", "public_identity", "hooks"}
 )
 
-const renamed = `[modules] is [components] since se 6: rename each [modules.<name>] to [components.<name>] and drop its url, as a component is found by its name (README "Modules")`
+const renamed = `[modules] is [components] since se 8: rename each [modules.<name>] to [components.<name>] and drop its url, as a component is found by its name (README "Modules")`
 
 // localConfig is where the machine's settings are: ~/.se/local.toml.
 var localConfig = func() string {
