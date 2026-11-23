@@ -1230,6 +1230,106 @@ def test_a_component_whose_release_lists_url_is_refused_naming_its_path(hosts, c
     assert code == 1 and "component style: url is refused in se.toml of consumer -> lib" in out, out
 
 
+# Breaking releases beyond a pin (work issue 1719): the check lists each pin of the tree whose
+# component's newest release breaks it, on the fake door with a fake host listing.
+
+
+def unchanged(hosts):
+    """se.toml's bytes and se.lock's absence, to hold the check to changing no pin."""
+    return hosts.manifest.read_bytes(), (hosts.root / "se.lock").exists()
+
+
+def test_the_check_names_a_pin_one_major_behind_with_both_versions(hosts, capsys):
+    hosts.release("team", "obs", ["5.0.0", "5.3.0", "10.0.0"])
+    hosts.list({"git.example.org/team": ["obs"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.obs]\nversion = "^5.0"\n')
+    before = unchanged(hosts)
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert (code, out) == (0, "consumer pins obs ^5.0, newest 10.0.0\n")
+    assert unchanged(hosts) == before, "the check changes no pin and writes no lock"
+
+
+def test_the_check_prints_one_line_where_every_pin_admits_its_newest_release(hosts, capsys):
+    hosts.release("team", "obs", ["5.0.0", "5.3.0"])
+    hosts.release("team", "style", ["1.4.2", "1.6.0"])  # beyond ~1.4.2, but not breaking
+    hosts.list({"git.example.org/team": ["obs", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.obs]\nversion = "^5.0"\n\n[components.style]\nversion = "~1.4.2"\n')
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert (code, out) == (0, "no breaking release beyond a pin: 2 pins checked (obs, style)\n")
+
+
+def test_the_check_names_a_nested_pin_a_major_behind_by_its_holder(hosts, capsys):
+    hosts.release("team", "style", ["1.2.0", "2.0.0"])
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nversion = "^1.2"\n')
+    hosts.list({"git.example.org/team": ["lib", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert (code, out) == (0, "lib pins style ^1.2, newest 2.0.0 (consumer -> lib -> style)\n")
+
+
+def test_the_check_reports_each_pin_where_sync_would_refuse_the_two(hosts, capsys):
+    hosts.release("team", "style", ["1.2.0", "2.0.0"])
+    hosts.release("team", "lib", ["1.0.0"], manifest='[components.style]\nversion = "^1.2"\n')
+    hosts.list({"git.example.org/team": ["lib", "style"], "git.example.org/alice": []})
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n\n[components.style]\nversion = "^2.0"\n')
+
+    code, out = finds(hosts, capsys, "breaking", "--all")
+
+    assert code == 0, out
+    assert out.splitlines() == ["consumer pins lib ^1, newest 1.0.0: admitted",
+                                "consumer pins style ^2.0, newest 2.0.0: admitted",
+                                "lib pins style ^1.2, newest 2.0.0 (consumer -> lib -> style): breaking"]
+    assert finds(hosts, capsys, "sync")[0] == 1, "sync refuses the two pins the check reports"
+
+
+def test_a_go_pin_below_1_0_is_broken_by_a_higher_minor(hosts, capsys):
+    hosts.release("team", "kern", ["0.14.1", "0.14.3", "0.15.0"])
+    hosts.list({"git.example.org/team": ["kern"], "git.example.org/alice": []})
+    write(hosts.root / "go.mod", "module consumer\n\nrequire kern v0.14.1\n")
+    write(hosts.manifest, '[components.kern]\ngo = true\n')
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert (code, out) == (0, "consumer pins kern 0.14.1 (go.mod), newest 0.15.0\n")
+
+
+def test_a_ref_pin_is_judged_by_the_release_at_its_commit(hosts, capsys):
+    tags = hosts.release("team", "lib", ["1.0.0", "2.1.0"])
+    hosts.list({"git.example.org/team": ["lib"], "git.example.org/alice": []})
+    write(hosts.manifest, f'[components.lib]\nref = "{tags["1.0.0"]}"\n')
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert (code, out) == (0, f"consumer pins lib ref {tags['1.0.0'][:12]} (1.0.0), newest 2.1.0\n")
+
+
+def test_a_component_whose_releases_no_offer_names_fails_the_listing_naming_it(hosts, capsys, tmp_path):
+    checkout = fake_git.init(tmp_path / "work" / "lib")
+    write(checkout / "se.toml", '[project]\nversion = "1.0.0"\n')
+    write(hosts.local, hosts.local.read_text(encoding="utf-8") + f'\n[paths]\nlib = "{checkout.as_posix()}"\n')
+    write(hosts.manifest, '[components.lib]\nversion = "^1"\n')
+
+    code, out = finds(hosts, capsys, "breaking")
+
+    assert code == 1
+    assert out.splitlines()[0] == "no breaking release beyond a pin: 1 pin checked (lib)"
+    assert ("error: the releases of lib (consumer -> lib) could not be read: origin: git.example.org/team "
+            "marks no repository lib as a component") in out
+
+
+@pytest.mark.parametrize("base, newest, breaks", [
+    ((5, 0, 0), (10, 0, 0), True), ((5, 0, 0), (5, 9, 0), False), ((0, 14, 1), (0, 15, 0), True),
+    ((0, 14, 1), (0, 14, 9), False), ((0, 14, 1), (1, 0, 0), True), ((1, 4, 0), (1, 5, 0), False)])
+def test_a_breaking_release_is_a_higher_major_or_below_1_0_a_higher_minor(base, newest, breaks):
+    assert se_modules.is_breaking(base, newest) is breaks
+
+
 # The host's listing: github.com's search for the topic, with the person's login where one is set.
 
 

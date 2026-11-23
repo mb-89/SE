@@ -1171,6 +1171,146 @@ def place_tree(root: Path, local: LocalConfig, names: list[str] | None = None,
     return lines, [*tree.finder.notes, *missing_lines, *got]
 
 
+# Breaking releases beyond a pin (docs/components.md "Breaking releases beyond a pin")
+
+
+def is_breaking(base: Version, newest: Version) -> bool:
+    """Whether `newest` breaks what `base` offered: a higher major, or below 1.0 a higher minor
+    (Semantic Versioning, item 4, as work_tickets.py `breaking_kind` releases one)."""
+    return newest[0] > base[0] or (newest[0] == base[0] == 0 and newest[1] > base[1])
+
+
+@dataclass(frozen=True)
+class PinState:
+    """One pin of the tree with the newest release its component's first offer names."""
+
+    path: tuple[str, ...]  # the holder's path from the root; its last name holds the pin
+    module: Module
+    base: Version | None  # the release the pin is based on: a range's lowest, a go pin's, a ref's tag
+    newest: Version | None  # None where no offer named a release
+    reasons: tuple[str, ...] = ()  # why no offer named one
+
+    @property
+    def beyond(self) -> bool:
+        """Whether the newest release lies beyond what the pin admits."""
+        module, newest = self.module, self.newest
+        if newest is None or self.base is None:
+            return False
+        if module.version and not module.go:
+            return newest >= version_bounds(module.name, module.version)[1]
+        return newest > self.base
+
+    @property
+    def breaking(self) -> bool:
+        return self.beyond and is_breaking(self.base, self.newest)
+
+    def pin_text(self) -> str:
+        module = self.module
+        if module.go:
+            return f"{module.version} ({module.go})"
+        if module.version:
+            return module.version
+        return f"ref {module.ref[:12]}" + (f" ({version_text(self.base)})" if self.base else "")
+
+    def line(self) -> str:
+        """`<holder> pins <name> <pin>, newest <version>`, the path after it for a nested holder."""
+        newest = version_text(self.newest) if self.newest else "none found"
+        text = f"{self.path[-1]} pins {self.module.name} {self.pin_text()}, newest {newest}"
+        return text + (f" ({_arrow(self.path, self.module.name)})" if len(self.path) > 1 else "")
+
+    def verdict(self) -> str:
+        if self.newest is None:
+            return "no release found"
+        if self.base is None:
+            return "not judged: no release at the pin"
+        if self.breaking:
+            return "breaking"
+        return "newer, not breaking" if self.beyond else "admitted"
+
+
+class _Walk(Tree):
+    """The tree as `sync` resolves it, every host's pin recorded and none refused: the check
+    reports a pin that falls behind, where `sync` would stop at it."""
+
+    def _again(self, chosen: Placed, path: tuple[str, ...], module: Module) -> None:
+        chosen.pins.append((path, module))
+
+    def _on_path(self, path: tuple[str, ...], module: Module, placed: dict[str, Placed]) -> None:
+        key = module.name.lower()
+        if key != self.name.lower():  # the root is the project itself, not a release it relies on
+            self._again(placed[key], path, module)
+
+
+@dataclass
+class Breaking:
+    """What `breaking` found: each pin of the tree and what the run said besides."""
+
+    pins: list[PinState]
+    notes: list[str]
+
+    @property
+    def findings(self) -> list[PinState]:
+        return [pin for pin in self.pins if pin.breaking]
+
+    @property
+    def unread(self) -> list[PinState]:
+        return [pin for pin in self.pins if pin.newest is None]
+
+    def lines(self, every: bool = False) -> list[str]:
+        """The findings, one line each, or the one line saying none moved; with `every`, each pin
+        with its verdict, then the run's notes."""
+        if every:
+            return [f"{pin.line()}: {pin.verdict()}" for pin in self.pins] + self.notes
+        if self.findings:
+            return [pin.line() for pin in self.findings]
+        names = sorted({pin.module.name for pin in self.pins})
+        return [f"no breaking release beyond a pin: {_plural(len(self.pins), 'pin')} checked"
+                + (f" ({', '.join(names)})" if names else "")]
+
+    def error(self) -> str | None:
+        """Why the listing failed: the components whose releases no offer named."""
+        if not self.unread:
+            return None
+        return "; ".join(f"the releases of {pin.module.name} ({_arrow(pin.path, pin.module.name)}) "
+                         "could not be read: " + ("; ".join(pin.reasons) or "no remote offers it")
+                         for pin in self.unread)
+
+
+def breaking(root: Path, local: LocalConfig, finder: Finder | None = None) -> Breaking:
+    """Each pin of the tree, the root's and every component's own, with the newest release of its
+    component: the first offer in the finder's order that names one (docs/components.md
+    "Breaking releases beyond a pin"). It places what `sync` would to read the components' own
+    lists, and changes no pin, lock or checkout."""
+    walk = _Walk(root, local, finder)
+    placed, missing_lines = walk.resolve()
+    newest: dict[str, tuple[dict[Version, str], tuple[str, ...]]] = {}
+    states: list[PinState] = []
+    for item in placed:
+        key = item.module.name.lower()
+        if key not in newest:
+            read: list[str] = []
+            reasons: list[str] = []
+            offer = next((offer for offer in walk.finder.offers(item.module.name, read, reasons)
+                          if offer.releases), None)
+            newest[key] = (offer.releases if offer else {}, tuple(reasons))
+        releases, reasons = newest[key]
+        seen: set[tuple[tuple[str, ...], str]] = set()
+        for path, module in item.pins:
+            if (path, module.pin) in seen:
+                continue
+            seen.add((path, module.pin))
+            if module.go:
+                base = parse_version(module.version)
+            elif module.version:
+                base = version_bounds(module.name, module.version)[0]
+            else:
+                base = next((version for version, commit in releases.items()
+                             if commit.lower() == module.ref), None)
+            states.append(PinState(path, module, base, max(releases) if releases else None,
+                                   reasons if not releases else ()))
+    return Breaking(states, [*walk.finder.notes, *missing_lines])
+
+
 def version_report(source: Source) -> str:
     """The version of a local checkout, and whether the module's range admits it."""
     module = source.module
@@ -1413,6 +1553,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("names", nargs="*", help="components of the root's list; default: all")
     status = commands.add_parser("status", help="show the source of each component and its drift from the pin")
     status.add_argument("names", nargs="*", help="components; default: all")
+    moved = commands.add_parser("breaking", help="list each pin of the component tree, nested ones "
+                                "included, whose component's newest release is a breaking one beyond "
+                                "it; one line where none is")
+    moved.add_argument("--all", action="store_true", help="list every pin with its newest release and "
+                       "whether it breaks, and what the run says besides")
     update = commands.add_parser("update", help=f"find a component again, move its pin to the newest "
                                  f"{TRACKED_BRANCH} commit (a range's lock to its newest release) and sync")
     update.add_argument("name", nargs="?", help="component to update")
@@ -1461,6 +1606,14 @@ def main(argv: list[str] | None = None) -> int:
         modules = load_manifest(root)
         if args.command == "path":
             print(resolve(root, select(modules, [args.name])[0], local).dir)
+            return 0
+        if args.command == "breaking":
+            found = breaking(root, local)
+            print("\n".join(found.lines(args.all)))
+            failed = found.error()
+            if failed:
+                print(f"error: {failed}", file=sys.stderr)
+                return 1
             return 0
         names = [args.name] if args.command == "update" and args.name else getattr(args, "names", [])
         if args.command == "sync":
