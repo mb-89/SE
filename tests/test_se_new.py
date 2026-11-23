@@ -82,7 +82,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True, lock: bool = 
     git_fake.init(root, "-b", "main")
     write(root, {"se.toml": '[project]\nidentity = "alice <alice>"\n\n'
                             '[components.kern]\ngo = "components/go.mod"\n',
-                 "components/go.mod": f"module se/components\n\nrequire kern v{version}\n",
+                 "components/go.mod": f"module se/components\n\nrequire kern {se_modules.go_version(version)}\n",
                  ".github/workflows/kern-battery.yml": BATTERY,
                  ".github/actions/kern-at-pin/action.yml": KERN_AT_PIN})
     git(root, "add", "-A")
@@ -167,6 +167,15 @@ def test_the_application_comes_from_kerns_template_at_the_pin_with_its_name_and_
     assert git(app, "log", "--format=%an <%ae>|%cn <%ce>|%s") == (
         "alice <alice>|alice <alice>|Start ledger, a bare application on kern 0.1.0")
     assert git(app, "branch", "--show-current") == "main" and git(app, "status", "--porcelain") == ""
+
+
+def test_an_application_on_kern_2_requires_it_as_go_spells_a_major_above_1(tmp_path: Path, home: None) -> None:
+    source = small_se(tmp_path / "se", version="2.1.0")
+    app = tmp_path / "apps" / "ledger"
+    lines = se_new.create("ledger", app, source)
+    assert "from kern's template at v2.1.0 (" in lines[0]
+    assert "require kern v2.1.0+incompatible\n" in (app / "go.mod").read_text()
+    assert se_modules.kern_pin(app)[0] == "2.1.0"
 
 
 def test_the_owners_github_step_is_one_line_and_the_command_touches_no_remote(tmp_path: Path, home: None) -> None:

@@ -3,9 +3,10 @@
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
 what the command does. The template comes from the clone of kern se.toml [components.kern] pins
 (scripts/se_modules.py `kern_dir`), at its tag `v<version>`. The application pins the kern SE pins:
-its go.mod requires kern at that version and replaces the module by `./.se/modules/kern`, its se.lock
-locks the commit SE's se.lock locks, and SE's clone at that commit is copied there, ignored, so the
-application builds before it has an origin; `se_modules.py sync kern` keeps it there afterwards.
+its go.mod requires kern at that version as Go spells it (`se_modules.go_version`, `+incompatible`
+above major 1) and replaces the module by `./.se/modules/kern`, its se.lock locks the commit SE's
+se.lock locks, and SE's clone at that commit is copied there, ignored, so the application builds
+before it has an origin; `se_modules.py sync kern` keeps it there afterwards.
 """
 
 from __future__ import annotations
@@ -205,7 +206,7 @@ def create(name: str, path: Path, se_root: Path = SE_ROOT) -> list[str]:
     commit = kern_lock(se_root, version, kern, ref)
     path.mkdir(parents=True, exist_ok=True)
     unpack(kern, ref, path, name)
-    _fill(path / "go.mod", KERN_REQUIRE, lambda match: f"{match['lead']}v{version}", tag)
+    _fill(path / "go.mod", KERN_REQUIRE, lambda match: f"{match['lead']}{modules.go_version(version)}", tag)
     _fill(path / "go.mod", KERN_REPLACE, app_replace, tag)
     _fill(path / "se.toml", TEMPLATE_IDENTITY, f'identity = "{identity[0]} <{identity[1]}>"', tag)
     if KERN_TABLE not in (path / "se.toml").read_text(encoding="utf-8"):

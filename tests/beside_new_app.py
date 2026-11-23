@@ -132,7 +132,7 @@ def test_the_new_application_carries_no_kern_and_builds_on_the_clone_at_the_pin_
         assert git_door.run("check-ignore", "-q", ".se/modules/kern", root=app).returncode == 0
     assert not [name for name in tracked if name.startswith(("kern/", ".se/"))], tracked
     assert "replace kern => ./.se/modules/kern\n" in (app / "go.mod").read_text(encoding="utf-8")
-    assert f"require kern v{se_modules.kern_pin(ROOT)[0]}\n" in (app / "go.mod").read_text(encoding="utf-8")
+    assert f"require kern {se_modules.go_version(se_modules.kern_pin(ROOT)[0])}\n" in (app / "go.mod").read_text(encoding="utf-8")
     assert (se_modules.kern_dir(app) / "go.mod").is_file()
     done = run("go", "vet", "./...", cwd=app)
     assert done.returncode == 0, done.stdout + done.stderr
