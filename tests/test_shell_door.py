@@ -50,7 +50,7 @@ def test_the_real_shell_answers_as_its_fake(case: str) -> None:
 
 @pytest.mark.parametrize("argv, shell", [
     ("echo hi", False),
-    (["git", "status"], True),
+    (["make", "docs"], True),
     (["sh", "RUNME.sh"], False),
     (["/bin/bash", "-c", "true"], False),
     ([r"C:\Program Files\Git\bin\bash.exe", "-lc", "true"], False),
@@ -64,7 +64,7 @@ def test_a_shell_is_a_command_line_a_shell_program_or_a_shell_script(argv, shell
     assert shell_door.is_shell(argv, shell)
 
 
-@pytest.mark.parametrize("argv", [["git", "status"], [sys.executable, "x.sh"], ["uv", "run", "python", "a.py"],
+@pytest.mark.parametrize("argv", [["make", "docs"], [sys.executable, "x.sh"], ["uv", "run", "python", "a.py"],
                                   ["gh", "api", "repos"], ["shellcheck", "x.sh"], []])
 def test_no_other_program_is_a_shell(argv) -> None:
     assert not shell_door.is_shell(argv)
@@ -73,17 +73,17 @@ def test_no_other_program_is_a_shell(argv) -> None:
 def test_the_process_door_hands_a_shell_to_the_shell_door(fake_shell: fakes.FakeProcesses,
                                                           fake_processes: fakes.FakeProcesses) -> None:
     fake_shell.on(lambda _invocation: True, lambda invocation: 5)
-    for argv, options in ((["bash", "-c", "true"], {}), ("true", {"shell": True}), (["git", "status"], {"shell": True}),
+    for argv, options in ((["bash", "-c", "true"], {}), ("true", {"shell": True}), (["make", "docs"], {"shell": True}),
                           (["scripts/check.sh"], {})):
         assert process_door.run(argv, **options).returncode == 5
-    assert [call.argv for call in fake_shell.calls] == [["bash", "-c", "true"], "true", ["git", "status"],
+    assert [call.argv for call in fake_shell.calls] == [["bash", "-c", "true"], "true", ["make", "docs"],
                                                         ["scripts/check.sh"]]
     assert fake_processes.calls == []
 
 
 def test_the_shell_door_refuses_a_program_that_is_no_shell_naming_the_process_door() -> None:
     with pytest.raises(ValueError, match="scripts/process_door.py"):
-        shell_door.run(["git", "status"])
+        shell_door.run(["make", "docs"])
 
 
 def test_a_test_gets_the_fake_shell_which_answers_by_its_handlers(fake_shell: fakes.FakeProcesses,
