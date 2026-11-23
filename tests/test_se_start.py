@@ -820,13 +820,17 @@ def test_the_listing_runs_in_the_checkout_and_its_table_is_read(tmp_path):
                                   "newest": "2.0.0"}
 
 
-@pytest.mark.parametrize(("body", "error"), [
-    ("import sys\nsys.exit('obs-components: no remote')\n", " failed with exit code 1: obs-components: no remote"),
-    ("print('nothing here')\n", ": its output holds no table headed component  kind  installed  newest  repository"),
-    ("import time\ntime.sleep(5)\n", " took longer than 0.5 s"),
+@pytest.mark.parametrize(("body", "timeout", "error"), [
+    ("import sys\nsys.exit('obs-components: no remote')\n", 30,
+     " failed with exit code 1: obs-components: no remote"),
+    ("print('nothing here')\n", 30,
+     ": its output holds no table headed component  kind  installed  newest  repository"),
+    ("import time\ntime.sleep(5)\n", 0.5, " took longer than 0.5 s"),
 ])
-def test_a_listing_that_fails_or_takes_too_long_answers_its_error(tmp_path, monkeypatch, body, error):
-    monkeypatch.setattr(se_start, "COMPONENTS_TIMEOUT", 0.5)
+def test_a_listing_that_fails_or_takes_too_long_answers_its_error(tmp_path, monkeypatch, body, timeout,
+                                                                  error):
+    # Only the listing that sleeps is bound tightly: Python alone may start slower than that.
+    monkeypatch.setattr(se_start, "COMPONENTS_TIMEOUT", timeout)
     command = _script(tmp_path, body)
     found = se_start.list_components(tmp_path, command)
     assert found == {"error": " ".join(command) + error}
