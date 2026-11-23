@@ -9,13 +9,18 @@ once, an open overhaul answering a second `new`.
 from: every rule of the rule book with what checks it (a test, a check, or judgment); the retros
 closed since the last closed overhaul, from their reports' blocks; the previous overhaul's findings
 and the state of the issues that name them (`overhaul #<n> finding <k>`), too early to score where
-one is still open and the countdown (`[overhaul]` `due_after` or `days`) is on; and the pruning facts.
-It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
+one is still open and the countdown (`[overhaul]` `due_after` or `days`) is on; the pruning facts;
+then the questions the judge answers, the standing questions (templates/standing-questions.md,
+which the retro and every field report ask too) and the overhaul's own
+(templates/overhaul-questions.md), each a section of the overhaul template (TEMPLATE_NAME,
+QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the judge fills.
 
-`overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, writing nothing; it files
-no issue (wrk-007). It posts the report, each finding with its kind (`work`, which SE bundles, or
-`decision`, for the owner's decision list; a rule change is always a decision), then the facts and
-the block, as the overhaul issue's closing comment, and closes the issue.
+`overhaul.py file <issue> --draft FILE` refuses an incomplete judgment, a question left open among
+it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts the report, a
+document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
+question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
+owner's decision list; a rule change is always a decision), then the facts and the block, which
+`judgment_problems` checks, as the overhaul issue's closing comment, and closes the issue.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -550,6 +555,10 @@ OVERHAUL_NAME = re.compile(r"(?:docs/)?overhaul-\d{8}")
 OVERHAUL_LABEL = "discovery"
 BLOCK_MARKER = "<!-- se:overhaul-yaml -->"
 REPORT_MARKER = "<!-- se:overhaul-report -->"
+# The overhaul's document template, and its fields the draft asks the judge to answer: the
+# standing questions, which the retro and every field report ask too, and the overhaul's own.
+TEMPLATE_NAME = "overhaul"
+QUESTION_FIELDS = ("questions", "overhaul_questions")
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
 BLOCK_VERSION = 1
 # A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`.
@@ -892,10 +901,16 @@ def draft(found: Gathered) -> str:
             f"{name} {counted.get(name, '?')} then, {value} now" for name, value in now.items())
             + ".", ""]
     lines.append(review.demoted(facts, 1).strip())
+    templates = sibling("templates")
+    for name in QUESTION_FIELDS:
+        item = overhaul_template().field(name)
+        lines += ["", f"## {item.heading}", "", f"<!-- {item.name}: {item.says} -->", "",
+                  templates.sections(item.nested, 3).rstrip("\n")]
     block = json.dumps(found.data(), indent=2, ensure_ascii=False)
     lines += ["", JUDGE_BEGIN, "## Judgment", "",
               "The judge reads se itself (the README, the agents and skills, the rule book, the "
-              "scripts), then fills the block below and runs "
+              "scripts), answers every standing question and every question of the overhaul's own "
+              "above, then fills the block below and runs "
               f"`overhaul.py file {found.number} --draft <this file>`: `verdicts`, one per rule "
               f"(`rule`, `strays`: {', '.join(STRAYS)}, `how`); `looked_at`, every part answered "
               f"({', '.join(LOOKED_AT)}; \"nothing to change\" is an answer); `findings`, each "
@@ -906,6 +921,39 @@ def draft(found: Gathered) -> str:
               f"`{NEW_RULE}`) is always a decision for the person. This part is not posted.",
               JUDGE_END, "", BLOCK_MARKER, review.fenced(block, "yaml")]
     return "\n".join(lines) + "\n"
+
+
+def overhaul_template():
+    """The overhaul's document template, TEMPLATE_NAME, as SE's checkout holds it."""
+    return sibling("templates").own(TEMPLATE_NAME)
+
+
+def question_sections(text: str) -> dict[str, str]:
+    """The draft `text`'s sections of QUESTION_FIELDS, by field: each heading's text up to the
+    next `## ` heading, comments kept for the check."""
+    found = {}
+    for name in QUESTION_FIELDS:
+        heading = overhaul_template().field(name).heading
+        match = re.search(rf"^## {re.escape(heading)}[ \t]*\n(.*?)(?=^## |^{re.escape(JUDGE_BEGIN)}|"
+                          rf"^{re.escape(BLOCK_MARKER)}|\Z)", text, re.MULTILINE | re.DOTALL)
+        found[name] = match[1].strip() if match else ""
+    return found
+
+
+def question_problems(text: str) -> list[str]:
+    """What keeps the draft `text` from answering every standing question and every question of
+    the overhaul's own, each block's own refusal; none where it does."""
+    templates = sibling("templates")
+    problems = []
+    for name, section in question_sections(text).items():
+        item = overhaul_template().field(name)
+        if not section:
+            problems.append(f"the draft has no section `## {item.heading}`")
+            continue
+        problems += [f"{item.heading}: {finding.fix.replace('`## ', '`### ')}"
+                     for finding in templates.check(item.nested, templates.parse(item.nested, section))
+                     if finding.severity == templates.REFUSE]
+    return problems
 
 
 def changes_rule(finding: dict) -> bool:
@@ -986,7 +1034,7 @@ def judged(text: str, number: int) -> dict:
     if block.get("overhaul") != number:
         raise work_tickets.QueueError(f"The draft is overhaul #{block.get('overhaul')}'s, not "
                                       f"#{number}'s")
-    problems = judgment_problems(block)
+    problems = judgment_problems(block) + question_problems(text)
     if problems:
         raise work_tickets.QueueError(f"The judgment of overhaul #{number} is not complete, so "
                                       "nothing was written: " + "; ".join(problems))
@@ -1004,46 +1052,58 @@ def judged(text: str, number: int) -> dict:
 
 
 def report(text: str, block: dict, number: int) -> str:
-    """The overhaul's report, its closing comment: the verdicts, what was looked at, each finding
-    with its kind, what went well, what follows, the facts, then the block the next overhaul
-    reads."""
+    """The overhaul's report, its closing comment, a document of the overhaul template: the
+    verdicts, what was looked at, the draft's answers to the standing questions and to the
+    overhaul's own, each finding with its kind and what follows, what went well, the facts, then
+    the block the next overhaul reads."""
     review = sibling("review")
+    templates = sibling("templates")
     one_line = sibling("retro").one_line
-    lines = [REPORT_MARKER, f"## Overhaul #{number}: the report", "", "### Verdicts", "",
-             "| rule | strays | how |", "|---|---|---|"]
+    verdicts = ["| rule | strays | how |", "|---|---|---|"]
     names = {rule["id"]: rule.get("name", "") for rule in block.get("rules") or []}
     order = {rule: index for index, rule in enumerate(names)}
     for verdict in sorted(block["verdicts"], key=lambda item: order.get(item["rule"].strip(), 0)):
         rule = verdict["rule"].strip()
-        lines.append(f"| {rule} {names.get(rule, '')} | {verdict['strays']} | "
-                     f"{one_line(verdict['how']).replace('|', '/')} |")
-    lines += ["", "### What was looked at", ""]
-    lines += [f"- **{part}**: {one_line(block['looked_at'][part])}" for part in LOOKED_AT]
-    lines += ["", "### Findings", ""]
-    if not block["findings"]:
-        lines.append("None.")
+        verdicts.append(f"| {rule} {names.get(rule, '')} | {verdict['strays']} | "
+                        f"{one_line(verdict['how']).replace('|', '/')} |")
+    findings = [] if block["findings"] else ["None."]  # then what follows
     for item in block["findings"]:
         kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                 if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
         change = "; a rule change" if item["rule_change"] else ""
-        lines += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}{change}; rule "
-                  f"{item['rule'].strip()}; place `{item['place'].strip()}`)",
-                  "  " + "\n  ".join(item["body"].strip().splitlines())]
-        lines += [f"  - Source: {source.strip()}" for source in item.get("sources") or []]
-    lines += ["", "### What went well", ""]
-    lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
+        findings += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}{change}; rule "
+                     f"{item['rule'].strip()}; place `{item['place'].strip()}`)",
+                     "  " + "\n  ".join(item["body"].strip().splitlines())]
+        findings += [f"  - Source: {source.strip()}" for source in item.get("sources") or []]
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
-    lines += ["", "### What follows", "",
-              f"This overhaul filed no issue. SE bundles the {WORK} findings "
-              f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-              f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
-              f"so the next overhaul scores it; the {DECISION} findings "
-              f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
-              "on the owner's decision list.",
-              "", "### The facts", "", sibling("retro").facts_of(text, BLOCK_MARKER, (JUDGE_BEGIN, JUDGE_END)), "", BLOCK_MARKER,
-              review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml")]
-    return "\n".join(lines) + "\n"
+    answered = question_sections(text)
+    headings = [overhaul_template().field(name).heading for name in QUESTION_FIELDS]
+    facts_text = re.sub(
+        r"^## (?:" + "|".join(map(re.escape, headings)) + r")[ \t]*\n.*?(?=^## |^"
+        + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
+        flags=re.MULTILINE | re.DOTALL)
+    follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
+               f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
+               f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+               f"so the next overhaul scores it; the {DECISION} findings "
+               f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
+               "on the owner's decision list.")
+    fields = {
+        "verdicts": "\n".join(verdicts),
+        "looked_at": "\n".join(f"- **{part}**: {one_line(block['looked_at'][part])}"
+                               for part in LOOKED_AT),
+        **{name: re.sub(r"<!--.*?-->\s*", "", answered[name], flags=re.DOTALL).strip()
+           for name in QUESTION_FIELDS},
+        "findings": "\n".join(findings) + "\n\n" + follows,
+        "went_well": "\n".join(f"- {entry.strip()}" for entry in block["went_well"]
+                               if review.words(entry)),
+        "facts": sibling("retro").facts_of(facts_text, BLOCK_MARKER, (JUDGE_BEGIN, JUDGE_END))
+                 + "\n\n" + BLOCK_MARKER + "\n"
+                 + review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml"),
+    }
+    body = templates.render(overhaul_template(), fields)
+    return f"{REPORT_MARKER}\n# Overhaul #{number}: the report\n\n{body.rstrip()}\n"
 
 
 def run_file(args: argparse.Namespace) -> int:

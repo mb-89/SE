@@ -7,13 +7,18 @@ retro issue exists. `--since <date>` starts it at a date, `--retro <issue>` wher
 issue closed (whose findings it then scores); the rule checks judge that window alone. Each issue
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
-draft with
+draft that is a document of the retro template (TEMPLATE_NAME, `templates/retro.md`), its six steps
+(field feedback, collect, the table of what happened, the standing questions with their matrix,
+classes and homes, the person's decisions; `draft`), each step's heading and instruction the
+template's. Step 2, collect, holds
 
 - the sizes: closed, landed, duplicates, escalated;
 - per landed issue the deliveries `integrate` refused before it landed (its `Integration
   stopped:` comments), its escalations and the complete suite's time its `Integrated in` comment
   names;
-- the field reports' Retro sections and their "Not delivered" items, grouped;
+- the field reports' answers to the standing questions (their Retro section, the block
+  work_tickets.py `standing_questions` nests; `retro_entries`) by question, and their "Not
+  delivered" items, the planning misses;
 - the rule checks (RULE_CHECKS), each broken one with what broke it;
 - the metrics of the window: the line each landing pull request's description ends in and the
   local metrics file's lines that started in the window, each run once (README "Metrics");
@@ -25,10 +30,18 @@ draft with
   (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
   (recurred); where the overhaul countdown is on (overhaul.py countdown_on), one that an open issue
   takes is too early to score (TOO_EARLY), neither;
+- the previous retro's classes measured again (`class_patterns`): rate before, its findings per
+  work issue it closed, against rate now, the issues of the window its pattern matches, per issue;
 
-and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
+step 3 the timeline in chapters of up to CHAPTER_HOURS, by when each issue came back (`chapters`),
+and per step (each issue) what went well, what it cost and whether a machine could do it, from its
+record and field report; step 4 the matrix of the standing questions against the chapters, each
+cell the issues whose report answers it there, and the questions for the judge to answer; step 5
+the home order (HOMES) and the previous retro's classes against the tree (`tree_state`: FIXED, PAST
+or OPEN). It ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
 `retro.py file` and later collects. The judge fills the block's `findings`, `classes` and
-`went_well`.
+`went_well`; a class has CLASS_FIELDS, one cause and one fix, its home and the kind of home, the
+first of HOMES that holds.
 
 Off by default, three additions leave that draft as it is without them:
 
@@ -50,11 +63,14 @@ Off by default, three additions leave that draft as it is without them:
   the classes that carry one (`class_patterns`). A block without them is scored and filed as
   before.
 
-`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, and a
-draft the integration branch does not hold as it stands; it files no issue (wrk-007). It posts the
-report proper, the judgment with each finding's proposed fix and its kind (`work`, which SE
-bundles into work issues, or `decision`, for the owner's decision list) and what follows, as the
-retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
+`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, a
+draft whose steps break the retro template (a step or a standing question left open;
+`steps_problems`) and a draft the integration branch does not hold as it stands; it files no issue
+(wrk-007). It posts the report proper, a document of the retro template (`report`): the draft's
+steps, the judgment in step 5, each class with its home and its state against the tree and each
+finding with its proposed fix and its kind (`work`, which SE bundles into work issues, or
+`decision`, for the owner's decision list), and the person's decisions and what follows in step 6,
+as the retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
 reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
 
@@ -115,10 +131,24 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 # A work issue names each retro finding it takes as `retro #<n> finding <k>`.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
-CLASS_FIELDS = ("name", "fix")
+# A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
+# one of HOMES.
+CLASS_FIELDS = ("name", "cause", "fix", "home", "home_kind")
 # The optional keys of a class: its status, the pattern (a regular expression) the next collect
-# counts over the window, and the limits of its fix.
-CLASS_KEYS = ("status", "pattern", "limits")
+# counts over the window, the limits of its fix, and its mark, a text the fix leaves in its home,
+# which the tree check looks for (`tree_state`).
+CLASS_KEYS = ("status", "pattern", "limits", "mark")
+# The homes of a fix, strongest first: a class's home is the first of them that holds (step 5).
+HOMES = ("check", "refusal", "gate", "prefill", "checklist line", "command", "setting", "sentence")
+# A class checked against the tree (`tree_state`): its fix is in its home (FIXED), it no longer
+# comes back though its fix is not there (PAST), or neither (OPEN), which the person decides.
+FIXED, PAST, OPEN = "fixed", "past", "open"
+# The timeline's chapters: a chapter takes every event up to this many hours after its first.
+CHAPTER_HOURS = 6
+# The retro document template: the six steps, the standing questions nested in step 4.
+TEMPLATE_NAME = "retro"
+# The field report's answers that say whether a machine could do a step (step 3).
+MECHANIZE = ("machine_scripts", "shell_command")
 # The author associations `--refusals` counts as inside the fleet (outside_text.inside).
 INSIDE = ("OWNER", "MEMBER", "COLLABORATOR")
 # How many of a refusal's first lines `--refusals` shows.
@@ -156,7 +186,6 @@ DUE_AFTER = 20
 # The state of an earlier run's finding whose issue is still open: it had no time to land, so the
 # run lists it and scores it neither way (no failure, no recurrence).
 TOO_EARLY = "too early to score"
-RETRO_KEYS = ("Went well", "Cost time", "Proposed improvement")
 EMPTY = {"", "none", "none.", "-", "n/a"}
 
 
@@ -427,17 +456,21 @@ def one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+def templates():
+    return sibling("templates")
+
+
+def questions():
+    """The standing questions, the block the retro, the overhaul and the field report nest."""
+    return work_tickets.standing_questions()
+
+
 def retro_entries(report: str) -> dict[str, str]:
-    """The field report's Retro section, by RETRO_KEYS; empty entries left out."""
-    found: dict[str, str] = {}
-    text = section(report, "Retro")
-    for key in RETRO_KEYS:
-        match = re.search(rf"\*\*{re.escape(key)}:\*\*(.*?)(?=^\s*[-*] \*\*|\Z)", text,
-                          re.MULTILINE | re.DOTALL)
-        value = one_line(match[1]) if match else ""
-        if value.lower() not in EMPTY:
-            found[key] = value
-    return found
+    """The field report's answers to the standing questions (its Retro section), by question
+    field; a question left out or answered None is not in it."""
+    text = section(report, work_tickets.QUESTIONS_SECTION)
+    return {name: one_line(answer)
+            for name, answer in templates().answers(questions(), text).items()}
 
 
 def not_delivered(report: str) -> list[str]:
@@ -481,8 +514,11 @@ class Closed:
     suite_seconds: float | None
     landing_pull: int | None
     report_pull: int | None
+    # The field report's answers to the standing questions, by question field (`retro_entries`).
     retro: dict[str, str] = field(default_factory=dict)
     not_delivered: list[str] = field(default_factory=list)
+    # When it came back: its landing's merge, else its close; the timeline orders by it.
+    at: str = ""
 
 
 @dataclass
@@ -525,13 +561,36 @@ class Collected:
                                                 ("breaking", self.breaking))
                 if value is not None}
 
+    def chapters(self) -> list[dict]:
+        """The window's timeline (`chapters`)."""
+        return chapters(self.issues)
+
     def data(self) -> dict:
         return {"version": BLOCK_VERSION, "window": asdict(self.window), "sizes": self.sizes,
                 "issues": [asdict(item) for item in self.issues],
+                "chapters": self.chapters(),
                 "rule_checks": [{**asdict(check), "kept": check.kept} for check in self.checks],
                 "metrics": {**self.run_sources, "runs": len(self.runs)},
                 "adhoc": self.adhoc, "scripts": self.scripts,
                 "previous": self.previous, **{name: [] for name in JUDGMENT}}
+
+
+def chapters(issues: list[Closed]) -> list[dict]:
+    """The timeline of `issues` in chapters, oldest first: each takes the issues that came back
+    (`Closed.at`) up to CHAPTER_HOURS after its first, with its first and last time; an issue
+    without a time comes last, in a chapter of its own."""
+    timed = sorted((item for item in issues if when(item.at)), key=lambda item: when(item.at))
+    found: list[dict] = []
+    for item in timed:
+        moment = when(item.at)
+        if not found or (moment - when(found[-1]["start"])).total_seconds() > CHAPTER_HOURS * 3600:
+            found.append({"chapter": len(found) + 1, "start": item.at, "end": item.at, "issues": []})
+        found[-1]["end"] = item.at
+        found[-1]["issues"].append(item.number)
+    untimed = [item.number for item in issues if not when(item.at)]
+    if untimed:
+        found.append({"chapter": len(found) + 1, "start": "", "end": "", "issues": untimed})
+    return found
 
 
 def read_block(text: str, marker: str = BLOCK_MARKER) -> dict | None:
@@ -865,7 +924,9 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             landing_pull=landing.number if landing else None,
             report_pull=report_pull.number if report_pull else None,
             retro=retro_entries(report) if report else {},
-            not_delivered=not_delivered(report) if report else []))
+            not_delivered=not_delivered(report) if report else [],
+            at=(landing.merged_at if landing is not None and landing.merged_at
+                else issue.closed_at)))
 
     checks = {name: RuleCheck(name, rule, 0) for name, rule in RULE_CHECKS.items()}
     for pull in landings:
@@ -937,7 +998,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
     if door.missing:
         return None
     scored = scored_findings(previous, last.number if last else 0, window, checks, opened)
-    patterns = class_patterns(previous, issue_texts)
+    patterns = class_patterns(previous, issue_texts, root)
     sizes = {"closed": len(closed), "landed": sum(item.landed for item in closed),
              "duplicates": sum(item.duplicate for item in closed),
              "escalated": sum(item.escalations > 0 for item in closed)}
@@ -975,7 +1036,7 @@ def breaking_lines(breaking: dict | None) -> list[str]:
     """The breaking-release check's section; none where it did not run."""
     if breaking is None:
         return []
-    lines = ["", "## Breaking releases beyond a pin", "",
+    lines = ["", "### Breaking releases beyond a pin", "",
              "`se_modules.py breaking` over the project's component tree, as collect ran it; what "
              "to do about a finding is the person's decision."]
     if breaking["lines"]:
@@ -1061,21 +1122,53 @@ def refusal_records(comments: dict[int, list[dict]], door, tracker: str,
     return records
 
 
-def class_patterns(previous: dict | None, texts: dict[int, list[str]]) -> list[dict]:
-    """Each class of the previous retro's block that carries a `pattern`, counted over `texts`
-    (what collect read of each work issue of the window): its matches in all and the issues it
-    matched in, with its `status` and `limits` where given."""
+def rate(count: int, closed: object) -> float | None:
+    """`count` per closed work issue, to two places; None where nothing closed."""
+    return round(count / closed, 2) if isinstance(closed, int) and closed > 0 else None
+
+
+def tree_state(root: Path, given: dict, matches: int | None = None) -> str:
+    """A class checked against the tree at `root`: FIXED where its home holds its mark, PAST
+    where it is not but nothing of the window matched its pattern (`matches` 0), else OPEN."""
+    home = str(given.get("home") or "").strip().lstrip("./")
+    mark = str(given.get("mark") or "").strip()
+    path = root / home if home else None
+    if mark and path is not None and path.is_file() and mark in path.read_text(
+            encoding="utf-8", errors="replace"):
+        return FIXED
+    return PAST if matches == 0 else OPEN
+
+
+def class_patterns(previous: dict | None, texts: dict[int, list[str]],
+                   root: Path | None = None) -> list[dict]:
+    """Each class of the previous retro's block, measured again (step 2): its rate before (its
+    findings per work issue the previous retro closed) and, where it carries a `pattern`, its rate
+    now (the work issues of `texts`, what collect read of each issue of the window, it matched
+    in, per issue), its matches in all and those issues; with its home, its `status` and `limits`
+    where given, and its state against the tree at `root` (`tree_state`)."""
     found: list[dict] = []
+    findings = [item for item in (previous or {}).get("findings") or [] if isinstance(item, dict)]
+    closed = ((previous or {}).get("sizes") or {}).get("closed")
     for given in (previous or {}).get("classes") or []:
-        if not isinstance(given, dict) or not isinstance(given.get("pattern"), str):
+        if not isinstance(given, dict):
             continue
-        pattern = re.compile(given["pattern"])
-        counts = {number: sum(len(pattern.findall(text)) for text in read)
-                  for number, read in texts.items()}
-        found.append({"name": str(given.get("name") or ""), "status": given.get("status"),
-                      "pattern": given["pattern"], "limits": given.get("limits"),
-                      "matches": sum(counts.values()),
-                      "issues": sorted(number for number, count in counts.items() if count)})
+        name = str(given.get("name") or "")
+        before = rate(sum(str(item.get("class") or "").strip() == name.strip()
+                          for item in findings), closed)
+        row = {"name": name, "status": given.get("status"), "home": given.get("home"),
+               "home_kind": given.get("home_kind"), "limits": given.get("limits"),
+               "before": before}
+        matches = None
+        if isinstance(given.get("pattern"), str):
+            pattern = re.compile(given["pattern"])
+            counts = {number: sum(len(pattern.findall(text)) for text in read)
+                      for number, read in texts.items()}
+            issues = sorted(number for number, count in counts.items() if count)
+            matches = sum(counts.values())
+            row.update({"pattern": given["pattern"], "matches": matches, "issues": issues,
+                        "now": rate(len(issues), len(texts))})
+        row["tree"] = tree_state(root, given, matches) if root is not None else OPEN
+        found.append(row)
     return found
 
 
@@ -1251,22 +1344,99 @@ def scored_findings(previous: dict | None, retro: int, window: list[Issue],
     return found
 
 
-def draft(found: Collected) -> str:
-    """The draft as the judging agent reads it, ending in the block `read_block` parses."""
+def retro_template():
+    """The retro's document template, TEMPLATE_NAME, as SE's checkout holds it."""
+    return templates().own(TEMPLATE_NAME)
+
+
+def step(name: str, body: list[str]) -> list[str]:
+    """The retro template's section `name`: its heading, its instruction, then `body`."""
+    item = retro_template().field(name)
+    return ["", f"## {item.heading}", "", f"<!-- {item.name}: {item.says} -->", *(
+        ["", *body] if body else [])]
+
+
+def cell(text: str) -> str:
+    return one_line(text).replace("|", "\\|")
+
+
+def chapter_label(chapter: dict) -> str:
+    if not chapter["start"]:
+        return f"{chapter['chapter']} (no time)"
+    return f"{chapter['chapter']} ({chapter['start'][:16].replace('T', ' ')})"
+
+
+def timeline_lines(found: Collected) -> list[str]:
+    """Step 3: the chapters, then per step (each work issue that came back) what went well, what
+    it cost and whether a machine could do it, from its field report and its record; the judge
+    fills what the record leaves open."""
+    chapters = found.chapters()
+    if not chapters:
+        return ["No work issue came back in the window."]
+    by_number = {item.number: item for item in found.issues}
+    lines = [f"Chapters of up to {CHAPTER_HOURS} hours, by when each work issue came back (its "
+             "landing, else its close).", "", "| chapter | from | to | steps |", "|---|---|---|---|"]
+    lines += [f"| {chapter['chapter']} | {chapter['start'] or 'unknown'} | "
+              f"{chapter['end'] or 'unknown'} | "
+              + ", ".join(f"#{number}" for number in chapter["issues"]) + " |"
+              for chapter in chapters]
+    lines += ["", "| step | chapter | what went well | what it cost | can a machine do it |",
+              "|---|---|---|---|---|"]
+    for chapter in chapters:
+        for number in chapter["issues"]:
+            item = by_number[number]
+            state = ("landed" if item.landed else "duplicate" if item.duplicate
+                     else item.state_reason)
+            suite = f", suite {item.suite_seconds:g} s" if item.suite_seconds is not None else ""
+            cost = f"{state}; {item.refused} refused, {item.escalations} escalated{suite}"
+            machine = "; ".join(item.retro[key] for key in MECHANIZE if key in item.retro)
+            lines.append(f"| #{item.number} {cell(item.title)} | {chapter['chapter']} | "
+                         f"{cell(item.retro.get('goes_well', ''))} | {cell(cost)} | {cell(machine)} |")
+    return lines
+
+
+def matrix_lines(found: Collected) -> list[str]:
+    """Step 4's matrix: each standing question against each chapter, a cell naming the work
+    issues whose field report answers it there; the judge fills the rest."""
+    chapters = found.chapters()
+    if not chapters:
+        return ["No chapter: no work issue came back in the window."]
+    by_number = {item.number: item for item in found.issues}
+    lines = ["| question | " + " | ".join(chapter_label(chapter) for chapter in chapters) + " |",
+             "|---|" + "---|" * len(chapters)]
+    for question in questions().fields:
+        cells = [", ".join(f"#{number}" for number in chapter["issues"]
+                           if question.name in by_number[number].retro) for chapter in chapters]
+        lines.append(f"| {cell(question.heading)} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def answer_lines(found: Collected) -> list[str]:
+    """Step 2's part of the field reports: each standing question with each work issue's answer."""
+    lines = ["### The field reports' answers to the standing questions"]
+    for question in questions().fields:
+        entries = [(item.number, item.retro[question.name]) for item in found.issues
+                   if question.name in item.retro]
+        lines += ["", f"#### {question.heading}", ""]
+        lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
+    return lines
+
+
+def collect_lines(found: Collected) -> list[str]:
+    """Step 2: what collect read, each part a `###` section."""
     window = found.window
-    lines = [f"# Retro draft for #{window.retro}", ""]
     starts = {
         CLOSED_RETRO: f"when retro #{window.since_retro} closed",
         GIVEN: "as --since gives",
         OPEN_RETRO: f"when retro #{window.since_retro}, the oldest open retro issue, was created; "
                     "no retro issue has closed"}
     if window.since:
-        lines.append(f"Window: work issues closed after {window.since}, {starts[window.start]}, "
-                     f"up to {window.until}.")
+        lines = [f"Window: work issues closed after {window.since}, {starts[window.start]}, "
+                 f"up to {window.until}."]
     else:
-        lines.append(f"Window: the whole history up to {window.until}; no retro issue exists.")
+        lines = [f"Window: the whole history up to {window.until}; no retro issue exists."]
     previous = (found.previous or {}).get("sizes") or {}
-    lines += ["", "## Sizes", ""]
+    lines += ["", "### Sizes", ""]
     if previous:
         lines += [f"| size | this window | retro #{found.previous['retro']} |", "|---|---|---|"]
         lines += [f"| {name} | {value} | {previous.get(name, '')} |"
@@ -1276,7 +1446,7 @@ def draft(found: Collected) -> str:
         lines += [f"| {name} | {value} |" for name, value in found.sizes.items()]
     scored = (found.previous or {}).get("findings") or []
     if found.previous:
-        lines += ["", f"## The findings of retro #{found.previous['retro']}", ""]
+        lines += ["", f"### The findings of retro #{found.previous['retro']}", ""]
     if scored:
         lines += ["| finding | class | kind | issues | state | recurred |",
                   "|---|---|---|---|---|---|"]
@@ -1290,7 +1460,7 @@ def draft(found: Collected) -> str:
     elif found.previous:
         lines.append("None.")
     lines += class_lines(found)
-    lines += ["", "## Landed issues", ""]
+    lines += ["", "### Landed issues", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
         lines += ["| issue | refused deliveries | escalations | suite time | field report |",
@@ -1302,23 +1472,18 @@ def draft(found: Collected) -> str:
                          f"{suite} | {report} |")
     else:
         lines.append("None.")
-    others = [item for item in found.issues if not item.landed]
-    if others:
-        lines += ["", "Closed without landing: " + ", ".join(
-            f"#{item.number} ({'duplicate' if item.duplicate else item.state_reason})"
-            for item in others) + "."]
-    lines += ["", "## Rule checks", ""]
+    lines += ["", "### Rule checks", ""]
     for check in found.checks:
         state = (f"kept ({check.checked} checked)" if check.kept
                  else f"broken {len(check.broken)} of {check.checked}")
         lines.append(f"- **{check.name}**: {check.rule}: {state}")
         lines += [f"  - {item['item']}: {item['what']}" for item in check.broken]
-    lines += ["", "## Metrics", "",
+    lines += ["", "### Metrics", "",
               f"{len(found.runs)} runs: {found.run_sources.get('landings', 0)} from the landing "
               f"pull requests, {found.run_sources.get('local', 0)} from {metrics.path()}, each run "
               "once.", "", "```text", metrics.report(found.runs), "```"]
     lines += breaking_lines(found.breaking)
-    lines += ["", "## Ad hoc components to promote", ""]
+    lines += ["", "### Ad hoc components to promote", ""]
     if found.adhoc:
         lines += [f"Used in {se_usage.PROMOTE_SESSIONS} or more sessions since the last retro; "
                   "promote each to a tracked component (docs/go-core.md).", "",
@@ -1327,7 +1492,7 @@ def draft(found: Collected) -> str:
                   for c in found.adhoc]
     else:
         lines.append("None.")
-    lines += ["", "## Ad hoc scripts to promote", ""]
+    lines += ["", "### Ad hoc scripts to promote", ""]
     if found.scripts:
         lines += [f"Run {se_usage.PROMOTE_RUNS} or more times in the window (since "
                   f"{found.window.since or 'the start of the history'}), the most-run "
@@ -1337,44 +1502,89 @@ def draft(found: Collected) -> str:
                   for s in found.scripts]
     else:
         lines.append("None.")
-    lines += ["", "## Retro sections of the field reports"]
-    for key in RETRO_KEYS:
-        entries = [(item.number, item.retro[key]) for item in found.issues if key in item.retro]
-        lines += ["", f"### {key}", ""]
-        lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
-    lines += ["", "## Not delivered", ""]
+    lines += ["", *answer_lines(found)]
+    lines += ["", "### Planning misses", "", "What the field reports did not deliver:", ""]
     entries = [(item.number, text) for item in found.issues for text in item.not_delivered]
     lines += [f"- #{number}: {text}" for number, text in entries] or ["None."]
-    lines += signal_lines(found.signals) + refusal_lines(found.refusals) + cost_lines(found.costs)
+    others = [item for item in found.issues if not item.landed]
+    if others:
+        lines += ["", "Closed without landing: " + ", ".join(
+            f"#{item.number} ({'duplicate' if item.duplicate else item.state_reason})"
+            for item in others) + "."]
+    extra = signal_lines(found.signals) + refusal_lines(found.refusals) + cost_lines(found.costs)
+    if extra:
+        lines += sibling("review").demoted("\n".join(extra), 1).split("\n")
+    return lines
+
+
+def classes_lines(found: Collected) -> list[str]:
+    """Step 5 as collect leaves it: the home order and the last retro's classes against the tree;
+    the judge's classes go in the block."""
+    lines = ["Home order, strongest first: " + ", ".join(HOMES) + ". A class's `home_kind` is the "
+             "first of them that holds; its `home` is the file the fix changes, its `mark` a text "
+             "the fix leaves there, which the tree check looks for."]
+    earlier = (found.previous or {}).get("classes") or []
+    if earlier:
+        lines += ["", f"The classes of retro #{found.previous['retro']} against the tree:", "",
+                  "| class | home | tree |", "|---|---|---|"]
+        lines += [f"| {cell(item['name'])} | {item.get('home_kind') or ''} "
+                  f"`{item.get('home') or ''}` | {item['tree']} |" for item in earlier]
+    return lines
+
+
+def draft(found: Collected) -> str:
+    """The draft as the judging agent reads it: the retro template's six steps, what collect read
+    filled in, then the block `read_block` parses."""
+    window = found.window
+    answers = templates().sections(questions(), 3).rstrip("\n").split("\n")
+    lines = [f"# Retro draft for #{window.retro}"]
+    lines += step("field_feedback", [])
+    lines += step("collect", collect_lines(found))
+    lines += step("timeline", timeline_lines(found))
+    lines += step("matrix", matrix_lines(found))
+    lines += step("answers", answers)
+    lines += step("classes", classes_lines(found))
+    lines += step("decisions", [])
     block = json.dumps(found.data(), indent=2, ensure_ascii=False)
     lines += ["", JUDGE_BEGIN, "## Judgment", "",
-              "The judge fills `findings`, `classes` and `went_well` in the block below, then runs "
-              f"`retro.py file {window.retro} --draft <this file>`: a finding has `title` (five "
-              "words or more), `body`, `class` (a class's `name`), `home` (the file it changes), "
-              "`controversial` (true where it changes a rule, trades one metric for another, the "
-              "judge is unsure, or it recurred after an earlier fix) with its `why`, and "
-              f"optionally `check` (a rule check: {', '.join(RULE_CHECKS)}); a class has `name` "
-              "and `fix`; `went_well` lists what went well. This part is not posted.", JUDGE_END,
-              "", BLOCK_MARKER, review.fenced(block, "yaml")]
+              "The judge writes the person's field feedback into step 1, fills what steps 3 and 4 "
+              "leave open, answers every standing question, fills `findings`, `classes` and "
+              f"`went_well` in the block below, then runs `retro.py file {window.retro} --draft "
+              "<this file>`, which refuses a step or a question left open: a finding has `title` "
+              "(five words or more), `body`, `class` (a class's `name`), `home` (the file it "
+              "changes), `controversial` (true where it changes a rule, trades one metric for "
+              "another, the judge is unsure, or it recurred after an earlier fix) with its `why`, "
+              f"and optionally `check` (a rule check: {', '.join(RULE_CHECKS)}); a class has "
+              f"`name`, `cause`, `fix`, `home` and `home_kind` (one of: {', '.join(HOMES)}), and "
+              f"optionally {', '.join(f'`{key}`' for key in CLASS_KEYS)}; `went_well` lists what "
+              "went well. Step 6 is the person's, in the session. This part is not posted.",
+              JUDGE_END, "", BLOCK_MARKER, review.fenced(block, "yaml")]
     return "\n".join(lines) + "\n"
 
 
 def class_lines(found: Collected) -> list[str]:
-    """The earlier classes that carry a pattern, each counted over the window; none without."""
+    """The last retro's classes measured again: rate before against rate now, the window's
+    matches of each pattern; none where it named none."""
     classes = (found.previous or {}).get("classes") or []
     if not classes:
         return []
-    lines = ["", f"## The classes of retro #{found.previous['retro']}", "",
-             "Each class that carries a pattern, counted over the window's work issues (title, "
-             "body, comments, field report).", "",
-             "| class | status | pattern | matches | issues | limits |", "|---|---|---|---|---|---|"]
+    lines = ["", f"### The classes of retro #{found.previous['retro']}, measured again", "",
+             "Rate before: the class's findings per work issue that retro closed; rate now: the "
+             "work issues of this window its pattern matches (title, body, comments, field "
+             "report), per issue.", "",
+             "| class | status | rate before | rate now | pattern | matches | issues | limits |",
+             "|---|---|---|---|---|---|---|---|"]
     for item in classes:
-        issues = ", ".join(f"#{number}" for number in item["issues"]) or "none"
+        issues = ", ".join(f"#{number}" for number in item.get("issues") or []) or "none"
         limits = item.get("limits")
         limits = "; ".join(limits) if isinstance(limits, list) else (limits or "")
-        pattern = item["pattern"].replace("|", "\\|")
-        lines.append(f"| {item['name']} | {item.get('status') or ''} | `{pattern}` | "
-                     f"{item['matches']} | {issues} | {one_line(limits)} |")
+        pattern = f"`{item['pattern'].replace('|', chr(92) + '|')}`" if "pattern" in item else "none"
+        rates = [("unknown" if value is None else f"{value:g}")
+                 for value in (item.get("before"), item.get("now"))]
+        if "pattern" not in item:
+            rates[1], issues = "no pattern", ""
+        lines.append(f"| {item['name']} | {item.get('status') or ''} | {rates[0]} | {rates[1]} | "
+                     f"{pattern} | {item.get('matches', '')} | {issues} | {one_line(limits)} |")
     return lines
 
 
@@ -1446,6 +1656,8 @@ def class_key_problems(given: dict, name: str) -> list[str]:
                 re.compile(pattern)
             except re.error as error:
                 problems.append(f"{name}: pattern is no regular expression ({error})")
+    if "mark" in given and not (isinstance(given["mark"], str) and given["mark"].strip()):
+        problems.append(f"{name}: mark is a text the fix leaves in its home")
     if "limits" in given:
         limits = given["limits"]
         if not (isinstance(limits, str) or (isinstance(limits, list)
@@ -1475,8 +1687,12 @@ def judgment_problems(block: dict) -> list[str]:
         problems += class_key_problems(given, f'class "{name}"' if name else f"class {index}")
         if not name:
             problems.append(f"class {index} has no name")
-        elif not review.words(given.get("fix")):
-            problems.append(f'class "{name}" has no fix')
+        else:
+            problems += [f'class "{name}" has no {key}' for key in ("cause", "fix", "home")
+                         if not review.words(given.get(key))]
+            if review.words(given.get("home_kind")) not in HOMES:
+                problems.append(f'class "{name}": home_kind is the first of the home order that '
+                                f"holds: {', '.join(HOMES)}")
         classes[name] = review.words(given.get("fix"))
     recurred = {item.get("check") for item in ((block.get("previous") or {}).get("findings") or [])
                 if isinstance(item, dict) and item.get("recurred")}
@@ -1514,9 +1730,10 @@ def judgment_problems(block: dict) -> list[str]:
     return problems
 
 
-def judged(text: str, number: int) -> dict:
-    """The block of the draft `text`, its judgment checked; every refusal is raised before
-    anything is written."""
+def judged(text: str, number: int, filed: bool = False) -> dict:
+    """The block of the draft `text`, its judgment checked, unless `filed` (a retro doc already
+    filed, whose judgment was checked when it was, read back by the next collect); every refusal
+    is raised before anything is written."""
     block = read_block(text)
     if block is None:
         raise QueueError(f"The draft has no {BLOCK_MARKER} block: write it with retro.py collect "
@@ -1524,12 +1741,14 @@ def judged(text: str, number: int) -> dict:
     retro = (block.get("window") or {}).get("retro")
     if retro != number:
         raise QueueError(f"The draft is retro #{retro}'s, not #{number}'s")
-    problems = judgment_problems(block)
+    problems = [] if filed else judgment_problems(block)
     if problems:
         raise QueueError(f"The judgment of retro #{number} is not complete, so nothing was "
                          "written: " + "; ".join(problems))
     findings = []
-    for index, given in enumerate(block["findings"], 1):
+    for index, given in enumerate(block.get("findings") or [], 1):
+        if not isinstance(given, dict):
+            continue
         controversial = given.get("controversial") is True
         findings.append({"finding": index, **{key: given[key] for key in FINDING_FIELDS
                                               if key in given},
@@ -1552,6 +1771,20 @@ def facts_of(text: str, marker: str = BLOCK_MARKER,
     return review.demoted("\n".join(lines)).strip()
 
 
+def steps_of(text: str):
+    """The draft `text` read as a document of the retro template: its six steps and the answers
+    to the standing questions (templates.py `parse`)."""
+    return templates().parse(retro_template(), text[:text.rfind(BLOCK_MARKER)]
+                             if BLOCK_MARKER in text else text)
+
+
+def steps_problems(text: str) -> list[str]:
+    """What keeps the draft `text` from holding every step the retro template requires, the
+    field feedback and each answer to the standing questions among them; none where it does."""
+    found = templates().check(retro_template(), steps_of(text))
+    return [finding.fix for finding in found if finding.severity == templates().REFUSE]
+
+
 def class_key_lines(keys: dict) -> list[str]:
     """A class's optional keys as the report shows them; none without."""
     lines = []
@@ -1563,56 +1796,90 @@ def class_key_lines(keys: dict) -> list[str]:
         limits = keys["limits"]
         lines.append("Limits: " + ("; ".join(entry.strip() for entry in limits)
                                    if isinstance(limits, list) else limits.strip()))
+    if "mark" in keys:
+        lines.append(f"Mark: `{keys['mark'].strip()}`")
     return ["", *lines] if lines else []
 
 
-def report(block: dict, number: int, doc: str, url: str, sha: str) -> str:
-    """The retro's report proper, its closing comment: the judgment, each finding with its
-    proposed fix and kind, what follows, then the link to the committed retro doc `doc` at commit
-    `sha` (`url`), which holds the facts and the block the next collect reads."""
-    fixes = {entry["name"].strip(): entry["fix"].strip() for entry in block["classes"]}
-    keys = {entry["name"].strip(): {key: entry[key] for key in CLASS_KEYS if key in entry}
-            for entry in block["classes"]}
-    lines = [REPORT_MARKER, f"## Retro #{number}: the report", "", "### Findings"]
-    if not block["findings"]:
-        lines += ["", "None."]
-    for name, fix in fixes.items():
-        members = [item for item in block["findings"] if item["class"].strip() == name]
-        if not members:
-            continue
-        lines += ["", f"#### {name} ({len(members)})", "", f"Fix: {fix}",
-                  *class_key_lines(keys.get(name, {})), ""]
-        for item in members:
+def judged_classes(block: dict, root: Path | None) -> list[dict]:
+    """The judged classes, strongest home first (HOMES), each with its findings and its state
+    against the tree at `root` (`tree_state`), OPEN where no tree is given."""
+    rows = []
+    for entry in block["classes"]:
+        name = entry["name"].strip()
+        rows.append({**entry, "name": name,
+                     "findings": [item for item in block["findings"]
+                                  if item["class"].strip() == name],
+                     "tree": tree_state(root, entry) if root is not None else OPEN})
+    return sorted(rows, key=lambda row: HOMES.index(row["home_kind"].strip()))
+
+
+def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
+           root: Path | None = None) -> str:
+    """The retro's report proper, its closing comment, a document of the retro template: the six
+    steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
+    with its home and its state against the tree at `root`, and its findings, each with its kind),
+    and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
+    facts and the block the next collect reads."""
+    template = retro_template()
+    drafted = steps_of(text).fields
+    classes = judged_classes(block, root)
+    lines = []
+    for row in classes:
+        lines += ["", f"#### {row['name']} ({len(row['findings'])})", "",
+                  f"Cause: {one_line(row['cause'])}", "", f"Fix: {row['fix'].strip()}", "",
+                  f"Home: {row['home_kind'].strip()} (home {HOMES.index(row['home_kind'].strip()) + 1} "
+                  f"of {len(HOMES)}), `{row['home'].strip()}`; tree: {row['tree']}",
+                  *class_key_lines({key: row[key] for key in CLASS_KEYS if key in row}), ""]
+        for item in row["findings"]:
             kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                     if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
             check = f"; check `{item['check']}`" if item.get("check") else ""
             lines += [f"- **{item['finding']}. {item['title'].strip()}** ({kind}; home "
                       f"`{item['home'].strip()}`{check})",
                       "  " + "\n  ".join(item["body"].strip().splitlines())]
-    lines += ["", "### What went well", ""]
+    if not classes:
+        lines += ["", "None."]
+    lines += ["", "#### What went well", ""]
     lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
-    lines += ["", "### What follows", "",
-              f"This retro filed no issue. SE bundles the {WORK} findings "
-              f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-              f"needs, each naming `retro #{number} finding <k>` for every finding it takes, so "
-              f"the next retro scores it; the {DECISION} findings "
-              f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list.",
-              "", "### The facts", "",
-              f"The facts (sizes, landed issues, rule checks, metrics, the field reports' Retro "
-              f"and Not delivered sections) and the block the next retro reads are in the "
-              f"committed retro doc [{doc}]({url}), at {sha[:12]}.", "",
-              DOC_MARKER.format(sha=sha, path=doc)]
-    return "\n".join(lines) + "\n"
+    still = [row["name"] for row in classes if row["tree"] == OPEN]
+    decided = [str(drafted.get("decisions") or "").strip(),
+               "Open classes: " + (", ".join(still) or "none") + ".",
+               f"This retro filed no issue. SE files what the person accepted: it bundles the "
+               f"{WORK} findings ({', '.join(map(str, work)) or 'none'}) into as few work issues "
+               f"as the work needs, each naming `retro #{number} finding <k>` for every finding "
+               f"it takes, so the next retro scores it; the {DECISION} findings "
+               f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list."]
+    fields = {
+        "field_feedback": drafted.get("field_feedback") or "None.",
+        "collect": f"The facts (sizes, landed issues, rule checks, metrics, the field reports' "
+                   f"answers and what they did not deliver, the last retro's classes measured "
+                   f"again) and the block the next retro reads are in the committed retro doc "
+                   f"[{doc}]({url}), at {sha[:12]}.",
+        "timeline": drafted.get("timeline") or "None.",
+        "matrix": drafted.get("matrix") or "None.",
+        "answers": drafted.get("answers") or "None.",
+        "classes": "\n".join(lines).strip(),
+        "decisions": "\n\n".join(part for part in decided if part),
+    }
+    body = templates().render(template, fields)
+    return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
+            f"{DOC_MARKER.format(sha=sha, path=doc)}\n")
 
 
 def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
     """`text` as the comments that post it: itself where it fits in `limit` characters, else
     numbered parts, cut at line ends (a longer line within it), each labelled `Part k of n`;
-    nothing is left out."""
+    nothing is left out but the report's markers (REPORT_MARKER and the template's), so no part
+    is taken for a whole report: `file` checked the whole before it cut it."""
     if len(text) <= limit:
         return [text]
+    unmarked = {REPORT_MARKER, templates().FLEET_MARKER}
+    text = "".join(line for line in text.splitlines(keepends=True)
+                   if line.strip() not in unmarked
+                   and not templates().TEMPLATE_MARKER_PATTERN.fullmatch(line.rstrip("\n")))
     size = limit - PART_ROOM
     chunks = [""]
     for line in text.splitlines(keepends=True):
@@ -1670,7 +1937,7 @@ def posted_block(texts: list[str], number: int, show) -> dict | None:
     if text is None:
         raise QueueError(f"Retro #{number}'s report links {doc} at {sha[:12]}, which the checkout "
                          "does not hold: run work_tickets.py sync and read again")
-    return judged(text, number)
+    return judged(text, number, filed=True)
 
 
 def file_steps(tracker: str, number: int, comments: list[str], what: str = "retro") -> Plan:
@@ -1692,9 +1959,20 @@ def run_file(args: argparse.Namespace) -> int:
     tracker = work_tickets.resolve_repo(root, args.repo)
     text = work_tickets.read_file(args.draft, "the retro draft")
     block = judged(text, args.retro)
+    open_steps = steps_problems(text)
+    if open_steps:
+        raise QueueError(f"The draft of retro #{args.retro} leaves a step of the retro template "
+                         f"({retro_template().path or TEMPLATE_NAME}) open, so nothing was written: "
+                         + "; ".join(open_steps))
     doc, sha = committed_doc(root, args.draft, text, work_tickets.integration_ref(root))
     url = doc_url(work_tickets.remote_repo(root) or tracker, sha, doc)
-    comments = parts(report(block, args.retro, doc, url, sha), args.retro)
+    posted = report(block, args.retro, doc, url, sha, text, root)
+    refused = [finding.fix for finding in templates().check(retro_template(), templates().parse(
+        retro_template(), posted)) if finding.severity == templates().REFUSE]
+    if refused:
+        raise QueueError(f"The report of retro #{args.retro} breaks the retro template, so nothing "
+                         "was written: " + "; ".join(refused))
+    comments = parts(posted, args.retro)
     steps = file_steps(tracker, args.retro, comments)
     if work_tickets.hand_off():
         print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools:")

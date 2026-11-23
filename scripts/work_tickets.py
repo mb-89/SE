@@ -2273,13 +2273,43 @@ def template_labels(value: str) -> list[str]:
 FIELD_REPORT_TEMPLATE_NAME = f"the se checkout's {FIELD_REPORT_TEMPLATE}"
 
 
+# The field report's Retro section nests the standing questions, SE's block template of that name:
+# the pull request template holds QUESTIONS_PLACEHOLDER where they go.
+STANDING_QUESTIONS = "standing-questions"
+QUESTIONS_PLACEHOLDER = "<!-- se:standing-questions -->"
+QUESTIONS_SECTION = "Retro"
+
+
+def standing_questions():
+    """The standing questions, SE's block template STANDING_QUESTIONS (templates.py `own`)."""
+    return sibling("templates").own(STANDING_QUESTIONS)
+
+
 def field_report_template() -> str:
-    """The pull request template, the field report's one template, markers included."""
+    """The pull request template, the field report's one template, markers included, its
+    QUESTIONS_PLACEHOLDER replaced by the standing questions, each a `###` section."""
     path = Path(__file__).resolve().parents[1] / FIELD_REPORT_TEMPLATE
     try:
-        return path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except OSError as error:
         raise QueueError(f"Field-report template not found: {FIELD_REPORT_TEMPLATE_NAME}: {error}") from error
+    questions = sibling("templates").sections(standing_questions(), 3).rstrip("\n")
+    return text.replace(QUESTIONS_PLACEHOLDER, questions, 1)
+
+
+def question_problems(lines: list[str] | None) -> list[str]:
+    """What keeps the field report's QUESTIONS_SECTION, its `lines`, from answering every standing
+    question, each refusal of the block's own check; none where the section is missing, which the
+    structure check names."""
+    if lines is None:
+        return []
+    templates = sibling("templates")
+    block = standing_questions()
+    return [f'section "## {QUESTIONS_SECTION}": {finding.fix.replace("`## ", "`### ")} (one '
+            f'"### <question>" per standing question, {block.path or STANDING_QUESTIONS}; '
+            '"None" answers one that does not apply)'
+            for finding in templates.check(block, templates.parse(block, "\n".join(lines)))
+            if finding.severity == templates.REFUSE]
 
 
 def report_in(text: str, where: str) -> str:
@@ -4981,8 +5011,9 @@ def field_report_problems(body: str, issue_body: str | None,
     template (the report between the markers).
 
     Every section the template has, every bold field label it writes (`**Result:**`,
-    `**Commit groupings:**`), every table's header row and width, the header's placeholders and
-    Result, and, given the work issue's body, the evidence gate. A section whose template text
+    `**Commit groupings:**`), every table's header row and width, every standing question its
+    Retro section answers (`question_problems`), the header's placeholders and Result, and, given
+    the work issue's body, the evidence gate. A section whose template text
     allows "None" may say only that.
     """
     template = report_in(field_report_template(), FIELD_REPORT_TEMPLATE_NAME)
@@ -5010,6 +5041,7 @@ def field_report_problems(body: str, issue_body: str | None,
         template_header = next((line.strip() for line in expected if line.strip().startswith("|")), None)
         if template_header is not None:
             problems.extend(table_problems(where, template_header, text))
+    problems.extend(question_problems(report.get(QUESTIONS_SECTION.casefold())))
     header = "\n".join(report[""])
     problems.extend(
         f'header (above the first section): unfilled placeholder {placeholder}; '

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 
 import git_door
 import overhaul
+import templates
 import fake_git
 import time_bound
 
@@ -498,9 +500,17 @@ def test_without_gh_read_prints_its_reads_round_by_round_and_takes_the_answers(
     assert overhaul.read_block(out.read_text(encoding="utf-8"))["since_overhaul"] == 40
 
 
+def answered(text: str) -> str:
+    """The draft `text` with every standing question and every question of the overhaul's own
+    answered: the first "The suite stays fast.", the rest None."""
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    return text.replace("None.", "The suite stays fast.", 1)
+
+
 def judged_draft(checkout: Path, **changes: object) -> str:
-    """The draft of overhaul #50 with its block judged; `changes` replace parts of the judgment."""
-    text = overhaul.draft(gathered(checkout))
+    """The draft of overhaul #50 with its questions answered and its block judged; `changes`
+    replace parts of the judgment."""
+    text = answered(overhaul.draft(gathered(checkout)))
     data = overhaul.read_block(text)
     data.update({
         "verdicts": [{"rule": rule["id"], "strays": "none", "how": "Holds."}
@@ -597,7 +607,17 @@ def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothi
     assert [name for name, _ in tracker.calls] == ["comment_issue", "close_issue"]
     assert all(arguments["issue_number"] == THIS for _, arguments in tracker.calls)
     comment = tracker.calls[0][1]["body"]
-    assert comment.startswith(overhaul.REPORT_MARKER + "\n## Overhaul #50: the report\n")
+    assert comment.startswith(overhaul.REPORT_MARKER + "\n# Overhaul #50: the report\n")
+    template = overhaul.overhaul_template()
+    headings = [item.heading for item in template.fields if item.in_body]
+    at = [comment.index(f"\n## {heading}\n") for heading in headings]
+    assert at == sorted(at)
+    assert ("## The standing questions\n\n### What came back from real use since the last retro?"
+            "\n\nThe suite stays fast.\n") in comment
+    assert ("### What does the outside world do, and what can we learn from it?\n\nNone."
+            in comment)
+    assert [finding for finding in templates.check(template, templates.parse(template, comment))
+            if finding.severity == templates.REFUSE] == []
     assert "| gen-001 Mechanize first | none | Holds. |" in comment
     assert "- **outside**: Nothing to change." in comment
     assert ("- **1. Prune the three functions only tests reach** (work, for SE to bundle; rule "
@@ -609,13 +629,25 @@ def test_file_marks_rule_changes_for_the_person_posts_the_report_and_files_nothi
             "decision list: it changes a rule; a rule change; rule new;") in comment
     assert "  - Source: https://example.com/practice" in comment
     assert "This overhaul filed no issue." in comment and "`overhaul #50 finding <k>`" in comment
-    assert "### The facts" in comment and "\n#### The rule book (" in comment
+    assert "## The facts" in comment and "\n#### The rule book (" in comment
+    assert "#### The standing questions" not in comment  # answered above, not repeated as facts
     assert overhaul.JUDGE_BEGIN not in comment and "## Judgment" not in comment
     block = overhaul.read_block(comment)
     assert [(item["finding"], item["kind"], item["rule_change"]) for item in block["findings"]] == [
         (1, "work", False), (2, "decision", True), (3, "decision", True)]
     out = capsys.readouterr().out
     assert "1 work and 2 decision finding(s), 2 of them rule changes; no issue filed" in out
+
+
+def test_file_refuses_a_draft_that_leaves_a_question_open(checkout):
+    question = overhaul.overhaul_template().field("overhaul_questions").nested.fields[-1].heading
+    text = judged_draft(checkout)
+    left = text.replace(f"### {question}\n\nNone.\n", f"### {question}\n\n")
+    assert left != text
+    with pytest.raises(work_tickets.QueueError,
+                       match=re.escape(f"The overhaul's own questions: {question} is empty")):
+        overhaul.judged(left, THIS)
+    assert overhaul.judged(text, THIS)["overhaul"] == THIS
 
 
 def test_the_next_read_scores_the_findings_file_posted(checkout, tmp_path, monkeypatch):
