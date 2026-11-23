@@ -1177,6 +1177,8 @@ def test_status_reports_malformed_state(worktree: Path) -> None:
     assert report["complete"] is False
 
 
+@pytest.mark.spawns("windows: powershell.exe makes the directory junction, as Windows without developer mode "
+                    "grants no directory symlink; elsewhere it starts nothing")
 def test_symlinked_state_directory_cannot_escape_worktree(worktree: Path) -> None:
     initialize(worktree)
     outside = worktree.parent / "outside"
