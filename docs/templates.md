@@ -69,8 +69,8 @@ overlay: sha256:<digest of the overlay the fill applied>
 ```
 
 An issue, a comment or a message records the same three in its marker line,
-`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. Until templates declare a version
-and an overlay, the engine writes what it knows (the docstring of `scripts/templates.py` owns it).
+`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. The digest covers the template
+and the overlay the fill applied (the docstring of `scripts/templates.py`, Writing, owns it).
 
 The check reads a document against the template and version it records. Where the template has
 moved since, a new minor or patch version warns and a new major version refuses, naming both
@@ -170,6 +170,10 @@ An import adapter is a component that reads one source tool's templates and writ
 note: headings to sections, the source's instructions to comments, its fields to front matter.
 Each source tool gets one adapter; a source with headings only gives sections without
 instructions, which the overlay supplies.
+
+The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
+refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
+adapters' interface and the first adapter, which reads a Markdown template note.
 
 ## Tags and guidance
 

@@ -45,7 +45,30 @@ are refused until quoted. It declares:
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is;
 - `fields`, a list of the fields (below), in order;
-- `message` (an interface's alone, below): the one line its document is.
+- `message` (an interface's alone, below): the one line its document is;
+- `imported` (an imported note's alone): `sha256:<hex>` of what scripts/template_import.py wrote it
+  from, which its adapter reads to tell whether the source changed.
+
+**Overlays** (docs/templates.md "Template repositories"): `templates/<name>.overlay.md`, beside the
+template note it adds to in the same `templates/`, holds what agents need that the template does
+not: `load` and `catalog` merge it into its template (`overlay_data`), so every reader, `check` and
+`fill` among them, gets the template with its overlay, and a template that `extends` it inherits
+what it adds. Where an earlier layer of `catalog` holds the name, this layer's overlay of it adds
+nothing; an overlay with no template beside it does not load.
+
+- Its front matter holds `extends: <name>`, its template's, and only OVERLAY_KEYS: `says`, added
+  after the template's; `tags`, added to its tags; `rules`, each set; `fields`, a field it adds
+  (appended after the template's), or one of the template's named again with the keys it tightens;
+  `example`, its title and fields merged into the template's.
+- Its body has sections as a skeleton has: one per field it adds, under that field's heading, and
+  one per field of the template it adds an instruction to, under the template's heading, its
+  instruction added after the field's `says`. An interface's overlay has an empty body; a field it
+  adds keeps its `says` in the front matter.
+- It only adds or tightens (`_tightens`, refused with every loosening named): it changes none of
+  the template's own keys (TEMPLATE_SAME), takes away no field, tag or rule, reorders no field and
+  makes no rule milder (`off` < `warn` < `refuse`). Of a field it may turn on TIGHTER_ON, turn off
+  TIGHTER_OFF (`none_ok`), set or lower TIGHTER_LIMITS, narrow `choices` and add to `says`; any
+  other change, such as its kind or its heading, is refused.
 
 **The skeleton**, the note's body, is the empty document: one section per field that has one (not
 the title, not a label line), in the order `fields` lists them, each its heading at the template's
@@ -153,10 +176,11 @@ alone, after the scope's marker), then `## ` headings. The marker says what the 
 the repository `se` for SE's own templates, a template repository's component name for its
 templates (`catalog`) and `project` for any other `templates/` or `--templates` folder, the
 template's `version`, and
-`sha256:<hex>` of the template's file text, then those of the templates it `extends`, each ended
-by a NUL byte (`Template.marker_line`); a template with nodes takes `sha256:<hex>` of that digest
-and then its nodes' digests, each so ended (`_nest`); the digest stands where docs/templates.md "The document"
-puts the overlay's until templates have overlays. Selection reads the name alone. A section the template does not
+`sha256:<hex>` of the template's file text, then its overlay's where it has one, then those of
+the templates it `extends` with theirs, each ended by a NUL byte (`Template.marker_line`,
+`_digest`); a template with nodes takes `sha256:<hex>` of that digest and then its nodes' digests,
+each so ended (`_nest`). The one digest so stands for docs/templates.md "The document"'s overlay
+digest: it names the template and the overlay the fill applied. Selection reads the name alone. A section the template does not
 declare, and a field whose value did not change, are written back byte for byte in their place;
 a `verbatim` field is never reflowed.
 
@@ -272,6 +296,12 @@ the templates and `terms.toml` from that folder instead, for that run alone (`lo
 docs/templates.md "Fill": one command takes the template, the prompt, the raw input and the agent's
 fields.
 
+- First it brings every imported template up to date (`refresh`, scripts/template_import.py): those
+  the project's own `templates/imports.yaml` and each template repository's declare, or the
+  `--templates` folder's alone, each name it wrote on stderr; then it loads, and the overlays apply.
+  A project whose own `templates/` imports reads that folder from the working tree, where the
+  import writes. An import that fails exits 2 and writes nothing.
+
 - Without fields it answers the instructions first (`instructions`): the template, the prompt, its
   `says`, the rules of honest fields (HONEST, and one per `quote` field), the guidance its tags
   resolve in `--root`'s trees (`guidance`, through `scripts/se_guidance.py`), then the empty draft
@@ -298,7 +328,7 @@ import json
 import re
 import sys
 import tomllib
-from dataclasses import dataclass, field as dataclass_field, replace
+from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -347,7 +377,7 @@ FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_h
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
               "quote", "node", "entries", "fence"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message"}
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message", "imported"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
@@ -734,9 +764,8 @@ def front_data(text: str, where: str, first: int = 2) -> dict[str, object]:
     return data
 
 
-def note_data(text: str, where: str) -> dict[str, object]:
-    """A template note as the data `_build` reads: its front matter, each field of its skeleton
-    given its `heading` and its `says` from its section (the module docstring: Template files)."""
+def _note_parts(text: str, where: str) -> tuple[dict[str, object], str, int]:
+    """A note's front matter as data, its body, and the number of the body's first line."""
     text = text.replace("\r\n", "\n")
     if not text.startswith("---\n"):
         raise TemplateError(f"{where}: a template opens with its front matter between `---` lines")
@@ -745,9 +774,13 @@ def note_data(text: str, where: str) -> dict[str, object]:
         end = len(text) - 4
     if end < 0:
         raise TemplateError(f"{where}: the front matter has no closing `---` line")
-    data = front_data(text[4:end + 1], where)
-    body = text[end + 5:]
-    first = text.count("\n", 0, end + 5) + 1
+    return front_data(text[4:end + 1], where), text[end + 5:], text.count("\n", 0, end + 5) + 1
+
+
+def note_data(text: str, where: str) -> dict[str, object]:
+    """A template note as the data `_build` reads: its front matter, each field of its skeleton
+    given its `heading` and its `says` from its section (the module docstring: Template files)."""
+    data, body, first = _note_parts(text, where)
     fields = data.get("fields", [])
     if not isinstance(fields, list) or not all(isinstance(entry, dict) for entry in fields):
         raise TemplateError(f"{where}: fields is a list of mappings, one per field")
@@ -874,10 +907,14 @@ def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Templ
     raw: dict[str, dict] = {}
     texts: dict[str, str] = {}
     repositories: dict[str, str] = {}
+    overlays: dict[str, tuple[str, str]] = {}
     terms: tuple[Term, ...] | None = None
     for repository, files, where_of in layers:
+        won = set()
         for name, text in files.items():
             where = where_of(name)
+            if name.endswith(OVERLAY_SUFFIX):
+                continue
             if name == TERMS_FILE:
                 try:
                     data = tomllib.loads(text)
@@ -898,19 +935,263 @@ def _loaded(layers: list[tuple[str, dict[str, str], object]]) -> dict[str, Templ
             raw[template_name] = data
             texts[template_name] = text
             repositories[template_name] = repository
-    built = {name: _build(name, raw, terms or (), ()) for name in sorted(raw)}
-    digests = {name: _digest(name, raw, texts) for name in built}
+            won.add(template_name)
+        for name, text in files.items():
+            if not name.endswith(OVERLAY_SUFFIX):
+                continue
+            base = name.removesuffix(OVERLAY_SUFFIX)
+            if f"{base}{TEMPLATE_SUFFIX}" not in files:
+                raise TemplateError(f"{where_of(name)}: an overlay of {base!r}, which this "
+                                    f"{TEMPLATES}/ does not hold; an overlay lies beside its "
+                                    f"template, {TEMPLATES}/{base}{TEMPLATE_SUFFIX}")
+            if base in won:  # an earlier layer's template of that name takes no overlay of this one
+                overlays[base] = (text, where_of(name))
+    overlaid = _overlaid(raw, overlays)
+    built = {name: _build(name, overlaid, terms or (), ()) for name in sorted(raw)}
+    for name, (_, where) in sorted(overlays.items()):
+        _tightens(_build(name, raw, terms or (), ()), built[name], where)
+    digests = {name: _digest(name, raw, texts, {key: text for key, (text, _) in overlays.items()})
+               for name in built}
     return _nest({name: replace(template, repository=repositories[name], digest=digests[name])
                   for name, template in built.items()}, digests)
 
 
-def _digest(name: str, raw: dict[str, dict], texts: dict[str, str]) -> str:
-    """`sha256:<hex>` of the template's file text and those of the templates it extends, in turn."""
+def _digest(name: str, raw: dict[str, dict], texts: dict[str, str],
+            overlays: dict[str, str] | None = None) -> str:
+    """`sha256:<hex>` of the template's file text, then its overlay's where it has one, and those of
+    the templates it extends, in turn, each ended by a NUL byte."""
     chain = hashlib.sha256()
+    overlays = overlays or {}
     while name in texts:
         chain.update(texts[name].encode("utf-8") + b"\0")
+        if name in overlays:
+            chain.update(overlays[name].encode("utf-8") + b"\0")
         name = raw[name].get("extends", "")
     return f"sha256:{chain.hexdigest()}"
+
+
+# Overlays (docs/templates.md "Template repositories")
+
+#: A template's overlay, `templates/<name>.overlay.md`, beside the template note it extends.
+OVERLAY_SUFFIX = ".overlay.md"
+#: What an overlay's front matter may say: all else is its template's.
+OVERLAY_KEYS = ("extends", "says", "tags", "rules", "fields", "example")
+#: How strict each severity is, for the check that an overlay only tightens.
+STRICTNESS = {OFF: 0, WARN: 1, REFUSE: 2}
+#: Field keys an overlay may turn on, never off; and `none_ok`, which it may turn off, never on.
+TIGHTER_ON = ("required", "exact_heading", "actor", "one_sentence", "not_picked", "quote")
+TIGHTER_OFF = ("none_ok",)
+#: Field limits an overlay may set where there is none (0) or lower, never raise or take away.
+TIGHTER_LIMITS = ("max_words", "first_sentence_chars")
+#: The template's own keys, which its overlay never changes.
+TEMPLATE_SAME = ("name", "version", "kind", "reader", "actions", "order", "marker", "title_pattern",
+                 "keep_unknown", "actors", "scope", "paths", "marker_pattern", "labels", "base",
+                 "fallback", "checker", "adapter", "message", "is_adapter")
+
+
+def _says(*parts: object) -> str:
+    """Instructions joined in turn, the template's first: an overlay's are added after its own."""
+    return " ".join(str(part).strip() for part in parts if str(part or "").strip())
+
+
+def _chain(name: str, raw: dict[str, dict]) -> list[str]:
+    """`name`, then each template it extends in turn, as far as `raw` holds them."""
+    chain = []
+    while name in raw and name not in chain:
+        chain.append(name)
+        name = raw[name].get("extends", "")
+    return chain
+
+
+def _inherited(name: str, field_name: str, raw: dict[str, dict]) -> dict | None:
+    """The entry of `field_name` that `name`'s template has, its own or inherited, as `raw` holds it."""
+    for template in _chain(name, raw):
+        entry = next((dict(item) for item in raw[template].get("fields", [])
+                      if isinstance(item, dict) and item.get("name") == field_name), None)
+        if entry is not None:
+            return entry
+        if field_name in raw[template].get("remove", []):
+            return None
+    return None
+
+
+def _inherited_key(name: str, key: str, raw: dict[str, dict]) -> object:
+    return next((raw[template][key] for template in _chain(name, raw) if key in raw[template]), None)
+
+
+def _overlaid(raw: dict[str, dict], overlays: dict[str, tuple[str, str]]) -> dict[str, dict]:
+    """`raw` with each template's data an overlay extends merged with that overlay, a template's
+    before those that extend it, so they inherit what its overlay adds."""
+    merged = dict(raw)
+    for name in sorted(overlays, key=lambda name: (len(_chain(name, raw)), name)):
+        merged[name] = overlay_data(name, merged, *overlays[name])
+    return merged
+
+
+def overlay_data(name: str, raw: dict[str, dict], text: str, where: str) -> dict[str, object]:
+    """The data of template `name` (`raw` holds it and what it extends) with its overlay `text`
+    merged in: the overlay's `says` and each instruction of its body added to the template's, its
+    tags added, its rules set, its fields added and each field it names again given its keys. An
+    overlay's body has sections as a skeleton has: one for each field it adds, under its heading,
+    and one for each field it adds an instruction to, under that field's heading. What the merge
+    loosens `_tightens` refuses, once the result is built."""
+    data, body, first = _note_parts(text, where)
+    unknown = sorted(set(data) - set(OVERLAY_KEYS))
+    if unknown:
+        raise TemplateError(f"{where}: an overlay only adds or tightens; {', '.join(unknown)} "
+                            f"{'is' if len(unknown) == 1 else 'are'} the template's to say. An "
+                            f"overlay's keys are {', '.join(OVERLAY_KEYS)}")
+    if data.get("extends") != name:
+        raise TemplateError(f"{where}: extends is {data.get('extends')!r}; an overlay extends its "
+                            f"template, `extends: {name}`")
+    base = raw[name]
+    merged = {key: value for key, value in base.items()}
+    interface = base.get("kind") == INTERFACE
+    if "says" in data:
+        merged["says"] = _says(_inherited_key(name, "says", raw), data["says"])
+    tags = data.get("tags", [])
+    if not isinstance(tags, list):
+        raise TemplateError(f"{where}: tags is a list of words the overlay adds, such as [\"meeting\"]")
+    merged["tags"] = list(dict.fromkeys([*base.get("tags", []), *tags]))
+    rules = data.get("rules", {})
+    if not isinstance(rules, dict):
+        raise TemplateError(f"{where}: rules maps each rule to refuse, warn or \"off\"")
+    merged["rules"] = {**base.get("rules", {}), **rules}
+    if "example" in data:
+        example, given = dict(base.get("example", {})), data["example"]
+        if not isinstance(given, dict):
+            raise TemplateError(f"{where}: example is a mapping, its title and its fields")
+        merged["example"] = {**example, **given,
+                             "fields": {**example.get("fields", {}), **given.get("fields", {})}}
+    own = [dict(item) for item in base.get("fields", [])]
+    added: list[str] = []
+    entries = data.get("fields", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) and entry.get("name")
+                                                for entry in entries):
+        raise TemplateError(f"{where}: fields is a list of mappings, each naming its field")
+    for entry in entries:
+        field_name = entry["name"]
+        found = _inherited(name, field_name, raw)
+        sectioned = not interface and not entry.get("source", (found or {}).get("source")) and not \
+            entry.get("label", (found or {}).get("label")) and not entry.get("fence", (found or {}).get("fence"))
+        for key in ("heading", "says"):
+            if key in entry and sectioned:
+                raise TemplateError(f"{where}: field {field_name} has its section in the overlay's "
+                                    f"body, which owns its {key}; take {key} out of the front matter")
+        made = {**(found or {}), **entry}
+        if found is not None and "says" in entry:
+            made["says"] = _says(found.get("says", ""), entry["says"])
+        if found is None:
+            added.append(field_name)
+        index = next((i for i, item in enumerate(own) if item.get("name") == field_name), None)
+        if index is None:
+            own.append(made)
+        else:
+            own[index] = made
+    scope = base.get("scope", {})
+    level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
+    if interface:
+        _interface_data({}, body, where, first)
+        sections = []
+    else:
+        sections = _skeleton(body, where, first, level)
+    seen: set[str] = set()
+    for field_name, heading, says in sections:
+        if field_name in seen:
+            raise TemplateError(f"{where}: two sections add to field {field_name}; give it one")
+        seen.add(field_name)
+        index = next((i for i, item in enumerate(own) if item.get("name") == field_name), None)
+        entry = own[index] if index is not None else _inherited(name, field_name, raw)
+        if entry is None:
+            raise TemplateError(f"{where}: section {heading} adds to field {field_name}, which neither "
+                                f"{name} nor the overlay's fields hold; name it in the overlay's fields")
+        if field_name in added:
+            entry["heading"], entry["says"] = heading, says
+        else:
+            if _norm(heading) != _norm(str(entry.get("heading", ""))):
+                raise TemplateError(f"{where}: section {heading} adds to field {field_name}, whose "
+                                    f"heading is {entry.get('heading')!r}; an overlay adds under the "
+                                    "template's heading, never renames it")
+            entry = {**entry, "says": _says(entry.get("says", ""), says)}
+        if index is None:
+            own.append(entry)
+        else:
+            own[index] = entry
+    for field_name in added:
+        entry = next(item for item in own if item.get("name") == field_name)
+        if not interface and not entry.get("source") and not entry.get("label") \
+                and not entry.get("fence") and field_name not in seen:
+            raise TemplateError(f"{where}: field {field_name} is added without its section; give it "
+                                f"one in the overlay's body, its heading and `<!-- {field_name}: "
+                                "<instruction> -->`")
+    merged["fields"] = own
+    if "order" in base and added:
+        merged["order"] = [*base["order"], *added]
+    return merged
+
+
+def overlay_tags(text: str, where: str) -> list[str]:
+    """The tags an overlay adds to its template's, as scripts/se_guidance.py reads them."""
+    tags = _note_parts(text, where)[0].get("tags", [])
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        raise TemplateError(f"{where}: tags is a list of words the overlay adds, such as [\"meeting\"]")
+    return tags
+
+
+def _tightens(base: Template, overlaid: Template, where: str) -> None:
+    """Refuse an overlay whose template `overlaid` loosens `base`: a key of the template's own it
+    changes, its `says` or a field's not kept as they start, a tag, a field or a rule taken away,
+    a rule made milder, a field's identity changed or one of its rules loosened."""
+    problems = [f"it changes {key}" for key in TEMPLATE_SAME
+                if getattr(base, key) != getattr(overlaid, key)]
+    if not overlaid.says.startswith(base.says):
+        problems.append("it rewrites the template's says; add to it")
+    problems += [f"it takes tag {tag} away" for tag in base.tags if tag not in overlaid.tags]
+    for rule, severity in sorted(base.rules.items()):
+        now = overlaid.severity(rule)
+        if STRICTNESS[now] < STRICTNESS[severity]:
+            problems.append(f"it loosens rule {rule} from {severity} to {now}")
+    names = [item.name for item in overlaid.fields]
+    kept = [item.name for item in base.fields if item.name in names]
+    problems += [f"it takes field {item.name} away" for item in base.fields if item.name not in names]
+    if kept != [name for name in names if name in kept]:
+        problems.append("it reorders the template's fields")
+    for item in base.fields:
+        other = overlaid.field(item.name)
+        if other is not None:
+            problems += [f"field {item.name}: {problem}" for problem in _field_tightens(item, other)]
+    if problems:
+        raise TemplateError(f"{where}: the overlay loosens {base.name}: {'; '.join(problems)}. An "
+                            "overlay only adds or tightens: it adds instructions, fields, tags and "
+                            "rules and makes a rule stricter (docs/templates.md \"Template "
+                            "repositories\")")
+
+
+def _field_tightens(base: Field, other: Field) -> list[str]:
+    """What `other`, the overlay's field, loosens or changes of `base`, the template's."""
+    problems = []
+    for key in (item.name for item in dataclass_fields(Field) if item.compare):
+        was, now = getattr(base, key), getattr(other, key)
+        if was == now:
+            continue
+        if key == "says":
+            if not now.startswith(was):
+                problems.append("its says is rewritten; add to it")
+        elif key in TIGHTER_ON:
+            if was:
+                problems.append(f"{key} is turned off")
+        elif key in TIGHTER_OFF:
+            if not was:
+                problems.append(f"{key} is turned on")
+        elif key in TIGHTER_LIMITS:
+            if not now or (was and now > was):
+                problems.append(f"{key} is raised from {was or 'none'} to {now or 'none'}")
+        elif key == "choices":
+            if not set(now) <= set(was) or not now:
+                problems.append(f"choices widen from {', '.join(was)} to {', '.join(now)}")
+        else:
+            problems.append(f"{key} changes from {was!r} to {now!r}")
+    return problems
 
 
 def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
@@ -2956,6 +3237,30 @@ def _root(path: Path, root: Path | None) -> Path:
     return Path.cwd()
 
 
+def refresh(root: Path = ROOT, *, folder: Path | None = None) -> tuple[list[str], bool]:
+    """Bring every imported template the fill may resolve up to date before it loads them
+    (docs/templates.md "Template repositories"; scripts/template_import.py owns each step): those
+    of `folder` alone where given (`--templates`), else those of the project's own `templates/` and
+    of each template repository its se.toml lists. Answers the lines `template_import.refresh` names
+    and whether the project's own `templates/` imports any, so that the fill reads it from the
+    working tree, where the import writes."""
+    importer = _sibling("template_import")
+    if folder is not None:
+        return importer.refresh(folder), False
+    own = root / TEMPLATES
+    lines = importer.refresh(own) if own.is_dir() else []
+    if str(Path(__file__).parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).parent))
+    modules = _sibling("se_modules")
+    try:
+        repositories = modules.template_repositories(root)
+    except modules.ModuleError as error:
+        raise TemplateError(f"templates: {error}") from error
+    for _, repository in repositories:
+        lines += importer.refresh(repository)
+    return lines, bool(importer.imports(own)) if own.is_dir() else False
+
+
 def _project(options: argparse.Namespace) -> Path:
     """The project whose catalog resolves a name (`catalog`): `--root`, else the root of `--path`
     (`_root`), else SE's own checkout."""
@@ -3225,9 +3530,15 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if options.command == "interfaces":
             return _interfaces(load(ROOT, tree=True), options.check)
-        templates = (load(ROOT, tree=options.tree, folder=options.templates)
+        tree = options.tree
+        if options.command == "fill":
+            imported, own_imports = refresh(_project(options), folder=options.templates)
+            tree = tree or own_imports
+            if imported:
+                print("\n".join(imported), file=sys.stderr)
+        templates = (load(ROOT, tree=tree, folder=options.templates)
                      if options.templates is not None
-                     else catalog(_project(options), tree=options.tree))
+                     else catalog(_project(options), tree=tree))
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
