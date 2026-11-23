@@ -1021,9 +1021,10 @@ def _tail(result: subprocess.CompletedProcess) -> str:
 
 
 def refresh_plugin(se_root: Path, root: Path | None, entry: dict, old: Version, due: Version,
-                   world: World) -> str:
+                   world: World, same_major: bool = True) -> str:
     """Update the installed plugin through Claude Code, check that the new install starts, and put
-    the old install back in Claude Code's record when it does not."""
+    the old install back in Claude Code's record when it does not; with `same_major`, an install
+    outside `old`'s major counts as failed too (the boot passes False: SE moves to its newest)."""
     plugin_id = entry["id"]
     registry = plugin_registry()
     try:
@@ -1041,9 +1042,9 @@ def refresh_plugin(se_root: Path, root: Path | None, entry: dict, old: Version, 
         if new_root is None:
             raise RefreshError(f"claude plugin list no longer names {plugin_id}")
         found = se_modules.checkout_version(new_root) if (new_root / se_modules.MANIFEST).is_file() else None
-        if found is None or found < due or found[0] != old[0]:
+        if found is None or found < due or (same_major and found[0] != old[0]):
             raise RefreshError(f"claude plugin update {plugin_id} installed version {_v(found)}, "
-                               f"not v{_v(due)} or newer within major {old[0]}")
+                               f"not v{_v(due)} or newer" + (f" within major {old[0]}" if same_major else ""))
         _starts(new_root, root, found)
     except (RefreshError, ModuleError) as error:
         if saved is None:
@@ -1245,6 +1246,280 @@ def start_refresh(se_root: Path, root: Path | None, local_config: Path | None,
     return f"SE: {_v(version)} -> {_v(due)}, refreshed at this start ({se_root.as_posix()})", True
 
 
+# The boot (README "Boot"): the checkout current, then every dependency with its pinned, locked and
+# newest version, then, with --upgrade, SE and every lock moved to the newest release its pin
+# admits; one report. It decides from versions alone.
+
+BOOT_FETCH_TIMEOUT = 60  # seconds the boot's fetch of origin may take
+
+
+def boot_command(se_root: Path, upgrade: bool = False) -> str:
+    return f"uv run python {se_root.as_posix()}/scripts/se_start.py boot" + (" --upgrade" if upgrade else "")
+
+
+def _ref(root: Path, name: str) -> str | None:
+    found = git_door.run("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}", root=root)
+    return found.stdout.strip() if found.returncode == 0 and found.stdout.strip() else None
+
+
+def _contains(root: Path, ancestor: str, descendant: str) -> bool:
+    return git_door.run("merge-base", "--is-ancestor", ancestor, descendant, root=root).returncode == 0
+
+
+def current_checkout(root: Path, integration: str, timeout: float | None = BOOT_FETCH_TIMEOUT
+                     ) -> tuple[str, bool]:
+    """The boot's first step: fetch origin and bring the checkout to the newest tip of its branch,
+    `origin/<branch>` and, on a branch other than the integration branch, `origin/<integration>`
+    too, each by a fast-forward where it can, else by a merge on a clean tree. A detached HEAD that
+    the integration branch's tip contains moves to that tip. The line to show, and whether the boot
+    stops: a fetch that fails, a fast-forward or merge git refuses, a merge needed over local
+    changes. It never discards local work: a merge that conflicts is aborted on its clean tree."""
+    where = root.as_posix()
+    if git_door.run("rev-parse", "--show-toplevel", root=root).returncode != 0:
+        return f"Checkout: {where} is no git checkout; nothing to bring current", False
+    if git_door.run("remote", "get-url", "origin", root=root).returncode != 0:
+        return f"Checkout: {where} has no origin; nothing to fetch", False
+    try:
+        fetched = git_door.run("fetch", "--quiet", "origin", root=root, no_prompt=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"Checkout: fetching origin took over {timeout:g} s; the boot stops", True
+    if fetched.returncode != 0:
+        return f"Checkout: fetching origin failed, the boot stops: {_tail(fetched)}", True
+    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    before = _git(root, "rev-parse", "HEAD")
+    tip = f"origin/{integration}"
+    if branch == "HEAD":
+        target = _ref(root, tip)
+        if target is None or target == before or not _contains(root, before, target):
+            return (f"Checkout: detached at {before[:7]}, which {tip} does not lead on from; "
+                    "left as it is"), False
+        moved = git_door.run("-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", target,
+                             root=root)
+        if moved.returncode != 0:
+            return f"Checkout: moving the detached HEAD to {tip} failed, the boot stops: {_tail(moved)}", True
+        return f"Checkout: detached {before[:7]} -> {target[:7]} ({tip})", False
+    targets = [ref for ref in [f"origin/{branch}", *([tip] if branch != integration else [])] if _ref(root, ref)]
+    done: list[str] = []
+    for ref in targets:
+        head = _git(root, "rev-parse", "HEAD")
+        if _contains(root, ref, head):
+            continue
+        if _contains(root, head, ref):
+            merged = git_door.run("merge", "--quiet", "--ff-only", ref, root=root)
+            if merged.returncode != 0:
+                return (f"Checkout: {branch} cannot fast-forward to {ref}, the boot stops; "
+                        f"nothing was discarded: {_tail(merged)}"), True
+            done.append(f"fast-forward to {ref}")
+            continue
+        if se_modules.is_dirty(root):
+            return (f"Checkout: {branch} needs a merge of {ref} and has local changes, the boot stops; "
+                    "commit them, then boot again"), True
+        merged = git_door.run("merge", "--quiet", "--no-edit", ref, root=root)
+        if merged.returncode != 0:
+            git_door.run("merge", "--abort", root=root)
+            return (f"Checkout: merging {ref} into {branch} does not merge cleanly, the boot stops; the "
+                    f"merge was aborted, nothing was discarded: {_tail(merged)}"), True
+        done.append(f"merged {ref}")
+    after = _git(root, "rev-parse", "HEAD")
+    if not done:
+        return f"Checkout: {branch} at {after[:7]}, current with {', '.join(targets) or 'no remote branch'}", False
+    return f"Checkout: {branch} {before[:7]} -> {after[:7]} ({'; '.join(done)})", False
+
+
+@dataclass(frozen=True)
+class SEState:
+    """SE itself as the boot sees it: the version installed, the newest release, the newest the
+    project's pin of se admits (every release where it pins none), and why it does not move."""
+
+    item: Item
+    newest: Version | None = None
+    due: Version | None = None  # the newest admitted release above the one installed
+    pin: str | None = None  # the project's [components.se] version range
+    stays: str = ""  # why the boot leaves SE as it is
+    error: str = ""
+
+
+def se_state(se_root: Path, root: Path | None, local, world: World) -> SEState:
+    version = se_modules.parse_version(_project(se_root).get("version"))
+    item = _se_item(se_root, version, local)
+    if item.kind == "local":
+        return SEState(item, stays=f"a local path ({se_root.as_posix()}), the boot never touches it")
+    if item.url is None:
+        return SEState(item, stays=item.note)
+    pinned = None
+    if root is not None and (root / se_modules.MANIFEST).is_file():
+        pinned = next((m.version for m in se_modules.load_manifest(root)
+                       if m.name == "se" and m.version and not m.go), None)
+    try:
+        versions = world.remote(item.url)
+    except (RemoteError, OSError, subprocess.SubprocessError) as error:
+        return SEState(item, pin=pinned, error=f"its releases could not be read: {error}")
+    bounds = se_modules.version_bounds("se", pinned) if pinned else None
+    fits = [v for v in versions if bounds is None or se_modules.matches(v, bounds)]
+    newest, best = max(versions, default=None), max(fits, default=None)
+    due = best if best and (version is None or best > version) else None
+    stays = ""
+    if due and (se_root / ".git").exists() and (
+            (root is not None and root.resolve() == se_root.resolve()) or _development(se_root)):
+        stays = "a development checkout, the boot leaves it"
+    return SEState(item, newest, due, pinned, stays)
+
+
+def se_line(state: SEState, moved: str = "") -> str:
+    item = state.item
+    head = f"SE: installed {_v(item.version)}"
+    if state.pin:
+        head += f", pinned {state.pin} by the project"
+    if state.error:
+        return f"{head}: {state.error}"
+    if state.newest is None:
+        return f"{head}: {state.stays or 'no release found'}"
+    head += f", newest {_v(state.newest)}"
+    verdict = (moved or (state.stays if state.due and state.stays else "")
+               or (f"the upgrade takes {_v(state.due)}" if state.due else "current"))
+    if state.pin and not se_modules.matches(state.newest, se_modules.version_bounds("se", state.pin)):
+        verdict += (f"; {_v(state.newest)} lies beyond the pin, not taken; to take it, set version = "
+                    f"\"^{state.newest[0]}.{state.newest[1]}\" in [components.se] of the project's "
+                    f"{se_modules.MANIFEST}")
+    return f"{head}: {verdict}"
+
+
+def upgrade_se(se_root: Path, root: Path | None, state: SEState, world: World) -> tuple[str, bool]:
+    """Move SE to `state.due`: a git checkout to its tag, a Claude Code plugin through Claude Code,
+    a copy only VS Code updates named. The outcome, and whether it failed."""
+    item = state.item
+    try:
+        if (se_root / ".git").exists():
+            return refresh_se(se_root, root, state.due, timeout=BOOT_FETCH_TIMEOUT), False
+        if entry := installed_plugin(se_root, world):
+            return refresh_plugin(se_root, root, entry, item.version, state.due, world, same_major=False), False
+        return refresh_copy(se_root, item, state.due), False
+    except (RefreshError, ModuleError, OSError, subprocess.SubprocessError) as error:
+        return f"not moved, {_v(item.version)} stays in use: {error}", True
+
+
+def pin_move(pin, root: Path, se_root: Path) -> str:
+    """What moving a pin to its component's newest release needs, from the pin's kind alone."""
+    module, newest, se = pin.module, pin.newest, se_root.as_posix()
+    holder = pin.path[-1]
+    if len(pin.path) > 1:
+        return f"{holder} moves its pin in its own {se_modules.MANIFEST} (a ticket for {holder}'s repository)"
+    if module.go:
+        return (f"set require {module.name} v{_v(newest)} in {(root / module.go).as_posix()}, then run: "
+                f"uv run python {se}/scripts/se_modules.py sync {module.name}")
+    if module.version:
+        return (f"set version = \"^{newest[0]}.{newest[1]}\" in [components.{module.name}] of "
+                f"{(root / se_modules.MANIFEST).as_posix()}, then run: {boot_command(se_root, True)}")
+    return f"run: uv run python {se}/scripts/se_modules.py update {module.name} --to v{_v(newest)}"
+
+
+def _takes(pin, locked: dict) -> bool:
+    """Whether the upgrade moves this pin's lock: a range locked at another release than the newest
+    it admits, below it or outside the pin."""
+    module = pin.module
+    if not module.version or module.go or pin.admitted is None:
+        return False
+    return se_modules.parse_version(locked.get(module.name, ("", ""))[0]) != pin.admitted
+
+
+def pin_row(pin, locked: dict, moved: dict, root: Path, se_root: Path, local_paths: frozenset[str] = frozenset()
+            ) -> str:
+    """`<holder> pins <name> <pin>, locked <v>, newest <v>: <verdict>`, nested holders' paths after."""
+    module = pin.module
+    lock = locked.get(module.name, ("", ""))[0] or ("-" if not module.version else "none")
+    path = f" ({se_modules._arrow(pin.path, module.name)})" if len(pin.path) > 1 else ""
+    head = (f"  {pin.path[-1]} pins {module.name} {pin.pin_text()}, locked {lock}, "
+            f"newest {_v(pin.newest) if pin.newest else 'none found'}{path}")
+    if module.name in local_paths:
+        return f"{head}: a local path, the boot never touches it"
+    if pin.newest is None:
+        return f"{head}: its releases could not be read: " + ("; ".join(pin.reasons) or "no remote offers it")
+    if pin.base is None:
+        return f"{head}: not judged, no release at the pin"
+    if module.name in moved:
+        verdict = f"moved {moved[module.name]}"
+    elif _takes(pin, locked):
+        verdict = f"the upgrade takes {_v(pin.admitted)}"
+    else:
+        verdict = "current"
+    if pin.beyond:
+        kind = "breaking release" if pin.breaking else "newer release"
+        verdict += f"; {kind} {_v(pin.newest)} beyond the pin, not taken; to take it: {pin_move(pin, root, se_root)}"
+    return f"{head}: {verdict}"
+
+
+def boot(se_root: Path, root: Path | None, local_config: Path | None, world: World,
+         upgrade: bool = False) -> tuple[list[str], bool]:
+    """SE's boot, each step mechanical (README "Boot"): the checkout current (current_checkout),
+    SE and every pin of the project's component tree, nested ones included, with its pinned,
+    locked and newest version (se_modules.breaking); with `upgrade`, SE moved to the newest release
+    the project's pin of se admits (every release where it pins none) and every range's lock to the
+    newest release it admits (se_modules.place_tree, every name unlocked). A release beyond a pin
+    is listed with what moving the pin needs and never taken. The report, once, and whether it
+    failed: the checkout could not be brought current (the boot stops there), a listing or a move
+    failed."""
+    lines = [f"SE boot of {root.as_posix() if root else 'no project'}"
+             + (", upgrading" if upgrade else ", checking")]
+    if root is not None:
+        try:
+            integration = _load("work_tickets").integration_branch(root)
+        except Exception as error:  # noqa: BLE001 - its own message names the setting
+            return lines + [f"Checkout: the integration branch cannot be read, the boot stops: {error}"], True
+        line, stopped = current_checkout(root, integration)
+        lines.append(line)
+        if stopped:
+            return lines, True
+    failed = False
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+    except ModuleError as error:
+        return lines + [f"Machine-local configuration: {error}"], True
+    se = se_state(se_root, root, local, world)
+    failed |= bool(se.error)
+    se_moved = ""
+    if upgrade and se.due and not se.stays:
+        se_moved, broke = upgrade_se(se_root, root, se, world)
+        failed |= broke
+    lines.append(se_line(se, se_moved))
+    if root is None or not (root / se_modules.MANIFEST).is_file():
+        return lines + ["Dependencies: the project has no se.toml"], failed
+    try:
+        found = se_modules.breaking(root, local)
+    except ModuleError as error:
+        return lines + [f"Dependencies: not listed: {error}"], True
+    before = se_modules.read_lock(root)
+    moved: dict[str, str] = {}
+    if upgrade and any(_takes(pin, before) for pin in found.pins):
+        try:
+            se_modules.place_tree(root, local, unlock=frozenset(pin.module.name for pin in found.pins))
+        except ModuleError as error:
+            failed = True
+            lines.append(f"Upgrade of the locks failed, {se_modules.LOCK} stays as it was: {error}")
+        after = se_modules.read_lock(root)
+        moved = {name: f"{before.get(name, ('none', ''))[0]} -> {version} ({se_modules.LOCK}; commit it)"
+                 for name, (version, _) in after.items() if before.get(name, ("", ""))[0] != version}
+    locked = se_modules.read_lock(root)
+    local_paths = frozenset(pin.module.name for pin in found.pins
+                            if se_modules.resolve(root, pin.module, local).kind == "local")
+    lines.append(f"Dependencies ({_plural(len(found.pins), 'pin')}: pinned, locked, newest):")
+    lines += [pin_row(pin, locked, moved, root, se_root, local_paths) for pin in found.pins]
+    lines += [f"  {note}" for note in found.notes]
+    failed |= any(pin.module.name not in local_paths for pin in found.unread)
+    takes = sum(_takes(pin, locked) for pin in {pin.module.name: pin for pin in found.pins}.values())
+    takes += bool(se.due and not se.stays and not upgrade)
+    beyond = [pin for pin in found.pins if pin.beyond]
+    if upgrade:
+        lines.append(f"Moved: {_plural(len(moved) + bool(se_moved and not se_moved.startswith('not ')), 'item')}")
+    elif takes:
+        lines.append(f"Upgrade: {_plural(takes, 'item')} to take within the pins; run: {boot_command(se_root, True)}")
+    else:
+        lines.append("Upgrade: nothing to take within the pins")
+    if beyond:
+        lines.append(f"Left: {_plural(len(beyond), 'release')} beyond a pin, "
+                     f"{sum(pin.breaking for pin in beyond)} of them breaking")
+    return lines, failed
+
+
 #: The first words of the start's stop (docs/components.md "Required and optional at start").
 STOP = "SE cannot start"
 
@@ -1350,6 +1625,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
                         "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
+    boot_parser = commands.add_parser("boot", help="SE's boot: bring the checkout to the newest tip of its "
+                                      "branch, then list SE and every pin of the component tree with its "
+                                      "pinned, locked and newest version (README \"Boot\")")
+    boot_parser.add_argument("--upgrade", action="store_true", help="also move SE to its newest release "
+                             "and every lock to the newest release its pin admits; a release beyond a pin "
+                             "is never taken")
     commands.add_parser("start-refresh", help="bootstrap.sh at the session's start: move an installed SE that "
                         "is a git checkout to its latest release; exit code 0 where it moved")
     commands.add_parser("start-components", help="bootstrap.sh at the session's start, before the core: resolve "
@@ -1404,6 +1685,10 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         if line:
             print(line)
         return 0
+    if args.command == "boot":
+        lines, failed = boot(SE_ROOT, root, args.local, world, args.upgrade)
+        print("\n".join(lines))
+        return 1 if failed else 0
     if args.command == "refresh":
         lines, failed = refresh(SE_ROOT, root, args.local, cache_path, world)
         print("\n".join(lines))

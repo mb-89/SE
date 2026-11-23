@@ -57,15 +57,22 @@ its tools.
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
-- **Breaking releases**: right after the greeting, never before or instead of it, start
-  `uv run python <se>/scripts/se_modules.py --root <main checkout> breaking` in the background (in
-  Claude Code, Bash's `run_in_background`) and go on with the turn without waiting for it.
-  - When it ends with findings, tell the person once, in your next message: each line it printed,
-    which names the component, its pin and the newest release.
-  - Its one line where nothing moved needs no message; a failure is one line naming the check and
-    its message.
-  - The check changes nothing: what to do about a finding is the person's decision
-    ([README "Commands"](../../README.md#commands)).
+- **Boot**: right after the greeting, never before or instead of it, run SE's boot,
+  `uv run python <se>/scripts/se_start.py --root <main checkout> boot`
+  ([README "Boot"](../../README.md#boot)): the checkout current, SE and every dependency listed.
+  - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) run it with `--upgrade` as your first
+    action, before any other work, and wait for it; then report once what it moved and what is
+    left: its `Moved:` and `Left:` lines and each row beyond a pin.
+  - On a local machine start it in the background (in Claude Code, Bash's `run_in_background`)
+    and go on with the turn. When it ends, report once what there is to take and what is left,
+    and offer the upgrade; on the person's yes, run it again with `--upgrade` and report what moved.
+  - A boot that stops names why in its `Checkout:` line: pass that line on, and start no other work
+    on the checkout until the person has decided.
+  - The boot decides from versions alone. A release beyond a pin is the person's decision, with
+    what moving the pin needs named in its row.
+  - Where SE moves across a major, or a row names a breaking release beyond a pin that the person
+    takes, follow that repository's upgrade guide, `docs/upgrading.md`, its sections from the
+    version left to the version taken, in order (work issue SE#1790 owns the guide).
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
