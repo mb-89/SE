@@ -71,6 +71,11 @@ agent_lint = sys.modules.get("agent_lint") or importlib.util.module_from_spec(_l
 if "agent_lint" not in sys.modules:
     sys.modules["agent_lint"] = agent_lint
     _lint_spec.loader.exec_module(agent_lint)
+_marker_spec = importlib.util.spec_from_file_location("generated", Path(__file__).with_name("generated.py"))
+generated_files = sys.modules.get("generated") or importlib.util.module_from_spec(_marker_spec)
+if "generated" not in sys.modules:
+    sys.modules["generated"] = generated_files
+    _marker_spec.loader.exec_module(generated_files)
 SOURCE = PurePosixPath("src")
 DRAFTS = PurePosixPath("drafts/skills")
 GUIDANCE = PurePosixPath("guidance")  # se_guidance.py TREE
@@ -146,12 +151,14 @@ COPILOT_AGENTS = PurePosixPath(".github/agents")
 # marketplace it installs from. A skill Claude Code ships loads by itself and is not listed.
 ROLE_SKILL = re.compile(r"^(?P<plugin>[a-z0-9][a-z0-9-]*)@(?P<marketplace>[A-Za-z0-9][\w.-]*)"
                         r":(?P<skill>[a-z0-9][a-z0-9-]*)$")
-# The notice that opens every Markdown file the build generates, naming its source: the one mark of
-# a whole generated file, which the landing guard reads to leave the file out of authored prose.
-NOTICE = ("<!-- Generated from {source} by scripts/se_plugin.py; edit the source and run "
-          "`python scripts/se_plugin.py build`. -->\n")
+# The notice that opens every Markdown file the build generates, naming its source: the marker of a
+# generated file (scripts/generated.py, the guidance note generated-files-are-marked), which the
+# landing guard also reads to leave the file out of authored prose. The JSON manifests carry none,
+# as JSON has no comments: .gitattributes marks them.
+GENERATOR = "se_plugin.py build"
 NOTICE_PATTERN = re.compile(
-    "^" + re.escape(NOTICE.rstrip("\n")).replace(re.escape("{source}"), r"\S+") + "$", re.MULTILINE)
+    "^" + re.escape(generated_files.line(GENERATOR, "{source}", "html")).replace(re.escape("{source}"), r"\S+")
+    + "$", re.MULTILINE)
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
 PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 # Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
@@ -407,7 +414,7 @@ def guidance_findings(root: Path) -> list[str]:
 
 def notice(source: PurePosixPath | str) -> str:
     """The notice line that opens a Markdown file generated from `source`."""
-    return NOTICE.format(source=source)
+    return generated_files.line(GENERATOR, str(source), "html") + "\n"
 
 
 def _version(root: Path) -> str:
