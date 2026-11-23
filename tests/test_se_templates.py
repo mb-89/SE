@@ -251,6 +251,7 @@ import shlex  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
 import threading  # noqa: E402
+import types  # noqa: E402
 
 import review  # noqa: E402
 from shell_paths import BASH, sh  # noqa: E402
@@ -456,17 +457,26 @@ def test_a_crash_after_selection_denies_and_one_before_passes_and_logs(
 def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh):
     """A judgement still running at the bound: the bound is zero and the judgement waits until
     the gate has answered, so the order, not the clock, makes it late. The gate's wait starts once
-    the judgement is deciding, past finding the project, as no scheduler promises that order."""
+    the judgement is deciding, past finding the project, as no scheduler promises that order:
+    without it the gate may give up before the judgement knows the project, and its line goes to
+    SE's own checkout. Only se_templates' threads are the test's, and its judgement, released as a
+    free write, ends before the test does, so no thread of it outlives the test."""
     released, reached = threading.Event(), threading.Event()
+    runners: list[threading.Thread] = []
 
     class Started(threading.Thread):
         def start(self) -> None:
+            runners.append(self)
             super().start()
-            reached.wait(60)
+            assert reached.wait(60), "the judgement never reached deciding"
+
+    def deciding(*_) -> None:
+        reached.set()
+        assert released.wait(60), "the test never released the judgement"
 
     monkeypatch.setattr(se_templates, "GATE_SECONDS", 0)
-    monkeypatch.setattr(se_templates, "deciding", lambda *_: reached.set() or released.wait(60))
-    monkeypatch.setattr(se_templates.threading, "Thread", Started)
+    monkeypatch.setattr(se_templates, "deciding", deciding)
+    monkeypatch.setattr(se_templates, "threading", types.SimpleNamespace(Thread=Started))
     text = payload("mcp__github__issue_write", project, method="create", title=TITLE,
                    labels=["work"], body=THIN)
     try:
@@ -474,8 +484,12 @@ def test_a_gate_past_its_bound_passes_and_logs(capsys, monkeypatch, project, gh)
         assert not released.is_set()  # answered while the judgement still ran
     finally:
         released.set()
-    assert "slow: no answer within 0 s" in (
-        project / ".se" / ".runtime" / "templates-gate.log").read_text(encoding="utf-8")
+        for runner in runners:
+            runner.join(60)
+    assert [runner.is_alive() for runner in runners] == [False]
+    lines = (project / ".se" / ".runtime" / "templates-gate.log").read_text(
+        encoding="utf-8").splitlines()
+    assert len(lines) == 1 and lines[0].endswith("passed unjudged: slow: no answer within 0 s")
 
 
 # The hook: se_hook.sh runs the gate for a guarded call only, its answer the hook's whole stdout.
