@@ -14,7 +14,7 @@ DECISION = SOURCE / "skills" / "decision" / "SKILL.md"
 RULE_BOOK = SOURCE / "skills" / "work-model" / "references" / "rules.md"
 ROLES = ("se", "worker", "integrator", "reviewer")
 # The authored prose: the agent and skill sources, the issue templates and the pull request template
-# (generated layouts excluded).
+# (the generated layout excluded).
 # The field report's template: the pull request template.
 REPORT_TEMPLATE = GITHUB / "pull_request_template.md"
 PROSE = sorted([*SOURCE.rglob("*.md"), *(GITHUB / "ISSUE_TEMPLATE").glob("*.md"), REPORT_TEMPLATE])
@@ -34,10 +34,9 @@ def test_agent_definition_names_its_role_and_points_to_the_work_model(role):
 
 
 def test_worker_agent_tools_exclude_input_and_workspace_prompts():
-    text = (GITHUB / "agents" / "worker.agent.md").read_text(encoding="utf-8")  # what Copilot reads
-    front_matter = text.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in front_matter
-    assert "strict-tools-list: true" in front_matter
+    front_matter = (AGENTS / "worker.md").read_text(encoding="utf-8").split("---")[1]  # both hosts read it
+    assert "\ntools:" not in front_matter, "a tools list would take Agent from Claude Code's worker"
+    assert "disallowedTools: AskUserQuestion" in front_matter
     assert "ask_user" not in front_matter
     assert "set_workspace" not in front_matter
 
@@ -147,10 +146,7 @@ def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
                  "You run a model no weaker than the worker's"):
         assert rule in reviewer, rule
     front_matter = (AGENTS / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
-    assert "claude.model: inherit" in front_matter
-    copilot = (GITHUB / "agents" / "reviewer.agent.md").read_text(encoding="utf-8").split("---")[1]
-    assert "tools: ['execute', 'read', 'search', 'send_message', 'se/*']" in copilot  # no edit tool
-    assert "strict-tools-list: true" in copilot
+    assert "model: inherit" in front_matter
 
 
 def test_se_starts_a_reviewer_on_request_and_the_integrator_does_not_wait_for_it():
@@ -192,7 +188,7 @@ def test_partial_deliveries_define_blockers_and_review_responses():
     assert "## Review responses" in report
     assert "answers every review point" in report
     assert "## Removed behaviour, deleted or weakened tests, and authored prose" in report
-    assert "(skills/work-model/SKILL.md#rules-for-all-roles)" in report
+    assert "(../skills/work-model/SKILL.md#rules-for-all-roles)" in report
 
 
 def test_field_report_template_has_requirement_evidence_table():
@@ -200,7 +196,7 @@ def test_field_report_template_has_requirement_evidence_table():
     assert "one row per work-issue requirement and acceptance item" in report
     assert 'numbered items under "Changes after filing" are requirements, by their number' in report
     assert "| Work issue item | Result | Commits | Evidence |" in report
-    assert "(agents/worker.agent.md#procedure)" in report
+    assert "(../agents/worker.md#procedure)" in report
 
 
 def test_field_report_template_names_the_integration_branch_it_was_tested_against():
@@ -565,53 +561,31 @@ def test_without_gh_names_what_the_session_prompt_still_carries_and_nothing_else
             in " ".join(section.split()))
     prompt = section.split("```text", 1)[1].split("```", 1)[0]
     keys = [line.strip().split(":", 1)[0] for line in prompt.strip().splitlines()]
-    assert keys == ["Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).",
+    assert keys == ["Act as the worker agent defined in <se>/agents/worker.md (read it first, plus the project's AGENTS.md).",
                     "Work issue", "Branch", "Integrator session to notify at delivery"]
-
-
-def claude_text(path: Path) -> str:
-    """A source as the Claude layout carries it: its Copilot-only parts dropped (se_plugin.py
-    `hosts`), whitespace normalized."""
-    text = re.sub(r"(?ms)^<!-- copilot -->\n.*?^<!-- /copilot -->\n", "", path.read_text(encoding="utf-8"))
-    return " ".join(text.split())
 
 
 @pytest.mark.parametrize("role", ("worker", "integrator"))
 def test_roles_point_to_without_gh_and_do_not_restate_it(role):
-    """The Claude layout's role text; under Copilot the role names SE's MCP tools, which the work
-    model's Host procedure under Copilot owns (the next test)."""
-    text = claude_text(AGENTS / f"{role}.md")
+    """The role names SE's MCP tools and points on; the work model's Host procedure under Copilot
+    owns the rest (the next test)."""
+    text = normalized(AGENTS / f"{role}.md")
     assert "(../skills/work-model/SKILL.md#without-gh)" in text
-    for owned in ("Commands that still run", "GitHub tools", "MCP", "outcome branch",
+    for owned in ("Commands that still run", "GitHub tools", "outcome branch",
                   "carries only", "`review-note`, `probe`"):
         assert owned not in text, owned
 
 
 @pytest.mark.parametrize("role", ("worker", "integrator", "reviewer", "se"))
-def test_under_copilot_each_role_names_ses_mcp_tools_and_points_to_the_host_procedure(role):
-    text = normalized(ROOT / ".github" / "agents" / f"{role}.agent.md")
+def test_each_role_names_ses_mcp_tools_and_points_to_the_host_procedure(role):
+    text = normalized(ROOT / "agents" / f"{role}.md")
     assert "MCP tools" in text
     assert "(../skills/work-model/SKILL.md#host-procedure-under-copilot)" in text
-    assert "Host procedure under Copilot" not in claude_text(AGENTS / f"{role}.md")
-    assert "MCP" not in normalized(ROOT / "agents" / f"{role}.md").replace("GitHub MCP", "")
-
-
-@pytest.mark.parametrize("role", ("worker", "reviewer"))
-def test_the_strict_tool_lists_gain_the_se_server_under_copilot_only(role):
-    copilot = (ROOT / ".github" / "agents" / f"{role}.agent.md").read_text(encoding="utf-8").split("\n---\n")[0]
-    assert "'se/*']" in copilot and "strict-tools-list: true" in copilot
-    assert "se/*" not in (ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8")
 
 
 def host_procedure() -> str:
-    text = normalized(ROOT / ".github" / "skills" / "work-model" / "SKILL.md")
+    text = normalized(ROOT / "skills" / "work-model" / "SKILL.md")
     return text.split("## Host procedure under Copilot", 1)[1]
-
-
-def test_the_host_procedure_is_in_the_copilot_layout_only():
-    """The Claude text stays as it is: tests/test_se_plugin.py holds its layout byte for byte."""
-    assert "## Host procedure under Copilot" in normalized(ROOT / ".github" / "skills" / "work-model" / "SKILL.md")
-    assert "Host procedure under Copilot" not in normalized(ROOT / "skills" / "work-model" / "SKILL.md")
 
 
 def test_the_host_procedure_branches_on_the_tools_the_session_has():
@@ -676,12 +650,8 @@ def test_a_worker_or_integrator_rereads_its_issue_only_when_it_changed():
         text = normalized(AGENTS / agent)
         assert "`updated_at` and comment count against the values you last read" in text, agent
         assert "[Check before rereading](../skills/work-model/SKILL.md#issues)" in text, agent
-    for built in (ROOT / "skills" / "work-model" / "SKILL.md",
-                  ROOT / ".github" / "skills" / "work-model" / "SKILL.md"):
-        assert rule in normalized(built), built
-    for built in (ROOT / "agents" / "worker.md", ROOT / "agents" / "integrator.md",
-                  ROOT / ".github" / "agents" / "worker.agent.md",
-                  ROOT / ".github" / "agents" / "integrator.agent.md"):
+    assert rule in normalized(ROOT / "skills" / "work-model" / "SKILL.md")
+    for built in (ROOT / "agents" / "worker.md", ROOT / "agents" / "integrator.md"):
         assert "`updated_at` and comment count against the values you last read" in normalized(
             built), built
 
@@ -832,7 +802,7 @@ def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
         if path != WORK_MODEL:
             assert "Browser checks are batched" not in normalized(path), path
     template = normalized(GITHUB / "ISSUE_TEMPLATE" / "work.md")
-    assert "(../skills/work-model/SKILL.md#tests)" in template
+    assert "(../../skills/work-model/SKILL.md#tests)" in template
 
 
 def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests():
@@ -1094,14 +1064,14 @@ def test_integrator_starts_the_next_startable_issue_after_each_landing_and_recor
     assert "`Started: none startable`" in integrator
 
 
-# What the work of 22 Nov showed, as the built layouts carry it: each role reads it where it runs.
+# What the work of 22 Nov showed, as the built layout carries it: each role reads it where it runs.
 BUILT = {
-    "integrator": [ROOT / "agents" / "integrator.md", GITHUB / "agents" / "integrator.agent.md"],
-    "worker": [ROOT / "agents" / "worker.md", GITHUB / "agents" / "worker.agent.md"],
-    "decision": [ROOT / "skills" / "decision" / "SKILL.md", GITHUB / "skills" / "decision" / "SKILL.md"],
-    "work-model": [ROOT / "skills" / "work-model" / "SKILL.md", GITHUB / "skills" / "work-model" / "SKILL.md"],
-    "catch-up": [ROOT / "skills" / "catch-up" / "SKILL.md", GITHUB / "skills" / "catch-up" / "SKILL.md"],
-    "se": [ROOT / "agents" / "se.md", GITHUB / "agents" / "se.agent.md"],
+    "integrator": ROOT / "agents" / "integrator.md",
+    "worker": ROOT / "agents" / "worker.md",
+    "decision": ROOT / "skills" / "decision" / "SKILL.md",
+    "work-model": ROOT / "skills" / "work-model" / "SKILL.md",
+    "catch-up": ROOT / "skills" / "catch-up" / "SKILL.md",
+    "se": ROOT / "agents" / "se.md",
 }
 LESSONS = [
     ("integrator", "Before you start a worker and before each merge, read the messages queued for your session"),
@@ -1135,9 +1105,8 @@ LESSONS = [
 
 
 @pytest.mark.parametrize(("source", "lesson"), LESSONS, ids=[f"{source}-{n}" for n, (source, _) in enumerate(LESSONS)])
-def test_the_built_layouts_carry_what_22_nov_showed(source, lesson):
-    for path in BUILT[source]:
-        assert lesson in normalized(path), f"{path.relative_to(ROOT).as_posix()}: {lesson}"
+def test_the_built_layout_carries_what_22_nov_showed(source, lesson):
+    assert lesson in normalized(BUILT[source]), f"{BUILT[source].relative_to(ROOT).as_posix()}: {lesson}"
 
 
 def test_the_worked_example_shows_what_others_do_and_its_options_name_none_of_them():

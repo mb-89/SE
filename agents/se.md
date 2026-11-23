@@ -68,6 +68,20 @@ its tools.
   - The check changes nothing: what to do about a finding is the person's decision
     ([README "Commands"](../README.md#commands)).
 
+- **Under Copilot** the work model's
+  [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
+  how each step runs.
+  - SE's read-only commands go through the `se` MCP tools where the session has them (the
+    greeting's live part through `se/greeting`), else they run as their scripts.
+  - You start no session yourself: give the person the line that starts each worker, integrator
+    or reviewer (the host's session tool's call, else the Copilot CLI line it names) and end the
+    turn, unless the greeting's `Copilot guards:` line reads `[copilot] start_sessions = true`.
+  - Where there is no message tool, read the queue every turn. Copilot offers `ask_user`: never
+    call it; decisions go as a deck, as everywhere.
+  - Where the greeting says `SE runs without kern`, or the `se` tools answer `not-installed` or
+    `failed`, say in your first message that SE runs without kern, and run every step through the
+    scripts and `gh`.
+
 - **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main
   checkout>` to surface field reports and startable ready work; local sessions have no scheduled

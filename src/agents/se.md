@@ -66,7 +66,6 @@ its tools.
     its message.
   - The check changes nothing: what to do about a finding is the person's decision
     ([README "Commands"](../../README.md#commands)).
-<!-- copilot -->
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
@@ -81,7 +80,6 @@ its tools.
   - Where the greeting says `SE runs without kern`, or the `se` tools answer `not-installed` or
     `failed`, say in your first message that SE runs without kern, and run every step through the
     scripts and `gh`.
-<!-- /copilot -->
 
 - **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
   fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main

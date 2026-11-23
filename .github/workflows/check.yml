@@ -1,6 +1,6 @@
 # SE's CI, the one check main's ruleset requires by its name `check` (AGENTS.md "Public safety"):
 # on every pull request and every push to the integration branch, every check the integration runs:
-# the public check's commit gate, the generated layouts, the README's command reference, the
+# the public check's commit gate, the generated layout, the README's command reference, the
 # hygiene of SE's own checkout, a pull request's field report and the complete suite within its
 # budget, SE's Go components on kern at the pin se.toml [components.kern] reads from components/go.mod,
 # and, through the job kern-platforms, SE's start, hook and setup scripts and its worktree removal
@@ -92,8 +92,8 @@ jobs:
             echo "::error::se.lock does not lock the kern components/go.mod requires: run uv run python scripts/se_modules.py sync kern and commit se.lock"
             exit 1
           fi
-      # Before the suite, whose start regenerates the layouts (tests/conftest.py).
-      - name: The generated layouts match src/
+      # Before the suite, whose start regenerates the layout (tests/conftest.py).
+      - name: The generated layout matches src/
         run: uv run python scripts/se_plugin.py check
       - name: The README's command reference is up to date
         run: uv run python scripts/work_tickets.py docs --check

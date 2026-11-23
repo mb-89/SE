@@ -40,7 +40,7 @@ tags and calls "collect the guidance for this template"
   is the union of both.
 - **Every note is also a skill.** Its front matter carries the two keys a skill needs, `name` and
   `description`, beside `tags` and the optional `overrides`. The build that writes SE's agents and
-  skills into both hosts' layouts ([AGENTS.md "Agents and skills"](../AGENTS.md#agents-and-skills))
+  skills into the layout both hosts read ([AGENTS.md "Agents and skills"](../AGENTS.md#agents-and-skills))
   writes each note as one skill, so a host that offers skills to the agent offers each note too.
 
 ```markdown
@@ -82,7 +82,7 @@ notes:
 Two checks hold the tree to its templates:
 
 - **No orphan note.** A note that reaches no template is refused, naming the note and its tags,
-  with the remedy: fix its tags, or delete it. The check runs where SE's generated layouts are
+  with the remedy: fix its tags, or delete it. The check runs where SE's generated layout is
   checked today, in `se_plugin.py check`, so the `check` job fails on it.
 - **The resolutions are pinned.** One committed table, `tests/guidance-pins.yaml`, names for each
   template the notes it gets, in order. A test resolves every template and compares: a change

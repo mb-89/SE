@@ -260,10 +260,10 @@ def test_with_no_git_bash_a_generated_handoff_hook_line_prints_the_install_line_
         assert INSTALL_LINE in result.stderr.splitlines(), (line, result.stderr)
 
 
-# What names a script: the plugin build, the layouts it generates (Copilot's and Claude Code's),
+# What names a script: the plugin build, the layout it generates (for both hosts),
 # the hooks, the start and setup scripts, the agents and the README. The build names the hand-off
-# only behind powershell_hooks, unset in SE's se.toml, so the layouts it writes name it nowhere.
-NAMERS = [".github/hooks", ".github/plugin", ".github/agents", ".github/skills", "agents", "skills",
+# only behind powershell_hooks, unset in SE's se.toml, so the layout it writes names it nowhere.
+NAMERS = [".github/hooks", ".github/plugin", "agents", "skills",
           ".claude-plugin", ".githooks", "scripts", "src/agents", "src/skills", "README.md", "AGENTS.md"]
 SETTING_OWNER = PROJECT / "scripts" / "se_plugin.py"
 

@@ -1731,7 +1731,7 @@ def test_tracker_from_local_config_overrides_origin(worktree, gh, local_config):
 
 def test_repo_help_matches_the_work_model_resolution_order():
     documentation = (
-        PROJECT / ".github" / "skills" / "work-model" / "SKILL.md"
+        PROJECT / "skills" / "work-model" / "SKILL.md"
     ).read_text(encoding="utf-8")
     documented_order = next(
         line for line in documentation.splitlines() if "`--repo` resolution order" in line
