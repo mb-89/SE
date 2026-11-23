@@ -15,7 +15,6 @@ import pytest
 import fake_processes as fakes
 import git_door
 import se_modules
-import time_bound
 from test_work_ticket_issues import (  # noqa: F401  (the landing's fixtures: checkout, GitHub, config)
     PROJECT, git_ok, git_run, github, integration_fakes, local_config, main_checkout, reported_at,
     squashed_onto_origin, work_tickets,
@@ -415,7 +414,6 @@ GUARD_MOD = "module se/components\n\ngo 1.25.0\n\nrequire kern v{kern}\n\nreplac
 
 
 @pytest.mark.skipif(shutil.which("go") is None, reason="Go is not installed")
-@pytest.mark.timeout(time_bound.BOUND + time_bound.COLD_CACHE_SECONDS)  # Go's caches may be empty
 @pytest.mark.spawns("go: builds and runs kern's release guard (kern/tools/release), a Go program, with "
                     "`go run`; the one test of the guard on SE's components/go.mod")
 def test_the_guard_refuses_a_branch_that_moves_only_the_kern_require_without_a_stated_kind(

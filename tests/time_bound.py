@@ -6,8 +6,7 @@ Reader: whoever writes a slow test, measures the bound again, or changes the wir
 counts over setup, call and teardown, so a hanging fixture is caught too. A test whose fixtures
 include `obs` (the tests of tests/test_deck.py count through `decks`) gets the obs fixture's wait for
 its lock on top: on a fresh checkout its setup clones and builds obs over the network, which no
-measurement on one host bounds. A test that carries its own `timeout` mark keeps it, such as one
-that may fill the machine's empty caches (COLD_CACHE_SECONDS). A test in
+measurement on one host bounds. A test that carries its own `timeout` mark keeps it. A test in
 `tests/beside_*.py` gets none: those files run under their own `se.toml` `[tests.beside.*]` limit,
 or only where the owner adds them (README "Host validators").
 
@@ -48,12 +47,6 @@ BOUND = WINDOWS_BOUND if WINDOWS else LINUX_BOUND
 #: on: a test that holds a time of its own (tests/test_discovery_budget.py, the facts budget of
 #: tests/test_overhaul.py) scales it by this.
 SCALE = SLOWEST_SECONDS / LINUX_SLOWEST_SECONDS
-#: What a test whose tool fills the machine's empty caches over the network may take on top of
-#: BOUND, given with its own `timeout` mark: on a machine whose Go caches are empty (a fresh home,
-#: tests/conftest.py `machine_caches`), the first `go run` fetches the toolchain go.mod asks for and
-#: kern's modules and builds them, which took 24 s on the host BOUND was measured on; like the obs
-#: fixture's wait, no measurement on one host bounds a download.
-COLD_CACHE_SECONDS = 120
 
 
 def beside(item: pytest.Item) -> bool:
