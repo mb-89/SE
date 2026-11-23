@@ -59,6 +59,17 @@
   - on a change to `.github/workflows/check.yml`, `tests/test_public_check.py`, which holds the
     workflow's jobs and their order, beside the tests of the steps it changed (such as
     `tests/test_kern.py` for kern's, `tests/test_pr_issues.py` for the issue rule's).
+- Processes: a test starts none; it calls the code under test in-process, a script through its
+  `main(argv)`, a hook through its logic (the guidance note
+  [tests-spawn-no-processes](guidance/pull-request/field-report/tests-spawn-no-processes.md)).
+  - Every program but git starts through `scripts/process_door.py`; a test's code reaches the
+    fake, `tests/fake_processes.py`, which answers SE's scripts and hooks in-process and `gh` or a
+    suite command by the test's handlers (`fake_processes` fixture).
+  - The spawn guard, `scripts/spawn_guard.py`, fails a test that starts a process unmarked, naming
+    each call; `@pytest.mark.spawns("<reason>")` marks a door's contract (`contract: <door>`), a
+    script's one entry-point test (`entry: <script>`) or a justified start, such as shell logic.
+  - `tests/spawn-baseline.yaml` holds the tests not converted yet and only shrinks:
+    `uv run pytest -q --spawn-baseline=write` drops each entry that ran and started nothing.
 - File order: `tests/file-seconds.json` holds CI's seconds per test file, as CI's runner runs the
   PowerShell cases and skips the Playwright ones; a change that moves a test file's time by
   several seconds refreshes it from its pull request's `check` run with

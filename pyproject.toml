@@ -15,7 +15,7 @@ package = false
 testpaths = ["tests"]
 # One worker per core (pytest-xdist); a file's tests share one worker and run in order there, the
 # heaviest file first by the cache's seconds, else tests/file-seconds.json's (tests/conftest.py).
-addopts = "-n auto --dist loadfile"
+addopts = "-n auto --dist loadfile -p pytester"
 
 [dependency-groups]
 dev = [

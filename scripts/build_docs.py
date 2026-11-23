@@ -16,6 +16,7 @@ import tempfile
 import sys
 from pathlib import Path
 
+import process_door
 import rule_book
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +42,7 @@ def obs_dir() -> Path:
     if os.environ.get(OBS_VARIABLE):
         return Path(os.environ[OBS_VARIABLE])
     for command in ("sync", "path"):
-        result = subprocess.run([sys.executable, str(MODULES), command, "obs"], cwd=ROOT,
+        result = process_door.run([sys.executable, str(MODULES), command, "obs"], cwd=ROOT,
                                 capture_output=True, text=True)
         if result.returncode:
             print(f"se_modules.py {command} obs failed:\n{result.stderr}{result.stdout}", file=sys.stderr)
@@ -68,7 +69,7 @@ def obs_document_command(obs: Path) -> list[str]:
     run``. Not ``uv run obs-document``: uv sets VIRTUAL_ENV for it, obs passes its environment on to
     the adapter's own ``uv run``, and uv warns there that the two environments differ."""
     if obs not in _PYTHON:
-        result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c",
+        result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c",
                                  "import sys; print(sys.executable)"],
                                 cwd=ROOT, capture_output=True, text=True, env=child_environment())
         said = result.stdout.strip().splitlines()
@@ -105,7 +106,7 @@ def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = Tru
         if found is None:
             print(f"{tool}: {refusal}", file=sys.stderr)
             return 1
-    result = subprocess.run(
+    result = process_door.run(
         [*obs_document_command(obs), *(["--adapter", ADAPTER] if adapter else []), *arguments],
         cwd=ROOT, capture_output=True, text=True, env=child_environment(),
     )
@@ -142,7 +143,7 @@ def installed_adapter(obs: Path) -> tuple[dict | None, str]:
             f"folder = adapter_location({ADAPTER!r}).folder; "
             f"print(json.dumps({{**load_adapter({ADAPTER!r}), 'folder': str(folder), "
             f"'missing': sorted(set(requirements(folder, {ADAPTER!r})) - set(installed()))}}))")
-    result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c", code],
+    result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c", code],
                             cwd=ROOT, capture_output=True, text=True, env=child_environment())
     said = result.stdout.strip().splitlines()
     if result.returncode or not said:
@@ -154,7 +155,7 @@ def installed_adapter(obs: Path) -> tuple[dict | None, str]:
 def install_adapter(obs: Path) -> tuple[int, str]:
     """Run ``ADAPTER_REMEDY`` from ``obs``, which installs ``ADAPTER`` with the components it requires
     (obs 10.3.2 or later): its exit code and the last line it said."""
-    result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
+    result = process_door.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
                             capture_output=True, text=True, env=child_environment())
     said = (result.stdout + result.stderr).strip().splitlines()
     return result.returncode, said[-1] if said else f"exit code {result.returncode}"
@@ -247,7 +248,7 @@ def runme(vault: Path, folder: Path) -> int:
     on with the copy's folder named as ``folder``; no timeout. 1 where it fails, else 0."""
     if not (vault / "RUNME.sh").is_file():
         return 0
-    result = subprocess.run(["sh", "RUNME.sh", "--help"], cwd=vault, stdout=subprocess.DEVNULL,
+    result = process_door.run(["sh", "RUNME.sh", "--help"], cwd=vault, stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE, text=True, env=child_environment())
     if result.stderr:
         print(result.stderr.replace(str(vault), str(folder)), end="", file=sys.stderr)

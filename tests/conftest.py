@@ -19,8 +19,11 @@ import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
+import fake_processes as fake_programs  # noqa: E402
+import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
+import spawn_guard  # noqa: E402
 import time_bound  # noqa: E402
 import waiting  # noqa: E402
 
@@ -104,37 +107,31 @@ def door_variable(item: pytest.Item) -> str:
     return "real" if isinstance(door_backend(item), git_door.RealGit) else "refused"
 
 
+def process_backend(item: pytest.Item) -> process_door.Backend:
+    """What the process door (scripts/process_door.py) runs for `item`: the real programs for a test
+    the spawn guard lets start them (a `spawns` mark, or the baseline), else the fake
+    (tests/fake_processes.py), which answers SE's scripts and hooks in-process and the test's
+    handlers (the `fake_processes` fixture) for the rest."""
+    return process_door.RealProcesses() if spawn_guard.allowed(item) else fake_programs.FakeProcesses()
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
-    with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
-            pytest.MonkeyPatch.context() as patch:
+    with git_door.use(door_backend(item)), process_door.use(process_backend(item)), \
+            network_guard.running(item.nodeid), pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
-        count_children(item, patch)
         yield
 
 
-# The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git: it
-# costs about 3 ms a git call, the fake in memory (`fake_git_door`) about 0.15 ms. So a test that ran
-# git through the state file and started no child process (`subprocess.Popen` in the test's process,
-# its setup and teardown included, a hook the state file runs among them) fails at its teardown,
-# naming the remedy, unless its file is named here with its reason. The list may only shrink.
+# The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git, or
+# whose git runs hooks, which only the state file runs (in this process through the process door's
+# fake, tests/fake_processes.py): it costs about 3 ms a git call, the fake in memory
+# (`fake_git_door`) about 0.15 ms. So a test that ran git through the state file, ran no hook and
+# started no child process (as the spawn guard counts them, scripts/spawn_guard.py `started`)
+# fails at its teardown, naming the remedy, unless its file is named here with its reason. The
+# list may only shrink.
 IN_PROCESS_STATE_FILE: dict[str, str] = {
 }
-children_started = pytest.StashKey[list[int]]()
-
-
-def count_children(item: pytest.Item, patch: pytest.MonkeyPatch) -> None:
-    """Counts the child processes `item` starts, its setup and teardown included, in its stash."""
-    started = item.stash[children_started] = [0]
-    execute = subprocess.Popen._execute_child
-
-    def counted(self, *arguments, **options):
-        started[0] += 1
-        return execute(self, *arguments, **options)
-
-    patch.setattr(subprocess.Popen, "_execute_child", counted)
-
-
 def item_file(item: pytest.Item) -> str:
     """`item`'s file, relative to se's root where it lies inside it."""
     path = Path(item.path).resolve()
@@ -152,13 +149,13 @@ class WatchedStateFile(fake_git.StateFile):
 
 
 def state_file_refusal(item: pytest.Item, state: WatchedStateFile) -> str:
-    """Why `item` may not have taken the state file, or "" where it may: it ran git through it and
-    started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
-    started = item.stash.get(children_started, [0])[0]
-    if not state.runs or started or item_file(item) in IN_PROCESS_STATE_FILE:
+    """Why `item` may not have taken the state file, or "" where it may: it ran git through it, ran
+    no hook and started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
+    started = spawn_guard.started(item)
+    if not state.runs or started or state.hooks_run or item_file(item) in IN_PROCESS_STATE_FILE:
         return ""
-    return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git) and "
-            "started no child process; take the fake_git_door fixture, the fake in memory, or name the "
+    return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git), ran no "
+            "hook and started no child process; take the fake_git_door fixture, the fake in memory, or name the "
             "file in tests/conftest.py IN_PROCESS_STATE_FILE with its reason")
 
 
@@ -177,6 +174,12 @@ class GuardReports:
         time_bound.explain(item, report)
 
 
+@pytest.hookimpl(optionalhook=True)
+def pytest_handlecrashitem(crashitem: str, report: pytest.TestReport, sched) -> None:
+    """A test that ended its pytest-xdist worker fails once, by name (tests/time_bound.py `crashed`)."""
+    time_bound.crashed(crashitem, report, sched)
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Every collected test gets its time bound (tests/time_bound.py), one outside tests/ too."""
     time_bound.mark(items, OBS_LOCK_WAIT_SECONDS)
@@ -188,6 +191,18 @@ def fake_git_door() -> Iterator[fake_git.FakeGit]:
     tests/test_git_door.py); what the test and the code under test run reaches no real git."""
     with git_door.use(fake_git.FakeGit()) as fake:
         yield fake
+
+
+@pytest.fixture
+def fake_processes() -> fake_programs.FakeProcesses:
+    """The process door's fake of this test (tests/fake_processes.py), for its handlers: `gh`'s
+    answers, a suite command; SE's scripts and hooks it answers in-process by itself. A test the
+    spawn guard lets start processes runs the real programs and cannot take it."""
+    backend = process_door.BACKEND
+    if not isinstance(backend, fake_programs.FakeProcesses):
+        pytest.fail("fake_processes: this test runs the real programs (a spawns mark, or the spawn baseline); "
+                    "drop the mark or its baseline entry to take the fake", pytrace=False)
+    return backend
 
 
 @pytest.fixture
@@ -235,16 +250,16 @@ def obs() -> Path:
             held.enter_context(waiting.exclusive(ROOT / ".se" / "obs-setup.flock", OBS_LOCK_WAIT_SECONDS))
         except TimeoutError as error:
             pytest.fail(str(error))
-        with pytest.MonkeyPatch.context() as patch:
-            # Bringing SE's own checkout's obs module to its pin is the suite's setup, not a test:
-            # it fetches the real module, through real git.
+        # Bringing SE's own checkout's obs module to its pin and building it is the suite's setup,
+        # not a test: it fetches the real module through real git and runs the real programs.
+        with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
             patch.setenv(git_door.VARIABLE, "real")
             directory = build_docs.obs_dir()
-        subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
-                       env=build_docs.child_environment())
-        # The adapter component every build runs through, installed where it is missing, as a build
-        # installs it: once here, so no test's build waits for it.
-        adapter, refusal = build_docs.ready_adapter(directory)
+            subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
+                           env=build_docs.child_environment())
+            # The adapter component every build runs through, installed where it is missing, as a
+            # build installs it: once here, so no test's build waits for it.
+            adapter, refusal = build_docs.ready_adapter(directory)
         if adapter is None:
             pytest.fail(refusal)
         os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it
@@ -402,7 +417,8 @@ DRIFT_SECONDS, DRIFT_SHARE = 5.0, 0.5
 file_seconds_read = pytest.StashKey[dict[str, float]]()
 
 
-def pytest_addoption(parser: pytest.Parser) -> None:
+def pytest_addoption(parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager) -> None:
+    spawn_guard.register(pluginmanager)  # the spawn guard (scripts/spawn_guard.py) judges every test
     parser.addoption("--record-file-seconds", nargs="?", const="", default=None, metavar="PATH",
                      help="write this run's seconds per file to PATH at the end of a passing parallel "
                           "run of whole files, as CI's suite step does; the tracked table is CI's, "

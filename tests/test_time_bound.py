@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -76,19 +74,59 @@ def test_has_the_bound(request):
 """
 
 
+class Wiring:
+    """What tests/conftest.py wires of the time bound, as a plugin of a planted run: its
+    `pytest_collection_modifyitems` (the bound's mark) and its GuardReports (the bound's section)."""
+
+    def __init__(self, conftest) -> None:
+        self.conftest = conftest
+
+    def pytest_collection_modifyitems(self, items) -> None:
+        self.conftest.pytest_collection_modifyitems(items)
+
+    def pytest_configure(self, config) -> None:
+        config.pluginmanager.register(self.conftest.GuardReports(), "se-guard-reports")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="on Windows pytest-timeout ends the worker "
                     "instead (its timer thread), and the section is not added")
-def test_a_test_past_its_bound_fails_naming_itself_its_bound_and_the_remedy(tmp_path):
-    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
-    (tmp_path / "test_planted.py").write_text(PLANTED.format(bound=time_bound.BOUND), encoding="utf-8")
-    environment = {**os.environ, "PYTHONPATH": os.pathsep.join([str(TESTS), os.environ.get("PYTHONPATH", "")])}
-    result = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "conftest",
-                             "test_planted.py"], cwd=tmp_path, env=environment, capture_output=True,
-                            text=True, check=False, timeout=30)
-    output = result.stdout + result.stderr
-    assert result.returncode == 1, output
+def test_a_test_past_its_bound_fails_naming_itself_its_bound_and_the_remedy(pytester, pytestconfig):
+    pytester.makeini("[pytest]\n")
+    pytester.makepyfile(test_planted=PLANTED.format(bound=time_bound.BOUND))
+    conftest = pytestconfig.pluginmanager.get_plugin(str(TESTS / "conftest.py"))
+    assert conftest is not None, "tests/conftest.py is this run's conftest"
+    result = pytester.runpytest_inprocess("-q", "-p", "no:cacheprovider", "test_planted.py",
+                                          plugins=[Wiring(conftest)])
+    output = result.stdout.str() + result.stderr.str()
+    assert result.ret == 1, output
     assert "1 failed, 1 passed" in output
     assert "Timeout (>1.0s) from pytest-timeout." in output
     assert ("tests/time_bound.py: test_planted.py::test_sleeps_past_its_bound ran past its time bound "
             "of 1 s") in output
     assert "Remedy: run the test alone to find what it waits for" in output
+
+
+class Scheduling:
+    """pytest-xdist's `--dist loadfile` scheduling as `time_bound.crashed` sees it: the requeued work
+    of each file, test to whether it is done."""
+
+    def __init__(self, workqueue: dict[str, dict[str, bool]]) -> None:
+        self.workqueue = workqueue
+
+
+def test_a_test_that_ends_its_worker_fails_once_by_name_and_its_file_goes_on():
+    """tests/conftest.py `pytest_handlecrashitem`: pytest-xdist requeues the file of a test whose
+    worker ended, the test with it, so it would end worker after worker until the run stops; the
+    crashed test is marked done, and its report names it, the likely cause and where the bound is."""
+    crashed = "tests/test_x.py::test_hangs"
+    sched = Scheduling({"tests/test_x.py": {"tests/test_x.py::test_before": True, crashed: False,
+                                            "tests/test_x.py::test_after": False}})
+    report = pytest.TestReport(crashed, ("tests/test_x.py", None, "tests/test_x.py"), {}, "failed",
+                               f"worker 'gw0' crashed while running '{crashed}'", "???")
+    time_bound.crashed(crashed, report, sched)
+    assert sched.workqueue["tests/test_x.py"] == {"tests/test_x.py::test_before": True, crashed: True,
+                                                  "tests/test_x.py::test_after": False}
+    text = str(report.longrepr)
+    assert text.startswith(f"worker 'gw0' crashed while running '{crashed}'")
+    assert f"{crashed} ended its worker and failed; it is not run again" in text
+    assert "thread method, the only one on Windows" in text and time_bound.OWNER in text

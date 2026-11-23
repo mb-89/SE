@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import git_door  # noqa: E402
+import process_door  # noqa: E402
 
 TABLE = "commit_checks"
 SETTINGS = "se.toml"
@@ -143,8 +144,8 @@ def run(root: Path, out=None, err=None) -> int:
         for name, command in named.items():
             shown = " ".join(command)
             try:
-                result = subprocess.run(command, cwd=folder, env=environment(), stdin=subprocess.DEVNULL,
-                                        capture_output=True, text=True, errors="replace", check=False)
+                result = process_door.run(command, cwd=folder, env=environment(), stdin=subprocess.DEVNULL,
+                                         capture_output=True, text=True, errors="replace", check=False)
             except OSError as error:
                 print(f"commit check {name}: error: `{shown}` cannot start: {error}; refusing the "
                       f"commit (se.toml [{TABLE}] {name})", file=err)

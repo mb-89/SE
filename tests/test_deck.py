@@ -28,6 +28,8 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import build_docs  # noqa: E402
 import deck  # noqa: E402
+import deck_look  # noqa: E402
+from fake_processes import Answer  # noqa: E402
 
 NOTE = ("---\nobs: {bless: pending}\n---\n# %s\n\n## Current situation\n\nThis is one case of how %s is chosen.\n"
         "\n## The problem\n\nIt is chosen by hand.\n\n## What others do\n\nOthers pick it by a rule.\n")
@@ -43,15 +45,17 @@ def _folder(tmp_path: Path, notes: dict[str, str], manifest: str | None = None) 
     return folder
 
 
-def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys):
-    # A fake obs-document that builds and warns.
-    def fake_run(command, **_):
-        if "--destination" in command:
-            Path(command[command.index("--destination") + 1]).write_text("<html>", encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, "", "obs-document: warning: one: long paragraph\n")
+def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys, fake_processes):
+    # A fake obs-document that builds and warns, run as obs's own Python would run it.
+    def obs_document(call):
+        words = call.words
+        if "--destination" in words:
+            Path(words[words.index("--destination") + 1]).write_text("<html>", encoding="utf-8")
+        return Answer(0, "", "obs-document: warning: one: long paragraph\n")
 
     monkeypatch.setattr(deck, "obs_dir", lambda: tmp_path)
-    monkeypatch.setattr(build_docs.subprocess, "run", fake_run)
+    monkeypatch.setitem(build_docs._PYTHON, tmp_path, "obs-python")
+    fake_processes.on("obs-python", obs_document)
     monkeypatch.setattr(build_docs, "ready_adapter", lambda obs: ({"name": build_docs.ADAPTER}, ""))
     folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
     assert deck.build(folder, tmp_path / "deck.html") == 1
@@ -156,16 +160,18 @@ def test_the_worked_example_builds_without_a_warning(decks):
     assert "warning" not in result.stderr
 
 
-def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks):
+@pytest.mark.spawns("tool: deck_look's browser half (scripts/deck_look.js) renders the built deck in node's "
+                    "Playwright, which runs only as a process")
+def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks, capsys):
     if not _playwright():
         pytest.skip("node with playwright is not installed")
     built, deck_page = decks["worked-example"]
     assert built.returncode == 0, built.stderr
     before = sorted(path.name for path in deck_page.parent.iterdir())
-    result = subprocess.run([sys.executable, str(SCRIPTS / "deck_look.py"), "look", str(deck_page),
-                             "--capabilities", "artifact,comments,downloads"], capture_output=True, text=True)
-    assert (result.returncode, result.stdout) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
-                                                     "phone-dark, desktop-light, desktop-dark\n"), result.stderr
+    code = deck_look.main(["look", str(deck_page), "--capabilities", "artifact,comments,downloads"])
+    result = capsys.readouterr()
+    assert (code, result.out) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
+                                     "phone-dark, desktop-light, desktop-dark\n"), result.err
     assert sorted(path.name for path in deck_page.parent.iterdir()) == before
 
 
@@ -502,7 +508,9 @@ def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_scr
     assert data == {"title": "A </script><!-- deck", "decisions": ["pick"]}
 
 
-def test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers(decks, tmp_path):
+@pytest.mark.spawns("tool: `deck.py answers --record` builds the record with the real obs, obs-document in "
+                    "obs's own Python environment, which runs only as a process")
+def test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers(decks, tmp_path, capsys):
     # A Bless with a comment and a comment with no verdict, at the built deck's own chapter versions.
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
@@ -512,83 +520,122 @@ def test_answers_in_the_obs_2_1_shape_print_and_record_through_deck_answers(deck
         {"chapter": "cache", "version": version["cache"], "verdict": "bless", "comment": "Fine as it is."},
         {"chapter": "queue", "version": version["queue"], "comment": "Only a thought."}]}), encoding="utf-8")
     record = tmp_path / "record.html"
-    shown = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "answers", str(answers),
-                            "--record", str(artifact.parent / "decisions"), "--destination", str(record)],
-                           capture_output=True, text=True)
-    assert shown.returncode == 0, shown.stderr
-    assert shown.stdout.splitlines()[:4] == ["cache: bless", "  comment: Fine as it is.", "queue: comment",
+    code = deck.main(["answers", str(answers), "--record", str(artifact.parent / "decisions"),
+                      "--destination", str(record)])
+    shown = capsys.readouterr()
+    assert code == 0, shown.err
+    assert shown.out.splitlines()[:4] == ["cache: bless", "  comment: Fine as it is.", "queue: comment",
                                              "  comment: Only a thought."]
     recorded = _requests(record)
     assert recorded["cache"]["answer"]["comment"] == "Fine as it is."
     assert "answer" not in recorded["queue"] and recorded["queue"]["comment"]["comment"] == "Only a thought."
 
 
-# The answers bundle on a fake of obs-html and of the Claude app's runtime, one case per run: the
+# The answers bundle on a fake of obs-html and of the Claude app's runtime, one case per mode: the
 # runtime's modes are what `artifact.publish` and `comments.sendToClaude` do (ok, or a rejection code).
+# Every mode runs in one node run (`bundled`), each case in a fresh context of its own (node's vm), so
+# no page's globals reach another's.
 BUNDLE_DOUBLE = """
+const vm = require("vm");
 const bundle = require("fs").readFileSync(process.argv[1], "utf8");
-const [payload, mode] = [JSON.parse(process.argv[2]), JSON.parse(process.argv[3])];
-const element = () => {
-    const node = {dataset: {}, style: {}, children: [], setAttribute() {}, addEventListener() {},
-                  after() {}, prepend: child => node.children.unshift(child),
-                  replaceChildren: (...children) => { node.children = children; }};
-    return node;
-};
-const body = element();
-const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0};
-globalThis.console = {...console, warn: message => calls.warnings.push(message)};
-if (mode.deck) globalThis.seDeck = mode.deck;
-globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
-                       createElement: () => { calls.created += 1; return element(); }};
-if (!mode.noNotices) globalThis.obsNotices = {post: entry => calls.notices.push(["post", entry]),
-                                              reveal: id => calls.notices.push(["reveal", id]),
-                                              remove: id => calls.notices.push(["remove", id])};
-if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
-globalThis.obsArtifact = {
-    registerApplication: application => { calls.application = [application.id, application.actions]; },
-    trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
-};
-const refusal = code => Object.assign(new Error(`refused: ${code}`), {code});
-const claude = {use: async name => {
-    if (name === "artifact") return {publish: async files => {
-        if (mode.files !== "ok") throw refusal(mode.files);
-        calls.published.push(files);
-        return {version: "v2"};
-    }};
-    if (name === "comments") return {
-        anchorFor: async node => ({element: node === body ? "body" : "other"}),
-        sendToClaude: async target => {
-            if (mode.comment !== "ok") throw refusal(mode.comment);
-            calls.comments.push(target);
-            return {threadId: "t1", commentId: "c1"};
-        },
+const [payload, modes] = [JSON.parse(process.argv[2]), JSON.parse(process.argv[3])];
+// One page: its globals are its context's; `report` takes what the bundle did.
+function page() {
+    const element = () => {
+        const node = {dataset: {}, style: {}, children: [], setAttribute() {}, addEventListener() {},
+                      after() {}, prepend: child => node.children.unshift(child),
+                      replaceChildren: (...children) => { node.children = children; }};
+        return node;
     };
-    return null;
-}};
-if (!mode.late) globalThis.claude = claude;
-eval(bundle);
+    const body = element();
+    const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0};
+    globalThis.console = {...console, warn: message => calls.warnings.push(message)};
+    if (mode.deck) globalThis.seDeck = mode.deck;
+    globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
+                           createElement: () => { calls.created += 1; return element(); }};
+    if (!mode.noNotices) globalThis.obsNotices = {post: entry => calls.notices.push(["post", entry]),
+                                                  reveal: id => calls.notices.push(["reveal", id]),
+                                                  remove: id => calls.notices.push(["remove", id])};
+    if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
+    globalThis.obsArtifact = {
+        registerApplication: application => { calls.application = [application.id, application.actions]; },
+        trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
+    };
+    const refusal = code => Object.assign(new Error(`refused: ${code}`), {code});
+    const claude = {use: async name => {
+        if (name === "artifact") return {publish: async files => {
+            if (mode.files !== "ok") throw refusal(mode.files);
+            calls.published.push(files);
+            return {version: "v2"};
+        }};
+        if (name === "comments") return {
+            anchorFor: async node => ({element: node === body ? "body" : "other"}),
+            sendToClaude: async target => {
+                if (mode.comment !== "ok") throw refusal(mode.comment);
+                calls.comments.push(target);
+                return {threadId: "t1", commentId: "c1"};
+            },
+        };
+        return null;
+    }};
+    if (!mode.late) globalThis.claude = claude;
+    eval(bundle);
+    (async () => {
+        const registered = calls.sink !== null;  // Registered at the first run, with or without claude.
+        if (mode.late && !mode.never) globalThis.claude = claude;
+        let result = null, error = null;
+        try { result = await calls.sink.send(payload); }
+        catch (failure) { error = {message: failure.message, code: failure.code, failed: failure.failed}; }
+        report({registered, application: calls.application, namespace: calls.sink.namespace,
+                id: calls.sink.id, name: calls.sink.name ?? null, result, error,
+                elements: calls.created + body.children.length, notices: calls.notices,
+                published: calls.published, comments: calls.comments, warnings: calls.warnings});
+    })();
+}
 (async () => {
-    const registered = calls.sink !== null;  // Registered at the first run, with or without claude.
-    if (mode.late && !mode.never) globalThis.claude = claude;
-    let result = null, error = null;
-    try { result = await calls.sink.send(payload); }
-    catch (failure) { error = {message: failure.message, code: failure.code, failed: failure.failed}; }
-    console.log(JSON.stringify({registered, application: calls.application, namespace: calls.sink.namespace,
-                                id: calls.sink.id, name: calls.sink.name ?? null, result, error,
-                                elements: calls.created + body.children.length, notices: calls.notices,
-                                published: calls.published,
-                                comments: calls.comments, warnings: calls.warnings}));
+    const results = [];
+    for (const mode of modes) {
+        results.push(await new Promise(report => vm.runInNewContext(`(${page})()`,
+            {bundle, payload, mode, report, console, TextEncoder})));
+    }
+    console.log(JSON.stringify(results));
 })();
 """
 
+# Every mode a test below runs the bundle in.
+BUNDLE_MODES = [
+    {"files": "ok", "comment": "ok"},
+    {"files": "ok", "comment": "ok", "served": True},
+    {"files": "ok", "comment": "ok", "deck": {"title": "Storage", "decisions": ["record", "open"]}},
+    {"files": "ok", "comment": "ok", "deck": {"title": "Storage"}},
+    {"files": "ok", "comment": "ok", "deck": {"title": 1, "decisions": []}},
+    {"files": "capability_disabled", "comment": "ok"},
+    {"files": "ok", "comment": "claude_unavailable"},
+    {"files": "ok", "comment": "claude_unavailable", "noNotices": True},
+    {"files": "capability_disabled", "comment": "claude_unavailable"},
+    {"files": "ok", "comment": "ok", "late": True},
+    {"files": "ok", "comment": "ok", "late": True, "never": True},
+]
 
-def _bundle(**mode: object) -> dict:
+
+def _mode_key(mode: dict) -> str:
+    return json.dumps(mode, sort_keys=True)
+
+
+@pytest.fixture(scope="module")
+def bundled() -> dict[str, dict]:
+    """What the bundle did in each of BUNDLE_MODES, by the mode's JSON: one node run for them all."""
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
     result = subprocess.run(["node", "-e", BUNDLE_DOUBLE, str(SCRIPTS / "deck_answers.js"), json.dumps(PAYLOAD),
-                             json.dumps(mode)], capture_output=True, text=True)
+                             json.dumps(BUNDLE_MODES)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    return {_mode_key(mode): calls for mode, calls in zip(BUNDLE_MODES, json.loads(result.stdout), strict=True)}
+
+
+def _bundle(bundled: dict[str, dict], **mode: object) -> dict:
+    assert _mode_key(mode) in bundled, f"add {mode} to BUNDLE_MODES"
+    return bundled[_mode_key(mode)]
 
 
 def _send_warnings(calls: dict) -> list[str]:
@@ -596,8 +643,8 @@ def _send_warnings(calls: dict) -> list[str]:
     return [warning for warning in calls["warnings"] if "readable deck data" not in warning]
 
 
-def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
-    calls = _bundle(files="ok", comment="ok")
+def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude(bundled):
+    calls = _bundle(bundled, files="ok", comment="ok")
     assert calls["application"] == [deck.BUNDLE_ID, []]
     assert (calls["namespace"], calls["id"]) == ("obsHtml.answers", "claude-artifact")
     assert calls["result"] == {"ways": ["answers.json", "comment"], "failed": {}, "written": "answers.json",
@@ -614,13 +661,13 @@ def test_the_bundle_saves_answers_json_and_sends_the_comment_to_claude():
     assert (calls["elements"], calls["notices"], _send_warnings(calls)) == (0, [["remove", "se-answers-partly"]], [])
 
 
-def test_where_obs_html_serve_served_the_page_the_sink_names_no_reader():
-    calls = _bundle(files="ok", comment="ok", served=True)
+def test_where_obs_html_serve_served_the_page_the_sink_names_no_reader(bundled):
+    calls = _bundle(bundled, files="ok", comment="ok", served=True)
     assert calls["id"] == "claude-artifact" and calls["name"] is None
 
 
-def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data():
-    calls = _bundle(files="ok", comment="ok", deck={"title": "Storage", "decisions": ["record", "open"]})
+def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data(bundled):
+    calls = _bundle(bundled, files="ok", comment="ok", deck={"title": "Storage", "decisions": ["record", "open"]})
     assert calls["warnings"] == []
     [comment] = calls["comments"]
     lines = comment["text"].splitlines()
@@ -631,8 +678,8 @@ def test_the_bundle_takes_the_title_and_the_open_decisions_from_the_decks_data()
 
 @pytest.mark.parametrize("data", [None, {"title": "Storage"}, {"title": 1, "decisions": []}],
                          ids=["none", "no-decisions", "no-title"])
-def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(data):
-    calls = _bundle(files="ok", comment="ok", **({"deck": data} if data else {}))
+def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(bundled, data):
+    calls = _bundle(bundled, files="ok", comment="ok", **({"deck": data} if data else {}))
     [warning] = calls["warnings"]
     assert warning.startswith("se-answers: this deck carries no readable deck data (globalThis.seDeck)")
     assert calls["result"]["ways"] == ["answers.json", "comment"]
@@ -652,8 +699,8 @@ PARTLY = {
 
 @pytest.mark.parametrize(("files", "comment", "failed"), [("capability_disabled", "ok", "answers.json"),
                                                           ("ok", "claude_unavailable", "comment")])
-def test_a_send_where_one_way_failed_posts_one_plain_warning(files, comment, failed):
-    calls = _bundle(files=files, comment=comment)
+def test_a_send_where_one_way_failed_posts_one_plain_warning(bundled, files, comment, failed):
+    calls = _bundle(bundled, files=files, comment=comment)
     assert calls["error"] is None
     code = files if failed == "answers.json" else comment
     assert calls["result"]["failed"] == {failed: code}
@@ -667,13 +714,13 @@ def test_a_send_where_one_way_failed_posts_one_plain_warning(files, comment, fai
     assert calls["elements"] == 0
 
 
-def test_a_partial_send_without_a_notice_center_still_resolves():
-    calls = _bundle(files="ok", comment="claude_unavailable", noNotices=True)
+def test_a_partial_send_without_a_notice_center_still_resolves(bundled):
+    calls = _bundle(bundled, files="ok", comment="claude_unavailable", noNotices=True)
     assert calls["error"] is None and calls["result"]["ways"] == ["answers.json"]
 
 
-def test_when_both_ways_fail_it_rejects_in_plain_words_and_the_codes_go_to_the_console():
-    calls = _bundle(files="capability_disabled", comment="claude_unavailable")
+def test_when_both_ways_fail_it_rejects_in_plain_words_and_the_codes_go_to_the_console(bundled):
+    calls = _bundle(bundled, files="capability_disabled", comment="claude_unavailable")
     assert calls["result"] is None
     assert calls["error"]["code"] == "not_sent"
     assert calls["error"]["failed"] == {"answers.json": "capability_disabled", "comment": "claude_unavailable"}
@@ -685,14 +732,14 @@ def test_when_both_ways_fail_it_rejects_in_plain_words_and_the_codes_go_to_the_c
     assert calls["elements"] == 0
 
 
-def test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers():
-    calls = _bundle(files="ok", comment="ok", late=True)
+def test_a_claude_runtime_that_appears_after_the_first_run_takes_the_answers(bundled):
+    calls = _bundle(bundled, files="ok", comment="ok", late=True)
     assert calls["registered"]
     assert calls["result"]["ways"] == ["answers.json", "comment"]
 
 
-def test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows():
-    calls = _bundle(files="ok", comment="ok", late=True, never=True)
+def test_without_claude_or_a_server_send_rejects_so_the_text_to_copy_shows(bundled):
+    calls = _bundle(bundled, files="ok", comment="ok", late=True, never=True)
     assert calls["registered"] and calls["result"] is None
     assert "sending is not available here" in calls["error"]["message"]
 
@@ -741,7 +788,9 @@ def test_a_deck_keeps_the_draft_over_a_reload_and_sends_through_a_late_claude(de
         assert {"- cache: decline: Too slow.", "- queue: comment: Later."} <= set(sent["text"].splitlines())
 
 
-def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, page):
+@pytest.mark.spawns("entry: scripts/deck.py serve --wait, end to end: obs-html's server waits for the "
+                    "browser's send, and both run only as processes")
+def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, page, capsys):
     built, artifact = decks["send"]
     assert built.returncode == 0, built.stderr
     served = subprocess.Popen([sys.executable, str(SCRIPTS / "deck.py"), "serve", str(artifact), "--wait",
@@ -758,9 +807,9 @@ def test_build_serve_wait_and_send_from_the_browser_print_the_answers(decks, pag
     assert [(item["chapter"], item["verdict"]) for item in printed["verdicts"]] == [("cache", "bless"), ("queue", "bless")]
     answers = artifact.parent / "answers.json"
     assert json.loads(answers.read_text(encoding="utf-8")) == printed
-    shown = subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "answers", str(answers)],
-                           capture_output=True, text=True)
-    assert shown.stdout == "cache: bless\nqueue: bless\n", shown.stderr
+    assert deck.main(["answers", str(answers)]) == 0
+    shown = capsys.readouterr()
+    assert shown.out == "cache: bless\nqueue: bless\n", shown.err
 
 
 @pytest.mark.parametrize("text, problems", [

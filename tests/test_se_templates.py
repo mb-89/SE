@@ -517,6 +517,9 @@ pytest_hook = pytest.mark.skipif(BASH is None or sys.platform == "win32",
 
 
 @pytest_hook
+@pytest.mark.spawns("shell: scripts/se_hook.sh hands a guarded GitHub write to se_templates.py gate, prints its "
+                    "deny as its whole stdout and still posts kern the payload; that wiring is bash, run only "
+                    "as a process")
 def test_the_plugins_hook_line_prints_exactly_the_deny(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, "refuse")
     text = payload("mcp__github__issue_write", root, method="create", title=TITLE,
@@ -530,6 +533,8 @@ def test_the_plugins_hook_line_prints_exactly_the_deny(tmp_path, shared_fake_git
 
 
 @pytest_hook
+@pytest.mark.spawns("shell: scripts/se_hook.sh's `guarded` test and its SE_TEMPLATES_GATE switch, bash builtins, "
+                    "pick which calls run the gate; run only as a process")
 def test_the_hook_runs_no_gate_for_another_call_nor_with_the_switch_off(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, None)
     thin = payload("mcp__github__issue_write", root, method="create", title=TITLE,
@@ -724,6 +729,8 @@ def test_the_hold_is_read_from_the_label(capsys, monkeypatch, project, gh):
 
 
 @pytest_hook
+@pytest.mark.spawns("shell: scripts/se_hook.sh's `shelled` test, bash builtins, finds `gh` as a word in a shell "
+                    "call's command; run only as a process")
 def test_the_hook_gates_a_gh_shell_call_and_no_other(tmp_path, shared_fake_git):
     root = hook_project(tmp_path, "refuse")
     thin = body_file(root, THIN, "thin.md")
@@ -843,13 +850,11 @@ def test_no_template_of_ses_claims_a_path_and_no_se_toml_switch_turns_the_file_g
     assert not hasattr(templates.Enforcement(), "files") and not hasattr(templates, "FILES_VALUES")
 
 
-@pytest_hook
-def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
-        tmp_path, shared_fake_git):
-    """SE's own se.toml, read from this checkout, at the fixture's `origin/main`: the hook denies an
+def test_se_tomls_own_gate_on_its_integration_branch_decides_the_gate(capsys, monkeypatch, tmp_path):
+    """SE's own se.toml, read from this checkout, at the fixture's `origin/main`: the gate the hook runs
+    (test_the_plugins_hook_line_prints_exactly_the_deny holds the hook's hand-off) denies an
     off-template `issue_write` naming Problem and passes the template's own body. The working tree's copy
     lacks the gate, so the integration branch's decides."""
-    import git_door
     import fake_git
 
     own = (ROOT / "se.toml").read_text(encoding="utf-8")
@@ -863,14 +868,11 @@ def test_se_tomls_own_gate_on_its_integration_branch_denies_through_the_hook(
                  "commit", "-q", "-m", "SE's se.toml")
     fake_git.git("-C", str(root), "update-ref", "refs/remotes/origin/main", "HEAD")
     (root / "se.toml").write_text(own.replace('gate = "refuse"', ""), encoding="utf-8")
-    variables = {"CLAUDE_PROJECT_DIR": sh(root), git_door.VARIABLE: f"fake:{shared_fake_git.path}"}
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(root))
     given = {"method": "create", "title": TITLE, "labels": ["work"]}
-    result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=THIN, **given),
-                    **variables)
-    assert result.returncode == 0 and "Problem" in denial(result.stdout)
-    result = hooked(tmp_path, payload("mcp__github__issue_write", root, body=GOOD_WORK, **given),
-                    **variables)
-    assert result.returncode == 0 and result.stdout == ""
+    assert "Problem" in denial(gate(capsys, monkeypatch, payload("mcp__github__issue_write", root, body=THIN,
+                                                                 **given)))
+    assert gate(capsys, monkeypatch, payload("mcp__github__issue_write", root, body=GOOD_WORK, **given)) == ""
 
 
 # The file tools: wherever a template claims a path, the gate denies every write of it but the fill's.
@@ -996,8 +998,11 @@ def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(
 
 
 @pytest_hook
+@pytest.mark.spawns("shell: scripts/se_hook.sh's `filed` test, bash builtins, sends a Write of a project file to "
+                    "the gate only where templates-files says claimed, and the fill's shell call past it; run "
+                    "only as a process")
 def test_the_hook_denies_a_write_of_a_claimed_path_and_lets_its_fill_write_it(
-        tmp_path, shared_fake_git):
+        capsys, monkeypatch, tmp_path, shared_fake_git):
     """The acceptance: through SE's hook as the plugin runs it, a Write of a claimed path is denied
     naming the fill, and the fill of the same path passes the hook and writes the file on template."""
     root = hook_project(tmp_path, None)
@@ -1012,24 +1017,24 @@ def test_the_hook_denies_a_write_of_a_claimed_path_and_lets_its_fill_write_it(
     assert f"  book/m1/steps/s1.md (step-risks): uv run python " in reason
     assert f"templates.py fill step-risks --path {step} --root {root}" in reason
     assert not step.exists()
-    fill = [sys.executable, str(ROOT / "scripts" / "templates.py"), "fill", "step-risks", "--path", str(step),
-            "--root", str(root), "--templates", str(root / "templates"),
+    fill = ["fill", "step-risks", "--path", str(step), "--root", str(root), "--templates", str(root / "templates"),
             "--input-text", "The scan misses a tool.", "--fields-json",
             json.dumps({"risks": ["The scan misses a tool."]})]
-    command = shell_payload(shlex.join(fill), root)
+    command = shell_payload(shlex.join([sys.executable, str(ROOT / "scripts" / "templates.py"), *fill]), root)
     result = hooked(tmp_path, command, CLAUDE_PROJECT_DIR=sh(root))
     assert result.returncode == 0 and result.stdout == '{"kern": "answer"}\n'
-    filled = subprocess.run(fill, capture_output=True, text=True, timeout=60, cwd=root)
-    assert filled.returncode == 0, filled.stdout + filled.stderr
-    assert filled.stdout == "wrote book/m1/steps/s1.md: step-risks 1.0.0\n"
-    assert run_check_files(step, root) == "se_templates.py check-files: 1 claimed file passes its template"
+    capsys.readouterr()
+    monkeypatch.chdir(root)  # the fill as the shell call runs it, in-process
+    code = templates.main(fill)
+    filled = capsys.readouterr()
+    assert code == 0, filled.out + filled.err
+    assert filled.out == "wrote book/m1/steps/s1.md: step-risks 1.0.0\n"
+    assert run_check_files(capsys, step, root) == "se_templates.py check-files: 1 claimed file passes its template"
 
 
-def run_check_files(path: Path, root: Path) -> str:
-    done = subprocess.run([sys.executable, str(ROOT / "scripts" / "se_templates.py"), "check-files",
-                           "--templates", str(root / "templates"), "--root", str(root), str(path)],
-                          capture_output=True, text=True, timeout=60)
-    return done.stdout.strip()
+def run_check_files(capsys, path: Path, root: Path) -> str:
+    se_templates.main(["check-files", "--templates", str(root / "templates"), "--root", str(root), str(path)])
+    return capsys.readouterr().out.strip()
 
 
 # The backstop (se_templates.py backstop, .github/workflows/templates.yml): an event file in, a plan out.

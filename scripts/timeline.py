@@ -57,7 +57,6 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import tomllib
@@ -555,7 +554,7 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
         config = Path(scratch) / "obs-config.json"
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8", newline="\n")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(
+        result = sibling("process_door").run(
             [*build_docs.obs_document_command(obs), "--adapter", build_docs.ADAPTER, "--config", str(config),
              "--source", str(folder / "manifest.md"), "--destination", str(destination.resolve())],
             cwd=ROOT, capture_output=True, text=True, env=environment)

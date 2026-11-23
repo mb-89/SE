@@ -22,12 +22,25 @@ NOTES = "src/skills/work-model/references/"
 BOOK = ROOT / NOTES / "rules.md"
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_docs  # noqa: E402
+from fake_processes import Answer  # noqa: E402
 # Every build syncs the obs module into the checkout; the fixture `obs` (conftest.py) prepares it first,
 # once at a time.
 
 
 def build(*arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True, env=env)
+
+
+def built_in_process(capsys: pytest.CaptureFixture, *arguments: str) -> subprocess.CompletedProcess:
+    """`build_docs.py <arguments>` run by its main in this process: its exit code and output."""
+    code = build_docs.main(list(arguments))
+    captured = capsys.readouterr()
+    return subprocess.CompletedProcess(["build_docs.py", *arguments], code, captured.out, captured.err)
+
+
+# The obs build of a vault: obs's lints are obs's, so only the real obs proves a build fails on one.
+REAL_OBS = ("tool: obs-document, in obs's own Python environment, builds the vault and owns the lint, so "
+            "only the real obs proves the build fails on it; it runs only as a process")
 
 
 # The fake se's help, as the build's command-line chapter must show it; no tracked file outside
@@ -149,18 +162,20 @@ def test_documentation_builds_without_warnings(built):
             or not href.startswith(NOTES)] == []
 
 
-def test_a_destination_inside_the_manifest_folder_is_refused_before_any_copy(tmp_path):
+def test_a_destination_inside_the_manifest_folder_is_refused_before_any_copy(tmp_path, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "docs.md").write_text("---\ntitle: t\n---\n", encoding="utf-8")
     inside = vault / "site" / "index.html"
-    result = build("--source", str(vault / "docs.md"), "--destination", str(inside))
+    result = built_in_process(capsys, "--source", str(vault / "docs.md"), "--destination", str(inside))
     assert result.returncode == 2, result.stderr + result.stdout
     assert str(inside) in result.stderr and str(vault) in result.stderr
     assert sorted(path.name for path in vault.iterdir()) == ["docs.md"]
 
 
-def test_a_rule_note_that_would_overwrite_a_file_fails_the_build_naming_it(tmp_path, obs):
+def test_a_rule_note_that_would_overwrite_a_file_fails_the_build_naming_it(tmp_path, monkeypatch, capsys):
+    # The build refuses before obs runs: an obs folder that holds nothing, and the fake door fails any program.
+    monkeypatch.setenv(build_docs.OBS_VARIABLE, str(tmp_path / "no-obs"))
     vault = tmp_path / "vault"
     references = vault / NOTES
     references.mkdir(parents=True)
@@ -169,7 +184,8 @@ def test_a_rule_note_that_would_overwrite_a_file_fails_the_build_naming_it(tmp_p
     (references / "gen-001.md").write_text("mine\n", encoding="utf-8")
     (vault / "docs.md").write_text("---\ntitle: t\n---\n", encoding="utf-8")
     before = {path: path.read_bytes() for path in vault.rglob("*") if path.is_file()}
-    result = build("--source", str(vault / "docs.md"), "--destination", str(tmp_path / "out.html"))
+    result = built_in_process(capsys, "--source", str(vault / "docs.md"), "--destination",
+                              str(tmp_path / "out.html"))
     assert result.returncode == 1, result.stderr + result.stdout
     assert f"{NOTES}gen-001.md" in result.stderr
     assert {path: path.read_bytes() for path in vault.rglob("*") if path.is_file()} == before
@@ -203,23 +219,27 @@ def test_no_note_of_the_copy_asks_for_a_verdict():
     assert build_docs.without_verdict(unchanged) == unchanged
 
 
-def test_a_missing_note_fails_the_build(tmp_path, obs):
+@pytest.mark.spawns(REAL_OBS)
+def test_a_missing_note_fails_the_build(tmp_path, obs, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "chapter.md").write_text("# Chapter\n\nSee [[no-such-note]].\n", encoding="utf-8")
     (vault / "docs.md").write_text("---\ntitle: t\n---\n\n- [[chapter|Chapter]]\n", encoding="utf-8")
-    result = build("--source", str(vault / "docs.md"), "--destination", str(tmp_path / "out.html"))
+    result = built_in_process(capsys, "--source", str(vault / "docs.md"), "--destination",
+                              str(tmp_path / "out.html"))
     assert result.returncode == 1, result.stderr + result.stdout
     assert "no-such-note" in result.stderr
 
 
-def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs):
+@pytest.mark.spawns(REAL_OBS)
+def test_a_paragraph_over_obs_default_limit_fails_the_build(tmp_path, obs, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     long_paragraph = " ".join(["word"] * 100)  # six lines at 80 characters, over obs's default of five
     (vault / "chapter.md").write_text(f"# Chapter\n\n{long_paragraph}\n", encoding="utf-8")
     (vault / "docs.md").write_text("---\ntitle: t\n---\n\n- [[chapter|Chapter]]\n", encoding="utf-8")
-    result = build("--source", str(vault / "docs.md"), "--destination", str(tmp_path / "out.html"))
+    result = built_in_process(capsys, "--source", str(vault / "docs.md"), "--destination",
+                              str(tmp_path / "out.html"))
     assert result.returncode == 1, result.stderr + result.stdout
     assert "long paragraph" in result.stderr
 
@@ -311,6 +331,8 @@ const opened = async (page, rule) => {
 """
 
 
+@pytest.mark.spawns("tool: node's Playwright measures the built page's rule book at phone width; a browser "
+                    "runs only as a process")
 def test_each_rule_book_row_is_one_line_on_a_phone_in_both_views(built):
     """doc-004: at 390 px the rule book's table shows Rule and Name only, never scrolls sideways, keeps
     every rule row and section caption to one line, and opens a rule's row to its sentence."""
@@ -367,6 +389,8 @@ def test_no_script_passes_adapter_config():
     assert passing == []
 
 
+@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, finds the installed "
+                    "obs-html; it runs only as a process")
 def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs):
     adapter, refusal = build_docs.installed_adapter(obs)
     assert refusal == ""
@@ -374,6 +398,8 @@ def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs):
     assert Path(adapter["folder"]) != obs  # obs 10 holds no adapter in its own tree
 
 
+@pytest.mark.spawns("tool: obs's own finder, asked through uv in obs's environment, refuses a component "
+                    "of another kind; the refusal is obs's, and it runs only as a process")
 def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
     monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
     (tmp_path / "components.json").write_text(json.dumps({"components": [
@@ -464,11 +490,23 @@ def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
     assert build_docs.obs_warnings(output) == ["obs-document: warning: one.md:3: long paragraph"]
 
 
-def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(obs):
+def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(tmp_path, monkeypatch, fake_processes):
     """uv run would set VIRTUAL_ENV, which obs hands on to obs-html's own uv run."""
+    obs, python = tmp_path / "obs", tmp_path / "obs" / ".venv" / "bin" / "python3"
+    asked: list[list[str]] = []
+
+    def uv(call):
+        asked.append(call.words)
+        return Answer(0, f"{python}\n")
+
+    monkeypatch.setattr(build_docs, "_PYTHON", {})
+    fake_processes.on("uv", uv)
     command = build_docs.obs_document_command(obs)
-    assert command[1:] == ["-m", "obs.document"]
-    assert Path(command[0]).is_file() and Path(command[0]).name.startswith("python")
+    assert command == [str(python), "-m", "obs.document"]
+    assert build_docs.obs_document_command(obs) == command  # uv is asked once per process
+    [words] = asked
+    assert words[:6] == ["uv", "run", "--quiet", "--project", str(obs), "python"]
+    assert "sys.executable" in words[-1] and "obs-document" not in words
 
 
 def test_every_obs_build_runs_through_the_one_adapter():

@@ -5,7 +5,6 @@ application calls, and kern's application template in the pinned clone."""
 import os
 import re
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import pytest
 import yaml
 
 import ci_trust  # scripts/ is on the path (tests/conftest.py)
+import fake_processes
 import se_modules
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -298,8 +298,14 @@ def kern_at_pin(folder: Path, files: dict[str, str]) -> tuple[subprocess.Complet
     output.write_text("", encoding="utf-8")
     script = step(yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"], "The kern se.lock locks")
     assert script["shell"] == "python3 {0}" and script["env"] == {"PYTHONUNBUFFERED": "1", "FOLDER": "${{ inputs.folder }}"}
-    result = subprocess.run([sys.executable, "-c", script["run"]], cwd=folder.parent, capture_output=True,
-                            text=True, env={**os.environ, "FOLDER": folder.name, "GITHUB_OUTPUT": str(output)})
+    # The step's Python, run in this process as `python3 {0}` would run it: in the folder's parent,
+    # with the step's environment, its exit code and output answered (tests/fake_processes.py).
+    code = compile(script["run"], f"{KERN_AT_PIN}/action.yml", "exec")
+    invocation = fake_processes.Invocation(["python3", "-c", "<step>"], {
+        "cwd": folder.parent, "env": {**os.environ, "FOLDER": folder.name, "GITHUB_OUTPUT": str(output)}})
+    answer = fake_processes.run_main(lambda _arguments: exec(code, {"__name__": "__main__"}), invocation)
+    result = subprocess.CompletedProcess(invocation.argv, answer.returncode, answer.stdout.decode("utf-8"),
+                                         answer.stderr.decode("utf-8"))
     return result, output.read_text(encoding="utf-8")
 
 

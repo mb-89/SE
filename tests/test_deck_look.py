@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -105,16 +104,13 @@ def test_a_finding_in_several_views_is_one_line_naming_them():
     assert deck_look.judge(views[:2], []) == ["look: one (every view): div.wide: overflow: reaches past the viewport"]
 
 
-def _look(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SCRIPTS / "deck_look.py"), "look", *args],
-                          capture_output=True, text=True, env=env)
-
-
-def test_without_node_look_says_so_in_one_line_and_passes(tmp_path):
+def test_without_node_look_says_so_in_one_line_and_passes(tmp_path, monkeypatch, capsys):
     page = tmp_path / "page.html"
     page.write_text("<p>Hi</p>", encoding="utf-8")
-    result = _look(str(page), env={**os.environ, "PATH": str(tmp_path)})
-    assert (result.returncode, result.stdout, result.stderr) == (0, "look: skipped, node is not installed\n", "")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    code = deck_look.main(["look", str(page)])
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (0, "look: skipped, node is not installed\n", "")
 
 
 def test_without_playwright_or_its_browser_look_skips_and_writes_no_shots(tmp_path, capsys):
@@ -125,9 +121,9 @@ def test_without_playwright_or_its_browser_look_skips_and_writes_no_shots(tmp_pa
     assert sorted(path.name for path in tmp_path.iterdir()) == ["page.html"]
 
 
-def test_a_missing_page_is_a_setup_error(tmp_path):
-    result = _look(str(tmp_path / "none.html"))
-    assert result.returncode == 2 and "is no built page" in result.stderr
+def test_a_missing_page_is_a_setup_error(tmp_path, capsys):
+    assert deck_look.main(["look", str(tmp_path / "none.html")]) == 2
+    assert "is no built page" in capsys.readouterr().err
 
 
 def _playwright() -> bool:
@@ -147,6 +143,8 @@ PLANTED = """<!doctype html>
 """
 
 
+@pytest.mark.spawns("entry: scripts/deck_look.py, with its browser half scripts/deck_look.js in node's "
+                    "Playwright, which renders the page only as a process")
 def test_look_finds_the_planted_overflow_empty_chapter_and_script_error_and_shoots_on_request(tmp_path):
     # Probed here, not in a mark: every worker imports this file.
     if not _playwright():
@@ -154,7 +152,8 @@ def test_look_finds_the_planted_overflow_empty_chapter_and_script_error_and_shoo
     page = tmp_path / "planted.html"
     page.write_text(PLANTED, encoding="utf-8")
     shots = tmp_path / "shots"
-    result = _look(str(page), "--shots", str(shots))
+    result = subprocess.run([sys.executable, str(SCRIPTS / "deck_look.py"), "look", str(page), "--shots", str(shots)],
+                            capture_output=True, text=True)
     assert result.returncode == 1, result.stderr
     assert result.stdout.splitlines() == [
         'look: wide (every view): div.row "A row wider than any screen.": overflow: reaches past the viewport',

@@ -1,10 +1,12 @@
 """work_tickets.py reads work issues and pull requests, and writes pull requests whose descriptions
 carry the field report, through gh (mocked here)."""
+import errno
 import importlib.util
 import io
 import json
 import os
 import re
+import runpy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
@@ -15,7 +17,9 @@ from xml.etree import ElementTree
 import git_door
 import pytest
 import fake_git
+import fake_processes as fake_programs
 import interfaces
+import process_door
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -27,8 +31,51 @@ TESTED_MAIN = work_tickets.tested_main
 REAL_GITHUB = work_tickets.GitHub
 REAL_HAND_OFF = work_tickets.hand_off
 
-# Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py.
-pytestmark = pytest.mark.usefixtures("fake_git_door")
+# Every test's git is the door's fake (tests/fake_git.py), held to real git by tests/test_git_door.py,
+# and the scripts a test plants for a project's commands run in this process (`planted_scripts`).
+pytestmark = pytest.mark.usefixtures("fake_git_door", "planted_scripts")
+
+
+def script_path(invocation: fake_programs.Invocation) -> Path | None:
+    """The Python script `invocation` runs (`python suite.py`), from the call's working directory."""
+    script = invocation.script
+    if script is None or not fake_programs.python(invocation.words[0]):
+        return None
+    return script if script.is_absolute() else (invocation.cwd or Path.cwd()) / script
+
+
+def planted(invocation: fake_programs.Invocation) -> bool:
+    """Whether the door is asked to run a Python script a test planted (`python suite.py` in the
+    checkout, se.toml's command), not one of SE's scripts."""
+    path = script_path(invocation)
+    return path is not None and path.resolve().parent != fake_programs.SCRIPTS.resolve()
+
+
+def run_planted(invocation: fake_programs.Invocation) -> fake_programs.Answer:
+    """The planted script run as `python <script>` would run it, in this process: its working
+    directory, environment, arguments and output the call's (tests/fake_processes.py `run_main`)."""
+    path = script_path(invocation)
+
+    def main(arguments: list[str]) -> None:
+        runpy.run_path(str(path), run_name="__main__")
+
+    return fake_programs.run_main(main, invocation, path.name)
+
+
+def missing_program(invocation: fake_programs.Invocation) -> None:
+    """A program that is not installed, refused as the operating system refuses to start it."""
+    name = invocation.words[0]
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), name)
+
+
+@pytest.fixture
+def planted_scripts() -> None:
+    """The scripts a test plants for a project's suite, its setup and the suites beside it (se.toml
+    `[tests]`), answered in this process by the process door's fake; a test that runs the real
+    programs (a spawns mark) runs them as processes."""
+    backend = process_door.BACKEND
+    if isinstance(backend, fake_programs.FakeProcesses):
+        backend.on(planted, run_planted)
 
 
 def git_run(root: Path | None, *arguments: str, env: dict | None = None,
@@ -83,7 +130,7 @@ class PublicCheck:
 def public_check_child(monkeypatch) -> PublicCheck:
     """The public check runs as PublicCheck; every other process runs as it would."""
     check, real_run = PublicCheck(), subprocess.run
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         check(arguments) if str(work_tickets.PUBLIC_CHECK) in map(str, arguments)
         else real_run(arguments, **kwargs)))
     return check
@@ -1296,7 +1343,7 @@ def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, 
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets.shutil, "which", lambda name: "/opt/unsigned/gh")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: (
             calls.append(arguments) or subprocess.CompletedProcess(arguments, 1, "", "not logged in")
         ),
@@ -1379,7 +1426,7 @@ def test_sync_prefers_the_machine_public_identity_over_the_project_identity(main
 def test_sync_refuses_a_malformed_project_identity_naming_the_file(worktree, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
     )
     (worktree / "se.toml").write_text('[project]\nidentity = "proj"\n', encoding="utf-8")
@@ -1394,7 +1441,7 @@ def test_sync_refuses_a_malformed_public_identity_naming_the_file(
         worktree, local_config, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
     )
     local_config.parent.mkdir(parents=True)
@@ -1444,7 +1491,7 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(  # the public check, a child process, passes
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
     local_config.parent.mkdir(parents=True)
@@ -1481,7 +1528,7 @@ def test_deliver_records_the_tip_it_delivers_and_a_later_push_names_the_stale_de
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
     later = "0123456789abcdef0123456789abcdef01234567"
@@ -1527,7 +1574,7 @@ def test_deliver_uses_only_an_open_pull_request(
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1549,7 +1596,7 @@ def test_deliver_writes_the_report_into_the_pull_request_on_origin_and_files_no_
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "source.example/owner/source")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1586,7 +1633,7 @@ def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, caps
     )
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1607,7 +1654,7 @@ def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypat
     pushes: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: (
             pushes.append(arguments) or subprocess.CompletedProcess(arguments, 0, "", "")
         ),
@@ -5400,6 +5447,8 @@ def test_suite_refuses_a_tier_setting_it_cannot_load_before_running(
     assert refusal in captured.err and "Suite time:" not in captured.out
 
 
+@pytest.mark.spawns("contract: se's conftest writes the JUnit report `suite` reads, workers and setup "
+                    "times among it, only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(worktree, monkeypatch, capsys):
     """se's conftest writes the JUnit report `suite` reads (README "Test budget")."""
     root = Path(__file__).resolve().parents[1]
@@ -5460,6 +5509,8 @@ def test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before(work
     assert kept.err == without.err
 
 
+@pytest.mark.spawns("contract: se's conftest writes the host's cpu and each test's start into se.xml "
+                    "only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypatch, capsys, tmp_path):
     """se's conftest writes the host's cpu and each test's start into se.xml (README "Test budget")."""
     root = Path(__file__).resolve().parents[1]
@@ -5623,7 +5674,9 @@ def test_a_suite_beside_over_its_limit_is_refused_on_the_reference_run_alone(
         assert "CI's check, the reference, refuses it there" in error
 
 
-def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys):
+def test_a_suite_beside_whose_command_is_missing_fails_naming_it(worktree, monkeypatch, capsys,
+                                                                 fake_processes):
+    fake_processes.on("no-such-go", missing_program)
     beside_suite(worktree, monkeypatch, [5.0, 0.0])
     config = (worktree / "se.toml").read_text(encoding="utf-8")
     (worktree / "se.toml").write_text(config.replace(json.dumps([sys.executable, "kern.py"]),
@@ -6056,7 +6109,7 @@ def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeyp
         gate.append(arguments)
         return subprocess.CompletedProcess(arguments, 1, "hit: file.txt (e-mail address)", "")
 
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         public_check(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
         else subprocess.CompletedProcess(arguments, 1, "", "")
     ))
@@ -6079,7 +6132,7 @@ def test_push_with_the_public_check_off_says_so_and_where_to_turn_it_on(
     (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
     checked = []
     real_run = subprocess.run
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         checked.append(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
         else real_run(arguments, **kwargs)
     ))
@@ -6771,7 +6824,7 @@ def test_deliver_names_the_issue_with_a_closing_keyword_only_for_pre_merge_accep
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -7282,7 +7335,7 @@ def test_deliver_warns_on_platform_code_without_green_legs_and_still_delivers(
     platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
-    monkeypatch.setattr(work_tickets.subprocess, "run",
+    monkeypatch.setattr(work_tickets.process_door, "run",
                         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
     answered = gh.__call__
 
@@ -7310,7 +7363,7 @@ def test_deliver_warns_without_blocking_where_github_cannot_be_read(
     platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
-    monkeypatch.setattr(work_tickets.subprocess, "run",
+    monkeypatch.setattr(work_tickets.process_door, "run",
                         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
     answered = gh.__call__
 

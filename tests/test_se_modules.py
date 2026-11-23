@@ -531,17 +531,19 @@ def test_network_transports_are_blocked(world, capsys):
     assert not (world.cache / ".git" / "index").exists()
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
-def test_script_runs_as_a_command(world):
-    args = [sys.executable, str(SCRIPT), "--root", str(world.root), "--local", str(world.local)]
-    synced = subprocess.run([*args, "sync"], capture_output=True, text=True)
-    assert synced.returncode == 0, synced.stderr
-    status = subprocess.run([*args, "status"], capture_output=True, text=True)
+@pytest.mark.usefixtures("shared_fake_git")  # its child process runs git
+@pytest.mark.spawns("entry: scripts/se_modules.py")
+def test_script_runs_as_a_command(world, capsys):
+    """The sync and the refusal run in-process; `status`, its git included, runs as the command."""
+    args = ["--root", str(world.root), "--local", str(world.local)]
+    capsys.readouterr()
+    assert se_modules.main([*args, "sync"]) == 0, capsys.readouterr().err
+    status = subprocess.run([sys.executable, str(SCRIPT), *args, "status"], capture_output=True, text=True)
     assert status.returncode == 0, status.stderr
     assert status.stdout.startswith("lib: pinned") and "at pin" in status.stdout
-    failed = subprocess.run([*args, "path", "nope"], capture_output=True, text=True)
-    assert failed.returncode == 1
-    assert "error: unknown module(s): nope" in failed.stderr
+    capsys.readouterr()
+    assert se_modules.main([*args, "path", "nope"]) == 1
+    assert "error: unknown module(s): nope" in capsys.readouterr().err
 
 
 def module_commands(markdown: str) -> list[str]:

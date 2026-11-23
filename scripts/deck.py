@@ -47,12 +47,12 @@ import functools
 import json
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import process_door  # noqa: E402
 import se_components  # noqa: E402
 import templates  # noqa: E402
 from build_docs import child_environment, obs_dir, obs_document, ready_adapter  # noqa: E402
@@ -368,7 +368,7 @@ def serve(artifact: Path, wait: bool, timeout: str | None) -> int:
         print(f"deck: {refusal}", file=sys.stderr)
         return 2
     sys.stdout.flush()
-    return subprocess.run([*adapter["serve"], str(artifact.resolve()), *(["--wait"] if wait else []),
+    return process_door.run([*adapter["serve"], str(artifact.resolve()), *(["--wait"] if wait else []),
                            *(["--timeout", timeout] if timeout is not None else [])],
                           cwd=adapter["folder"], env=child_environment(), check=False).returncode
 

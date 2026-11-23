@@ -31,6 +31,7 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
 import git_door
+import process_door
 import se_home
 
 STATES = ("todo", "held", "done")
@@ -734,7 +735,7 @@ def signed_in(executable: str) -> None:
     process."""
     if executable not in _signed_in_gh:
         feedback.reading("GitHub", ["gh", "auth", "status"])
-        status = subprocess.run(
+        status = process_door.run(
             [executable, "auth", "status"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
@@ -761,7 +762,7 @@ def run_gh(root: Path, arguments: list[str]) -> str:
     """One call to GitHub through gh, announced before it is made (feedback.reading)."""
     executable = gh_executable()
     feedback.reading("GitHub", ["gh", *arguments])
-    result = subprocess.run(
+    result = process_door.run(
         [executable, *arguments],
         cwd=root,
         capture_output=True,
@@ -1066,7 +1067,7 @@ def status_on_pushed(root: Path, commit: str) -> str:
 
 def run_public_check(root: Path, previous: str) -> None:
     """se's public check on the merged tree and every commit since `previous`; refuse on failure."""
-    result = subprocess.run(
+    result = process_door.run(
         [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", "HEAD",
          "--range", f"{previous}..HEAD"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -2858,7 +2859,7 @@ def push_gate(root: Path, branch: str) -> None:
         f"{pushed.stdout.strip()}..{branch} --not --remotes=origin"
         if pushed.returncode == 0 and pushed.stdout.strip() else f"{branch} --not --remotes=origin"
     )
-    result = subprocess.run(
+    result = process_door.run(
         [sys.executable, str(PUBLIC_CHECK), "--repo", str(root), "--rev", branch,
          "--remote", "origin", "--range", revisions],
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
@@ -3205,7 +3206,7 @@ def build_release(root: Path, tag: str) -> list[str]:
     set_project_version(root, tag[1:])
     if command is None:
         return ["se.toml"]
-    result = subprocess.run(command, cwd=root, shell=False, capture_output=True, text=True,
+    result = process_door.run(command, cwd=root, shell=False, capture_output=True, text=True,
                             encoding="utf-8", errors="replace", check=False)
     if result.returncode != 0:
         checked_git(root, "checkout", "HEAD", "--", "se.toml")
@@ -6285,7 +6286,7 @@ def pull_request_report(
 
 
 def run_project_command(root: Path, command: str, description: str) -> str:
-    result = subprocess.run(
+    result = process_door.run(
         command, cwd=root, shell=True, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=False,
     )
@@ -6520,6 +6521,12 @@ def tier_lines(parts: list[SuitePart], tier_of) -> list[str]:
     return [f"{tier}: {line}" for tier, (_, line) in sorted(slowest.items())]
 
 
+def spawns_line(output: str) -> str:
+    """The spawn guard's total of the suite's process starts (scripts/spawn_guard.py), its last
+    `spawns:` line in the suite's output, or "" where the suite runs no guard."""
+    return next((line.strip() for line in reversed(output.splitlines()) if line.startswith("spawns: ")), "")
+
+
 def output_tail(output: str) -> str:
     """The last lines of a command's output, indented, for the person reading the run."""
     return "\n".join(f"  {line}" for line in output.splitlines()[-OUTPUT_TAIL_LINES:])
@@ -6530,7 +6537,7 @@ def run_suite_setup(root: Path, setup: list[str]) -> None:
 
     Prints its time and its last lines; refuses a failing setup with its whole output."""
     started = clock()
-    result = subprocess.run(
+    result = process_door.run(
         setup, cwd=root, shell=False, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=False,
     )
@@ -6705,7 +6712,7 @@ def time_suite(checkout: Path, command: list[str], keep_reports: Path | None = N
     the run's `kept` names them."""
     with tempfile.TemporaryDirectory(prefix="se-test-reports-") as reports:
         started = clock()
-        result = subprocess.run(
+        result = process_door.run(
             command, cwd=checkout, shell=False, capture_output=True,
             text=True, encoding="utf-8", errors="replace", check=False,
             env={**os.environ, TEST_REPORTS_VARIABLE: reports},
@@ -6770,7 +6777,7 @@ def run_beside_step(root: Path, suite: BesideSuite, command: list[str]) -> tuple
     that is not installed fails the step, naming it."""
     started = clock()
     try:
-        result = subprocess.run(
+        result = process_door.run(
             command, cwd=root / suite.directory, shell=False, capture_output=True,
             text=True, encoding="utf-8", errors="replace", check=False,
         )
@@ -7065,7 +7072,7 @@ def record_shard(root: Path, name: str, directory: Path, command: list[str]) -> 
     feedback.phase(f"suite shard {name}: {' '.join(command)}")
     started = clock()
     try:
-        code = subprocess.run(command, cwd=root, shell=False, check=False).returncode
+        code = process_door.run(command, cwd=root, shell=False, check=False).returncode
     except OSError as error:
         raise QueueError(f"suite-shard: cannot run {command[0]}: {error}") from error
     seconds = clock() - started
@@ -7215,6 +7222,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     if keep_reports is not None:
         print(kept_reports_line(keep_reports, result.kept or []))
     seconds, output, parts = result.seconds, result.output, result.parts
+    spawns = spawns_line(output)
+    if spawns:
+        print(spawns)
     skipped = beside_to_skip(root, budget.beside, full)
     beside = [time_beside(root, suite) for suite in budget.beside if suite.name not in skipped]
     reference = suite_is_reference()
@@ -7481,12 +7491,12 @@ def run_project_checks(
     for index, command in enumerate(commands, start=1):
         if temporary_working_directory:
             with tempfile.TemporaryDirectory(prefix="se-check-") as directory:
-                result = subprocess.run(
+                result = process_door.run(
                     command, cwd=directory, shell=False, capture_output=True, text=True,
                     encoding="utf-8", errors="replace", check=False,
                 )
         else:
-            result = subprocess.run(
+            result = process_door.run(
                 command, cwd=root, shell=False, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", check=False,
             )
@@ -9028,7 +9038,7 @@ def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None
     if command is None:
         return
     before = changed_paths(root)
-    result = subprocess.run(command, cwd=root, shell=False, capture_output=True, text=True,
+    result = process_door.run(command, cwd=root, shell=False, capture_output=True, text=True,
                             encoding="utf-8", errors="replace", check=False)
     if result.returncode != 0:
         abandon_landing(root, target, landing)

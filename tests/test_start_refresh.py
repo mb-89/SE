@@ -33,6 +33,12 @@ echo "${name%.exe} $*$input" >> "$HOME/calls"
 exit 0
 """
 START = '{"session_id":"s1","hook_event_name":"SessionStart"}'
+# The refresh is bootstrap.sh's: it runs the real se_start.py start-refresh through uv and, where SE
+# moved, runs itself again from the moved tree, whose pins the core starts from. That re-run is
+# shell, so these run the hook as a process; se_start.py's own refresh is tested in-process
+# (tests/test_se_start.py).
+REFRESH = pytest.mark.spawns("shell: scripts/bootstrap.sh runs se_start.py start-refresh through uv and "
+                             "re-runs itself from the moved tree, run only as a process")
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -120,6 +126,7 @@ def calls(home: Path) -> list[str]:
     return [line.split(" --root ")[0] for line in lines if " status " not in line]
 
 
+@REFRESH
 def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins(behind):
     """A fresh clone has no core.hooksPath (git never copies it): the plugin's start sets it to its
     SE's hooks, as setup.sh would, so the first commit runs the public check. That a set one stays
@@ -142,6 +149,7 @@ def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the
     assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
 
 
+@REFRESH
 def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(behind):
     home, plugin, project, base = behind
     git(plugin, "remote", "set-url", "origin", (base / "gone").as_uri())

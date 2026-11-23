@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import os
 import stat
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -55,22 +54,14 @@ def make_link(kind: str, link: Path, target: Path) -> None:
         except (OSError, NotImplementedError):
             pytest.skip("directory symlinks are unavailable")
         return
-    # The same call as tests/test_work_tickets.py test_symlinked_state_directory_cannot_escape_worktree.
-    link_path = str(link).replace("'", "''")
-    target_path = str(target).replace("'", "''")
-    junction = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-Command",
-            f"New-Item -ItemType Junction -Path '{link_path}' -Target '{target_path}' | Out-Null",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if junction.returncode != 0:
-        pytest.skip(f"directory junctions are unavailable: {junction.stdout}{junction.stderr}".strip())
+    # A junction made in this process, as tests/test_work_tickets.py
+    # test_symlinked_state_directory_cannot_escape_worktree makes it: no PowerShell starts.
+    import _winapi
+
+    try:
+        _winapi.CreateJunction(str(target), str(link))
+    except OSError as error:
+        pytest.skip(f"directory junctions are unavailable: {error}")
 
 
 def snapshot(outside: Path) -> dict[str, object]:

@@ -106,6 +106,7 @@ def calls(home: Path) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+@pytest.mark.spawns("shell: RUNME.sh's need check and run line are sh, run only as a process against fakes on PATH")
 def test_with_nothing_missing_runme_installs_nothing_prints_nothing_and_runs_the_tool(box):
     project, home, fakes = box
     fake(fakes, "apt-get")
@@ -116,6 +117,8 @@ def test_with_nothing_missing_runme_installs_nothing_prints_nothing_and_runs_the
     assert calls(home) == []
 
 
+@pytest.mark.spawns("shell: RUNME.sh's choice of the first way that fits, its installer on stderr, is sh, run only as "
+                    "a process")
 def test_a_missing_need_runs_its_first_fitting_way_on_stderr_then_the_tool(box):
     project, home, fakes = box
     fake(fakes, "apt-get", "dnf")
@@ -133,6 +136,8 @@ def test_a_missing_need_runs_its_first_fitting_way_on_stderr_then_the_tool(box):
 @pytest.mark.parametrize("arguments", [
     ("plain",), ("with space", 'a "quote"', "it's", ""), ("--help",), ("--", "-x", "$HOME", "*")],
     ids=["one", "spaces-quotes-empty", "help", "dashes-and-expansions"])
+@pytest.mark.spawns("shell: RUNME.sh's hand-off of every argument to the tool in the caller's folder is sh, run only "
+                    "as a process")
 def test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder(box, arguments, tmp_path):
     project, _, _ = box
     conf(project, 'run "$RUNME_ROOT/tool"')
@@ -143,12 +148,14 @@ def test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder(box, ar
     assert result.stdout.splitlines() == [f"pwd={shown(caller)}", *(f"[{arg}]" for arg in arguments)]
 
 
+@pytest.mark.spawns("shell: RUNME.sh's exec of the tool, its exit code, is sh, run only as a process")
 def test_the_tools_exit_code_is_runmes(box):
     project, _, _ = box
     conf(project, 'run "$RUNME_ROOT/tool"')
     assert runme(box, TOOL_EXIT="7").returncode == 7
 
 
+@pytest.mark.spawns("shell: RUNME.sh's sudo -n without a terminal and its remedy line are sh, run only as a process")
 def test_apt_get_runs_with_sudo_n_without_a_terminal_and_a_failed_install_names_sudo(box):
     project, home, fakes = box
     fake(fakes, "apt-get")
@@ -163,6 +170,7 @@ def test_apt_get_runs_with_sudo_n_without_a_terminal_and_a_failed_install_names_
 
 
 @pytest.mark.skipif(WINDOWS or not hasattr(os, "openpty"), reason="a terminal for stdin: a pty")
+@pytest.mark.spawns("shell: RUNME.sh's plain sudo where stdin is a terminal (a pty) is sh, run only as a process")
 def test_with_a_terminal_apt_get_runs_with_plain_sudo(box):
     project, home, fakes = box
     fake(fakes, "apt-get")
@@ -179,6 +187,7 @@ def test_with_a_terminal_apt_get_runs_with_plain_sudo(box):
     assert calls(home)[:2] == ["sudo apt-get update -q", "apt-get update -q"]
 
 
+@pytest.mark.spawns("shell: RUNME.sh's package manager probe is sh, run only as a process against fakes on PATH")
 def test_dnf_where_apt_get_is_not(box):
     project, home, fakes = box
     fake(fakes, "dnf")
@@ -188,6 +197,8 @@ def test_dnf_where_apt_get_is_not(box):
     assert calls(home) == ["dnf install -y hello"]
 
 
+@pytest.mark.spawns("shell: RUNME.sh's fallback through the other ways and its remedy line are sh, run only as a "
+                    "process")
 def test_on_linux_without_apt_get_and_dnf_the_line_names_the_first_other_way_that_fits(box):
     project, home, fakes = box
     conf(project, "need hello command hello", "get hello apt hello", "get hello unix false first",
@@ -198,6 +209,7 @@ def test_on_linux_without_apt_get_and_dnf_the_line_names_the_first_other_way_tha
                                           "RUNME: hello is missing; run: false first"]
 
 
+@pytest.mark.spawns("shell: RUNME.sh's refusal where no way fits is sh, run only as a process")
 def test_a_need_no_way_fits_says_so_and_never_runs_the_tool(box):
     project, _, _ = box
     conf(project, "need hello command hello", "get hello windows nothing-here", 'run "$RUNME_ROOT/tool"')
@@ -206,6 +218,7 @@ def test_a_need_no_way_fits_says_so_and_never_runs_the_tool(box):
     assert result.stderr == "RUNME: hello is missing; run: what installs it here (RUNME.conf names no way)\n"
 
 
+@pytest.mark.spawns("shell: RUNME.sh's command way, run in the project's folder, is sh, run only as a process")
 def test_a_command_way_runs_in_the_projects_folder(box, tmp_path):
     project, _, _ = box
     conf(project, "need made file made", "get made unix touch made", 'run "$RUNME_ROOT/tool"')
@@ -216,6 +229,7 @@ def test_a_command_way_runs_in_the_projects_folder(box, tmp_path):
     assert (project / "made").exists() and not (caller / "made").exists()
 
 
+@pytest.mark.spawns("shell: RUNME.sh's file need check, its .exe twin, is sh, run only as a process")
 def test_a_file_need_counts_its_exe_twin(box):
     project, home, _ = box
     (project / "tool.exe").touch()
@@ -225,6 +239,7 @@ def test_a_file_need_counts_its_exe_twin(box):
     assert result.returncode == 0 and result.stderr == "" and calls(home) == []
 
 
+@pytest.mark.spawns("shell: RUNME.sh's path lines and their tilde are sh, run only as a process")
 def test_path_lines_come_after_the_callers_path_and_a_tilde_is_the_home(box):
     project, home, fakes = box
     (home / "tools").mkdir()
@@ -238,6 +253,7 @@ def test_path_lines_come_after_the_callers_path_and_a_tilde_is_the_home(box):
     assert path.endswith(f":{sh(home)}/tools:{sh(project)}/inside")
 
 
+@pytest.mark.spawns("shell: RUNME.sh's refusals without a RUNME.conf or a run line are sh, run only as a process")
 def test_without_a_conf_or_a_run_line_runme_says_so_and_exits_2(box):
     project, _, _ = box
     result = runme(box)
@@ -247,6 +263,8 @@ def test_without_a_conf_or_a_run_line_runme_says_so_and_exits_2(box):
     assert result.returncode == 2 and result.stderr == "RUNME: RUNME.conf has no run line\n"
 
 
+@pytest.mark.spawns("shell: RUNME.sh's winget way and its PATH reread through PowerShell are sh, run only as a "
+                    "process against fakes")
 def test_on_windows_winget_installs_and_path_is_read_again_from_the_registry(box):
     project, home, fakes = box
     fake(fakes, "winget")
@@ -283,6 +301,8 @@ def test_ses_conf_declares_what_se_needs_in_order_and_runs_se():
     assert "get se any bash scripts/bootstrap.sh --binary" in text.splitlines()
 
 
+@pytest.mark.spawns("shell: RUNME.sh with SE's own RUNME.conf, its file need placed once by the bootstrap way, is sh, "
+                    "run only as a process")
 def test_with_an_older_se_in_the_home_runme_places_the_pinned_one_once_then_runs_it(box):
     project, home, fakes = box
     shutil.copy2(ROOT / "RUNME.conf", project / "RUNME.conf")
@@ -383,6 +403,8 @@ def ps(project: Path, line: str, env: dict[str, str] | None = None) -> subproces
 
 
 @powershell_only
+@pytest.mark.spawns("shell: RUNME.ps1's hand-off of every argument to RUNME.sh through Git's bash is PowerShell, run "
+                    "only as a process (the Windows leg)")
 def test_powershell_hands_every_argument_to_runme_sh_with_its_exit_code(tmp_path):
     project = ps_box(tmp_path)
     arguments = ["plain", "with space", 'a "quote"', "it's", "", "--help", "$HOME"]
@@ -393,6 +415,8 @@ def test_powershell_hands_every_argument_to_runme_sh_with_its_exit_code(tmp_path
 
 
 @powershell_only
+@pytest.mark.spawns("shell: RUNME.ps1's reading of a double dash is PowerShell's own, run only as a process (the "
+                    "Windows leg)")
 def test_powershell_drops_an_unquoted_double_dash_and_keeps_a_quoted_one(tmp_path):
     project = ps_box(tmp_path)
     result = ps(project, "a -- b '--'")
@@ -401,6 +425,8 @@ def test_powershell_drops_an_unquoted_double_dash_and_keeps_a_quoted_one(tmp_pat
 
 
 @powershell_only
+@pytest.mark.spawns("shell: RUNME.ps1's refusal without Git's bash or winget is PowerShell, run only as a process "
+                    "(the Windows leg)")
 def test_powershell_without_gits_bash_or_winget_prints_one_line_and_exits_1(tmp_path):
     project = ps_box(tmp_path)
     empty = tmp_path / "empty"

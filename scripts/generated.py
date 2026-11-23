@@ -363,10 +363,13 @@ def marker_findings(root: Path, files: list[str], generators: list[Generator]) -
 
 
 def run_check(root: Path, command: tuple[str, ...]) -> tuple[int, str]:
-    """Run a declared `check` command in `root`: its exit code and its output."""
+    """Run a declared `check` command in `root`, through the process door: its exit code and its
+    output. The door loads here, as a copy of the generator alone (se_plugin.py's) runs no check."""
+    import process_door
+
     try:
-        done = subprocess.run(list(command), cwd=root, capture_output=True, text=True,
-                              timeout=RERUN_SECONDS)
+        done = process_door.run(list(command), cwd=root, capture_output=True, text=True,
+                                timeout=RERUN_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as error:
         return 2, str(error)
     return done.returncode, (done.stdout + done.stderr).strip()

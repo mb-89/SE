@@ -2,11 +2,13 @@
 commands, and se's commit hook runs them on the staged tree, refusing the commit where one fails.
 
 git is the door's fake: in memory where the test calls the module, behind a state file
-(`shared_fake_git`) where the commit runs se's hooks as git runs them."""
+(`shared_fake_git`) where the commit runs se's hooks, which only that fake runs. A check's command
+runs through the process door, whose fake answers it in this process (`fake_processes`), as it
+answers se's hooks by their logic; the hooks' own shell runs in their entry tests
+(tests/test_public_check.py)."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -14,11 +16,12 @@ import pytest
 
 import commit_checks
 import fake_git
+import fake_processes as fake_processes_module
 import git_door
 
 PROJECT = Path(__file__).resolve().parents[1]
-# The interpreter by its bare name, found on the PATH the test sets: the hook's public check scans
-# the staged se.toml, which carries no machine path.
+# The interpreter by its bare name: the hook's public check scans the staged se.toml, which carries
+# no machine path.
 INTERPRETER = Path(sys.executable)
 
 
@@ -32,6 +35,16 @@ def check(expected: str) -> str:
     """A check that passes where the checked tree's work.txt reads `expected`."""
     code = f"import sys; sys.exit(open('work.txt').read() != '{expected}' and 'work.txt is not {expected}')"
     return f'["{INTERPRETER.name}", "-c", "{code}"]'
+
+
+def check_work(expected: str):
+    """The fake of `check(expected)`'s command, as the process door's fake answers it: it reads
+    work.txt where the check runs."""
+    def answer(call: fake_processes_module.Invocation) -> fake_processes_module.Answer:
+        if (call.cwd / "work.txt").read_text(encoding="utf-8") != expected:
+            return fake_processes_module.Answer(1, "", f"work.txt is not {expected}\n")
+        return fake_processes_module.Answer(0)
+    return answer
 
 
 def repository(tmp_path: Path, settings: str) -> Path:
@@ -55,7 +68,8 @@ def test_an_entry_that_is_no_command_is_refused_naming_it(entry):
         commit_checks.checks(f"[commit_checks]\n{entry}\n")
 
 
-def test_a_check_runs_on_the_staged_tree_not_the_working_tree(tmp_path, fake_git_door, capsys):
+def test_a_check_runs_on_the_staged_tree_not_the_working_tree(tmp_path, fake_git_door, fake_processes, capsys):
+    fake_processes.on(INTERPRETER.name, check_work("staged"))
     root = repository(tmp_path, f"[commit_checks]\nstaged = {check('staged')}\n")
     (root / "work.txt").write_text("staged", encoding="utf-8")
     git(root, "add", "-A")
@@ -66,19 +80,25 @@ def test_a_check_runs_on_the_staged_tree_not_the_working_tree(tmp_path, fake_git
     git(root, "add", "-A")
     assert commit_checks.run(root) == 1
     assert "work.txt is not staged" in capsys.readouterr().err
+    assert [call.words[:2] for call in fake_processes.calls] == [[INTERPRETER.name, "-c"]] * 2
+    assert all(call.cwd != root for call in fake_processes.calls)
 
 
-def test_a_command_that_cannot_start_refuses_naming_the_check(tmp_path, fake_git_door, capsys):
+def test_a_command_that_cannot_start_refuses_naming_the_check(tmp_path, fake_git_door, fake_processes, capsys):
+    def cannot_start(call):
+        raise FileNotFoundError(2, "No such file or directory", call.words[0])
+
+    fake_processes.on("se-no-such-command", cannot_start)
     root = repository(tmp_path, '[commit_checks]\nmissing = ["se-no-such-command"]\n')
     git(root, "add", "-A")
     assert commit_checks.run(root) == 2
     assert "commit check missing: error: `se-no-such-command` cannot start" in capsys.readouterr().err
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the commit's hooks run as child processes
+@pytest.mark.usefixtures("shared_fake_git")  # the commit runs se's hooks, which only this fake runs
 def test_the_commit_hook_refuses_a_failing_check_by_name_and_lets_a_passing_one_through(
-        tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ['PATH']}")
+        tmp_path, fake_processes):
+    fake_processes.on(INTERPRETER.name, check_work("good"))
     root = repository(tmp_path, f"[commit_checks]\nwork-is-good = {check('good')}\n")
     git(root, "config", "core.hooksPath", str(PROJECT / ".githooks"))
     (root / "work.txt").write_text("bad", encoding="utf-8")
