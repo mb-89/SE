@@ -19,6 +19,8 @@ import build_docs  # noqa: E402
 import se_plugin  # noqa: E402
 import fake_git  # noqa: E402
 import git_door  # noqa: E402
+import fake_processes as fake_programs  # noqa: E402
+import process_door  # noqa: E402
 import network_guard  # noqa: E402
 import se_modules  # noqa: E402
 import spawn_guard  # noqa: E402
@@ -105,10 +107,18 @@ def door_variable(item: pytest.Item) -> str:
     return "real" if isinstance(door_backend(item), git_door.RealGit) else "refused"
 
 
+def process_backend(item: pytest.Item) -> process_door.Backend:
+    """What the process door (scripts/process_door.py) runs for `item`: the real programs for a test
+    the spawn guard lets start them (a `spawns` mark, or the baseline), else the fake
+    (tests/fake_processes.py), which answers SE's scripts and hooks in-process and the test's
+    handlers (the `fake_processes` fixture) for the rest."""
+    return process_door.RealProcesses() if spawn_guard.allowed(item) else fake_programs.FakeProcesses()
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item: pytest.Item, nextitem):
-    with git_door.use(door_backend(item)), network_guard.running(item.nodeid), \
-            pytest.MonkeyPatch.context() as patch:
+    with git_door.use(door_backend(item)), process_door.use(process_backend(item)), \
+            network_guard.running(item.nodeid), pytest.MonkeyPatch.context() as patch:
         patch.setenv(git_door.VARIABLE, door_variable(item))
         yield
 
@@ -179,6 +189,18 @@ def fake_git_door() -> Iterator[fake_git.FakeGit]:
     tests/test_git_door.py); what the test and the code under test run reaches no real git."""
     with git_door.use(fake_git.FakeGit()) as fake:
         yield fake
+
+
+@pytest.fixture
+def fake_processes() -> fake_programs.FakeProcesses:
+    """The process door's fake of this test (tests/fake_processes.py), for its handlers: `gh`'s
+    answers, a suite command; SE's scripts and hooks it answers in-process by itself. A test the
+    spawn guard lets start processes runs the real programs and cannot take it."""
+    backend = process_door.BACKEND
+    if not isinstance(backend, fake_programs.FakeProcesses):
+        pytest.fail("fake_processes: this test runs the real programs (a spawns mark, or the spawn baseline); "
+                    "drop the mark or its baseline entry to take the fake", pytrace=False)
+    return backend
 
 
 @pytest.fixture

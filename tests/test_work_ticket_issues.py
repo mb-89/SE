@@ -83,7 +83,7 @@ class PublicCheck:
 def public_check_child(monkeypatch) -> PublicCheck:
     """The public check runs as PublicCheck; every other process runs as it would."""
     check, real_run = PublicCheck(), subprocess.run
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         check(arguments) if str(work_tickets.PUBLIC_CHECK) in map(str, arguments)
         else real_run(arguments, **kwargs)))
     return check
@@ -1273,7 +1273,7 @@ def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, 
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets.shutil, "which", lambda name: "/opt/unsigned/gh")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: (
             calls.append(arguments) or subprocess.CompletedProcess(arguments, 1, "", "not logged in")
         ),
@@ -1356,7 +1356,7 @@ def test_sync_prefers_the_machine_public_identity_over_the_project_identity(main
 def test_sync_refuses_a_malformed_project_identity_naming_the_file(worktree, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
     )
     (worktree / "se.toml").write_text('[project]\nidentity = "proj"\n', encoding="utf-8")
@@ -1371,7 +1371,7 @@ def test_sync_refuses_a_malformed_public_identity_naming_the_file(
         worktree, local_config, monkeypatch, capsys):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: None)
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: pytest.fail(f"sync ran {arguments}"),
     )
     local_config.parent.mkdir(parents=True)
@@ -1421,7 +1421,7 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(  # the public check, a child process, passes
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
     local_config.parent.mkdir(parents=True)
@@ -1458,7 +1458,7 @@ def test_deliver_records_the_tip_it_delivers_and_a_later_push_names_the_stale_de
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
     later = "0123456789abcdef0123456789abcdef01234567"
@@ -1504,7 +1504,7 @@ def test_deliver_uses_only_an_open_pull_request(
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1526,7 +1526,7 @@ def test_deliver_writes_the_report_into_the_pull_request_on_origin_and_files_no_
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "source.example/owner/source")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1563,7 +1563,7 @@ def test_deliver_refuses_report_without_evidence(worktree, gh, monkeypatch, caps
     )
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -1584,7 +1584,7 @@ def test_deliver_refuses_a_report_with_an_invalid_result(worktree, gh, monkeypat
     pushes: list[list[str]] = []
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: (
             pushes.append(arguments) or subprocess.CompletedProcess(arguments, 0, "", "")
         ),
@@ -6033,7 +6033,7 @@ def test_push_runs_the_public_check_gate_first(main_checkout, fake_push, monkeyp
         gate.append(arguments)
         return subprocess.CompletedProcess(arguments, 1, "hit: file.txt (e-mail address)", "")
 
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         public_check(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
         else subprocess.CompletedProcess(arguments, 1, "", "")
     ))
@@ -6056,7 +6056,7 @@ def test_push_with_the_public_check_off_says_so_and_where_to_turn_it_on(
     (main_checkout / "se.toml").write_text(IDENTITY + "public_check = false\n", encoding="utf-8")
     checked = []
     real_run = subprocess.run
-    monkeypatch.setattr(work_tickets.subprocess, "run", lambda arguments, **kwargs: (
+    monkeypatch.setattr(work_tickets.process_door, "run", lambda arguments, **kwargs: (
         checked.append(arguments) if str(work_tickets.PUBLIC_CHECK) in arguments
         else real_run(arguments, **kwargs)
     ))
@@ -6748,7 +6748,7 @@ def test_deliver_names_the_issue_with_a_closing_keyword_only_for_pre_merge_accep
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
     monkeypatch.setattr(
-        work_tickets.subprocess, "run",
+        work_tickets.process_door, "run",
         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""),
     )
 
@@ -7259,7 +7259,7 @@ def test_deliver_warns_on_platform_code_without_green_legs_and_still_delivers(
     platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
-    monkeypatch.setattr(work_tickets.subprocess, "run",
+    monkeypatch.setattr(work_tickets.process_door, "run",
                         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
     answered = gh.__call__
 
@@ -7287,7 +7287,7 @@ def test_deliver_warns_without_blocking_where_github_cannot_be_read(
     platform_worktree(worktree, scripted_git, PLATFORM_DIFF)
     draft_complete_field_report(worktree)
     monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
-    monkeypatch.setattr(work_tickets.subprocess, "run",
+    monkeypatch.setattr(work_tickets.process_door, "run",
                         lambda arguments, **kwargs: subprocess.CompletedProcess(arguments, 0, "", ""))
     answered = gh.__call__
 

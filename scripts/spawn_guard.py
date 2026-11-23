@@ -380,6 +380,13 @@ def started(item: pytest.Item) -> int:
     return item.stash.get(STARTS, 0) + running
 
 
+def allowed(item: pytest.Item) -> bool:
+    """Whether `item` may start processes: a spawns mark with its reason, or a baseline entry."""
+    plugin = item.config.pluginmanager.get_plugin(NAME)
+    listed = plugin is not None and (item.nodeid in plugin.baseline or plugin.mode == "init")
+    return bool(reason(item)) or listed
+
+
 def register(pluginmanager: pytest.PytestPluginManager) -> SpawnGuard:
     """Register the plugin once, from a conftest's `pytest_addoption(parser, pluginmanager)`."""
     plugin = pluginmanager.get_plugin(NAME)

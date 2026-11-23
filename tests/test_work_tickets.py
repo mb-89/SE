@@ -2321,7 +2321,7 @@ def test_a_command_appends_one_metrics_line_with_its_github_calls(tmp_path, monk
         return next(answers)
 
     monkeypatch.setattr(work_tickets, "gh_executable", lambda: "gh")
-    monkeypatch.setattr(work_tickets.subprocess, "run", door)
+    monkeypatch.setattr(work_tickets.process_door, "run", door)
     monkeypatch.setattr(work_tickets, "wait", lambda seconds: clock.advance(seconds))
 
     def handler(root, args):

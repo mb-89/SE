@@ -134,7 +134,7 @@ def test_a_github_call_is_announced_before_it_is_made(tmp_path, monkeypatch, cap
         return subprocess.CompletedProcess(arguments, 0, "[]", "")
 
     monkeypatch.setattr(work_tickets, "gh_executable", lambda: "gh")
-    monkeypatch.setattr(work_tickets.subprocess, "run", run)
+    monkeypatch.setattr(work_tickets.process_door, "run", run)
     work_tickets.run_gh(tmp_path, ["issue", "list", "--label", "escalated", "--json",
                                    "number,title", "--limit", "200", "--repo", "owner/repo"])
     assert seen == ["Reading GitHub: gh issue list --label escalated --repo owner/repo\n"]
