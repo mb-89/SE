@@ -267,8 +267,8 @@ def rule_table(vault: Path) -> None:
     shown = rule_book.documentation(book.read_text(encoding="utf-8"))
     for name in shown.notes:
         if (book.parent / name).exists():
-            raise FileExistsError(f"the rule note {BOOK.parent / name} would overwrite the file of that "
-                                  "name beside the rule book; rename that file")
+            raise FileExistsError(f"the rule note {(BOOK.parent / name).as_posix()} would overwrite the file "
+                                  "of that name beside the rule book; rename that file")
     book.write_text(shown.page, encoding="utf-8")
     for name, text in shown.notes.items():
         (book.parent / name).write_text(text, encoding="utf-8")
