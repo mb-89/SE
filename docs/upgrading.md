@@ -23,17 +23,24 @@ Placeholders, used throughout:
    - Then run `bash <se>/scripts/setup.sh <project>` once, so the project's hooks are the new SE's.
    - Check: `grep -m1 '^version' <se>/se.toml` prints the newest version, and
      `git -C <project> config core.hooksPath` names `<se>/.githooks`.
-2. **List the sections to follow.** The start greeting names them on the line
+2. **Take what the pins admit, then list what lies beyond them.** `uv run python
+   <se>/scripts/se_start.py boot --upgrade` brings the checkout current and moves SE and every lock
+   to the newest release its pin admits ([README "Boot"](../README.md#boot)); its rows name each
+   release beyond a pin, `breaking` or `newer`, whose sections this guide holds.
+   - A `se.toml` that still holds `[modules]` is refused from SE 8 on: there, run it after the
+     [SE 8](#se-8) section.
+3. **List the sections to follow.** The start greeting names them on the line
    `SE: <newest> is outside SE's major <n>`. They print, oldest first, with
    `uv run python <se>/scripts/upgrade_guide.py show --name SE --from <in use> --to <newest>`.
    - `<in use>` is the `[project] version` of the old SE, or the project's locked `se` in
      `se.lock`.
-3. **Follow each section in order**, every step and then its check, in the project's checkout.
+4. **Follow each section in order**, every step and then its check, in the project's checkout.
    Commit after each section. A section points to the component sections at the step where SE
    moved a component, so each component moves only once SE can read it.
-4. **Finish.** Each of these prints what it names:
+5. **Finish.** Each of these prints what it names:
    - `uv run python <se>/scripts/se_modules.py sync` exits 0;
    - `uv run python <se>/scripts/se_modules.py breaking` prints `no breaking release beyond a pin`;
+   - `uv run python <se>/scripts/se_start.py boot; echo $?` prints no `Left:` line and `0` last;
    - `uv run python <se>/scripts/public_check.py --repo .; echo $?` prints `0` or `1`, never `2`;
    - `uv run python <se>/scripts/se_start.py --root . status --greeting` prints no line with
      `is outside` and none opening `SE cannot start`.
