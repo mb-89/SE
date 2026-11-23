@@ -27,7 +27,7 @@ from collections.abc import Callable, Mapping
 from typing import NoReturn
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
 import git_door
@@ -6018,7 +6018,8 @@ def beside_suites(root: Path, tables: object) -> tuple[BesideSuite, ...]:
                              '"./..."]; fix it or remove it')
         paths = table.get("paths")
         if paths is not None and not (is_argument_array(paths) and all(
-                not Path(path).is_absolute() and ".." not in Path(path).parts for path in paths)):
+                not PurePosixPath(path).is_absolute() and ".." not in PurePosixPath(path).parts
+                for path in paths)):
             raise QueueError(f"{where}: paths must be a non-empty array of paths relative to the "
                              'project root, a folder ending with "/", for example paths = '
                              '["kern/bus/"]; fix it or remove it to run the suite always')
