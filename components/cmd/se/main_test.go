@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kern/bus"
+	"kern/components/clock"
 	"kern/components/github"
 	"kern/components/session"
 	"kern/host"
@@ -18,6 +19,14 @@ import (
 	"se/components/origin"
 	retrodue "se/components/retro-due"
 )
+
+// still is a host clock that never moves: SE's wiring places kern's clock,
+// whose loop waits on it for good, so github.second stays unwritten and no
+// refresh runs while a case reads the snapshots its tool answers land.
+type still struct{}
+
+func (still) Now() time.Time                       { return time.Time{} }
+func (still) After(time.Duration) <-chan time.Time { return make(chan time.Time) }
 
 // toolUse is a PostToolUse payload as a cloud session's hook hands it, with
 // the GitHub tool's answer as its text.
@@ -67,7 +76,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	origin.Tracker = func(string) string { return "alice/SE" }
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
-		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retrodue.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +171,7 @@ func TestSEsTrackedWiringLeavesTheSessionRecordOff(t *testing.T) {
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	rec := session.New(session.Options{Dir: dir})
 	c, err := host.Serve(host.Options{Root: root, Wiring: w,
-		Components: []*index.Component{g.Component, origin.Component, fleet.Component, retrodue.Component, rec.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, rec.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,8 +2,8 @@
 # Written by sync and update; commit it, never edit it.
 
 [components.kern]
-version = "0.14.1"
-ref = "4b2b08a8d6c864aeecc4865b84f1522eb1042384"
+version = "1.5.0"
+ref = "d04460fc85e07406ae8caeb0c1c0dac66f8829cf"
 
 [components.obs]
 version = "5.0.0"

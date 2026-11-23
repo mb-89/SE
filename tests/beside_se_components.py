@@ -28,7 +28,7 @@ import git_door
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = ["delivery", "guidance", "templates", "integration", "issues", "overhaul", "render",
           "retro", "review", "scaffold", "tickets"]  # SE's Python command groups, each placed
-GO = ["fleet", "github", "origin", "retro-due"]  # SE's Go components, in the se binary (components/README.md)
+GO = ["clock", "fleet", "github", "origin", "retro-due"]  # the Go components in the se binary (components/README.md)
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -90,7 +90,7 @@ def test_kern_lists_ses_components_and_a_command_answers_through_it_and_without_
             1, refused.stdout, refused.stderr)
         status = run(str(kern), "status", "--root", str(checkout), "--json", cwd=checkout)
         health = json.loads(status.stdout)["health"]
-        # The four Python groups placed beside SE's four Go components in the se binary.
+        # The Python groups placed beside the Go components in the se binary.
         assert sorted(health["instances"]) == sorted(GROUPS + GO)
         # The Go components run in process, so attached with the core; the calls above waited
         # for their command's component to attach, and the other placed ones attached alone.

@@ -22,7 +22,8 @@ import (
 // SE's own catalog, its root wiring.toml and its components' declarations as
 // the core reads them, passes the MCP door's catalog check, and makes a few
 // coarse tools: status, the greeting with every part it reads, and one per
-// command group that offers commands declared read-only; work_tickets.py
+// command group that offers commands declared read-only, and kern's GitHub
+// component's github_write, its filled-template writes; work_tickets.py
 // queue, which syncs the checkout, is in none.
 func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
@@ -50,8 +51,8 @@ func TestSEsCatalogMakesTheDoorsTools(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(names, " "); got != "status greeting integration overhaul templates tickets" || len(tools) < 3 || len(tools) > 8 {
-		t.Fatalf("SE's door offers the tools %q, and wants status, greeting, integration, overhaul, templates and tickets", got)
+	if got := strings.Join(names, " "); got != "status greeting integration overhaul templates tickets github_write" || len(tools) < 3 || len(tools) > 8 {
+		t.Fatalf("SE's door offers the tools %q, and wants status, greeting, integration, overhaul, templates, tickets and github_write", got)
 	}
 }
 
@@ -125,7 +126,7 @@ mcp = "Lists what waits on the desk; use it to see what to do next."
 	release := filepath.Join(dir, "release")
 	t.Cleanup(func() {
 		_ = os.WriteFile(release, nil, 0o600)
-		if _, err := host.AskStop(root); err != nil {
+		if _, err := host.AskStop(host.Wall{}, root); err != nil {
 			t.Errorf("the case's stop: %v", err)
 		}
 	})
