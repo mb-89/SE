@@ -1240,7 +1240,8 @@ class FakeGit:
         """`push [-q] [-u] [--force] [--force-with-lease=<ref>:<sha>] <remote> <spec>...`: `[+]<src>[:<dst>]`
         moves the remote's branch or tag (a non-fast-forward, or a tag that exists, refused unless
         forced: `--force`, a `+` spec), `:<dst>` deletes it; a lease that
-        does not hold, or the remote's pre-receive hook (`declining`), refuses the push."""
+        does not hold (`<ref>:` with no sha: the ref must not exist), or the remote's pre-receive
+        hook (`declining`), refuses the push."""
         repository = self.find(call.where)
         name, *specs = [a for a in call.args if not a.startswith("-")]
         remote = self.remote(repository, name)
@@ -1249,7 +1250,8 @@ class FakeGit:
             source, destination = self.push_refs(repository, spec)
             short = destination.removeprefix("refs/heads/")
             old = remote.refs.get(destination)
-            if destination in leases and old != self.resolve(repository, leases[destination]):
+            if destination in leases and old != (self.resolve(repository, leases[destination])
+                                                  if leases[destination] else None):
                 raise Refusal(1, f"To {name}\n ! [rejected]        {spec} (stale info)\n"
                                  f"error: failed to push some refs to '{name}'")
             if remote.path in self.declining:

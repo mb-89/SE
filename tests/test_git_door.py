@@ -566,6 +566,19 @@ def test_a_merge_keeps_an_uncommitted_change_it_does_not_touch_and_refuses_one_i
     assert (root / "a.txt").read_text(encoding="utf-8") == "mine\n" and git(root, "rev-parse", "HEAD") == side
 
 
+def test_push_under_an_empty_lease_creates_a_branch_only_where_it_does_not_exist(door, tmp_path: Path) -> None:
+    origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
+    root = project(tmp_path)
+    git(root, "remote", "add", "origin", str(origin))
+    first = commit(root, {"a.txt": "a\n"})
+    second = commit(root, {"a.txt": "a2\n"})
+    git(root, "push", "-q", "--force-with-lease=refs/heads/claimed:", "origin", f"{first}:refs/heads/claimed")
+    assert git(origin, "rev-parse", "refs/heads/claimed") == first
+    again = git_door.run("push", "--force-with-lease=refs/heads/claimed:", "origin",
+                         f"{second}:refs/heads/claimed", root=root)
+    assert again.returncode != 0 and git(origin, "rev-parse", "refs/heads/claimed") == first
+
+
 def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(door, tmp_path: Path) -> None:
     origin = fake_git.init(tmp_path / "origin.git", "--bare", "-b", "main")
     root = project(tmp_path)
