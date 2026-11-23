@@ -19,7 +19,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 | `fleet` | `github/issues`, `github/pulls`, `github/checks`, `github/issue-lists`, `github/pull-lists` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed, how many issues, pull requests and branches it read, whether that was a complete read of the open issue and pull-request lists (`complete`) and since when (`since`); only a complete read is `healthy` | `work_tickets.py` `fleet_findings` |
 | `retro-due` | `github/issues`, `github/pulls` whole; `origin/tracker`; config `due-after` (20), `failure-weight` (5), `days` (7), `overhaul-after` (3), `overhaul-days` (30), `base` | `retro-due/due`: what came back since the newest retro started (landed, failed, their weighted `count`), whether a retro is due and why, the retros open, where the window starts; the retros closed since the newest overhaul started, whether an overhaul is due and why, the overhauls open | `retro.py` `retro_countdown`, `overhaul.py` `overhaul_countdown` |
 | `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (kern's `kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
-| `template` | SE's `templates/` in the checkout its config `root` names, at each call | nothing: its verbs answer. `fill` makes a filled template ([The template engine in Go](#the-template-engine-in-go)); `accept` is a templated target's gate across the bus; `check` gives a text's findings | `scripts/templates.py` |
+| `template` | at each call, the templates a name resolves to for the checkout its config `root` names, as `catalog` reads them ([The template engine in Go](#the-template-engine-in-go)); SE's scripts and templates in the checkout its config `se` names | nothing: its verbs answer. `fill` makes a filled template ([The template engine in Go](#the-template-engine-in-go)); `accept` is a templated target's gate across the bus; `check` gives a text's findings | `scripts/templates.py` |
 
 - **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the
@@ -55,12 +55,37 @@ answer as the Python functions of their names do.
   Python engine, so a change to either engine or to `templates/` refreshes them with
   `uv run python tests/template_cases.py`.
 - **Code a template names.** A template names Python as `<module>:<NAME>`; Go holds its port of
-  each name SE's templates use in `References` and `Checkers` (`references.go`), and the cases
-  hold each port to the Python one. A name Go holds no port of does not load; an adapter whose
-  checker Go does not hold refuses its check, naming the checker.
-- **Not in Go.** The rule `dangling` (an SE command that does not exist) reads the checkout's
-  scripts and their parsers through `scripts/references.py`, and the adapters' checkers but
-  `deck:pugh_problems` are Python's: Go runs neither, and the cases hold no text either refuses.
+  each name SE's templates use in `References` (`references.go`), `Checkers` and `Extractors`
+  (`checkers.go`), and the cases hold each port to the Python one. A name Go holds no port of does
+  not load; an adapter whose checker or reading Go does not hold fails its check, naming it.
+- **Where a name resolves.** `CatalogAt` (`repositories.go`) is `catalog`'s resolution: the
+  checkout's own `templates/` at origin's integration branch (se.toml `[project]
+  integration_branch`, through kern's git door), else in its working tree; then each template
+  repository se.toml `[templates] repositories` lists, a component pinned by `ref`, `version`
+  (with `se.lock`) or `go` and placed at its pin, or the machine's `~/.se/local.toml` `[paths]`
+  checkout; then SE's own. A repository that does not resolve refuses the catalog with
+  `se_modules.py`'s words; `overlays.go` applies each `<name>.overlay.md` and refuses one that
+  loosens its template. The cases hold checkouts with every kind of pin and refusal, their git
+  answered by a fake (`repositories.json`), and overlays that load and do not. A TOML file that
+  does not parse names go-toml's error, where Python names tomllib's.
+- **The rule `dangling`.** An SE command or script a text names that does not exist
+  (`dangling.go`, the port of `scripts/references.py` `dangling`): Go reads each script's
+  subcommands from its source (`commands.go`: the parser `main` parses, its `add_parser` calls, a
+  positional's `choices`, work_tickets.py's registry), where Python runs its argparse parser.
+  The config `se` names SE's checkout whose scripts it reads. `agreement/` holds the Go reading
+  to Python's tree for every script of SE's checkout, and the cases hold texts naming what exists,
+  what does not and what a Requirement creates.
+- **The adapters' checkers.** `checkers.go` ports each of SE's: the field report's structure
+  (`work_tickets:field_report_problems`, against SE's `.github/pull_request_template.md` with the
+  standing questions nested in its Retro section, without the work issue), the squash commit's
+  trailer (`work_tickets:merge_release_kind`), the review report (`review:checked_report`) and
+  the Pugh fence (`deck:pugh_problems`), called as `adapter_findings` calls them: `extract`,
+  `json_after` (read as Python's `json.loads` reads it, its error text included, `pyjson.go`),
+  `drop`, `missing`, `with`, `none`, `text_as`, `title_as` and `result`. An adapter written wrong
+  for its checker fails the check with the Python engine's error. The cases hold each adapter's
+  texts: what its writer writes and every refusal.
+- **Where Go answers otherwise.** Python keeps a lone surrogate of a JSON string, Go reads it as
+  U+FFFD.
 
 ## Who reads them
 

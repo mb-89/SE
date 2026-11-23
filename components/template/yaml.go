@@ -44,9 +44,13 @@ func yamlLines(text, where string, first int) ([]yamlLine, error) {
 
 func yamlScalar(text, where string) (any, error) {
 	if text == "" || strings.ContainsAny(text[:1], "\"[{") {
-		v, err := decodeJSON(text)
+		v, err := pyJSON(text)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %s is no JSON value (%s); write a quoted string, a list or a mapping as JSON", where, text, err)
+			what := err.Error()
+			if e, ok := err.(*jsonError); ok {
+				what = e.what
+			}
+			return nil, fmt.Errorf("%s: %s is no JSON value (%s); write a quoted string, a list or a mapping as JSON", where, text, what)
 		}
 		return v, nil
 	}
@@ -119,7 +123,7 @@ func yamlBlock(lines []yamlLine, index, indent int, where string) (any, int, err
 		}
 		key := match[1]
 		if strings.HasPrefix(key, "\"") {
-			v, err := decodeJSON(key)
+			v, err := pyJSON(key)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s:%d: %s is no `key: value` line", where, number, text)
 			}

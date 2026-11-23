@@ -255,7 +255,11 @@ func TestTheVerbAcceptRequiresTheTemplateThatClaimsAPathAndLeavesOtherPathsFree(
 	if err := os.WriteFile(filepath.Join(root, TemplatesFolder, "risks.md"), []byte(risksTemplate), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	config := map[string]any{index.ConfigPrefix + "root": root, index.ConfigPrefix + "repository": ProjectRepository}
+	se, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := map[string]any{index.ConfigPrefix + "root": root, index.ConfigPrefix + "repository": ProjectRepository, index.ConfigPrefix + "se": se}
 	if err := Component.Start("template", func(port string) any { return config[port] }, nil); err != nil {
 		t.Fatal(err)
 	}

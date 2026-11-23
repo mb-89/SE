@@ -28,12 +28,16 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
 import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import git_door  # noqa: E402
 import templates  # noqa: E402
 
 OUT = ROOT / "components" / "template" / "testdata" / "cases"
@@ -116,12 +120,16 @@ def _fill(template: templates.Template, example: dict, title: str | None, raw: s
 
 
 def _body(template: templates.Template, body: str, title: str | None) -> dict:
+    """What parse gives of a body, what check finds (or, where its adapter is written wrong for
+    the body, the error it raises) and the digest of render."""
     document = templates.parse(template, body, title)
-    found = templates.check(template, document)
-    rendered = templates.render(template, document)
-    return {"body": body, "title": title, "fields": document.fields,
-            "misses": sorted(document.misses), "recorded": document.recorded,
-            "findings": _findings(found), "render": _digest(rendered)}
+    case = {"body": body, "title": title, "fields": document.fields,
+            "misses": sorted(document.misses), "recorded": document.recorded}
+    try:
+        case["findings"] = _findings(templates.check(template, document))
+    except templates.TemplateError as error:
+        case["error"] = str(error)
+    return {**case, "render": _digest(templates.render(template, document))}
 
 
 def _fills(template: templates.Template, example: dict, title: str | None) -> list[dict]:
@@ -190,6 +198,207 @@ def _variants(template: templates.Template, document: str) -> list[str]:
     return found
 
 
+#: Texts naming SE's commands and scripts, each appended to the base document of a template whose
+#: rule `dangling` is on: what exists, what does not, and the Requirements that create it. The
+#: scripts named define a tree that rarely changes (review.py, se_plugin.py), as each finding lists it.
+DANGLING = (
+    "Run `review.py brief` and `<se>/scripts/review.py file`.\n",
+    "Run `review.py nope` first.\n",
+    "Run `uv run python scripts/review.py brief extra`, then `se_plugin.py check`.\n",
+    "Run `se_plugin.py nope.` and `se_plugin.py Build`.\n",
+    "Run `scripts/missing_tool.py` and `<se>/scripts/gone.py check`.\n",
+    "Run `scripts/<name>.py` and `scripts/review.py:12`.\n",
+    "Run ``review.py nope`` and `` `review.py` ``.\n",
+    "A span over two lines: `review.py\nnope`.\n",
+    "An unclosed `review.py nope\n\nAnd ``review.py nope` too.\n",
+    "```sh\nuv run python <se>/scripts/review.py nope\nreview.py brief\n```\n",
+    "~~~\nse_plugin.py nope\n```\nreview.py nope\n~~~\nreview.py `nope`\n",
+    "````\nreview.py nope\n```\nreview.py gone\n````\n",
+    "Run `review.py nope`.\n\n## Requirements\n\n1. Add the new `review.py nope`.\n",
+    "Run `scripts/missing_tool.py`.\n\n## Requirements\n\n- It creates\n  missing_tool.py.\n",
+    "Run `review.py nope`.\n\n## Requirements\n\n1. Keep `review.py nope` as it is.\n",
+)
+
+
+def _dangling(template: templates.Template, base: str) -> list[str]:
+    """Bodies made from the base document with a text of DANGLING appended, for a template whose
+    rule `dangling` is on."""
+    if template.severity("dangling") == templates.OFF or not base:
+        return []
+    return [base.rstrip("\n") + "\n\n" + text for text in DANGLING]
+
+
+# Adapters: the texts SE already writes, each checked by its own checker (templates.py "Adapters").
+
+
+def _fenced(marker: str, data: object, fence: str = "```yaml") -> str:
+    ticks = fence[:len(fence) - len(fence.lstrip("`"))]
+    return f"Above.\n\n{marker}\n{fence}\n{json.dumps(data, indent=2, ensure_ascii=False)}\n{ticks}\n"
+
+
+def _report(header: dict[str, str | None] | None = None, sections: dict[str, str | None] | None = None,
+            before: str = "", after: str = "") -> str:
+    """A field report between its markers: every section of SE's pull request template, filled,
+    with `header` lines and `sections` changed (None drops one)."""
+    lines = {"Work issue": "#12", "Branch": "`plain-issue-titles`", "Result": "complete"}
+    head = {"Work issue": "**Work issue:** #12  **Branch:** `plain-issue-titles`  **Result:** complete",
+            "Tested against": "**Tested against `main`:** `0123456789abcdef0123456789abcdef01234567`",
+            "Branch tip": "**Branch tip:** `abcdef1`",
+            "Release kind": "**Release kind:** patch — a fix of the title",
+            "Re-integration kind": "**Re-integration kind:** patch"}
+    del lines
+    head.update(header or {})
+    body = {
+        "User requirement (quoted back)": "> Titles say what changes.",
+        "Delivered": "| Work issue item | Result | Commits | Evidence |\n|---|---|---|---|\n"
+                     "| 1 | done | abcdef1 | `pytest` passed |\n\n**Commit groupings:** None\n\n"
+                     "**Suite time:** None",
+        "Not delivered": "None",
+        "Removed behaviour, deleted or weakened tests, and authored prose": "None",
+        "Review responses": "None",
+        "Decisions": "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|\n"
+                     "| Keep it | none | simple | high |",
+        "Spec gaps": "None.",
+        "Tickets for other repositories": "None",
+        "Retro": _questions(),
+    }
+    body.update(sections or {})
+    text = "\n".join(line for line in head.values() if line is not None) + "\n"
+    for heading, content in body.items():
+        if content is not None:
+            text += f"\n## {heading}\n\n{content}\n"
+    return f"{before}<!-- se:field-report -->\n{text}<!-- se:field-report:end -->\n{after}"
+
+
+def _questions(answer: str = "None.", drop: str = "", rename: str = "") -> str:
+    """The standing questions as a field report's Retro section answers them: one `###` section
+    each, `drop` left out and `rename` under another heading."""
+    block = templates.own("standing-questions")
+    parts = []
+    for item in block.fields:
+        if item.name == drop:
+            continue
+        heading = item.heading + "?" if item.name == rename else item.heading
+        parts.append(f"### {heading}\n\n{answer}")
+    return "\n\n".join(parts)
+
+
+REVIEW = {"pull": 7, "verdict": "pass", "head": "0123456789abcdef0123456789abcdef01234567", "landed": False,
+          "acceptance": [{"item": "Titles say what changes.", "evidence": "tests pass"}],
+          "findings": [], "clean": ["the title code"]}
+FINDING = {"title": "A title", "evidence": "x.py:3", "place": "x.py:3", "blocking": False, "why": "small"}
+def _changed(data: dict, **changes: object) -> dict:
+    """`data` with each key changed (a value of DROP removes the key); `<key>__<n>__<field>`
+    changes item n of a list."""
+    data = copy.deepcopy(data)
+    for key, value in changes.items():
+        target, name = data, key
+        if "__" in key:
+            path, index, name = key.split("__")
+            target = data[path][int(index)]
+        if value is DROP:
+            target.pop(name, None)
+        else:
+            target[name] = value
+    return data
+
+
+DROP = object()
+
+
+def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]]:
+    """The bodies each of SE's adapters is checked on, with their titles."""
+    review, retro, overhaul = "<!-- se:review -->", "<!-- se:retro-yaml -->", "<!-- se:overhaul-yaml -->"
+    if template.name == "field-report":
+        bad_rows = "| Item | Result |\n|---|---|\n| 1 | done | extra |\n\n**Commit groupings:** None\n\n**Suite time:** None"
+        return [(text, None) for text in (
+            "Free text.\n", "<!-- se:field-report -->\n<!-- se:field-report:end -->\n",
+            "<!-- se:field-report:end -->\n<!-- se:field-report -->\n",
+            _report(), _report(before="A note above.\n\n", after="\nBelow.\n"),
+            _report(header={"Result": None, "Work issue": "**Work issue:** #<n>  **Branch:** `<branch>`"}),
+            _report(header={"Branch tip": "**Branch tip:** `<tip>`"}),
+            _report(header={"Branch tip": "**Branch tip:** abcdef1234"}),
+            _report(header={"Branch tip": "**Branch tip:** `abcdef`"}),
+            _report(header={"Branch tip": "**Branch tip:** `" + "a" * 41 + "`"}),
+            _report(header={"Branch tip": "**Branch tip:** `abcdef1`x"}),
+            _report(header={"Branch tip": "**Branch tip:** abcdef1 \u2014 the tip"}),
+            _report(header={"Release kind": None}),
+            _report(header={"Release kind": "**Release kind:** huge"}),
+            _report(header={"Release kind": "**Release kind:** minor: new titles"}),
+            _report(header={"Release kind": "**Release kind:** patch <!-- a comment --> — why"}),
+            _report(header={"Re-integration kind": "**Re-integration kind:** later"}),
+            _report(header={"Re-integration kind": None}),
+            _report(header={"Component kinds": "**Component kinds:** se patch, app minor — both"}),
+            _report(header={"Component kinds": "**Component kinds:** se big"}),
+            _report(header={"Component kinds": "**Component kinds:** se"}),
+            _report(header={"Work issue": "**Work issue:** #12  **Branch:** `b`  **Result:** done"}),
+            _report(header={"Work issue": "**Work issue:** #12  **Branch:** `b`  **Result:** partial  "}),
+            _report(sections={"Removed behaviour, deleted or weakened tests, and authored prose":
+                              "- **Breaking:** the old flag\n**Breaking:** the old name"}),
+            _report(header={"Release kind": "**Release kind:** minor — a breaking change"},
+                    sections={"Removed behaviour, deleted or weakened tests, and authored prose":
+                              "- **Breaking:** the old flag"}),
+            _report(sections={"Spec gaps": None, "Retro": None}),
+            _report(sections={"Delivered": bad_rows}),
+            _report(sections={"Delivered": "Done.\n\n**Commit groupings:** None"}),
+            _report(sections={"Decisions": "None", "Review responses": "none."}),
+            _report(sections={"Not delivered": "```\n## Retro\n```\nAll of it."}),
+            _report(sections={"Retro": "- **Went well:** x"}),
+            _report(sections={"Retro": _questions(drop="real_use")}),
+            _report(sections={"Retro": _questions(answer="")}),
+            _report(sections={"Retro": _questions(answer="TBD", rename="stale_process")}),
+            _report(sections={"Retro": _questions(answer="We ran `review.py brief` by hand twice.")}),
+            _report(sections={"Delivered": "| work issue ITEM | Result | Commits | Evidence |\n|---|---|---|---|\n"
+                                           "| 1 \\| 2 | done | a | b |\n\n**Commit groupings:** a\n\n**Suite time:** 3 s"}),
+            _report().replace("## Decisions", "## DECISIONS"),
+            _report().replace("\n## Spec gaps", "\n##   Spec gaps  "),
+        )]
+    if template.name == "merge-message":
+        long = "Integrate " + "word-" * 30 + "end: and **more** text"
+        return [
+            ("A body.\n\nRelease-kind: minor\n", "Integrate plain-issue-titles"),
+            ("A body.\n\nRelease-kind: minor\n", None),
+            ("A body.\n\nRelease-kind: minor\n", "Merge plain-issue-titles"),
+            ("No trailer.\n", "Integrate plain-issue-titles"),
+            ("Release-kind: patch\nRelease-kind: minor\n", "Integrate x"),
+            ("Release-kind: huge\n", "Integrate x: the **thing**"),
+            ("Release-kind:patch   \n", "Integrate x"),
+            ("Release-kind: \n", "Integrate x"),
+            ("Release-kind: minor more\n", "Integrate x"),
+            ("Text.\n\nRelease-kind: major", long),
+            ("", ""),
+        ]
+    if template.name == "review":
+        def report(**changes: object) -> str:
+            return _fenced(review, _changed(REVIEW, **changes))
+        bodies = [
+            "No marker.\n", f"{review}\nNo block.\n", f"{review}\n```\n\n```\n",
+            report(), report(pull=DROP, landed=DROP), _fenced(review, REVIEW, "````json"),
+            f"{review}\n```yaml\n{{}}\n```\n\n{review}\n```\n[]\n```\n",
+            report(extra=1), report(verdict="passed"), report(verdict=None), report(verdict=3),
+            report(verdict=["pass"]), report(verdict={"a": 1.5}), report(head="0123"),
+            report(head=" 0123456789abcdef0123456789abcdef01234567 "), report(clean=[]),
+            report(clean=["", "x"]), report(clean="x"), report(acceptance=[]),
+            report(acceptance=["x"]), report(acceptance=[{"item": "x", "proof": "y"}]),
+            report(acceptance=[{"item": " ", "evidence": "y"}]),
+            report(acceptance=[{"item": "x"}]), report(findings="none"), report(findings=[1]),
+            report(findings=[{**FINDING, "rank": 1}]), report(findings=[{**FINDING, "title": ""}]),
+            report(findings=[{**FINDING, "evidence": ""}]), report(findings=[{**FINDING, "place": None}]),
+            report(findings=[{**FINDING, "blocking": 1}]), report(findings=[{**FINDING, "why": " "}]),
+            report(verdict="decline"), report(verdict="decline", findings=[{**FINDING, "blocking": True}]),
+            report(findings=[FINDING]), report(findings=[{**FINDING, "blocking": True}] * 2),
+            report(verdict="pass with open points"),
+            report(verdict="pass with open points", findings=[FINDING, FINDING]),
+        ]
+        for broken in ("", "{", '{"a"', '{"a":', '{"a":1', '{"a":1,}', "[1,]", "[1 2]", '{1:2}',
+                       '"abc', '"a\\x"', '"a\\u12"', '"a\u0001"', "[1] x", "nul", "-", "1e",
+                       '{"é": "ü"  x}', "\n\n  [1,\n 2,]", "NaN", '[1e400, -0, 1.5e3, "\\ud83d\\ude00"]',
+                       '{"verdict": "pass", "verdict": 1}', "\ufeff{}"):
+            bodies.append(f"{review}\n```json\n{broken}\n```\n")
+        return [(body, None) for body in bodies]
+    return []
+
+
 def _set(name: str, loaded: dict[str, templates.Template], source: str, files: dict | None = None,
          repository: str = "", bodies: dict[str, list[str]] | None = None) -> dict:
     data: dict[str, object] = {"generated": GENERATED.format(source=source), "set": name}
@@ -210,9 +419,12 @@ def _set(name: str, loaded: dict[str, templates.Template], source: str, files: d
             bases[template.name] = base
             entry["bodies"] = [_body(template, body, title)
                                for body in [*_variants(template, base),
-                                            *(bodies or {}).get(template.name, [])]]
+                                            *(bodies or {}).get(template.name, []),
+                                            *_dangling(template, base)]]
             if any(item.source == "title" for item in template.fields):
                 entry["bodies"] += [_body(template, base, other) for other in TITLES if other != title]
+        else:
+            entry["bodies"] = [_body(template, body, title) for body, title in _adapter_bodies(template)]
         made[template.name] = entry
     data["templates"] = made
     data["select"] = _select(loaded, bases)
@@ -444,6 +656,260 @@ SCOPED_BODY = ("The outside text, kept.\n\n## Their heading\n\nTheirs.\n\n<!-- s
                "## Routing\n\n### Kind\n\nidea\n\n### Why\n\nIt helps.\n\n## After\n\nKept too.\n")
 
 
+OVERLAID = """---
+name: plan
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "A plan."
+applies:
+  actions: ["issue.create"]
+order: ["goal", "risks", "size"]
+rules:
+  required: refuse
+  words: warn
+fields:
+  - name: goal
+    kind: text
+    required: true
+    max_words: 40
+  - name: risks
+    kind: list
+    none_ok: true
+  - name: size
+    kind: choice
+    choices: ["small", "large"]
+example:
+  fields:
+    goal: "Ship the plan."
+    risks: ["None"]
+    size: small
+---
+
+## Goal
+
+<!-- goal: The goal. -->
+
+## Risks
+
+<!-- risks: What could go wrong. -->
+
+## Size
+
+<!-- size: Small or large. -->
+"""
+OVERLAY = """---
+extends: plan
+says: "Agents keep it short."
+tags: ["meeting"]
+rules:
+  duplicate: refuse
+  choice: refuse
+fields:
+  - name: goal
+    max_words: 20
+    actor: true
+  - name: owner
+    kind: line
+    label: Owner
+    required: true
+    says: "Who owns it."
+  - name: why
+    kind: text
+    required: true
+  - name: size
+    choices: ["small"]
+example:
+  fields:
+    owner: alice
+    why: "It is due."
+---
+
+## Goal
+
+<!-- goal: Name who does it. -->
+
+## Why
+
+<!-- why: Why now. -->
+"""
+CHILD = MINIMAL.format(name="subplan", extra=f"extends: plan\n{ISSUE_CREATE}").replace(
+    "fields:\n  - name: goal\n    kind: text\n    required: true\n", "fields:\n  - name: note\n    kind: text\n").replace(
+    "## Goal\n\n<!-- goal: The goal. -->\n", "## Note\n\n<!-- note: A note. -->\n")
+
+
+def _overlay_broken() -> list[tuple[str, dict[str, str]]]:
+    """Overlays that do not load, each with the template it extends."""
+    def overlay(front: str, body: str = "") -> dict[str, str]:
+        return {"plan.md": OVERLAID, "plan.overlay.md": f"---\nextends: plan\n{front}---\n{body}"}
+    return [
+        ("overlay-unknown-key", overlay("reader: fleet\nversion: 2.0.0\n")),
+        ("overlay-unknown-one", overlay("reader: fleet\n")),
+        ("overlay-extends", {"plan.md": OVERLAID, "plan.overlay.md": "---\nextends: other\n---\n"}),
+        ("overlay-no-extends", {"plan.md": OVERLAID, "plan.overlay.md": "---\nsays: x\n---\n"}),
+        ("overlay-alone", {"plan.md": OVERLAID, "other.overlay.md": "---\nextends: other\n---\n"}),
+        ("overlay-tags", overlay("tags: meeting\n")),
+        ("overlay-rules", overlay("rules: [refuse]\n")),
+        ("overlay-example", overlay("example: [1]\n")),
+        ("overlay-fields", overlay("fields:\n  - kind: text\n")),
+        ("overlay-heading", overlay("fields:\n  - name: goal\n    heading: Aim\n")),
+        ("overlay-says", overlay("fields:\n  - name: why\n    kind: text\n    says: Why.\n")),
+        ("overlay-section-unknown", overlay("", "\n## Aim\n\n<!-- aim: The aim. -->\n")),
+        ("overlay-section-twice", overlay("", "\n## Goal\n\n<!-- goal: One. -->\n\n## Goal\n\n<!-- goal: Two. -->\n")),
+        ("overlay-rename", overlay("", "\n## Aim\n\n<!-- goal: The aim. -->\n")),
+        ("overlay-no-section", overlay("fields:\n  - name: why\n    kind: text\n")),
+        ("overlay-loosens-rule", overlay("rules:\n  required: warn\n  words: \"off\"\n")),
+        ("overlay-refuses-a-warning", overlay("rules:\n  words: refuse\n")),
+        ("overlay-loosens-field", overlay("fields:\n  - name: goal\n    required: false\n    max_words: 80\n    kind: list\n"
+                                         "  - name: risks\n    none_ok: false\n  - name: size\n    choices: [\"small\", \"huge\"]\n")),
+        ("overlay-limit-off", overlay("fields:\n  - name: goal\n    max_words: 0\n")),
+        ("overlay-none-ok-on", overlay("fields:\n  - name: goal\n    none_ok: true\n")),
+        ("overlay-no-choices", overlay("fields:\n  - name: size\n    choices: []\n")),
+    ]
+
+
+# Template repositories: a project's checkout with its se.toml pins, se.lock and clones, the
+# machine's local.toml and what git answers, resolved by `catalog` (docs/templates.md "Template
+# repositories"). Paths in errors are written from `<tmp>`, the case's own folder.
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
+
+
+def _note(name: str) -> str:
+    return MINIMAL.format(name=name, extra=ISSUE_CREATE)
+
+
+def _repository_sets() -> list[dict]:
+    """Each case: its name, the files of the checkout `app/` and beside it, the local.toml, the
+    HEAD of each clone and what origin's integration branch holds."""
+    clone = ".se/modules/shared"
+    pinned = {f"{clone}/.git/index": "", f"{clone}/templates/shared.md": _note("shared"),
+              f"{clone}/templates/handover.md": _note("handover"),
+              f"{clone}/templates/own.md": _note("own")}
+    toml = 'project = {{}}\n\n[templates]\nrepositories = {listed}\n\n[components.shared]\n{pin}\n'
+    def app(listed: str = '["shared"]', pin: str = f'ref = "{SHA}"', **files: str) -> dict[str, str]:
+        made = {"se.toml": toml.format(listed=listed, pin=pin), "templates/own.md": _note("own")}
+        made.update({key.replace("__", "/").replace("_dot_", "."): value for key, value in files.items()})
+        return {f"app/{key}": value for key, value in made.items()}
+    heads = {clone: SHA}
+    lock = '[components.shared]\nversion = "1.3.0"\nref = "' + SHA + '"\n'
+    return [
+        {"name": "own-only", "files": {"app/templates/own.md": _note("own")}},
+        {"name": "no-templates", "files": {"app/README.md": "An app.\n"}},
+        {"name": "origin", "files": {"app/templates/own.md": _note("own")},
+         "origin": {"origin/main": {"templates/own.md": _note("own").replace("A template.", "At origin."),
+                                    "templates/extra.md": _note("extra"), "templates/sub/deep.md": _note("deep"),
+                                    "templates/notes.txt": "x", "README.md": "x"}}},
+        {"name": "origin-terms-only", "files": {"app/templates/own.md": _note("own")},
+         "origin": {"origin/main": {"templates/terms.toml": "[[terms]]\nterm = \"x\"\n"}}},
+        {"name": "integration-branch", "files": {"app/se.toml": '[project]\nintegration_branch = "trunk"\n',
+                                                 "app/templates/own.md": _note("own")},
+         "origin": {"origin/trunk": {"templates/trunk.md": _note("trunk")},
+                    "origin/main": {"templates/main.md": _note("main")}}},
+        {"name": "pinned", "files": {**app(), **{f"app/{key}": value for key, value in pinned.items()}}, "heads": heads},
+        {"name": "pinned-path", "files": {**app(pin=f'ref = "{SHA}"\npath = "sub"'),
+                                          f"app/{clone}/.git/index": "",
+                                          f"app/{clone}/sub/templates/shared.md": _note("shared")}, "heads": heads},
+        {"name": "version-locked", "files": {**app(pin='version = "^1.2"'), "app/se.lock": lock,
+                                             **{f"app/{key}": value for key, value in pinned.items()}}, "heads": heads},
+        {"name": "version-unlocked", "files": {**app(pin='version = "^2.0"'), "app/se.lock": lock,
+                                               **{f"app/{key}": value for key, value in pinned.items()}}, "heads": heads},
+        {"name": "go-pin", "files": {**app(pin='go = "go.mod"'), "app/go.mod": "module app\n\nrequire (\n\tshared v1.3.0 // the templates\n)\n",
+                                     "app/se.lock": lock, **{f"app/{key}": value for key, value in pinned.items()}}, "heads": heads},
+        {"name": "go-pin-no-require", "files": {**app(pin='go = true'), "app/go.mod": "module app\n"}},
+        {"name": "not-a-component", "files": app(listed='["ghost"]')},
+        {"name": "not-fetched", "files": {**app(), f"app/{clone}/templates/shared.md": _note("shared")}},
+        {"name": "wrong-head", "files": {**app(), **{f"app/{key}": value for key, value in pinned.items()}},
+         "heads": {clone: OTHER_SHA}},
+        {"name": "head-fails", "files": {**app(), **{f"app/{key}": value for key, value in pinned.items()}}},
+        {"name": "no-templates-folder", "files": {**app(), f"app/{clone}/.git/index": ""}, "heads": heads},
+        {"name": "local-path", "files": {**app(), "checkouts/shared/templates/shared.md": _note("shared")},
+         "local": '[paths]\nshared = "../../checkouts/shared"\n'},
+        {"name": "local-path-missing", "files": app(), "local": '[paths]\nshared = "../../nowhere"\n'},
+        {"name": "local-unknown", "files": app(), "local": "[colours]\nred = 1\n"},
+        {"name": "local-paths-not-strings", "files": app(), "local": "[paths]\nshared = 1\n"},
+        {"name": "list-not-list", "files": app(listed='"shared"')},
+        {"name": "list-twice", "files": app(listed='["shared", "Shared"]')},
+        {"name": "list-empty", "files": app(listed="[]")},
+        {"name": "unknown-key", "files": app(pin=f'ref = "{SHA}"\ncolour = "red"')},
+        {"name": "url", "files": app(pin=f'ref = "{SHA}"\nurl = "x"')},
+        {"name": "short-ref", "files": app(pin='ref = "0123"')},
+        {"name": "ref-and-version", "files": app(pin=f'ref = "{SHA}"\nversion = "^1"')},
+        {"name": "bad-range", "files": app(pin='version = "latest"')},
+        {"name": "bad-path", "files": app(pin=f'ref = "{SHA}"\npath = "../up"')},
+        {"name": "renamed", "files": {"app/se.toml": '[templates]\nrepositories = ["shared"]\n\n[modules.shared]\nref = "x"\n'}},
+        {"name": "overlay-in-repository", "files": {
+            **app(), **{f"app/{key}": value for key, value in pinned.items()},
+            f"app/{clone}/templates/plan.md": OVERLAID, f"app/{clone}/templates/plan.overlay.md": OVERLAY}, "heads": heads},
+        {"name": "project-overlay-of-repository", "files": {
+            **app(), **{f"app/{key}": value for key, value in pinned.items()},
+            "app/templates/shared.overlay.md": "---\nextends: shared\n---\n"}, "heads": heads},
+    ]
+
+
+class CaseGit:
+    """The git a repository case gives: each clone's HEAD and what origin's refs hold; any other
+    command fails, as git without a repository does."""
+
+    def __init__(self, root: Path, case: dict) -> None:
+        self.root, self.case = root, case
+
+    def run(self, argv: list[str], *, cwd=None, env=None, stdin=None, timeout=None):
+        where = Path(cwd) if cwd is not None else None
+        if argv[:1] == ["-C"]:
+            where, argv = Path(argv[1]), argv[2:]
+        relative = where.resolve().relative_to(self.root).as_posix() if where is not None and \
+            where.resolve().is_relative_to(self.root) else None
+        def done(code: int, out: str = "", err: str = "") -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(argv, code, out.encode(), err.encode())
+        if argv == ["rev-parse", "HEAD"] and relative is not None:
+            head = self.case.get("heads", {}).get(relative.removeprefix("app/"))
+            return done(0, head + "\n") if head else done(128, "", "fatal: not a git repository\n")
+        origin = self.case.get("origin", {}) if relative == "app" else {}
+        if argv[:3] == ["ls-tree", "-r", "--name-only"] and argv[3] in origin:
+            return done(0, "".join(f"{path}\n" for path in sorted(origin[argv[3]])
+                                   if path.startswith(argv[5] + "/")))
+        if argv[:1] == ["show"] and ":" in argv[1]:
+            ref, path = argv[1].split(":", 1)
+            if path in origin.get(ref, {}):
+                return done(0, origin[ref][path])
+        return done(128, "", f"fatal: Not a valid object name {argv[-1]}\n")
+
+
+@contextmanager
+def _local(path: Path):
+    modules = templates._sibling("se_modules")
+    saved = modules.default_local_config
+    modules.default_local_config = lambda: path
+    try:
+        yield
+    finally:
+        modules.default_local_config = saved
+
+
+def _resolved(case: dict) -> dict:
+    """What `catalog` resolves for the case's checkout: each template's name, repository, file and
+    digest, or the error."""
+    with tempfile.TemporaryDirectory() as folder:
+        tmp = Path(folder).resolve()
+        for path, text in case["files"].items():
+            (tmp / path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp / path).write_text(text, encoding="utf-8", newline="\n")
+        local = tmp / "machine" / ".se" / "local.toml"
+        if case.get("local") is not None:
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_text(case["local"], encoding="utf-8", newline="\n")
+        with git_door.use(CaseGit(tmp, case)), _local(local):
+            try:
+                loaded = templates.catalog(tmp / "app")
+            except templates.TemplateError as error:
+                return {**case, "error": str(error).replace(str(tmp), "<tmp>")}
+    return {**case, "templates": [[template.name, template.repository, template.path, template.digest]
+                                  for template in sorted(loaded.values(), key=lambda item: item.name)]}
+
+
 def _broken() -> list[tuple[str, dict[str, str]]]:
     """Template sets that do not load, each named, with its files."""
     minimal = MINIMAL.format(name="one", extra=ISSUE_CREATE)
@@ -510,7 +976,7 @@ def _broken() -> list[tuple[str, dict[str, str]]]:
         "one.md": minimal.replace("    kind: text\n", "    node: two@2.0.0\n"), "two.md": two}))
     sets.append(("node-entry-kind", {
         "one.md": minimal.replace("    kind: text\n", "    entries: two@1.0.0\n"), "two.md": two}))
-    return sets
+    return sets + _overlay_broken()
 
 
 def _fixture(name: str, files: dict[str, str], bodies: dict[str, list[str]] | None = None) -> dict:
@@ -577,6 +1043,15 @@ def build() -> dict[str, str]:
     made["scoped.json"] = _fixture("scoped", {"scoped.md": SCOPED_TEMPLATE}, {"scoped": [
         SCOPED_BODY, SCOPED_BODY.replace("idea", "plan"), "No marker here.\n",
         "Text.\n\n<!-- se:scoped -->\n\nNo section.\n"]})
+    overlaid_body = ("Owner: bob\n\n## Goal\n\nWe ship it.\n\n## Risks\n\nNone\n\n## Size\n\nlarge\n\n"
+                     "## Why\n\nIt is due.\n")
+    made["overlays.json"] = _fixture("overlays", {"plan.md": OVERLAID, "plan.overlay.md": OVERLAY,
+                                                  "subplan.md": CHILD}, {"plan": [
+        overlaid_body, overlaid_body.replace("Owner: bob\n\n", ""),
+        overlaid_body.replace("We ship it.", " ".join(["word"] * 25))]})
+    made["repositories.json"] = {"generated": GENERATED.format(source="the checkouts below"),
+                                 "set": "repositories",
+                                 "cases": [_resolved(case) for case in _repository_sets()]}
     errors = []
     for name, files in _broken():
         try:

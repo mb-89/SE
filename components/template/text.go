@@ -3,6 +3,8 @@ package template
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"regexp"
 	"sort"
 	"strconv"
@@ -98,7 +100,9 @@ func repr(v any) string {
 	case int:
 		return strconv.Itoa(x)
 	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64)
+		return pyFloat(x)
+	case *big.Int:
+		return x.String()
 	case []any:
 		parts := make([]string, len(x))
 		for i, item := range x {
@@ -113,6 +117,35 @@ func repr(v any) string {
 		return "{" + strings.Join(parts, ", ") + "}"
 	}
 	return fmt.Sprint(v)
+}
+
+// pyFloat is Python's repr of a float: the shortest digits that read back, in positional
+// notation from 1e-4 up to 1e16, where a whole number keeps its ".0".
+func pyFloat(f float64) string {
+	switch {
+	case math.IsNaN(f):
+		return "nan"
+	case math.IsInf(f, 1):
+		return "inf"
+	case math.IsInf(f, -1):
+		return "-inf"
+	}
+	exp := 0
+	if f != 0 {
+		exp = int(math.Floor(math.Log10(math.Abs(f))))
+		digits := strconv.FormatFloat(f, 'e', -1, 64)
+		if at := strings.LastIndexByte(digits, 'e'); at >= 0 {
+			exp, _ = strconv.Atoi(digits[at+1:])
+		}
+	}
+	if exp < -4 || exp >= 16 {
+		return strconv.FormatFloat(f, 'e', -1, 64)
+	}
+	text := strconv.FormatFloat(f, 'f', -1, 64)
+	if !strings.ContainsAny(text, ".") {
+		text += ".0"
+	}
+	return text
 }
 
 func reprString(s string) string {
