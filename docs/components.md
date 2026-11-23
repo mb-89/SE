@@ -20,8 +20,8 @@ Every part is a **component**; "plugin", "part" and "module" name nothing else
   itself a host, whose adapters and styles are its components; kern is a component of SE and a host
   of its own components.
 - A component lives in its host's tree or in a repository of its own. One in its host's tree, such as
-  kern's `components/github` or obs's `adapters/html`, is part of its host's release: nothing finds
-  it, and no list names it. This note is about the second kind, a **component repository**.
+  kern's `components/github`, is part of its host's release: nothing finds it, and no list names
+  it. This note is about the second kind, a **component repository**.
 - A component knows nothing of its hosts. It can be required by several hosts, and it can run by
   itself.
 

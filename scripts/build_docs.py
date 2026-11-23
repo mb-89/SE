@@ -59,24 +59,60 @@ def child_environment() -> dict[str, str]:
     return environment
 
 
+#: obs's Python by obs folder, as ``obs_document_command`` read it once per process.
+_PYTHON: dict[Path, str] = {}
+
+
+def obs_document_command(obs: Path) -> list[str]:
+    """obs-document as obs's own environment's Python runs it, that environment synced first by ``uv
+    run``. Not ``uv run obs-document``: uv sets VIRTUAL_ENV for it, obs passes its environment on to
+    the adapter's own ``uv run``, and uv warns there that the two environments differ."""
+    if obs not in _PYTHON:
+        result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c",
+                                 "import sys; print(sys.executable)"],
+                                cwd=ROOT, capture_output=True, text=True, env=child_environment())
+        said = result.stdout.strip().splitlines()
+        if result.returncode or not said:
+            return ["uv", "run", "--quiet", "--project", str(obs), "obs-document"]  # fails as obs says
+        _PYTHON[obs] = said[-1]
+    return [_PYTHON[obs], "-m", "obs.document"]
+
+
+#: What an obs build may print that names no note to fix, so it fails no build: obs-html cannot
+#: name the commit it was installed at, as it reads it only from obs's own tree (its
+#: src/obs_html/render.py `_editable_source_commit`), and SE builds from a copy without Git.
+KNOWN_WARNINGS = ("generation provenance: cannot resolve the generator commit",)
+
+
+def obs_warnings(output: str) -> list[str]:
+    """The lines of ``output`` that warn, except those ``KNOWN_WARNINGS`` names."""
+    return [line for line in output.splitlines()
+            if "warning" in line.casefold() and not any(known in line for known in KNOWN_WARNINGS)]
+
+
 def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = True,
                  renamed: tuple[Path, Path] | None = None) -> int:
-    """Run obs-document with ``arguments`` through the html adapter, the component obs finds among the
-    installed ones (without it, unless ``adapter``: a parse into ``--document`` only); 1 on a failure or
-    any warning. Where no ``html`` is found, obs fails naming ``obs-components install html``.
+    """Run obs-document with ``arguments`` through the adapter component ``ADAPTER``, installed first
+    where it is missing (``ready_adapter``; without it, unless ``adapter``: a parse into ``--document``
+    only); 1 on a failure or any warning, and where no ``ADAPTER`` can be installed, naming
+    ``ADAPTER_REMEDY``.
 
     Each warning is printed to stderr under ``tool``'s name; scripts/deck.py shares this run. With
     ``renamed`` (a copy's folder, its source's folder), obs's output names the source's files.
     """
+    if adapter:
+        found, refusal = ready_adapter(obs)
+        if found is None:
+            print(f"{tool}: {refusal}", file=sys.stderr)
+            return 1
     result = subprocess.run(
-        ["uv", "run", "--quiet", "--project", str(obs), "obs-document",
-         *(["--adapter", "html"] if adapter else []), *arguments],
+        [*obs_document_command(obs), *(["--adapter", ADAPTER] if adapter else []), *arguments],
         cwd=ROOT, capture_output=True, text=True, env=child_environment(),
     )
     output = result.stdout + result.stderr
     if renamed:
         output = output.replace(str(renamed[0]), str(renamed[1]))
-    warnings = [line for line in output.splitlines() if "warning" in line.casefold()]
+    warnings = obs_warnings(output)
     for line in warnings:
         print(line, file=sys.stderr)
     if result.returncode:
@@ -88,46 +124,62 @@ def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = Tru
     return 0
 
 
-# The command that installs the adapter component every build here runs through (obs's
-# spec/design_input/components.md, Choosing); a build that finds no html fails naming it.
-HTML_REMEDY = "obs-components install html"
-HTML_INSTALL = tuple(HTML_REMEDY.split())
+# The adapter component every build here runs through, docs, decks and the Timeline (obs's
+# spec/design_input/components.md, Choosing), and the command that installs it; obs builds with
+# no other, so a build installs it where it is missing.
+ADAPTER = "obs-html"
+ADAPTER_REMEDY = f"obs-components install {ADAPTER}"
+ADAPTER_INSTALL = tuple(ADAPTER_REMEDY.split())
 
 
-def html_adapter(obs: Path) -> tuple[dict | None, str]:
-    """The html adapter as obs finds it: the installed component, else the one of obs's own tree. Its
-    manifest with the folder its commands run from (``folder``), and ""; or None and obs's refusal, which
-    names ``obs-components install html``."""
+def installed_adapter(obs: Path) -> tuple[dict | None, str]:
+    """``ADAPTER`` as obs finds it among the machine's installed components: its manifest with the
+    folder its commands run from (``folder``), and ""; or None and obs's refusal, which names
+    ``ADAPTER_REMEDY``."""
     code = ("import json; from obs.adapter import adapter_location, load_adapter; "
-            "print(json.dumps({**load_adapter('html'), 'folder': str(adapter_location('html').folder)}))")
+            f"print(json.dumps({{**load_adapter({ADAPTER!r}), "
+            f"'folder': str(adapter_location({ADAPTER!r}).folder)}}))")
     result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c", code],
                             cwd=ROOT, capture_output=True, text=True, env=child_environment())
-    if result.returncode:
+    said = result.stdout.strip().splitlines()
+    if result.returncode or not said:
         refusal = (result.stderr.strip().splitlines() or [f"exit code {result.returncode}"])[-1]
         return None, refusal
-    return json.loads(result.stdout.strip().splitlines()[-1]), ""
+    return json.loads(said[-1]), ""
+
+
+#: The adapters ``ready_adapter`` found in this process, by obs folder: a build asks obs once.
+_READY: dict[Path, dict] = {}
+
+
+def ready_adapter(obs: Path) -> tuple[dict | None, str]:
+    """``ADAPTER`` as obs finds it, installed first (``ADAPTER_REMEDY``) where it is missing: its
+    manifest with ``folder``, and ""; or None and why, naming the command and obs's refusal."""
+    if obs in _READY:
+        return _READY[obs], ""
+    adapter, refusal = installed_adapter(obs)
+    if adapter is None:
+        result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), *ADAPTER_INSTALL], cwd=ROOT,
+                                capture_output=True, text=True, env=child_environment())
+        adapter, refusal = installed_adapter(obs)
+        if adapter is None:
+            said = (result.stdout + result.stderr).strip().splitlines()
+            return None, (f"obs finds no adapter component {ADAPTER} ({refusal}), and `{ADAPTER_REMEDY}` "
+                          f"from {obs} installed none ({said[-1] if said else f'exit code {result.returncode}'}). "
+                          "Install it there, where obs's remotes reach a repository that offers it")
+        print(f"build_docs: installed obs's adapter component {ADAPTER} at {adapter['folder']}", file=sys.stderr)
+    _READY[obs] = adapter
+    return adapter, ""
 
 
 def install_html(obs: Path) -> int:
-    """Install the component html (``obs-components install html``): 0 once obs finds an html to build
-    with, 1 where it finds none, naming the command.
-
-    Where no repository offers an html release, the install fails; obs then still finds the adapter of
-    its own tree, so the build runs on it, and this says so."""
-    result = subprocess.run(["uv", "run", "--quiet", "--project", str(obs), *HTML_INSTALL], cwd=ROOT,
-                            capture_output=True, text=True, env=child_environment())
-    output = (result.stdout + result.stderr).strip()
-    if output:
-        print(output, file=sys.stderr if result.returncode else sys.stdout)
-    adapter, refusal = html_adapter(obs)
+    """Install ``ADAPTER`` where it is missing (``ready_adapter``): 0 once obs finds it, saying where; 1
+    where none can be installed, naming the command."""
+    adapter, refusal = ready_adapter(obs)
     if adapter is None:
-        print(f"build_docs: obs finds no adapter component html ({refusal}). Install it with "
-              f"`{HTML_REMEDY}` from {obs}, where its remotes reach a repository that offers it",
-              file=sys.stderr)
+        print(f"build_docs: {refusal}", file=sys.stderr)
         return 1
-    if result.returncode:
-        print(f"build_docs: `{HTML_REMEDY}` installed nothing; obs builds with the html it finds "
-              f"at {adapter['folder']}")
+    print(f"build_docs: obs builds with {ADAPTER} at {adapter['folder']}")
     return 0
 
 
@@ -327,7 +379,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--document", type=Path,
                         help="also write the obs Document the page was built from to this JSON file")
     parser.add_argument("--install-html", action="store_true",
-                        help="install obs's adapter component html (obs-components install html) and stop")
+                        help="install obs's adapter component obs-html where it is missing (obs-components install obs-html) "
+                             "and stop")
     arguments = parser.parse_args(argv)
     if arguments.install_html:
         return install_html(obs_dir())

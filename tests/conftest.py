@@ -222,7 +222,8 @@ OBS_LOCK_WAIT_SECONDS = 600
 
 @pytest.fixture(scope="session")
 def obs() -> Path:
-    """The obs module at its pin with its environment built, once per checkout at a time.
+    """The obs module at its pin with its environment built and its adapter component obs-html
+    installed, once per checkout at a time.
 
     The suite's workers run test files in parallel (pyproject.toml), and every obs build syncs the module
     and runs it through uv: a fresh checkout must clone and build it once, never twice at once. The
@@ -241,6 +242,11 @@ def obs() -> Path:
             directory = build_docs.obs_dir()
         subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
                        env=build_docs.child_environment())
+        # The adapter component every build runs through, installed where it is missing, as a build
+        # installs it: once here, so no test's build waits for it.
+        adapter, refusal = build_docs.ready_adapter(directory)
+        if adapter is None:
+            pytest.fail(refusal)
         os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it
         return directory
 

@@ -684,6 +684,8 @@ of the whole suite is judged against the shards times it; otherwise it is the wh
   - The guard fetches that commit and passes each deleted test the moved file holds there; one it
     lacks, one outside the folder, and every test of a destination it cannot fetch are named by
     name.
+  - An authored-content file inside the folder is held the same way: each of its sentences the
+    moved file holds there passes, and every other is named as `<path>: <sentence>`.
 - Leave the worktree alone while the complete suite runs: tests that read the checkout (the
   generated layouts, the references, the public check) would see an edit made mid-run and fail or
   pass on files the run never started with.

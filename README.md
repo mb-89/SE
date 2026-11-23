@@ -511,10 +511,13 @@ component (`[components.obs]` in `se.toml`, found beside SE's repository) builds
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
-obs builds it, and every decision deck, with the adapter component `html`, which it finds among
-the machine's installed components, else in its own tree. `build_docs.py --install-html` runs
-`obs-components install html` and fails, naming that command, where obs finds no `html`; the setup
-scripts in se's checkout, the `check` job and the docs workflow run it before they build.
+obs builds it, every decision deck and the Timeline with the adapter component `obs-html`, which
+it finds among the machine's installed components only. Each build installs it where it is missing
+(`obs-components install obs-html`) and fails, naming that command, where none can be installed.
+
+`build_docs.py --install-html` does only that; the setup scripts in se's checkout, the `check` job
+and the docs workflow run it before they build. A build fails on every warning obs prints, except
+obs-html's that it cannot name its own commit (`build_docs.py` `KNOWN_WARNINGS`).
 
 The build reads a copy of the repository in which no note asks for a verdict, so the worked
 decision note shows as a page to read, with no Send; the note itself still asks, for the decks
@@ -1359,6 +1362,13 @@ paths = ["components/", "se.lock"] # optional: run only where the change touches
   - A suite beside that passed without running a test is named in one line after its time, and
     its verdict stands; `scripts/suite_runs.py` says which output counts as no test run.
 
+Before either runs, a checkout that still holds a moved folder's output is refused: a folder
+with ignored files and no tracked one, where git deleted tracked files before, as a move to another
+repository leaves its tool environments and bytecode behind.
+
+The refusal names each folder and its remedy, `git clean -fdX <folder>`; a folder git never
+tracked, such as `.venv`, is no such folder.
+
 The two budgets are apart, and neither spends the other's time:
 
 - Each run prints and reports both times, `Suite: <result>; <time> (target, limit); go-components passed
@@ -2041,7 +2051,7 @@ gated push and the pull request, and the Stop hook's check.
 
 | Command | Usage | What it does |
 |---|---|---|
-| `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue |
+| `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue. It first refuses an se outside the project's se pin ([components.se]), naming both versions, and never exits non-zero without a message |
 | `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out |
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
 | `work_tickets.py identity` | `work_tickets.py identity --worktree WORKTREE` | set the checkout's commit identity (machine-local public_identity, else se.toml project.identity) as sync does, without fetching or merging; scripts/setup.sh, setup.ps1 and the session's start (bootstrap.sh --hook) run it |

@@ -48,9 +48,10 @@ jobs:
         run: |
           python3 scripts/se_modules.py sync
           bash scripts/bootstrap.sh --binary
-      # obs builds with the adapter component html, found among the installed ones (README
-      # "Documentation"); a build that finds none fails naming obs-components install html.
-      - name: Install obs's adapter component html
+      # obs builds with the adapter component obs-html, found among the installed ones (README
+      # "Documentation"); a build installs it where it is missing, and fails naming
+      # obs-components install obs-html where it cannot.
+      - name: Install obs's adapter component obs-html
         run: python3 scripts/build_docs.py --install-html
       - name: Build the documentation
         run: |

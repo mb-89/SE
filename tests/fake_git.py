@@ -1055,6 +1055,8 @@ class FakeGit:
         folder that git neither tracks nor ignores."""
         repository = self.find(call.where)
         end = "\0" if "-z" in call.args else "\n"
+        if "--ignored" in call.args or "-i" in call.args:
+            raise Refusal(129, "fake git: no `ls-files --ignored`; the fake lists no ignored files")
         if "--others" not in call.args and "-o" not in call.args:
             paths = within(sorted(repository.index), self.pathspecs(repository, call))
             if "-s" in call.args or "--stage" in call.args:

@@ -296,7 +296,7 @@ def test_the_suite_the_go_checks_and_the_legs_run_only_where_the_decision_says_r
     jobs = jobs_of_workflow()
     for gated in ("kern-platforms", "kern-platforms-queue"):
         assert "needs: trust\n    if: needs.trust.outputs.suite == 'run'" in jobs[gated], gated
-    for step in ("SE's Go components vet", "Install obs's adapter component html",
+    for step in ("SE's Go components vet", "Install obs's adapter component obs-html",
                  "The complete suite and the suites beside it", "Keep the suite's file seconds",
                  "Keep the suite's test reports", "Mark the full pass", "Name the trusted records"):
         block = re.search(rf"(?ms)- name: {re.escape(step)}.*?\n(?=      - |\Z)", jobs["check"])[0]

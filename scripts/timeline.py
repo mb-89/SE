@@ -425,7 +425,7 @@ def rows(snapshot: dict, ages: bool = False) -> list[dict]:
 COLUMNS = {"repository": "Repo", "place": "Place", "date": "Date", "number": "Item",
            "subject": "Title", "status": "Status", "mark": "Mark"}
 PAGE_SIZE = 20
-# The live read (obs's live data: adapters/html/spec/generic-tables.md, Current data): GitHub's
+# The live read (obs-html's live data: its spec/generic-tables.md, Current data): GitHub's
 # public REST list of a repository's issues, which needs no token and answers any page's origin.
 ISSUES_URL = ("https://api.github.com/repos/{name}/issues"
               "?state=all&since={{since}}&sort=updated&direction=asc&per_page=100")
@@ -541,6 +541,10 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
     time, so a live read asks for what changed since the snapshot). 0 built, 1 obs failed."""
     build_docs = sibling("build_docs")
     obs = build_docs.obs_dir()
+    adapter, refusal = build_docs.ready_adapter(obs)
+    if adapter is None:
+        print(f"timeline: {refusal}", file=sys.stderr)
+        return 1
     environment = build_docs.child_environment()
     environment["SOURCE_DATE_EPOCH"] = str(int(datetime.fromisoformat(read_at.replace("Z", "+00:00")).timestamp()))
     with tempfile.TemporaryDirectory() as scratch:
@@ -552,13 +556,12 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
         config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
         destination.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["uv", "run", "--quiet", "--project", str(obs), "obs-document", "--adapter", "html", "--config", str(config),
+            [*build_docs.obs_document_command(obs), "--adapter", build_docs.ADAPTER, "--config", str(config),
              "--source", str(folder / "manifest.md"), "--destination", str(destination.resolve())],
             cwd=ROOT, capture_output=True, text=True, env=environment)
         output = (result.stdout + result.stderr).replace(str(folder), "<timeline notes>")
-    for line in output.splitlines():
-        if "warning" in line.casefold():
-            print(f"timeline: obs {line}", file=sys.stderr)
+    for line in build_docs.obs_warnings(output):
+        print(f"timeline: obs {line}", file=sys.stderr)
     if result.returncode:
         print(f"timeline: obs-document failed with exit code {result.returncode}:\n{output}", file=sys.stderr)
         return 1

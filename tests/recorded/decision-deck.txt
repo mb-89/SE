@@ -722,5 +722,13 @@
         }
       }
     }
-  }
+  },
+  "components": [
+    {
+      "name": "obs-html",
+      "kind": "adapter",
+      "version": "<the version installed on the build machine>",
+      "commit": "<its commit>"
+    }
+  ]
 }

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -526,11 +527,18 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
-def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, str]:
+MOVED_GUIDE = "The adapter renders a page.\nIt links each note.\n"
+
+
+def moved_folder_case(case: Path, destination_tests: str | None,
+                      destination_guide: str | None = None) -> tuple[Path, str]:
     """A clone on the branch `move-html` that deletes the folder `adapters/html` with its two tests
     and the test `test_outside` beside it, its origin `<case>/app.git`; beside it the repository
     `html.git` holds `destination_tests` as `tests/test_html.py` (the folder's
-    `tests/test_html.py`, moved to its root) at the commit returned, or is missing where it is None."""
+    `tests/test_html.py`, moved to its root) at the commit returned, or is missing where it is None.
+
+    With `destination_guide`, the clone's authored content is `**/*.md` and the folder also holds
+    MOVED_GUIDE as `spec/guide.md`, which the destination holds as `destination_guide`."""
     case.mkdir()
     repository = case / "clone"
     repository.mkdir()
@@ -541,6 +549,12 @@ def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, 
     folder = repository / "adapters" / "html" / "tests"
     folder.mkdir(parents=True)
     (folder / "test_html.py").write_text(MOVED_TESTS, encoding="utf-8")
+    if destination_guide is not None:
+        (repository / "se.toml").write_text('[project]\nauthored_content = ["**/*.md"]\n',
+                                             encoding="utf-8")
+        (repository / "adapters" / "html" / "spec").mkdir()
+        (repository / "adapters" / "html" / "spec" / "guide.md").write_text(MOVED_GUIDE,
+                                                                           encoding="utf-8")
     (repository / "tests").mkdir()
     (repository / "tests" / "test_app.py").write_text(
         "def test_outside():\n    pass\n", encoding="utf-8")
@@ -560,6 +574,9 @@ def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, 
         assert git(destination, "config", key, value).returncode == 0
     (destination / "tests").mkdir()
     (destination / "tests" / "test_html.py").write_text(destination_tests, encoding="utf-8")
+    if destination_guide is not None:
+        (destination / "spec").mkdir()
+        (destination / "spec" / "guide.md").write_text(destination_guide, encoding="utf-8")
     assert git(destination, "add", ".").returncode == 0
     assert git(destination, "commit", "-qm", "the html adapter").returncode == 0
     fake_git.init(case / "html.git", "--bare", "-b", "main")
@@ -633,6 +650,48 @@ def test_guard_still_requires_by_name_a_deleted_test_outside_the_moved_folder(
                               "sentence: test_outside, each compared")
 
 
+def test_guard_passes_the_authored_sentences_of_a_moved_folder_its_destination_holds(
+    worktree: Path,
+) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-prose-case", MOVED_TESTS,
+                                           MOVED_GUIDE)
+    report = removed_report(f"Moved: adapters/html to html at {commit}", "test_outside")
+
+    removed = work_tickets.guard(repository, "move-html", report)
+
+    assert removed[3:] == ["adapters/html/spec/guide.md: The adapter renders a page.",
+                           "adapters/html/spec/guide.md: It links each note."]
+
+
+def test_guard_refuses_a_moved_authored_sentence_its_destination_lacks(worktree: Path) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-prose-missing", MOVED_TESTS,
+                                           "The adapter renders a page.\n")
+    line = f"Moved: adapters/html to html at {commit}"
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", removed_report(line, "test_outside"))
+
+    message = str(refused.value)
+    assert message.startswith("Field report must name each deleted or renamed test and authored "
+                              "sentence: adapters/html/spec/guide.md: It links each note., each")
+    assert "The adapter renders a page." not in message
+    named = removed_report(line, "test_outside", "adapters/html/spec/guide.md: It links each note.")
+    assert work_tickets.guard(repository, "move-html", named)
+
+
+def test_guard_still_requires_by_name_a_moved_folders_sentence_without_a_move_line(
+    worktree: Path,
+) -> None:
+    repository, _ = moved_folder_case(worktree.parent / "moved-prose-unnamed", MOVED_TESTS,
+                                      MOVED_GUIDE)
+    report = removed_report("test_outside", "test_renders_a_page", "test_renders_a_link")
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", report)
+
+    assert "adapters/html/spec/guide.md: The adapter renders a page." in str(refused.value)
+
+
 @pytest.mark.parametrize("commit", [None, "fedcba9876543210fedcba9876543210fedcba98"])
 def test_guard_refuses_a_moved_folder_whose_destination_cannot_be_fetched(
     worktree: Path, commit: str | None,
@@ -650,6 +709,43 @@ def test_guard_refuses_a_moved_folder_whose_destination_cannot_be_fetched(
     assert message.startswith(f"Cannot check the moved-folder line {line!r}: html at ")
     assert "cannot be fetched" in message
     assert "name each test the branch deletes under adapters/html under Removed behaviour" in message
+
+
+def test_deliver_refuses_an_se_outside_the_projects_se_pin_naming_both_versions(
+        worktree, monkeypatch, capsys):
+    (worktree / "se.toml").write_text('[components.se]\nversion = "^1.0"\n', encoding="utf-8")
+    running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: pytest.fail("delivered"))
+
+    assert work_tickets.main(["deliver", "--worktree", str(worktree)]) == 1
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: deliver: this session's se (")
+    assert "lies outside the project's se pin" in error and "nothing was pushed" in error
+    assert f"pins se at version '^1.0', but this check runs se {running}" in error
+
+
+def test_deliver_within_the_projects_se_pin_goes_on(worktree, monkeypatch):
+    running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    (worktree / "se.toml").write_text(f'[components.se]\nversion = "^{running.split(".")[0]}.0"\n',
+                                      encoding="utf-8")
+    work_tickets.refuse_se_outside_pin(worktree)
+    (worktree / "se.toml").write_text("[project]\n", encoding="utf-8")
+    work_tickets.refuse_se_outside_pin(worktree)
+
+
+@pytest.mark.parametrize("stop, said", [
+    (SystemExit(3), "error: work_tickets.py deliver stopped with exit code 3 and no message"),
+    (work_tickets.QueueError(""), "error: QueueError without a message"),
+])
+def test_deliver_never_exits_non_zero_without_a_message(worktree, monkeypatch, capsys, stop, said):
+    def stopped(root):
+        raise stop
+
+    monkeypatch.setattr(work_tickets, "refuse_se_outside_pin", stopped)
+
+    assert work_tickets.main(["deliver", "--worktree", str(worktree)]) == (3 if isinstance(stop, SystemExit) else 1)
+    assert capsys.readouterr().err.startswith(said)
 
 
 def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_request(
@@ -2605,6 +2701,49 @@ def test_a_ci_suite_within_the_limit_reports_its_time_as_a_notice(worktree, monk
 
     assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 0
     assert "::notice title=se suite time::Suite time: 40.0 s (limit 120 s)" in capsys.readouterr().out
+
+
+def test_leftover_folders_are_a_moved_folders_ignored_output_never_a_folder_git_never_tracked(
+        tmp_path, monkeypatch):
+    """`adapters/html` holds ignored output only, where git deleted its files; `.venv` and
+    `scripts/__pycache__` were never tracked, and `notes.log` is a file, no folder."""
+    asked = []
+
+    def git(root, *arguments, **_):
+        asked.append(arguments)
+        answers = {
+            "--others": ".venv/\0scripts/__pycache__/\0adapters/html/.venv/\0adapters/html/src/x.pyc\0"
+                        "notes.log\0",
+            "-z": "scripts/a.py\0adapters/README.md\0",
+            "log": "adapters/html/pyproject.toml\nadapters/html/src/x.py\n",
+        }
+        key = "log" if arguments[0] == "log" else arguments[1]
+        return subprocess.CompletedProcess(arguments, 0, answers[key], "")
+
+    monkeypatch.setattr(work_tickets, "run_git", git)
+
+    assert work_tickets.leftover_folders(tmp_path) == ["adapters/html"]
+    assert asked[-1][-4:] == ("--", ".venv", "adapters/html", "scripts/__pycache__")
+    assert "--no-renames" in asked[-1] and "--diff-filter=D" in asked[-1]
+
+
+def test_a_checkout_git_cannot_list_has_no_leftover_folders(tmp_path, monkeypatch):
+    monkeypatch.setattr(work_tickets, "run_git", lambda root, *arguments, **_: (
+        subprocess.CompletedProcess(arguments, 128, "", "fatal: not a git repository")))
+    assert work_tickets.leftover_folders(tmp_path) == []
+
+
+def test_suite_refuses_a_checkout_that_holds_a_moved_folders_output_naming_the_remedy(
+        worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "leftover_folders", lambda root: ["adapters/html", "kern"])
+    monkeypatch.setattr(work_tickets, "suite_budget", lambda root: pytest.fail("the suite ran"))
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+
+    error = capsys.readouterr().err
+    assert "still holds the ignored output of 2 folder(s) whose tracked files git deleted" in error
+    assert "adapters/html, kern" in error
+    assert "`git clean -fdX adapters/html` and `git clean -fdX kern`, then run again" in error
 
 
 def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, monkeypatch, capsys):

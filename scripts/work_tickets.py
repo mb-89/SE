@@ -2410,11 +2410,16 @@ def fetched_destination(root: Path, moved: MovedFolder, scratch: Path) -> str:
     return resolved.stdout.strip()
 
 
-def tests_at_destination(root: Path, moved: MovedFolder,
-                         places: list[tuple[str, str]]) -> set[tuple[str, str]]:
-    """The (path, name) pairs of `places` the destination of `moved` holds: the same test, found as
-    `deleted_test_places` finds tests, in the file at the path rebased from the folder."""
+def held_at_destination(
+    root: Path, moved: MovedFolder, places: list[tuple[str, str]],
+    sentences: list[tuple[str, str]] = (),
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """The (path, name) pairs of `places` and the (path, sentence) pairs of `sentences` the
+    destination of `moved` holds, in the file at the path rebased from the folder: the same test,
+    found as `deleted_test_places` finds tests, and the same authored sentence, split as
+    `authored_sentences` splits it."""
     held: set[tuple[str, str]] = set()
+    kept: set[tuple[str, str]] = set()
     with tempfile.TemporaryDirectory(prefix="se-moved-") as directory:
         scratch = Path(directory)
         commit = fetched_destination(root, moved, scratch)
@@ -2422,21 +2427,31 @@ def tests_at_destination(root: Path, moved: MovedFolder,
             path for path in run_git(scratch, "ls-tree", "-r", "--name-only", commit)
             .stdout.splitlines()
         }
+        texts: dict[str, str] = {}
+
+        def text(path: str) -> str:
+            target = moved.destination(path)
+            if target not in texts:
+                shown = run_git(scratch, "show", f"{commit}:{target}") if target in files else None
+                texts[target] = shown.stdout if shown is not None and shown.returncode == 0 else ""
+            return texts[target]
+
         names: dict[str, set[str]] = {}
         for path, name in places:
-            target = moved.destination(path)
-            if target not in names:
-                text = ""
-                if target in files:
-                    shown = run_git(scratch, "show", f"{commit}:{target}")
-                    text = shown.stdout if shown.returncode == 0 else ""
-                names[target] = {
-                    found for line in text.splitlines()
+            if path not in names:
+                names[path] = {
+                    found for line in text(path).splitlines()
                     if (found := test_name(f"-{line}")) is not None
                 }
-            if name in names[target]:
+            if name in names[path]:
                 held.add((path, name))
-    return held
+        prose: dict[str, set[str]] = {}
+        for path, sentence in sentences:
+            if path not in prose:
+                prose[path] = set(authored_sentences(text(path)))
+            if sentence in prose[path]:
+                kept.add((path, sentence))
+    return held, kept
 
 
 # Text a generator writes into an authored file is marked once, where it is written: a block between
@@ -2528,6 +2543,13 @@ def authored_sentences(text: str) -> list[str]:
 
 
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
+    """Each authored sentence `branch` removes, as `<path>: <sentence>`."""
+    return [f"{path}: {sentence}" for path, sentence in deleted_authored_places(root, branch)]
+
+
+def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
+    """The (path, sentence) pairs of the authored sentences `branch` removes: a sentence of an
+    authored file where it forked that no authored file on the branch holds."""
     globs = authored_content_globs(root)
     if not globs:
         return []
@@ -2581,14 +2603,13 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
         for path, revision in new_files
         for sentence in authored_sentences(content(path, revision))
     }
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     for path, revision in old_files:
         if path is None:
             continue
         for sentence in authored_sentences(content(path, revision)):
-            removed = f"{path}: {sentence}"
-            if sentence not in new_sentences and removed not in found:
-                found.append(removed)
+            if sentence not in new_sentences and (path, sentence) not in found:
+                found.append((path, sentence))
     return found
 
 
@@ -2608,10 +2629,13 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     branch = branch_head(root, branch)
     places = deleted_test_places(root, branch)
     removed_tests = list(dict.fromkeys(name for _, name in places))
-    removed_sentences = deleted_authored_sentences(root, branch)
+    removed_places = deleted_authored_places(root, branch)
+    removed_sentences = [f"{path}: {sentence}" for path, sentence in removed_places]
     section = section_content(report, REMOVED_SECTION)
     named = re.sub(r"\s+", " ", "\n".join(section))
     unnamed = [(path, name) for path, name in places if name not in named]
+    unnamed_prose = [(path, sentence) for path, sentence in removed_places
+                     if f"{path}: {sentence}" not in named]
     moves = moved_folders(section)
     checked: list[str] = []
     def owner(path: str) -> MovedFolder | None:
@@ -2621,12 +2645,14 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
 
     for moved in moves:
         under = [place for place in unnamed if owner(place[0]) == moved]
-        held = tests_at_destination(root, moved, under)
+        prose = [place for place in unnamed_prose if owner(place[0]) == moved]
+        held, kept = held_at_destination(root, moved, under, prose)
         checked.append(moved.line)
         unnamed = [place for place in unnamed if place not in held]
+        unnamed_prose = [place for place in unnamed_prose if place not in kept]
     missing = [
         *dict.fromkeys(name for _, name in unnamed),
-        *[sentence for sentence in removed_sentences if sentence not in named],
+        *[f"{path}: {sentence}" for path, sentence in unnamed_prose],
     ]
     if missing:
         lines = (
@@ -3538,6 +3564,23 @@ def platform_warning(root: Path, report: str, check_runs: Path | None = None) ->
            "pass its answer as field-report --check --check-runs <file>." if unread else
            "The work pull request has no such leg yet.")
     )
+
+
+def refuse_se_outside_pin(root: Path) -> None:
+    """Refuse where the project pins se (`[components.se]`) and the se running this script lies
+    outside that pin, naming both versions: the push's public check refuses such an se
+    (pub-007, public_check.py `check_se_version`, its one owner), so a delivery stops first."""
+    check = sibling("public_check")
+    try:
+        pin = check.se_pin(root)
+        if pin is None:
+            return
+        check.check_se_version(root, check.se_commit() if "version" not in pin else None)
+    except check.SetupError as error:
+        raise QueueError(
+            f"deliver: this session's se ({SE_ROOT}) lies outside the project's se pin, so the "
+            f"push's public check would refuse it; nothing was pushed: {error}"
+        ) from error
 
 
 def deliver(root: Path) -> int:
@@ -6354,6 +6397,53 @@ def clean_commit(root: Path) -> str | None:
     return head.stdout.strip()
 
 
+def leftover_folders(root: Path) -> list[str]:
+    """The topmost folders of the checkout that hold ignored output and no tracked file, where git
+    deleted tracked files before: what a move of a folder to another repository leaves behind, as
+    git removes only its tracked files. A folder git never tracked (`.venv`, `__pycache__`) is
+    ignored output by design and none of these. None where git cannot list them (no checkout)."""
+    listed = run_git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory",
+                     "-z")
+    files = run_git(root, "ls-files", "-z")
+    if listed.returncode != 0 or files.returncode != 0:
+        return []
+    ignored = [entry for entry in listed.stdout.split("\0") if entry]
+    tracked: set[str] = set()
+    for path in files.stdout.split("\0"):
+        parts = path.split("/")[:-1]
+        tracked.update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+    candidates: set[str] = set()
+    for entry in ignored:
+        parts = entry.rstrip("/").split("/")
+        for depth in range(1, len(parts) + 1):
+            folder = "/".join(parts[:depth])
+            if folder not in tracked:
+                if depth < len(parts) or entry.endswith("/"):
+                    candidates.add(folder)
+                break
+    if not candidates:
+        return []
+    deleted = checked_git(root, "log", "--format=", "--name-only", "--no-renames", "--diff-filter=D",
+                          "--", *sorted(candidates)).splitlines()
+    return sorted(folder for folder in candidates
+                  if any(path.startswith(folder + "/") for path in deleted))
+
+
+def refuse_leftover_folders(root: Path) -> None:
+    """Refuse a checkout that holds a `leftover_folders` folder, naming each and its remedy: a run
+    there would read the folder's stale output (an importable package of stale bytecode, a stale
+    tool environment) as the moved folder's, and fail without naming it."""
+    folders = leftover_folders(root)
+    if folders:
+        raise QueueError(
+            f"{root} still holds the ignored output of {len(folders)} folder(s) whose tracked files "
+            f"git deleted, as a move to another repository leaves them: {', '.join(folders)}; a run "
+            "here would read that output as theirs. Remove it with "
+            + " and ".join(f"`git clean -fdX {folder}`" for folder in folders)
+            + ", then run again"
+        )
+
+
 def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: float) -> None:
     """Record the suite's verdict on `commit`'s tree, where the checkout still holds exactly it."""
     if commit is None or clean_commit(root) != commit:
@@ -6625,7 +6715,9 @@ def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = Fa
     A suite beside that passed without running a test, as its output reads (suite_runs.py), is
     named in one line after its time; its verdict stands.
     Records its verdict on HEAD's tree where the checkout holds exactly it (clean_commit);
-    push reads it before the integration branch is pushed."""
+    push reads it before the integration branch is pushed. First refuses a checkout that still
+    holds a moved folder's ignored output (refuse_leftover_folders)."""
+    refuse_leftover_folders(root)
     budget = suite_budget(root)
     tier_of = tier_function(root, budget.tier) if budget.tier else None
     if budget.setup:
@@ -10766,10 +10858,13 @@ def run_guard(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("deliver", "sync, check the field report, push, and create or update the pull request "
-                    "whose description carries it; files no issue",
+                    "whose description carries it; files no issue. It first refuses an se outside "
+                    "the project's se pin ([components.se]), naming both versions, and never exits "
+                    "non-zero without a message",
          WORKTREE,
          arg("--integrator-session", help=f"{SESSION_HELP} to notify"))
 def run_deliver(root: Path, args: argparse.Namespace) -> int:
+    refuse_se_outside_pin(root)
     session = config_value(
         "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
     pr = deliver(root)
@@ -11964,8 +12059,22 @@ def run_command(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return SUITE_OVER_LIMIT_EXIT_CODE
     except (QueueError, OSError, ValueError, KeyError, sibling("se_relay").RelayError) as error:
-        print(f"error: {error}", file=sys.stderr)
+        print(f"error: {said(error)}", file=sys.stderr)
         return 1
+    except SystemExit as error:
+        # A bare exit code from a step this process runs in-process says nothing; never pass it on
+        # silently. One that carries its message has printed it already.
+        if isinstance(error.code, int) and error.code != 0:
+            print(f"error: work_tickets.py {args.command} stopped with exit code {error.code} and "
+                  "no message from the step that exited; this is a defect of that step: report "
+                  "it with the command", file=sys.stderr)
+            return error.code
+        raise
+
+
+def said(error: BaseException) -> str:
+    """`error`'s message, or, where it carries none, its kind: an error is never printed empty."""
+    return str(error).strip() or f"{type(error).__name__} without a message"
 
 
 if __name__ == "__main__":
