@@ -2718,7 +2718,7 @@ def test_leftover_folders_are_a_moved_folders_ignored_output_never_a_folder_git_
             "log": "adapters/html/pyproject.toml\nadapters/html/src/x.py\n",
         }
         key = "log" if arguments[0] == "log" else arguments[1]
-        return subprocess.CompletedProcess(["git", *arguments], 0, answers[key], "")
+        return subprocess.CompletedProcess(arguments, 0, answers[key], "")
 
     monkeypatch.setattr(work_tickets, "run_git", git)
 
@@ -2729,7 +2729,7 @@ def test_leftover_folders_are_a_moved_folders_ignored_output_never_a_folder_git_
 
 def test_a_checkout_git_cannot_list_has_no_leftover_folders(tmp_path, monkeypatch):
     monkeypatch.setattr(work_tickets, "run_git", lambda root, *arguments, **_: (
-        subprocess.CompletedProcess(["git", *arguments], 128, "", "fatal: not a git repository")))
+        subprocess.CompletedProcess(arguments, 128, "", "fatal: not a git repository")))
     assert work_tickets.leftover_folders(tmp_path) == []
 
 
