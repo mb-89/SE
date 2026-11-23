@@ -2749,6 +2749,71 @@ def test_suite_refuses_a_checkout_that_holds_a_moved_folders_output_naming_the_r
     assert "`git clean -fdX adapters/html` and `git clean -fdX kern`, then run again" in error
 
 
+def leftover(root: Path, folder: str, *files: str) -> Path:
+    """`folder` under `root`, holding `files` (paths relative to it), each a few bytes."""
+    for name in files:
+        path = root / folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\0")
+    return root / folder
+
+
+def test_suite_removes_python_cache_left_in_deleted_folders_and_runs_naming_them(
+        worktree, monkeypatch, capsys):
+    """A restored container brings back `__pycache__` of folders git deleted: SE removes it
+    itself, names the folders in one line, and the suite's guard passes."""
+    forms = leftover(worktree, "components/forms", "__pycache__/__init__.cpython-313.pyc")
+    kern = leftover(worktree, "kern", "python/kern/__pycache__/nats.cpython-313.pyc",
+                    "python/kern/__pycache__/runner.cpython-313.pyc", "legacy.pyc")
+    monkeypatch.setattr(work_tickets, "leftover_folders",
+                        lambda root: ["components/forms", "kern"])
+
+    work_tickets.refuse_leftover_folders(worktree)
+
+    assert not forms.exists() and not kern.exists()
+    lines = [line for line in capsys.readouterr().out.splitlines() if "cache" in line]
+    assert lines == ["Removed Python's cache (`__pycache__`, `.pyc`), all they held, from 2 "
+                     "folder(s) whose tracked files git deleted: components/forms, kern"]
+
+
+def test_a_deleted_folder_with_other_ignored_output_still_refuses_and_keeps_its_cache(
+        worktree, monkeypatch, capsys):
+    """Only a folder that holds nothing but Python's cache is removed; one that holds any other
+    ignored output refuses as before, naming its remedy, and nothing of it is removed."""
+    forms = leftover(worktree, "components/forms", "__pycache__/__init__.cpython-313.pyc")
+    html = leftover(worktree, "adapters/html", "src/__pycache__/x.cpython-313.pyc",
+                    ".venv/pyvenv.cfg")
+    monkeypatch.setattr(work_tickets, "leftover_folders",
+                        lambda root: ["adapters/html", "components/forms"])
+    monkeypatch.setattr(work_tickets, "suite_budget", lambda root: pytest.fail("the suite ran"))
+
+    assert work_tickets.main(["suite", "--worktree", str(worktree)]) == 1
+
+    captured = capsys.readouterr()
+    assert not forms.exists()
+    assert (html / "src/__pycache__/x.cpython-313.pyc").exists()
+    assert "1 folder(s) whose tracked files git deleted: components/forms" in captured.out
+    assert "still holds the ignored output of 1 folder(s)" in captured.err
+    assert "Remove it with `git clean -fdX adapters/html`, then run again" in captured.err
+
+
+@pytest.mark.parametrize("held", ["notes.log", "src/__pycache__.txt", "x.pyc.bak"])
+def test_a_file_that_only_looks_like_python_cache_is_other_output(worktree, held):
+    folder = leftover(worktree, "adapters/html", "__pycache__/a.pyc", held)
+    assert work_tickets.cache_only(folder) is False
+    assert work_tickets.cache_only(leftover(worktree, "kern", "__pycache__/a.pyc", "b.pyc"))
+    assert work_tickets.cache_only(worktree / "missing") is False
+
+
+def test_a_symbolic_link_in_a_deleted_folder_is_other_output(worktree):
+    folder = leftover(worktree, "adapters/html", "__pycache__/a.pyc")
+    try:
+        (folder / "linked.pyc").symlink_to(worktree)
+    except OSError:
+        pytest.skip("this host refuses symbolic links")
+    assert work_tickets.cache_only(folder) is False
+
+
 def test_a_local_suite_within_the_limit_reads_ci_only_for_integrate(worktree, monkeypatch, capsys):
     reads = budget_suite(worktree, monkeypatch, 40.0, 45.0)
 
