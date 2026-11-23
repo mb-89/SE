@@ -996,14 +996,19 @@ The hand-off steps that land a pull request, by hand:
   - Its refusals (late commits, a failed check) are those with `gh`; `--include-late <reason>`
     states why late commits are included.
   - Run the plan's steps; anything but a passed `check` merges nothing.
+  - A landing pull request is never merged on GitHub outside its plan's own step: a squash landing
+    merges through the plan's `merge_pull_request`; with fast-forward landing the plan ends at the
+    check, and `--read-back` pushes main to the landing commit, which marks it merged. GitHub's
+    merge would write GitHub's identities into main's history.
   - A fix commit pushed onto `land/<branch>` after this (a lock move) is recorded with
     `integrate --record-fix <branch>`: it refuses one that is not the project identity's or
     whose message holds an e-mail address, tests the new head and prints the plan at it. An
     unrecorded one is refused at the read-back.
   - Then `integrate --read-back <branch> --landing-pull <number> --check-run <url>
-    --landing-description <file>`, the landing pull request's description saved after the merge;
-    through the relay, run it without `--landing-description` and it reads that description from
-    the relay too.
+    --landing-description <file>`, the landing pull request's description saved once the plan's
+    last step passed; through the relay, run it without `--landing-description` and it reads that
+    description from the relay too. Where the relay holds no snapshot of it, the refusal names the
+    GitHub tool call that takes one.
   - It refuses a description without the plan's `Metrics:` line, reads the landing back through
     git, fast-forwards the checkout, cleans up and prints the close-out plan; run its steps. It starts no session: start what is unblocked as `start`
     above says.
