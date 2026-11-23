@@ -69,8 +69,8 @@ overlay: sha256:<digest of the overlay the fill applied>
 ```
 
 An issue, a comment or a message records the same three in its marker line,
-`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. Until templates declare a version
-and an overlay, the engine writes what it knows (the docstring of `scripts/templates.py` owns it).
+`<!-- se:template <repository>/<name> 1.2.0 sha256:<digest> -->`. The digest covers the template
+and the overlay the fill applied (the docstring of `scripts/templates.py`, Writing, owns it).
 
 The check reads a document against the template and version it records. Where the template has
 moved since, a new minor or patch version warns and a new major version refuses, naming both

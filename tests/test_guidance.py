@@ -260,6 +260,16 @@ def test_a_template_with_tags_loads_and_gets_the_notes_of_those_tags(capsys, tmp
     assert names(capsys, root, "--template", "ticket") == []
 
 
+def test_a_template_s_overlay_adds_its_tags_and_is_no_template_of_its_own(capsys, project):
+    """An overlay beside its template (scripts/templates.py: Overlays) adds the tags it names, so
+    the template gets their notes; the overlay itself is read with its template, never as one."""
+    (project / ".se" / "modules" / "lib" / "templates" / "plain.overlay.md").write_text(
+        '---\nextends: plain\ntags: ["other"]\n---\n', encoding="utf-8")
+    assert names(capsys, project, "--template", "plain") == ["zzz-lib", "base", "x"]
+    code, out, _ = run(capsys, "check", "--root", str(project))
+    assert code == 0 and "4 templates" in out
+
+
 def test_a_template_note_that_does_not_load_is_a_finding(capsys, project):
     (project / "templates" / "broken.md").write_text("name: broken\n", encoding="utf-8")
     code, out, _ = run(capsys, "check", "--root", str(project))

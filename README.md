@@ -2509,6 +2509,8 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - `templates.py` resolves a name for the project `--root` names, else the checkout holding
   `--path`: its own `templates/`, the template repositories its se.toml pins, then SE's
   ([docs/templates.md "Template repositories"](docs/templates.md#template-repositories)).
+- A template overlay, `templates/<name>.overlay.md` beside its template, adds instructions,
+  fields, tags and rules or makes a rule stricter; one that loosens its template does not load.
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes
