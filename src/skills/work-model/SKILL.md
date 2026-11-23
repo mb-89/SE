@@ -39,8 +39,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
     report and is refused.
   - Field-report issues filed before this are history: they keep their `field-report` label and
     are not migrated; nothing new gets that label.
-  - The field report holds what was not done, decisions with confidence, spec gaps, a short retro
-    and tickets for other repositories.
+  - The field report holds what was not done, decisions with confidence, spec gaps, its answers
+    to the standing questions (its Retro section) and tickets for other repositories.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
@@ -72,7 +72,11 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   needs the human's approval, obtained by SE.
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes. The retro's report closes the retro issue and files nothing; SE bundles its
+  script it changes.
+  - A retro takes the six steps of its template: field feedback, collect, the table of what
+    happened, the standing questions, classes and homes, and the person's decisions.
+  - The standing questions are one block, asked alike by the retro, the overhaul and every field
+    report; the overhaul adds its own. The retro's report closes the retro issue and files nothing; SE bundles its
   findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first and refuses every other filing while
