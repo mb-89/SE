@@ -6888,11 +6888,43 @@ def leftover_folders(root: Path) -> list[str]:
                   if any(path.startswith(folder + "/") for path in deleted))
 
 
+#: Python's own cache, which it recreates on its own: every file in such a folder, and such a file.
+PYTHON_CACHE_FOLDER = "__pycache__"
+PYTHON_CACHE_SUFFIX = ".pyc"
+
+
+def cache_only(folder: Path) -> bool:
+    """Whether `folder` holds Python's cache and nothing else: every entry a folder, a file in a
+    `__pycache__` folder or a `.pyc` file. A symbolic link is other output, as removing the
+    folder would not remove what it names. A missing folder holds no cache to remove."""
+    if not folder.is_dir() or folder.is_symlink():
+        return False
+    for path in folder.rglob("*"):
+        if path.is_symlink():
+            return False
+        if path.is_dir():
+            continue
+        if path.suffix != PYTHON_CACHE_SUFFIX and \
+                PYTHON_CACHE_FOLDER not in path.relative_to(folder).parts[:-1]:
+            return False
+    return True
+
+
 def refuse_leftover_folders(root: Path) -> None:
     """Refuse a checkout that holds a `leftover_folders` folder, naming each and its remedy: a run
     there would read the folder's stale output (an importable package of stale bytecode, a stale
-    tool environment) as the moved folder's, and fail without naming it."""
+    tool environment) as the moved folder's, and fail without naming it. A folder that holds only
+    Python's cache (`cache_only`), as a restored container brings it back, is removed here instead,
+    in one line naming it: Python recreates that cache, and it blocks no run."""
     folders = leftover_folders(root)
+    cached = [folder for folder in folders if cache_only(root / folder)]
+    for folder in cached:
+        shutil.rmtree(root / folder)
+    if cached:
+        print(f"Removed Python's cache (`{PYTHON_CACHE_FOLDER}`, `{PYTHON_CACHE_SUFFIX}`), all they "
+              f"held, from {len(cached)} folder(s) whose tracked files git deleted: "
+              f"{', '.join(cached)}")
+    folders = [folder for folder in folders if folder not in cached]
     if folders:
         raise QueueError(
             f"{root} still holds the ignored output of {len(folders)} folder(s) whose tracked files "

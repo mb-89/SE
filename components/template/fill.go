@@ -36,5 +36,6 @@ func FillDocument(t *Template, values Object, raw string, title *string, existin
 			named = &s
 		}
 	}
-	return rendered, Check(t, Parse(t, rendered, named), &raw), nil
+	found, err := CheckText(t, Parse(t, rendered, named), &raw)
+	return rendered, found, err
 }

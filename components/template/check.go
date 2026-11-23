@@ -293,10 +293,26 @@ func isWordRune(r rune) bool {
 
 // Check gives every finding of the document against the template, refusals first, in field order.
 // raw, the raw input a fill takes, is what a quote field's quotes must hold; nil without one.
+//
+// A check that fails (an adapter written wrong) answers its error as one refusing finding of the
+// field `body`; CheckText answers it as the error it is.
 func Check(t *Template, doc *Document, raw *string) []Finding {
+	found, err := CheckText(t, doc, raw)
+	if err != nil {
+		found = append(found, Finding{"body", "checker", Refuse, err.Error()})
+	}
+	return found
+}
+
+// CheckText is Check with the error of a check that fails, as templates.py check raises it.
+func CheckText(t *Template, doc *Document, raw *string) ([]Finding, error) {
 	if t.IsAdapter() {
 		return adapterFindings(t, doc)
 	}
+	return fieldFindings(t, doc, raw), nil
+}
+
+func fieldFindings(t *Template, doc *Document, raw *string) []Finding {
 	found := provenance(t, doc)
 	add := func(rule, field, fix string) {
 		if severity := t.Severity(rule); severity != Off {
@@ -455,6 +471,11 @@ func Check(t *Template, doc *Document, raw *string) []Finding {
 		}
 	}
 	found = append(found, fenceOrder(t, doc)...)
+	if doc.Source != "" {
+		for _, f := range Dangling(doc.Source, seCheckout(), true) {
+			add("dangling", fieldAt(doc, f.Line), f.String()+": correct it, or say in Requirements that this issue adds it")
+		}
+	}
 	order := map[string]int{}
 	for i, item := range t.Fields {
 		order[item.Name] = i
@@ -661,9 +682,9 @@ func provenance(t *Template, doc *Document) []Finding {
 	return []Finding{{"template", versionRule, Refuse, fmt.Sprintf("%s, %s: fill it again at %s: `templates.py draft %s --json` gives its fields, and `templates.py check %s --fields <fields> --render` writes it", named, why, current, where, where)}}
 }
 
-// adapterFindings are an adapter's findings: its lines, its title rule, then its checker's answer.
-// The Go engine runs a checker it holds a port of (Checkers) on the body; another refuses, naming it.
-func adapterFindings(t *Template, doc *Document) []Finding {
+// adapterFindings are an adapter's findings: its lines, its title rule, then its checker's answer
+// (checkerFindings); an error is the adapter written wrong, as Python's TemplateError.
+func adapterFindings(t *Template, doc *Document) ([]Finding, error) {
 	spec, body := t.Adapter, doc.Source
 	titleValue, hasTitle := doc.Fields.Get("title")
 	var found []Finding
@@ -697,39 +718,21 @@ func adapterFindings(t *Template, doc *Document) []Finding {
 		name := str(spec.Value("title_rule"))
 		rule, ok := References[name].(*regexp.Regexp)
 		if !ok {
-			refuse("checker", fmt.Sprintf("the Go engine holds no port of %s; check this text with scripts/templates.py", name), Refuse)
-		} else {
-			title, _ := titleValue.(string)
-			if !hasTitle || !regexp.MustCompile(`^(?:`+rule.String()+`)`).MatchString(title) {
-				shown := "None"
-				if hasTitle {
-					shown = repr(title)
-				}
-				refuse("title", fmt.Sprintf("the title %s does not match %s (%s)", shown, repr(rule.String()), name), Refuse)
+			return found, fail("%s: the Go engine holds no port of %s; check this text with scripts/templates.py", t.Path, name)
+		}
+		title, _ := titleValue.(string)
+		if !hasTitle || !regexp.MustCompile(`^(?:`+rule.String()+`)`).MatchString(title) {
+			shown := "None"
+			if hasTitle {
+				shown = repr(title)
 			}
+			refuse("title", fmt.Sprintf("the title %s does not match %s (%s)", shown, repr(rule.String()), name), Refuse)
 		}
 	}
 	if t.Checker == "" {
-		return found
+		return found, nil
 	}
-	checker, held := Checkers[t.Checker]
-	plainBody := true
-	for _, key := range []string{"extract", "json_after", "sections", "when", "text_as", "title_as", "with", "none", "drop"} {
-		if spec.Has(key) {
-			plainBody = false
-		}
-	}
-	if result := spec.Value("result"); result != nil && result != "problems" {
-		plainBody = false
-	}
-	if !held || !plainBody {
-		refuse("checker", fmt.Sprintf("the Go engine holds no port of %s; check this text with scripts/templates.py", t.Checker), Refuse)
-		return found
-	}
-	for _, problem := range checker(body) {
-		refuse("checker", problem, Refuse)
-	}
-	return found
+	return found, checkerFindings(t, body, titleValue, refuse)
 }
 
 // Selection is what Select chose: the template (nil: free) and the refused markers it met.
@@ -964,7 +967,11 @@ func Verdict(templates Catalog, action, body string, title *string, where Where)
 	}
 	found := append([]Finding{}, chosen.Findings...)
 	if chosen.Template != nil {
-		found = append(found, Check(chosen.Template, Parse(chosen.Template, body, title), nil)...)
+		checked, err := CheckText(chosen.Template, Parse(chosen.Template, body, title), nil)
+		if err != nil {
+			return chosen.Template, nil, err
+		}
+		found = append(found, checked...)
 	}
 	return chosen.Template, found, nil
 }

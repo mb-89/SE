@@ -120,18 +120,36 @@ type state struct {
 	mu         sync.Mutex
 	root       string
 	repository string
+	se         string
 }
 
 var s = state{root: ".", repository: SERepository}
 
-// Catalog reads the templates of the checkout the instance serves: its templates/ folder, each
-// marked with the instance's repository. It reads them at each call, so an edited template counts
-// at once.
+// seCheckout is SE's checkout, whose scripts name SE's commands (rule dangling) and whose
+// templates are the last layer of an application's catalog: the instance's `se`, else the root
+// itself for SE's own templates, else the se component's folder as se_modules.py resolves it.
+func seCheckout() string {
+	s.mu.Lock()
+	root, repository, se := s.root, s.repository, s.se
+	s.mu.Unlock()
+	if se != "" {
+		return se
+	}
+	if repository == SERepository {
+		return root
+	}
+	return componentFolder(root, "se")
+}
+
+// catalog reads the templates a name resolves to for the checkout the instance serves, as
+// templates.py `catalog` does (CatalogAt): its own templates/ at origin's integration branch, else
+// its working tree's, marked with the instance's repository; then each template repository its
+// se.toml lists; then SE's. It reads them at each call, so a template that changed counts at once.
 func catalog() (Catalog, error) {
 	s.mu.Lock()
 	root, repository := s.root, s.repository
 	s.mu.Unlock()
-	return LoadFolder(filepath.Join(root, TemplatesFolder), repository)
+	return CatalogAt(root, repository, seCheckout())
 }
 
 // LoadFolder loads the template notes and the term list of one folder, marked with repository.
@@ -194,7 +212,9 @@ func checkVerb(_ context.Context, req CheckRequest) (Checked, error) {
 		if t, err = named(templates, req.Template); err != nil {
 			return Checked{}, err
 		}
-		found = Check(t, Parse(t, req.Body, req.Title), nil)
+		if found, err = CheckText(t, Parse(t, req.Body, req.Title), nil); err != nil {
+			return Checked{}, err
+		}
 	case req.Action != "":
 		if t, found, err = Verdict(templates, req.Action, req.Body, req.Title, Where{Labels: req.Labels}); err != nil {
 			return Checked{}, err
@@ -218,6 +238,7 @@ var Component = index.Declare(Name, "SE's template engine in Go: fill makes a fi
 	index.IO(),
 	index.Config("root", ".", "The checkout whose templates/ the engine reads; a detached core runs in its root."),
 	index.Config("repository", SERepository, "The repository its templates' marker names: se for SE's own, project for an application's."),
+	index.Config("se", "", "SE's checkout, whose scripts name SE's commands and whose templates an application's resolve last; empty: the root for SE's own, else the se component's folder."),
 	index.JSONVerb("fill", "Fills a template from the agent's fields and the raw input, checks the document, and answers the filled template, the one value a templated target takes; a fill something refuses answers every finding and makes nothing.", FillShape, FilledShape, fillVerb),
 	index.JSONVerb("accept", "The gate of a templated target in another component or language: answers the document and title of the filled template it was handed, of the template required or of the one that claims the path, and refuses free text, a body or fields, naming the template to fill; a path no template claims is free.", AcceptShape, AcceptedShape, acceptVerb),
 	index.JSONVerb("check", "Checks a text against its template, named or selected by its action, as SE's filing commands would: every finding, and whether one refuses.", CheckShape, CheckedShape, checkVerb),
@@ -227,8 +248,9 @@ var Component = index.Declare(Name, "SE's template engine in Go: fill makes a fi
 		if repository == "" {
 			repository = SERepository
 		}
+		se, _ := read(index.ConfigPrefix + "se").(string)
 		s.mu.Lock()
-		s.root, s.repository = root, repository
+		s.root, s.repository, s.se = root, repository, se
 		s.mu.Unlock()
 		return nil // the templates are read at each call: a checkout without templates/ still starts
 	}),
