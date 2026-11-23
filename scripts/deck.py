@@ -55,13 +55,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import se_components  # noqa: E402
 import templates  # noqa: E402
-from build_docs import child_environment, html_adapter, obs_dir, obs_document  # noqa: E402
+from build_docs import child_environment, obs_dir, obs_document, ready_adapter  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
 BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
 BUNDLE_FILE = f"{BUNDLE_ID}.js"
-# How long obs-html's passing line after Send ("Sent to Claude.") shows on SE's decks, in ms (obs's
-# adapters/html/spec/artifact-ui.md, Dock menu: `artifact.reading.briefNoticeMilliseconds`, default 0, off).
+# How long obs-html's passing line after Send ("Sent to Claude.") shows on SE's decks, in ms
+# (obs-html's spec/artifact-ui.md, Dock menu: `artifact.reading.briefNoticeMilliseconds`, default 0, off).
 BRIEF_NOTICE_MILLISECONDS = 4000
 
 
@@ -161,8 +161,8 @@ def _settings(vault: Path) -> None:
 
 
 def _screens(vault: Path) -> None:
-    """Give the vault's manifest ``obsHtml.layout: screens``, the phone view of one chapter per screen (obs's
-    adapters/html/spec/input-model.md, Author presentation), unless its frontmatter sets a layout."""
+    """Give the vault's manifest ``obsHtml.layout: screens``, the phone view of one chapter per screen
+    (obs-html's spec/input-model.md, Author presentation), unless its frontmatter sets a layout."""
     try:
         name = json.loads((vault / "cfg.json").read_text(encoding="utf-8"))["input"]["manifestFilename"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -361,8 +361,9 @@ def _refusal(chapters: list[dict], recorded: bool) -> str | None:
 
 
 def serve(artifact: Path, wait: bool, timeout: str | None) -> int:
-    """Serve ``artifact`` with the html adapter's serve command, from obs as obs-document --serve runs it."""
-    adapter, refusal = html_adapter(obs_dir())
+    """Serve ``artifact`` with obs-html's serve command, from its folder as obs-document --serve runs it,
+    installed first where it is missing."""
+    adapter, refusal = ready_adapter(obs_dir())
     if adapter is None:
         print(f"deck: {refusal}", file=sys.stderr)
         return 2

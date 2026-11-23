@@ -364,37 +364,87 @@ def test_no_script_passes_adapter_config():
     assert passing == []
 
 
-def test_obs_finds_the_html_adapter_component_and_its_serve_command(obs, tmp_path, monkeypatch):
-    monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))  # no component installed on this machine
-    adapter, refusal = build_docs.html_adapter(obs)
+def test_obs_finds_the_installed_obs_html_component_and_its_serve_command(obs):
+    adapter, refusal = build_docs.installed_adapter(obs)
     assert refusal == ""
-    assert adapter["name"] == "html" and adapter["serve"]
-    assert Path(adapter["folder"]) == obs  # while html still lives in obs's tree
+    assert adapter["name"] == build_docs.ADAPTER == "obs-html" and adapter["serve"]
+    assert Path(adapter["folder"]) != obs  # obs 10 holds no adapter in its own tree
 
 
-def test_an_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
+def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, monkeypatch):
     monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
     (tmp_path / "components.json").write_text(json.dumps({"components": [
-        {"name": "html", "kind": "style", "version": "1.0.0", "commit": "0" * 40}]}), encoding="utf-8")
-    adapter, refusal = build_docs.html_adapter(obs)
+        {"name": "obs-html", "kind": "style", "version": "1.0.0", "commit": "0" * 40}]}), encoding="utf-8")
+    adapter, refusal = build_docs.installed_adapter(obs)
     assert adapter is None
-    assert "--adapter: html" in refusal and "not an adapter" in refusal
+    assert "--adapter: obs-html" in refusal and "not an adapter" in refusal
 
 
-def test_an_install_that_finds_no_html_fails_naming_the_command(obs, monkeypatch, capsys):
-    monkeypatch.setattr(build_docs, "HTML_INSTALL", ("python", "-c", "raise SystemExit(1)"))
-    missing = "--adapter: html: no adapter component 'html' is installed. Run obs-components install html"
-    monkeypatch.setattr(build_docs, "html_adapter", lambda folder: (None, missing))
-    assert build_docs.install_html(obs) == 1
-    assert "Install it with `obs-components install html`" in capsys.readouterr().err
+def adapter_after(monkeypatch, missing: int, install: tuple[str, ...]) -> list[str]:
+    """Fake obs's finder: no adapter for its first ``missing`` reads, then one; the install runs
+    ``install``. The returned list records each read."""
+    reads: list[str] = []
+    found = {"name": "obs-html", "serve": ["serve"], "folder": "/components/obs-html"}
+
+    def installed(folder):
+        reads.append("read")
+        if len(reads) <= missing:
+            return None, "--adapter: obs-html: no adapter component 'obs-html' is installed"
+        return found, ""
+
+    monkeypatch.setattr(build_docs, "_READY", {})
+    monkeypatch.setattr(build_docs, "installed_adapter", installed)
+    monkeypatch.setattr(build_docs, "ADAPTER_INSTALL", install)
+    return reads
 
 
-def test_an_install_that_installs_nothing_builds_with_the_html_of_obss_tree(obs, tmp_path, monkeypatch,
-                                                                             capsys):
-    monkeypatch.setenv("OBS_LOCAL_FOLDER", str(tmp_path))
-    monkeypatch.setattr(build_docs, "HTML_INSTALL", ("python", "-c", "raise SystemExit(1)"))
+def test_a_build_installs_obs_html_where_it_is_missing(obs, monkeypatch, capsys):
+    reads = adapter_after(monkeypatch, 1, ("python", "-c", "pass"))
+    adapter, refusal = build_docs.ready_adapter(obs)
+    assert refusal == "" and adapter["name"] == "obs-html"
+    assert reads == ["read", "read"]
+    assert "installed obs's adapter component obs-html at /components/obs-html" in capsys.readouterr().err
+    assert build_docs.ready_adapter(obs) == (adapter, "")
+    assert reads == ["read", "read"]  # asked once per process
+
+
+def test_a_found_obs_html_is_not_installed_again(obs, monkeypatch, capsys):
+    reads = adapter_after(monkeypatch, 0, ("python", "-c", "raise SystemExit('installed again')"))
     assert build_docs.install_html(obs) == 0
-    assert f"obs builds with the html it finds at {obs}" in capsys.readouterr().out
+    assert reads == ["read"]
+    assert capsys.readouterr().out == "build_docs: obs builds with obs-html at /components/obs-html\n"
+
+
+def test_a_build_that_cannot_install_obs_html_fails_naming_the_command(obs, monkeypatch, capsys):
+    adapter_after(monkeypatch, 99, ("python", "-c", "raise SystemExit('no release offers obs-html')"))
+    assert build_docs.install_html(obs) == 1
+    error = capsys.readouterr().err
+    assert "`obs-components install obs-html`" in error and "no release offers obs-html" in error
+    assert build_docs.obs_document(obs, ["--source", "unread.md"], "deck") == 1
+    assert "deck: obs finds no adapter component obs-html" in capsys.readouterr().err
+
+
+def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
+    output = ("obs-html: Warning: obs-html (src/obs_html/render.py): generation provenance: cannot resolve the "
+              "generator commit, target version, or target commit. Build from a Git checkout\n"
+              "obs-document: warning: one.md:3: long paragraph\nbuilt one.html\n")
+    assert build_docs.obs_warnings(output) == ["obs-document: warning: one.md:3: long paragraph"]
+
+
+def test_obs_document_runs_on_obs_environments_python_not_through_uv_run(obs):
+    """uv run would set VIRTUAL_ENV, which obs hands on to obs-html's own uv run."""
+    command = build_docs.obs_document_command(obs)
+    assert command[1:] == ["-m", "obs.document"]
+    assert Path(command[0]).is_file() and Path(command[0]).name.startswith("python")
+
+
+def test_every_obs_build_runs_through_the_one_adapter():
+    """deck.py and timeline.py build through build_docs's ADAPTER, installed where missing, and no
+    script names an adapter of its own."""
+    for script in ("deck.py", "timeline.py", "build_docs.py"):
+        text = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+        assert '"--adapter", "' not in text, script
+        assert "ready_adapter(" in text, script
 
 
 def test_setup_and_ci_install_html_before_they_build():

@@ -479,6 +479,16 @@ def large_snapshot() -> dict:
                     other=(issue(50, "backlogged", "se-person", created="2026-11-05T09:00:00Z"),))
 
 
+def test_the_page_builds_through_obs_html_without_a_warning(tmp_path, obs, capsys):
+    """The build itself, through obs and its adapter component obs-html, with no browser: CI's
+    runner skips the tests that open one (`page`)."""
+    snap = snapshot(issue(1, "in-progress"), issue(2, "ready"))
+    destination = tmp_path / "timeline.html"
+    assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
+    assert "<html" in destination.read_text(encoding="utf-8")
+    assert "warning" not in capsys.readouterr().err.casefold()
+
+
 def need_browser():
     if shutil.which("node") is None or subprocess.run(["node", "-e", "require('playwright')"],
                                                       capture_output=True).returncode:
@@ -510,7 +520,7 @@ def opened(page: Path, answer: dict[str, list] | None = None, turn: bool = False
 
 def test_obs_proves_the_live_declaration_against_every_saved_row(page, obs):
     build_docs = timeline.sibling("build_docs")
-    adapter, refusal = build_docs.html_adapter(obs)
+    adapter, refusal = build_docs.installed_adapter(obs)
     assert refusal == ""
     result = subprocess.run(["uv", "run", "--quiet", "--project", adapter["folder"], "obs-html", "--check-rendered",
                              str(page)], capture_output=True, text=True, env=build_docs.child_environment(), timeout=300)

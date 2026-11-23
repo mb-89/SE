@@ -52,6 +52,7 @@ def test_build_refuses_on_an_obs_warning(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(deck, "obs_dir", lambda: tmp_path)
     monkeypatch.setattr(build_docs.subprocess, "run", fake_run)
+    monkeypatch.setattr(build_docs, "ready_adapter", lambda obs: ({"name": build_docs.ADAPTER}, ""))
     folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
     assert deck.build(folder, tmp_path / "deck.html") == 1
     err = capsys.readouterr().err

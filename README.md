@@ -511,10 +511,13 @@ component (`[components.obs]` in `se.toml`, found beside SE's repository) builds
 uv run python scripts/build_docs.py --destination <file outside the repository>.html
 ```
 
-obs builds it, and every decision deck, with the adapter component `html`, which it finds among
-the machine's installed components, else in its own tree. `build_docs.py --install-html` runs
-`obs-components install html` and fails, naming that command, where obs finds no `html`; the setup
-scripts in se's checkout, the `check` job and the docs workflow run it before they build.
+obs builds it, every decision deck and the Timeline with the adapter component `obs-html`, which
+it finds among the machine's installed components only. Each build installs it where it is missing
+(`obs-components install obs-html`) and fails, naming that command, where none can be installed.
+
+`build_docs.py --install-html` does only that; the setup scripts in se's checkout, the `check` job
+and the docs workflow run it before they build. A build fails on every warning obs prints, except
+obs-html's that it cannot name its own commit (`build_docs.py` `KNOWN_WARNINGS`).
 
 The build reads a copy of the repository in which no note asks for a verdict, so the worked
 decision note shows as a page to read, with no Send; the note itself still asks, for the decks

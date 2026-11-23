@@ -4,8 +4,8 @@
 # public check's local list (.public-check.local, never checked in) to the repository's .gitignore,
 # and sets the repository's commit identity as work_tickets.py sync does, so its first commit
 # already carries it. Its git goes through se's git door (scripts/git_door.py). In se's own
-# checkout it then installs obs's adapter component html, which the docs and decks build with
-# (`build_docs.py --install-html`).
+# checkout it then installs obs's adapter component obs-html where it is missing, which the docs
+# and decks build with (`build_docs.py --install-html`).
 #
 # With --copilot (opt-in) it then installs SE for GitHub Copilot there: `copilot.py install`
 # (docs/copilot.md, "Another repository"). Without it nothing else changes.
