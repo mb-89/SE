@@ -47,8 +47,8 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
+| Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:retro`, `se:reviewer` and `se:worker` |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:retro`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
 | GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
 | GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
@@ -208,13 +208,12 @@ uv run python <se>/scripts/se_start.py refresh
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh is signed in, `check` also counts the work issues landed since
-  the last retro (the window of [`retro.py collect`](#work-commands)), the retros closed since
-  the last overhaul where that countdown is on, runs the [fleet check](#fleet-check), and caches
-  them.
-  - The greeting then names a retro that is [due](#retro-due), an overhaul that is
-    [due](#overhaul-due) and the fleet's findings by kind and issue, one line each with the command
-    to run, and a part whose read failed with its cause.
+- What is due in the work: where gh is signed in, `check` also counts what came back since the
+  newest retro started ([Retro due](#retro-due)), the retros closed since the newest overhaul
+  started where that countdown is on, runs the [fleet check](#fleet-check), and caches them.
+  - The greeting then names a retro that is [due or open](#retro-due), an overhaul that is
+    [due or open](#overhaul-due) and the fleet's findings by kind and issue, one line each with the
+    command to run, and a part whose read failed with its cause.
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
@@ -1187,33 +1186,53 @@ The same tree may be held by more than one remote or checkout
 
 ```toml
 [retro]
-due_after = 10
+due_after = 20      # what came back, weighed: a landing 1, a failure failure_weight
+failure_weight = 5  # an escalated work issue: an escalation or a refused landing
+days = 7            # or this many days after the last retro started, with anything come back; 0: off
 ```
 
-A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
-the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
-setting; SE's retro-due component counts the same from kern's GitHub names, for the greeting to read
-live ([components/README.md](components/README.md)).
+A retro falls due by what comes back to the project, never by what is opened: filing 20 issues in
+one session makes none due. Each work issue that landed since the newest retro started adds 1, each
+work issue labelled `escalated` (an escalation, a refused landing) updated since then adds
+`failure_weight`. At `due_after`, or `days` days after that start with anything counted, one is due.
+
+- **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
+  anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
+  `discovery`, not `ready`), and the filing asked for is refused, naming it.
+- **Blocking.** While a retro or an overhaul is open, every other filing is refused with the
+  reason and its number, until the person has decided its findings in an SE session and it is
+  closed. Running work goes on, and issues keep coming back; they count towards the next run.
+- **Scope and reset.** A retro covers everything up to its start, what came back after it fell
+  due included; its counters reset when it starts (its issue's creation), so a late retro never
+  makes the next one due at once.
+- **Own session.** A [retro agent](src/agents/retro.md) runs each retro and overhaul in its own
+  session; its first step asks the person for the field feedback.
+- **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
+  `retro.py due` prints both countdowns. The [start greeting](#start-and-refresh) names a run due
+  or open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
+  read live ([components/README.md](components/README.md)).
+- **Not counted yet.** A red `main` and a worker stopped by the usage limit leave no mark on an
+  issue, so they add nothing until one does.
 
 ### Overhaul due
 
 ```toml
 [overhaul]
-due_after = 3  # absent or 0: off
+due_after = 3  # retros closed since the last overhaul started; 0: off
+days = 30      # or this many days after it started, with a retro closed; 0: off
 ```
 
-An overhaul is due once `due_after` retros closed since the last closed overhaul issue; a retro
-closed as a duplicate or as not planned does not count, as for the landings a retro counts. The
-[start greeting](#start-and-refresh) names it beside the retro.
+An overhaul falls due after `due_after` retros closed since the newest overhaul started, or `days`
+days after that start with a retro closed; a retro closed as a duplicate or as not planned does
+not count. It is filed first and holds filing back like a retro ([Retro due](#retro-due)).
 
-- **Off unless set.** Absent or 0 switches the countdown off, SE's own `se.toml` among them: the
-  greeting names no overhaul, and the retro and the overhaul score earlier findings as they did
-  before it.
+- **On unless both are 0.** With `due_after` and `days` both 0 the countdown is off: the greeting
+  names no overhaul, and the retro and the overhaul score earlier findings as they did before it.
 - **Too early to score.** With it on, an earlier finding that an issue still open takes is listed
   as `too early to score`, by `retro.py collect` and `overhaul.py read`, not scored as a failure.
-- **One store.** `scripts/overhaul.py` owns the count (`retros_since`, a pure function of the runs
-  it is given) and the setting; the retro-due component counts the same into its name,
-  `retro-due/due`, by its config `overhaul-after` (0, off, unless the wiring sets it).
+- **One store.** `scripts/overhaul.py` owns the count (`overhaul_countdown`, a pure function of the
+  runs it is given); the retro-due component counts the same into its name, `retro-due/due`, by its
+  configs `overhaul-after` and `overhaul-days`.
 
 ### Stop hook
 
@@ -2108,7 +2127,7 @@ settings checks and the generated docs.
 | `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
 | `work_tickets.py release` | `work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]` | release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README "Project settings"); with nothing integrated since, it releases nothing |
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
-| `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
+| `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
 | `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
 | `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
@@ -2129,11 +2148,13 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, file checks
-the judged draft and closes the retro issue with its report.
+the judged draft and closes the retro issue with its report, due says whether a retro or an overhaul
+is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
 | `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul

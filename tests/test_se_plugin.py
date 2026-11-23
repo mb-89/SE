@@ -310,7 +310,8 @@ def front(path: Path) -> list[str]:
 
 
 def test_se_toml_names_every_role_and_each_relies_on_no_outside_skill_today():
-    assert se_plugin.roles() == {"se": [], "integrator": [], "reviewer": [], "worker": []}
+    assert se_plugin.roles() == {"se": [], "integrator": [], "retro": [], "reviewer": [],
+                                 "worker": []}
 
 
 def test_a_roles_skills_are_preloaded_into_that_agent_where_the_host_reads_them(tmp_path):
@@ -347,7 +348,7 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
 def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
     files = se_plugin.expected(checkout)
     agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
-    assert len(agents) == 4 and se_plugin.validate(files) == []
+    assert len(agents) == 5 and se_plugin.validate(files) == []
     for path in agents:
         fields = agent_lint.fields(files[path].decode())
         assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path

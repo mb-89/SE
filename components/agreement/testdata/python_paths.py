@@ -1,8 +1,9 @@
 """The Python side of the agreement test (agreement_test.go): SE's Python fleet check, retro
-count and overhaul count, scripts/work_tickets.py fleet_findings, scripts/retro.py
-landed_since_retro and scripts/overhaul.py retros_since_overhaul, run on the GitHub snapshot names
-a fixture holds, through doors that read them as the Python reads GitHub.
-Prints {"fleet": <fleet-check --json>, "retro": <landed>, "overhaul": <retros>}.
+countdown and overhaul countdown, scripts/work_tickets.py fleet_findings, scripts/retro.py
+retro_countdown and scripts/overhaul.py overhaul_countdown, run on the GitHub snapshot names a
+fixture holds, through doors that read them as the Python reads GitHub, with the fixture's
+settings at its `now`.
+Prints {"fleet": <fleet-check --json>, "retro": <countdown>, "overhaul": <countdown>}.
 
 With --ages the fleet check runs with se.toml `[fleet] ages` on, as the Go side with its config
 `ages` on.
@@ -12,6 +13,7 @@ Usage: python python_paths.py <se root> <fixture.json> [--ages]
 
 import json
 import sys
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -68,7 +70,7 @@ class SnapshotFleet:
 
 
 class SnapshotRetro:
-    """landed_since_retro's and retros_since_overhaul's door on the names."""
+    """The countdowns' door on the names."""
 
     missing: list = []
 
@@ -88,8 +90,17 @@ class SnapshotRetro:
 now = datetime.fromisoformat(fixture["now"].replace("Z", "+00:00"))
 found = work_tickets.fleet_findings(SnapshotFleet(), now, timedelta(hours=fixture["lease_hours"]),
                                     fixture["repository"], ages="--ages" in sys.argv[3:])
+door = SnapshotRetro()
+closed = [retro.issue_of(item) for item in door.closed_issues()]
+opened = [retro.issue_of(item) for item in door.open_issues()]
+pulls = [retro.pull_of(item) for item in door.pulls()]
 print(json.dumps({
     "fleet": json.loads(work_tickets.fleet_report(found, True)),
-    "retro": retro.landed_since_retro(SnapshotRetro(), fixture["tracker"], fixture["base"]),
-    "overhaul": overhaul.retros_since_overhaul(SnapshotRetro()),
+    "retro": asdict(retro.retro_countdown(
+        closed, opened, pulls, fixture["tracker"], fixture["base"],
+        {"due_after": fixture["due_after"], "failure_weight": fixture["failure_weight"],
+         "days": fixture["days"]}, now)),
+    "overhaul": asdict(overhaul.overhaul_countdown(
+        closed, opened, {"due_after": fixture["overhaul_after"],
+                         "days": fixture["overhaul_days"]}, now)),
 }))

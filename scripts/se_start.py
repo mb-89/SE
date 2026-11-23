@@ -367,13 +367,22 @@ def run_check(urls: set[str], remote: Callable[[str], list[Version]]) -> dict[st
         return dict(zip(sorted(urls), pool.map(one, sorted(urls))))
 
 
+def countdown_part(found) -> dict:
+    """A countdown (retro.py Countdown) as the cache keeps it."""
+    part = {"count": found.count, "due_after": found.due_after, "due": found.due,
+            "reason": found.reason, "open": list(found.open)}
+    if found.kind == "retro":
+        part.update(landed=found.landed, failed=found.failed)
+    return part
+
+
 def work_check(root: Path | None) -> dict | None:
-    """What is due in the work of the project at `root`, where gh is signed in: the work issues
-    landed since the last retro (retro.py's window) with the count that makes a retro due, the
-    retros closed since the last overhaul with the count that makes an overhaul due where that
-    countdown is on (overhaul.py due_after), and the
-    fleet check's findings, each part with its error instead where its read failed. None without gh
-    or without a project checkout: in the cloud no token reaches SE's code."""
+    """What is due in the work of the project at `root`, where gh is signed in: the retro and the
+    overhaul countdowns (retro.py countdowns; the overhaul's only where its countdown is on,
+    overhaul.py countdown_on), each with what it counted, whether it is due and why, and the runs
+    of its kind still open; and the fleet check's findings, each part with its error instead where
+    its read failed. None without gh or without a project checkout: in the cloud no token reaches
+    SE's code."""
     if root is None or not (root / ".git").exists():
         return None
     work_tickets = _load("work_tickets")
@@ -387,20 +396,20 @@ def work_check(root: Path | None) -> dict | None:
         branch = work_tickets.integration_branch(root)
     except failures as error:
         return {"retro": {"error": str(error)}, "fleet": {"error": str(error)}}
+    overhaul_on = False
     try:
+        overhaul_on = _load("overhaul").countdown_on(root)
         door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
-        work["retro"] = {"landed": retro.landed_since_retro(door, repo, branch),
-                         "due_after": retro.due_after(root)}
+        found = retro.countdowns(door, repo, branch, root, datetime.now(timezone.utc))
+        if found is None:
+            raise work_tickets.QueueError("the GitHub reads of the countdowns gave no answer")
+        work["retro"] = countdown_part(found["retro"])
+        if overhaul_on:  # only where the countdown is on: off, it names nothing
+            work["overhaul"] = countdown_part(found["overhaul"])
     except failures as error:
         work["retro"] = {"error": str(error)}
-    overhaul = _load("overhaul")
-    try:
-        after = overhaul.due_after(root)
-        if after:  # the countdown is on: 0 (off, the built-in) reads and names nothing
-            door = retro.GhDoor(root, repo, work_tickets.remote_repo(root) or repo)
-            work["overhaul"] = {"retros": overhaul.retros_since_overhaul(door), "due_after": after}
-    except failures as error:
-        work["overhaul"] = {"error": str(error)}
+        if overhaul_on:
+            work["overhaul"] = {"error": str(error)}
     try:
         found = work_tickets.fleet_findings(
             work_tickets.Fleet(root, repo, branch), datetime.now(timezone.utc),
@@ -633,31 +642,31 @@ def component_lines(report: Report, se_root: Path) -> list[str]:
 
 
 def work_lines(report: Report, se_root: Path) -> list[str]:
-    """From the cached work check: one line for a retro that is due, one for an overhaul that is
-    due and one for the fleet's findings, each with the command to run; a part whose read failed is named with the remedy.
+    """From the cached work check: one line for a retro that is due or open, one for an overhaul
+    that is due or open and one for the fleet's findings, each with the command to run; a part
+    whose read failed is named with the remedy.
     Nothing where no work check ran (no gh)."""
     work = report.work or {}
     se = se_root.as_posix()
     lines = []
-    retro = work.get("retro") or {}
-    landed, due_after = retro.get("landed"), retro.get("due_after")
-    if "error" in retro:
-        lines.append(f"Retro check not done: {retro['error']}; {CHECK_REMEDY.format(se=se)}")
-    elif isinstance(landed, int) and isinstance(due_after, int) and landed >= due_after:
-        live = ", live from kern" if retro.get("from") == "kern" else ""
-        lines.append(f"Retro due: {_plural(landed, 'work issue')} landed since the last retro "
-                     f"(due after {due_after}{live}); file one from .github/ISSUE_TEMPLATE/retro.md, then "
-                     f"run: uv run python {se}/scripts/retro.py collect <retro issue> --out <draft>")
-    overhaul = work.get("overhaul") or {}
-    retros, after = overhaul.get("retros"), overhaul.get("due_after")
-    if "error" in overhaul:
-        lines.append(f"Overhaul check not done: {overhaul['error']}; {CHECK_REMEDY.format(se=se)}")
-    elif isinstance(retros, int) and isinstance(after, int) and retros >= after:
-        live = ", live from kern" if overhaul.get("from") == "kern" else ""
-        lines.append(f"Overhaul due: {_plural(retros, 'retro')} closed since the last overhaul "
-                     f"(due after {after}{live}); file one with: uv run python {se}/scripts/"
-                     f"overhaul.py new, then run: uv run python {se}/scripts/overhaul.py read "
-                     f"<overhaul issue> --out <draft>")
+    for kind, run in (("retro", f"uv run python {se}/scripts/retro.py collect <retro issue> "
+                                "--out <draft>"),
+                      ("overhaul", f"uv run python {se}/scripts/overhaul.py read <overhaul issue> "
+                                   "--out <draft>")):
+        part = work.get(kind) or {}
+        name = kind.capitalize()
+        live = ", live from kern" if part.get("from") == "kern" else ""
+        if "error" in part:
+            lines.append(f"{name} check not done: {part['error']}; {CHECK_REMEDY.format(se=se)}")
+        elif part.get("open"):
+            runs = ", ".join(f"#{number}" for number in part["open"])
+            lines.append(f"{name} open: {runs}{live}; SE files no new issue until the person has "
+                         f"decided its findings in an SE session; a retro agent runs it in its "
+                         f"own session: {run}")
+        elif part.get("due") is True:
+            lines.append(f"{name} due: {part.get('reason')}{live}; the next issue SE files "
+                         f"(work_tickets.py file) files it first, and a retro agent runs it in "
+                         f"its own session: {run}")
     fleet = work.get("fleet") or {}
     findings = fleet.get("findings") or []
     if "error" in fleet:

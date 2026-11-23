@@ -264,6 +264,17 @@ IDENTITY = '[project]\nidentity = "mb <mb>"\n'
 
 
 @pytest.fixture(autouse=True)
+def no_filing_check(monkeypatch) -> list[tuple[str, str]]:
+    """The filing check (README "Retro due") reads the whole tracker; these tests hold filing's
+    other rules, so it records what it was asked and reads nothing. tests/test_filing_check.py
+    holds the check itself."""
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(work_tickets, "filing_check",
+                        lambda root, repo, command, *_, **__: asked.append((repo, command)))
+    return asked
+
+
+@pytest.fixture(autouse=True)
 def local_config(tmp_path: Path, monkeypatch) -> Path:
     path = tmp_path / "home" / ".se" / "local.toml"
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: path)

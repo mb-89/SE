@@ -75,6 +75,12 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   window's closed work issues; each improvement names the agent definition, template, skill or
   script it changes. The retro's report closes the retro issue and files nothing; SE bundles its
   findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
+- Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
+  any new issue: `work_tickets.py file` files a due one first and refuses every other filing while
+  one is open, until the person has decided its findings; running work goes on. Each runs in a
+  session of SE's [retro agent](../../agents/retro.agent.md), which
+  [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
+  (README ["Retro due"](../../../README.md#retro-due)).
 
 ## Issues
 
@@ -510,6 +516,7 @@ sidebar shows one SE section, each role's sessions nested under the session that
   | A worker | below the integrator, started by it | `SE/<project>/worker/<ticket name>` |
   | A sub-integrator | below the integrator, started by it | `SE/<project>/integrator/<area>` |
   | A reviewer | beside the integrator, started by the SE agent | `SE/<project>/reviewer/<pull request number>` |
+  | A retro agent | beside the integrator, started by the SE agent | `SE/<project>/retro/<run's issue name>` |
   | A researcher | beside the integrator, started by the SE agent | `SE/<project>/researcher/<topic>` |
   | A spike | beside the integrator, started by the SE agent | `SE/<project>/spike/<topic>` |
 

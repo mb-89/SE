@@ -128,8 +128,8 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	}
 	var due retrodue.Due
 	get("retro-due/due", &due)
-	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 10 {
-		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, due after 10", due)
+	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 20 || due.OverhaulAfter != 3 {
+		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, the built-in due after 20 and 3 retros", due)
 	}
 }
 

@@ -240,12 +240,13 @@ def test_public_check_is_on_without_se_toml(tmp_path):
     assert default_of("[project] public_check").default == "on"
 
 
-def test_the_overhaul_countdown_is_off_without_se_toml(tmp_path):
+def test_the_overhaul_countdown_is_on_without_se_toml(tmp_path):
     import overhaul
+    import retro
 
     switch = default_of("[overhaul] due_after")
-    assert overhaul.due_after(tmp_path) == 0
-    assert switch.default == "off" and se_switches.state(switch, 0) == "off"
+    assert retro.due_after(tmp_path, "overhaul") == 3 and overhaul.countdown_on(tmp_path)
+    assert switch.default == "on" and se_switches.state(switch, 0) == "off"
 
 
 def test_trust_integrator_is_off_without_se_toml(tmp_path):

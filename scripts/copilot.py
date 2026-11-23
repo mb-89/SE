@@ -209,7 +209,7 @@ def install(repo: Path, run_sync=sync) -> int:
 # without what git ignores or no install carries.
 NOT_COPIED = shutil.ignore_patterns(".git", ".venv", ".se", "__pycache__", "*.pyc", ".pytest_cache",
                                     "node_modules", ".public-check.local")
-AGENTS = ("se", "integrator", "reviewer", "worker")
+AGENTS = ("se", "integrator", "retro", "reviewer", "worker")
 SKILLS = ("catch-up", "decision", "work-model")
 HOOK_EVENTS = {"SessionStart": "scripts/bootstrap.sh", "Stop": "scripts/se_hook.sh"}
 CALL_SECONDS = 30.0  # how long the door may answer `starting` before the self-test gives up

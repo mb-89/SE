@@ -33,6 +33,8 @@ LINKED = ("README.md", "AGENTS.md", "docs/**/*.md", "components/README.md", "tes
 UNLISTED = {
     "src/agents/reviewer.md": "the reviewer's role definition; the other three roles are chapters, "
                               "so whether it joins them is the owner's call",
+    "src/agents/retro.md": "the retro agent's role definition, as the reviewer's: whether it "
+                           "joins the chapters is the owner's call",
     "src/skills/catch-up/references/integrator-prompt.md": "a prompt template the catch-up skill fills",
     "docs/copilot.md": "the owner's guide to installing SE into Copilot, linked from README",
     "docs/components.md": "the design of finding components, linked from docs/go-core.md",

@@ -113,7 +113,7 @@ help = "claim a ready work issue for a worker your session tool starts: create i
 class = "batch"
 
 [commands."work_tickets.py session-title"]
-usage = "work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project]\n                              [topic]"
+usage = "work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike}\n                              [project] [topic]"
 summary = "print the title of a session a role starts: `SE`, ..."
 group = "Integration"
 help = "print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions)"
