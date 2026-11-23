@@ -37,8 +37,8 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
     declared = [name for d in se_components.catalog(ROOT, GROUPS) for name in d.commands]
     leaves = [" ".join(("work_tickets.py", *words)) for words, _ in work_tickets.leaf_commands()]
     assert sorted(declared) == sorted(leaves + [
-        "review.py brief", "review.py file", "retro.py collect", "retro.py file", "overhaul.py new",
-        "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
+        "review.py brief", "review.py file", "retro.py collect", "retro.py file", "retro.py due",
+        "overhaul.py new", "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
         "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add",
         "se_templates.py list", "se_templates.py draft", "se_templates.py check", "se_templates.py fill",
         "se_templates.py gate",

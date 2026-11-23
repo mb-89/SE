@@ -52,8 +52,9 @@ its tools.
   handed you, else the output of `uv run python <se>/scripts/se_start.py status --greeting`,
   run first. Its lines name what is out of date and the one refresh command; run that command only
   when the person asks ([Start and refresh](../README.md#start-and-refresh)).
-  - Where gh is signed in it also names a retro that is due and the fleet's findings, from the
-    cached background check. Without gh (the cloud) it names neither: at your first turn run
+  - Where gh is signed in it also names a retro or an overhaul that is due or open and the fleet's
+    findings, from the cached background check.
+    Without gh (the cloud) it names neither: at your first turn run
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../README.md#fleet-check)).
@@ -80,18 +81,26 @@ its tools.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with
   `work_tickets.py backlog file` and found with `backlog list --search <text>`, as the work model's
   [Issues](../skills/work-model/SKILL.md#issues) says.
-- **Retro issues** from [retro.md](../.github/ISSUE_TEMPLATE/retro.md) over several packages or a session;
-  each improvement names the agent definition, template or rule it changes. The retro reads the
-  field reports in the pull request descriptions of the window's closed work issues (older ones,
-  from before reports moved there, in their `field-report` issues).
-  - It runs as the template says, `retro.py collect` then `retro.py file`, which closes the retro
-    issue with its report ([README](../README.md#work-commands)). A work issue you file from it
-    names each finding it takes as `retro #<n> finding <k>`, so the next retro scores it.
-- **Overhaul issues**, rarely, to ask whether the design is still right: `overhaul.py new` files
-  one from [overhaul.md](../.github/ISSUE_TEMPLATE/overhaul.md), and it runs as the template
-  says, `overhaul.py read` then `overhaul.py file`, which closes it with its report
-  ([README](../README.md#work-commands)). A work issue you file from it names each finding it
-  takes as `overhaul #<n> finding <k>`, so the next overhaul scores it.
+- **Retro issues** from [retro.md](../.github/ISSUE_TEMPLATE/retro.md) over the work that came
+  back since the last one; each improvement names the agent definition, template or rule it
+  changes. The retro reads the field reports in the pull request descriptions of the window's
+  closed work issues (older ones, from before reports moved there, in their `field-report` issues).
+  - It falls due by what comes back ([README "Retro due"](../README.md#retro-due)): your next
+    `work_tickets.py file` files it first and refuses the issue you meant, naming it. While a
+    retro or an overhaul is open, you file no new issue; running work goes on.
+  - Start one [retro agent](retro.md) session for it, titled `session-title retro <project> <its
+    name>` and tagged `SE`; its prompt names only that agent, the issue, the main checkout and your
+    session. It asks the person for the field feedback first, runs the template's `retro.py
+    collect` and `retro.py file`, has the person decide every finding, and closes the issue.
+  - When it reports the issue closed, file its work findings: a work issue names each finding it
+    takes as `retro #<n> finding <k>`, so the next retro scores it.
+- **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
+  days ([README "Retro due"](../README.md#retro-due)) and are filed the same way, from
+  [overhaul.md](../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).
+  - A retro agent runs it, `overhaul.py read` then `overhaul.py file`, which closes it with its
+    report ([README](../README.md#work-commands)).
+  - A work issue you file from it names each finding it takes as `overhaul #<n> finding <k>`, so
+    the next overhaul scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.

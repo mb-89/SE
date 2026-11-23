@@ -897,11 +897,13 @@ Anything controversial goes to a person, and everything else flows without one.
 
 ### dec-012 Only SE asks the person
 
-Every question and approval for the person goes through SE, and no other role's procedure has a
-step that needs the person in its session.
+Every question and approval for the person goes through SE or SE's retro agent, and no other
+role's procedure has a step that needs the person in its session.
 
 - **Why:** the person talks to one session, and a host counts an approval only in the session it
-  was given; a step another role needs approved must therefore run in SE's session.
+  was given; a step another role needs approved must therefore run in SE's session. The retro
+  agent is SE's for this rule: it runs a retro or an overhaul with the person in a session SE
+  starts for that (README "Retro due").
 - **Without it:** the person is sent into integrator and worker sessions they do not monitor, and
   a step waits there for a yes, or runs under a relayed one.
 - **Prevents:** a person asked outside SE's session; a one-way step stuck on an approval no one
@@ -909,7 +911,8 @@ step that needs the person in its session.
 - **Implementations:**
   - se: [Steps only the person approves](../SKILL.md#steps-only-the-person-approves) in the work
     model; `work_tickets.py refs request` and `refs apply`; `tests/test_agent_definitions.py`
-    refuses a non-SE agent or skill file that has the person act outside SE's session.
+    refuses an agent or skill file other than SE's and the retro agent's that has the person act
+    outside SE's session.
 - **Related:** dec-008, dec-011
 
 ## pub: publishing and security

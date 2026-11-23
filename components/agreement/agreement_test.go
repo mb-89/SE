@@ -1,7 +1,7 @@
 // Package agreement holds SE's two fleet paths to one answer: the Go
 // components (fleet, retro-due) and the Python fallback (scripts/work_tickets.py
-// fleet_findings, scripts/retro.py landed_since_retro, scripts/overhaul.py
-// retros_since_overhaul) read the same GitHub snapshot names,
+// fleet_findings, scripts/retro.py retro_countdown, scripts/overhaul.py
+// overhaul_countdown) read the same GitHub snapshot names,
 // testdata/snapshot.json, and must find the same.
 package agreement
 
@@ -38,6 +38,11 @@ type fixture struct {
 	Pulls      map[string]github.Snapshot `json:"pulls"`
 	Checks     map[string]github.Snapshot `json:"checks"`
 	Branches   map[string]time.Time       `json:"branches"`
+	// The countdowns' settings beside due_after and overhaul_after, which
+	// countdownFixture adds.
+	FailureWeight int `json:"failure_weight"`
+	Days          int `json:"days"`
+	OverhaulDays  int `json:"overhaul_days"`
 }
 
 func load(t *testing.T) fixture {
@@ -67,25 +72,81 @@ func python(t *testing.T) string {
 	return ""
 }
 
+// countdown is a countdown as retro.py and overhaul.py answer it (Countdown).
+type countdown struct {
+	SinceRun int    `json:"since_run"`
+	Landed   int    `json:"landed"`
+	Failed   int    `json:"failed"`
+	Count    int    `json:"count"`
+	Due      bool   `json:"due"`
+	Reason   string `json:"reason"`
+	Open     []int  `json:"open"`
+}
+
 // pythonPaths is what the Python paths answer on the fixture.
 type pythonPaths struct {
 	Fleet struct {
 		Healthy  bool            `json:"healthy"`
 		Findings []fleet.Finding `json:"findings"`
 	} `json:"fleet"`
-	Retro    int `json:"retro"`
-	Overhaul int `json:"overhaul"`
+	Retro    countdown `json:"retro"`
+	Overhaul countdown `json:"overhaul"`
+}
+
+// countdownFixture is testdata/snapshot.json with the countdowns' settings
+// (failure weight 5, 7 days, 30 overhaul days), written to a file of its own;
+// without the open retro, it also holds an escalated work issue updated since
+// the newest retro started, so every part of the count is counted.
+func countdownFixture(t *testing.T, openRetro bool) (string, fixture) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["failure_weight"], raw["days"], raw["overhaul_days"] = 5, 7, 30
+	issues := raw["issues"].(map[string]any)
+	if !openRetro {
+		delete(issues, "alice.se.30")
+		issues["alice.se.40"] = map[string]any{"repo": "alice/se", "number": 40, "read": "2026-11-13T11:59:00Z", "via": "token",
+			"data": map[string]any{"number": 40, "title": "feat/x", "state": "open", "body": "",
+				"created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-11-08T00:00:00Z",
+				"labels": []any{map[string]any{"name": "work"}, map[string]any{"name": "escalated"}}}}
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var f fixture
+	if err := json.Unmarshal(out, &f); err != nil {
+		t.Fatal(err)
+	}
+	return path, f
 }
 
 // runPython runs the Python paths on the fixture; with ages, the fleet check
 // runs with se.toml [fleet] ages on.
 func runPython(t *testing.T, ages ...bool) pythonPaths {
 	t.Helper()
+	path, _ := countdownFixture(t, true)
+	return runPythonOn(t, path, ages...)
+}
+
+// runPythonOn runs the Python paths on the fixture at path.
+func runPythonOn(t *testing.T, path string, ages ...bool) pythonPaths {
+	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []string{filepath.Join("testdata", "python_paths.py"), root, filepath.Join("testdata", "snapshot.json")}
+	args := []string{filepath.Join("testdata", "python_paths.py"), root, path}
 	if len(ages) > 0 && ages[0] {
 		args = append(args, "--ages")
 	}
@@ -139,30 +200,43 @@ func TestTheFleetPathsAgree(t *testing.T) {
 	}
 }
 
-// The retro-due component and retro.py count the same work issues landed since
-// the last retro on one snapshot.
+// The retro-due component and retro.py count the same that came back since the
+// newest retro started on one snapshot: with its open retro, which resets the
+// count, and without it, where landings and a failure count and make a retro
+// due.
 func TestTheRetroPathsAgree(t *testing.T) {
-	f := load(t)
-	got := retrodue.Count(retrodue.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, Tracker: f.Tracker, Base: f.Base})
-	want := runPython(t)
-	if got.Landed != want.Retro {
-		t.Fatalf("the retro-due component counts %d landed, retro.py %d", got.Landed, want.Retro)
-	}
-	if got.Landed == 0 || !got.Due || got.Retro != 20 {
-		t.Fatalf("on the fixture the count is %+v, want landed above 0, due, since retro #20", got)
+	for _, openRetro := range []bool{true, false} {
+		path, f := countdownFixture(t, openRetro)
+		got := retrodue.Count(retrodue.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, FailureWeight: f.FailureWeight,
+			Days: f.Days, Tracker: f.Tracker, Base: f.Base}, f.Now)
+		want := runPythonOn(t, path).Retro
+		mine := countdown{SinceRun: got.Retro, Landed: got.Landed, Failed: got.Failed, Count: got.Count, Due: got.Due,
+			Reason: got.Reason, Open: got.Open}
+		if !reflect.DeepEqual(mine, want) {
+			t.Fatalf("with the open retro %v the paths disagree:\nGo %+v\nPython %+v", openRetro, mine, want)
+		}
+		if openRetro && (got.Retro != 30 || got.Count != 0 || got.Due || len(got.Open) != 1) {
+			t.Fatalf("with the open retro the count is %+v, want reset at retro #30, open, not due", got)
+		}
+		// #32 closed as a duplicate starts nothing; #19 and #20 started together, and the first wins.
+		if !openRetro && (got.Landed == 0 || got.Failed != 1 || !got.Due || got.Retro != 19) {
+			t.Fatalf("without it the count is %+v, want landings and a failure since retro #19, due", got)
+		}
 	}
 }
 
 // The retro-due component and overhaul.py count the same retros closed since
-// the last overhaul on one snapshot; the fixture holds a retro closed as a
-// duplicate, which neither counts.
+// the newest overhaul started on one snapshot; the fixture holds a retro
+// closed as a duplicate, which neither counts.
 func TestTheOverhaulPathsAgree(t *testing.T) {
-	f := load(t)
+	path, f := countdownFixture(t, true)
 	got := retrodue.Count(retrodue.In{Issues: f.Issues, Pulls: f.Pulls, DueAfter: f.DueAfter, OverhaulAfter: f.Overhaul,
-		Tracker: f.Tracker, Base: f.Base})
-	want := runPython(t)
-	if got.Retros != want.Overhaul {
-		t.Fatalf("the retro-due component counts %d retros since the last overhaul, overhaul.py %d", got.Retros, want.Overhaul)
+		OverhaulDays: f.OverhaulDays, Tracker: f.Tracker, Base: f.Base}, f.Now)
+	want := runPythonOn(t, path).Overhaul
+	mine := countdown{SinceRun: got.Overhaul, Count: got.Retros, Due: got.OverhaulDue, Reason: got.OverhaulReason,
+		Open: got.OverhaulOpen}
+	if !reflect.DeepEqual(mine, want) {
+		t.Fatalf("the paths disagree:\nGo %+v\nPython %+v", mine, want)
 	}
 	if got.Retros != 2 || !got.OverhaulDue || got.Overhaul != 31 {
 		t.Fatalf("on the fixture the overhaul count is %+v, want 2 retros since overhaul #31, due after 2", got)

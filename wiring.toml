@@ -52,7 +52,8 @@ component = "guidance"
 command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts/se_components.py", "run", "guidance"]
 # kern's GitHub component, and SE's fleet, retro-due and origin reading it (components/README.md), all
 # compiled into the `se` binary. The config is SE's own checkout's: the fleet's lease hours, the
-# repository name and the integration branch; retro-due's due-after count, with the tracker the home
+# repository name and the integration branch; retro-due's thresholds are its built-ins (SE's se.toml
+# sets no [retro] or [overhaul]), with the tracker the home
 # origin names (the origin component, kern/home), so no wiring names where SE lives.
 [instances.github]
 component = "github"
@@ -71,7 +72,7 @@ config = { lease-hours = 3.0, repository = "SE", base = "main" }
 
 [instances.retro-due]
 component = "retro-due"
-config = { due-after = 10, base = "main" }
+config = { base = "main" }
 
 # SE's template engine in Go (components/README.md "The template engine in Go"): its verb fill makes
 # the filled template, the one value a templated target takes, from SE's templates/.
