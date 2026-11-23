@@ -102,8 +102,9 @@ component = "template"
 "integration.step" = "github.step"
 "issues.step" = "github.step"
 "delivery.step" = "github.step"
-# A template fill files the issue or the comment it checked through the GitHub component's write
-# verbs (docs/templates.md "Fill").
+# A template fill makes the filled template of what it checked with the template component's
+# fill, and files it through the GitHub component's write verbs (docs/templates.md "Fill").
+"templates.fill-template" = "template.fill"
 "templates.file-issue" = "github.issue-create"
 "templates.file-comment" = "github.issue-comment"
 # The GitHub component's write verbs write only a filled template the template component accepts

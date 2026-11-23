@@ -1,16 +1,24 @@
 # What the templates component's tests rely on of the requests it sends (kern's README
-# "Expectations"): a fill files through kern's GitHub component's write verbs, its template's name
-# and fields and never a body, and reads back where it filed. TOML, as kern reads this file.
+# "Expectations"): a fill makes its filled template with SE's template component's fill, files it
+# through kern's GitHub component's write verbs, that filled template and never a body, and reads
+# back where it filed. TOML, as kern reads this file.
+
+[[expect]]
+name = "template.fill"
+request = "fill-template"
+ask = { template = "work", raw = "The person said: plain titles." }
+exact = ["ask.template"]
+answer = { template = "work", version = "1.0.0", document = "<!-- se:form work -->\n", seal = "made-by-fill" }
 
 [[expect]]
 name = "github.issue-create"
 request = "file-issue"
-ask = { owner = "alice", repo = "demo", template = "work", fields = { title = "plain-titles" } }
-exact = ["ask.template"]
+ask = { owner = "alice", repo = "demo", filled = { template = "work", version = "1.0.0", document = "<!-- se:form work -->\n", seal = "made-by-fill" } }
+exact = ["ask.filled"]
 answer = { repo = "alice/demo", number = 21, url = "https://github.com/alice/demo/issues/21" }
 
 [[expect]]
 name = "github.issue-comment"
 request = "file-comment"
-ask = { owner = "alice", repo = "demo", number = 7, template = "work", fields = {} }
+ask = { owner = "alice", repo = "demo", number = 7, filled = { template = "work", version = "1.0.0", document = "<!-- se:form work -->\n", seal = "made-by-fill" } }
 answer = { repo = "alice/demo", number = 7, url = "https://github.com/alice/demo/issues/7#issuecomment-99" }
