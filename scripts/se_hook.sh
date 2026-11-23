@@ -177,6 +177,36 @@ gate() { # <payload>
       "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" >>"$project/.se/.runtime/templates-gate.log" 2>/dev/null
   fi
 }
+# The claim's heartbeat (README "Workers"): on every tool call (PreToolUse) in the project or the
+# checkout holding the cwd whose beat record, .se/work/beat.yaml (work_tickets.py intake writes it
+# for a work issue in progress), is due by its `due` line, the hook starts `work_tickets.py beat`
+# once, detached, its output appended to .se/work/beat.log; the claim .se/work/beat.claim, which
+# `beat` removes, keeps a second from starting for ten minutes. Before it is due the hook reads that
+# one file with builtins and starts nothing, so no network call is made.
+if [ "$event" = PreToolUse ]; then
+  for worked in "$project" ${checkout:+"$checkout"}; do
+    record="$worked/.se/work/beat.yaml"
+    [ -f "$record" ] || continue
+    due=""
+    while IFS= read -r line || [ -n "$line" ]; do
+      [[ $line =~ ^due:\ ([0-9]+) ]] && due="${BASH_REMATCH[1]}"
+    done <"$record"
+    now="${EPOCHSECONDS:-}"
+    [ -n "$now" ] || printf -v now '%(%s)T' -1 2>/dev/null || now=""
+    [[ $now =~ ^[0-9]+$ ]] || now="$(date +%s 2>/dev/null)"
+    if [ -n "$due" ] && [[ $now =~ ^[0-9]+$ ]] && [ "$now" -ge "$due" ]; then
+      beat_claim="$worked/.se/work/beat.claim"
+      if { [ ! -e "$beat_claim" ] || [ -z "$(find "$beat_claim" -mmin -10 2>/dev/null)" ]; } &&
+        rm -f "$beat_claim" && (set -C && : >"$beat_claim") 2>/dev/null; then
+        detach=()
+        command -v setsid >/dev/null 2>&1 && detach=(setsid)
+        PATH="$HOME/.local/bin:$PATH" ${detach[@]+"${detach[@]}"} uv run --no-project --python ">=3.11" \
+          python "$here/work_tickets.py" beat --worktree "$worked" </dev/null >>"$worked/.se/work/beat.log" 2>&1 &
+      fi
+    fi
+    [ "$worked" = "${checkout:-}" ] && break
+  done
+fi
 case "$event" in
 Stop | SubagentStop) ;;
 *)

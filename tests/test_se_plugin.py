@@ -310,7 +310,8 @@ def front(path: Path) -> list[str]:
 
 
 def test_se_toml_names_every_role_and_each_relies_on_no_outside_skill_today():
-    assert se_plugin.roles() == {"se": [], "integrator": [], "reviewer": [], "worker": []}
+    assert se_plugin.roles() == {"se": [], "integrator": [], "retro": [], "reviewer": [],
+                                 "worker": []}
 
 
 def test_a_roles_skills_are_preloaded_into_that_agent_where_the_host_reads_them(tmp_path):
@@ -347,7 +348,7 @@ def test_an_agents_own_skills_field_is_refused_for_the_one_list(tmp_path, capsys
 def test_every_generated_copilot_agent_holds_to_copilots_fields(checkout):
     files = se_plugin.expected(checkout)
     agents = [path for path in files if path.parent.as_posix() == ".github/agents"]
-    assert len(agents) == 4 and se_plugin.validate(files) == []
+    assert len(agents) == 5 and se_plugin.validate(files) == []
     for path in agents:
         fields = agent_lint.fields(files[path].decode())
         assert set(fields) <= agent_lint.COPILOT_AGENT_FIELDS, path
@@ -980,10 +981,11 @@ def test_ses_own_notes_are_skills_of_both_layouts():
 
 
 def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys):
-    """A copy of the generator alone (se_plugin.py, agent_lint.py) checks its layouts as before."""
+    """A copy of the generator alone (se_plugin.py, agent_lint.py and generated.py, whose marker it
+    writes) checks its layouts as before."""
     root = drafts_copy(tmp_path)
     (root / "scripts").mkdir()
-    for name in ("se_plugin.py", "agent_lint.py"):
+    for name in ("se_plugin.py", "agent_lint.py", "generated.py"):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
     assert se_plugin.main(["build", "--root", str(root)]) == 0
     done = subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), "check", "--root", str(root)],

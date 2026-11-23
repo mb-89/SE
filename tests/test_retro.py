@@ -166,6 +166,7 @@ def answers(checkout: Path) -> dict[str, object]:
                              {"body": "Integrated in def5678 from PR #24. Suite: 880 passed; "
                                       "40 s (target 60 s, limit 120 s).\n"}],
         "comments-3.json": [], "comments-13.json": [], "comments-14.json": [],
+        "open-issues.json": [],
         "checks-21.json": {"total_count": 1, "check_runs": [
             {"name": "check", "status": "completed", "conclusion": "success"}]},
         "checks-23.json": {"check_runs": [
@@ -340,26 +341,138 @@ def test_retro_starts_the_window_where_that_retro_closed(checkout):
         retro.make_parser().parse_args(["collect", "30", "--retro", "4", "--since", "2026-11-01"])
 
 
-def test_the_landed_count_is_the_collects_and_reads_only_the_lists(checkout):
-    """The start's count of work landed since the last retro (se_start.py check) is the next
-    retro's window, counted as collect counts it, from the two lists alone."""
+def test_the_countdown_counts_the_landings_as_collect_does_from_the_lists(checkout):
+    """The countdown of the next retro (se_start.py, the filing check) counts the landings of the
+    work since retro #5 started as collect counts them, from the lists alone; a retro started
+    since then resets it."""
     door = FakeDoor(answers(checkout))
-    assert retro.landed_since_retro(door, REPO, "main") == collected(checkout).sizes["landed"] == 2
-    assert door.reads == ["issues.json", "pulls.json"]
+    found = retro.countdowns(door, REPO, "main", checkout, NOW)
+    assert found["retro"].landed == collected(checkout).sizes["landed"] == 2
+    assert (found["retro"].since_run, found["retro"].count, found["retro"].due) == (5, 2, True)
+    assert found["retro"].reason == "11 days since the last retro with 2 came back (due after 7 days)"
+    assert door.reads == ["issues.json", "open-issues.json", "pulls.json"]
 
     given = answers(checkout)
     given["issues.json"].append(issue(31, "docs/retro-20261105", "2026-11-05T00:00:00Z",
                                       labels=("retro",)))
-    assert retro.landed_since_retro(FakeDoor(given), REPO, "main") == 0
+    found = retro.countdowns(FakeDoor(given), REPO, "main", checkout, NOW)
+    assert (found["retro"].since_run, found["retro"].landed, found["retro"].due) == (31, 0, False)
 
 
-def test_a_retro_is_due_after_ten_landed_issues_or_what_se_toml_sets(tmp_path):
-    assert retro.due_after(tmp_path) == retro.DUE_AFTER == 10
-    (tmp_path / "se.toml").write_text("[retro]\ndue_after = 4\n", encoding="utf-8")
-    assert retro.due_after(tmp_path) == 4
+def work(number: int, closed: str | None = None, updated: str = "", created: str = "",
+         labels: tuple[str, ...] = ("work",)) -> retro.Issue:
+    """A work issue: open, or closed at `closed`."""
+    return retro.Issue(number, f"feat/n{number}", list(labels), closed or "",
+                       "completed" if closed else "", updated_at=updated or closed or created,
+                       created_at=created)
+
+
+def landing(number: int, merged: str) -> retro.Pull:
+    return retro.Pull(100 + number, f"feat/n{number}", f"Fixes #{number}", f"feat/n{number}", "",
+                      "main", merged, "")
+
+
+SETTINGS = {"due_after": 20, "failure_weight": 5, "days": 7}
+LAST = retro.Issue(1, "retro-due-20261101", ["retro"], "2026-11-01T12:00:00Z", "completed",
+                   created_at="2026-11-01T00:00:00Z")
+
+
+def countdown(closed, opened=(), pulls=(), now=NOW, settings=SETTINGS) -> retro.Countdown:
+    return retro.retro_countdown([LAST, *closed], list(opened), list(pulls), REPO, "main",
+                                 settings, now)
+
+
+def test_twenty_issues_opened_make_no_retro_due_and_twenty_come_back_do():
+    """Opening issues counts nothing: a productive session that files 20 is no retro; 20 that
+    come back (landed) make one due, 19 do not."""
+    opened = [work(n, created="2026-11-11T10:00:00Z") for n in range(10, 30)]
+    found = countdown([], opened, now=datetime(2026, 11, 30, tzinfo=timezone.utc))
+    assert (found.count, found.due, found.reason) == (0, False, "")
+
+    closed = [work(n, "2026-11-10T00:00:00Z") for n in range(10, 30)]
+    pulls = [landing(n, "2026-11-10T00:00:00Z") for n in range(10, 30)]
+    found = countdown(closed, pulls=pulls, now=datetime(2026, 11, 5, tzinfo=timezone.utc))
+    assert (found.landed, found.count, found.due) == (20, 20, True)
+    assert found.reason == "20 came back since the last retro (due at 20)"
+    found = countdown(closed[1:], pulls=pulls, now=datetime(2026, 11, 5, tzinfo=timezone.utc))
+    assert (found.count, found.due) == (19, False)
+
+
+def test_a_failure_weighs_its_failure_weight_and_an_unlanded_close_nothing():
+    """An escalated work issue (an escalation or a refused landing) adds failure_weight, open or
+    closed; one closed without a landing adds nothing; four failures make a retro due at 20."""
+    failed = [work(n, updated="2026-11-03T00:00:00Z", labels=("work", "escalated"))
+              for n in range(10, 14)]
+    unlanded = [work(20, "2026-11-03T00:00:00Z")]
+    found = countdown(unlanded, failed, now=datetime(2026, 11, 4, tzinfo=timezone.utc))
+    assert (found.landed, found.failed, found.count, found.due) == (0, 4, 20, True)
+    found = countdown(unlanded, failed[:3], now=datetime(2026, 11, 4, tzinfo=timezone.utc),
+                      settings={**SETTINGS, "failure_weight": 6})
+    assert (found.count, found.due) == (18, False)
+
+
+def test_a_retro_is_due_seven_days_after_the_last_started_where_anything_came_back():
+    one = ([work(10, "2026-11-02T00:00:00Z")], (), [landing(10, "2026-11-02T00:00:00Z")])
+    assert not countdown(*one, now=datetime(2026, 11, 7, tzinfo=timezone.utc)).due
+    found = countdown(*one, now=datetime(2026, 11, 8, tzinfo=timezone.utc))
+    assert (found.elapsed_days, found.due) == (7, True)
+    assert not countdown([], now=datetime(2026, 12, 30, tzinfo=timezone.utc)).due
+    assert not countdown(*one, now=datetime(2026, 11, 30, tzinfo=timezone.utc),
+                         settings={**SETTINGS, "days": 0}).due
+
+
+def test_the_counters_reset_when_a_retro_starts_and_a_late_one_makes_none_due_at_once():
+    """A retro counts from the newest retro's start (its creation), open or closed: what came back
+    before it is its own, so a retro filed late leaves the next countdown at zero. While it is
+    open, issues keep coming back and count towards the next."""
+    closed = [work(n, "2026-11-10T00:00:00Z") for n in range(10, 40)]
+    pulls = [landing(n, "2026-11-10T00:00:00Z") for n in range(10, 40)]
+    late = retro.Issue(2, "retro-due-20261120", ["retro"], "", "", created_at="2026-11-20T00:00:00Z")
+    now = datetime(2026, 11, 26, tzinfo=timezone.utc)
+    assert countdown(closed, pulls=pulls, now=now).due
+    found = countdown(closed, [late], pulls, now=now)
+    assert (found.since_run, found.count, found.due, found.open) == (2, 0, False, [2])
+    after = [work(50, "2026-11-21T00:00:00Z")]
+    found = countdown([*closed, *after], [late], [*pulls, landing(50, "2026-11-21T00:00:00Z")],
+                      now=now)
+    assert (found.count, found.open) == (1, [2])
+
+
+def test_the_settings_hold_the_thresholds_and_refuse_a_bad_one(tmp_path):
+    assert retro.settings(tmp_path, "retro") == {"due_after": 20, "failure_weight": 5, "days": 7}
+    assert retro.settings(tmp_path, "overhaul") == {"due_after": 3, "days": 30}
+    assert retro.due_after(tmp_path) == retro.DUE_AFTER == 20
+    (tmp_path / "se.toml").write_text("[retro]\ndue_after = 4\nfailure_weight = 2\ndays = 0\n"
+                                      "[overhaul]\ndue_after = 0\ndays = 14\n", encoding="utf-8")
+    assert retro.settings(tmp_path, "retro") == {"due_after": 4, "failure_weight": 2, "days": 0}
+    assert retro.settings(tmp_path, "overhaul") == {"due_after": 0, "days": 14}
     (tmp_path / "se.toml").write_text("[retro]\ndue_after = 0\n", encoding="utf-8")
     with pytest.raises(retro.QueueError, match="retro.due_after .* positive whole number"):
         retro.due_after(tmp_path)
+    (tmp_path / "se.toml").write_text("[retro]\nfailure_weight = -1\n", encoding="utf-8")
+    with pytest.raises(retro.QueueError, match="retro.failure_weight .* 0 for off"):
+        retro.settings(tmp_path, "retro")
+
+
+def test_due_prints_each_countdown_and_without_gh_its_plan(checkout, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    assert retro.main(["due", "--repo", REPO, "--worktree", str(checkout)]) == 0
+    out = capsys.readouterr().out
+    assert "GitHub plan: the retro and overhaul countdowns" in out
+    assert "list_issues" in out and "list_pull_requests" in out
+    answers_dir = tmp_path / "answers"
+    answers_dir.mkdir()
+    given = answers(checkout)
+    for name in ("issues.json", "open-issues.json", "pulls.json"):
+        (answers_dir / name).write_text(json.dumps(given[name]), encoding="utf-8")
+    for item in given["issues.json"]:
+        (answers_dir / f"issue-{item['number']}.json").write_text(json.dumps(item), encoding="utf-8")
+    assert retro.main(["due", "--answers", str(answers_dir), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("retro: 2 (2 landed, 0 failed) since #5 started ")
+    assert "days since the last retro with 2 came back (due after 7 days)" in lines[0]
+    assert lines[1].startswith("overhaul: 1 retros closed in the whole history")
 
 
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
@@ -717,9 +830,10 @@ def test_file_without_gh_prints_the_comment_and_the_close(checkout, monkeypatch,
 def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     """Retro #5's posted report held four findings in its linked doc; in the window #11 took
     finding 1 and closed, #12 took finding 2 and closed, and the check finding 2 names broke
-    again; open #16 takes finding 4. With the overhaul countdown off (the built-in), finding 4 is
-    scored as before it: none, and recurred. With it on, finding 4 had no time to land: too early
-    to score, not a failure, even though the check it names broke again."""
+    again; open #16 takes finding 4. With the overhaul countdown off (`[overhaul]` due_after and
+    days 0), finding 4 is scored as before it: none, and recurred. With it on (the built-in),
+    finding 4 had no time to land: too early to score, not a failure, even though the check it
+    names broke again."""
     tracker = FakeTracker()
     monkeypatch.setattr(work_tickets, "hand_off", lambda: False)
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
@@ -746,6 +860,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     given["open-issues.json"] = [{"number": 16, "title": "feat/gate", "state": "open",
                                   "labels": [{"name": "work"}], "body": "Takes retro #5 finding 4."}]
 
+    (checkout / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
     off = FakeDoor(given)
     unchanged = retro.collect(checkout, 30, off, REPO, "main", "origin/main", NOW)
     assert "open-issues.json" not in off.reads
@@ -754,7 +869,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
         "check": "check", "issues": [], "state": "none", "recurred": True}
     assert ("| 4. Gate the landing on its check run | C | work | none | none | yes (check) |"
             in retro.draft(unchanged))
-    (checkout / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
+    (checkout / "se.toml").unlink()
 
     found = collected(checkout, given)
     assert found.previous["sizes"] == {"closed": 7}

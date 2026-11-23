@@ -29,6 +29,12 @@ authored_content = [
 [binary]
 release = "components/release.toml"
 
+# The project's own commit checks, run by se's commit hook on the staged tree (README "Commit
+# checks"): every generated file marked and declared (scripts/generated.py), without its fresh runs,
+# which CI's hygiene step adds.
+[commit_checks]
+generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "check", "--no-rerun"]
+
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
 # integrator's own, so no commit on main carries an address (README "Landing on main").
 [integrate]
@@ -159,6 +165,9 @@ skills = []
 skills = []
 
 [roles.reviewer]
+skills = []
+
+[roles.retro]
 skills = []
 
 [roles.worker]

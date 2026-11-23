@@ -16,6 +16,7 @@ import (
 	_ "se/components/fleet"
 	_ "se/components/origin"
 	_ "se/components/retro-due"
+	_ "se/components/template"
 )
 
 // Greeting is what the MCP door's greeting tool reads, the live part of SE's

@@ -1,7 +1,7 @@
 """SE's components against the real core, the suite beside se.toml `[tests.beside.se-components]`
 (README "Commands as components"): where the `se` binary serves a checkout with SE's wiring,
-`se status` lists SE's four Python command groups placed and attached beside its four Go components
-(fleet, github, origin, retro-due) in process, an interactive command answers through the core as it
+`se status` lists SE's four Python command groups placed and attached beside its Go components
+(fleet, github, origin, retro-due, template) in process, an interactive command answers through the core as it
 answers directly, and once the core has stopped it runs directly again; the Stop hook (README "Stop
 hook") answers through the delivery component as stop-check answers directly.
 
@@ -28,7 +28,7 @@ import git_door
 ROOT = Path(__file__).resolve().parents[1]
 GROUPS = ["delivery", "guidance", "templates", "integration", "issues", "overhaul", "render",
           "retro", "review", "scaffold", "tickets"]  # SE's Python command groups, each placed
-GO = ["clock", "fleet", "github", "origin", "retro-due"]  # the Go components in the se binary (components/README.md)
+GO = ["clock", "fleet", "github", "origin", "retro-due", "template"]  # the Go components in the se binary (components/README.md)
 
 
 def run(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -41,7 +41,7 @@ def checkout(tmp_path: Path, shared_fake_git) -> Path:
     """A checkout of its own for the core, SE's components, scripts and SDK linked into it, so the
     core's files and its lease never touch this checkout's own kern. It is a git repository so
     the origin component reads its refs (the bare core refuses a wiring with a component it lacks;
-    the se binary carries fleet, github, origin and retro-due): the fake the test shares with the
+    the se binary carries fleet, github, origin, retro-due and template): the fake the test shares with the
     core it starts (`shared_fake_git`)."""
     root = tmp_path / "se"
     fake_git.init(root, "-b", "main")

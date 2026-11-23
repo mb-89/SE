@@ -21,10 +21,13 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+import generated
 import git_door
 import se_home
 MANIFEST = "se.toml"
 LOCK = "se.lock"
+# The generator se.lock's marker names (scripts/generated.py); `update` writes it the same way.
+LOCK_GENERATOR = "se_modules.py sync"
 MODULES_DIR = Path(".se") / "modules"
 #: The se.toml table of a host's components (README "Modules"); se 6 renamed it from [modules].
 COMPONENTS = "components"
@@ -185,16 +188,19 @@ def read_lock(root: Path) -> dict[str, tuple[str, str]]:
 def write_lock(root: Path, entries: dict[str, tuple[str, str]]) -> None:
     """Write `se.lock` with exactly `entries`, the (version, commit) of each component of the tree
     pinned by a range or a go.mod; nothing is written where it holds them already."""
-    if entries == read_lock(root) and (entries or not (root / LOCK).is_file()):
+    path, text = root / LOCK, lock_text(entries)
+    if not entries and not path.is_file():
         return
-    (root / LOCK).write_text(lock_text(entries), encoding="utf-8", newline="\n")
+    if path.is_file() and path.read_text(encoding="utf-8").replace("\r\n", "\n") == text:
+        return
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def lock_text(entries: dict[str, tuple[str, str]]) -> str:
     """`se.lock`'s text for (version, commit) per component, as sync writes it."""
-    lines = [f"# {LOCK}: the commits scripts/se_modules.py resolved for the version ranges and go.mod pins "
-             f"of the components {MANIFEST} lists, and of theirs.",
-             "# Written by sync and update; commit it, never edit it."]
+    lines = [generated.line(LOCK_GENERATOR, MANIFEST, "hash"),
+             f"# The commits scripts/se_modules.py resolved for the version ranges and go.mod pins of the "
+             f"components {MANIFEST} lists, and of theirs; sync and update write it, commit it."]
     for key in sorted(entries):
         locked_version, locked_ref = entries[key]
         lines += ["", f"[{COMPONENTS}.{key}]", f'version = "{locked_version}"', f'ref = "{locked_ref}"']

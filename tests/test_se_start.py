@@ -533,7 +533,10 @@ def test_the_greeting_names_the_applications_own_binary_where_it_builds_one(setu
 # What is due in the work: a retro, an overhaul and the fleet's findings, from the cache (work
 # issue "start names what's due"; the overhaul countdown).
 
-DUE = {"retro": {"landed": 12, "due_after": 10}, "overhaul": {"retros": 3, "due_after": 3},
+DUE = {"retro": {"count": 12, "landed": 12, "failed": 0, "due_after": 10, "due": True,
+                 "reason": "12 came back since the last retro (due at 10)", "open": []},
+       "overhaul": {"count": 3, "due_after": 3, "due": True,
+                    "reason": "3 retros closed since the last overhaul (due at 3)", "open": []},
        "fleet": {"findings": [{"kind": "failed check", "issue": 7}, {"kind": "stray branch", "issue": 3},
                               {"kind": "stray branch", "issue": 5}]}}
 
@@ -550,9 +553,12 @@ def work_lines(lines):
     return [line for line in lines if line.startswith(("Retro", "Overhaul", "Fleet"))]
 
 
-OVERHAUL_LINE = ("Overhaul due: 3 retros closed since the last overhaul (due after 3); file one "
-                 "with: uv run python {se}/scripts/overhaul.py new, then run: uv run python "
-                 "{se}/scripts/overhaul.py read <overhaul issue> --out <draft>")
+RUN = ("; the next issue SE files (work_tickets.py file) files it first, and a retro agent runs it "
+       "in its own session: ")
+RETRO_LINE = ("Retro due: 12 came back since the last retro (due at 10)" + RUN
+              + "uv run python {se}/scripts/retro.py collect <retro issue> --out <draft>")
+OVERHAUL_LINE = ("Overhaul due: 3 retros closed since the last overhaul (due at 3)" + RUN
+                 + "uv run python {se}/scripts/overhaul.py read <overhaul issue> --out <draft>")
 
 
 def test_with_the_overhaul_countdown_off_the_greeting_is_unchanged(setup):
@@ -561,9 +567,7 @@ def test_with_the_overhaul_countdown_off_the_greeting_is_unchanged(setup):
     seed(setup, {key: value for key, value in DUE.items() if key != "overhaul"})
     se = setup["se"].as_posix()
     assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
-        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
-        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
-        "<retro issue> --out <draft>",
+        RETRO_LINE.format(se=se),
         "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
         f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}"]
 
@@ -572,9 +576,7 @@ def test_a_due_retro_overhaul_and_the_fleets_findings_appear_from_a_seeded_cache
     seed(setup, DUE)
     se = setup["se"].as_posix()
     expected = [
-        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
-        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
-        "<retro issue> --out <draft>",
+        RETRO_LINE.format(se=se),
         OVERHAUL_LINE.format(se=se),
         "Fleet: 3 findings (failed check #7; stray branch #3, #5); see each with its remedy: "
         f"uv run python {se}/scripts/work_tickets.py fleet-check --worktree {setup['project'].as_posix()}",
@@ -592,23 +594,32 @@ def test_the_parts_kern_holds_live_replace_the_cached_ones_and_say_so(setup):
     setup["world"] = dataclasses.replace(setup["world"], live=lambda root: asked.append(root) or live)
     se = setup["se"].as_posix()
     assert work_lines(se_start.greeting(report(setup), setup["se"])) == [
-        "Retro due: 12 work issues landed since the last retro (due after 10); file one from "
-        f".github/ISSUE_TEMPLATE/retro.md, then run: uv run python {se}/scripts/retro.py collect "
-        "<retro issue> --out <draft>",
+        RETRO_LINE.format(se=se),
         OVERHAUL_LINE.format(se=se),
         "Fleet: 1 finding (conflict #9), live from kern over 14 issues read; see each with its "
         f"remedy: uv run python {se}/scripts/work_tickets.py fleet-check --worktree "
         f"{setup['project'].as_posix()}"]
     assert asked == [setup["project"]]
-    live["retro"] = {"landed": 3, "due_after": 3, "issues": 14, "from": "kern"}
+    live["retro"] = {"count": 3, "due_after": 3, "due": True, "open": [],
+                     "reason": "3 came back since the last retro (due at 3)", "issues": 14,
+                     "from": "kern"}
     assert work_lines(se_start.greeting(report(setup), setup["se"]))[0].startswith(
-        "Retro due: 3 work issues landed since the last retro (due after 3, live from kern); ")
-    live["overhaul"] = {"retros": 4, "due_after": 3, "issues": 14, "from": "kern"}
+        "Retro due: 3 came back since the last retro (due at 3), live from kern; ")
+    live["overhaul"] = {"count": 4, "due_after": 3, "due": True, "open": [], "issues": 14,
+                        "reason": "4 retros closed since the last overhaul (due at 3)",
+                        "from": "kern"}
     assert work_lines(se_start.greeting(report(setup), setup["se"]))[1].startswith(
-        "Overhaul due: 4 retros closed since the last overhaul (due after 3, live from kern); ")
-    live["overhaul"] = {"retros": 2, "due_after": 3, "issues": 14, "from": "kern"}
+        "Overhaul due: 4 retros closed since the last overhaul (due at 3), live from kern; ")
+    live["overhaul"] = {"count": 2, "due_after": 3, "due": False, "open": [], "reason": "",
+                        "issues": 14, "from": "kern"}
     assert not any(line.startswith("Overhaul") for line in work_lines(
         se_start.greeting(report(setup), setup["se"])))
+    # An open run is named while it is open, due or not: it holds back SE's filing.
+    live["retro"] = {**live["retro"], "due": False, "open": [41]}
+    assert work_lines(se_start.greeting(report(setup), setup["se"]))[0] == (
+        "Retro open: #41, live from kern; SE files no new issue until the person has decided its "
+        "findings in an SE session; a retro agent runs it in its own session: uv run python "
+        f"{se}/scripts/retro.py collect <retro issue> --out <draft>")
 
 
 def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, tmp_path):
@@ -621,17 +632,22 @@ def test_without_a_core_the_live_read_answers_none_and_the_cache_stands(setup, t
 
 def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch):
     names = {"fleet/findings": {"issues": 0, "findings": []},
-             "retro-due/due": {"issues": 4, "landed": 1, "due_after": 10, "due": False}}
+             "retro-due/due": {"issues": 4, "count": 6, "landed": 1, "failed": 1, "due_after": 10,
+                               "due": False, "reason": "", "open": None}}
     monkeypatch.setattr(se_start.kern_names, "read", lambda root, wanted: names)
     assert se_start.kern_names.live_work(Path(".")) == {
-        "retro": {"landed": 1, "due_after": 10, "issues": 4, "from": "kern"}}
+        "retro": {"count": 6, "landed": 1, "failed": 1, "due_after": 10, "due": False,
+                  "reason": "", "open": [], "issues": 4, "from": "kern"}}
     # The overhaul part comes from the same name, retro-due/due, where it counts the retros, and
-    # only where its countdown is on: with overhaul_after 0 the core names no overhaul part.
-    names["retro-due/due"].update(retros=2, overhaul_after=0)
+    # only where its countdown is on: with overhaul_after and overhaul_days 0 the core names no
+    # overhaul part.
+    names["retro-due/due"].update(retros=2, overhaul_after=0, overhaul_days=0)
     assert "overhaul" not in se_start.kern_names.live_work(Path("."))
-    names["retro-due/due"].update(retros=2, overhaul_after=3)
+    names["retro-due/due"].update(retros=2, overhaul_after=0, overhaul_days=30, overhaul_due=True,
+                                  overhaul_reason="r", overhaul_open=[7])
     assert se_start.kern_names.live_work(Path("."))["overhaul"] == {
-        "retros": 2, "due_after": 3, "issues": 4, "from": "kern"}
+        "count": 2, "due_after": 0, "due": True, "reason": "r", "open": [7], "issues": 4,
+        "from": "kern"}
     # A partial view of the fleet is no verdict: the cached check stands; a complete one replaces it.
     names["fleet/findings"] = {"issues": 1, "complete": False, "findings": []}
     assert "fleet" not in se_start.kern_names.live_work(Path("."))
@@ -643,7 +659,8 @@ def test_the_live_read_keeps_only_the_parts_whose_names_hold_issues(monkeypatch)
     assert se_start.kern_names.live_work(Path(".")) is None
 
 
-@pytest.mark.parametrize("work", [None, {"retro": {"landed": 9, "due_after": 10}, "fleet": {"findings": []}}])
+@pytest.mark.parametrize("work", [None, {"retro": {"count": 9, "due_after": 10, "due": False, "open": []},
+                                         "fleet": {"findings": []}}])
 def test_the_lines_are_absent_without_gh_without_a_cache_or_with_nothing_due(setup, work):
     assert work_lines(se_start.greeting(report(setup), setup["se"])) == []  # no cache yet
     seed(setup, work)
@@ -704,17 +721,24 @@ def test_with_gh_each_part_keeps_its_answer_when_the_other_fails(tmp_path, monke
         raise work_tickets.QueueError("gh api issues failed: HTTP 502")
 
     monkeypatch.setattr(retro, "GhDoor", no_door)
-    # The overhaul countdown is off (no se.toml): the work check reads it not and names it not.
+    # The overhaul countdown is on by default: a failed read names both countdowns.
     assert se_start.work_check(project) == {"retro": {"error": "gh api issues failed: HTTP 502"},
+                                            "overhaul": {"error": "gh api issues failed: HTTP 502"},
                                             "fleet": {"findings": [{"kind": "stray branch", "issue": 3}]}}
-    (project / "se.toml").write_text("[overhaul]\ndue_after = 3\n", encoding="utf-8")
-    assert se_start.work_check(project)["overhaul"] == {"error": "gh api issues failed: HTTP 502"}
+    (project / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
+    assert "overhaul" not in se_start.work_check(project)  # off: read not, named not
+    (project / "se.toml").unlink()
     monkeypatch.setattr(retro, "GhDoor", lambda *args: "door")
-    monkeypatch.setattr(retro, "landed_since_retro", lambda door, repo, branch: 11)
-    monkeypatch.setattr(se_start._load("overhaul"), "retros_since_overhaul", lambda door: 2)
+
+    def counted(door, repo, branch, root, now):
+        return {"retro": retro.Countdown("retro", None, None, 11, 1, 16, 20, 7, 3, False, "", [41]),
+                "overhaul": retro.Countdown("overhaul", None, None, 2, 0, 2, 3, 30, 3, False, "")}
+
+    monkeypatch.setattr(retro, "countdowns", counted)
     work = se_start.work_check(project)
-    assert work["retro"] == {"landed": 11, "due_after": 10}
-    assert work["overhaul"] == {"retros": 2, "due_after": 3}
+    assert work["retro"] == {"count": 16, "landed": 11, "failed": 1, "due_after": 20, "due": False,
+                             "reason": "", "open": [41]}
+    assert work["overhaul"] == {"count": 2, "due_after": 3, "due": False, "reason": "", "open": []}
 
 
 # The project's components: its listing command, run by the check, reported by the greeting.
@@ -872,7 +896,7 @@ def repos(tmp_path, isolated_git):
     scripts = {f"scripts/{name}": (ROOT / "scripts" / name).read_text(encoding="utf-8")
                for name in ("se_start.py", "git_door.py", "se_modules.py", "se_home.py", "public_check.py",
                              "metrics.py", "feedback.py", "kern_names.py", "se_plugin.py", "agent_lint.py",
-                             "public-check-terms.toml")}
+                             "generated.py", "public-check-terms.toml")}
     upstream = tmp_path / "se-remote"
     upstream.mkdir()
     fake_git.init(upstream, "-b", "main")
