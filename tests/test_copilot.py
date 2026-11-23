@@ -18,6 +18,7 @@ import pytest
 
 import copilot
 import fake_git
+import fake_processes as fake_programs
 import se_plugin
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,10 +155,20 @@ def test_the_self_tests_static_checks_pass_on_this_checkout() -> None:
     assert report.lines and report.lines[0].startswith("passed hooks:"), report.lines
 
 
-def test_the_self_tests_plugin_copy_passes_its_layout_check(tmp_path) -> None:
+def test_the_self_tests_plugin_copy_passes_its_layout_check(tmp_path, fake_processes) -> None:
     """The copy holds SE's guidance tree, whose check reads kern's page limit: the copy places kern
-    as SE's start places it in an install, so `se_plugin.py check` of the copy passes."""
+    as SE's start places it in an install, so `se_plugin.py check` of the copy passes. The copy's
+    script runs in-process as its own: se_plugin.py's main with the copy as its root, its guidance
+    check reading kern from the copy."""
     plugin = tmp_path / "plugin" / "se"
+
+    def the_copys_check(call: fake_programs.Invocation) -> fake_programs.Answer:
+        assert (call.script, call.arguments) == (plugin / "scripts" / "se_plugin.py", ["check"])
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(se_plugin.guidance(), "SE_ROOT", plugin)
+            return fake_programs.run_main(lambda argv: se_plugin.main([*argv, "--root", str(plugin)]), call)
+
+    fake_processes.on("se_plugin.py", the_copys_check)
     report = copilot.Report([])
     copilot.copy_plugin(plugin, report)
     copilot.check_layout(plugin, report)
@@ -193,6 +204,8 @@ def test_a_status_passes_only_where_it_names_the_project(tmp_path: Path) -> None
     assert copilot.root_verdict("", project) == ("failed", "no answer")
 
 
+@pytest.mark.spawns("contract: copilot.Door, the self-test's MCP door, starts a long-lived child it speaks "
+                    "JSON lines with; its working directory and parent process exist only in a real process")
 def test_the_door_starts_in_the_plugin_folder_under_a_parent_in_the_project(tmp_path: Path) -> None:
     plugin, project = tmp_path / "plugin", tmp_path / "project"
     plugin.mkdir()
@@ -257,6 +270,7 @@ def test_the_smoke_helper_reads_vs_codes_and_claudes_tool_names_too() -> None:
         assert copilot.smoke_verdict(lines) == (True, "greeting `SE 1.2.3 started:` and se tool status answered")
 
 
+@pytest.mark.spawns("entry: scripts/copilot_smoke.sh")
 def test_the_smoke_script_reports_skipped_without_a_token(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if bash is None:

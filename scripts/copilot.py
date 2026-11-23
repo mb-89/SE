@@ -44,6 +44,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import git_door  # noqa: E402
+import process_door  # noqa: E402
 import se_home  # noqa: E402
 import se_modules  # noqa: E402
 import se_plugin  # noqa: E402
@@ -256,8 +257,8 @@ def check_layout(plugin: Path, report: Report) -> None:
     if missing:
         report.add("failed", "layout", f"{se_plugin.COPILOT_MANIFEST} lacks {', '.join(missing)}")
         return
-    done = subprocess.run([sys.executable, str(plugin / "scripts" / "se_plugin.py"), "check"],
-                          capture_output=True, text=True, check=False)
+    done = process_door.run([sys.executable, str(plugin / "scripts" / "se_plugin.py"), "check"],
+                            capture_output=True, text=True, check=False)
     if done.returncode:
         report.add("failed", "layout", (done.stderr or done.stdout).strip().splitlines()[-1])
         return
