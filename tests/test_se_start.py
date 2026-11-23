@@ -199,13 +199,29 @@ def test_the_greeting_names_only_what_is_out_of_date_and_the_refresh(setup):
         "  SE: 1.2.0 -> 1.3.0",
         "  lib: 1.2.0 -> 1.4.1",
         "  SE: 2.0.0 is outside SE's major 1; refresh never applies it; to take it, install SE 2.0.0 "
-        "again as README \"Install\" says",
+        "again as README \"Install\" says, then follow SE's docs/upgrading.md, section \"SE 2\"",
         f"  lib: 2.0.0 is outside ^1.2; refresh never applies it; to take it, set version = \"^2.0\" in "
         f"[components.lib] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update lib",
         f"  tool: 2.1.0 is outside ~2.0.1; refresh never applies it; to take it, set version = \"^2.1\" in "
         f"[components.tool] of {manifest}, then run: uv run python {se}/scripts/se_modules.py update tool",
         f"Refresh: uv run python {setup['se'].as_posix()}/scripts/se_start.py refresh",
     ]
+
+
+def test_an_se_several_majors_behind_names_each_section_of_the_upgrade_guide(setup):
+    """SE 5.x with SE 12 released: the outside line names docs/upgrading.md, "SE 6" to "SE 12"; a
+    project that pins se as a component gets the same sections after its update."""
+    plugin(setup["se"], "5.134.2")
+    write(setup["project"] / "se.toml", '[components.se]\nversion = "^5.134"\n')
+    write(setup["project"] / "se.lock", f'[components.se]\nversion = "5.134.2"\nref = "{SHA}"\n')
+    setup["remotes"].tags = {SE_URL: ["v5.134.2", "v11.1.0", "v12.0.0"]}
+    report(setup, "check")
+    lines = se_start.greeting(report(setup), setup["se"])
+    guide = "then follow SE's docs/upgrading.md, sections \"SE 6\" to \"SE 12\", in order"
+    assert ("  SE: 12.0.0 is outside SE's major 5; refresh never applies it; to take it, install SE 12.0.0 "
+            f"again as README \"Install\" says, {guide}") in lines
+    pinned = [line for line in lines if line.startswith("  se: 12.0.0 is outside ^5.134")]
+    assert len(pinned) == 1 and pinned[0].endswith(f"/scripts/se_modules.py update se, {guide}")
 
 
 def test_an_up_to_date_greeting_is_one_line(setup):
@@ -1034,7 +1050,7 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
             f"{(repos['project'] / 'se.toml').as_posix()}, then run: uv run python {repos['se'].as_posix()}"
             "/scripts/se_modules.py update lib") in lines
     assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as README "
-            "\"Install\" says") in lines
+            "\"Install\" says, then follow SE's docs/upgrading.md, section \"SE 2\"") in lines
     assert "mine: local, not touched" in lines
     assert not any(line.startswith("tool:") for line in lines)
     lock = se_modules.read_lock(repos["project"])

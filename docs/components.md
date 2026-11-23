@@ -215,7 +215,9 @@ The check changes no pin, no lock and no checkout, and files no issue: what to d
 decision. It places a release in `.se/modules/<name>` where `sync` would, to read that
 component's own list. Every retro runs it (`retro.py collect`), and SE's boot lists its pins with
 their locked versions after the start greeting, its `--upgrade` moving each lock within its pin
-([README "Boot"](../README.md#boot)).
+([README "Boot"](../README.md#boot)). Moving a pin across such a release follows the sections of
+the component's upgrade guide between the two versions, `upgrade_guide.py show`
+([docs/upgrading.md](upgrading.md)); each component keeps its own guide in that shape.
 
 ## Runtimes
 

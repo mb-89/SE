@@ -67,7 +67,7 @@ def test_an_entry_with_url_is_refused_naming_finding_by_name(tmp_path):
 
 def test_the_old_modules_table_is_refused_naming_the_rename(tmp_path):
     write(tmp_path / "se.toml", f'[modules.obs]\nurl = "../obs.git"\nref = "{SHA_A}"\n')
-    with pytest.raises(se_modules.ModuleError, match=re.escape("[modules] is [components] since se 6")):
+    with pytest.raises(se_modules.ModuleError, match=re.escape("[modules] is [components] since se 8")):
         se_modules.load_manifest(tmp_path)
 
 

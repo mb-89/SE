@@ -5,6 +5,7 @@ document type: Documentation
 
 - [[README|se: systematic engineering]]
 - [[docs/command-line|Command line]]
+- [[docs/upgrading|Upgrading]]
 - [[AGENTS|Agent guide]]
 - [[src/agents/se.md|SE]]
 - [[src/agents/integrator.md|Integrator]]

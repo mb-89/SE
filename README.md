@@ -58,6 +58,8 @@ Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less C
 showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
 for the first run with Copilot.
 
+**From an older SE**, follow the [upgrade guide](docs/upgrading.md).
+
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
 folder is outside your project. Claude Code asks you to allow this the first time. A headless
 `claude -p` session cannot ask, so it refuses them unless you allow them in advance, for example
@@ -263,8 +265,8 @@ uv run python <se>/scripts/se_start.py boot [--upgrade]
 - An installed SE older than the project's se: where the project's `se.toml` uses a key or
   table the installed SE does not know, the start's modules step fails or places nothing, and the
   greeting's update check names the same cause.
-  - Such a table is `[components]`, which replaced `[modules]` in se 6: an SE before 6 reads no
-    component of it, and an SE 6 refuses a `[modules]` table, naming the rename.
+  - Such a table is `[components]`, which replaced `[modules]` in se 8: an SE before 8 reads no
+    component of it, and an SE 8 refuses a `[modules]` table, naming the rename.
   - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
     new session, whose start moves it.
 
