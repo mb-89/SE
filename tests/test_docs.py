@@ -380,48 +380,78 @@ def test_an_obs_html_installed_as_another_kind_is_refused_by_obs(obs, tmp_path, 
     assert "--adapter: obs-html" in refusal and "not an adapter" in refusal
 
 
-def adapter_after(monkeypatch, missing: int, install: tuple[str, ...]) -> list[str]:
-    """Fake obs's finder: no adapter for its first ``missing`` reads, then one; the install runs
-    ``install``. The returned list records each read."""
-    reads: list[str] = []
-    found = {"name": "obs-html", "serve": ["serve"], "folder": "/components/obs-html"}
+STYLE = "obs-html-style-generic"
+
+
+def fake_components(monkeypatch, listing: list[str], installs: list[str]) -> list[str]:
+    """Fake obs's machine folder as its listing ``listing``, the names of the installed components,
+    with no process started: obs's finder reads obs-html from it, with the components obs-html
+    requires (its default style) that the listing lacks; obs's install appends ``installs`` to it,
+    as obs 10.3.2 installs obs-html with the components it requires. The returned list records each
+    read and install."""
+    calls: list[str] = []
 
     def installed(folder):
-        reads.append("read")
-        if len(reads) <= missing:
+        calls.append("read")
+        if "obs-html" not in listing:
             return None, "--adapter: obs-html: no adapter component 'obs-html' is installed"
-        return found, ""
+        return {"name": "obs-html", "serve": ["serve"], "folder": "/components/obs-html",
+                "missing": [name for name in (STYLE,) if name not in listing]}, ""
+
+    def install(folder):
+        calls.append("install")
+        listing.extend(name for name in installs if name not in listing)
+        return (0, f"installed {', '.join(installs)}") if installs else (1, "no release offers obs-html")
 
     monkeypatch.setattr(build_docs, "_READY", {})
     monkeypatch.setattr(build_docs, "installed_adapter", installed)
-    monkeypatch.setattr(build_docs, "ADAPTER_INSTALL", install)
-    return reads
+    monkeypatch.setattr(build_docs, "install_adapter", install)
+    return calls
 
 
-def test_a_build_installs_obs_html_where_it_is_missing(obs, monkeypatch, capsys):
-    reads = adapter_after(monkeypatch, 1, ("python", "-c", "pass"))
+def test_a_build_installs_obs_html_with_its_style_on_an_empty_machine_folder(obs, monkeypatch, capsys):
+    listing: list[str] = []
+    calls = fake_components(monkeypatch, listing, ["obs-html", STYLE])
     adapter, refusal = build_docs.ready_adapter(obs)
     assert refusal == "" and adapter["name"] == "obs-html"
-    assert reads == ["read", "read"]
+    assert listing == ["obs-html", STYLE]
+    assert calls == ["read", "install", "read"]
     assert "installed obs's adapter component obs-html at /components/obs-html" in capsys.readouterr().err
     assert build_docs.ready_adapter(obs) == (adapter, "")
-    assert reads == ["read", "read"]  # asked once per process
+    assert calls == ["read", "install", "read"]  # asked once per process
 
 
-def test_a_found_obs_html_is_not_installed_again(obs, monkeypatch, capsys):
-    reads = adapter_after(monkeypatch, 0, ("python", "-c", "raise SystemExit('installed again')"))
+def test_a_found_obs_html_without_its_style_installs_the_style(obs, monkeypatch, capsys):
+    listing = ["obs-html"]
+    calls = fake_components(monkeypatch, listing, [STYLE])
     assert build_docs.install_html(obs) == 0
-    assert reads == ["read"]
+    assert listing == ["obs-html", STYLE] and calls == ["read", "install", "read"]
+    assert f"installed the components obs-html requires, {STYLE}" in capsys.readouterr().err
+
+
+def test_a_found_obs_html_with_its_style_is_not_installed_again(obs, monkeypatch, capsys):
+    calls = fake_components(monkeypatch, ["obs-html", STYLE], [])
+    assert build_docs.install_html(obs) == 0
+    assert calls == ["read"]
     assert capsys.readouterr().out == "build_docs: obs builds with obs-html at /components/obs-html\n"
 
 
 def test_a_build_that_cannot_install_obs_html_fails_naming_the_command(obs, monkeypatch, capsys):
-    adapter_after(monkeypatch, 99, ("python", "-c", "raise SystemExit('no release offers obs-html')"))
+    fake_components(monkeypatch, [], [])
     assert build_docs.install_html(obs) == 1
     error = capsys.readouterr().err
     assert "`obs-components install obs-html`" in error and "no release offers obs-html" in error
     assert build_docs.obs_document(obs, ["--source", "unread.md"], "deck") == 1
     assert "deck: obs finds no adapter component obs-html" in capsys.readouterr().err
+
+
+def test_a_missing_default_style_fails_naming_its_install_before_any_build(obs, monkeypatch, capsys):
+    calls = fake_components(monkeypatch, ["obs-html"], [])
+    assert build_docs.install_html(obs) == 1
+    error = capsys.readouterr().err
+    assert f"`obs-components install {STYLE}`" in error and f"without the components it requires, {STYLE}" in error
+    assert build_docs.obs_document(obs, ["--source", "unread.md"], "deck") == 1
+    assert calls == ["read", "install", "read", "read", "install", "read"]  # no build ran
 
 
 def test_obs_htmls_unnamed_commit_fails_no_build_and_every_other_warning_does():
