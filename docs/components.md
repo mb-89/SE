@@ -212,7 +212,9 @@ and 1 with a message only where the listing fails: the tree does not resolve, or
 component's releases.
 
 The check changes no pin, no lock and no checkout, and files no issue: what to do is the person's
-decision. It places a release in `.se/modules/<name>` where `sync` would, to read that
+decision. Moving a pin across such a release follows the sections of the component's upgrade guide
+between the two versions, `upgrade_guide.py show` ([docs/upgrading.md](upgrading.md)); each
+component keeps its own guide in that shape. It places a release in `.se/modules/<name>` where `sync` would, to read that
 component's own list. SE runs it in the background after its start greeting
 ([se agent](../src/agents/se.md#tools)) and at every retro (`retro.py collect`).
 
