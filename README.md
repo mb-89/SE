@@ -269,10 +269,11 @@ uv run python <se>/scripts/se_start.py refresh
 - An installed SE older than the project's se: where the project's `se.toml` uses a key or
   table the installed SE does not know, the start's modules step fails or places nothing, and the
   greeting's update check names the same cause.
-  - Such a table is `[components]`, which replaced `[modules]` in se 6: an SE before 6 reads no
-    component of it, and an SE 6 refuses a `[modules]` table, naming the rename.
-  - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
-    new session, whose start moves it.
+  - Such a table is `[components]`, which replaced `[modules]` in se 8: an SE before 8 reads no
+    component of it, and an SE 8 or later refuses a `[modules]` table, naming the rename.
+  - The remedy is a newer installed SE: within its major `uv run python <se>/scripts/se_start.py
+    refresh`, or a new session, whose start moves it; across a major an install again, then the
+    [upgrade guide](docs/upgrading.md)'s sections.
 
 ### Kern
 

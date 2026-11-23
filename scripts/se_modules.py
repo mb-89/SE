@@ -275,7 +275,7 @@ def go_require_in(read: Callable[[str], str | None], where: str, name: str, valu
     raise ModuleError(f"module {name}: {relative} has no require {name} v<version>; add one")
 
 
-RENAMED = (f"[modules] is [{COMPONENTS}] since se 6: rename each [modules.<name>] to "
+RENAMED = (f"[modules] is [{COMPONENTS}] since se 8: rename each [modules.<name>] to "
            f"[{COMPONENTS}.<name>] and drop its url, as a component is found by its name (README \"Modules\")")
 
 
