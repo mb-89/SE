@@ -29,6 +29,28 @@ TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch
          "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
+# What these tests prove is bootstrap.sh's own shell logic, which runs only as a process: each runs
+# the real script under bash, the programs it calls (uv, curl, go, kern) fakes on its PATH. The
+# spawn guard (scripts/spawn_guard.py) passes them by these marks, one per part of the script.
+UV_STEPS = pytest.mark.spawns("shell: scripts/bootstrap.sh's git, uv and Python steps (install, offline, "
+                              "the env file) are shell, run only as a process")
+HOOK_STEPS = pytest.mark.spawns("shell: scripts/bootstrap.sh's --hook start (its steps, their order, the "
+                                "greeting's notes, the compaction skip) is shell, run only as a process")
+COMPONENTS = pytest.mark.spawns("shell: scripts/bootstrap.sh's components step (stop or go on, its lines as "
+                                "notes) is shell, run only as a process")
+COPILOT = pytest.mark.spawns("shell: scripts/bootstrap.sh and hosts.sh read Copilot's payload and claim its "
+                             "session in shell, run only as a process")
+KERN_STEP = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern step (checkout, locate, link, start, hand "
+                               "over the start) is shell, run only as a process against a fake kern")
+KERN_BACKGROUND = pytest.mark.spawns("shell: scripts/bootstrap.sh fetches or builds the binary in a detached "
+                                     "bash of its own, run only as a process and awaited by its bell")
+SWITCH = pytest.mark.spawns("shell: scripts/bootstrap.sh reads the core switch (SE_HOOK_CORE, "
+                            "~/.se/local.toml) in shell, run only as a process")
+BINARY = pytest.mark.spawns("shell: scripts/bootstrap.sh --binary (RUNME's `get se`) places the binary in "
+                            "shell, run only as a process")
+KERN_PLACE = pytest.mark.spawns("shell: scripts/bootstrap.sh's kern_place reads se.lock and kern's HEAD in "
+                                "shell, run only as a process")
+
 # A fake uv: `python find` fails until `python install` ran; the core switch's read
 # (se_modules.py hooks-core) runs the real script with this interpreter; SE's start prints a greeting unless
 # `status-fails` exists; its refresh at start (tests/test_start_refresh.py) moves SE where
@@ -134,6 +156,17 @@ def calls(home: Path) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
+def uv_in_place(home: Path) -> None:
+    """uv and Python in place, as a first start leaves them (the fake installer's uv in ~/.local/bin,
+    its `python install` done) and nothing logged: what a test of a later start begins from, with
+    no run of the script that it does not test (test_an_empty_home_... proves that first start)."""
+    uv = home / ".local" / "bin" / "uv"
+    uv.parent.mkdir(parents=True, exist_ok=True)
+    uv.write_text(FAKE_UV, encoding="utf-8", newline="\n")
+    uv.chmod(0o755)
+    (home / "python").touch()
+
+
 # The bell of each test's machine, by its home: the background half rings it as it ends.
 BELLS: dict[Path, waiting.Bell] = {}
 
@@ -176,6 +209,8 @@ exit 127
 
 
 @pytest.mark.skipif(WINDOWS, reason="a shim runs its file by its path there: a wrapper finds no entry of its own")
+@pytest.mark.spawns("shell: the wrapper is an sh script; only bash running it shows it reaches the tool "
+                    "past its own entry on the fake path")
 def test_a_wrapper_first_on_path_still_reaches_the_tool_after_it_on_the_fake_path(tmp_path, monkeypatch):
     wrapper, log, text = tmp_path / "wrapper", tmp_path / "log", tmp_path / "text"
     wrapper.mkdir()
@@ -190,10 +225,10 @@ def test_a_wrapper_first_on_path_still_reaches_the_tool_after_it_on_the_fake_pat
     assert result.returncode == 0 and result.stdout == "through the wrapper\n", result.stderr
     assert log.read_text(encoding="utf-8") == f"wrapper {text}\n"
     drop_tool(path, "cat")
-    gone = subprocess.run([BASH, "-c", "command -v cat"], env=env, capture_output=True, text=True, timeout=60)
-    assert gone.returncode != 0 and gone.stdout == ""
+    assert shutil.which("cat", path=env["PATH"]) is None, "no cat is left on the fake path"
 
 
+@UV_STEPS
 def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quiet(machine):
     home, project, base = machine
     path = fake_bin(base)
@@ -212,6 +247,7 @@ def test_an_empty_home_gets_uv_python_and_the_modules_and_a_second_start_is_quie
     assert not any(line.startswith(("curl", "powershell", "uv python install")) for line in calls(home))
 
 
+@UV_STEPS
 def test_an_interrupted_first_start_finishes_when_run_again(machine):
     home, project, base = machine
     path = fake_bin(base)
@@ -225,6 +261,7 @@ def test_an_interrupted_first_start_finishes_when_run_again(machine):
     assert (home / ".local" / "bin" / "uv").is_file() and (home / "python").is_file()
 
 
+@UV_STEPS
 def test_missing_git_names_the_one_line_to_run(machine):
     home, project, base = machine
     result = run(home, fake_bin(base, git=False), project)
@@ -233,6 +270,7 @@ def test_missing_git_names_the_one_line_to_run(machine):
     assert calls(home) == []
 
 
+@COMPONENTS
 def test_a_project_without_modules_syncs_nothing(machine):
     home, project, base = machine
     (project / "se.toml").write_text("[project]\n", encoding="utf-8", newline="\n")
@@ -240,6 +278,7 @@ def test_a_project_without_modules_syncs_nothing(machine):
     assert not any(line.startswith("uv run") for line in calls(home))
 
 
+@UV_STEPS
 def test_the_session_finds_uv_through_claudes_env_file(machine):
     home, project, base = machine
     env_file = base / "env"
@@ -250,6 +289,7 @@ def test_the_session_finds_uv_through_claudes_env_file(machine):
     assert os.access(home / ".local" / "bin" / "uv", os.X_OK)
 
 
+@HOOK_STEPS
 def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     home, project, base = machine
     result = run(home, fake_bin(base), project, "--hook")
@@ -262,6 +302,7 @@ def test_the_hook_ends_with_ses_greeting_carrying_what_bootstrap_said(machine):
     assert "--note se bootstrap: installing Python 3.11" in start[0]
 
 
+@HOOK_STEPS
 def test_the_hook_sets_the_projects_commit_identity_at_start(machine):
     """A fresh clone carries the host's default identity until something sets the project's: the
     session's start does, as setup.sh does, through work_tickets.py identity."""
@@ -279,6 +320,7 @@ def test_the_hook_sets_the_projects_commit_identity_at_start(machine):
 
 
 @pytest.mark.parametrize("host", ["claude", "copilot camelCase", "copilot PascalCase"])
+@HOOK_STEPS
 def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payload(machine, host):
     """A fresh clone has no core.hooksPath until setup.sh runs: the session's start sets it, under
     Claude's payload (its project variable) and Copilot's two shapes (the payload's cwd), through
@@ -304,6 +346,7 @@ def test_the_hook_points_the_projects_hooks_at_se_at_start_under_each_hosts_payl
     assert not any("start-hooks" in line for line in calls(home))
 
 
+@HOOK_STEPS
 def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
     home, project, base = machine
     (home / "refresh-moves").touch()
@@ -316,6 +359,7 @@ def test_a_start_that_moved_se_runs_once_more_carrying_what_it_said(machine):
     assert notes.index("installing Python") < notes.index("--note SE: 1.0.0 -> 1.0.1, refreshed at this start")
 
 
+@HOOK_STEPS
 def test_the_hook_falls_back_to_plain_lines_when_the_greeting_cannot_run(machine):
     home, project, base = machine
     path = fake_bin(base)
@@ -385,14 +429,14 @@ needs_platform = pytest.mark.skipif(PLATFORM.startswith("-") or PLATFORM.endswit
                                     reason="kern releases linux, darwin and windows on amd64 and arm64")
 
 
+@KERN_STEP
 def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)  # uv and Python in place
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
-    (home / "calls").unlink()
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     log = [line for line in calls(home) if line.startswith("kern ")]
@@ -409,14 +453,14 @@ def test_a_session_start_starts_the_kern_on_this_machine_and_hands_it_the_start(
 COPILOT_START = '{"sessionId":"s1","timestamp":1,"cwd":"%s","source":"startup"}'
 
 
+@COPILOT
 def test_a_copilot_start_finds_the_project_by_its_cwd_greets_as_copilot_and_hands_kern_snake_case(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)  # uv and Python in place
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
-    (home / "calls").unlink()
     env = {"HOME": sh(home), "PATH": tool_path(path)}
     result = subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, capture_output=True, text=True, timeout=60,
                             input=COPILOT_START % sh(project), cwd=base)
@@ -438,26 +482,26 @@ def copilot_start(home: Path, path: Path, cwd: Path, payload: str) -> subprocess
                           input=payload, cwd=cwd)
 
 
+@COPILOT
 def test_a_copilot_start_with_a_claude_shaped_payload_greets_as_copilot(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     result = copilot_start(home, path, base, PASCAL_START % sh(project))
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert f"--root {sh(project)} status --hook --host copilot " in greeting_call(home)
 
 
+@COPILOT
 def test_copilot_starts_a_session_once_however_many_sources_fire(machine):
     """Copilot runs every hook source it finds together; the second start of the same session ends
     quietly, and kern is started once."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
-    (home / "calls").unlink()
     first = copilot_start(home, path, base, PASCAL_START % sh(project))
     second = copilot_start(home, path, base, PASCAL_START % sh(project))
     assert first.stdout == '{"greeting": 1}\n' and (second.returncode, second.stdout) == (0, "")
@@ -466,10 +510,11 @@ def test_copilot_starts_a_session_once_however_many_sources_fire(machine):
     assert other.stdout == '{"greeting": 1}\n', "another session starts"
 
 
+@COPILOT
 def test_claude_code_starts_are_not_guarded(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     for _ in range(2):
         assert run(home, path, project, "--hook", stdin=START).stdout == '{"greeting": 1}\n'
     assert not list((project / ".se" / ".runtime").glob("start-*.claim"))
@@ -485,14 +530,14 @@ def start_steps(home: Path) -> dict[str, bool]:
             "file gate": any("se_templates.py gate --runtime " in line for line in log)}
 
 
+@HOOK_STEPS
 def test_a_start_after_a_compaction_skips_the_refresh_modules_identity_and_hooks_and_still_greets(machine):
     """Claude Code fires SessionStart with source "compact" after every compaction: the steps that
     ran at the session's own start do not run again, and the greeting context still comes, so the
     session keeps <se>."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     result = run(home, path, project, "--hook", stdin=START.replace("}", ',"source":"compact"}'))
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks", "file gate"), False)
@@ -506,11 +551,11 @@ STOP = ("SE cannot start: the required component obs is missing (project -> obs)
         "Add a remote of an owner that offers it: git remote add <remote> <address>\n")
 
 
+@COMPONENTS
 def test_a_required_component_missing_stops_the_start_and_the_session_is_shown_why(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     (home / "components-say").write_text(STOP, encoding="utf-8", newline="\n")
     (home / "components-stop").touch()
 
@@ -526,11 +571,11 @@ def test_a_required_component_missing_stops_the_start_and_the_session_is_shown_w
     assert plain.returncode == 1 and plain.stdout == STOP, "without --hook the lines as they are"
 
 
+@COMPONENTS
 def test_an_optional_component_missing_is_a_line_and_the_start_goes_on(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     line = "optional component project -> obs -> style not found on any remote's owner"
     (home / "components-say").write_text(line + "\n", encoding="utf-8", newline="\n")
 
@@ -541,6 +586,7 @@ def test_an_optional_component_missing_is_a_line_and_the_start_goes_on(machine):
     assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks", "file gate"), True)
 
 
+@COMPONENTS
 def test_a_component_check_that_fails_without_a_word_stops_naming_the_command(machine):
     home, project, base = machine
     (home / "components-stop").touch()
@@ -554,17 +600,18 @@ def test_a_component_check_that_fails_without_a_word_stops_naming_the_command(ma
 
 
 @pytest.mark.parametrize("source", ['"source":"startup"', '"source":"resume"', '"source":"clear"', None])
+@HOOK_STEPS
 def test_every_other_start_runs_every_step(machine, source):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     payload = START if source is None else START.replace("}", f",{source}}}")
     result = run(home, path, project, "--hook", stdin=payload)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert start_steps(home) == dict.fromkeys(("refresh", "modules", "identity", "hooks", "file gate"), True)
 
 
+@HOOK_STEPS
 def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_it_without_se_toml(machine):
     """se_hook.sh guards the file tools only where the start left templates-files (README "Templates"):
     `se_templates.py gate --runtime` writes it where a template claims a path and removes it otherwise
@@ -584,12 +631,13 @@ def test_the_start_writes_the_file_gates_line_through_se_templates_and_removes_i
     assert not line.exists() and not any("se_templates.py" in line for line in calls(home))
 
 
+@KERN_STEP
 def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     """`se status` works in the session's shells: the start links ~/.se/bin/<name> to the version
     it runs and puts ~/.se/bin on the session's PATH through Claude Code's env file."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
@@ -607,34 +655,34 @@ def test_the_session_finds_se_on_its_path_by_a_stable_name(machine):
     assert os.access(stable, os.X_OK)
 
 
+@KERN_STEP
 def test_the_core_starts_without_uvs_deprecated_tls_variable(machine):
     """core.log holds no deprecation notice of uv's: the core, and every component it places with
     `uv run`, starts with UV_NATIVE_TLS turned into UV_SYSTEM_CERTS."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN.replace(
         'echo "kern $*$input" >> "$HOME/calls"',
         'echo "kern $*$input native=${UV_NATIVE_TLS-unset} system=${UV_SYSTEM_CERTS-unset}" >> "$HOME/calls"'),
         encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
-    (home / "calls").unlink()
     env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project), "UV_NATIVE_TLS": "1"}
     subprocess.run([BASH, sh(SCRIPT), "--hook"], env=env, input=START, check=True, capture_output=True,
                    text=True, timeout=60)
     assert f"kern start --root {sh(project)} --home {SE_ROOT} native=unset system=1" in calls(home), calls(home)
 
 
+@KERN_STEP
 def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
     (home / "kern-fails").touch()
-    (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert f"--kern-failed {NAME} start: kern start: boom --kern-bin" in greeting_call(home)
     assert not any("kern hook" in line for line in calls(home)), "no core to hand the start to"
@@ -646,6 +694,7 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
     pytest.param(("sha256sum", "setsid"), marks=pytest.mark.skipif(
         WINDOWS, reason="macOS's tools; on Windows, without setsid, the background fetch did not finish")),
 ], ids=["every-tool", "shasum-no-setsid"])  # as on macOS: the checksum from shasum, no setsid
+@KERN_BACKGROUND
 def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it(machine, missing):
     home, project, base = machine
     path = fake_bin(base)
@@ -653,9 +702,8 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
         drop_tool(path, tool)
     if not (path / "sha256sum").exists() and not (path / "shasum").exists():
         pytest.skip("neither sha256sum nor shasum is on this machine")
-    run(home, path, project)
+    uv_in_place(home)
     release(home)
-    (home / "calls").unlink()
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
     assert greeting_call(home).endswith(f"--kern-starting fetching the {NAME} {APP_VERSION} release for {PLATFORM} "
@@ -671,22 +719,23 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
 
 
 @needs_platform
+@KERN_BACKGROUND
 def test_an_archive_that_fails_its_checksum_is_never_run(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     release(home, corrupt=True)
-    (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert any(ASSET in line for line in settled(home))
     assert not kern_bin(home).exists()
     assert not any(line.startswith("kern ") for line in calls(home))
 
 
+@KERN_BACKGROUND
 def test_with_no_release_kern_is_built_from_ses_kern_in_the_background_and_the_greeting_says_so(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     # A fake go: `go build -o <out> ./cmd/se` in SE's components/ writes the fake binary.
     (path / "go").write_text(f"""#!/bin/sh
 echo "go $* in $PWD" >> "$HOME/calls"
@@ -695,7 +744,6 @@ cat > "$3" <<'KERN'
 chmod +x "$3"
 """, encoding="utf-8", newline="\n")
     (path / "go").chmod(0o755)
-    (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-starting no {NAME} {APP_VERSION} release at {APP_BASE}; "
                                         f"building it from {sh(ROOT)}/{BUILD_DIR} in the background")
@@ -704,31 +752,32 @@ chmod +x "$3"
     assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log and os.access(kern_bin(home), os.X_OK)
 
 
+@KERN_STEP
 def test_with_no_release_and_no_go_kern_failed_names_both(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release at {APP_BASE}, and no go "
                                         f"to build it from {sh(ROOT)}/{BUILD_DIR}")
 
 
+@KERN_STEP
 def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_its_folder(machine):
     """app-binary answers `-` for the download base where the checkout's origin names no home: no
     release is asked for, and the start builds the binary from its folder as where none matches."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     (home / "app-binary").write_text(f"{NAME} {APP_VERSION} - {BUILD_DIR} {PACKAGE}\n", encoding="utf-8",
                                      newline="\n")
-    (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert greeting_call(home).endswith(f"--kern-failed no {NAME} {APP_VERSION} release to fetch: the origin of "
                                         f"{sh(ROOT)} names no home, and no go to build it from {sh(ROOT)}/{BUILD_DIR}")
     assert not any(line.startswith("curl") for line in calls(home))
 
 
+@KERN_STEP
 def test_a_start_outside_a_git_checkout_starts_no_core(machine):
     """A session started without sources (README "Cloud sessions"): no core, no read of the binary,
     no fetch and nothing said of the core; the session's shells still find `se` for a late checkout."""
@@ -747,6 +796,7 @@ def test_a_start_outside_a_git_checkout_starts_no_core(machine):
 
 
 @pytest.mark.parametrize("worktree", (False, True), ids=("subfolder", "linked-worktree"))
+@KERN_STEP
 def test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_core(machine, worktree):
     home, project, path = kern_in_place(machine)
     if worktree:  # a linked worktree's .git is a file naming its git directory
@@ -761,21 +811,21 @@ def test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_co
     assert "--kern-none" not in greeting_call(home)
 
 
+@KERN_STEP
 def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     assert run(home, path, project).returncode == 0
     assert not any("kern" in line for line in calls(home))
 
 
+@KERN_STEP
 def test_without_a_pin_kern_is_left_alone(machine):
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     (home / "app-binary").unlink()  # se_modules.py app-binary answers nothing
-    (home / "calls").unlink()
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
     assert "--kern" not in greeting_call(home)
     assert not any(line.startswith(("curl", "kern ")) for line in calls(home))
@@ -793,11 +843,10 @@ def kern_in_place(machine) -> tuple[Path, Path, Path]:
     """uv, Python and the binary in place, the logs empty: the start the switch decides."""
     home, project, base = machine
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     kern_bin(home).parent.mkdir(parents=True)
     kern_bin(home).write_text(FAKE_KERN, encoding="utf-8", newline="\n")
     kern_bin(home).chmod(0o755)
-    (home / "calls").unlink()
     return home, project, path
 
 
@@ -813,6 +862,7 @@ def core_started(home: Path) -> bool:
     return any(line.startswith("kern ") for line in calls(home))
 
 
+@SWITCH
 def test_the_switch_rows_default_is_the_starts_behaviour(machine):
     sys.path.insert(0, str(ROOT / "scripts"))
     import se_switches
@@ -824,6 +874,7 @@ def test_the_switch_rows_default_is_the_starts_behaviour(machine):
     assert core_started(home) and (project / ".se" / ".runtime" / "kern.path").exists()
 
 
+@SWITCH
 def test_an_empty_hook_core_variable_starts_as_unset(machine):
     home, project, path = kern_in_place(machine)
     seen = []
@@ -839,6 +890,7 @@ def test_an_empty_hook_core_variable_starts_as_unset(machine):
 
 
 @pytest.mark.parametrize("text", (None, '[paths]\nobs = "~/src/obs"\n'))
+@SWITCH
 def test_without_hooks_in_the_local_file_the_start_reads_no_setting(machine, text):
     home, project, path = kern_in_place(machine)
     if text is not None:
@@ -855,6 +907,7 @@ def test_without_hooks_in_the_local_file_the_start_reads_no_setting(machine, tex
     ({}, '[hooks]\ncore = "OFF"\n', LOCAL_NOTE),
     ({}, "[hooks]\ncore = false\n", LOCAL_NOTE),
 ], ids=["off", "OFF", "Off", "environment first", "local", "local OFF", "local false"])
+@SWITCH
 def test_hook_core_off_starts_no_core_and_says_so(machine, variables, text, note):
     home, project, path = kern_in_place(machine)
     if text is not None:
@@ -875,6 +928,7 @@ def test_hook_core_off_starts_no_core_and_says_so(machine, variables, text, note
 
 
 @pytest.mark.parametrize("value", ON_VALUES)
+@SWITCH
 def test_any_other_hook_core_value_starts_the_core_as_today(machine, value):
     home, project, path = kern_in_place(machine)
     assert run(home, path, project, "--hook", stdin=START, SE_HOOK_CORE=value).returncode == 0
@@ -883,6 +937,7 @@ def test_any_other_hook_core_value_starts_the_core_as_today(machine, value):
 
 @pytest.mark.parametrize("text", ('[hooks]\ncore = "on"\n', "[hooks]\ncore = true\n",
                                   "[hooks]\ncore = 1\n", '[hooks]\ncor = "off"\n'))
+@SWITCH
 def test_a_local_file_that_does_not_say_off_leaves_the_hooks_on(machine, text):
     home, project, path = kern_in_place(machine)
     local_file(home, text)
@@ -920,6 +975,7 @@ def placed(home: Path, root: Path) -> None:
 
 
 @needs_platform
+@BINARY
 def test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothing(machine):
     home, _, base = machine
     root = binary_root(base)
@@ -930,6 +986,7 @@ def test_binary_fetches_the_release_in_the_foreground_links_it_and_starts_nothin
     assert any(ASSET in line for line in calls(home))
 
 
+@BINARY
 def test_binary_builds_with_go_where_no_release_matches(machine):
     home, _, base = machine
     root = binary_root(base)
@@ -950,6 +1007,7 @@ chmod +x "$3"
                for line in calls(home))
 
 
+@BINARY
 def test_binary_without_a_release_or_go_names_both_in_one_line_and_exits_1(machine):
     home, _, base = machine
     root = binary_root(base)
@@ -992,12 +1050,12 @@ def kern_syncs(home: Path, root: Path) -> list[str]:
 
 
 @pytest.mark.parametrize("head", [None, "c" * 40], ids=["missing", "off-the-lock"])
+@KERN_PLACE
 def test_a_start_places_the_installed_ses_kern_before_the_core_where_it_is_missing(machine, head):
     home, project, base = machine
     root = pinning_se(base, head)
     path = fake_bin(base)
-    run(home, path, project)  # uv and Python in place
-    (home / "calls").unlink()
+    uv_in_place(home)
     assert run_hook(home, path, project, root).returncode == 0
     log = calls(home)
     assert len(kern_syncs(home, root)) == 1
@@ -1006,29 +1064,30 @@ def test_a_start_places_the_installed_ses_kern_before_the_core_where_it_is_missi
     assert "placing kern" not in greeting_call(home)
 
 
+@KERN_PLACE
 def test_an_ses_kern_at_its_lock_starts_no_process(machine):
     home, project, base = machine
     root = pinning_se(base, LOCKED)
     path = fake_bin(base)
-    run(home, path, project)
-    (home / "calls").unlink()
+    uv_in_place(home)
     assert run_hook(home, path, project, root).returncode == 0
     assert kern_syncs(home, root) == [] and any(" app-binary " in line for line in calls(home))
 
 
+@KERN_PLACE
 def test_a_failed_placement_is_named_in_the_greeting_and_the_start_goes_on(machine):
     home, project, base = machine
     root = pinning_se(base, None)
     path = fake_bin(base)
-    run(home, path, project)
+    uv_in_place(home)
     (home / "kern-sync-fails").touch()
-    (home / "calls").unlink()
     assert run_hook(home, path, project, root).returncode == 0
     assert (f"--note SE: placing kern for {sh(root)} failed, so this start goes on without it: error: "
             "module kern: git clone failed") in greeting_call(home)
     assert any(" app-binary " in line for line in calls(home)), "the core step goes on"
 
 
+@BINARY
 def test_binary_places_kern_before_it_builds_the_binary_on_it(machine):
     """The build fallback builds $pins/$builddir, whose go.mod replaces kern by the placed clone:
     --binary syncs it first; the build names its folder and package, no default of kern/."""
