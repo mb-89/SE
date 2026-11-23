@@ -198,8 +198,9 @@ Components are found by name under the owners of the checkout's remotes
 - **Change:** from 10.8 a template name resolves from the project's own `templates/` first, then
   its template repositories, then SE's, so a project file named like an SE template replaces it.
 - **Steps:** delete each copy of an SE template the project does not mean to override.
-- **Check:** `comm -12 <(ls templates | sort) <(ls <se>/templates | sort)` prints only `terms.toml`
-  and the names the project's `AGENTS.md` lists as overridden.
+- **Check:** with each override the project keeps named as `templates/<file>` in its `AGENTS.md`,
+  this prints nothing:
+  `comm -12 <(ls templates | sort) <(ls <se>/templates | sort) | grep -vxF terms.toml | while read -r f; do grep -qF "templates/$f" AGENTS.md || echo "$f"; done`.
 
 ### `[workers]` admits three keys
 
