@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "agent_lint.py"
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -10,11 +12,19 @@ import agent_lint  # noqa: E402
 
 
 def run(*files: Path) -> subprocess.CompletedProcess:
+    """The script as a command: the one entry-point test's."""
     return subprocess.run([sys.executable, str(SCRIPT), *map(str, files)], capture_output=True, text=True,
                           timeout=60)
 
 
-def test_another_repositorys_valid_agent_and_skill_have_no_findings(tmp_path):
+def lint(capsys, *files: Path) -> tuple[int, str, str]:
+    """The script's `main` in-process: its exit code, standard output and error."""
+    code = agent_lint.main([str(path) for path in files])
+    out, err = capsys.readouterr()
+    return code, out, err
+
+
+def test_another_repositorys_valid_agent_and_skill_have_no_findings(tmp_path, capsys):
     agent = tmp_path / ".github" / "agents" / "helper.agent.md"
     skill = tmp_path / ".github" / "skills" / "write-notes" / "SKILL.md"
     for path, text in ((agent, "---\nname: helper\ndescription: 'Helps.'\ntools: ['read', 'github/*']\n"
@@ -22,10 +32,10 @@ def test_another_repositorys_valid_agent_and_skill_have_no_findings(tmp_path):
                        (skill, "---\nname: write-notes\ndescription: \"Writes notes.\"\n---\n")):
         path.parent.mkdir(parents=True)
         path.write_text(text, encoding="utf-8")
-    result = run(agent, skill)
-    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert lint(capsys, agent, skill) == (0, "", "")
 
 
+@pytest.mark.spawns("entry: scripts/agent_lint.py")
 def test_findings_name_each_file_and_exit_one(tmp_path):
     agent = tmp_path / "x.agent.md"
     agent.write_text("---\nname: x\ndescription: ''\ntools: ['bash', 'read']\nhandoffs: []\n---\n", encoding="utf-8")
@@ -41,9 +51,9 @@ def test_findings_name_each_file_and_exit_one(tmp_path):
     ]
 
 
-def test_an_unreadable_file_is_a_setup_error(tmp_path):
-    result = run(tmp_path / "missing.agent.md")
-    assert result.returncode == 2 and "missing.agent.md" in result.stderr
+def test_an_unreadable_file_is_a_setup_error(tmp_path, capsys):
+    code, _out, err = lint(capsys, tmp_path / "missing.agent.md")
+    assert code == 2 and "missing.agent.md" in err
 
 
 def test_a_long_name_and_a_quoted_description_are_measured_as_the_host_reads_them():
