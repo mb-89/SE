@@ -16,15 +16,17 @@
 
 - Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`, for
   both hosts: its body serves Claude Code and Copilot (prose for one host says so, such as "Under
-  Copilot"). Each agent becomes one file, `agents/<name>.md`, which both hosts read: Copilot reads
-  Claude Code's agent format, and a second copy would list every agent twice in VS Code. An agent
-  has no `tools` list (Claude Code would read it as an allow-list and take tools from the agent);
-  a key prefixed `claude.` loses its prefix, and one prefixed `copilot.` is refused.
-- `uv run python scripts/se_plugin.py build` generates everything else from it: the Claude Code
-  plugin (`agents/`, `skills/`, `.claude-plugin/`), which Copilot's manifest names too, and
-  Copilot's manifest with its own hooks (`.github/plugin/`, `.github/hooks/`, `.github/mcp.json`);
-  both hosts load the one `agents/` and the one `skills/`.
-  Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+  Copilot").
+  - Each agent becomes one file, `agents/<name>.md`, which both hosts read: Copilot reads Claude
+    Code's agent format, and a second copy would list every agent twice in VS Code.
+  - An agent has no `tools` list (Claude Code would read it as an allow-list and take tools from
+    the agent); a key prefixed `claude.` loses its prefix, and one prefixed `copilot.` is refused.
+- `uv run python scripts/se_plugin.py build` generates everything else from it:
+  - the Claude Code plugin (`agents/`, `skills/`, `.claude-plugin/`), which Copilot's manifest
+    names too;
+  - Copilot's manifest with its own hooks (`.github/plugin/`, `.github/hooks/`,
+    `.github/mcp.json`); both hosts load the one `agents/` and the one `skills/`.
+  - Never edit those by hand; `tests/test_se_plugin.py` checks they match.
 - Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into
   `skills/<name>/SKILL.md`, `<name>` its front matter's
   ([docs/guidance.md "Notes in folders"](docs/guidance.md#notes-in-folders)).

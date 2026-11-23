@@ -142,7 +142,6 @@ HOSTS = (CLAUDE, COPILOT)
 # Where earlier builds wrote a second, Copilot-only copy of each agent; VS Code listed both copies,
 # so every agent showed twice. Nothing is generated here any more: `build` removes what is left.
 COPILOT_AGENTS = PurePosixPath(".github/agents")
-COPILOT_AGENT_SUFFIX = ".agent.md"
 # One outside skill a role relies on: `<plugin>@<marketplace>:<skill>`, a skill of a plugin and the
 # marketplace it installs from. A skill Claude Code ships loads by itself and is not listed.
 ROLE_SKILL = re.compile(r"^(?P<plugin>[a-z0-9][a-z0-9-]*)@(?P<marketplace>[A-Za-z0-9][\w.-]*)"
@@ -626,8 +625,6 @@ def validate(files: dict[PurePosixPath, bytes]) -> list[str]:
         text = data.decode("utf-8", errors="replace")
         if path.parent == AGENTS and path.suffix == ".md":
             findings += agent_lint.copilot_agent(path, text, shared=True)
-        elif path.parent == COPILOT_AGENTS and path.name.endswith(COPILOT_AGENT_SUFFIX):
-            findings += agent_lint.copilot_agent(path, text)
         elif path.name == "SKILL.md" and path.parent.parent == SKILLS:
             findings += agent_lint.skill(path, text)
     return findings
