@@ -21,7 +21,8 @@ import git_door
 import fake_git
 import hygiene
 import pytest
-from conftest import REAL_GIT, RefusedGit, door_backend, door_variable, runner_variables
+from conftest import (MACHINE_HOME, REAL_GIT, XDG_VARIABLES, RefusedGit, door_backend, door_variable,
+                      machine_caches, runner_variables)
 from hygiene import binary_findings, git_door_findings, large_findings, marker_findings
 from test_public_check import commit, repo, se_checkout  # noqa: F401  (repo: the public check's fixture)
 
@@ -193,6 +194,46 @@ def test_the_runner_variables_are_ci_se_cloud_agent_and_every_github_variable() 
 def test_a_test_that_needs_a_runner_variable_sets_it_itself(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert runner_variables(os.environ) == ["GITHUB_ACTIONS"]
+
+
+# Each test's home is its own and empty (tests/conftest.py `own_home`); the machine's caches stay
+# where the machine keeps them (`machine_caches`).
+
+def test_each_test_runs_in_an_empty_home_of_its_own_that_reads_no_git_configuration(own_home) -> None:
+    assert Path.home() == own_home and os.environ["HOME"] == os.environ["USERPROFILE"] == str(own_home)
+    assert list(own_home.iterdir()) == [] and own_home != Path(MACHINE_HOME["HOME"] or "/")
+    assert [name for name in XDG_VARIABLES if name in os.environ] == []
+    assert "GIT_CONFIG_GLOBAL" not in os.environ and os.environ["GIT_CONFIG_NOSYSTEM"] == "1"
+    (own_home / ".se").mkdir()  # what a test writes under ~ is its own: the next test's home is empty
+
+
+def test_the_next_test_finds_nothing_the_last_one_wrote_under_its_home(own_home) -> None:
+    assert not (Path.home() / ".se").exists()
+
+
+def test_the_machine_caches_are_where_each_tool_finds_them_without_its_variable() -> None:
+    def at(*paths: str) -> tuple[str, ...]:
+        return tuple(str(Path(path)) for path in paths)
+
+    def found(environ: dict[str, str], platform: str, *names: str) -> tuple[str, ...]:
+        caches = machine_caches(environ, platform)
+        return tuple(caches[name] for name in names)
+
+    every = ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "GOCACHE", "GOPATH", "GOMODCACHE", "npm_config_cache",
+             "PLAYWRIGHT_BROWSERS_PATH")
+    assert list(machine_caches({"HOME": "/u/alice"}, "linux")) == list(every)
+    assert found({"HOME": "/u/alice"}, "linux", *every) == at(
+        "/u/alice/.cache/uv", "/u/alice/.local/share/uv/python", "/u/alice/.cache/go-build", "/u/alice/go",
+        "/u/alice/go/pkg/mod", "/u/alice/.npm", "/u/alice/.cache/ms-playwright")
+    xdg = {"HOME": "/u/alice", "XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d", "GOPATH": "/g"}
+    assert found(xdg, "linux", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "GOCACHE", "GOPATH", "GOMODCACHE") == (
+        *at("/c/uv", "/d/uv/python", "/c/go-build"), "/g", *at("/g/pkg/mod"))
+    assert found({"HOME": "/u/alice"}, "darwin", "UV_CACHE_DIR", "GOCACHE", "PLAYWRIGHT_BROWSERS_PATH") == at(
+        "/u/alice/.cache/uv", "/u/alice/Library/Caches/go-build", "/u/alice/Library/Caches/ms-playwright")
+    windows = {"USERPROFILE": "/u/alice", "LOCALAPPDATA": "/l", "APPDATA": "/r"}
+    assert found(windows, "win32", *every) == at(
+        "/l/uv/cache", "/r/uv/data/python", "/l/go-build", "/u/alice/go", "/u/alice/go/pkg/mod", "/l/npm-cache",
+        "/l/ms-playwright")
 
 
 # The neutral home (hygiene's neutral-home check): no tracked file names the origin's owner.
