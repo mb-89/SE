@@ -220,7 +220,9 @@ func Load(layers ...Layer) (Catalog, error) {
 	repositories := map[string]string{}
 	var terms []Term
 	termsRead := false
+	overlays := map[string][2]string{}
 	for _, layer := range layers {
+		won := map[string]bool{}
 		for _, name := range sortedKeys(layer.Files) {
 			text := layer.Files[name]
 			where := layer.Where(name)
@@ -234,7 +236,7 @@ func Load(layers ...Layer) (Catalog, error) {
 				}
 				continue
 			}
-			if !strings.HasSuffix(name, templateSuffix) {
+			if !strings.HasSuffix(name, templateSuffix) || strings.HasSuffix(name, overlaySuffix) {
 				continue
 			}
 			data, err := noteData(text, where)
@@ -251,25 +253,55 @@ func Load(layers ...Layer) (Catalog, error) {
 			}
 			data.Set("path", where)
 			raw[own], texts[own], repositories[own] = data, text, layer.Repository
+			won[own] = true
 		}
+		for _, name := range sortedKeys(layer.Files) {
+			base, isOverlay := strings.CutSuffix(name, overlaySuffix)
+			if !isOverlay {
+				continue
+			}
+			if _, beside := layer.Files[base+templateSuffix]; !beside {
+				return nil, fail("%s: an overlay of %s, which this %s/ does not hold; an overlay lies beside its template, %s/%s%s", layer.Where(name), repr(base), TemplatesFolder, TemplatesFolder, base, templateSuffix)
+			}
+			if won[base] { // an earlier layer's template of that name takes no overlay of this one
+				overlays[base] = [2]string{layer.Files[name], layer.Where(name)}
+			}
+		}
+	}
+	merged, err := overlaid(raw, overlays)
+	if err != nil {
+		return nil, err
 	}
 	built := map[string]*Template{}
 	for _, name := range sortedKeys(raw) {
-		t, err := build(name, raw, terms, nil)
+		t, err := build(name, merged, terms, nil)
 		if err != nil {
 			return nil, err
 		}
 		built[name] = t
 	}
+	for _, name := range sortedKeys(overlays) {
+		base, err := build(name, raw, terms, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := tightens(base, built[name], overlays[name][1]); err != nil {
+			return nil, err
+		}
+	}
+	texts2 := map[string]string{}
+	for name, overlay := range overlays {
+		texts2[name] = overlay[0]
+	}
 	digests := map[string]string{}
 	for name, t := range built {
-		digests[name] = digestOf(name, raw, texts)
+		digests[name] = digestOf(name, raw, texts, texts2)
 		t.Repository, t.Digest = repositories[name], digests[name]
 	}
 	return nest(built, digests)
 }
 
-func digestOf(name string, raw map[string]Object, texts map[string]string) string {
+func digestOf(name string, raw map[string]Object, texts, overlays map[string]string) string {
 	chain := sha256.New()
 	for {
 		text, ok := texts[name]
@@ -278,6 +310,10 @@ func digestOf(name string, raw map[string]Object, texts map[string]string) strin
 		}
 		chain.Write([]byte(text))
 		chain.Write([]byte{0})
+		if overlay, ok := overlays[name]; ok {
+			chain.Write([]byte(overlay))
+			chain.Write([]byte{0})
+		}
 		next, _ := raw[name].Get("extends")
 		s, _ := next.(string)
 		name = s
@@ -320,12 +356,12 @@ func readTerms(text, where string) ([]Term, error) {
 	return terms, nil
 }
 
-// noteData reads a template note as the data build reads: its front matter, each field of its
-// skeleton given its heading and says from its section.
-func noteData(text, where string) (Object, error) {
+// noteParts is templates.py `_note_parts`: a note's front matter as data, its body, and the number
+// of the body's first line.
+func noteParts(text, where string) (Object, string, int, error) {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
-		return nil, fail("%s: a template opens with its front matter between `---` lines", where)
+		return nil, "", 0, fail("%s: a template opens with its front matter between `---` lines", where)
 	}
 	end := strings.Index(text[3:], "\n---\n")
 	if end >= 0 {
@@ -335,17 +371,26 @@ func noteData(text, where string) (Object, error) {
 		end = len(text) - 4
 	}
 	if end < 0 {
-		return nil, fail("%s: the front matter has no closing `---` line", where)
+		return nil, "", 0, fail("%s: the front matter has no closing `---` line", where)
 	}
 	data, err := FrontData(text[4:end+1], where, 2)
 	if err != nil {
-		return nil, err
+		return nil, "", 0, err
 	}
 	body := ""
 	if end+5 <= len(text) {
 		body = text[end+5:]
 	}
-	first := strings.Count(text[:min(end+5, len(text))], "\n") + 1
+	return data, body, strings.Count(text[:min(end+5, len(text))], "\n") + 1, nil
+}
+
+// noteData reads a template note as the data build reads: its front matter, each field of its
+// skeleton given its heading and says from its section.
+func noteData(text, where string) (Object, error) {
+	data, body, first, err := noteParts(text, where)
+	if err != nil {
+		return nil, err
+	}
 	fieldsValue, has := data.Get("fields")
 	if !has {
 		fieldsValue = []any{}

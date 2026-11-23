@@ -13,21 +13,12 @@ import (
 // ShapeFunc is a title's shape that is a function: its answer, where not empty, is the warning.
 type ShapeFunc func(title string) string
 
-// Checker is an adapter's check of its body: each answer a refusal.
-type Checker func(body string) []string
-
 // References are the names SE's templates give, each as Go holds it: a list of choices, a pattern or
 // a shape function.
 var References = map[string]any{
 	"work_tickets:RELEASE_KINDS":               []string{"feature", "feat", "fix", "perf", "chore", "docs", "test"},
 	"work_tickets:name_refusal":                ShapeFunc(nameRefusal),
 	"work_tickets:INTEGRATION_SUBJECT_PATTERN": regexp.MustCompile(`Integrate ([^\s:()]+)`),
-}
-
-// Checkers are the adapters' checks the Go engine holds, by the name the template gives. An adapter
-// whose checker is not here refuses its check, naming it (README "Templates in Go").
-var Checkers = map[string]Checker{
-	"deck:pugh_problems": pughProblems,
 }
 
 // The name rule (work_tickets.py `NAME_PATTERN`, the work model's Issues).
