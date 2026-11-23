@@ -62,6 +62,7 @@ feedback = _load("feedback")
 kern_names = _load("kern_names")
 se_plugin = _load("se_plugin")
 se_home = _load("se_home")
+upgrade_guide = _load("upgrade_guide")
 ModuleError = se_modules.ModuleError
 Version = tuple[int, int, int]
 
@@ -686,17 +687,13 @@ def work_lines(report: Report, se_root: Path) -> list[str]:
     return lines
 
 
-#: SE's upgrade guide, in SE's tree: one section per SE major, headed `SE <major>`, whose steps
-#: bring a checkout and its projects across that major.
-UPGRADE_GUIDE = "docs/upgrading.md"
-
-
 def upgrade_sections(in_use: int, newest: int) -> str:
-    """The sections of the upgrade guide that lead from major `in_use` to major `newest`."""
-    first = in_use + 1
+    """The sections of SE's upgrade guide (scripts/upgrade_guide.py owns its shape) that lead from
+    major `in_use` to major `newest`, each headed `SE <major>`."""
+    guide, first = upgrade_guide.GUIDE.as_posix(), in_use + 1
     if first >= newest:
-        return f"then follow SE's {UPGRADE_GUIDE}, section \"SE {newest}\""
-    return f"then follow SE's {UPGRADE_GUIDE}, sections \"SE {first}\" to \"SE {newest}\", in order"
+        return f"then follow SE's {guide}, section \"SE {newest}\""
+    return f"then follow SE's {guide}, sections \"SE {first}\" to \"SE {newest}\", in order"
 
 
 def take_outside(state: State, root: Path | None, se_root: Path) -> str:
