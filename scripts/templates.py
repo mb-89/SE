@@ -255,7 +255,10 @@ holding a name winning, each template's marker naming its repository (`project`,
 name, `se`), and a listed repository not placed at its pin refusing the whole catalog; `parse(template, body, title)` gives a `Document`; `render(template, document_or_fields)`;
 `check(template, document)` gives `Finding`s; `select(...)` gives a `Selection`, its template (None: free)
 and its findings; `verdict(templates, action, body, title, ...)` both at once; `draft(template)`;
-`list_templates(templates)` (named so beside Python's `list`). All but `load` (which also imports the scripts
+`list_templates(templates)` (named so beside Python's `list`); `sections(template, level)`, a fielded
+template's sections at a heading level as a document nests them, `answers(template, text)`, its
+answered fields, and `own(name)`, SE's own template from the se checkout's working tree, which the
+field report, the retro and the overhaul nest the standing questions by. All but `load` (which also imports the scripts
 a field names) and `home_repositories` are pure, but for the checkers an adapter names and the
 functions a field's shape names.
 
@@ -2115,6 +2118,39 @@ def draft(template: Template) -> str:
         if item.in_body:
             lines += [f"{hashes} {item.heading}", "", f"<!-- {item.says} -->", ""]
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def sections(template: Template, level: int = 2) -> str:
+    """A fielded template's sections as a document nests them, without markers: each field's
+    heading at `level` and its instruction comment, `<!-- <field>: <says> -->`, as the skeleton
+    writes it; the field report nests the standing questions so (`own`)."""
+    hashes = "#" * level
+    return "".join(f"{hashes} {item.heading}\n\n<!-- {item.name}: {item.says} -->\n\n"
+                   for item in template.fields if item.in_body)
+
+
+_OWN: dict[str, Template] = {}
+
+
+def own(name: str) -> Template:
+    """SE's own template `name`, read from the working tree of the se checkout this script runs
+    from, as the commands that lay out SE's documents read it (the field report, the retro and the
+    overhaul nest the standing questions so); read once per process."""
+    if not _OWN:
+        _OWN.update(load(ROOT, tree=True))
+    found = _OWN.get(name)
+    if found is None:
+        raise TemplateError(f"templates: the se checkout {ROOT} has no template {name}")
+    return found
+
+
+def answers(template: Template, text: str) -> dict[str, str]:
+    """The fields of `text`, a document of fielded `template` such as the standing questions,
+    each answered one as its text; a field left out, empty or `None` is not in it."""
+    read = parse(template, text).fields
+    return {item.name: _uncomment(str(read[item.name])).strip() for item in template.fields
+            if item.in_body and _uncomment(_plain(read.get(item.name, ""))).strip().rstrip(".")
+            .casefold() not in ("", "none")}
 
 
 def draft_fields(template: Template) -> dict[str, object]:
