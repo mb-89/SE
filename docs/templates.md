@@ -223,12 +223,12 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twenty template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's twenty-one template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's nineteen templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's twenty templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
@@ -247,7 +247,8 @@ SE's nineteen templates are notes; the term list stays a TOML list until the gui
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
-| `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
+| `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks and whose judgment node, a yaml fence, is the `overhaul-judgment` block | document | SE |
+| `templates/overhaul-judgment.md` | `overhaul-judgment`: the overhaul's judged block | block | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |
 | `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |
