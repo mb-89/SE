@@ -171,6 +171,10 @@ note: headings to sections, the source's instructions to comments, its fields to
 Each source tool gets one adapter; a source with headings only gives sections without
 instructions, which the overlay supplies.
 
+The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
+refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
+adapters' interface and the first adapter, which reads a Markdown template note.
+
 ## Tags and guidance
 
 A template carries tags in its front matter, and makes one call to the guidance system: "collect

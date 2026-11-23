@@ -45,7 +45,9 @@ are refused until quoted. It declares:
   heading level of its fields. Only that section is read; the text above the marker is data, never
   checked or read into a field, and kept as it is;
 - `fields`, a list of the fields (below), in order;
-- `message` (an interface's alone, below): the one line its document is.
+- `message` (an interface's alone, below): the one line its document is;
+- `imported` (an imported note's alone): `sha256:<hex>` of what scripts/template_import.py wrote it
+  from, which its adapter reads to tell whether the source changed.
 
 **Overlays** (docs/templates.md "Template repositories"): `templates/<name>.overlay.md`, beside the
 template note it adds to in the same `templates/`, holds what agents need that the template does
@@ -294,6 +296,12 @@ the templates and `terms.toml` from that folder instead, for that run alone (`lo
 docs/templates.md "Fill": one command takes the template, the prompt, the raw input and the agent's
 fields.
 
+- First it brings every imported template up to date (`refresh`, scripts/template_import.py): those
+  the project's own `templates/imports.yaml` and each template repository's declare, or the
+  `--templates` folder's alone, each name it wrote on stderr; then it loads, and the overlays apply.
+  A project whose own `templates/` imports reads that folder from the working tree, where the
+  import writes. An import that fails exits 2 and writes nothing.
+
 - Without fields it answers the instructions first (`instructions`): the template, the prompt, its
   `says`, the rules of honest fields (HONEST, and one per `quote` field), the guidance its tags
   resolve in `--root`'s trees (`guidance`, through `scripts/se_guidance.py`), then the empty draft
@@ -369,7 +377,7 @@ FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_h
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
               "quote", "node", "entries", "fence"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
-             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message"}
+             "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message", "imported"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
                 "fallback", "paths"}
 ADAPTER_KEYS = {"extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as",
@@ -3229,6 +3237,30 @@ def _root(path: Path, root: Path | None) -> Path:
     return Path.cwd()
 
 
+def refresh(root: Path = ROOT, *, folder: Path | None = None) -> tuple[list[str], bool]:
+    """Bring every imported template the fill may resolve up to date before it loads them
+    (docs/templates.md "Template repositories"; scripts/template_import.py owns each step): those
+    of `folder` alone where given (`--templates`), else those of the project's own `templates/` and
+    of each template repository its se.toml lists. Answers the lines `template_import.refresh` names
+    and whether the project's own `templates/` imports any, so that the fill reads it from the
+    working tree, where the import writes."""
+    importer = _sibling("template_import")
+    if folder is not None:
+        return importer.refresh(folder), False
+    own = root / TEMPLATES
+    lines = importer.refresh(own) if own.is_dir() else []
+    if str(Path(__file__).parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).parent))
+    modules = _sibling("se_modules")
+    try:
+        repositories = modules.template_repositories(root)
+    except modules.ModuleError as error:
+        raise TemplateError(f"templates: {error}") from error
+    for _, repository in repositories:
+        lines += importer.refresh(repository)
+    return lines, bool(importer.imports(own)) if own.is_dir() else False
+
+
 def _project(options: argparse.Namespace) -> Path:
     """The project whose catalog resolves a name (`catalog`): `--root`, else the root of `--path`
     (`_root`), else SE's own checkout."""
@@ -3498,9 +3530,15 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if options.command == "interfaces":
             return _interfaces(load(ROOT, tree=True), options.check)
-        templates = (load(ROOT, tree=options.tree, folder=options.templates)
+        tree = options.tree
+        if options.command == "fill":
+            imported, own_imports = refresh(_project(options), folder=options.templates)
+            tree = tree or own_imports
+            if imported:
+                print("\n".join(imported), file=sys.stderr)
+        templates = (load(ROOT, tree=tree, folder=options.templates)
                      if options.templates is not None
-                     else catalog(_project(options), tree=options.tree))
+                     else catalog(_project(options), tree=tree))
         if options.command == "list":
             print("\n".join(list_templates(templates)))
             return 0
