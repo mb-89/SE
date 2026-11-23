@@ -9,6 +9,8 @@ summary = "print the guidance a template or a set of tags gets, general first"
 group = "Guidance"
 help = "print the guidance a template or a set of tags gets, general first"
 class = "interactive"
+read-only = true
+mcp = "Gives the guidance notes a template (--template) or a topic's tags (--tags a,b) get, general before specific, once per session (--session) and in pages. Use it before you work on or talk about a topic, and for a template's guidance before its input."
 
 [commands."se_guidance.py check"]
 usage = "se_guidance.py check [--root ROOT]"
@@ -16,6 +18,8 @@ summary = "find what docs/guidance.md refuses in the guidance trees"
 group = "Guidance"
 help = "find what docs/guidance.md refuses in the guidance trees"
 class = "interactive"
+read-only = true
+mcp = "Finds what docs/guidance.md refuses in the project's guidance trees: front matter, names, tags, orphans, overrides, size and the generated files. Use it after changing a note."
 
 [commands."se_guidance.py project"]
 usage = "se_guidance.py project [--root ROOT]"

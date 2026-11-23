@@ -449,3 +449,14 @@ def test_in_a_session_the_same_call_answers_the_next_page(project):
     assert printed == [item.name for item in notes if item.name.startswith("n")]
     with pytest.raises(se_guidance.Usage, match="--page is for a call without --session"):
         se_guidance.delivered(project, notes, "Guidance for long", session="s", page=2)
+
+
+def test_collect_and_check_are_tools_of_the_mcp_door():
+    declared = (ROOT / "components" / "guidance" / "component.toml").read_text(encoding="utf-8")
+    import tomllib
+    commands = tomllib.loads(declared)["commands"]
+    for name in ("collect", "check"):
+        entry = commands[f"se_guidance.py {name}"]
+        assert entry["read-only"] is True and entry["mcp"] == se_guidance.READ_ONLY_COMMANDS[name]
+    # project writes the tool files, so the door does not offer it.
+    assert "read-only" not in commands["se_guidance.py project"]

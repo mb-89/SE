@@ -776,6 +776,17 @@ COMPONENTS = (sibling("se_components").Group(
     ("collect", "check", "project")),)
 #: The commands that go through kern where it runs (se_components.routed): both only read.
 INTERACTIVE_COMMANDS = frozenset({"collect", "check"})
+#: The same two, each with when an agent uses it: kern's MCP door offers them as tools of
+#: `guidance` (docs/guidance.md "Guidance without a template"); collect writes only the record of
+#: the session it names.
+READ_ONLY_COMMANDS = {
+    "collect": "Gives the guidance notes a template (--template) or a topic's tags (--tags a,b) get, "
+               "general before specific, once per session (--session) and in pages. Use it before "
+               "you work on or talk about a topic, and for a template's guidance before its input.",
+    "check": "Finds what docs/guidance.md refuses in the project's guidance trees: front matter, "
+             "names, tags, orphans, overrides, size and the generated files. Use it after changing "
+             "a note.",
+}
 
 
 def make_parser() -> argparse.ArgumentParser:
