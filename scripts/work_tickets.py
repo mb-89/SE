@@ -2410,11 +2410,16 @@ def fetched_destination(root: Path, moved: MovedFolder, scratch: Path) -> str:
     return resolved.stdout.strip()
 
 
-def tests_at_destination(root: Path, moved: MovedFolder,
-                         places: list[tuple[str, str]]) -> set[tuple[str, str]]:
-    """The (path, name) pairs of `places` the destination of `moved` holds: the same test, found as
-    `deleted_test_places` finds tests, in the file at the path rebased from the folder."""
+def held_at_destination(
+    root: Path, moved: MovedFolder, places: list[tuple[str, str]],
+    sentences: list[tuple[str, str]] = (),
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """The (path, name) pairs of `places` and the (path, sentence) pairs of `sentences` the
+    destination of `moved` holds, in the file at the path rebased from the folder: the same test,
+    found as `deleted_test_places` finds tests, and the same authored sentence, split as
+    `authored_sentences` splits it."""
     held: set[tuple[str, str]] = set()
+    kept: set[tuple[str, str]] = set()
     with tempfile.TemporaryDirectory(prefix="se-moved-") as directory:
         scratch = Path(directory)
         commit = fetched_destination(root, moved, scratch)
@@ -2422,21 +2427,31 @@ def tests_at_destination(root: Path, moved: MovedFolder,
             path for path in run_git(scratch, "ls-tree", "-r", "--name-only", commit)
             .stdout.splitlines()
         }
+        texts: dict[str, str] = {}
+
+        def text(path: str) -> str:
+            target = moved.destination(path)
+            if target not in texts:
+                shown = run_git(scratch, "show", f"{commit}:{target}") if target in files else None
+                texts[target] = shown.stdout if shown is not None and shown.returncode == 0 else ""
+            return texts[target]
+
         names: dict[str, set[str]] = {}
         for path, name in places:
-            target = moved.destination(path)
-            if target not in names:
-                text = ""
-                if target in files:
-                    shown = run_git(scratch, "show", f"{commit}:{target}")
-                    text = shown.stdout if shown.returncode == 0 else ""
-                names[target] = {
-                    found for line in text.splitlines()
+            if path not in names:
+                names[path] = {
+                    found for line in text(path).splitlines()
                     if (found := test_name(f"-{line}")) is not None
                 }
-            if name in names[target]:
+            if name in names[path]:
                 held.add((path, name))
-    return held
+        prose: dict[str, set[str]] = {}
+        for path, sentence in sentences:
+            if path not in prose:
+                prose[path] = set(authored_sentences(text(path)))
+            if sentence in prose[path]:
+                kept.add((path, sentence))
+    return held, kept
 
 
 # Text a generator writes into an authored file is marked once, where it is written: a block between
@@ -2528,6 +2543,13 @@ def authored_sentences(text: str) -> list[str]:
 
 
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
+    """Each authored sentence `branch` removes, as `<path>: <sentence>`."""
+    return [f"{path}: {sentence}" for path, sentence in deleted_authored_places(root, branch)]
+
+
+def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
+    """The (path, sentence) pairs of the authored sentences `branch` removes: a sentence of an
+    authored file where it forked that no authored file on the branch holds."""
     globs = authored_content_globs(root)
     if not globs:
         return []
@@ -2581,14 +2603,13 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
         for path, revision in new_files
         for sentence in authored_sentences(content(path, revision))
     }
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     for path, revision in old_files:
         if path is None:
             continue
         for sentence in authored_sentences(content(path, revision)):
-            removed = f"{path}: {sentence}"
-            if sentence not in new_sentences and removed not in found:
-                found.append(removed)
+            if sentence not in new_sentences and (path, sentence) not in found:
+                found.append((path, sentence))
     return found
 
 
@@ -2608,10 +2629,13 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
     branch = branch_head(root, branch)
     places = deleted_test_places(root, branch)
     removed_tests = list(dict.fromkeys(name for _, name in places))
-    removed_sentences = deleted_authored_sentences(root, branch)
+    removed_places = deleted_authored_places(root, branch)
+    removed_sentences = [f"{path}: {sentence}" for path, sentence in removed_places]
     section = section_content(report, REMOVED_SECTION)
     named = re.sub(r"\s+", " ", "\n".join(section))
     unnamed = [(path, name) for path, name in places if name not in named]
+    unnamed_prose = [(path, sentence) for path, sentence in removed_places
+                     if f"{path}: {sentence}" not in named]
     moves = moved_folders(section)
     checked: list[str] = []
     def owner(path: str) -> MovedFolder | None:
@@ -2621,12 +2645,14 @@ def guard(root: Path, branch: str, report: str) -> list[str]:
 
     for moved in moves:
         under = [place for place in unnamed if owner(place[0]) == moved]
-        held = tests_at_destination(root, moved, under)
+        prose = [place for place in unnamed_prose if owner(place[0]) == moved]
+        held, kept = held_at_destination(root, moved, under, prose)
         checked.append(moved.line)
         unnamed = [place for place in unnamed if place not in held]
+        unnamed_prose = [place for place in unnamed_prose if place not in kept]
     missing = [
         *dict.fromkeys(name for _, name in unnamed),
-        *[sentence for sentence in removed_sentences if sentence not in named],
+        *[f"{path}: {sentence}" for path, sentence in unnamed_prose],
     ]
     if missing:
         lines = (

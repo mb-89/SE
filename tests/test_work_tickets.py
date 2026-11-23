@@ -526,11 +526,18 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
-def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, str]:
+MOVED_GUIDE = "The adapter renders a page.\nIt links each note.\n"
+
+
+def moved_folder_case(case: Path, destination_tests: str | None,
+                      destination_guide: str | None = None) -> tuple[Path, str]:
     """A clone on the branch `move-html` that deletes the folder `adapters/html` with its two tests
     and the test `test_outside` beside it, its origin `<case>/app.git`; beside it the repository
     `html.git` holds `destination_tests` as `tests/test_html.py` (the folder's
-    `tests/test_html.py`, moved to its root) at the commit returned, or is missing where it is None."""
+    `tests/test_html.py`, moved to its root) at the commit returned, or is missing where it is None.
+
+    With `destination_guide`, the clone's authored content is `**/*.md` and the folder also holds
+    MOVED_GUIDE as `spec/guide.md`, which the destination holds as `destination_guide`."""
     case.mkdir()
     repository = case / "clone"
     repository.mkdir()
@@ -541,6 +548,12 @@ def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, 
     folder = repository / "adapters" / "html" / "tests"
     folder.mkdir(parents=True)
     (folder / "test_html.py").write_text(MOVED_TESTS, encoding="utf-8")
+    if destination_guide is not None:
+        (repository / "se.toml").write_text('[project]\nauthored_content = ["**/*.md"]\n',
+                                             encoding="utf-8")
+        (repository / "adapters" / "html" / "spec").mkdir()
+        (repository / "adapters" / "html" / "spec" / "guide.md").write_text(MOVED_GUIDE,
+                                                                           encoding="utf-8")
     (repository / "tests").mkdir()
     (repository / "tests" / "test_app.py").write_text(
         "def test_outside():\n    pass\n", encoding="utf-8")
@@ -560,6 +573,9 @@ def moved_folder_case(case: Path, destination_tests: str | None) -> tuple[Path, 
         assert git(destination, "config", key, value).returncode == 0
     (destination / "tests").mkdir()
     (destination / "tests" / "test_html.py").write_text(destination_tests, encoding="utf-8")
+    if destination_guide is not None:
+        (destination / "spec").mkdir()
+        (destination / "spec" / "guide.md").write_text(destination_guide, encoding="utf-8")
     assert git(destination, "add", ".").returncode == 0
     assert git(destination, "commit", "-qm", "the html adapter").returncode == 0
     fake_git.init(case / "html.git", "--bare", "-b", "main")
@@ -631,6 +647,48 @@ def test_guard_still_requires_by_name_a_deleted_test_outside_the_moved_folder(
     message = str(refused.value)
     assert message.startswith("Field report must name each deleted or renamed test and authored "
                               "sentence: test_outside, each compared")
+
+
+def test_guard_passes_the_authored_sentences_of_a_moved_folder_its_destination_holds(
+    worktree: Path,
+) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-prose-case", MOVED_TESTS,
+                                           MOVED_GUIDE)
+    report = removed_report(f"Moved: adapters/html to html at {commit}", "test_outside")
+
+    removed = work_tickets.guard(repository, "move-html", report)
+
+    assert removed[3:] == ["adapters/html/spec/guide.md: The adapter renders a page.",
+                           "adapters/html/spec/guide.md: It links each note."]
+
+
+def test_guard_refuses_a_moved_authored_sentence_its_destination_lacks(worktree: Path) -> None:
+    repository, commit = moved_folder_case(worktree.parent / "moved-prose-missing", MOVED_TESTS,
+                                           "The adapter renders a page.\n")
+    line = f"Moved: adapters/html to html at {commit}"
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", removed_report(line, "test_outside"))
+
+    message = str(refused.value)
+    assert message.startswith("Field report must name each deleted or renamed test and authored "
+                              "sentence: adapters/html/spec/guide.md: It links each note., each")
+    assert "The adapter renders a page." not in message
+    named = removed_report(line, "test_outside", "adapters/html/spec/guide.md: It links each note.")
+    assert work_tickets.guard(repository, "move-html", named)
+
+
+def test_guard_still_requires_by_name_a_moved_folders_sentence_without_a_move_line(
+    worktree: Path,
+) -> None:
+    repository, _ = moved_folder_case(worktree.parent / "moved-prose-unnamed", MOVED_TESTS,
+                                      MOVED_GUIDE)
+    report = removed_report("test_outside", "test_renders_a_page", "test_renders_a_link")
+
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.guard(repository, "move-html", report)
+
+    assert "adapters/html/spec/guide.md: The adapter renders a page." in str(refused.value)
 
 
 @pytest.mark.parametrize("commit", [None, "fedcba9876543210fedcba9876543210fedcba98"])
