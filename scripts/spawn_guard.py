@@ -2,7 +2,7 @@
 
 Reader: whoever writes a test, loads the plugin into a Python project's suite, or converts a test
 that still starts processes. The rule it enforces is the guidance note `tests-spawn-no-processes`
-(guidance/tests-spawn-no-processes.md): a test calls product code in-process; only a door's
+(guidance/pull-request/field-report/tests-spawn-no-processes.md): a test calls product code in-process; only a door's
 contract test, a script's or hook's one entry-point test, or a test marked with its reason starts
 a real process.
 

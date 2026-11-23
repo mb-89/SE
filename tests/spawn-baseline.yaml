@@ -133,53 +133,6 @@ tests:
   "tests/test_file_order.py::test_record_file_seconds_writes_nothing_after_a_run_of_part_of_the_files_and_says_why": 1
   "tests/test_file_order.py::test_record_file_seconds_writes_the_files_of_a_passing_parallel_run": 2
   "tests/test_file_order.py::test_with_nothing_recorded_the_table_orders_the_files": 2
-  "tests/test_git_door.py::test_a_child_process_reaches_the_fake_its_test_names_and_is_refused_without_it": 4
-  "tests/test_git_door.py::test_a_clone_has_a_commit_made_upstream_only_once_it_fetches_it[real]": 40
-  "tests/test_git_door.py::test_a_commit_and_a_merge_without_an_identity_are_refused[real]": 9
-  "tests/test_git_door.py::test_a_commit_carries_the_identity_the_door_sets_or_the_environment_names[real]": 10
-  "tests/test_git_door.py::test_a_conflicting_merge_fails_naming_the_file[real]": 16
-  "tests/test_git_door.py::test_a_merge_keeps_an_uncommitted_change_it_does_not_touch_and_refuses_one_it_does[real]": 22
-  "tests/test_git_door.py::test_a_merge_takes_both_sides_line_changes_and_lists_a_conflict_until_aborted[real]": 28
-  "tests/test_git_door.py::test_a_second_merge_of_a_branch_merges_from_its_last_merged_tip[real]": 19
-  "tests/test_git_door.py::test_a_shallow_clone_names_its_boundary_and_lists_no_commit_below_it[real]": 28
-  "tests/test_git_door.py::test_a_state_file_load_is_a_fresh_copy_and_sees_another_process": 2
-  "tests/test_git_door.py::test_a_tag_moves_only_with_force_locally_and_on_the_remote[real]": 28
-  "tests/test_git_door.py::test_a_test_that_runs_git_through_the_state_file_and_starts_no_child_is_refused": 1
-  "tests/test_git_door.py::test_a_three_dot_diff_names_the_branch_changes_since_the_merge_base[real]": 18
-  "tests/test_git_door.py::test_a_worktree_shares_the_branches_and_is_listed_until_it_is_removed[real]": 22
-  "tests/test_git_door.py::test_add_force_takes_an_excluded_file_and_rm_cached_untracks_it[real]": 14
-  "tests/test_git_door.py::test_an_orphan_branch_starts_without_files_or_parents_and_takes_another_branch_files[real]": 19
-  "tests/test_git_door.py::test_cat_file_merge_base_and_diff_compare_two_commits[real]": 18
-  "tests/test_git_door.py::test_check_ignore_and_add_follow_the_root_gitignore[real]": 10
-  "tests/test_git_door.py::test_checkout_and_switch_start_a_branch_at_a_commit_and_rm_and_add_stage_paths[real]": 20
-  "tests/test_git_door.py::test_checkout_detach_and_reset_hard_move_head_and_the_files_to_a_commit[real]": 19
-  "tests/test_git_door.py::test_clone_brings_the_branches_and_tags_and_checks_out_the_branch_asked[real]": 21
-  "tests/test_git_door.py::test_commit_all_takes_the_tracked_files_and_leaves_new_ones[real]": 11
-  "tests/test_git_door.py::test_commit_amend_replaces_head_on_its_parents[real]": 14
-  "tests/test_git_door.py::test_commit_tree_for_each_ref_and_plain_worktree_list[real]": 21
-  "tests/test_git_door.py::test_config_sets_and_gets_and_a_missing_key_fails[real]": 10
-  "tests/test_git_door.py::test_fetch_mirrors_the_remote_branches_with_prune_and_pull_merges_one[real]": 24
-  "tests/test_git_door.py::test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_refusal_stops_the_command[real]": 19
-  "tests/test_git_door.py::test_git_runs_the_hooks_paths_hooks_with_their_arguments_and_stdin_and_a_refusal_stops_the_command[state]": 6
-  "tests/test_git_door.py::test_init_without_a_path_makes_the_working_directory_a_repository[real]": 3
-  "tests/test_git_door.py::test_log_and_rev_list_leave_out_excluded_revisions_and_merges[real]": 27
-  "tests/test_git_door.py::test_log_formats_the_dates_subjects_and_changed_paths[real]": 12
-  "tests/test_git_door.py::test_log_with_a_path_lists_the_main_line_commits_that_change_it_oldest_first[real]": 23
-  "tests/test_git_door.py::test_ls_files_ls_tree_and_cat_file_read_the_index_and_a_commit_by_blob[real]": 15
-  "tests/test_git_door.py::test_ls_files_status_and_archive_read_the_tracked_files[real]": 14
-  "tests/test_git_door.py::test_ls_remote_of_a_missing_remote_fails[real]": 1
-  "tests/test_git_door.py::test_ls_remote_reads_a_named_remote_by_pattern[real]": 13
-  "tests/test_git_door.py::test_merge_base_of_several_commits_and_a_fast_forward_only_merge[real]": 28
-  "tests/test_git_door.py::test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it[real]": 20
-  "tests/test_git_door.py::test_push_fetch_and_ls_remote_against_a_bare_origin[real]": 21
-  "tests/test_git_door.py::test_push_under_an_empty_lease_creates_a_branch_only_where_it_does_not_exist[real]": 16
-  "tests/test_git_door.py::test_rev_parse_names_a_bare_repository_and_a_checkout[real]": 6
-  "tests/test_git_door.py::test_rev_parse_names_commits_trees_branches_and_the_git_directory[real]": 20
-  "tests/test_git_door.py::test_show_reads_a_file_at_a_commit_and_refuses_a_missing_one[real]": 12
-  "tests/test_git_door.py::test_switch_brings_the_branch_files_and_a_no_ff_merge_makes_the_main_line[real]": 18
-  "tests/test_git_door.py::test_the_history_rewrite_streams_every_branch_and_tag_through_its_filter": 94
-  "tests/test_git_door.py::test_update_ref_moves_and_deletes_a_ref_only_from_the_old_value_named[real]": 16
-  "tests/test_git_door.py::test_var_names_the_identity_a_commit_would_carry[real]": 5
   "tests/test_kern.py::test_the_action_leaves_a_folder_carrying_kerns_source_as_it_is": 2
   "tests/test_kern.py::test_the_action_places_kern_at_the_commit_se_lock_locks_for_the_go_mod_se_toml_names": 2
   "tests/test_kern.py::test_the_action_refuses_a_folder_with_neither_naming_the_sync": 1

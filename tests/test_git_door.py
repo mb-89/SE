@@ -21,6 +21,10 @@ import git_door
 import se_modules
 import work_tickets  # scripts/ is on the path (tests/conftest.py)
 
+# The git door's contract runs real git, and child processes that reach the fake through its state
+# file, as SE's code relies on both (the spawn guard, scripts/spawn_guard.py).
+pytestmark = pytest.mark.spawns("contract: git, real git and the state file's child processes")
+
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[0-9a-f]{40}")
 IDENTITY = ("alice", "alice@example.com")
@@ -1140,6 +1144,8 @@ def test_runs_git_and_a_child(shared_fake_git, tmp_path):
 """
 
 
+@pytest.mark.spawns("entry: tests/conftest.py as the plugin of a planted suite, whose refusal fires at a "
+                    "fixture's teardown in a session of its own")
 def test_a_test_that_runs_git_through_the_state_file_and_starts_no_child_is_refused(tmp_path: Path) -> None:
     """tests/conftest.py `shared_fake_git`: the state file is for a test whose child processes run
     git; one that ran git through it and started none fails at its teardown, naming the test and

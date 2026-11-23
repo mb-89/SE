@@ -16,6 +16,7 @@ field-report:
   - flake-at-base
   - platform-code-legs
   - test-paths-on-windows
+  - tests-spawn-no-processes
 handover:
   - discover-cheap-load-late
   - guidance-comes-first
