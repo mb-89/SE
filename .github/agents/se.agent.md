@@ -52,8 +52,8 @@ its tools.
   run first. Its lines name what is out of date and the one refresh command; run that command only
   when the person asks ([Start and refresh](../../README.md#start-and-refresh)).
   - Where gh is signed in it also names a retro or an overhaul that is due or open and the fleet's
-    findings, from the cached background check. Without gh (the cloud) it names neither: at your
-    first turn run
+    findings, from the cached background check.
+    Without gh (the cloud) it names neither: at your first turn run
     `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
     GitHub tools, pass the lists back as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
