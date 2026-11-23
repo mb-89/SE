@@ -2,9 +2,7 @@
 real shell and against the fake every other test gets (tests/fake_processes.py behind the `fake_shell` fixture).
 
 The real side is one test, `test_the_real_shell_answers_as_its_fake`, the door's own contract:
-it starts one `sh` per case. The contract tests of SE's shell programs (scripts/bootstrap.sh,
-se_hook.sh, se_mcp.sh, RUNME.sh and the rest), marked `contract: shell, ...` in their own files,
-are the door's contract too. Every other case here runs in-process: what a shell is, the process
+it starts one `sh` per case. Every other case here runs in-process: what a shell is, the process
 door handing a shell over and the shell door refusing a program that is none, the fake answering by the test's handlers.
 """
 

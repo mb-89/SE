@@ -4,12 +4,10 @@
 The shell is a door, like git, gh and the network (the rule book's des-004, one door per outside
 thing): product code reaches a shell only through this door, and a test never starts one. Only
 the door's contract starts a real shell: `tests/test_shell_door.py`, which holds this door to its
-fake, and the contract tests of SE's own shell programs (scripts/bootstrap.sh, se_hook.sh,
-se_mcp.sh, RUNME.sh and the rest), each marked `contract: shell`, which prove the real shell runs
-them as their callers assume. Every other test gets the fake behind this door (the `fake_shell`
+fake. Every other test gets the fake behind this door (the `fake_shell`
 fixture of tests/conftest.py, a tests/fake_processes.py `FakeProcesses` answering by the test's
-handlers), and the spawn guard (scripts/spawn_guard.py) refuses a shell start in any test not
-marked `contract: shell`, naming the call.
+handlers), and the spawn guard (scripts/spawn_guard.py) refuses a shell start in any test but
+the door's contract (`contract: shell`) and a shell script's one entry-point test, naming the call.
 
 What counts as a shell (`is_shell`): a command line (`shell=True`, a string command, `os.system`),
 a program whose name is one of SHELLS (with or without `.exe`), or a shell script run as the
