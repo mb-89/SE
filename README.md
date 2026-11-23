@@ -54,6 +54,11 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with the one `agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
 | GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/hooks/se.json`; it reads agents only from the repository's own `.github` folder, where SE ships none, so it offers no `se` agent; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task whose first line is `Act as the se agent defined in agents/se.md.` | its `sessionStart` hook hands the session SE's greeting, as above |
 
+**From an older SE.** A fresh clone needs nothing more: clone, run [RUNME](#getting-it-running),
+start the agent. A checkout or project that ran an older SE major also follows the
+[upgrade guide](docs/upgrading.md), one section per major from the one after its own, in order;
+the start greeting names those sections ([Start and refresh](#start-and-refresh)).
+
 Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
 showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
 for the first run with Copilot.
@@ -240,7 +245,9 @@ uv run python <se>/scripts/se_start.py refresh
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
   applied, with the remedy: for a module the range to set in its `se.toml` and the `update` that
-  takes it, for SE an install again.
+  takes it, for SE an install again. For SE, installed or pinned as the component `se`, the remedy
+  also names the sections of the [upgrade guide](docs/upgrading.md) from the next major to the
+  newer one, which the checkout and its projects follow in order.
 - A local path (`[paths]` of `~/.se/local.toml`, SE's own under the name `se`) is reported as local
   and never touched. A module pinned by commit is reported, and only the module command's
   [`update`](#commands) moves it.
