@@ -1349,7 +1349,7 @@ def test_readme_command_reference_is_what_docs_writes():
 
 def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, monkeypatch, capsys):
     readme = tmp_path / "README.md"
-    stale = (f"# Title\n\nProse stays.\n\n{work_tickets.REFERENCE_BEGIN}\nstale\n"
+    stale = (f"# Title\n\nProse stays.\n\n{work_tickets.REFERENCE_BEGIN}\nOUTDATED REFERENCE\n"
              f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
     readme.write_text(stale, encoding="utf-8")
     monkeypatch.setattr(work_tickets, "README", readme)
@@ -1363,7 +1363,7 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
     assert written.startswith("# Title\n\nProse stays.\n\n")
     assert written.endswith(f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
     assert "work_tickets.py backlog list --worktree WORKTREE" in written
-    assert "stale" not in written
+    assert "OUTDATED REFERENCE" not in written
     assert work_tickets.main(["docs", "--check"]) == 0
 
 
@@ -2529,7 +2529,8 @@ def test_queue_refuses_while_paused(worktree, monkeypatch, capsys, paused):
 @pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
 def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
     calls = pause_door(monkeypatch, paused,
-                       lambda arguments: "" if arguments[:2] == ["issue", "edit"] else None)
+                       lambda arguments: "" if arguments[:2] == ["issue", "edit"]
+                       else '{"body": ""}' if arguments[:2] == ["issue", "view"] else None)
     read: list[int] = []
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:
                         read.append(1) or [{"number": 5, "title": "feat/five"}])

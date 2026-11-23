@@ -122,10 +122,10 @@ read-only = true
 mcp = "Prints the title of a session a role starts, by the scheme SE/<project>/<role>/<topic>. Use it before starting a session, to give the host's session tool its title."
 
 [commands."work_tickets.py ready"]
-usage = "work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]"
-summary = "list startable ready work issues"
+usage = "work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos] [--claimed FILE]"
+summary = "list startable ready work issues, then each claimed one (labelled ..."
 group = "Integration"
-help = "list startable ready work issues"
+help = "list startable ready work issues, then each claimed one (labelled in-progress) as live or stale by its beat line, with the beat's age, and the stale ones for the person; neither is startable"
 class = "interactive"
 read-only = true
 mcp = "Lists the ready work issues a session may start now. Use it to choose the next package to start."
