@@ -84,7 +84,7 @@ Two checks hold the tree to its templates:
 - **No orphan note.** A note that reaches no template is refused, naming the note and its tags,
   with the remedy: fix its tags, or delete it. The check runs where SE's generated layouts are
   checked today, in `se_plugin.py check`, so the `check` job fails on it.
-- **The resolutions are pinned.** One committed table, `tests/guidance-pins.toml`, names for each
+- **The resolutions are pinned.** One committed table, `tests/guidance-pins.yaml`, names for each
   template the notes it gets, in order. A test resolves every template and compares: a change
   that moves a note into or out of a template fails until the table is rewritten by the guidance
   command's `pin` action, and that diff is what a reviewer reads.

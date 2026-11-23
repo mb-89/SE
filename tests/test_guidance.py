@@ -460,3 +460,33 @@ def test_collect_and_check_are_tools_of_the_mcp_door():
         assert entry["read-only"] is True and entry["mcp"] == se_guidance.READ_ONLY_COMMANDS[name]
     # project writes the tool files, so the door does not offer it.
     assert "read-only" not in commands["se_guidance.py project"]
+
+
+# Pins (docs/guidance.md "Resolution"): one committed table of every template's notes.
+
+def test_every_resolution_of_ses_templates_matches_tests_guidance_pins():
+    loaded = se_guidance.load(ROOT)
+    assert se_guidance.pin_differences(loaded) == [], "run `uv run python scripts/se_guidance.py pin`"
+    import yaml
+    pinned = yaml.safe_load((ROOT / "tests" / "guidance-pins.yaml").read_text(encoding="utf-8"))
+    assert pinned == se_guidance.pins(loaded) and set(pinned) == set(loaded.templates)
+
+
+def test_a_resolution_that_differs_from_the_pins_fails_until_pin_rewrites_them(capsys, project):
+    assert se_guidance.pin_differences(se_guidance.load(project)) == [
+        "tests/guidance-pins.yaml: missing; run `se_guidance.py pin`"]
+    code, out, _ = run(capsys, "pin", "--root", str(project))
+    assert code == 0 and out == "wrote tests/guidance-pins.yaml: 4 templates\n"
+    assert se_guidance.pin_differences(se_guidance.load(project)) == []
+    assert "other:\n  - zzz-lib\n  - base\n  - x\n" in (
+        project / "tests" / "guidance-pins.yaml").read_text(encoding="utf-8")
+    # A note that moves into a template fails the comparison, naming the template, both lists
+    # and the command; pin writes the table again and the comparison passes.
+    note(project, "guidance/other/y.md", "y")
+    assert se_guidance.pin_differences(se_guidance.load(project)) == [
+        "tests/guidance-pins.yaml: other: pinned zzz-lib, base, x, resolves zzz-lib, base, x, y; "
+        "run `se_guidance.py pin` and review the diff"]
+    code, out, _ = run(capsys, "pin", "--root", str(project))
+    assert code == 0 and se_guidance.pin_differences(se_guidance.load(project)) == []
+    code, out, _ = run(capsys, "pin", "--root", str(project))
+    assert out == "tests/guidance-pins.yaml: up to date\n"
