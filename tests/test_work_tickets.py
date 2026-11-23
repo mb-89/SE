@@ -1177,34 +1177,19 @@ def test_status_reports_malformed_state(worktree: Path) -> None:
     assert report["complete"] is False
 
 
-@pytest.mark.spawns("windows: powershell.exe makes the directory junction, as Windows without developer mode "
-                    "grants no directory symlink; elsewhere it starts nothing")
 def test_symlinked_state_directory_cannot_escape_worktree(worktree: Path) -> None:
     initialize(worktree)
     outside = worktree.parent / "outside"
     outside.mkdir()
     todo = worktree / ".se" / "work" / "todo"
     todo.rmdir()
-    if os.name == "nt":
-        link_path = str(todo).replace("'", "''")
-        target_path = str(outside).replace("'", "''")
-        junction = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-Command",
-                f"New-Item -ItemType Junction -Path '{link_path}' "
-                f"-Target '{target_path}' | Out-Null",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if junction.returncode != 0:
-            pytest.skip(
-                "directory junctions are unavailable: "
-                f"{junction.stdout}{junction.stderr}".strip()
-            )
+    if os.name == "nt":  # a junction, as Windows without developer mode grants no directory symlink
+        import _winapi
+
+        try:
+            _winapi.CreateJunction(str(outside), str(todo))
+        except OSError as error:
+            pytest.skip(f"directory junctions are unavailable: {error}")
     else:
         try:
             os.symlink(outside, todo, target_is_directory=True)
