@@ -181,6 +181,10 @@ merge or a start.
    clash with running workers) gets a fresh worktree from the newest integration branch
    (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
+   `ready` also names each claimed issue live or stale by its beat; put the stale ones it names
+   into your report to SE, and release none
+   ([README "Workers"](../README.md#workers)).
+
    Start no more workers than the worker limit leaves room for
    ([README "Workers"](../README.md#workers)): `capacity`, or in the cloud without gh the
    queue's plan. The rest wait, and the next landing starts them as a worker finishes.
