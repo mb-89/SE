@@ -3,6 +3,7 @@ package template
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -190,5 +191,92 @@ func TestTheComponentsVerbCheckGivesATextsFindings(t *testing.T) {
 	}
 	if _, err := Component.Serve(context.Background(), "check", map[string]any{"body": "x"}); err == nil {
 		t.Fatal("check took a text without a template or an action")
+	}
+}
+
+const risksTemplate = `---
+name: risks
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: "Risks: what could go wrong."
+applies:
+  actions: ["file.write"]
+  paths: ["book/*/steps/*.md"]
+rules:
+  required: refuse
+fields:
+  - name: risks
+    kind: list
+    required: true
+---
+
+## Risks
+
+<!-- risks: One item per risk. -->
+`
+
+// The verb accept is the gate a target in another component asks: kern's GitHub door and its files
+// module take a filled template through it, and a path no template claims stays free.
+func TestTheComponentsVerbAcceptRefusesFreeTextAndTakesAFilledTemplate(t *testing.T) {
+	startComponent(t)
+	work, fields, title := workFields(t)
+	ctx := context.Background()
+	filled, err := Component.Serve(ctx, "fill", map[string]any{"template": "work", "fields": fields, "raw": raw, "title": *title})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := Component.Serve(ctx, "accept", map[string]any{"target": "github issue-create", "template": "work", "filled": filled})
+	if err != nil {
+		t.Fatalf("accept refused the filled template fill made: %v", err)
+	}
+	var got Accepted
+	if err := index.Recode(answer, &got); err != nil || got.Template != "work" || got.Version != work.Version || got.Title == nil || *got.Title != *title || got.Free {
+		t.Fatalf("accept answered %+v, %v", got, err)
+	}
+	document, _, _ := FillDocument(work, fields, raw, title, "")
+	if got.Document != document {
+		t.Fatal("accept answered another document than the fill rendered")
+	}
+	for what, v := range map[string]any{"free text": document, "fields": map[string]any{"template": "work", "fields": fields}} {
+		_, err := Component.Serve(ctx, "accept", map[string]any{"target": "github issue-create", "template": "work", "filled": v})
+		if err == nil || !strings.Contains(err.Error(), "github issue-create takes a filled template of work") {
+			t.Errorf("accept took %s: %v", what, err)
+		}
+	}
+}
+
+func TestTheVerbAcceptRequiresTheTemplateThatClaimsAPathAndLeavesOtherPathsFree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, TemplatesFolder), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, TemplatesFolder, "risks.md"), []byte(risksTemplate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := map[string]any{index.ConfigPrefix + "root": root, index.ConfigPrefix + "repository": ProjectRepository}
+	if err := Component.Start("template", func(port string) any { return config[port] }, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { startComponent(t) })
+	ctx := context.Background()
+	path := filepath.ToSlash(filepath.Join("book", "m1", "steps", "51.md"))
+	filled, err := Component.Serve(ctx, "fill", map[string]any{"template": "risks", "fields": map[string]any{"risks": []any{"The scan misses a tool."}}, "raw": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := Component.Serve(ctx, "accept", map[string]any{"target": "files write", "path": path, "filled": filled})
+	var got Accepted
+	if err != nil || index.Recode(answer, &got) != nil || got.Template != "risks" || !strings.Contains(got.Document, "- The scan misses a tool.") {
+		t.Fatalf("accept refused the filled risks template for %s: %+v, %v", path, got, err)
+	}
+	_, err = Component.Serve(ctx, "accept", map[string]any{"target": "files write", "path": path, "filled": "## Risks\n\n- Typed by hand.\n"})
+	if err == nil || !strings.Contains(err.Error(), "files write of book/m1/steps/51.md takes a filled template of risks") {
+		t.Fatalf("accept took free text for a claimed path: %v", err)
+	}
+	answer, err = Component.Serve(ctx, "accept", map[string]any{"target": "files write", "path": "notes.md", "filled": "anything"})
+	if err != nil || index.Recode(answer, &got) != nil || !got.Free {
+		t.Fatalf("a path no template claims is not free: %+v, %v", got, err)
 	}
 }

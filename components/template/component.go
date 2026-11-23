@@ -16,10 +16,12 @@ const Name = "template"
 // The named JSON shapes of the verbs' requests and answers, so a component in another language asks
 // them as a Go one does.
 const (
-	FillShape    = "template.fill"
-	FilledShape  = "template.filled"
-	CheckShape   = "template.check"
-	CheckedShape = "template.checked"
+	FillShape     = "template.fill"
+	FilledShape   = "template.filled"
+	CheckShape    = "template.check"
+	CheckedShape  = "template.checked"
+	AcceptShape   = "template.accept"
+	AcceptedShape = "template.accepted"
 )
 
 // FillRequest is what the verb fill asks: the template, the agent's field values, the raw input
@@ -39,6 +41,71 @@ type CheckRequest struct {
 	Body     string   `json:"body"`
 	Title    *string  `json:"title,omitempty"`
 	Labels   []string `json:"labels,omitempty"`
+}
+
+// AcceptRequest is what the verb accept asks: the value a target was handed, and the template it
+// requires, or the path of the file it writes, whose claiming template is then required.
+type AcceptRequest struct {
+	Target   string `json:"target"`
+	Template string `json:"template,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Filled   any    `json:"filled"`
+}
+
+// Accepted is what the verb accept answers: the filled template's template, version, title and
+// document, which the target writes as they stand; Free where the path is one no template claims,
+// so the target takes the write as it is.
+type Accepted struct {
+	Free     bool    `json:"free"`
+	Template string  `json:"template,omitempty"`
+	Version  string  `json:"version,omitempty"`
+	Title    *string `json:"title,omitempty"`
+	Document string  `json:"document,omitempty"`
+}
+
+func acceptVerb(_ context.Context, req AcceptRequest) (Accepted, error) {
+	target := req.Target
+	if target == "" {
+		target = "the target"
+	}
+	required := req.Template
+	if req.Path != "" {
+		templates, err := catalog()
+		if err != nil {
+			return Accepted{}, err
+		}
+		path := strings.Trim(strings.ReplaceAll(req.Path, "\\", "/"), "/")
+		var claiming []string
+		for _, name := range sortedKeys(templates) {
+			if templates[name].IsFile() && templates[name].Claims(path) {
+				claiming = append(claiming, name)
+			}
+		}
+		if len(claiming) == 0 {
+			return Accepted{Free: true}, nil
+		}
+		f, err := Accept(target+" of "+path, strings.Join(claiming, " or "), req.Filled)
+		if err == nil && !in(f.Template(), claiming) {
+			err = fail("%s of %s takes a filled template of %s, not one of %s: fill it with the template component's fill", target, path, strings.Join(claiming, " or "), f.Template())
+		}
+		if err != nil {
+			return Accepted{}, err
+		}
+		return accepted(f), nil
+	}
+	f, err := Accept(target, required, req.Filled)
+	if err != nil {
+		return Accepted{}, err
+	}
+	return accepted(f), nil
+}
+
+func accepted(f Filled) Accepted {
+	a := Accepted{Template: f.Template(), Version: f.Version(), Document: f.Document()}
+	if title, ok := f.Title(); ok {
+		a.Title = &title
+	}
+	return a
 }
 
 // Checked is what the verb check answers: the template it checked against ("" where the text is
@@ -152,6 +219,7 @@ var Component = index.Declare(Name, "SE's template engine in Go: fill makes a fi
 	index.Config("root", ".", "The checkout whose templates/ the engine reads; a detached core runs in its root."),
 	index.Config("repository", SERepository, "The repository its templates' marker names: se for SE's own, project for an application's."),
 	index.JSONVerb("fill", "Fills a template from the agent's fields and the raw input, checks the document, and answers the filled template, the one value a templated target takes; a fill something refuses answers every finding and makes nothing.", FillShape, FilledShape, fillVerb),
+	index.JSONVerb("accept", "The gate of a templated target in another component or language: answers the document and title of the filled template it was handed, of the template required or of the one that claims the path, and refuses free text, a body or fields, naming the template to fill; a path no template claims is free.", AcceptShape, AcceptedShape, acceptVerb),
 	index.JSONVerb("check", "Checks a text against its template, named or selected by its action, as SE's filing commands would: every finding, and whether one refuses.", CheckShape, CheckedShape, checkVerb),
 	index.Inlet(func(_ string, read index.Reader, _ index.Commit) error {
 		root, _ := read(index.ConfigPrefix + "root").(string)

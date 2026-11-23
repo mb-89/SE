@@ -153,15 +153,20 @@ a target relies on its type and checks nothing again.
   refuses a request of another type. A target that reads JSON calls `template.Accept`, which
   refuses free text, a body, field values and a value whose seal does not hold, naming the
   template to fill.
+- **The gate across the bus.** A target in another component, kern's among them, cannot import
+  SE's package, so it asks the template component's verb `accept`: it answers the document and
+  title of the filled template it was handed, of the template required or of the one that claims
+  the path written, refuses anything else, and answers a path no template claims as free.
 
 The two targets the decision names are kern's, each a change in kern's repository that SE's work
 issue drafts:
 
 - **The GitHub door's writing tools** (kern#19): `issue-create` and `issue-comment` take a filled
-  template instead of a template's name and its fields, and write its document and title as they
-  stand, refusing anything else, naming the template to fill.
-- **The files module's template-only paths**: a `write` of a path a template claims takes a filled
-  template of that template, and refuses free text, naming it.
+  template instead of a template's name and its fields, pass it to `accept` through a request port
+  the wiring binds to the template component, and write the document and title it answers as they
+  stand; a refusal reaches GitHub not at all.
+- **The files module's template-only paths**: a `write` asks `accept` with its path; a path a
+  template claims takes only a filled template of that template, and every other path stays free.
 
 Until those land, SE's filing commands and its gate keep checking after the fact, as
 [Fill](#fill) says.
