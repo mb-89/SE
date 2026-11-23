@@ -107,10 +107,20 @@ and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
 ## Fill
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
-door's tool `templates`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
-rule `quote`) and `scripts/se_templates.py` (its `fill`) own what is built. Until kern's door
-offers a tool that writes, the tool's `fill` answers the checked document and writes nothing, and
-neither files through the tracker: the agent files what it answers.
+door's tool `templates_write`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
+rule `quote`) and `scripts/se_templates.py` (its `fill`, `kern_template`) own what is built.
+
+- **Filing.** With `--repo`, a fill files an issue, or with `--number` a comment, through kern's
+  GitHub component, after the same checks as any fill: its request ports, which `wiring.toml`
+  binds to the component's write verbs, carry the template's name and fields, never a body.
+  `templates.py fill --repo` hands its call to the tool's `fill`, so one place files.
+- **What kern files is what was checked.** kern renders the body from the fields, so the fill
+  writes the template as kern reads it and refuses a value kern would write otherwise;
+  `components/template/kern_test.go` holds kern's render to SE's for every fill of the templates
+  kern can file (work, ticket, handover).
+- **Not yet.** A message has no writing tool in kern's door, and the tool's `fill` writes no
+  claimed file: `templates.py fill --path` writes it, until kern's files module takes only filled
+  templates (The filled template is a type).
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against
