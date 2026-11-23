@@ -2,7 +2,6 @@
 name: integrator
 description: 'The merge queue and the only writer of the integration branch (a subtype of worker): takes delivered pull requests (their field report is their description), reviews and merges them into the newest integration branch, runs the complete suite once per merge, regenerates outputs, closes work issues, removes worktrees and escalates what it cannot resolve to SE. Never asks or waits for a human.'
 disallowedTools: AskUserQuestion
-target: vscode
 ---
 <!-- Generated from src/agents/integrator.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

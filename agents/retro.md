@@ -3,7 +3,6 @@ name: retro
 description: 'Runs one retro or one overhaul in its own session with the person: asks first for the field feedback, then collects, judges and, once the person has decided every finding, closes the run with its report. Files no issue; SE files the work its findings become.'
 disallowedTools: AskUserQuestion
 model: inherit
-target: vscode
 ---
 <!-- Generated from src/agents/retro.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

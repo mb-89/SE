@@ -1,8 +1,6 @@
 ---
 name: worker
 description: 'Works one work issue in its own worktree and always ends with a pushed branch and a pull request whose description is its field report. Never talks to other agents, never waits for a human.'
-copilot.tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']
-copilot.strict-tools-list: true
 claude.disallowedTools: AskUserQuestion
 ---
 

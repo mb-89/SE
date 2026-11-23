@@ -2,7 +2,6 @@
 name: se
 description: 'The session the human talks to: discusses and decides with the user, writes design and work issues, starts worker and integrator sessions, files tickets for other repositories and presents escalations. Makes very small changes itself on its own branch, never writes main.'
 disallowedTools: AskUserQuestion
-target: vscode
 ---
 <!-- Generated from src/agents/se.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

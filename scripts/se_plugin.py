@@ -2,17 +2,13 @@
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
 Every skill goes into the one skills folder both hosts load, `skills/<name>/...`. Every agent goes
-into two files of the same body: Claude Code's `agents/<name>.md` and Copilot's
-`.github/agents/<name>.agent.md`, because the two hosts' front matter cannot be one: Copilot's
-worker and reviewer have tool allow-lists, and Claude Code reads the same `tools` key, so one shared
-list would take from Claude Code's agents tools they have (Agent among them). VS Code loads both,
-Claude Code's through the Claude Code manifest and Copilot's through its Copilot runtime; Claude
-Code's say `target: vscode`, which VS Code's Copilot pickers skip, so each agent shows there once.
-`build` writes both, the Claude Code plugin manifests, Copilot's
+into one file both hosts load, `agents/<name>.md`: Copilot reads Claude Code's agent format and
+ignores the fields it does not know, so a second copy would only list each agent twice in VS Code.
+`build` writes them, the Claude Code plugin manifests, Copilot's
 hooks (`.github/hooks/se.json` for the repository, `.github/plugin/hooks.json` for a plugin
 install, as Claude Code's inline hooks do not run under Copilot on Windows), Copilot's one plugin
 manifest (`.github/plugin/plugin.json`, or the root `plugin.json` where `se.toml` `[plugin]
-copilot_manifest` is `"root"`), whose `agents` names `.github/agents/` and whose `skills` names the
+copilot_manifest` is `"root"`), whose `agents` names `agents/` and whose `skills` names the
 shared `skills/`, and the MCP door's declarations (`.github/mcp.json`, and a root
 `.mcp.json` only where `se.toml` `[plugin] root_mcp` is on, and the Claude Code manifest's
 `mcpServers` only where `[plugin] claude_mcp` is on). Whether the PowerShell lines of both
@@ -23,8 +19,8 @@ agent Copilot would reject or a skill either host would skip, as the standalone 
 `scripts/agent_lint.py` find them. Where the plugin is installed from is the README section
 "Install".
 
-Source front matter is one `key: value` per line. A key prefixed `copilot.` or `claude.` goes only
-into that host's agent file, without its prefix; every other key goes into both (`_front_matter`).
+Source front matter is one `key: value` per line. An agent's keys all go into its one file; a key
+prefixed `claude.` loses its prefix there, and a key prefixed `copilot.` is refused (`_front_matter`).
 A skill's file is shared, so its keys are both hosts'.
 
 Every link of the generated files uses URL separators on every platform and stays relative to its generated
@@ -140,22 +136,13 @@ UNROOTED_SCRIPT = re.compile(r"(?<![\w./>}-])scripts/|<(?!se>)[^<>\n]*>/scripts/
 # Claude Code's agents, and the skills both hosts load (Copilot's manifest names them too).
 AGENTS = PurePosixPath("agents")
 SKILLS = PurePosixPath("skills")
-# The hosts a front matter key may be prefixed with (`copilot.tools`); an unprefixed key goes to both.
+# The hosts a front matter key may be prefixed with (`claude.model`); an unprefixed key goes to both.
 CLAUDE, COPILOT = "claude", "copilot"
 HOSTS = (CLAUDE, COPILOT)
-# Copilot's own agents: the same body as Claude Code's, with Copilot's front matter (its tool
-# allow-lists, which Claude Code's tool names cannot express without taking tools from Claude Code's
-# agents). Copilot's manifest names this folder, and the cloud agent on github.com reads it in the
-# repository; a thin file pointing at `agents/` would not do, as the Copilot CLI resolves the link
-# from the session's folder and may not read a plugin's folder without asking.
+# Where earlier builds wrote a second, Copilot-only copy of each agent; VS Code listed both copies,
+# so every agent showed twice. Nothing is generated here any more: `build` removes what is left.
 COPILOT_AGENTS = PurePosixPath(".github/agents")
 COPILOT_AGENT_SUFFIX = ".agent.md"
-# VS Code reads SE's plugin through Claude Code's manifest (`agents/`) and its Copilot runtime reads
-# Copilot's (`.github/agents/`): both list every agent. Its Copilot pickers show an agent only if its
-# `target` is unset or `github-copilot`, so Claude Code's agents say `vscode`, a field Claude Code's
-# agents do not define: there each agent is listed once, as Copilot's; VS Code's local harness lists
-# Claude Code's, the only ones it reads.
-CLAUDE_AGENT_TARGET = "target: vscode"
 # One outside skill a role relies on: `<plugin>@<marketplace>:<skill>`, a skill of a plugin and the
 # marketplace it installs from. A skill Claude Code ships loads by itself and is not listed.
 ROLE_SKILL = re.compile(r"^(?P<plugin>[a-z0-9][a-z0-9-]*)@(?P<marketplace>[A-Za-z0-9][\w.-]*)"
@@ -169,8 +156,8 @@ NOTICE_PATTERN = re.compile(
 COPILOT_HOOKS_FILE = PurePosixPath(".github/hooks/se.json")
 PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 # Copilot's one plugin manifest: a plugin installed under Copilot reads this one before the Claude
-# Code manifest, .claude-plugin/plugin.json; its `agents` names Copilot's own agents
-# (COPILOT_AGENTS) and its `skills` the shared skills, with Copilot's own hooks and MCP declaration. Where it lies is
+# Code manifest, .claude-plugin/plugin.json; its `agents` names the one agents folder both hosts read
+# (AGENTS) and its `skills` the shared skills, with Copilot's own hooks and MCP declaration. Where it lies is
 # the build setting se.toml [plugin]
 # copilot_manifest (`copilot_manifest`): unset, "github"; "root" puts it at the repository root, the
 # one place VS Code reads a Copilot-format manifest (MANIFEST_LOOKUPS). Every build writes exactly one.
@@ -274,8 +261,6 @@ def _target(source: PurePosixPath, host: str = CLAUDE) -> PurePosixPath:
     if kind == "agents":
         if len(rest) != 1 or not rest[0].endswith(".md"):
             raise SourceError(f"{source}: an agent is one Markdown file directly in {SOURCE}/agents")
-        if host == COPILOT:
-            return COPILOT_AGENTS / (rest[0].removesuffix(".md") + COPILOT_AGENT_SUFFIX)
         return AGENTS / rest[0]
     return SKILLS.joinpath(*rest)
 
@@ -336,16 +321,13 @@ def _front_matter(text: str, source: PurePosixPath, skills: list[RoleSkill] = ()
             raise SourceError(f"{source}: an agent's skills come from se.toml [roles.<role>] skills, "
                               "not its front matter")
         if dot and prefix in HOSTS:
+            if source.parent == SOURCE / "agents" and prefix == COPILOT:
+                raise SourceError(f"{source}: an agent is one file both hosts read; `{key}` has no "
+                                  "Copilot-only file to go to")
             if prefix == host:
                 lines.append(bare + line[len(key):])
         else:
             lines.append(line)
-        if (host == CLAUDE and source.parent == SOURCE / "agents"
-                and (bare if dot and prefix == CLAUDE else key).strip() == "target"):
-            raise SourceError(f"{source}: Claude Code's agent gets its target from the build "
-                              f"(`{CLAUDE_AGENT_TARGET}`); set `copilot.target` for Copilot's")
-    if host == CLAUDE and source.parent == SOURCE / "agents":
-        lines.append(CLAUDE_AGENT_TARGET)
     if skills and host == CLAUDE:
         lines.append("skills: " + ", ".join(item.name for item in skills))
     return "---\n" + "\n".join(lines) + "\n---\n", text[end + 5:]
@@ -627,7 +609,7 @@ def _manifests(root: Path) -> dict[PurePosixPath, bytes]:
         "version": plugin["version"],
         "description": DESCRIPTION,
         "license": "MIT",
-        "agents": f"{COPILOT_AGENTS}/",
+        "agents": f"{AGENTS}/",
         "skills": f"{SKILLS}/",
         "hooks": str(PLUGIN_HOOKS_FILE),
         "mcpServers": {MCP_SERVER: {**mcp_server(f"{COPILOT_PLUGIN_ROOT}/{LAUNCHER}"),
@@ -663,9 +645,6 @@ def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
     for source in sources:
         path, data = _generated_file(source, root, role_skills, frozenset(drafts))
         files[path] = data
-        if source.parent == SOURCE / "agents":
-            path, data = _generated_file(source, root, role_skills, frozenset(drafts), host=COPILOT)
-            files[path] = data
     skills = {source.parts[2] for source in sources if source.parts[:2] == ("src", "skills")}
     for note, name in notes(root):
         if name in skills or name in drafts:

@@ -251,7 +251,7 @@ def check_layout(plugin: Path, report: Report) -> None:
     skills, and the copy matches its sources (`se_plugin.py check` of the copy)."""
     manifest = _json_file(plugin / se_plugin.COPILOT_MANIFEST)
     agents, skills = plugin / manifest["agents"], plugin / manifest["skills"]
-    missing = [name for name in AGENTS if not (agents / f"{name}{se_plugin.COPILOT_AGENT_SUFFIX}").is_file()]
+    missing = [name for name in AGENTS if not (agents / f"{name}.md").is_file()]
     missing += [name for name in SKILLS if not (skills / name / "SKILL.md").is_file()]
     if missing:
         report.add("failed", "layout", f"{se_plugin.COPILOT_MANIFEST} lacks {', '.join(missing)}")

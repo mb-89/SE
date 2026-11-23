@@ -25,17 +25,16 @@
 
 # What each host reads of SE, by role: `instructions` and `agent` files are handed to every session
 # whole, a skill's name and description too; its body and `reference` files load on demand. The
-# Copilot CLI reads Copilot's agents, `.github/agents/`, and the shared `skills/`, where its
-# manifest names them; VS Code reads Claude Code's `agents/` and `skills/` through the Claude Code
-# manifest (scripts/se_plugin.py). The cloud agent reads a repository's own `.github/agents/` and
-# `.github/skills/`; SE ships the agents.
+# Copilot CLI and VS Code read the one `agents/` and the shared `skills/`, which both manifests name
+# (scripts/se_plugin.py). The cloud agent reads a repository's own `.github/agents/` and
+# `.github/skills/`; SE ships neither.
 
 [surfaces.copilot-cli]
 name = "Copilot CLI"
 source = "https://docs.github.com/en/copilot/reference/cli-command-reference"
 read = 2026-11-14
 instructions = ["AGENTS.md"]
-agent = [".github/agents/*.agent.md"]
+agent = ["agents/*.md"]
 skill = ["skills/*/SKILL.md"]
 reference = ["skills/*/references/*"]
 

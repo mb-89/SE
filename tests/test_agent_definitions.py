@@ -34,10 +34,9 @@ def test_agent_definition_names_its_role_and_points_to_the_work_model(role):
 
 
 def test_worker_agent_tools_exclude_input_and_workspace_prompts():
-    text = (GITHUB / "agents" / "worker.agent.md").read_text(encoding="utf-8")  # what Copilot reads
-    front_matter = text.split("---")[1]
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in front_matter
-    assert "strict-tools-list: true" in front_matter
+    front_matter = (AGENTS / "worker.md").read_text(encoding="utf-8").split("---")[1]  # both hosts read it
+    assert "\ntools:" not in front_matter, "a tools list would take Agent from Claude Code's worker"
+    assert "disallowedTools: AskUserQuestion" in front_matter
     assert "ask_user" not in front_matter
     assert "set_workspace" not in front_matter
 
@@ -147,10 +146,7 @@ def test_reviewer_finds_verifies_and_judges_in_order_and_files_one_comment():
                  "You run a model no weaker than the worker's"):
         assert rule in reviewer, rule
     front_matter = (AGENTS / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
-    assert "claude.model: inherit" in front_matter
-    copilot = (GITHUB / "agents" / "reviewer.agent.md").read_text(encoding="utf-8").split("---")[1]
-    assert "tools: ['execute', 'read', 'search', 'send_message', 'se/*']" in copilot  # no edit tool
-    assert "strict-tools-list: true" in copilot
+    assert "model: inherit" in front_matter
 
 
 def test_se_starts_a_reviewer_on_request_and_the_integrator_does_not_wait_for_it():
@@ -585,13 +581,6 @@ def test_each_role_names_ses_mcp_tools_and_points_to_the_host_procedure(role):
     text = normalized(ROOT / "agents" / f"{role}.md")
     assert "MCP tools" in text
     assert "(../skills/work-model/SKILL.md#host-procedure-under-copilot)" in text
-
-
-@pytest.mark.parametrize("role", ("worker", "reviewer"))
-def test_the_strict_tool_lists_gain_the_se_server_under_copilot_only(role):
-    copilot = (ROOT / ".github" / "agents" / f"{role}.agent.md").read_text(encoding="utf-8").split("\n---\n")[0]
-    assert "'se/*']" in copilot and "strict-tools-list: true" in copilot
-    assert "se/*" not in (ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8").split("\n---\n")[0]
 
 
 def host_procedure() -> str:

@@ -104,43 +104,33 @@ def test_each_agent_and_skill_has_one_source_and_one_generated_file(checkout):
     for role in ("se", "integrator", "worker", "reviewer"):
         assert (checkout / "src" / "agents" / f"{role}.md").is_file()
         assert (checkout / "agents" / f"{role}.md").is_file()
-        assert (checkout / ".github" / "agents" / f"{role}.agent.md").is_file()
+    assert not (checkout / ".github" / "agents").exists(), "one file per agent, or VS Code lists it twice"
     for skill in (checkout / "src" / "skills").iterdir():
         assert (checkout / "skills" / skill.name / "SKILL.md").is_file()
     assert not (checkout / ".github" / "skills").exists()
 
 
-def test_each_host_keeps_its_own_agent_front_matter(checkout):
-    """Claude Code's agents have every tool but AskUserQuestion; Copilot's worker and reviewer have
-    their allow-lists, the reviewer's without `edit`."""
-    for role in ("se", "integrator", "worker", "reviewer"):
-        claude = (checkout / "agents" / f"{role}.md").read_text(encoding="utf-8").split("---")[1]
-        copilot = (checkout / ".github" / "agents" / f"{role}.agent.md").read_text(encoding="utf-8").split("---")[1]
-        assert "disallowedTools: AskUserQuestion" in claude, role
-        assert "tools:" not in claude.replace("disallowedTools:", ""), role
-        assert "disallowedTools" not in copilot and "model:" not in copilot, role
-        assert ("strict-tools-list: true" in copilot) == (role in ("worker", "reviewer")), role
+def test_each_agent_keeps_every_tool_but_asking_in_its_one_file(checkout):
+    """No `tools` list: Claude Code would read it as an allow-list and take Agent from the agent."""
+    for role in ("se", "integrator", "retro", "worker", "reviewer"):
+        front_matter = (checkout / "agents" / f"{role}.md").read_text(encoding="utf-8").split("---")[1]
+        assert "disallowedTools: AskUserQuestion" in front_matter, role
+        assert "tools:" not in front_matter.replace("disallowedTools:", ""), role
+        assert "target:" not in front_matter, role
     assert "model: inherit" in (checkout / "agents" / "reviewer.md").read_text(encoding="utf-8")
-    worker = (checkout / ".github" / "agents" / "worker.agent.md").read_text(encoding="utf-8")
-    reviewer = (checkout / ".github" / "agents" / "reviewer.agent.md").read_text(encoding="utf-8")
-    assert "tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']" in worker
-    assert "tools: ['execute', 'read', 'search', 'send_message', 'se/*']" in reviewer
 
 
-def test_a_host_prefixed_key_goes_only_to_that_hosts_agent(tmp_path):
+def test_a_claude_prefixed_key_loses_its_prefix_and_a_copilot_one_is_refused(tmp_path, capsys):
     write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
-                 "copilot.tools: ['read']\nclaude.model: inherit\n---\n# SE\n")
-    files = se_plugin.expected(tmp_path)
-    claude = files[PurePosixPath("agents/se.md")].decode()
-    copilot = files[PurePosixPath(".github/agents/se.agent.md")].decode()
-    assert "model: inherit" in claude and "tools:" not in claude
-    assert "tools: ['read']" in copilot and "model:" not in copilot
-    # VS Code's Copilot pickers skip a `vscode` agent, so each agent shows there once, as Copilot's.
-    assert "target: vscode" in claude and "target:" not in copilot
-    assert claude.split("---\n", 2)[2] == copilot.split("---\n", 2)[2]
+                 "claude.model: inherit\n---\n# SE\n")
+    assert "\nmodel: inherit\n" in se_plugin.expected(tmp_path)[PurePosixPath("agents/se.md")].decode()
+    write_source(tmp_path, "src/agents/se.md", "---\nname: se\ndescription: 'SE.'\n"
+                 "copilot.tools: ['read']\n---\n# SE\n")
+    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 2
+    assert "has no Copilot-only file to go to" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("layout", ("agents", "skills", ".github/agents"))
+@pytest.mark.parametrize("layout", ("agents", "skills"))
 def test_relative_links_resolve_in_each_layout(checkout, layout):
     for path in (checkout / layout).rglob("*.md"):
         for target in LINK.findall(path.read_text(encoding="utf-8")):
@@ -327,7 +317,6 @@ def test_a_roles_skills_are_preloaded_into_that_agent(tmp_path):
     assert front(root / "agents" / "worker.md")[-1] == (
         "skills: plugin-dev:plugin-structure, example-skills:skill-creator")
     assert not any(line.startswith("skills:") for line in front(root / "agents" / "integrator.md"))
-    assert not any(line.startswith("skills:") for line in front(root / ".github" / "agents" / "worker.agent.md"))
 
 
 @pytest.mark.parametrize(("roles", "refusal"), (
@@ -373,10 +362,9 @@ def test_every_generated_skill_holds_to_the_agentskills_rules(checkout):
 
 @pytest.mark.parametrize("front, refusal", (
     ("agents: []", "agents is no Copilot agent field"),
-    ("copilot.target: cli", "target is one of github-copilot, vscode"),
+    ("target: cli", "target is one of github-copilot, vscode"),
     ("handoffs: []", "handoffs is no Copilot agent field"),
     ("claude.handoffs: []", "handoffs is no Copilot agent field"),
-    ("target: vscode", "Claude Code's agent gets its target from the build"),
 ))
 def test_an_agent_copilot_would_reject_is_refused_naming_it(tmp_path, capsys, front, refusal):
     write_source(tmp_path, "src/agents/se.md", f"---\nname: se\ndescription: 'SE.'\n{front}\n---\n# SE\n")
@@ -432,7 +420,7 @@ def test_copilots_one_manifest_names_the_layout_its_hooks_and_the_door(checkout)
     claude = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert {key: manifest[key] for key in ("name", "version", "description")} == {
         key: claude[key] for key in ("name", "version", "description")}
-    assert manifest["agents"] == ".github/agents/" and manifest["skills"] == "skills/"
+    assert manifest["agents"] == "agents/" and manifest["skills"] == "skills/"
     assert manifest["hooks"] == ".github/plugin/hooks.json"
     for key in ("agents", "skills", "hooks"):
         assert (checkout / manifest[key]).exists(), key

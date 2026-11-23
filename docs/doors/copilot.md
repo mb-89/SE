@@ -46,14 +46,14 @@ item links the file that assumes it.
 - **Copilot's agents and Claude Code's skills.** The Copilot CLI loads Claude Code's skills folder
   where the manifest's `skills` names it. It also loads agents written as Claude Code's
   `agents/<name>.md`, warning `unknown field ignored: disallowedTools`, and reads Claude's tool
-  names as aliases; SE still gives it its own `.github/agents/<name>.agent.md`, as the two hosts'
-  tool lists cannot be one ([docs/copilot.md](../copilot.md#the-door-by-hand)). A `model: inherit` it does
+  names as aliases; SE gives it exactly those files, with no Copilot copy and no `tools` list
+  ([docs/copilot.md](../copilot.md#the-door-by-hand)). A `model: inherit` it does
   not inherit: it warns `Custom agent "probe" specifies model "inherit" which is not available;
   using "auto" instead` and runs the agent. A `target` it ignores with `unknown field ignored:
   target` and lists the agent. A relative link in an agent's body it resolves from the session's
   folder, not the file's. Copilot CLI 1.0.112 on Windows, 2026-11-23. `seen`. SE acts on it in
   [scripts/se_plugin.py](../../scripts/se_plugin.py), whose Copilot manifest names
-  `.github/agents/` and `skills/`, and [scripts/agent_lint.py](../../scripts/agent_lint.py),
+  `agents/` and `skills/`, and [scripts/agent_lint.py](../../scripts/agent_lint.py),
   `CLAUDE_AGENT_FIELDS`.
 - **A `vscode` agent is not in VS Code's Copilot pickers.** The Chat view's mode picker, with the
   session target Copilot, and the Agents window's list an agent only if its `target` is
@@ -66,8 +66,8 @@ item links the file that assumes it.
   (`getAvailableModes`), `.../chat/common/promptSyntax/languageProviders/promptFileAttributes.ts`
   (`getTarget`) and `src/vs/platform/agentPlugins/common/pluginParsers.ts`
   (`detectManifestPluginFormat`), main, read 2026-11-23; the custom agent file reference. `documented`.
-  SE acts on it in [scripts/se_plugin.py](../../scripts/se_plugin.py), `CLAUDE_AGENT_TARGET`, and
-  [docs/copilot.md "VS Code"](../copilot.md#vs-code).
+  SE sets no `target`: its one file per agent must show in every picker
+  ([docs/copilot.md "VS Code"](../copilot.md#vs-code)).
 
 ## Front matter
 
