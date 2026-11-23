@@ -26,17 +26,33 @@ SHA = re.compile(r"[0-9a-f]{40}")
 IDENTITY = ("alice", "alice@example.com")
 RUNNER_VARIABLES = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
                     "GIT_COMMITTER_EMAIL", "EMAIL", "GIT_DIR", "GIT_WORK_TREE")
+PASSED_CONFIG = ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_CONFIG_PARAMETERS")
 
 
 def isolated_git(home: Path) -> git_door.RealGit:
     """Real git with nothing of the machine's configuration: like CI's bare runner, it knows no
-    identity, and it may not guess one."""
+    identity, and it may not guess one. Configuration the environment passes (`GIT_CONFIG_COUNT`
+    and its keys and values, `GIT_CONFIG_PARAMETERS`) is dropped with the rest."""
     home.mkdir(parents=True, exist_ok=True)
     config = home / "gitconfig"
     config.write_text("[user]\n\tuseConfigOnly = true\n[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n", encoding="utf-8")
     return git_door.RealGit({"HOME": str(home), "XDG_CONFIG_HOME": str(home),
                              "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(config),
-                             **{name: None for name in RUNNER_VARIABLES}})
+                             **{name: None for name in RUNNER_VARIABLES},
+                             **{name: None for name in os.environ if name.startswith(PASSED_CONFIG)}})
+
+
+def test_the_isolated_git_drops_configuration_the_environment_passes(tmp_path, monkeypatch):
+    """A host that passes git configuration through the environment (`GIT_CONFIG_COUNT` with its
+    keys and values, or `GIT_CONFIG_PARAMETERS`), such as `safe.bareRepository=explicit`, which
+    refuses the contract's bare remotes, reaches no contract run."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "explicit")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'safe.bareRepository'='explicit'")
+    environment = isolated_git(tmp_path / "home").environment(None)
+    assert not [name for name in environment if name.startswith("GIT_CONFIG_")
+                and name not in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")]
 
 
 @pytest.fixture(params=["fake", "state", "real"])
