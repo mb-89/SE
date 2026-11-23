@@ -84,7 +84,7 @@ Two checks hold the tree to its templates:
 - **No orphan note.** A note that reaches no template is refused, naming the note and its tags,
   with the remedy: fix its tags, or delete it. The check runs where SE's generated layouts are
   checked today, in `se_plugin.py check`, so the `check` job fails on it.
-- **The resolutions are pinned.** One committed table, `tests/guidance-pins.toml`, names for each
+- **The resolutions are pinned.** One committed table, `tests/guidance-pins.yaml`, names for each
   template the notes it gets, in order. A test resolves every template and compares: a change
   that moves a note into or out of a template fails until the table is rewritten by the guidance
   command's `pin` action, and that diff is what a reviewer reads.
@@ -96,10 +96,9 @@ rules, not that system's code.
 
 ### The template command prints guidance first
 
-The command that hands an agent its template (`templates.py fill` and the fill tool,
-[docs/templates.md "Fill"](templates.md#fill); until they exist, `se_templates.py draft` and the
-templates tool's `draft`) prints the template's resolved guidance
-before the template itself. The agent cannot reach the template's fields without reading past the
+The command that hands an agent its template, the templates tool's `draft` and `fill`
+(`se_templates.py`, [docs/templates.md "Fill"](templates.md#fill)), prints the template's resolved
+guidance before the template itself. The agent cannot reach the template's fields without reading past the
 guidance, so reading it is the only way to the work.
 
 No evidence of a read is asked for: no quiz, no digest the agent repeats, no proof in the report.

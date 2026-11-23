@@ -122,7 +122,8 @@ def test_the_list_names_each_command_with_its_usage_summary_and_kind(capsys):
     entries = {e["command"]: e for e in json.loads(capsys.readouterr().out)}
     assert entries["se_guidance.py collect"] == {
         "command": "se_guidance.py collect", "component": "guidance", "group": "Guidance",
-        "usage": "se_guidance.py collect (--template TEMPLATE | --tags TAGS) [--json] [--root ROOT]",
+        "usage": "se_guidance.py collect (--template TEMPLATE | --tags TAGS) [--json] [--session SESSION]\n"
+                 "                       [--page PAGE] [--root ROOT]",
         "summary": "print the guidance a template or a set of tags gets, general first",
         "class": "interactive"}
     assert se_components.main(["commands", "--root", str(ROOT)]) == 0
