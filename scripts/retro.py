@@ -505,6 +505,7 @@ class Collected:
 
 def read_block(text: str, marker: str = BLOCK_MARKER) -> dict | None:
     """The data of the last block under `marker` in `text`; None where it has none."""
+    text = text.replace("\r\n", "\n")  # a draft saved on Windows
     at = text.rfind(marker)
     if at < 0:
         return None
