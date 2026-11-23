@@ -2439,12 +2439,14 @@ both.
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
+| `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
 | `templates/retro.md` | A retro's report or draft: its judged block, under its marker. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |

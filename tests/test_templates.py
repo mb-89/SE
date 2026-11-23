@@ -121,7 +121,7 @@ ISSUE_TEMPLATES = ("ticket", "work", "routed")
 ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
             "overhaul", "pugh")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
-NESTING = ("decision", "raid-register", "raid-entry")
+NESTING = ("decision", "raid-register", "raid-entry", "standing-questions", "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("delivery-notice", "escalation", "handover")
 EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
@@ -296,7 +296,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_seventeen_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_of_the_nineteen_templates_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -308,13 +308,13 @@ def test_each_of_the_seventeen_templates_renders_and_parses_its_example_back(cat
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 17
+    assert len(catalog) == 19
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
     yaml = pytest.importorskip("yaml")
     notes = sorted((ROOT / "templates").glob("*.md"))
-    assert [path.stem for path in notes] == sorted(EVERY)
+    assert sorted(path.stem for path in notes) == sorted(EVERY)
     assert sorted(path.name for path in (ROOT / "templates").iterdir()) == sorted(
         [path.name for path in notes] + [templates.TERMS_FILE])
     for path in notes:
