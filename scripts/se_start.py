@@ -54,6 +54,7 @@ def _load(name: str):
 
 
 git_door = _load("git_door")
+process_door = _load("process_door")
 se_modules = _load("se_modules")
 public_check = _load("public_check")
 metrics = _load("metrics")
@@ -472,8 +473,8 @@ def list_components(root: Path, command: list[str]) -> dict:
     """Run the project's component listing in its checkout, read-only (the command with no
     subcommand lists, never installs), within COMPONENTS_TIMEOUT: its rows, or its error."""
     try:
-        result = subprocess.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8",
-                                errors="replace", stdin=subprocess.DEVNULL, timeout=COMPONENTS_TIMEOUT)
+        result = process_door.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", stdin=subprocess.DEVNULL, timeout=COMPONENTS_TIMEOUT)
     except subprocess.TimeoutExpired:
         return {"error": f"{' '.join(command)} took longer than {COMPONENTS_TIMEOUT} s"}
     except (OSError, subprocess.SubprocessError) as error:
@@ -936,7 +937,7 @@ def _starts(se: Path, root: Path | None, version: Version) -> None:
     with tempfile.TemporaryDirectory(prefix="se-start-") as scratch:
         argv = [sys.executable, str(se / "scripts" / "se_start.py"), "--cache", str(Path(scratch) / "cache.json")]
         argv += (["--root", str(root)] if root else []) + ["status", "--offline"]
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        result = process_door.run(argv, capture_output=True, text=True, timeout=60)
     if result.returncode != 0 or f"SE {_v(version)} started" not in result.stdout:
         raise RefreshError(f"SE v{_v(version)} does not start: {(result.stderr or result.stdout).strip()[-300:]}")
 
