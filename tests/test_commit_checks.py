@@ -2,13 +2,13 @@
 commands, and se's commit hook runs them on the staged tree, refusing the commit where one fails.
 
 git is the door's fake: in memory where the test calls the module, behind a state file
-(`shared_fake_git`) where the commit runs se's hooks as git runs them. A check's command runs
-through the process door, its fake answering it in-process (`fake_processes`), but in the hook's
-one entry-point test."""
+(`shared_fake_git`) where the commit runs se's hooks, which only that fake runs. A check's command
+runs through the process door, whose fake answers it in this process (`fake_processes`), as it
+answers se's hooks by their logic; the hooks' own shell runs in their entry tests
+(tests/test_public_check.py)."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -20,8 +20,8 @@ import fake_processes as fake_processes_module
 import git_door
 
 PROJECT = Path(__file__).resolve().parents[1]
-# The interpreter by its bare name, found on the PATH the test sets: the hook's public check scans
-# the staged se.toml, which carries no machine path.
+# The interpreter by its bare name: the hook's public check scans the staged se.toml, which carries
+# no machine path.
 INTERPRETER = Path(sys.executable)
 
 
@@ -95,11 +95,10 @@ def test_a_command_that_cannot_start_refuses_naming_the_check(tmp_path, fake_git
     assert "commit check missing: error: `se-no-such-command` cannot start" in capsys.readouterr().err
 
 
-@pytest.mark.spawns("entry: .githooks/pre-commit, the shell that runs scripts/commit_checks.py on a commit")
-@pytest.mark.usefixtures("shared_fake_git")  # the commit's hooks run as child processes
+@pytest.mark.usefixtures("shared_fake_git")  # the commit runs se's hooks, which only this fake runs
 def test_the_commit_hook_refuses_a_failing_check_by_name_and_lets_a_passing_one_through(
-        tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ['PATH']}")
+        tmp_path, fake_processes):
+    fake_processes.on(INTERPRETER.name, check_work("good"))
     root = repository(tmp_path, f"[commit_checks]\nwork-is-good = {check('good')}\n")
     git(root, "config", "core.hooksPath", str(PROJECT / ".githooks"))
     (root / "work.txt").write_text("bad", encoding="utf-8")
