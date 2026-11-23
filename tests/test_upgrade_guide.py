@@ -98,3 +98,13 @@ def test_a_breaking_release_without_its_section_is_refused(tmp_path):
 def test_versions_parse_with_or_without_minor_and_patch(text):
     assert upgrade_guide.parse(text)[0] == 6
 
+
+
+def test_ses_own_guide_has_a_section_for_every_major_from_6_to_the_current_one():
+    import tomllib
+
+    current = upgrade_guide.parse(tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))
+                                  ["project"]["version"])
+    text = (ROOT / upgrade_guide.GUIDE).read_text(encoding="utf-8")
+    found = upgrade_guide.sections(text, "SE", (5, 0, 0), current)
+    assert titles(found) == [f"SE {major}" for major in range(6, current[0] + 1)]

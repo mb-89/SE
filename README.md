@@ -245,9 +245,10 @@ uv run python <se>/scripts/se_start.py refresh
 - What is due: the highest version a module's `version` range admits above its locked one, and for
   SE the highest version of its major. A newer version outside the range is shown apart and never
   applied, with the remedy: for a module the range to set in its `se.toml` and the `update` that
-  takes it, for SE an install again. For SE, installed or pinned as the component `se`, the remedy
-  also names the sections of the [upgrade guide](docs/upgrading.md) from the next major to the
-  newer one, which the checkout and its projects follow in order.
+  takes it, for SE an install again.
+  - For SE, installed or pinned as the component `se`, the remedy also names the sections of the
+    [upgrade guide](docs/upgrading.md) from the next major to the newer one, which the checkout
+    and its projects follow in order.
 - A local path (`[paths]` of `~/.se/local.toml`, SE's own under the name `se`) is reported as local
   and never touched. A module pinned by commit is reported, and only the module command's
   [`update`](#commands) moves it.
