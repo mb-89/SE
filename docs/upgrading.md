@@ -131,8 +131,11 @@ Components are found by name under the owners of the checkout's remotes
   The keys are `ref`, `version`, `go`, `optional` and `path`.
 - **Steps:** rename every `[modules.<name>]` to `[components.<name>]`, delete each `url = ...`
   line, and set `[components.se] version` to the newest SE's major, `"^<major>.0"`, where the
-  project pins se. Then `uv run python <se>/scripts/se_modules.py sync`, and commit `se.toml` and
-  `se.lock`.
+  project pins se.
+  - One version per name holds over the tree: where the project also pins a component the newest
+    SE pins (`grep -A2 '^\[components\.' <se>/se.toml`), set its range to admit SE's now, such as
+    obs `"^10.3"`; its content steps follow at [SE 11](#se-11).
+  - Then `uv run python <se>/scripts/se_modules.py sync`, and commit `se.toml` and `se.lock`.
 - **Check:** `grep -nE '^\[modules(\.|\])|^url *=' se.toml` and `grep -c '^\[modules\.' se.lock`
   print nothing and `0`.
 
@@ -151,6 +154,9 @@ Components are found by name under the owners of the checkout's remotes
 - **Steps:** give each component the project's owner publishes the topic `component`; for a
   component of another owner, `git remote add <name> <any repository of that owner>`; mark a
   component the project works without `optional = true`.
+  - Where the repository SE lives in lacks the topic, `sync` names `marks no repository se as a
+    component`: until its owner adds it, a machine sets `se = "<se>"` under `[paths]` in
+    `~/.se/local.toml`.
 - **Check:** `uv run python <se>/scripts/se_start.py --root . start-components 2>&1 | grep -c 'SE cannot start'`
   prints `0`.
 
@@ -170,7 +176,7 @@ Components are found by name under the owners of the checkout's remotes
   shape [scripts/templates.py](../scripts/templates.py) "Template files" owns, with
   `<se>/templates/ticket.md` as the model, `version: 1.0.0`; then delete the TOML file.
 - **Check:** `ls templates/*.toml 2>/dev/null | grep -v '/terms\.toml$'` prints nothing, and
-  `uv run python <se>/scripts/templates.py check --tree --root . --path README.md; echo $?` prints
+  `uv run python <se>/scripts/templates.py check --tree --root . --path se.toml; echo $?` prints
   `0` last (`2` names a note that does not load).
 
 ## SE 10
@@ -216,7 +222,7 @@ Components are found by name under the owners of the checkout's remotes
 
 - **Change:** 11.1 moved SE's obs to `^10.0` and kern to 1.5.0. One version per name holds over the
   tree, so a project that pins se and also obs or kern must admit a release both accept; else
-  `sync` fails, naming both pins.
+  `sync` fails, naming both pins. A project that pins se moved such a pin at [SE 8](#se-8).
 - **Steps:** follow the component sections [obs 6](#obs-6) to [obs 10.3](#obs-103), then
   [obs-html 0.2](#obs-html-02) to [obs-html 0.5](#obs-html-05), then [kern 1](#kern-1).
 - **Check:** `uv run python <se>/scripts/se_modules.py sync 2>&1 | grep -c 'admits both'` prints `0`.
