@@ -1,7 +1,7 @@
 [project]
 # The project's one semantic version, raised by work_tickets.py release when SE asks (README
 # "Project settings").
-version = "12.0.0"
+version = "12.0.1"
 # Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (README
 # "Release tags").
 release = "workflow"
