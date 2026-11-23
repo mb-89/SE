@@ -3566,6 +3566,23 @@ def platform_warning(root: Path, report: str, check_runs: Path | None = None) ->
     )
 
 
+def refuse_se_outside_pin(root: Path) -> None:
+    """Refuse where the project pins se (`[components.se]`) and the se running this script lies
+    outside that pin, naming both versions: the push's public check refuses such an se
+    (pub-007, public_check.py `check_se_version`, its one owner), so a delivery stops first."""
+    check = sibling("public_check")
+    try:
+        pin = check.se_pin(root)
+        if pin is None:
+            return
+        check.check_se_version(root, check.se_commit() if "version" not in pin else None)
+    except check.SetupError as error:
+        raise QueueError(
+            f"deliver: this session's se ({SE_ROOT}) lies outside the project's se pin, so the "
+            f"push's public check would refuse it; nothing was pushed: {error}"
+        ) from error
+
+
 def deliver(root: Path) -> int:
     """Merge current main, check the field report against it, push, and open or update the pull
     request whose description carries the report; returns the pull request's number. No issue is
@@ -10841,10 +10858,13 @@ def run_guard(root: Path, args: argparse.Namespace) -> int:
 
 
 @command("deliver", "sync, check the field report, push, and create or update the pull request "
-                    "whose description carries it; files no issue",
+                    "whose description carries it; files no issue. It first refuses an se outside "
+                    "the project's se pin ([components.se]), naming both versions, and never exits "
+                    "non-zero without a message",
          WORKTREE,
          arg("--integrator-session", help=f"{SESSION_HELP} to notify"))
 def run_deliver(root: Path, args: argparse.Namespace) -> int:
+    refuse_se_outside_pin(root)
     session = config_value(
         "integrator_session", str(required_snapshot(root)["repo"]), args.integrator_session)
     pr = deliver(root)
@@ -12039,8 +12059,22 @@ def run_command(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return SUITE_OVER_LIMIT_EXIT_CODE
     except (QueueError, OSError, ValueError, KeyError, sibling("se_relay").RelayError) as error:
-        print(f"error: {error}", file=sys.stderr)
+        print(f"error: {said(error)}", file=sys.stderr)
         return 1
+    except SystemExit as error:
+        # A bare exit code from a step this process runs in-process says nothing; never pass it on
+        # silently. One that carries its message has printed it already.
+        if isinstance(error.code, int) and error.code != 0:
+            print(f"error: work_tickets.py {args.command} stopped with exit code {error.code} and "
+                  "no message from the step that exited; this is a defect of that step: report "
+                  "it with the command", file=sys.stderr)
+            return error.code
+        raise
+
+
+def said(error: BaseException) -> str:
+    """`error`'s message, or, where it carries none, its kind: an error is never printed empty."""
+    return str(error).strip() or f"{type(error).__name__} without a message"
 
 
 if __name__ == "__main__":

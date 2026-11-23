@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -708,6 +709,43 @@ def test_guard_refuses_a_moved_folder_whose_destination_cannot_be_fetched(
     assert message.startswith(f"Cannot check the moved-folder line {line!r}: html at ")
     assert "cannot be fetched" in message
     assert "name each test the branch deletes under adapters/html under Removed behaviour" in message
+
+
+def test_deliver_refuses_an_se_outside_the_projects_se_pin_naming_both_versions(
+        worktree, monkeypatch, capsys):
+    (worktree / "se.toml").write_text('[components.se]\nversion = "^1.0"\n', encoding="utf-8")
+    running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: pytest.fail("delivered"))
+
+    assert work_tickets.main(["deliver", "--worktree", str(worktree)]) == 1
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: deliver: this session's se (")
+    assert "lies outside the project's se pin" in error and "nothing was pushed" in error
+    assert f"pins se at version '^1.0', but this check runs se {running}" in error
+
+
+def test_deliver_within_the_projects_se_pin_goes_on(worktree, monkeypatch):
+    running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
+    (worktree / "se.toml").write_text(f'[components.se]\nversion = "^{running.split(".")[0]}.0"\n',
+                                      encoding="utf-8")
+    work_tickets.refuse_se_outside_pin(worktree)
+    (worktree / "se.toml").write_text("[project]\n", encoding="utf-8")
+    work_tickets.refuse_se_outside_pin(worktree)
+
+
+@pytest.mark.parametrize("stop, said", [
+    (SystemExit(3), "error: work_tickets.py deliver stopped with exit code 3 and no message"),
+    (work_tickets.QueueError(""), "error: QueueError without a message"),
+])
+def test_deliver_never_exits_non_zero_without_a_message(worktree, monkeypatch, capsys, stop, said):
+    def stopped(root):
+        raise stop
+
+    monkeypatch.setattr(work_tickets, "refuse_se_outside_pin", stopped)
+
+    assert work_tickets.main(["deliver", "--worktree", str(worktree)]) == (3 if isinstance(stop, SystemExit) else 1)
+    assert capsys.readouterr().err.startswith(said)
 
 
 def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_request(

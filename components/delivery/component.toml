@@ -35,7 +35,7 @@ class = "batch"
 usage = "work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]"
 summary = "sync, check the field report, push, and create or update the pull ..."
 group = "Delivery"
-help = "sync, check the field report, push, and create or update the pull request whose description carries it; files no issue"
+help = "sync, check the field report, push, and create or update the pull request whose description carries it; files no issue. It first refuses an se outside the project's se pin ([components.se]), naming both versions, and never exits non-zero without a message"
 class = "batch"
 
 [commands."work_tickets.py push"]
