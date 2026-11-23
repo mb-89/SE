@@ -183,6 +183,36 @@ def _variants(template: templates.Template, document: str) -> list[str]:
     return found
 
 
+#: Texts naming SE's commands and scripts, each appended to the base document of a template whose
+#: rule `dangling` is on: what exists, what does not, and the Requirements that create it. The
+#: scripts named define a tree that rarely changes (review.py, se_plugin.py), as each finding lists it.
+DANGLING = (
+    "Run `review.py brief` and `<se>/scripts/review.py file`.\n",
+    "Run `review.py nope` first.\n",
+    "Run `uv run python scripts/review.py brief extra`, then `se_plugin.py check`.\n",
+    "Run `se_plugin.py nope.` and `se_plugin.py Build`.\n",
+    "Run `scripts/missing_tool.py` and `<se>/scripts/gone.py check`.\n",
+    "Run `scripts/<name>.py` and `scripts/review.py:12`.\n",
+    "Run ``review.py nope`` and `` `review.py` ``.\n",
+    "A span over two lines: `review.py\nnope`.\n",
+    "An unclosed `review.py nope\n\nAnd ``review.py nope` too.\n",
+    "```sh\nuv run python <se>/scripts/review.py nope\nreview.py brief\n```\n",
+    "~~~\nse_plugin.py nope\n```\nreview.py nope\n~~~\nreview.py `nope`\n",
+    "````\nreview.py nope\n```\nreview.py gone\n````\n",
+    "Run `review.py nope`.\n\n## Requirements\n\n1. Add the new `review.py nope`.\n",
+    "Run `scripts/missing_tool.py`.\n\n## Requirements\n\n- It creates\n  missing_tool.py.\n",
+    "Run `review.py nope`.\n\n## Requirements\n\n1. Keep `review.py nope` as it is.\n",
+)
+
+
+def _dangling(template: templates.Template, base: str) -> list[str]:
+    """Bodies made from the base document with a text of DANGLING appended, for a template whose
+    rule `dangling` is on."""
+    if template.severity("dangling") == templates.OFF or not base:
+        return []
+    return [base.rstrip("\n") + "\n\n" + text for text in DANGLING]
+
+
 def _set(name: str, loaded: dict[str, templates.Template], source: str, files: dict | None = None,
          repository: str = "", bodies: dict[str, list[str]] | None = None) -> dict:
     data: dict[str, object] = {"generated": GENERATED.format(source=source), "set": name}
@@ -203,7 +233,8 @@ def _set(name: str, loaded: dict[str, templates.Template], source: str, files: d
             bases[template.name] = base
             entry["bodies"] = [_body(template, body, title)
                                for body in [*_variants(template, base),
-                                            *(bodies or {}).get(template.name, [])]]
+                                            *(bodies or {}).get(template.name, []),
+                                            *_dangling(template, base)]]
             if any(item.source == "title" for item in template.fields):
                 entry["bodies"] += [_body(template, base, other) for other in TITLES if other != title]
         made[template.name] = entry

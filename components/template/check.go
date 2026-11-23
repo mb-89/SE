@@ -455,6 +455,11 @@ func Check(t *Template, doc *Document, raw *string) []Finding {
 		}
 	}
 	found = append(found, fenceOrder(t, doc)...)
+	if doc.Source != "" {
+		for _, f := range Dangling(doc.Source, seCheckout(), true) {
+			add("dangling", fieldAt(doc, f.Line), f.String()+": correct it, or say in Requirements that this issue adds it")
+		}
+	}
 	order := map[string]int{}
 	for i, item := range t.Fields {
 		order[item.Name] = i
