@@ -33,6 +33,14 @@ from pathlib import Path
 
 import git_door
 
+if "process_door" not in sys.modules:  # a child's door may run a copy of SE's scripts that lacks it
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location(
+        "process_door", Path(__file__).resolve().parents[1] / "scripts" / "process_door.py")
+    sys.modules["process_door"] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules["process_door"])
+import process_door  # noqa: E402
+
 if "waiting" not in sys.modules:  # a child's door loads this file by its path, beside no tests/ on sys.path
     import importlib.util
     _spec = importlib.util.spec_from_file_location("waiting", Path(__file__).with_name("waiting.py"))
@@ -1494,8 +1502,8 @@ class Hook:
         the platform cannot start a script itself (Windows)."""
         shell = [] if os.name != "nt" else [shutil.which("sh") or str(
             Path(shutil.which("git")).parents[1] / "bin" / "sh.exe")]
-        return subprocess.run([*shell, str(self.path), *self.args], cwd=self.cwd, env=env,
-                              input=self.stdin, capture_output=True, timeout=timeout, check=False)
+        return process_door.run([*shell, str(self.path), *self.args], cwd=self.cwd, env=env,
+                                input=self.stdin, capture_output=True, timeout=timeout, check=False)
 
 
 @dataclass(frozen=True)
@@ -1643,6 +1651,7 @@ class StateFile:
     def __init__(self, path: Path) -> None:
         self.path = Path(path).resolve()
         self.lock = self.path.with_name(self.path.name + ".flock")
+        self.hooks_run = 0  # the hooks this process's commands ran, in-process or as a child
         if not self.path.exists():
             self.save(FakeGit())
 
@@ -1702,6 +1711,7 @@ class StateFile:
         environment = {**(os.environ if env is None else env), git_door.VARIABLE: f"fake:{self.path}"}
         out = err = b""
         for hook in hooks:
+            self.hooks_run += 1
             ran = hook.run(environment, timeout)
             if hook.path.name == "pre-push":
                 out, err = out + ran.stdout, err + ran.stderr

@@ -3,6 +3,7 @@ table (scripts/timeline.py)."""
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 import socket
@@ -14,6 +15,7 @@ import pytest
 
 import fake_git
 import git_door
+import process_door
 import timeline
 
 NOW = datetime(2026, 11, 11, 15, 0, tzinfo=timezone.utc)
@@ -479,6 +481,8 @@ def large_snapshot() -> dict:
                     other=(issue(50, "backlogged", "se-person", created="2026-11-05T09:00:00Z"),))
 
 
+@pytest.mark.spawns("tool: obs-document, in obs's own Python environment, builds the page through obs-html; "
+                    "the build without a warning is obs's, and it runs only as a process")
 def test_the_page_builds_through_obs_html_without_a_warning(tmp_path, obs, capsys):
     """The build itself, through obs and its adapter component obs-html, with no browser: CI's
     runner skips the tests that open one (`page`)."""
@@ -489,20 +493,28 @@ def test_the_page_builds_through_obs_html_without_a_warning(tmp_path, obs, capsy
     assert "warning" not in capsys.readouterr().err.casefold()
 
 
+@functools.cache
+def playwright() -> bool:
+    """Whether node has Playwright: probed once per worker, by the first browser test or `page`."""
+    return shutil.which("node") is not None and not subprocess.run(
+        ["node", "-e", "require('playwright')"], capture_output=True).returncode
+
+
 def need_browser():
-    if shutil.which("node") is None or subprocess.run(["node", "-e", "require('playwright')"],
-                                                      capture_output=True).returncode:
+    if not playwright():
         pytest.skip("node with playwright is not installed")
 
 
 @pytest.fixture(scope="module")
 def page(tmp_path_factory, obs):
     """The Timeline obs built from `large_snapshot`; every test of it opens a browser, so it skips
-    before the build where none is installed."""
+    before the build where none is installed. The build runs through the real process door: one
+    build for the module, not a test's."""
     need_browser()
     destination = tmp_path_factory.mktemp("timeline") / "timeline.html"
     snap = large_snapshot()
-    assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
+    with process_door.use(process_door.RealProcesses()):
+        assert timeline.build(timeline.vault(snap), destination, snap["read_at"]) == 0
     return destination
 
 
@@ -518,6 +530,8 @@ def opened(page: Path, answer: dict[str, list] | None = None, turn: bool = False
     return json.loads(result.stdout)
 
 
+@pytest.mark.spawns("tool: obs's finder (through uv) and obs-html --check-rendered, which renders the page in a "
+                    "browser and counts its console errors; both run only as processes")
 def test_obs_proves_the_live_declaration_against_every_saved_row(page, obs):
     build_docs = timeline.sibling("build_docs")
     adapter, refusal = build_docs.installed_adapter(obs)
@@ -528,6 +542,8 @@ def test_obs_proves_the_live_declaration_against_every_saved_row(page, obs):
     assert "0 console errors" in result.stdout
 
 
+@pytest.mark.spawns("tool: node's Playwright opens the built Timeline at phone width; a browser runs only "
+                    "as a process")
 def test_the_page_opens_on_the_newest_row_of_each_place_and_pages_the_rest(page):
     seen = opened(page)
     rows = seen["rows"]
@@ -539,6 +555,8 @@ def test_the_page_opens_on_the_newest_row_of_each_place_and_pages_the_rest(page)
     assert seen["width"] == 390
 
 
+@pytest.mark.spawns("tool: node's Playwright opens the built Timeline at phone width; a browser runs only "
+                    "as a process")
 def test_a_backlog_row_shows_as_waiting_for_your_input_in_the_page(page):
     seen = opened(page, turn=True)
     assert "Page 2 of 2" in seen["text"]
@@ -548,6 +566,8 @@ def test_a_backlog_row_shows_as_waiting_for_your_input_in_the_page(page):
     assert all(cells[5].startswith("waiting for") for cells in backlog)
 
 
+@pytest.mark.spawns("tool: node's Playwright opens the built Timeline at phone width; a browser runs only "
+                    "as a process")
 def test_the_page_shows_what_github_answers_when_it_opens(page):
     moved = {"number": 3, "title": "issue 3", "state": "open", "state_reason": None,
              "labels": [{"name": "in-progress"}, {"name": "ready"}], "created_at": "2026-10-03T09:00:00Z",

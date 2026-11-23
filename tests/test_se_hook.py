@@ -32,6 +32,24 @@ STOP = '{"session_id":"s1","hook_event_name":"Stop","cwd":"/w"}'
 EVENT = '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}'
 
 
+# What runs as a process here, and why: se_hook.sh is bash, and every test below proves its own
+# logic, so each runs it (as the host does) against the fake programs it execs; one is its entry.
+def shell(logic: str) -> pytest.MarkDecorator:
+    return pytest.mark.spawns(f"shell: scripts/se_hook.sh's {logic} is bash, run only as a process")
+
+
+KERN = shell("call of the kern bootstrap.sh named, and its fail-open, against a fake kern it execs")
+STOPS = shell("Stop answer, kern's else stop-check's through uv, against a fake kern and uv it runs")
+COPILOT = shell("handling of Copilot's payloads (hosts.sh: snake_case, project, host field)")
+WARNING = shell("answer of a stop's advice, under Copilot a warning on stderr with exit code 2")
+LATE = shell("late-checkout start, claimed and detached, against a fake bootstrap.sh")
+CORE = shell("SE_HOOK_CORE switch")
+GATE = shell("file-gate filter (templates-files, file tools in the project), against a fake uv")
+BEAT = shell("claim beat (its due line and claim, a detached work_tickets.py beat), against a fake uv")
+PLUGIN = pytest.mark.spawns("shell: .github/plugin/hooks.json's bash and PowerShell commands, which pick "
+                            "PLUGIN_ROOT's script, run only as a process in the host's shell")
+
+
 def hook(home: Path, project: Path, *args: str, event: str = EVENT, **variables: str) -> subprocess.CompletedProcess:
     env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project), **variables}
     return subprocess.run([BASH, sh(SCRIPT), *args], env=env, input=event, capture_output=True, text=True,
@@ -72,6 +90,7 @@ def install(home: Path, project: Path) -> Path:
     return binary
 
 
+@pytest.mark.spawns("entry: scripts/se_hook.sh")
 def test_an_event_goes_to_the_pinned_kern_for_the_project_with_the_hosts_json(machine):
     home, project = machine
     install(home, project)
@@ -80,6 +99,7 @@ def test_an_event_goes_to_the_pinned_kern_for_the_project_with_the_hosts_json(ma
     assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{EVENT}\n"
 
 
+@KERN
 def test_kerns_answer_is_the_hooks_output_and_its_errors_stay_quiet(machine):
     home, project = machine
     install(home, project)
@@ -89,6 +109,7 @@ def test_kerns_answer_is_the_hooks_output_and_its_errors_stay_quiet(machine):
     assert result.returncode == 0 and result.stdout == '{"decision": "block"}\n' and result.stderr == ""
 
 
+@KERN
 def test_without_kern_on_this_machine_the_hook_passes_silently(machine):
     home, project = machine
     result = hook(home, project, "PostToolUse")  # no session start named a binary
@@ -102,6 +123,7 @@ def test_without_kern_on_this_machine_the_hook_passes_silently(machine):
     assert not (home / "calls").exists()
 
 
+@STOPS
 def test_a_stop_kern_answers_is_its_output_and_runs_no_fallback(machine):
     home, project = machine
     install(home, project)
@@ -116,6 +138,7 @@ def test_a_stop_kern_answers_is_its_output_and_runs_no_fallback(machine):
     assert (hook(home, project, "Stop", event=STOP).stdout, (home / "fallback").exists()) == ("", False)
 
 
+@STOPS
 def test_a_stop_no_command_of_kerns_answers_falls_back_to_stop_check_with_the_hooks_json(machine):
     home, project = machine
     fallback = f"run --no-project --python >=3.11 python {sh(ROOT)}/scripts/work_tickets.py stop-check <<{STOP}"
@@ -142,6 +165,7 @@ def copilot_hook(home: Path, event: str, payload: str, **variables: str) -> subp
                           timeout=30)
 
 
+@COPILOT
 def test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_snake_case(machine):
     home, project = machine
     install(home, project)
@@ -151,6 +175,7 @@ def test_a_copilot_event_without_a_project_variable_goes_to_the_cwds_kern_in_sna
     assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{handed}\n"
 
 
+@COPILOT
 def test_without_a_project_variable_or_a_cwd_the_project_is_the_working_directory(machine, tmp_path):
     home, project = machine
     install(home, project)
@@ -161,6 +186,7 @@ def test_without_a_project_variable_or_a_cwd_the_project_is_the_working_director
     assert (home / "calls").read_text(encoding="utf-8").startswith("hook PostToolUse --root ")
 
 
+@COPILOT
 def test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does(machine):
     """.github/hooks/se.json registers `Stop`: Copilot then sends a Claude-shaped payload."""
     home, project = machine
@@ -171,6 +197,7 @@ def test_copilots_pascal_case_stop_reaches_stop_check_as_claudes_does(machine):
     assert line.endswith(f'work_tickets.py stop-check <<{{"se_host":"copilot",{stop[1:]}')
 
 
+@COPILOT
 def test_a_copilot_agent_stop_falls_back_to_stop_check_with_the_payload_in_snake_case(machine):
     home, project = machine
     result = copilot_hook(home, "Stop", COPILOT_STOP % sh(project))
@@ -189,6 +216,7 @@ SAID = 'se Stop hook, advice only: "x" undelivered\nrun deliver now\n'
 
 
 @pytest.mark.parametrize("through", ("kern", "fallback"))
+@WARNING
 def test_under_copilot_a_stops_advice_is_a_hook_warning_never_output(machine, through):
     home, project = machine
     stop = '{"hook_event_name":"Stop","session_id":"s1","cwd":"%s"}' % sh(project)
@@ -203,6 +231,7 @@ def test_under_copilot_a_stops_advice_is_a_hook_warning_never_output(machine, th
     assert f'<<{{"se_host":"copilot",{stop[1:]}' in handed
 
 
+@WARNING
 def test_under_claude_code_a_stops_advice_stays_its_output(machine):
     home, project = machine
     install(home, project)
@@ -212,6 +241,7 @@ def test_under_claude_code_a_stops_advice_stays_its_output(machine):
     assert "se_host" not in (home / "calls").read_text(encoding="utf-8")
 
 
+@COPILOT
 def test_an_empty_copilot_stop_payload_gets_the_host_field_alone(machine):
     home, project = machine
     install(home, project)
@@ -264,6 +294,7 @@ def clone(path: Path) -> Path:
     return path
 
 
+@LATE
 def test_the_first_hook_in_a_late_checkout_starts_its_core_once_and_then_posts_to_it(machine):
     home, project = machine
     install(home, project)
@@ -292,6 +323,7 @@ def test_the_first_hook_in_a_late_checkout_starts_its_core_once_and_then_posts_t
     assert starts(home, 1) == [f"{sh(late)} --hook <<{payload}"]
 
 
+@LATE
 def test_no_late_start_in_the_project_or_a_checkout_without_se(machine):
     home, project = machine
     (project / ".git").mkdir()
@@ -305,6 +337,7 @@ def test_no_late_start_in_the_project_or_a_checkout_without_se(machine):
     assert not (home / "starts").exists()
 
 
+@LATE
 def test_a_late_claim_older_than_ten_minutes_is_taken_anew(machine):
     home, project = machine
     late = clone(home.parent / "SE")
@@ -330,6 +363,7 @@ def outcome(home: Path, result: subprocess.CompletedProcess) -> tuple:
 
 
 @pytest.mark.parametrize(("name", "event"), (("PostToolUse", EVENT), ("Stop", STOP)))
+@CORE
 def test_an_empty_hook_core_variable_acts_as_unset(machine, name, event):
     home, project = machine
     install(home, project)
@@ -344,6 +378,7 @@ def test_an_empty_hook_core_variable_acts_as_unset(machine, name, event):
 
 
 @pytest.mark.parametrize("value", OFF_VALUES)
+@CORE
 def test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop(machine, value):
     home, project = machine
     install(home, project)
@@ -354,6 +389,7 @@ def test_hook_core_off_posts_to_no_core_and_passes_every_event_but_stop(machine,
 
 
 @pytest.mark.parametrize("value", OFF_VALUES)
+@CORE
 def test_hook_core_off_still_answers_a_stop_with_stop_check(machine, value):
     home, project = machine
     install(home, project)
@@ -365,6 +401,7 @@ def test_hook_core_off_still_answers_a_stop_with_stop_check(machine, value):
     assert not (home / "calls").exists()
 
 
+@CORE
 def test_hook_core_off_under_copilot_a_stops_advice_is_still_a_hook_warning(machine):
     home, project = machine
     install(home, project)
@@ -376,6 +413,7 @@ def test_hook_core_off_under_copilot_a_stops_advice_is_still_a_hook_warning(mach
 
 
 @pytest.mark.parametrize("value", ON_VALUES)
+@CORE
 def test_any_other_hook_core_value_posts_to_the_core_as_today(machine, value):
     home, project = machine
     install(home, project)
@@ -384,6 +422,7 @@ def test_any_other_hook_core_value_posts_to_the_core_as_today(machine, value):
     assert (home / "calls").read_text(encoding="utf-8") == f"hook PreToolUse --root {sh(project)} <<{EVENT}\n"
 
 
+@CORE
 def test_hook_core_off_starts_no_late_checkout_and_claims_none(machine):
     home, project = machine
     install(home, project)
@@ -439,6 +478,7 @@ def plugin_root(kind: str, plugin: Path) -> str:
 
 @pytest.mark.parametrize("kind", PLUGIN_FORMS)
 @pytest.mark.parametrize("event, said", (("SessionStart", "bootstrap.sh --hook"), ("Stop", "se_hook.sh Stop")))
+@PLUGIN
 def test_a_plugin_hook_runs_only_the_plugins_own_script(plugin_and_repository, kind, event, said):
     plugin, repository = plugin_and_repository
     result = plugin_hook(kind, event, repository, plugin_root(kind, plugin))
@@ -447,6 +487,7 @@ def test_a_plugin_hook_runs_only_the_plugins_own_script(plugin_and_repository, k
 
 @pytest.mark.parametrize("kind", PLUGIN_FORMS)
 @pytest.mark.parametrize("case", ("unset", "empty", "se checkout"))
+@PLUGIN
 def test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout(plugin_and_repository, kind, case):
     """No fallback to the folder's own scripts; in SE's checkout its repository hooks run its copy."""
     plugin, repository = plugin_and_repository
@@ -461,6 +502,7 @@ def test_a_plugin_hook_runs_nothing_without_plugin_root_or_in_ses_checkout(plugi
 
 @pytest.mark.parametrize("kind", PLUGIN_FORMS)
 @pytest.mark.parametrize(("code", "passed"), ((2, 2), (1, 0), (0, 0)))
+@PLUGIN
 def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
         plugin_and_repository, kind, code, passed):
     """Copilot shows a hook's stderr on exit code 2 and goes on; every other exit fails open."""
@@ -486,6 +528,7 @@ def gate_runs(home: Path) -> int:
     return log.read_text(encoding="utf-8").count("se_templates.py gate") if log.exists() else 0
 
 
+@GATE
 def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_with_it(machine):
     home, project = machine
     install(home, project)
@@ -539,6 +582,7 @@ def settled_hook(home: Path, project: Path, event: str = "PreToolUse") -> subpro
                                capture_output=True, text=True, timeout=30)
 
 
+@BEAT
 def test_a_tool_call_starts_the_claims_beat_once_it_is_due_and_before_reads_the_record_alone(machine):
     home, project = machine
     uv = home / ".local" / "bin" / "uv"

@@ -14,6 +14,7 @@ import tomllib
 
 import pytest
 import fake_git
+import fake_processes as fakes
 import git_door
 
 
@@ -735,12 +736,38 @@ def plugin_checkout(checkout: Path, build: list[str]) -> Path:
     return checkout
 
 
+def own_python(invocation: fakes.Invocation) -> fakes.Answer:
+    """A Python program the checkout's release build runs, in this process as the child would run
+    it: a script by its own copy's `main` (`python scripts/<name>.py ...`, from the call's working
+    directory, so it builds the checkout it lives in), or `python -c <code>`."""
+    words = invocation.words
+    if words[1:2] == ["-c"]:
+        code = compile(words[2], "<string>", "exec")
+        return fakes.run_main(lambda _arguments: exec(code, {"__name__": "__main__"}), invocation)
+    script = Path(invocation.cwd or Path.cwd()) / invocation.script
+    with pytest.MonkeyPatch.context() as patch:
+        spec = importlib.util.spec_from_file_location(f"copy_of_{script.stem}", script)
+        module = importlib.util.module_from_spec(spec)
+        patch.setitem(sys.modules, spec.name, module)
+        spec.loader.exec_module(module)
+        return fakes.run_main(module.main, invocation)
+
+
+@pytest.fixture
+def release_build(fake_processes):
+    """The checkout's release build answered in-process (`own_python`)."""
+    return fake_processes.on(lambda invocation: fakes.python(invocation.words[0]), own_python)
+
+
 def plugin(command: str, root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), command, "--root", str(root)],
-                          capture_output=True, text=True, check=False)
+    """The checkout's copy of se_plugin.py run as `python scripts/se_plugin.py <command> --root <root>`, in this process."""
+    argv = [sys.executable, str(root / "scripts" / "se_plugin.py"), command, "--root", str(root)]
+    answer = own_python(fakes.Invocation(argv, {"cwd": root}))
+    return subprocess.CompletedProcess(argv, answer.returncode, answer.stdout.decode("utf-8"),
+                                       answer.stderr.decode("utf-8"))
 
 
-def test_the_release_commit_carries_what_release_build_regenerates(checkout):
+def test_the_release_commit_carries_what_release_build_regenerates(checkout, release_build):
     plugin_checkout(checkout, [sys.executable, "scripts/se_plugin.py", "build"])
     integrate(checkout, "feature/topic-20261106")
     assert release(checkout) == 0
@@ -756,7 +783,7 @@ def test_se_regenerates_its_plugin_in_each_release_commit():
     assert project["release_build"][-2:] == ["scripts/se_plugin.py", "build"]
 
 
-def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, capsys):
+def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, capsys, release_build):
     plugin_checkout(checkout, [sys.executable, "-c", "raise SystemExit('generator broke')"])
     integrate(checkout, "feature/topic-20261106")
     before = git(checkout, "rev-parse", "HEAD")

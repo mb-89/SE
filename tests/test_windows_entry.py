@@ -29,6 +29,14 @@ INSTALL_LINE = ("SE needs the bash that Git for Windows ships: install Git for W
 
 POWERSHELLS = [shell for shell in ("powershell", "pwsh") if os.name == "nt" and shutil.which(shell)]
 windows = pytest.mark.skipif(not POWERSHELLS, reason="the hand-off runs where PowerShell and Git's bash are: Windows")
+# What the Windows cases prove is PowerShell's and Git's bash's own work, which runs only as a
+# process: the spawn guard (scripts/spawn_guard.py) passes them on the Windows leg by these marks.
+SELECTS = pytest.mark.spawns("shell: Select-SeBash is PowerShell (scripts/bash.ps1), run only by a "
+                             "PowerShell process")
+HANDS_OFF = pytest.mark.spawns("shell: scripts/bash.ps1 hands off from a PowerShell process to Git's bash, "
+                               "both run only as processes")
+HOOK_LINE = pytest.mark.spawns("shell: a generated PowerShell hook line runs scripts/bash.ps1 and Git's bash, "
+                               "run only as processes")
 
 GIT = PureWindowsPath("C:/Program Files/Git")
 WSL = PureWindowsPath("C:/Windows/System32/bash.exe")
@@ -64,6 +72,7 @@ def chosen(answer: dict[str, str]) -> dict[str, str]:
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
 @pytest.mark.parametrize("git", [GIT / "cmd" / "git.exe", GIT / "bin" / "git.exe", GIT / "mingw64" / "bin" / "git.exe"])
+@SELECTS
 def test_it_chooses_gits_wrapper_bash_beside_git_over_wsls_launcher(shell: str, git: PureWindowsPath) -> None:
     answer = select(shell, git=str(git), path_bash=str(WSL),
                     exists=(GIT / "usr" / "bin" / "bash.exe", GIT / "bin" / "bash.exe"))
@@ -72,6 +81,7 @@ def test_it_chooses_gits_wrapper_bash_beside_git_over_wsls_launcher(shell: str, 
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@SELECTS
 def test_without_the_wrapper_it_chooses_gits_plain_bash(shell: str) -> None:
     answer = select(shell, git=str(GIT / "cmd" / "git.exe"), exists=(GIT / "usr" / "bin" / "bash.exe",))
     assert chosen(answer) == {"case": "git", "bash": (GIT / "usr" / "bin" / "bash.exe").as_posix()}
@@ -79,6 +89,7 @@ def test_without_the_wrapper_it_chooses_gits_plain_bash(shell: str) -> None:
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@SELECTS
 def test_with_git_not_on_path_it_finds_git_in_a_usual_install_place(shell: str) -> None:
     user = PureWindowsPath("D:/Local/Programs/Git")
     answer = select(shell, places=(GIT, user), path_bash=str(WSL), exists=(user / "bin" / "bash.exe",))
@@ -89,12 +100,14 @@ def test_with_git_not_on_path_it_finds_git_in_a_usual_install_place(shell: str) 
 @pytest.mark.parametrize("shell", POWERSHELLS)
 @pytest.mark.parametrize("launcher", [WSL, PureWindowsPath("C:/Windows/SysWOW64/bash.exe"),
                                       PureWindowsPath("D:/Local/Microsoft/WindowsApps/bash.exe")])
+@SELECTS
 def test_only_wsls_launcher_on_path_is_no_bash(shell: str, launcher: PureWindowsPath) -> None:
     assert chosen(select(shell, places=(GIT,), path_bash=str(launcher))) == {"case": "wsl", "bash": ""}
 
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@SELECTS
 def test_a_bash_on_path_that_is_not_wsls_launcher_is_used_last(shell: str) -> None:
     other = PureWindowsPath("C:/msys64/usr/bin/bash.exe")
     assert chosen(select(shell, places=(GIT,), path_bash=str(other))) == {"case": "path", "bash": other.as_posix()}
@@ -102,6 +115,7 @@ def test_a_bash_on_path_that_is_not_wsls_launcher_is_used_last(shell: str) -> No
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@SELECTS
 def test_nothing_found_is_no_bash(shell: str) -> None:
     assert chosen(select(shell, git=str(GIT / "cmd" / "git.exe"), places=(GIT,))) == {"case": "none", "bash": ""}
 
@@ -118,6 +132,7 @@ def handoff(shell: str, script: Path, arguments: list[str], env: dict[str, str] 
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@HANDS_OFF
 def test_from_powershell_every_argument_reaches_the_script_unchanged_with_its_exit_code(
         shell: str, tmp_path: Path) -> None:
     script = tmp_path / "echo.sh"
@@ -130,6 +145,7 @@ def test_from_powershell_every_argument_reaches_the_script_unchanged_with_its_ex
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@HANDS_OFF
 def test_an_unquoted_switch_on_the_line_reaches_the_script_as_written(shell: str, tmp_path: Path) -> None:
     script = tmp_path / "echo.sh"
     script.write_text("for a in \"$@\"; do printf '<%s>\\n' \"$a\"; done\n", encoding="utf-8", newline="\n")
@@ -150,6 +166,7 @@ def bare_environment(tmp_path: Path, path: list[Path], places: Path) -> dict[str
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
 @pytest.mark.parametrize("wsl", [True, False], ids=["wsl-launcher-on-path", "nothing-on-path"])
+@HANDS_OFF
 def test_with_no_git_bash_it_prints_the_one_install_line(shell: str, wsl: bool, tmp_path: Path) -> None:
     launcher = tmp_path / "Windows" / "System32" / "bash.exe"
     launcher.parent.mkdir(parents=True)
@@ -170,6 +187,7 @@ TOOLS = ["uname", "mktemp", "cut", "mkdir", "grep", "find", "tar", "unzip", "sha
 
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
+@HANDS_OFF
 def test_from_a_powershell_whose_path_has_no_git_the_script_finds_bootstraps_tools(shell: str, tmp_path: Path) -> None:
     script = tmp_path / "tools.sh"
     script.write_text(
@@ -233,6 +251,7 @@ def run_hook_line(shell: str, line: str, plugin: bool, folder: Path, project: Pa
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
 @pytest.mark.parametrize("plugin", [False, True], ids=["repository-hooks", "plugin-hooks"])
+@HOOK_LINE
 def test_a_generated_handoff_hook_line_reaches_its_script_with_its_input_and_exits_0(
         shell: str, plugin: bool, tmp_path: Path) -> None:
     folder, project = hook_tree(tmp_path)
@@ -246,6 +265,7 @@ def test_a_generated_handoff_hook_line_reaches_its_script_with_its_input_and_exi
 @windows
 @pytest.mark.parametrize("shell", POWERSHELLS)
 @pytest.mark.parametrize("plugin", [False, True], ids=["repository-hooks", "plugin-hooks"])
+@HOOK_LINE
 def test_with_no_git_bash_a_generated_handoff_hook_line_prints_the_install_line_and_exits_0(
         shell: str, plugin: bool, tmp_path: Path) -> None:
     folder, project = hook_tree(tmp_path)
@@ -324,6 +344,11 @@ se_start._spawn_detached([sys.executable, *sys.argv[2:]])
 """
 
 
+DETACHED = pytest.mark.spawns("detached: se_start.py's _spawn_detached; only a real parent process that "
+                              "exits shows the child it started outlives it")
+
+
+@DETACHED
 def test_a_detached_child_outlives_the_parent_that_started_it(tmp_path: Path) -> None:
     """The child rings the test's bell and waits there for the go, which the test sends only once
     the parent has exited; the child's marker, written after the go, shows it outlived it."""

@@ -10,11 +10,14 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import git_door
 import fake_git
+import fake_processes as fake_programs
+import process_door
 import waiting
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -31,6 +34,7 @@ def load(name: str):
 
 
 work_tickets = load("work_tickets")
+se_start = load("se_start")
 feedback = work_tickets.feedback
 metrics = work_tickets.metrics
 
@@ -134,7 +138,7 @@ def test_a_github_call_is_announced_before_it_is_made(tmp_path, monkeypatch, cap
         return subprocess.CompletedProcess(arguments, 0, "[]", "")
 
     monkeypatch.setattr(work_tickets, "gh_executable", lambda: "gh")
-    monkeypatch.setattr(work_tickets.subprocess, "run", run)
+    monkeypatch.setattr(work_tickets.process_door, "run", run)
     work_tickets.run_gh(tmp_path, ["issue", "list", "--label", "escalated", "--json",
                                    "number,title", "--limit", "200", "--repo", "owner/repo"])
     assert seen == ["Reading GitHub: gh issue list --label escalated --repo owner/repo\n"]
@@ -150,57 +154,57 @@ def test_a_remote_read_by_git_is_announced_and_a_local_one_is_not(tmp_path, fake
 # records each call's start and end in one log, so a test proves order (a first line before the
 # first call, calls made at once) instead of timing the machine it runs on.
 
-DOOR_LOG = "FAKE_GH_LOG"  # the door's log: one line per event, its position the sequence counter
-DOOR_OUTPUT = "FAKE_GH_OUTPUT"  # the file the command under test writes its output to, if any
 WATCHER_LINE = ": working, nothing to show yet"  # feedback.watched's line for a silent run
-
-FAKE_GH = '''\
-import json, os, sys, time
-def log(event):
-    if os.environ.get("FAKE_GH_LOG"):
-        with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\\n")
-output = os.environ.get("FAKE_GH_OUTPUT")
-shown = open(output, encoding="utf-8", errors="replace").read() if output else ""
-log({"event": "start", "pid": os.getpid(), "shown": shown, "argv": sys.argv[1:3]})
-rounds = os.environ.get("FAKE_GH_ROUNDS")  # the calls of each round, e.g. "1,7,5"
-if rounds:  # a call ends only once every call of its round has started
-    def starts():
-        lines = open(os.environ["FAKE_GH_LOG"], encoding="utf-8").read().splitlines()
-        return [json.loads(line)["pid"] for line in lines if '"start"' in line]
-    place = starts().index(os.getpid()) + 1
-    bounds = [sum(int(n) for n in rounds.split(",")[:i + 1]) for i in range(len(rounds.split(",")))]
-    bound = next((b for b in bounds if b >= place), 0)
-    deadline = time.monotonic() + 30  # a failure bound: a call its round never joins
-    while len(starts()) < bound and time.monotonic() < deadline:
-        time.sleep(0.001)
-log({"event": "end", "pid": os.getpid()})
-a = sys.argv[1:]
-if a[:2] == ["issue", "list"]:
-    labels = [a[i + 1] for i, x in enumerate(a) if x == "--label"]
-    blocked = os.environ.get("FAKE_GH_BLOCKERS")  # each candidate n names #1n and #20
-    print(json.dumps([{"number": n, "title": f"feat/candidate-{n}",
-                       "body": f"## Blocked by\\n\\n- #{10 + n}\\n- #20\\n" if blocked else "",
-                       "labels": [{"name": "work"}, {"name": "ready"}]} for n in range(1, 6)]
-                     if "ready" in labels else []))
-elif a[:2] == ["pr", "list"]:
-    print("[]")
-elif a[:1] == ["api"]:
-    number = a[1].rsplit("/", 1)[-1]
-    print(json.dumps({"number": int(number) if number.isdigit() else 0, "state": "closed",
-                      "state_reason": "completed", "issue_dependencies_summary": {"blocked_by": 0}}))
-elif a[:2] == ["issue", "view"]:
-    print(json.dumps({"number": 5, "title": "feat/x", "url": "https://github.com/owner/repo/issues/5",
-                      "body": "## Requirements\\n\\n1. one\\n", "updatedAt": "", "labels": [],
-                      "comments": []}))
-'''
+ROUND_BOUND_SECONDS = 30  # a failure bound: a call its round never joins ends after it
 
 
-def door_events(log: Path) -> list[dict]:
-    """The door's log in the order its events happened."""
-    if not log.exists():
-        return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+class SlowDoor:
+    """`gh` behind the process door's fake: it answers like GitHub and logs each call's start and
+    end, the log's order the sequence counter. A start notes what the command under test had shown
+    by then (`shown`). With `rounds` (the calls of each round, e.g. "1,6,5") a call ends only once
+    every call of its round has started, so calls made one after the other wait in sequence."""
+
+    def __init__(self, rounds: str = "", blockers: bool = False,
+                 shown: Callable[[], str] = lambda: "") -> None:
+        self.rounds, self.blockers, self.shown = rounds, blockers, shown
+        self.events: list[dict] = []
+        self.changed = threading.Condition()
+
+    def starts(self) -> int:
+        return len([event for event in self.events if event["event"] == "start"])
+
+    def __call__(self, invocation: fake_programs.Invocation) -> str:
+        arguments = invocation.arguments
+        with self.changed:
+            call = self.starts() + 1
+            self.events.append({"event": "start", "pid": call, "shown": self.shown(), "argv": arguments[:2]})
+            self.changed.notify_all()
+            if self.rounds:
+                counts = [int(n) for n in self.rounds.split(",")]
+                bounds = [sum(counts[:i + 1]) for i in range(len(counts))]
+                bound = next((b for b in bounds if b >= call), 0)
+                self.changed.wait_for(lambda: self.starts() >= bound, ROUND_BOUND_SECONDS)
+            self.events.append({"event": "end", "pid": call})
+        return self.answer(arguments)
+
+    def answer(self, a: list[str]) -> str:
+        if a[:2] == ["issue", "list"]:
+            labels = [a[i + 1] for i, x in enumerate(a) if x == "--label"]
+            return json.dumps([{"number": n, "title": f"feat/candidate-{n}",  # candidate n names #1n and #20
+                                "body": f"## Blocked by\n\n- #{10 + n}\n- #20\n" if self.blockers else "",
+                                "labels": [{"name": "work"}, {"name": "ready"}]} for n in range(1, 6)]
+                              if "ready" in labels else [])
+        if a[:2] == ["pr", "list"]:
+            return "[]"
+        if a[:1] == ["api"]:
+            number = a[1].rsplit("/", 1)[-1]
+            return json.dumps({"number": int(number) if number.isdigit() else 0, "state": "closed",
+                               "state_reason": "completed", "issue_dependencies_summary": {"blocked_by": 0}})
+        if a[:2] == ["issue", "view"]:
+            return json.dumps({"number": 5, "title": "feat/x", "url": "https://github.com/owner/repo/issues/5",
+                               "body": "## Requirements\n\n1. one\n", "updatedAt": "", "labels": [],
+                               "comments": []})
+        return ""
 
 
 def door_depth(events: list[dict]) -> int:
@@ -218,102 +222,108 @@ def door_depth(events: list[dict]) -> int:
 
 @pytest.fixture(scope="module")
 def slow_door(tmp_path_factory) -> dict:
-    """A checkout (a directory: the first-line runs read no git), and a `gh` on PATH that answers
-    like GitHub, slowly."""
+    """A checkout (a directory: the first-line runs read no git), the environment the commands run
+    under, and a `gh` on PATH for them to find; the door's fake answers it (`SlowDoor`), so it
+    never runs."""
     base = tmp_path_factory.mktemp("slow-door")
     bin_dir = base / "bin"
     bin_dir.mkdir()
-    script = bin_dir / "fake_gh.py"
-    script.write_text(FAKE_GH, encoding="utf-8")
-    if sys.platform == "win32":
-        (bin_dir / "gh.cmd").write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
-    else:
-        gh = bin_dir / "gh"
-        gh.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
-        gh.chmod(0o755)
+    gh = bin_dir / ("gh.cmd" if sys.platform == "win32" else "gh")
+    gh.write_text("exit 127\n", encoding="utf-8")
+    gh.chmod(0o755)
     checkout = base / "checkout"
     checkout.mkdir()
-    environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                   "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base),
-                   "USERPROFILE": str(base)}
+    environment = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                   "SE_METRICS": str(base / "metrics.jsonl"), "HOME": str(base), "USERPROFILE": str(base)}
     return {"checkout": checkout, "env": environment, "metrics": base / "metrics.jsonl"}
 
 
-def interactive(checkout: Path) -> dict[str, list[str]]:
-    work = [sys.executable, str(SCRIPTS / "work_tickets.py")]
+Command = tuple[Callable[[list[str]], int], list[str]]
+
+
+def interactive(checkout: Path) -> dict[str, Command]:
+    """Each interactive command: the `main` that runs it and its arguments."""
     return {
-        "work_tickets.py status": [*work, "status", "--worktree", str(checkout)],
-        "work_tickets.py queue": [*work, "queue", "--worktree", str(checkout),
-                                  "--repo", "github.com/owner/repo"],
-        "work_tickets.py intake": [*work, "intake", "--worktree", str(checkout), "--issue", "5",
-                                   "--repo", "github.com/owner/repo"],
-        "work_tickets.py metrics": [*work, "metrics"],
-        "work_tickets.py paused": [*work, "paused", "--worktree", str(checkout),
-                                   "--repo", "github.com/owner/repo"],
-        "se_start.py status": [sys.executable, str(SCRIPTS / "se_start.py"),
-                               "--root", str(checkout), "status", "--offline"],
+        "work_tickets.py status": (work_tickets.main, ["status", "--worktree", str(checkout)]),
+        "work_tickets.py queue": (work_tickets.main, ["queue", "--worktree", str(checkout),
+                                                      "--repo", "github.com/owner/repo"]),
+        "work_tickets.py intake": (work_tickets.main, ["intake", "--worktree", str(checkout), "--issue", "5",
+                                                       "--repo", "github.com/owner/repo"]),
+        "work_tickets.py metrics": (work_tickets.main, ["metrics"]),
+        "work_tickets.py paused": (work_tickets.main, ["paused", "--worktree", str(checkout),
+                                                       "--repo", "github.com/owner/repo"]),
+        "se_start.py status": (se_start.main, ["--root", str(checkout), "status", "--offline"]),
     }
 
 
-def first_line(argv: list[str], environment: dict[str, str], base: Path) -> tuple[str, list[dict]]:
-    """The first line `argv` shows (stdout or stderr, into a file the door reads as each of its
-    calls starts) and the door's log, once the command has ended."""
-    base.mkdir()
-    log, output = base / "door.jsonl", base / "output.txt"
-    environment = {**environment, DOOR_LOG: str(log), DOOR_OUTPUT: str(output)}
-    with output.open("w", encoding="utf-8") as sink:
-        subprocess.run(argv, stdout=sink, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                       env=environment, timeout=waiting.DEADLINE_SECONDS, check=False)
-    text = output.read_text(encoding="utf-8", errors="replace")
-    assert "\n" in text, f"no line from {argv}: {text!r}"
-    return text.split("\n", 1)[0], door_events(log)
+def run_in_process(command: Command, environment: dict[str, str], monkeypatch,
+                   sink: io.StringIO | None = None) -> subprocess.CompletedProcess[str]:
+    """`command` run in this process as a fresh run of its script would, under `environment`: its
+    git the door's fake, `gh` the test's `SlowDoor`. Its stdout and stderr go to `sink` where
+    given, into one stream as a terminal shows them."""
+    main, argv = command
+    for name, value in environment.items():
+        if os.environ.get(name) != value:
+            monkeypatch.setenv(name, value)
+    monkeypatch.setattr(work_tickets, "_signed_in_gh", set())  # the sign-in check is the door's first call
+    out, err = (sink, sink) if sink is not None else (io.StringIO(), io.StringIO())
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(argv)
+    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
 
 
-def assert_first_line_before_the_door(command: str, argv: list[str], environment: dict[str, str],
-                                      base: Path) -> None:
-    """`command` shows a line before its first door call starts: the door, as it starts, already
+def first_line(command: Command, environment: dict[str, str], monkeypatch,
+               fake_processes) -> tuple[str, list[dict]]:
+    """The first line `command` shows (stdout or stderr, into one stream the door reads as each of
+    its calls starts) and the door's log, once the command has ended."""
+    sink = io.StringIO()
+    door = SlowDoor(shown=sink.getvalue)
+    fake_processes.on("gh", door)
+    run_in_process(command, environment, monkeypatch, sink)
+    text = sink.getvalue()
+    assert "\n" in text, f"no line from {command[1]}: {text!r}"
+    return text.split("\n", 1)[0], door.events
+
+
+def assert_first_line_before_the_door(name: str, command: Command, environment: dict[str, str],
+                                      monkeypatch, fake_processes) -> None:
+    """`name` shows a line before its first door call starts: the door, as it starts, already
     finds a line of the command's own (not the watcher's) in its output. The door answers at
     once, so the order of the log, not the clock, is what is checked."""
-    line, events = first_line(argv, environment, base)
-    assert line.strip(), command
+    line, events = first_line(command, environment, monkeypatch, fake_processes)
+    assert line.strip(), name
     starts = [event for event in events if event["event"] == "start"]
     if starts:  # the first call has started; what had the command shown by then?
         shown = [text for text in starts[0]["shown"].splitlines() if text.strip()]
         own = [text for text in shown if not text.endswith(WATCHER_LINE)]
-        assert own, (command, "its first line came after its first door call", starts[0])
+        assert own, (name, "its first line came after its first door call", starts[0])
 
 
-def test_each_interactive_command_shows_its_first_line_before_its_first_door_call(slow_door,
-                                                                                  tmp_path):
+def test_each_interactive_command_shows_its_first_line_before_its_first_door_call(
+        slow_door, fake_git_door, fake_processes, monkeypatch):
     commands = interactive(slow_door["checkout"])
     assert set(commands) == set(feedback.INTERACTIVE)
-    for command, argv in commands.items():
-        assert_first_line_before_the_door(command, argv, slow_door["env"],
-                                          tmp_path / command.replace(" ", "-"))
+    for name, command in commands.items():
+        assert_first_line_before_the_door(name, command, slow_door["env"], monkeypatch, fake_processes)
 
 
-SILENT_DOOR = '''\
-import shutil, subprocess, sys
-sys.path.insert(0, sys.argv[1])
-import feedback
-with feedback.watched("work_tickets.py silent"):
-    subprocess.run([shutil.which("gh") or "gh", "issue", "list"], capture_output=True, check=False)
-    print("listed")
-'''
+def silent(argv: list[str]) -> int:
+    """A command whose first door call comes before its first line."""
+    with feedback.watched("work_tickets.py silent"):
+        process_door.run(["gh", "issue", "list"], capture_output=True, check=False)
+        print("listed")
+    return 0
 
 
-def test_a_command_whose_first_line_comes_after_its_door_call_fails_the_check(slow_door,
-                                                                              tmp_path):
-    script = tmp_path / "silent.py"
-    script.write_text(SILENT_DOOR, encoding="utf-8")
-    argv = [sys.executable, str(script), str(SCRIPTS)]
+def test_a_command_whose_first_line_comes_after_its_door_call_fails_the_check(
+        slow_door, fake_processes, monkeypatch):
     with pytest.raises(AssertionError, match="its first line came after its first door call"):
-        assert_first_line_before_the_door("work_tickets.py silent", argv, slow_door["env"],
-                                          tmp_path / "silent")
+        assert_first_line_before_the_door("work_tickets.py silent", (silent, []), slow_door["env"],
+                                          monkeypatch, fake_processes)
 
 
-# The queue's rounds of door calls, as FAKE_GH_ROUNDS holds them: the sign-in check, the listings,
-# then the reads of the candidates (and, with FAKE_GH_BLOCKERS, of the blockers they name).
+# The queue's rounds of door calls: the sign-in check, the listings, then the reads of the
+# candidates (and, with blockers, of the blockers they name).
 QUEUE_ROUNDS = "1,6,5"
 BLOCKER_ROUNDS = "1,6,11"
 
@@ -331,70 +341,60 @@ def queue_checkout(tmp_path: Path, monkeypatch) -> Path:
     return checkout
 
 
-def run_in_process(argv: list[str], environment: dict[str, str], monkeypatch) -> subprocess.CompletedProcess[str]:
-    """`work_tickets.py <argv>` in this process, under `environment`, its git the door's fake; the
-    door it measures, `gh`, stays a process of its own."""
-    for name, value in environment.items():
-        if os.environ.get(name) != value:
-            monkeypatch.setenv(name, value)
-    monkeypatch.setattr(work_tickets, "_signed_in_gh", set())  # the sign-in check is the door's first call
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = work_tickets.main(argv)
-    return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+def queue(checkout: Path) -> Command:
+    return work_tickets.main, ["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"]
 
 
-def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_path, fake_git_door, monkeypatch):
+def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_path, fake_git_door,
+                                                              fake_processes, monkeypatch):
     """The queue's twelve door calls (the sign-in check, then six listings at once, then the
     blockers at once) wait for the door in three rounds, not twelve: proven by the door's own
     log, as a call ends only once its whole round has started. No wall time is checked."""
-    log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], "FAKE_GH_ROUNDS": QUEUE_ROUNDS, DOOR_LOG: str(log)}
+    door = SlowDoor(rounds=QUEUE_ROUNDS)
+    fake_processes.on("gh", door)
     slow_door["metrics"].unlink(missing_ok=True)
     checkout = queue_checkout(tmp_path, monkeypatch)
-    result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
-                            environment, monkeypatch)
+    result = run_in_process(queue(checkout), slow_door["env"], monkeypatch)
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("ready #") == 5
     line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])
     assert line["command"] == "work_tickets.py queue" and line["gh_calls"] == 11
-    assert len([event for event in door_events(log) if event["event"] == "start"]) == 12
-    assert door_depth(door_events(log)) == 3
+    assert door.starts() == 12
+    assert door_depth(door.events) == 3
     assert line["budget_seconds"] == feedback.INTERACTIVE_SECONDS
 
 
 def test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads(
-        slow_door, tmp_path, fake_git_door, monkeypatch):
+        slow_door, tmp_path, fake_git_door, fake_processes, monkeypatch):
     """Candidates whose Blocked by names issues outside the listings: each blocker is read once,
     at once with the candidates' own reads, so the queue still waits for the door in three
     rounds."""
-    log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], "FAKE_GH_ROUNDS": BLOCKER_ROUNDS, DOOR_LOG: str(log),
-                   "FAKE_GH_BLOCKERS": "1"}
+    door = SlowDoor(rounds=BLOCKER_ROUNDS, blockers=True)
+    fake_processes.on("gh", door)
     checkout = queue_checkout(tmp_path, monkeypatch)
-    result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
-                            environment, monkeypatch)
+    result = run_in_process(queue(checkout), slow_door["env"], monkeypatch)
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("ready #") == 5
-    reads = [event["argv"][1] for event in door_events(log)
+    reads = [event["argv"][1] for event in door.events
              if event["event"] == "start" and event["argv"][:1] == ["api"]]
     blockers = [path.rsplit("/", 1)[-1] for path in reads if path.rsplit("/", 1)[-1] in
                 {"11", "12", "13", "14", "15", "20"}]
     assert sorted(blockers) == ["11", "12", "13", "14", "15", "20"]
-    assert door_depth(door_events(log)) == 3
+    assert door_depth(door.events) == 3
 
 
-def test_paused_reads_the_door_once_and_declares_its_budget(slow_door, tmp_path):
+def test_paused_reads_the_door_once_and_declares_its_budget(slow_door, fake_git_door, fake_processes,
+                                                            monkeypatch):
     """The sign-in check, then one read: two door delays in sequence, proven by the door's own
     log. No wall time is checked: two calls in sequence are what any run waits."""
-    log = tmp_path / "door.jsonl"
-    environment = {**slow_door["env"], DOOR_LOG: str(log)}
+    door = SlowDoor()
+    fake_processes.on("gh", door)
     slow_door["metrics"].unlink(missing_ok=True)
-    result = subprocess.run(interactive(slow_door["checkout"])["work_tickets.py paused"],
-                            capture_output=True, text=True, env=environment, check=False)
+    result = run_in_process(interactive(slow_door["checkout"])["work_tickets.py paused"], slow_door["env"],
+                            monkeypatch)
     assert result.returncode == 0, result.stderr
     assert "Not paused" in result.stdout
     line = json.loads(slow_door["metrics"].read_text(encoding="utf-8").splitlines()[-1])
     assert line["command"] == "work_tickets.py paused" and line["gh_calls"] == 1
-    assert door_depth(door_events(log)) == 2
+    assert door_depth(door.events) == 2
     assert line["budget_seconds"] == feedback.INTERACTIVE_SECONDS

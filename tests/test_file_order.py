@@ -20,6 +20,12 @@ import conftest
 import work_tickets
 
 ROOT = Path(__file__).resolve().parents[1]
+# The suite's own conftest cannot run nested in this run, as its spawn guard and its doors are this
+# process's: its runs start as processes.
+PARALLEL_RUN = ("tool: a pytest run of the suite's own conftest on pytest-xdist's worker processes, whose "
+                "controller orders and records the files; the conftest cannot nest in this run")
+REFUSED_RUN = ("tool: a pytest run of the suite's own conftest that its configure refuses; the conftest "
+               "cannot nest in this run")
 
 
 def test_recorded_seconds_order_the_files_heaviest_first():
@@ -37,6 +43,7 @@ def test_a_file_the_cache_does_not_know_counts_its_tests_at_the_known_mean():
     assert conftest.file_order(counts, {"old.py": 4.0, "small.py": 6.0}) == ["small.py", "new.py", "old.py"]
 
 
+@pytest.mark.spawns(PARALLEL_RUN)
 def test_a_parallel_run_records_each_files_seconds_and_the_next_run_collects_by_them(tmp_path):
     """Two quick files of the suite, run on two workers with the cache in tmp_path: the cache then
     holds each file's seconds, and a run collecting with a recorded heavier second file takes it first."""
@@ -98,6 +105,7 @@ def test_the_cache_wins_the_table_fills_the_rest_and_a_file_in_neither_goes_by_t
     assert conftest.file_order({"a.py": 2, "b.py": 5, "c.py": 3}, merged) == ["b.py", "c.py", "a.py"]
 
 
+@pytest.mark.spawns(PARALLEL_RUN)
 def test_with_nothing_recorded_the_table_orders_the_files(tmp_path):
     table = tmp_path / "file-seconds.json"
     table.write_text(json.dumps({QUICK[0]: 0.1, QUICK[1]: 99.0}), encoding="utf-8")
@@ -114,6 +122,7 @@ def test_with_nothing_recorded_the_table_orders_the_files(tmp_path):
     assert tests and tests[0] == QUICK[1] and set(tests) == set(QUICK)
 
 
+@pytest.mark.spawns(PARALLEL_RUN)
 def test_record_file_seconds_writes_the_files_of_a_passing_parallel_run(tmp_path):
     table = tmp_path / "file-seconds.json"
     ran = run_pytest("-q", "-n", "2", "-p", "no:cacheprovider", f"--record-file-seconds={table}", *QUICK)
@@ -132,6 +141,7 @@ def test_record_file_seconds_writes_the_files_of_a_passing_parallel_run(tmp_path
     assert seconds[QUICK[0]] != 40.0  # this run's seconds, not the earlier table's
 
 
+@pytest.mark.spawns(PARALLEL_RUN)
 def test_record_file_seconds_writes_nothing_after_a_run_of_part_of_the_files_and_says_why(tmp_path):
     table = tmp_path / "file-seconds.json"
     ran = run_pytest("-q", "-n", "2", "-p", "no:cacheprovider", "-k", "home",
@@ -141,6 +151,7 @@ def test_record_file_seconds_writes_nothing_after_a_run_of_part_of_the_files_and
     assert "file seconds: wrote nothing" in ran.stdout and "whole files" in ran.stdout
 
 
+@pytest.mark.spawns(REFUSED_RUN)
 def test_a_table_that_is_not_files_to_non_negative_seconds_is_refused_naming_it(tmp_path):
     for number, text in enumerate(['["tests/a.py"]', '{"tests/a.py": -1}', '{"tests/a.py": "5"}', "{"]):
         table = tmp_path / f"bad-{number}.json"
@@ -364,6 +375,7 @@ def test_test_seconds_refuses_a_run_without_the_artifact_in_one_line_naming_it(c
     assert len(error.splitlines()) == 1 and "--run" in error and "--report" in error
 
 
+@pytest.mark.spawns(REFUSED_RUN)
 def test_record_file_seconds_without_a_path_is_refused_naming_the_refresh_from_ci():
     before = conftest.FILE_SECONDS_TABLE.read_bytes()
     ran = run_pytest("-q", "-n", "2", "-p", "no:cacheprovider", *QUICK, "--record-file-seconds")
@@ -395,6 +407,7 @@ def pytest_runtest_logreport(report):
 """
 
 
+@pytest.mark.spawns(PARALLEL_RUN)
 def test_a_run_that_writes_a_table_names_a_file_that_drifted_and_one_that_writes_none_names_none(tmp_path):
     (tmp_path / "slower.py").write_text(SLOWER, encoding="utf-8")
     table = tmp_path / "table.json"

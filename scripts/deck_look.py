@@ -34,9 +34,10 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+import process_door
 
 HARNESS = Path(__file__).resolve().with_name("deck_look.js")
 # Where the page is looked at: a phone and a desktop, each in both themes.
@@ -163,7 +164,7 @@ def _browser(request: dict) -> dict:
     """Run the browser half with ``request``: its measurements, or ``{"skip": reason}``."""
     if shutil.which("node") is None:
         return {"skip": "node is not installed"}
-    result = subprocess.run(["node", str(HARNESS), json.dumps(request)], capture_output=True, text=True,
+    result = process_door.run(["node", str(HARNESS), json.dumps(request)], capture_output=True, text=True,
                             encoding="utf-8")
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"the browser exited with {result.returncode}")

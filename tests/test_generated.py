@@ -12,6 +12,7 @@ import re
 import sys
 from pathlib import Path
 
+import fake_processes as fake_programs
 import generated
 import pytest
 
@@ -127,7 +128,8 @@ def test_a_marked_file_no_declaration_covers_fails(tmp_path: Path) -> None:
     ]
 
 
-def test_a_hand_edited_generated_file_fails_its_fresh_run(tmp_path: Path) -> None:
+def test_a_hand_edited_generated_file_fails_its_fresh_run(tmp_path: Path, fake_processes) -> None:
+    fake_processes.on("gen.py", fake_programs.run_script)  # the planted generator, in this process
     check = f'    check: [{json.dumps(sys.executable)}, "gen.py", "--check"]\n'
     root = project(tmp_path, {"gen.py": GENERATOR, "src.txt": "x\n"},
                    declare(entry("gen.py write", "src.txt", ["out.toml"], check)))

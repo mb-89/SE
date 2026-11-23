@@ -475,6 +475,8 @@ class RecordingPeer:
 
 
 @pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@pytest.mark.spawns("the capture under test hands each call's child process the call's own file "
+                    "descriptors (se_components.captured); only a real child writes through them")
 def test_two_overlapping_calls_of_one_component_each_answer_only_their_own_output(
         tmp_path, monkeypatch) -> None:
     """Calls side by side: two calls of one command run at once in the component's process (each
