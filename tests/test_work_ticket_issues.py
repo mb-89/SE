@@ -4635,6 +4635,11 @@ def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_push
     assert [step["tool"] for step in plan["steps"]] == [
         "list_issues", "create_pull_request", "pull_request_read"]  # GitHub merges nothing
     assert "after step 3>" in plan["then"]
+    rule = work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main")
+    assert plan["steps"][2]["note"].endswith(" " + rule)  # the step that ends at the check
+    out = capsys.readouterr().out
+    assert out.count(rule) == 1
+    assert f"   {plan['steps'][2]['note']}\n   Gives: check run url\nThen: " in out
     landed = git_run(main_checkout.parent / "origin.git", "rev-parse",
                      "refs/heads/land/feature/worker", check=True).stdout.strip()
     assert origin_main(main_checkout) == base
@@ -4648,6 +4653,13 @@ def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_push
     assert f"Landed: {landed[:12]} on main" in out
     assert "GitHub plan: close out #5\n" in out
     assert github.calls == []
+
+
+def test_a_squash_landing_plan_merges_through_its_own_step_and_says_no_fast_forward_rule(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") not in capsys.readouterr().out
 
 
 def closeout_comments(monkeypatch) -> list[str]:

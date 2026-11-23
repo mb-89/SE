@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from typing import NoReturn
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.etree import ElementTree
@@ -8032,6 +8032,9 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  f"by the integrator {verdict['integrator']}, with the description "
                  f"{verdict['description']}; anything else, or none: merge nothing",
             gives=("check run url",))
+    if mode == FAST_FORWARD:  # the plan ends here: the push that lands is the read-back's
+        waiting = replace(waiting, note=f"{waiting.note}. "
+                                        + NEVER_MERGE_ON_GITHUB.format(target=target))
     return Plan(f"land {landing} on {target}", (
         pause_step(tracker),
         *recording,
@@ -8049,6 +8052,13 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  f"refs/heads/{target}); where it moved, merge nothing and integrate again",
             gives=("merge commit sha",)),)),
     ), then)
+
+
+#: The rule a fast-forward landing's plan states in the step that ends at the check, and the
+#: read-back's refusals repeat (work model "Land"): GitHub's merge would write GitHub's identities
+#: into the integration branch's history, which the project identity's gate refuses.
+NEVER_MERGE_ON_GITHUB = ("Never merge this landing pull request on GitHub: integrate --read-back "
+                         "pushes {target} to the landing commit, and that push marks it merged")
 
 
 #: What each read of a landing pull request is for, as the told step names it: the reads of the
