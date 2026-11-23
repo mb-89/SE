@@ -106,6 +106,9 @@ component = "template"
 # verbs (docs/templates.md "Fill").
 "templates.file-issue" = "github.issue-create"
 "templates.file-comment" = "github.issue-comment"
+# The GitHub component's write verbs write only a filled template the template component accepts
+# (kern's components/github README "Writes: filled templates only").
+"github.template-accept" = "template.accept"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.
