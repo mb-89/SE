@@ -118,8 +118,7 @@ uv run pytest
 
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
-ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review",
-            "overhaul-judgment", "pugh")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
@@ -290,13 +289,12 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
-        "overhaul-judgment": (review.fenced(json.dumps(overhaul_block(), indent=2), "yaml"), None),
         "pugh": (test_deck.PUGH, None),
     }
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_of_the_nineteen_templates_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -308,7 +306,7 @@ def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalo
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 20
+    assert len(catalog) == 19
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
@@ -1308,7 +1306,6 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert "pr.create, pr.edit: checker work_tickets:field_report_problems:" in lines["field-report"]
     assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
     assert "comment.create, comment.edit: A retro's report and its draft:" in lines["retro"]
-    assert "a node of a document: checker overhaul:judgment_problems:" in lines["overhaul-judgment"]
     assert "comment.create, comment.edit: An overhaul's report:" in lines["overhaul"]
     assert "a node of a document: checker deck:pugh_problems:" in lines["pugh"]
     assert "deck.build: A decision note:" in lines["decision"]
@@ -1590,25 +1587,6 @@ def overhaul_block(**changes: object) -> dict:
                                                 rule="tst-002", place=overhaul.BOOK.as_posix())],
              "went_well": ["The retros kept their blocks."]}
     return {**block, **changes}
-
-
-@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
-    test_overhaul.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
-def test_the_overhaul_judgment_block_gives_judgment_problems_verdict(catalog, changes):
-    block = overhaul_block(**changes)
-    fence = review.fenced(json.dumps(block, indent=2), "yaml")
-    assert adapter_verdict(catalog["overhaul-judgment"], fence) == overhaul.judgment_problems(block)
-    if overhaul.judgment_problems(block):
-        _, found = templates.verdict(catalog, "comment.create", overhaul_report().replace(
-            fence_of(overhaul_report()), fence), repo=REPO, home=HOME)
-        assert {finding.field for finding in found if finding.severity == templates.REFUSE} == {
-            "judgment"}
-
-
-def fence_of(text: str) -> str:
-    """The last yaml fence of `text`, the overhaul report's judged block."""
-    start = text.rindex("```yaml")
-    return text[start:text.index("```", start + 3) + 3]
 
 
 def test_the_overhaul_report_passes_with_the_block_it_carries(catalog):

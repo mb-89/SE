@@ -2427,8 +2427,7 @@ It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
 it posts the report, opening with `<!-- se:overhaul-report -->`, as the overhaul issue's closing
 comment and closes the issue. The report is a document of the overhaul template
-([templates/overhaul.md](templates/overhaul.md)), its judged block a fence the template's judgment
-node checks. Without gh it prints the comment and the close as a plan. Each
+([templates/overhaul.md](templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comment and the close as a plan. Each
 finding is
 
 - `work`, for SE to bundle into work issues naming `overhaul #<n> finding <k>`, or
@@ -2483,7 +2482,6 @@ both.
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
-| `templates/overhaul-judgment.md` | An overhaul's judged block: the verdicts, what was looked at, the findings and what went well. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |

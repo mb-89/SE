@@ -19,9 +19,8 @@ QUESTION_FIELDS). It ends in a JSON block under BLOCK_MARKER whose judgment the 
 it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts the report, a
 document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
 question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
-owner's decision list; a rule change is always a decision), then the facts and the block, whose
-fence the template's judgment node checks (templates/overhaul-judgment.md, `fence_data`), as the
-overhaul issue's closing comment, and closes the issue.
+owner's decision list; a rule change is always a decision), then the facts and the block, which
+`judgment_problems` checks, as the overhaul issue's closing comment, and closes the issue.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -833,19 +832,6 @@ def gather(number: int, door, rules: list, facts: Facts, now: datetime,
         rows, previous, facts, too_early)
 
 
-def fence_data(text: str) -> dict:
-    """The data of the judged block's fence `text`, as the overhaul template's judgment node holds
-    it (templates/overhaul-judgment.md); refused where it holds no object."""
-    match = re.search(r"^(`{3,})[^\n]*\n(.*?)^\1[ \t]*$", text, re.MULTILINE | re.DOTALL)
-    try:
-        data = json.loads(match[2]) if match else None
-    except json.JSONDecodeError as error:
-        raise sibling("work_tickets").QueueError(f"The judged block is not JSON: {error}") from error
-    if not isinstance(data, dict):
-        raise sibling("work_tickets").QueueError("The judged block holds no object")
-    return data
-
-
 def read_block(text: str) -> dict | None:
     """The data of the last block under BLOCK_MARKER in `text`; None where it has none."""
     return sibling("retro").read_block(text, BLOCK_MARKER)
@@ -1068,8 +1054,8 @@ def judged(text: str, number: int) -> dict:
 def report(text: str, block: dict, number: int) -> str:
     """The overhaul's report, its closing comment, a document of the overhaul template: the
     verdicts, what was looked at, the draft's answers to the standing questions and to the
-    overhaul's own, each finding with its kind, what went well, what follows, the facts, then the
-    block the next overhaul reads."""
+    overhaul's own, each finding with its kind and what follows, what went well, the facts, then
+    the block the next overhaul reads."""
     review = sibling("review")
     templates = sibling("templates")
     one_line = sibling("retro").one_line
@@ -1080,7 +1066,7 @@ def report(text: str, block: dict, number: int) -> str:
         rule = verdict["rule"].strip()
         verdicts.append(f"| {rule} {names.get(rule, '')} | {verdict['strays']} | "
                         f"{one_line(verdict['how']).replace('|', '/')} |")
-    findings = [] if block["findings"] else ["None."]
+    findings = [] if block["findings"] else ["None."]  # then what follows
     for item in block["findings"]:
         kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                 if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
@@ -1097,24 +1083,24 @@ def report(text: str, block: dict, number: int) -> str:
         r"^## (?:" + "|".join(map(re.escape, headings)) + r")[ \t]*\n.*?(?=^## |^"
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
+    follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
+               f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
+               f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+               f"so the next overhaul scores it; the {DECISION} findings "
+               f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
+               "on the owner's decision list.")
     fields = {
         "verdicts": "\n".join(verdicts),
         "looked_at": "\n".join(f"- **{part}**: {one_line(block['looked_at'][part])}"
                                for part in LOOKED_AT),
         **{name: re.sub(r"<!--.*?-->\s*", "", answered[name], flags=re.DOTALL).strip()
            for name in QUESTION_FIELDS},
-        "findings": "\n".join(findings),
+        "findings": "\n".join(findings) + "\n\n" + follows,
         "went_well": "\n".join(f"- {entry.strip()}" for entry in block["went_well"]
                                if review.words(entry)),
-        "follows": f"This overhaul filed no issue. SE bundles the {WORK} findings "
-                   f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-                   f"needs, each naming `overhaul #{number} finding <k>` for every finding it "
-                   f"takes, so the next overhaul scores it; the {DECISION} findings "
-                   f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, "
-                   "go on the owner's decision list.",
         "facts": sibling("retro").facts_of(facts_text, BLOCK_MARKER, (JUDGE_BEGIN, JUDGE_END))
-                 + "\n\n" + BLOCK_MARKER,
-        "judgment": review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml"),
+                 + "\n\n" + BLOCK_MARKER + "\n"
+                 + review.fenced(json.dumps(block, indent=2, ensure_ascii=False), "yaml"),
     }
     body = templates.render(overhaul_template(), fields)
     return f"{REPORT_MARKER}\n# Overhaul #{number}: the report\n\n{body.rstrip()}\n"
