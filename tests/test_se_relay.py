@@ -80,6 +80,10 @@ def served(tmp_path: Path, monkeypatch):
     worktree = tmp_path / "wt"
     (worktree / ".git").mkdir(parents=True)
     names: dict[str, object] = {}
+    def no_gh() -> str:
+        raise work_tickets.MissingGhError("no gh in this test")
+
+    monkeypatch.setattr(work_tickets, "gh_executable", no_gh)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
     monkeypatch.setattr(work_tickets, "relay_for", lambda root: FakeRelay(Path(root), names))
     return worktree, names
