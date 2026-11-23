@@ -132,10 +132,14 @@ merge or a start.
      ([One call through kern](../skills/work-model/SKILL.md#without-gh)).
    - The landing pull request ends in its `Metrics:` line, step 2's body unedited, which
      `retro.py collect` reads back (README [Metrics](../../README.md#metrics)).
-   - Check it after the merge: pass its description, saved as `pull_request_read` `get` reads it,
-     as `--read-back`'s `--landing-description <file>`; through the relay, run `--read-back`
-     without that flag and it reads the description from the relay. Without the `Metrics:` line the
-     read-back fails and closes nothing: update the body to step 2's and read back again.
+   - Never merge a landing pull request on GitHub yourself: a squash landing merges only through
+     its plan's step, and with fast-forward landing (`se.toml` `[integrate] landing`) the plan ends
+     at the check and `--read-back` pushes main.
+   - Check it once the plan's last step passed: pass its description, saved as
+     `pull_request_read` `get` reads it, as `--read-back`'s `--landing-description <file>`;
+     through the relay, run `--read-back` without that flag and it reads the description from the
+     relay. Without the `Metrics:` line the read-back fails and closes nothing: update the body to
+     step 2's and read back again.
    - A suite the [Test budget](../../README.md#test-budget) refuses: escalate it to the worker
      with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
@@ -183,6 +187,10 @@ merge or a start.
    clash with running workers) gets a fresh worktree from the newest integration branch
    (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
+   `ready` also names each claimed issue live or stale by its beat; put the stale ones it names
+   into your report to SE, and release none
+   ([README "Workers"](../../README.md#workers)).
+
    Start no more workers than the worker limit leaves room for
    ([README "Workers"](../../README.md#workers)): `capacity`, or in the cloud without gh the
    queue's plan. The rest wait, and the next landing starts them as a worker finishes.
@@ -214,9 +222,11 @@ merge or a start.
    Without `gh`, the prompt is the one [Without gh](../skills/work-model/SKILL.md#without-gh)
    names.
 
-   Where you start the worker with `create_session` rather than `start` (the cloud flow), change
-   the issue's labels in that same step as `start` does, and remove `in-progress` when you close
-   it, as the work model's
+   Where you start the worker with `create_session` rather than `start` (the cloud flow), claim
+   the issue first with `work_tickets.py claim <issue>`
+   ([the claim](../skills/work-model/SKILL.md#worktrees)); where it refuses, start nothing for
+   that issue. Then change the issue's labels in that same step as `start` does, and remove
+   `in-progress` when you close it, as the work model's
    [scheduling](../skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
 
    Do not judge a worker by its session status right after starting it: a new session reads as

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import subprocess
@@ -182,6 +183,8 @@ None
 
 
 TIP = "fedcba9876543210fedcba9876543210fedcba98"
+# The fake clock of the claim beats (rule tst-002): work_tickets.utc_now replaced by it.
+NOW = datetime(2026, 11, 23, 8, 30, tzinfo=timezone.utc)
 
 
 def reported_at(tip: str) -> str:
@@ -258,6 +261,17 @@ class FakeGh:
 
 
 IDENTITY = '[project]\nidentity = "mb <mb>"\n'
+
+
+@pytest.fixture(autouse=True)
+def no_filing_check(monkeypatch) -> list[tuple[str, str]]:
+    """The filing check (README "Retro due") reads the whole tracker; these tests hold filing's
+    other rules, so it records what it was asked and reads nothing. tests/test_filing_check.py
+    holds the check itself."""
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(work_tickets, "filing_check",
+                        lambda root, repo, command, *_, **__: asked.append((repo, command)))
+    return asked
 
 
 @pytest.fixture(autouse=True)
@@ -1910,6 +1924,10 @@ class StartableFleet:
         if args[:2] == ["issue", "edit"] and "in-progress" in args:
             self.labels[int(args[2])] = "in-progress"
             return ""
+        if args[:2] == ["issue", "view"] and "body" in args:
+            return json.dumps({"body": ""})
+        if args[:2] == ["issue", "edit"] and "--body-file" in args:
+            return ""
         raise AssertionError(f"gh {args}")
 
     def finish(self, number: int) -> None:
@@ -1929,7 +1947,7 @@ def test_six_startable_issues_with_a_limit_of_four_start_four_and_a_fifth_when_o
     monkeypatch.setattr(work_tickets, "ready_issues", fleet.ready)
     monkeypatch.setattr(work_tickets, "pause_issues", lambda root, repo: [])
     monkeypatch.setattr(work_tickets, "start_worktree",
-                        lambda root, branch, worktree_root, create: worktree / branch)
+                        lambda root, number, repo, branch, worktree_root, create: worktree / branch)
 
     assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (4, 2)
     assert fleet.running() == [1, 2, 3, 4]
@@ -2318,6 +2336,126 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
     ] in fake.calls
 
 
+ISSUE_REMOTE = "https://git.example/owner/repo.git"  # the host of the issue's repository
+MIRROR_REMOTE = "https://mirror.example/other/repo.git"  # another remote of the same project
+
+
+def hosted(fake: fake_git.FakeGit, monkeypatch, **repositories: Path) -> None:
+    """The fake host: each URL given reaches its bare repository, as the host's would; a push that
+    creates a branch the repository already holds is refused there (tests/fake_git.py)."""
+    urls = {url.replace("_", "."): path.resolve() for url, path in repositories.items()}
+    reach = fake.remote
+
+    def remote(repository, name):
+        url = repository.config.get(f"remote.{name}.url", name)
+        return fake.find(urls[url]) if url in urls else reach(repository, name)
+
+    monkeypatch.setattr(fake, "remote", remote)
+
+
+def two_checkouts(tmp_path: Path, fake, monkeypatch) -> tuple[Path, Path, Path, Path]:
+    """The issue's repository on its host and a mirror of it elsewhere, each holding main; one
+    checkout whose origin is the issue's remote, another whose origin is the mirror and which
+    reaches the issue's remote as `upstream`. (issue host, mirror, first, second checkout)"""
+    host = fake_git.init(tmp_path / "host" / "repo.git", "--bare", "-b", "main")
+    mirror = fake_git.init(tmp_path / "mirror" / "repo.git", "--bare", "-b", "main")
+    hosted(fake, monkeypatch, **{ISSUE_REMOTE.replace(".", "_"): host,
+                                 MIRROR_REMOTE.replace(".", "_"): mirror})
+    first, second = tmp_path / "first" / "main", tmp_path / "second" / "main"
+    fake_git.clone(host, first)
+    git_ok("-C", str(first), "remote", "set-url", "origin", ISSUE_REMOTE)
+    (first / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    git_ok("-C", str(first), "add", "se.toml")
+    git_ok("-C", str(first), "-c", "user.name=mb", "-c", "user.email=mb", "commit", "-q", "-m", "base")
+    git_ok("-C", str(first), "push", "-q", "origin", "HEAD:main")
+    git_ok("-C", str(first), "push", "-q", str(mirror), "HEAD:main")
+    fake_git.clone(mirror, second)
+    git_ok("-C", str(second), "remote", "set-url", "origin", MIRROR_REMOTE)
+    git_ok("-C", str(second), "remote", "add", "upstream", ISSUE_REMOTE)
+    return host, mirror, first, second
+
+
+def claim_fakes(monkeypatch) -> StartGh:
+    """gh for a start of issue #5 of the issue's repository, ready, one slot free; the remotes as
+    each checkout's git names them."""
+    fake = StartGh()
+    monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "ready_issues",
+                        lambda root, repo, allow_existing_branch=False: [{"number": 5, "title": BRANCH}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
+    return fake
+
+
+def test_the_first_of_two_starts_from_checkouts_with_different_origins_claims_the_issue(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, mirror, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+
+    assert run(second, "start", "5", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    claimed = git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip()
+    assert claimed == git_run(second, "rev-parse", "origin/main", check=True).stdout.strip()
+    assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
+    worktree = second.parent / "main.worktrees" / "feature-example-20261104"
+    assert f"worktree={worktree}" in out
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
+    assert git_run(worktree, "rev-parse", "HEAD").stdout.strip() == claimed
+    labelled = [call for call in fake.calls if call[:2] == ["issue", "edit"]]
+    assert len(labelled) == 1
+
+    assert run(first, "start", "5", "--repo", "git.example/owner/repo") == 1
+    err = capsys.readouterr().err
+    assert f"its branch {BRANCH} exists on origin, so another start holds its claim" in err
+    assert not (first.parent / "main.worktrees").exists()
+    assert [call for call in fake.calls if call[:2] == ["issue", "edit"]] == labelled
+    assert git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == claimed
+
+
+def test_a_cloud_start_claims_the_branch_before_it_changes_a_label_and_a_second_changes_nothing(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: None)
+    arguments = ("start", "5", "--repo", "git.example/owner/repo", "--cloud-agent", "worker-login")
+
+    assert run(first, *arguments) == 0
+    assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+    assert run(second, *arguments) == 1
+    err = capsys.readouterr().err
+    assert f"its branch {BRANCH} exists on upstream" in err
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+
+def test_claim_creates_the_branch_on_the_issue_remote_for_a_session_tool_start_and_refuses_a_second(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, mirror, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+
+    assert run(second, "claim", "5", "--repo", "git.example/owner/repo") == 0
+    assert capsys.readouterr().out.endswith(f"Claimed #5: branch {BRANCH} on upstream\n")
+    assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
+    assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
+
+    assert run(first, "claim", "5", "--repo", "git.example/owner/repo") == 1
+    assert f"its branch {BRANCH} exists on origin" in capsys.readouterr().err
+    assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)  # the labels follow
+
+
+def test_the_issue_remote_is_the_remote_naming_the_issue_repository_else_its_url(
+        tmp_path, fake_git_door, monkeypatch):
+    _, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+
+    assert work_tickets.issue_remote(first, "git.example/owner/repo") == "origin"
+    assert work_tickets.issue_remote(second, "git.example/owner/repo") == "upstream"
+    assert work_tickets.issue_remote(second, "Owner/Repo") == "upstream"
+    assert work_tickets.issue_remote(second, "mirror.example/other/repo") == "origin"
+    assert work_tickets.issue_remote(first, "elsewhere.example/owner/repo") == \
+        "https://elsewhere.example/owner/repo.git"
+
+
 def started_without_gh(monkeypatch, tmp_path: Path, labels=("work", "ready")) -> Path:
     """No usable gh, as in Claude's cloud, whose worker limit is open by default: every gh call fails
     the test; the issue as the GitHub tools answer it."""
@@ -2342,10 +2480,11 @@ def test_start_without_gh_prints_the_label_change_and_the_started_comment_as_ste
     assert out.startswith("GitHub plan: start #5\n1. list_issues ")
     steps = [line for line in out.splitlines() if line[:1].isdigit()]
     assert [line.split(" ", 2)[1] for line in steps] == [
-        "list_issues", "issue_write", "issue_write", "add_issue_comment"]
+        "list_issues", "issue_write", "issue_write", "issue_write", "add_issue_comment"]
     assert '"labels": "<the issue\'s labels without ready>"' in steps[1]
     assert '"labels": "<the issue\'s labels with in-progress>"' in steps[2]
-    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[3]
+    assert '"body": "<the issue\'s body with its beat line set to <!-- se:beat ' in steps[3]
+    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in steps[4]
     assert (f"Launch worker: agent=worker issue={URL} worktree={worktree} "
             f"title=SE/repo/worker/{BRANCH}") in out
     assert "Started #5 here; run the GitHub steps above" in out
@@ -2458,6 +2597,7 @@ def test_start_without_gh_starts_once_its_blocker_is_closed_as_completed(
     git_ok("-C", str(main_checkout), "worktree", "remove", "--force",
            str(main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"))
     git_ok("-C", str(main_checkout), "branch", "-D", BRANCH)
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", f":refs/heads/{BRANCH}")  # its claim
 
     answer = blocked_answer(tmp_path, blocked_by("#4"))
     assert run(main_checkout, "start", "5", "--issue-body", str(answer),
@@ -2514,9 +2654,13 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
         if tool == "list_issues":
             return {"issues": []}
         if tool == "issue_read" and method == "get":
-            return {"number": 5, "title": BRANCH, "html_url": URL, "labels": list(labels)}
+            return {"number": 5, "title": BRANCH, "html_url": URL, "labels": list(labels),
+                    "body": body[0]}
         if tool == "issue_read" and method == "get_labels":
             return {"labels": [{"name": name} for name in labels]}
+        if tool == "issue_write" and "body" in input_:
+            body[0] = input_["body"]
+            return {"number": 5}
         if tool == "issue_write":
             labels[:] = input_["labels"]
             return {"number": 5}
@@ -2524,14 +2668,18 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
             return {"id": 41, "url": URL + "#issuecomment-41"}
         raise AssertionError(f"start asked an unexpected step: {tool} {input_}")
 
+    body = ["<!-- se:fleet -->\n\n## Situation\n"]
+    monkeypatch.setattr(work_tickets, "utc_now", lambda: NOW)
     with work_tickets.sibling("se_relay").stepping(session):
         assert run(main_checkout, "start", "5") == 0
 
     assert [(tool, input_.get("method")) for tool, input_ in asked] == [
         ("list_issues", None), ("issue_read", "get"), ("issue_read", "get_labels"),
         ("issue_write", "update"), ("issue_read", "get_labels"), ("issue_write", "update"),
-        ("add_issue_comment", None)]
+        ("issue_read", "get"), ("issue_write", "update"), ("add_issue_comment", None)]
     assert labels == ["work", "in-progress"]
+    assert body[0] == "<!-- se:fleet -->\n<!-- se:beat 2026-11-23T08:30Z -->\n\n## Situation\n"
+    assert asked[7][1]["labels"] == ["in-progress", "work"]  # the gate judges it by its template
     assert asked[-1][1]["body"] == f"Started: worker session on branch `{BRANCH}`\n"
     out = capsys.readouterr().out
     assert "GitHub plan:" not in out and "Started #5\n" in out
@@ -3923,7 +4071,8 @@ class SessionSteps:
         if tool == "issue_read" and method == "get_labels":
             return [{"name": "work"}, {"name": "in-progress"}]
         if tool == "issue_read" and method == "get":
-            return {"number": input_["issue_number"], "state": "closed"}
+            return {"number": input_["issue_number"], "state": "closed",
+                    "body": "<!-- se:fleet -->\n<!-- se:beat 2026-11-23T08:30Z -->\n\n## Situation\n"}
         if tool in ("update_pull_request", "issue_write"):
             return {"id": "1", "url": "https://git.example/owner/repo"}
         raise AssertionError(f"integrate asked an unexpected step: {tool} {input_}")
@@ -3960,14 +4109,18 @@ def test_integrate_runs_its_plan_and_close_out_as_one_call_through_kerns_relay(
         ("pull_request_read", "get"),  # the landing description, for its metrics line
         ("add_issue_comment", None), ("update_pull_request", None),  # the work pull request
         ("add_issue_comment", None), ("issue_read", "get_labels"), ("issue_write", "update"),
-        ("issue_write", "update"), ("issue_read", "get"),  # the work issue: out of progress, closed
+        ("issue_read", "get"), ("issue_write", "update"),  # out of progress, without its beat
+        ("issue_write", "update"), ("issue_read", "get"),  # the work issue closed
     ]
     assert waits == [30]  # one poll before the check completed
     assert session.asked[0][1] == {"owner": "owner", "repo": "tracker", "state": "OPEN",
                                    "labels": ["pause"], "perPage": 20}
     labels = session.asked[12][1]
     assert (labels["repo"], labels["issue_number"], labels["labels"]) == ("tracker", 5, ["work"])
-    closed = session.asked[13][1]
+    unbeaten = session.asked[14][1]
+    assert (unbeaten["repo"], unbeaten["body"]) == ("tracker", "<!-- se:fleet -->\n\n## Situation\n")
+    assert "labels" in unbeaten  # its own, so the template gate takes the issue's template
+    closed = session.asked[15][1]
     assert (closed["repo"], closed["state"], closed["state_reason"]) == ("tracker", "closed", "completed")
     commit = origin_main(main_checkout)
     assert commit != base and squashed_onto_origin(main_checkout, commit)
@@ -4357,7 +4510,10 @@ def test_integrate_read_back_checks_the_landing_through_git_and_hands_off_the_cl
                 "(check: https://git.example/owner/repo/runs/4)" in out)
     assert '"repo": "tracker"' in out  # the work issue lives in the tracker
     assert "<the issue's labels without in-progress>" in out
-    assert '5. issue_write {"issue_number": 5, "method": "update", "owner": "owner", "repo": ' \
+    assert ('5. issue_write {"body": "<the issue\'s body with its beat line (<!-- se:beat ... -->) '
+            'removed>", "issue_number": 5, "labels": "<the issue\'s labels, as issue_read get reads '
+            'them>", "method": "update", "owner": "owner", "repo": "tracker"}') in out
+    assert '6. issue_write {"issue_number": 5, "method": "update", "owner": "owner", "repo": ' \
            '"tracker", "state": "closed", "state_reason": "completed"}' in out
     assert "Started: none here" in out
     assert not (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
@@ -4514,6 +4670,11 @@ def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_push
     assert [step["tool"] for step in plan["steps"]] == [
         "list_issues", "create_pull_request", "pull_request_read"]  # GitHub merges nothing
     assert "after step 3>" in plan["then"]
+    rule = work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main")
+    assert plan["steps"][2]["note"].endswith(" " + rule)  # the step that ends at the check
+    out = capsys.readouterr().out
+    assert out.count(rule) == 1
+    assert f"   {plan['steps'][2]['note']}\n   Gives: check run url\nThen: " in out
     landed = git_run(main_checkout.parent / "origin.git", "rev-parse",
                      "refs/heads/land/feature/worker", check=True).stdout.strip()
     assert origin_main(main_checkout) == base
@@ -4527,6 +4688,72 @@ def test_a_handed_off_fast_forward_landing_plans_no_merge_and_its_read_back_push
     assert f"Landed: {landed[:12]} on main" in out
     assert "GitHub plan: close out #5\n" in out
     assert github.calls == []
+
+
+def test_a_squash_landing_plan_merges_through_its_own_step_and_says_no_fast_forward_rule(
+        main_checkout, monkeypatch, github, capsys):
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") not in capsys.readouterr().out
+
+
+def relayed_fast_forward_hand_off(main_checkout: Path, monkeypatch, github) -> tuple[str, Path]:
+    """A fast-forward landing handed off through kern's relay, its plan's steps run up to the
+    check: (origin's main, the hand-off's state file)."""
+    fast_forward_landings(main_checkout)
+    _, arguments = handed_off_worker(main_checkout, monkeypatch, github)
+    assert run(main_checkout, *arguments) == 0
+    handoff = main_checkout / ".se" / "handoff" / "feature-worker.json"
+    state = json.loads(handoff.read_text(encoding="utf-8"))
+    handoff.write_text(json.dumps({**state, "relay": True}), encoding="utf-8")
+    return origin_main(main_checkout), handoff
+
+
+def read_back_from_relay(main_checkout: Path) -> int:
+    return run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull", "20",
+               "--check-run", "https://git.example/owner/repo/runs/4")
+
+
+def test_a_read_back_without_the_relays_snapshot_names_it_and_the_read_never_a_merge(
+        main_checkout, monkeypatch, github, capsys):
+    """kern's relay holds no snapshot of the landing pull request: the refusal names that cause
+    and the GitHub tool call that takes the snapshot, and that the landing pull request is never
+    merged on GitHub, as the read-back pushes main itself; nothing is pushed."""
+    base, handoff = relayed_fast_forward_hand_off(main_checkout, monkeypatch, github)
+    se_relay = work_tickets.sibling("se_relay")
+    monkeypatch.setattr(work_tickets, "relay_for",
+                        lambda root: se_relay.Relay(root, lambda name: None))
+    capsys.readouterr()
+
+    assert read_back_from_relay(main_checkout) == 1
+
+    err = capsys.readouterr().err
+    assert "kern's relay holds no landing pull request of owner/repo#20" in err
+    assert ('pull_request_read {"method": "get", "owner": "owner", "pullNumber": 20, '
+            '"repo": "repo"}') in err
+    assert "then run this command again" in err
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") in err
+    assert "after the merge" not in err
+    assert origin_main(main_checkout) == base and handoff.is_file()
+
+
+def test_a_read_back_where_the_relay_no_longer_serves_names_that_cause_and_both_remedies(
+        main_checkout, monkeypatch, github, capsys):
+    base, handoff = relayed_fast_forward_hand_off(main_checkout, monkeypatch, github)
+    monkeypatch.setattr(work_tickets, "relay_for", lambda root: None)
+    capsys.readouterr()
+
+    assert read_back_from_relay(main_checkout) == 1
+
+    err = capsys.readouterr().err
+    assert "kern's relay served this integrate but does not serve" in err
+    assert "so it holds no snapshot of the landing pull request #20" in err
+    assert ('pull_request_read {"method": "get", "owner": "owner", "pullNumber": 20, '
+            '"repo": "repo"}') in err
+    assert "--landing-description <file>" in err
+    assert work_tickets.NEVER_MERGE_ON_GITHUB.format(target="main") in err
+    assert "after the merge" not in err
+    assert origin_main(main_checkout) == base and handoff.is_file()
 
 
 def closeout_comments(monkeypatch) -> list[str]:
@@ -4837,11 +5064,11 @@ def test_integrate_read_back_refuses_a_landing_without_its_metrics_line(
     assert f"The landing pull request #20's {message}: it ends in `{line}`" in err
     assert "update_pull_request #20" in err and "nothing was closed" in err
     assert (main_checkout / ".se" / "handoff" / "feature-worker.json").exists()
-    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
-    assert squashed_onto_origin(main_checkout, commit)
     assert run(main_checkout, "integrate", "--read-back", "feature/worker", "--landing-pull",
                "20", "--check-run", "url") == 1
     assert "--read-back needs --landing-description" in capsys.readouterr().err
+    assert read_back(main_checkout, landing_as_read(main_checkout)) == 0
+    assert squashed_onto_origin(main_checkout, commit)
 
 
 def test_integrate_chooses_the_hand_off_where_gh_is_not_signed_in(
@@ -6126,7 +6353,7 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     monkeypatch.setattr(work_tickets, "run_gh", github)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     body = worktree / "work.md"
     body.write_text("## Goal\n\nA filed package.\n", encoding="utf-8")
     routing = worktree / "route.md"
@@ -6145,7 +6372,13 @@ def test_filed_and_routed_issues_are_ready_and_nothing_else_is(worktree, monkeyp
     capsys.readouterr()
 
     assert run(worktree, "ready") == 0
-    assert capsys.readouterr().out == "#1 fix/routed-20261106\n#6 feature/filed-20261106\n"
+    assert capsys.readouterr().out == (
+        "#1 fix/routed-20261106\n#6 feature/filed-20261106\n"
+        # the issue in progress is claimed, not startable; with no beat line its claim is stale
+        "claimed #5 feature/running-20261106: stale, no beat, past the 12 h 00 min claim timeout\n"
+        "Stale claims for the person: #5. Nothing frees a claim on its own: releasing one "
+        "(deleting its branch, taking off in-progress and the beat line) is the person's step, "
+        "which SE prepares (work model, Issues)\n")
 
     assert run(worktree, "file", "--title", "feature/later-20261106", "--body-file", str(body),
                "--blocked-by", "6") == 0
@@ -7716,7 +7949,7 @@ def test_hold_files_as_given_after_two_refusals_off_template_and_never_started(
     monkeypatch.setattr(work_tickets, "run_gh", github)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     enforce(worktree, "refuse")
     body = worktree / "body.md"
     body.write_text("Only a line, no template.\n", encoding="utf-8")
@@ -7782,7 +8015,7 @@ def held_work_issue(worktree: Path, monkeypatch, capsys) -> tuple[LabelledGh, li
         calls.append(list(arguments)) or github(root, arguments)))
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     enforce(worktree, "refuse", refusals=1)
     body = worktree / "body.md"
     body.write_text("Only a line, no template.\n", encoding="utf-8")
@@ -8200,3 +8433,267 @@ def test_file_labels_the_issue_with_the_repository_it_files_in_through_gh_and_in
 def test_file_without_repo_labels_the_issue_with_the_checkout_s_repository(worktree, monkeypatch):
     monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo.git")
     assert work_tickets.work_labels(worktree, None) == ["work", "ready", "repo:repo"]
+
+
+# A claim's heartbeat (SE#1725, work model "Issues"): the claim is the issue's in-progress label,
+# its last beat one marker line in the body; time comes from the fake clock NOW (rule tst-002).
+
+
+def beat_body(at: datetime | None) -> str:
+    """BODY as the fleet files it, with a beat line at `at` where one is given."""
+    body = f"{work_tickets.FLEET_MARKER}\n{BODY}"
+    return work_tickets.with_beat(body, at) if at else body
+
+
+def test_a_beat_line_is_set_in_place_or_after_the_opening_markers_and_removed_without_a_trace():
+    body = "<!-- se:fleet -->\n<!-- se:form work -->\n\n## Situation\n\nText.\n"
+    beaten = work_tickets.with_beat(body, NOW)
+    assert beaten == ("<!-- se:fleet -->\n<!-- se:form work -->\n<!-- se:beat 2026-11-23T08:30Z -->\n"
+                      "\n## Situation\n\nText.\n")
+    later = work_tickets.with_beat(beaten, NOW + timedelta(hours=6, seconds=59))
+    assert later == beaten.replace("08:30Z", "14:30Z")  # to the minute, in place
+    assert work_tickets.beat_of(later) == NOW + timedelta(hours=6)
+    assert work_tickets.without_beat(later) == body and work_tickets.beat_of(body) is None
+    assert work_tickets.with_beat("## Goal\n", NOW) == "<!-- se:beat 2026-11-23T08:30Z -->\n## Goal\n"
+    # A beat named in prose is no beat line.
+    assert work_tickets.beat_of("The line `<!-- se:beat 2026-11-23T08:30Z -->` is a beat.\n") is None
+
+
+class ClaimsGh:
+    """gh for `ready`: one ready candidate, and the issues in progress with their bodies."""
+
+    def __init__(self, active: list[dict]) -> None:
+        self.active = active
+
+    def __call__(self, root, args):
+        if args[:2] == ["issue", "list"]:
+            return json.dumps([{"number": 1, "title": "feature/one", "body": ""}]
+                              if "ready" in args else self.active)
+        return json.dumps({"issue_dependencies_summary": {"blocked_by": 0}})
+
+
+def test_ready_lists_a_claim_with_a_young_beat_as_live_and_an_old_or_missing_one_as_stale(
+        worktree, monkeypatch, scripted_git, capsys):
+    active = [
+        {"number": 7, "title": "feature/live", "body": beat_body(NOW - timedelta(hours=2, minutes=5)),
+         "labels": [{"name": "work"}, {"name": "in-progress"}]},
+        {"number": 8, "title": "feature/old", "body": beat_body(NOW - timedelta(hours=13)),
+         "labels": [{"name": "work"}, {"name": "in-progress"}]},
+        {"number": 9, "title": "feature/none", "body": beat_body(None),
+         "labels": [{"name": "work"}, {"name": "in-progress"}]},
+    ]
+    monkeypatch.setattr(work_tickets, "run_gh", ClaimsGh(active))
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "utc_now", lambda: NOW)
+    scripted_git.answer = lambda argv: (1, "")
+
+    assert run(worktree, "ready") == 0
+    out = capsys.readouterr().out
+    assert out == (
+        "#1 feature/one\n"  # the one startable issue; no claimed one is startable
+        "claimed #7 feature/live: live, beat 2 h 05 min ago\n"
+        "claimed #8 feature/old: stale, beat 13 h 00 min ago, past the 12 h 00 min claim timeout\n"
+        "claimed #9 feature/none: stale, no beat, past the 12 h 00 min claim timeout\n"
+        "Stale claims for the person: #8, #9. Nothing frees a claim on its own: releasing one "
+        "(deleting its branch, taking off in-progress and the beat line) is the person's step, "
+        "which SE prepares (work model, Issues)\n")
+
+    # One value, the claim timeout: at 2 h even the youngest beat is past it.
+    (worktree / "se.toml").write_text(IDENTITY + "\n[workers]\nclaim_timeout_hours = 2\n",
+                                      encoding="utf-8")
+    assert run(worktree, "ready") == 0
+    assert "claimed #7 feature/live: stale, beat 2 h 05 min ago, past the 2 h 00 min claim timeout" \
+        in capsys.readouterr().out
+    (worktree / "se.toml").write_text(IDENTITY + "\n[workers]\nclaim_timeout_hours = 0\n",
+                                      encoding="utf-8")
+    assert run(worktree, "ready") == 1
+    assert "claim_timeout_hours" in capsys.readouterr().err
+
+
+def test_ready_without_gh_judges_the_claims_from_the_listed_issues(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, args: pytest.fail(f"gh {args}"))
+    monkeypatch.setattr(work_tickets, "utc_now", lambda: NOW)
+    listed = worktree / "claimed.json"
+    listed.write_text(json.dumps({"issues": [
+        {"number": 7, "title": "feature/live", "state": "OPEN", "labels": ["work", "in-progress"],
+         "body": beat_body(NOW - timedelta(minutes=30))},
+        {"number": 8, "title": "feature/old", "state": "OPEN", "labels": ["work", "in-progress"],
+         "body": beat_body(NOW - timedelta(hours=20))},
+        {"number": 3, "title": "feature/ready", "state": "OPEN", "labels": ["work", "ready"],
+         "body": ""},
+    ]}), encoding="utf-8")
+    assert run(worktree, "ready", "--claimed", str(listed)) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[:2] == [
+        "claimed #7 feature/live: live, beat 0 h 30 min ago",
+        "claimed #8 feature/old: stale, beat 20 h 00 min ago, past the 12 h 00 min claim timeout"]
+    assert "Stale claims for the person: #8." in out and "#3" not in out
+
+
+def test_queue_without_gh_reads_the_claims_for_ready_to_judge(worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    assert run(worktree, "queue", "--repo", "git.example/owner/repo") == 0
+    out = capsys.readouterr().out
+    assert '"labels": ["work", "in-progress", "repo:repo"]' in out
+    assert "work_tickets.py ready --claimed <file>" in out
+
+
+class BeatGh:
+    """gh for a worker's beat: the work issue's body, labels and state; every call recorded."""
+
+    def __init__(self, body: str, labels=("work", "in-progress"), state="OPEN") -> None:
+        self.body, self.labels, self.state = body, list(labels), state
+        self.calls: list[list[str]] = []
+        self.written: list[str] = []
+
+    def __call__(self, root, args):
+        self.calls.append(args)
+        if args[:2] == ["issue", "view"]:
+            return json.dumps({**FakeGh().issue, "body": self.body, "state": self.state,
+                               "labels": [{"name": name} for name in self.labels]})
+        if args[:2] == ["issue", "edit"] and "--body-file" in args:
+            self.body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+            self.written.append(self.body)
+        return ""
+
+
+def beat_worktree(worktree: Path, monkeypatch, gh: BeatGh, now: list[datetime]) -> None:
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "utc_now", lambda: now[0])
+
+
+def record(worktree: Path) -> str:
+    return (worktree / ".se" / "work" / "beat.yaml").read_text(encoding="utf-8")
+
+
+def test_intake_records_the_claims_beat_and_beat_writes_none_before_half_the_timeout(
+        worktree, monkeypatch, capsys):
+    now = [NOW]
+    gh = BeatGh(beat_body(NOW - timedelta(hours=1)))
+    beat_worktree(worktree, monkeypatch, gh, now)
+    assert run(worktree, "intake", "--issue", "5") == 0
+    due = int((NOW + timedelta(hours=5)).timestamp())  # the last beat plus half of 12 h
+    assert record(worktree).splitlines()[2:] == [
+        "issue: 5", 'repo: "git.example/owner/repo"', "beat: 2026-11-23T07:30Z", f"due: {due}"]
+    capsys.readouterr()
+    calls = len(gh.calls)
+
+    now[0] = NOW + timedelta(hours=4, minutes=59)  # younger than half the timeout: nothing at all
+    assert run(worktree, "beat") == 0
+    assert capsys.readouterr().out == ("The beat of #5 is due at 2026-11-23T13:30Z: nothing read "
+                                       "or written\n")
+    assert len(gh.calls) == calls and gh.written == []
+
+    now[0] = NOW + timedelta(hours=5)  # older: one read, one write, the next due 6 h later
+    assert run(worktree, "beat") == 0
+    out = capsys.readouterr().out
+    assert out == "Beat #5: <!-- se:beat 2026-11-23T13:30Z -->; the next is due at 2026-11-23T19:30Z\n"
+    assert [call[:2] for call in gh.calls[calls:]] == [["issue", "view"], ["issue", "edit"]]
+    assert gh.written == [beat_body(NOW + timedelta(hours=5))]
+    assert "beat: 2026-11-23T13:30Z" in record(worktree)
+    assert run(worktree, "beat") == 0 and "nothing read or written" in capsys.readouterr().out
+    assert len(gh.written) == 1
+
+
+def test_beat_retries_a_failed_write_later_and_stops_once_the_claim_is_released(
+        worktree, monkeypatch, capsys):
+    now = [NOW]
+    gh = BeatGh(beat_body(None))
+    beat_worktree(worktree, monkeypatch, gh, now)
+    assert run(worktree, "intake", "--issue", "5") == 0
+    assert f"due: {int(NOW.timestamp())}" in record(worktree)  # no beat yet: due at once
+    claim = worktree / ".se" / "work" / "beat.claim"
+    claim.touch()  # the hook's claim on the beat it started
+
+    def refused(root, args):
+        raise work_tickets.QueueError("gh issue view failed: HTTP 502")
+    monkeypatch.setattr(work_tickets, "run_gh", refused)
+    assert run(worktree, "beat") == 1
+    assert "The beat of #5 failed: gh issue view failed: HTTP 502" in capsys.readouterr().err
+    assert f"due: {int((NOW + timedelta(minutes=15)).timestamp())}" in record(worktree)
+    assert 'error: "gh issue view failed: HTTP 502"' in record(worktree)
+    assert not claim.exists()
+
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    gh.labels = ["work"]  # the person released the claim
+    now[0] = NOW + timedelta(minutes=15)
+    assert run(worktree, "beat") == 0
+    assert "#5 is no longer claimed" in capsys.readouterr().out
+    assert gh.written == [] and not (worktree / ".se" / "work" / "beat.yaml").exists()
+
+
+def test_intake_of_an_issue_nobody_claims_records_no_beat(worktree, monkeypatch, capsys):
+    gh = BeatGh(BODY, labels=("work", "ready"))
+    beat_worktree(worktree, monkeypatch, gh, [NOW])
+    (worktree / ".se" / "work").mkdir(parents=True)
+    (worktree / ".se" / "work" / "beat.yaml").write_text("issue: 4\n", encoding="utf-8")
+    assert run(worktree, "intake", "--issue", "5") == 0
+    assert not (worktree / ".se" / "work" / "beat.yaml").exists()
+    assert run(worktree, "beat") == 0
+    assert "No claim to beat" in capsys.readouterr().out and gh.written == []
+
+
+def test_a_beat_is_no_change_to_the_issue_for_refresh_hold_or_the_field_report_check(
+        tmp_path, worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    recorded = work_tickets.load_body_read(worktree)
+    gh.issue["body"] = work_tickets.with_beat(BODY, NOW)
+    gh.issue["updatedAt"] = "2026-11-04T12:00:00Z"
+    capsys.readouterr()
+    assert run(worktree, "refresh", "--json") == 0
+    changes = json.loads(capsys.readouterr().out)
+    assert (changes["changed"], changes["body_diff"]) == (False, [])
+    assert work_tickets.body_hash(gh.issue["body"]) == recorded
+    assert work_tickets.changed_body_error(recorded, gh.issue["body"], "#5") is None
+    assert work_tickets.changed_body_error(recorded, gh.issue["body"] + "Edited.\n", "#5") is not None
+
+    # The first hold after an intake from files compares the body: a beat passes it.
+    issue_file, comments_file = tool_answers(tmp_path, "tool")
+    by_tool = tmp_path / "by-tool"
+    by_tool.mkdir()
+    (by_tool / "se.toml").write_text(IDENTITY, encoding="utf-8")
+    assert run(by_tool, "intake", "--issue-body", str(issue_file), "--comments-file", str(comments_file)) == 0
+    first = sorted(path.stem for path in (by_tool / ".se" / "work" / "todo").iterdir())[0]
+    beaten = tmp_path / "beaten.json"
+    answer = json.loads(issue_file.read_text(encoding="utf-8"))
+    beaten.write_text(json.dumps({**answer, "updated_at": "2026-11-04T12:00:00Z",
+                                  "body": work_tickets.with_beat(answer["body"], NOW)}), encoding="utf-8")
+    capsys.readouterr()
+    assert run(by_tool, "move", "--id", first, "--to", "held", "--issue-body", str(beaten)) == 0
+    out = capsys.readouterr().out
+    assert "its body is unchanged" in out
+
+
+def test_start_writes_the_first_beat_with_the_claim(main_checkout, local_config, monkeypatch, capsys):
+    fake = start_fakes(monkeypatch)
+    body = ["<!-- se:fleet -->\n\n## Situation\n"]
+
+    def gh(root, arguments):
+        if arguments[:2] == ["issue", "view"] and arguments[4] == "body":
+            fake.calls.append(arguments)
+            return json.dumps({"body": body[0]})
+        if arguments[:2] == ["issue", "edit"] and "--body-file" in arguments:
+            body[0] = Path(arguments[arguments.index("--body-file") + 1]).read_text(encoding="utf-8")
+        return fake(root, arguments)
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    monkeypatch.setattr(work_tickets, "utc_now", lambda: NOW)
+    assert run(main_checkout, "start", "5") == 0
+    edits = [call for call in fake.calls if call[:2] == ["issue", "edit"]]
+    assert "--add-label" in edits[0] and "--body-file" in edits[1]  # the claim, then its beat
+    assert body[0] == "<!-- se:fleet -->\n<!-- se:beat 2026-11-23T08:30Z -->\n\n## Situation\n"
+
+
+def test_the_close_out_through_gh_removes_the_beat_line(worktree, monkeypatch):
+    gh = BeatGh(beat_body(NOW))
+    monkeypatch.setattr(work_tickets, "run_gh", gh)
+    plan = work_tickets.closeout_plan("git.example/owner/repo", "git.example/owner/repo", 7, 5,
+                                      "Landed.", "Integrated.", [])
+    work_tickets.run_plan(plan, {**work_tickets.tracker_actions(worktree, "git.example/owner/repo"),
+                                 "comment_pull": lambda arguments, _: None,
+                                 "close_pull": lambda arguments, _: None})
+    assert gh.written == [beat_body(None)]

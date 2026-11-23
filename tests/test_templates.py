@@ -4,6 +4,7 @@ failing and a passing fixture, the command, and the contracts with the writers S
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -1850,6 +1851,20 @@ def duplicates(catalog, monkeypatch) -> list[Case]:
         step.action: FREE for step in steps})
 
 
+def beat_edit(catalog, monkeypatch) -> list[Case]:
+    """What every beat sends (work_tickets.py beat, start, the close-out): the work issue's own body
+    with its beat line set or removed, with its own labels, so the gate takes the work template."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 23, 8, 30, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", body, labels=WORK_LABELS)
+            for body in (beaten, work_tickets.without_beat(beaten))]
+
+
+def without_beats(plan):
+    """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
+    return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
+                                               if not step.action.startswith("beat:")), plan.then)
+
+
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
@@ -1866,8 +1881,12 @@ CONTRACT = {
     "work_tickets:block": ("the blocker linker", blocker_link),
     "work_tickets:delivered_pull_request": ("deliver", delivered),
     "work_tickets:start_plan": ("start", plan_of(
-        lambda: work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False),
+        lambda: without_beats(work_tickets.start_plan(REPO, 7, WORK_TITLE, "agent", False)),
         {"assign": NO_BODY, "comment_issue": FREE})),
+    "work_tickets:beat_step": ("start and integrate", beat_edit),
+    "work_tickets:beat_action_gh.run": ("start and integrate", beat_edit),
+    "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
+    "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
     "work_tickets:escalation_plan": ("integrate", plan_of(
@@ -1876,8 +1895,8 @@ CONTRACT = {
     "work_tickets:tracker_actions.comment": ("retro.py, overhaul.py and escalations", tracker_comment),
     "work_tickets:landing_plan": ("integrate", landing),
     "work_tickets:closeout_plan": ("integrate", plan_of(
-        lambda: work_tickets.closeout_plan(REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n",
-                                           []),
+        lambda: without_beats(work_tickets.closeout_plan(
+            REPO, REPO, 5, 7, "abc1234", "Integrated in abc1234.\n", [])),
         {"comment_pull": FREE, "comment_issue": FREE})),
     "work_tickets:RelayDoor.create_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.create")),
     "work_tickets:RelayDoor.update_pull": ("integrate", lambda c, m: landing_door(c, m, "pr.edit")),
@@ -2637,3 +2656,168 @@ def test_a_project_without_template_repositories_resolves_its_own_then_se_s(tmp_
     resolved = templates.catalog(tmp_path, tree=True)
     assert resolved["own"].repository == "project"
     assert {template.repository for name, template in resolved.items() if name != "own"} == {"se"}
+
+
+# Overlays (docs/templates.md "Template repositories"; scripts/templates.py: Overlays):
+# templates/<name>.overlay.md extends its template and only adds or tightens; a loosening refuses.
+
+#: A template with a choice, a limit and a rule an overlay can loosen, for the overlay tests.
+OVERLAID = """---
+name: note
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A note.
+applies:
+  actions: ["issue.create"]
+rules:
+  required: refuse
+  words: warn
+fields:
+  - name: goal
+    kind: text
+    required: true
+    max_words: 40
+  - name: status
+    kind: choice
+    label: Status
+    says: "open or closed."
+    choices: ["open", "closed"]
+---
+
+## Goal
+
+<!-- goal: What the note is for. -->
+"""
+
+
+def overlay(root: Path, name: str, text: str) -> None:
+    (root / "templates").mkdir(exist_ok=True)
+    (root / "templates" / f"{name}.overlay.md").write_text(text, encoding="utf-8")
+
+
+def test_an_overlay_adds_instructions_fields_tags_and_rules_and_its_digest_is_recorded(tmp_path):
+    write_template(tmp_path, "note", OVERLAID)
+    plain = templates.load(tmp_path, folder=tmp_path / "templates")["note"]
+    overlay(tmp_path, "note", """---
+extends: note
+says: Agents keep it short.
+tags: ["meeting"]
+rules:
+  duplicate: refuse
+fields:
+  - name: goal
+    max_words: 20
+  - name: owner
+    kind: line
+    required: true
+---
+
+## Goal
+
+<!-- goal: One sentence. -->
+
+## Owner
+
+<!-- owner: Who keeps the note. -->
+""")
+    note = templates.load(tmp_path, folder=tmp_path / "templates")["note"]
+    assert note.says == "A note. Agents keep it short."
+    assert note.tags == ("test", "meeting")
+    assert note.severity("duplicate") == "refuse" and note.severity("words") == "warn"
+    assert [item.name for item in note.fields] == ["goal", "status", "owner"]
+    assert note.field("goal").says == "What the note is for. One sentence."
+    assert note.field("goal").max_words == 20
+    assert (note.field("owner").heading, note.field("owner").required) == ("Owner", True)
+    # The marker's digest covers the overlay, so a document records the overlay its fill applied.
+    assert note.digest != plain.digest and note.version == plain.version
+    text = (tmp_path / "templates" / "note.md").read_text(encoding="utf-8")
+    added = (tmp_path / "templates" / "note.overlay.md").read_text(encoding="utf-8")
+    assert note.digest == "sha256:" + hashlib.sha256(text.encode() + b"\0" + added.encode() + b"\0").hexdigest()
+    found = templates.check(note, templates.parse(note, templates.render(note, {"goal": "Ship it."})))
+    assert ("owner", "required", "refuse") in {(item.field, item.rule, item.severity) for item in found}
+
+
+def test_a_template_that_extends_an_overlaid_one_inherits_what_the_overlay_adds(tmp_path):
+    write_template(tmp_path, "note", OVERLAID)
+    write_template(tmp_path, "child", """---
+name: child
+version: 1.0.0
+kind: document
+tags: ["test"]
+extends: note
+---
+""")
+    overlay(tmp_path, "note", "---\nextends: note\nfields:\n  - name: owner\n    kind: line\n---\n\n"
+            "## Owner\n\n<!-- owner: Who keeps it. -->\n")
+    loaded = templates.load(tmp_path, folder=tmp_path / "templates")
+    assert [item.name for item in loaded["child"].fields] == ["goal", "status", "owner"]
+
+
+@pytest.mark.parametrize("text, refusal", [
+    ("rules:\n  required: warn\n", "it loosens rule required from refuse to warn"),
+    ('rules:\n  words: "off"\n', "it loosens rule words from warn to off"),
+    ("fields:\n  - name: goal\n    required: false\n", "field goal: required is turned off"),
+    ("fields:\n  - name: goal\n    max_words: 80\n", "field goal: max_words is raised from 40 to 80"),
+    ("fields:\n  - name: goal\n    max_words: 0\n", "field goal: max_words is raised from 40 to none"),
+    ("fields:\n  - name: goal\n    none_ok: true\n", "field goal: none_ok is turned on"),
+    ("fields:\n  - name: goal\n    kind: line\n", "field goal: kind changes from 'text' to 'line'"),
+    ('fields:\n  - name: status\n    choices: ["open", "closed", "parked"]\n',
+     "field status: choices widen from open, closed to open, closed, parked"),
+    ('fields:\n  - name: status\n    says: "anything."\n', None),
+    ("remove: [\"goal\"]\n", "an overlay only adds or tightens; remove is the template's to say"),
+    ("applies:\n  actions: [\"issue.edit\"]\n", "applies is the template's to say"),
+    ("version: 2.0.0\n", "version is the template's to say"),
+])
+def test_a_loosening_overlay_is_refused_naming_what_it_loosens(tmp_path, text, refusal):
+    write_template(tmp_path, "note", OVERLAID)
+    overlay(tmp_path, "note", f"---\nextends: note\n{text}---\n")
+    if refusal is None:  # a says the overlay gives is added to the field's, never in its place
+        assert templates.load(tmp_path, folder=tmp_path / "templates")["note"].field(
+            "status").says == "open or closed. anything."
+        return
+    with pytest.raises(templates.TemplateError, match=re.escape(refusal)) as raised:
+        templates.load(tmp_path, folder=tmp_path / "templates")
+    assert str(raised.value).startswith(str(tmp_path / "templates" / "note.overlay.md"))
+
+
+@pytest.mark.parametrize("text, refusal", [
+    ("---\nextends: other\n---\n", "extends is 'other'; an overlay extends its template, `extends: note`"),
+    ("---\nextends: note\n---\n\n## Aim\n\n<!-- goal: More. -->\n",
+     "section Aim adds to field goal, whose heading is 'Goal'"),
+    ("---\nextends: note\n---\n\n## Owner\n\n<!-- owner: Who. -->\n",
+     "section Owner adds to field owner, which neither note nor the overlay's fields hold"),
+    ("---\nextends: note\nfields:\n  - name: owner\n    kind: line\n---\n",
+     "field owner is added without its section"),
+])
+def test_an_overlay_that_does_not_fit_its_template_is_refused_with_the_remedy(tmp_path, text, refusal):
+    write_template(tmp_path, "note", OVERLAID)
+    overlay(tmp_path, "note", text)
+    with pytest.raises(templates.TemplateError, match=re.escape(refusal)):
+        templates.load(tmp_path, folder=tmp_path / "templates")
+
+
+def test_an_overlay_without_its_template_beside_it_is_refused(tmp_path):
+    write_template(tmp_path, "note", OVERLAID)
+    overlay(tmp_path, "other", "---\nextends: other\n---\n")
+    with pytest.raises(templates.TemplateError, match=re.escape(
+            "an overlay of 'other', which this templates/ does not hold")):
+        templates.load(tmp_path, folder=tmp_path / "templates")
+
+
+def test_an_overlay_applies_to_its_own_repository_s_template_only(tmp_path, fake_git_door, capsys,
+                                                                   monkeypatch):
+    """A name resolves to the first repository holding it; another repository's overlay of that
+    name lies beside a template the name does not reach, and adds nothing."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "nowhere")
+    template_repository(tmp_path / "upstream" / "shared", {"note": OVERLAID})
+    (tmp_path / "upstream" / "shared" / "templates" / "note.overlay.md").write_text(
+        "---\nextends: note\ntags: [\"shared\"]\n---\n", encoding="utf-8")
+    commit_all(tmp_path / "upstream" / "shared")
+    shared = git_door.run("-C", str(tmp_path / "upstream" / "shared"), "rev-parse", "HEAD").stdout.strip()
+    project, local = template_project(tmp_path, {"shared": shared}, ["shared"])
+    synced(project, local, capsys)
+    assert templates.catalog(project, tree=True)["note"].tags == ("test", "shared")
+    write_template(project, "note", OVERLAID)
+    assert templates.catalog(project, tree=True)["note"].tags == ("test",)

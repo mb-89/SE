@@ -182,7 +182,7 @@ def test_ready_skips_issues_that_wait_on_a_person(worktree, monkeypatch, fake_gi
         candidates if args[:2] == ["issue", "list"] and "ready" in args
         else [] if args[:2] == ["issue", "list"]
         else {"issue_dependencies_summary": {"blocked_by": 0}}))
-    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch: False)
+    monkeypatch.setattr(work_tickets, "branch_exists", lambda root, branch, repo: False)
     assert [issue["number"] for issue in work_tickets.ready_issues(worktree, REPO)] == [1]
 
 

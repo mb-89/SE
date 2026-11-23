@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from typing import NoReturn
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
@@ -126,6 +126,19 @@ PAUSE_LABEL = "pause"  # an open issue with it pauses the fleet (work model, Pau
 # label; `ready` and `start` take only those, and never an issue that carries a NOT_STARTABLE label.
 WORK_LABELS = ("work", "ready")
 IN_PROGRESS_LABEL = "in-progress"
+# A claim's heartbeat, owned by the work model's "Issues": the claim is the issue's `in-progress`
+# label, its last beat one marker line in the issue's body, the UTC time to the minute. `start`
+# writes the first with the claim, the worker's hook the next once half the claim timeout passed
+# (`beat`), the close-out removes it; `ready` reads a claim as live or stale from label and beat.
+BEAT_PATTERN = re.compile(
+    r"^<!-- se:beat ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z) -->[ \t]*(?:\r?\n|\Z)", re.M)
+BEAT_FORMAT = "%Y-%m-%dT%H:%MZ"
+CLAIM_TIMEOUT_HOURS = 12  # [workers] claim_timeout_hours, unset; a beat is due after half of it
+# The worker's local record of its claim's beat, in .se/work beside the snapshot: intake writes it
+# for an issue in progress, `beat` keeps it, and the hook (scripts/se_hook.sh) reads its `due` line.
+BEAT_RECORD = "beat.yaml"
+BEAT_CLAIM = "beat.claim"  # the hook's claim on a beat it started, which `beat` removes
+BEAT_RETRY = timedelta(minutes=15)  # after a beat that failed, the next is due this much later
 # An issue filed with --hold past its template's refusals (README "Templates"): never started until fixed.
 OFF_TEMPLATE_LABEL = "off-template"
 NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_TEMPLATE_LABEL})
@@ -789,8 +802,17 @@ SCP_REMOTE_PATTERN = re.compile(r"^(?:[^@/]+@)?(?P<host>[^/:@]{2,}):(?P<path>[^\
 
 def remote_repo(root: Path) -> str | None:
     """`<host>/<owner>/<repo>` of the checkout's `origin` remote, without credentials."""
-    result = run_git(root, "remote", "get-url", "origin")
-    url = result.stdout.strip() if result.returncode == 0 else ""
+    return named_remote_repo(root, "origin")
+
+
+def named_remote_repo(root: Path, name: str) -> str | None:
+    """`<host>/<owner>/<repo>` of the checkout's remote `name`, without credentials."""
+    result = run_git(root, "remote", "get-url", name)
+    return url_repo(result.stdout.strip() if result.returncode == 0 else "")
+
+
+def url_repo(url: str) -> str | None:
+    """`<host>/<owner>/<repo>` a remote URL names, without credentials; None for another form."""
     match = REMOTE_URL_PATTERN.match(url) or SCP_REMOTE_PATTERN.match(url)
     if match is None:
         return None
@@ -1477,9 +1499,10 @@ def record_comments_read(root: Path, state: dict[str, object]) -> None:
 
 
 def body_hash(body: str) -> str:
-    """What a read of the work issue's body records: the hash of its text, line endings and
-    surrounding whitespace aside, so a body read with gh and one saved by hand agree."""
-    return hashlib.sha256(body.replace("\r\n", "\n").strip().encode("utf-8")).hexdigest()
+    """What a read of the work issue's body records: the hash of its text, line endings,
+    surrounding whitespace and the beat line aside, so a body read with gh and one saved by hand
+    agree and a beat is no change."""
+    return hashlib.sha256(without_beat(body.replace("\r\n", "\n")).strip().encode("utf-8")).hexdigest()
 
 
 def body_read_path(root: Path) -> Path:
@@ -1876,6 +1899,7 @@ def intake(
     save_snapshot(root, issue)
     record_comments_read(root, comment_state(issue["comments"]))
     record_body_read(root, str(issue["body"]))
+    record_claim(root, issue)
     if answered is not None:
         reread_path(root).write_text(json.dumps({"updatedAt": issue["updatedAt"]}) + "\n",
                                      encoding="utf-8", newline="\n")
@@ -2133,8 +2157,8 @@ def issue_changes(previous: dict[str, object] | None, issue: dict[str, object]) 
     if previous is not None:
         if previous["title"] != issue["title"]:
             changes["title"] = [previous["title"], issue["title"]]
-        changes["body_diff"] = list(difflib.unified_diff(
-            previous["body"].splitlines(), issue["body"].splitlines(),
+        changes["body_diff"] = list(difflib.unified_diff(  # a beat is no change (without_beat)
+            without_beat(previous["body"]).splitlines(), without_beat(issue["body"]).splitlines(),
             "before", "now", lineterm="", n=1,
         ))
         old_items, new_items = requirement_items(previous["body"]), requirement_items(issue["body"])
@@ -4064,6 +4088,319 @@ def mark_in_progress(root: Path, number: int, repo: str) -> None:
     )
 
 
+def same_repo(found: str, repo: str) -> bool:
+    """Whether `found` (`<host>/<owner>/<repo>`) is the repository `repo` (`[host/]owner/repo`)
+    names: owner and name alike in any case, and the host where `repo` names one."""
+    found_parts, parts = found.lower().split("/"), repo.lower().split("/")
+    return found_parts[-2:] == parts[-2:] and (len(parts) < 3 or found_parts[0] == parts[0])
+
+
+def issue_remote(root: Path, repo: str) -> str:
+    """The remote that hosts the work issue's repository `repo`, found from the issue, not from
+    `origin`: the checkout's remote whose URL names it, `origin` first; where none does, that
+    repository's URL on its host (gh's default host where `repo` names none)."""
+    origin = remote_repo(root)
+    if origin is not None and same_repo(origin, repo):
+        return "origin"
+    listed = run_git(root, "remote")
+    for name in (listed.stdout.split() if listed.returncode == 0 else []):
+        found = None if name == "origin" else named_remote_repo(root, name)
+        if found is not None and same_repo(found, repo):
+            return name
+    home = sibling("se_home")
+    return home.Home(repo_host(repo) or home.GITHUB, *api_repo(repo).split("/")).url + ".git"
+
+
+def newest_integration_commit(root: Path) -> str:
+    """The integration branch's newest commit on origin, fetched."""
+    fetched = run_git(root, "fetch", "origin")
+    if fetched.returncode != 0:
+        raise QueueError(f"git fetch failed: {failure_detail(fetched)}")
+    return checked_git(root, "rev-parse", f"origin/{integration_branch(root)}^{{commit}}").strip()
+
+
+def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+    """Claim work issue #`number`: create its branch at `commit` on the remote that hosts its
+    repository (`issue_remote`), as a push that holds only while the branch does not exist there,
+    so of two starts the host lets the first create it and refuses the second. Only a push that
+    reports the branch new claims it: git passes a branch already at `commit` as up to date before
+    it checks the lease. The remote."""
+    remote = issue_remote(root, repo)
+    ref = f"refs/heads/{branch}"
+    pushed = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:", remote,
+                                 f"{commit}:{ref}"])
+    if pushed.returncode == 0 and any(
+            line.startswith("*\t") and line.split("\t")[1].endswith(f":{ref}")
+            for line in pushed.stdout.splitlines()):
+        return remote
+    listed = run_git(root, "ls-remote", remote, ref)
+    if listed.returncode == 0 and listed.stdout.strip():
+        raise QueueError(f"Issue #{number} is not startable: its branch {branch} exists on "
+                         f"{remote}, so another start holds its claim; nothing was changed")
+    raise QueueError(f"Issue #{number} is not startable: its branch {branch} could not be "
+                     f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
+
+
+def utc_now() -> datetime:
+    """The time now, in UTC: the clock every beat reads, which tests replace (rule tst-002)."""
+    return datetime.now(timezone.utc)
+
+
+def beat_line(at: datetime) -> str:
+    """The beat marker line of `at`, the UTC time to the minute."""
+    return f"<!-- se:beat {at.astimezone(timezone.utc).strftime(BEAT_FORMAT)} -->"
+
+
+def beat_of(body: str) -> datetime | None:
+    """The time of the body's beat line, None where it has none."""
+    found = BEAT_PATTERN.search(body or "")
+    return datetime.strptime(found[1], BEAT_FORMAT).replace(tzinfo=timezone.utc) if found else None
+
+
+def without_beat(body: str) -> str:
+    """`body` without its beat line: the text every comparison of an issue's body reads, so a beat
+    is never a change to it."""
+    return BEAT_PATTERN.sub("", body or "")
+
+
+#: A marker line that opens a body (`<!-- se:fleet -->`, `<!-- se:form work -->`).
+MARKER_LINE = re.compile(r"^<!-- se:[^\n]*? -->[ \t]*\r?$")
+
+
+def with_beat(body: str, at: datetime) -> str:
+    """`body` with its beat line set to `at`: in place where it has one, else after the marker
+    lines that open it, else first."""
+    line = beat_line(at) + "\n"
+    body = body or ""
+    if BEAT_PATTERN.search(body):
+        return BEAT_PATTERN.sub(lambda _: line, body, count=1)
+    lines = body.splitlines(keepends=True)
+    index = 0
+    while index < len(lines) and MARKER_LINE.match(lines[index].rstrip("\n")):
+        index += 1
+    if index and not lines[index - 1].endswith("\n"):
+        lines[index - 1] += "\n"
+    return "".join([*lines[:index], line, *lines[index:]])
+
+
+def claim_timeout(root: Path) -> timedelta:
+    """`[workers] claim_timeout_hours` in se.toml: how long a claim stays live after its last
+    beat; built in CLAIM_TIMEOUT_HOURS. A beat is due once half of it passed."""
+    hours = se_table(root, "workers").get("claim_timeout_hours", CLAIM_TIMEOUT_HOURS)
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours <= 0:
+        raise QueueError(f"[workers] claim_timeout_hours in {root / 'se.toml'} must be a positive "
+                         f"number of hours, not {hours!r}; remove it for the built-in "
+                         f"{CLAIM_TIMEOUT_HOURS}")
+    return timedelta(hours=hours)
+
+
+@dataclass(frozen=True)
+class Claim:
+    """A claimed issue as `ready` reads it: live while its beat is younger than the claim
+    timeout, stale where it is older or there is none; its beat's age where it has one."""
+
+    number: int
+    title: str
+    live: bool
+    age: timedelta | None
+
+
+def claim_of(issue: dict[str, object], now: datetime, timeout: timedelta) -> Claim:
+    """The claim of an issue labelled in-progress, judged from its body's beat line at `now`."""
+    beat = beat_of(str(issue.get("body") or ""))
+    age = None if beat is None else max(now - beat, timedelta(0))
+    return Claim(int(issue["number"]), str(issue.get("title") or ""),
+                 age is not None and age < timeout, age)
+
+
+def hours_text(delta: timedelta) -> str:
+    """A duration as `<h> h <mm> min`, to the minute."""
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes // 60} h {minutes % 60:02d} min"
+
+
+def claim_line(claim: Claim, timeout: timedelta) -> str:
+    """How `ready` names a claim: live or stale, with its beat's age."""
+    if claim.live and claim.age is not None:
+        return f"claimed #{claim.number} {claim.title}: live, beat {hours_text(claim.age)} ago"
+    beat = "no beat" if claim.age is None else f"beat {hours_text(claim.age)} ago"
+    return (f"claimed #{claim.number} {claim.title}: stale, {beat}, past the "
+            f"{hours_text(timeout)} claim timeout")
+
+
+def stale_claims_line(claims: list[Claim]) -> str:
+    """The line that names the stale claims for SE to pass to the person, "" where none is."""
+    stale = [f"#{claim.number}" for claim in claims if not claim.live]
+    if not stale:
+        return ""
+    return (f"Stale claims for the person: {', '.join(stale)}. Nothing frees a claim on its own: "
+            "releasing one (deleting its branch, taking off in-progress and the beat line) is the "
+            "person's step, which SE prepares (work model, Issues)")
+
+
+def beat_step(repo: str, number: int, write: bool, at: datetime | None = None) -> Step:
+    """The plan step that sets the issue's beat line to `at` (`write`) or removes it."""
+    change = (f"its beat line set to {beat_line(at or utc_now())}" if write
+              else "its beat line (<!-- se:beat ... -->) removed")
+    return Step(f"beat:{'set' if write else 'remove'}", "issue_write", {
+        **owner_repo(repo), "method": "update", "issue_number": number,
+        "body": f"<the issue's body with {change}>",
+        "labels": "<the issue's labels, as issue_read get reads them>"},
+        note="issue_read get reads the body and the labels; a beat line takes the place of the one "
+             "it has, else it goes after the marker lines at its top; issue_write sets the whole "
+             "body, with the labels unchanged, by which the template gate judges it")
+
+
+def beaten(body: str, detail: str) -> str:
+    """The body a beat step writes: the beat set now (`set`) or removed (`remove`)."""
+    return with_beat(body, utc_now()) if detail == "set" else without_beat(body)
+
+
+def beat_action_gh(root: Path, repo: str) -> Action:
+    """The local runner of a beat step, through gh: read the body, write it with the change."""
+    def run(arguments: dict[str, object], detail: str) -> None:
+        number = str(arguments["issue_number"])
+        read = run_gh(root, ["issue", "view", number, "--json", "body", *repo_arguments(repo)])
+        try:
+            found = json.loads(read)
+        except ValueError:
+            found = None
+        if not isinstance(found, dict) or not isinstance(found.get("body"), str):
+            # no body read is none to keep: write none rather than erase it
+            print(f"beat: gh read no body of #{number}; its beat line is left as it is",
+                  file=sys.stderr)
+            return None
+        body = found["body"]
+        changed = beaten(body, detail)
+        if changed != body:
+            run_gh_with_body(root, ["issue", "edit", number, *repo_arguments(repo)], changed)
+    return run
+
+
+def beat_action_door(door: "RelayDoor") -> Action:
+    """The runner of a beat step through kern's relay: issue_read, then issue_write the body."""
+    def run(arguments: dict[str, object], detail: str) -> None:
+        number = int(arguments["issue_number"])
+        read = door.ask("issue_read", {"method": "get", "issue_number": number}, "read its beat")
+        if not isinstance(read, dict) or not isinstance(read.get("body"), str):
+            print(f"beat: the relay read no body of #{number}; its beat line is left as it is",
+                  file=sys.stderr)
+            return None
+        body = read["body"]
+        changed = beaten(body, detail)
+        if changed != body:  # with its labels, so the template gate judges it by its own template
+            door.ask("issue_write", {"method": "update", "issue_number": number, "body": changed,
+                                     "labels": sorted(issue_labels(read))})
+    return run
+
+
+def beat_record_path(root: Path) -> Path:
+    path = queue_paths(root)["todo"].parent / BEAT_RECORD
+    inside_root(root, path)
+    return path
+
+
+def write_beat_record(root: Path, number: int, repo: str, beat: datetime | None, due: datetime,
+                      error: str = "") -> None:
+    """Write the worker's beat record: its issue, the last beat it knows, when the next is due
+    (`due`, Unix seconds, the line the hook reads with builtins) and why the last one failed."""
+    initialize(root)
+    lines = [
+        "# The claim's heartbeat (work_tickets.py beat, README \"Workers\"): scripts/se_hook.sh",
+        "# starts a beat on a tool call once the Unix time `due` has passed.",
+        f"issue: {number}",
+        f"repo: {json.dumps(repo)}",
+        f"beat: {beat.strftime(BEAT_FORMAT) if beat else 'none'}",
+        f"due: {int(due.timestamp())}",
+        *([f"error: {json.dumps(error, ensure_ascii=False)}"] if error else []),
+    ]
+    beat_record_path(root).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def load_beat_record(root: Path) -> dict[str, object] | None:
+    """The beat record `write_beat_record` wrote, None where there is none."""
+    path = beat_record_path(root)
+    if not path.is_file():
+        return None
+    fields = dict(re.findall(r"^(\w+): (.*)$", path.read_text(encoding="utf-8"), re.M))
+    try:
+        beat = fields["beat"]
+        return {"issue": int(fields["issue"]), "repo": str(json.loads(fields["repo"])),
+                "beat": None if beat == "none" else datetime.strptime(beat, BEAT_FORMAT).replace(
+                    tzinfo=timezone.utc),
+                "due": datetime.fromtimestamp(int(fields["due"]), timezone.utc)}
+    except (KeyError, ValueError, TypeError) as error:
+        raise QueueError(f"Cannot read the beat record {path}: {error}; run intake again") from error
+
+
+def record_claim(root: Path, issue: dict[str, object]) -> None:
+    """After intake: where the work issue is claimed (labelled in-progress), record its beat, the
+    next one due half the claim timeout after its beat line, at once where it has none; else
+    remove a record, so no hook beats an issue nobody claims."""
+    path = beat_record_path(root)
+    if IN_PROGRESS_LABEL not in issue_labels(issue):
+        path.unlink(missing_ok=True)
+        return
+    last = beat_of(str(issue["body"]))
+    due = last + claim_timeout(root) / 2 if last else utc_now()
+    write_beat_record(root, int(issue["number"]), str(issue["repo"]), last, due)
+
+
+def claimed_issue_now(root: Path, number: int, repo: str, door: "RelayDoor | None") -> dict[str, object]:
+    """The issue's body, labels and state as GitHub has them now: through kern's relay where this
+    runs as one call through kern (`door`), else through gh."""
+    if door is not None:
+        read = door.ask("issue_read", {"method": "get", "issue_number": number}, "read its beat")
+        read = read if isinstance(read, dict) else {}
+    else:
+        read = json.loads(run_gh(root, ["issue", "view", str(number), "--json", "body,labels,state",
+                                        *repo_arguments(repo)]))
+    if not isinstance(read, dict) or not isinstance(read.get("body"), str):
+        raise QueueError(f"the read of #{number} holds no body, so no beat is written over it")
+    return {"body": read["body"].replace("\r\n", "\n"),
+            "labels": issue_labels(read), "state": str(read.get("state") or "").lower()}
+
+
+def beat(root: Path) -> str:
+    """One beat of the worker's claim, as the hook starts it: nothing read or written before the
+    record's `due`; then the issue is read and, while it is open and in progress, its beat line set
+    to now and the next due half the claim timeout later. A failed read or write is due again
+    after BEAT_RETRY; an issue no longer claimed removes the record. The hook's claim on the beat
+    is removed in every case."""
+    claimed = beat_record_path(root).parent / BEAT_CLAIM
+    try:
+        record = load_beat_record(root)
+        if record is None:
+            return "No claim to beat: intake recorded no work issue in progress in this worktree"
+        number, repo, now = int(record["issue"]), str(record["repo"]), utc_now()
+        if now < record["due"]:
+            return (f"The beat of #{number} is due at {record['due'].strftime(BEAT_FORMAT)}: "
+                    "nothing read or written")
+        door = relay_door(root, repo)
+        try:
+            issue = claimed_issue_now(root, number, repo, door)
+            if issue["state"] != "open" or IN_PROGRESS_LABEL not in issue["labels"]:
+                beat_record_path(root).unlink(missing_ok=True)
+                return (f"#{number} is no longer claimed (it is {issue['state'] or 'unread'}, "
+                        f"labelled {', '.join(sorted(issue['labels'])) or 'nothing'}): no beat "
+                        "written, its record removed")
+            body = with_beat(issue["body"], now)
+            if door is not None:  # with its labels, as beat_action_door writes them
+                door.ask("issue_write", {"method": "update", "issue_number": number, "body": body,
+                                         "labels": sorted(issue["labels"])})
+            else:
+                run_gh_with_body(root, ["issue", "edit", str(number), *repo_arguments(repo)], body)
+        except (QueueError, MissingGhError, sibling("se_relay").RelayError) as error:
+            write_beat_record(root, number, repo, record["beat"], now + BEAT_RETRY, said(error))
+            raise QueueError(f"The beat of #{number} failed: {said(error)}; the next is due "
+                             f"{hours_text(BEAT_RETRY)} later") from error
+        due = now + claim_timeout(root) / 2
+        write_beat_record(root, number, repo, now, due)
+        return f"Beat #{number}: {beat_line(now)}; the next is due at {due.strftime(BEAT_FORMAT)}"
+    finally:
+        claimed.unlink(missing_ok=True)
+
+
 def start(
     root: Path,
     number: int,
@@ -4095,6 +4432,7 @@ def start(
     if cloud:
         if not agent:
             raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
+        claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
         run_gh(
             root,
             [
@@ -4110,16 +4448,21 @@ def start(
                 *repo_arguments(repo),
             ],
         )
+        beat_action_gh(root, repo)({"issue_number": number}, "set")
         return None
 
-    path = start_worktree(root, str(issue["title"]), worktree_root, create)
+    path = start_worktree(root, number, repo, str(issue["title"]), worktree_root, create)
     mark_in_progress(root, number, repo)
+    beat_action_gh(root, repo)({"issue_number": number}, "set")
     return path
 
 
-def start_worktree(root: Path, branch: str, worktree_root: str | None, create: bool) -> Path:
-    """The worker's worktree of `branch`: created from the newest integration branch, or with
-    `create` off the one the project's own script created, synced."""
+def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
+                   create: bool) -> Path:
+    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`): with
+    `create`, the branch created at the newest integration branch on the issue's remote and the
+    worktree created from it there; without, the one the project's own script created, its branch
+    claimed at its commit; synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -4127,20 +4470,23 @@ def start_worktree(root: Path, branch: str, worktree_root: str | None, create: b
             Path(directory).expanduser().resolve()
             if directory is not None else default_worktree_root(root)
         )
-        try:
-            directory_path.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            raise QueueError(f"Cannot create worktree root {directory_path}: {error}") from error
         path = directory_path / branch.replace("/", "-")
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
-        for arguments in (("fetch", "origin"),
-                          ("worktree", "add", "-b", branch, str(path),
-                           f"origin/{integration_branch(root)}")):
-            result = run_git(root, *arguments)
-            if result.returncode != 0:
-                detail = failure_detail(result)
-                raise QueueError(f"git {arguments[0]} failed: {detail}")
+        remote = claim(root, number, repo, branch, newest_integration_commit(root))
+        try:
+            directory_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise QueueError(f"Cannot create worktree root {directory_path}: {error}; #{number}'s "
+                             f"branch {branch} is claimed on {remote}, its labels unchanged") from error
+        fetched = run_git(root, "fetch", remote, f"refs/heads/{branch}")
+        claimed = (checked_git(root, "rev-parse", "FETCH_HEAD^{commit}").strip()
+                   if fetched.returncode == 0 else "")
+        added = run_git(root, "worktree", "add", "-b", branch, str(path), claimed) if claimed else fetched
+        if added.returncode != 0:
+            raise QueueError(f"git {'worktree' if claimed else 'fetch'} failed: "
+                             f"{failure_detail(added)}; #{number}'s branch {branch} is claimed on "
+                             f"{remote}, its labels unchanged")
     else:
         listed = run_git(root, "worktree", "list", "--porcelain")
         if listed.returncode != 0:
@@ -4158,6 +4504,7 @@ def start_worktree(root: Path, branch: str, worktree_root: str | None, create: b
             raise QueueError(f"No worktree exists for branch {branch}")
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
+        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip())
         sync(path)
     return path
 
@@ -4167,12 +4514,14 @@ STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
 
 def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
     """The GitHub steps of a start where gh cannot take them: the pause search where `paused`
-    (the relay asks it before anything else), `ready` off and `in-progress` on, the cloud worker
+    (the relay asks it before anything else), `ready` off and `in-progress` on with the first
+    beat (`beat_step`), the cloud worker
     assigned where `agent` names one, and the Started comment fleet-check's lease counts from."""
     return Plan(f"start #{number}", (
         *((pause_step(repo),) if paused else ()),
         label_step(repo, number, "ready", add=False),
         label_step(repo, number, "in-progress", add=True),
+        beat_step(repo, number, write=True),
         *((Step("assign", "issue_write", {
             **owner_repo(repo), "method": "update", "issue_number": number,
             "assignees": [agent]}),) if agent else ()),
@@ -4317,7 +4666,9 @@ def start_handed_off(
     if cloud and not agent:
         raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
     branch = str(issue["title"])
-    path = None if cloud else start_worktree(root, branch, worktree_root, create)
+    if cloud:
+        claim(root, number, repo, branch, newest_integration_commit(root))
+    path = None if cloud else start_worktree(root, number, repo, branch, worktree_root, create)
     plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
     if door is None:
         print(plan.text())
@@ -4326,7 +4677,7 @@ def start_handed_off(
             door.ask("issue_write", {key: value for key, value in arguments.items()
                                      if key not in ("owner", "repo")})
 
-        run_plan(plan, {**workflow_actions(door), "assign": assign})
+        run_plan(plan, {**workflow_actions(door), "assign": assign, "beat": beat_action_door(door)})
     return path, web_url(issue) or issue_url(repo, number), branch
 
 
@@ -4355,14 +4706,15 @@ def issue_ownership(issue: dict[str, object]) -> set[str]:
     }
 
 
-def branch_exists(root: Path, branch: str) -> bool:
+def branch_exists(root: Path, branch: str, repo: str) -> bool:
+    """Whether `branch` exists here or on the remote that hosts the issue's repository `repo`."""
     local = run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
     if local.returncode == 0:
         return True
     origin = run_git(root, "remote", "get-url", "origin")
     if origin.returncode != 0:
         return False
-    remote = run_git(root, "ls-remote", "--heads", "origin", branch)
+    remote = run_git(root, "ls-remote", issue_remote(root, repo), f"refs/heads/{branch}")
     if remote.returncode != 0:
         raise QueueError(f"Cannot check whether branch {branch} exists")
     return bool(remote.stdout.strip())
@@ -4381,9 +4733,17 @@ def concurrently(*calls: Callable[[], object]) -> list[object]:
 def ready_issues(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> list[dict[str, object]]:
+    """The startable work issues (`ready_and_claimed`)."""
+    return ready_and_claimed(root, repo, all_repos, allow_existing_branch)[0]
+
+
+def ready_and_claimed(
+    root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
     (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
-    progress holds. The two listings are read at once,
+    progress holds; and the claimed ones, the open issues labelled in-progress, with their bodies
+    (`claim_of`). The two listings are read at once,
     then each candidate's blockers and branch at once."""
     labels = repository_label_arguments(root, all_repos)
     candidates, active = (json.loads(listing) for listing in concurrently(
@@ -4407,7 +4767,7 @@ def ready_issues(
         detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
         blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
         return blockers == 0 and (allow_existing_branch
-                                  or not branch_exists(root, str(candidate["title"])))
+                                  or not branch_exists(root, str(candidate["title"]), repo))
 
     def state(number: int) -> dict[str, object] | None:
         try:
@@ -4430,7 +4790,7 @@ def ready_issues(
                       "read", file=sys.stderr)
         if verdict and not held:
             found.append(candidate)
-    return found
+    return found, active
 
 
 LOCAL_WORKERS = 4  # [workers] local, unset: at most this many working agents at once on a device
@@ -4446,10 +4806,10 @@ def worker_limit(root: Path, cloud: bool) -> int | None:
     """At most this many working agents run at once (README "Workers"): `se.toml` `[workers]`
     `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
     table = se_table(root, "workers")
-    unknown = sorted(set(table) - {"local", "cloud"})
+    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours"})
     if unknown:
         raise QueueError(f"[workers] in {root / 'se.toml'} holds unknown keys {', '.join(unknown)}; "
-                         "it holds local and cloud")
+                         "it holds local, cloud and claim_timeout_hours")
     key = "cloud" if cloud else "local"
     value = table.get(key, None if cloud else LOCAL_WORKERS)
     if value is None:
@@ -4981,10 +5341,11 @@ def name_refusal(name: str) -> str:
 SESSION_TAG = "SE"
 #: Each role a session title names, and whether its topic is refused, optional or required.
 SESSION_ROLES = {"se": "refused", "integrator": "optional", "worker": "required",
-                 "reviewer": "required", "researcher": "required", "spike": "required"}
+                 "reviewer": "required", "retro": "required", "researcher": "required",
+                 "spike": "required"}
 SESSION_TOPICS = {"integrator": "an area", "worker": "its ticket name",
-                  "reviewer": "the pull request's number", "researcher": "a topic",
-                  "spike": "a topic"}
+                  "reviewer": "the pull request's number", "retro": "its run's issue name",
+                  "researcher": "a topic", "spike": "a topic"}
 
 
 def session_title(role: str, project: str | None = None, topic: str | None = None) -> str:
@@ -5307,7 +5668,8 @@ def template_findings(root: Path, repo: str, chosen, title: str, body: str,
             private += [finding for finding in templates.private_findings(chosen, title, given, root)
                         if finding not in private]
         moved = (templates.provenance(chosen, templates.parse(chosen, recorded, title))
-                 if recorded is not None and recorded != body and not chosen.is_adapter else [])
+                 if recorded is not None and without_beat(recorded) != without_beat(body)
+                 and not chosen.is_adapter else [])  # a beat is no change to the text
         return private, private + moved + templates.check(
             chosen, templates.parse(chosen, body, title), root=SE_ROOT,
             bare_scripts=own_scripts(repo))
@@ -5579,20 +5941,25 @@ def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> St
 
 def file_work_issue(
     root: Path, title: str, file: Path | None, blockers: list[int], repo: str | None,
-    extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False,
+    extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False, *,
+    gate: bool = True, ready: bool = True,
 ) -> str:
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
     blockers are linked. The body is `file`, or `fields` rendered through the work template, checked
-    against it (README "Templates"). Returns the filed issue's URL, or the line naming the twin it
-    answered."""
+    against it (README "Templates"). The filing check runs first (`filing_check`), unless `gate` is
+    off: a run it files itself. Without `ready` the issue carries no `ready` label, as a run its
+    own agent runs. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
         raise QueueError("file needs a title, the ticket's name and its branch")
     title = checked_name("file", title)
     body, given = template_body(root, "work", "file", file, fields, lambda path: fleet_marked(
         read_text_file(path, "work issue body") + "\n"))
-    labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
+    labels = [*(label for label in work_labels(root, repo) if ready or label != "ready"),
+              *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
+    if gate:
+        filing_check(root, repo, "file")
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
         raise QueueError(
@@ -5606,10 +5973,61 @@ def file_work_issue(
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
             block(root, outcome.number, blocker, repo)
-        if not outcome.held:
+        if not outcome.held and ready:
             run_gh(root, ["issue", "edit", str(outcome.number), "--add-label", "ready",
                           *repo_arguments(repo)])
     return outcome.line(repo, "work issue")
+
+
+class ReviewDueError(QueueError):
+    """A retro or an overhaul is due or open: SE files no other issue until the person has decided
+    its findings (README "Retro due")."""
+
+
+REVIEW_HELP = 'README "Retro due"'
+
+
+def filing_door(root: Path, repo: str):
+    """retro.py's read door for the filing check: gh where it is signed in, else kern's relay
+    door where the command runs as one call, else None (the command prints its plan)."""
+    retro = sibling("retro")
+    if not hand_off():
+        return retro.GhDoor(root, repo, remote_repo(root) or repo)
+    door = relay_door(root, repo)
+    return retro.ToolDoor(door) if door is not None else None
+
+
+def filing_check(root: Path, repo: str, command: str, door=None,
+                 now: datetime | None = None) -> None:
+    """The filing check (README "Retro due"), which every issue SE files passes first: while a
+    retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
+    first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
+    work goes on: only filing is held. Where `command` only prints its plan (no gh, no relay),
+    print the check's command first, for the session to run before the plan."""
+    door = door if door is not None else filing_door(root, repo)
+    if door is None:
+        print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
+              f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
+              f"overhaul due or open, file nothing else ({REVIEW_HELP})")
+        return
+    retro = sibling("retro")
+    found = retro.countdowns(door, repo, integration_branch(root), root,
+                             now or datetime.now(timezone.utc))
+    if found is None:
+        raise QueueError(f"work_tickets.py {command}: the filing check could not read GitHub; "
+                         f"run `retro.py due --worktree {root.as_posix()}` ({REVIEW_HELP})")
+    held = (f"{command} files no other issue until the person has decided every finding of it in "
+            f"an SE session and it is closed; running work goes on ({REVIEW_HELP})")
+    for kind in ("retro", "overhaul"):
+        if found[kind].open:
+            names = ", ".join(f"#{number}" for number in found[kind].open)
+            raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
+    for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
+        if found[kind].due:
+            line = file_new(root, repo)
+            article = "an" if kind == "overhaul" else "a"
+            raise ReviewDueError(f"work_tickets.py {command}: {article} {kind} is due "
+                                 f"({found[kind].reason}), filed first: {line.strip()}; {held}")
 
 
 def today_stamp() -> str:
@@ -5760,6 +6178,7 @@ def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
         raise QueueError("backlog file needs a title and a body")
     body, given = template_body(root, "ticket", "backlog file", file, fields, read)
     title = checked_name("backlog file", title)
+    filing_check(root, repo, "backlog file")
     filing = Step("create", "issue_write", {
         **owner_repo(repo), "method": "create", "title": title.strip(),
         "body": body, "labels": [BACKLOG_LABEL, PERSON_LABEL]},
@@ -7662,7 +8081,7 @@ def tracker_actions(root: Path, repo: str) -> dict[str, Action]:
         run_gh(root, ["issue", "close", str(arguments["issue_number"]), *repo_arguments(repo)])
 
     return {"comment_issue": comment, "add_label": add_label, "remove_label": remove_label,
-            "close_issue": close}
+            "close_issue": close, "beat": beat_action_gh(root, repo)}
 
 
 def label_step(repo: str, number: int, label: str, add: bool) -> Step:
@@ -7960,6 +8379,9 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  f"by the integrator {verdict['integrator']}, with the description "
                  f"{verdict['description']}; anything else, or none: merge nothing",
             gives=("check run url",))
+    if mode == FAST_FORWARD:  # the plan ends here: the push that lands is the read-back's
+        waiting = replace(waiting, note=f"{waiting.note}. "
+                                        + NEVER_MERGE_ON_GITHUB.format(target=target))
     return Plan(f"land {landing} on {target}", (
         pause_step(tracker),
         *recording,
@@ -7977,6 +8399,13 @@ def landing_plan(remote: str, landing: str, target: str, base: str, landed: str,
                  f"refs/heads/{target}); where it moved, merge nothing and integrate again",
             gives=("merge commit sha",)),)),
     ), then)
+
+
+#: The rule a fast-forward landing's plan states in the step that ends at the check, and the
+#: read-back's refusals repeat (work model "Land"): GitHub's merge would write GitHub's identities
+#: into the integration branch's history, which the project identity's gate refuses.
+NEVER_MERGE_ON_GITHUB = ("Never merge this landing pull request on GitHub: integrate --read-back "
+                         "pushes {target} to the landing commit, and that push marks it merged")
 
 
 #: What each read of a landing pull request is for, as the told step names it: the reads of the
@@ -8119,10 +8548,10 @@ def landing_read_back(root: Path, target: str, base: str, landed: str,
 def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int, landed: str,
                   comment: str, pending: list[str], left: list[str] | None = None) -> Plan:
     """Close the work pull request with a line naming the landing, comment on the work issue,
-    take it out of progress and close it unless something keeps it open: `pending`, post-merge
-    acceptance, a review's open points or a planned split's pieces left; or `left`, what a
-    partial delivery naming no planned piece left (`partial_left`), which also takes any `ready`
-    off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
+    take it out of progress with its beat line, and close it unless something keeps it open:
+    `pending`, post-merge acceptance, a review's open points or a planned split's pieces left; or
+    `left`, what a partial delivery naming no planned piece left (`partial_left`), which also takes
+    any `ready` off and labels the issue `escalated`, so it reaches SE, which re-scopes it."""
     pulls = owner_repo(remote)
     issues = owner_repo(tracker)
     escalate = (label_step(tracker, work_number, "ready", add=False),
@@ -8135,6 +8564,7 @@ def closeout_plan(remote: str, tracker: str, pull_number: int, work_number: int,
         Step("comment_issue", "add_issue_comment",
              {**issues, "issue_number": work_number, "body": comment}),
         label_step(tracker, work_number, "in-progress", add=False),
+        beat_step(tracker, work_number, write=False),
         *escalate,
         *(() if pending or left else (Step("close_issue", "issue_write", {
             **issues, "method": "update", "issue_number": work_number, "state": "closed",
@@ -8566,6 +8996,35 @@ def landed_metrics(state: dict[str, object], landing_pull: int, description: str
             f"#{landing_pull}), save it again and read back again; nothing was closed")
 
 
+def relayed_landing_description(root: Path, state: dict[str, object], landing_pull: int) -> str:
+    """The landing pull request's description from kern's relay, for a read-back without
+    --landing-description. Where the relay holds no snapshot of it, the refusal names that cause
+    and the GitHub tool call that takes the snapshot; for a fast-forward landing it adds that the
+    pull request is never merged on GitHub, so no refusal reads like "merge first"."""
+    se_relay = sibling("se_relay")
+    owner, name = api_repo(str(state["remote"])).split("/")
+    rule = ("; nothing was pushed. " + NEVER_MERGE_ON_GITHUB.format(target=state["target"])
+            if state.get("landing_mode") == FAST_FORWARD else "")
+    read = se_relay.tool_call("pulls", owner, name, landing_pull)
+    relay = relay_for(root) if state.get("relay") else None
+    if relay is None and state.get("relay"):
+        raise QueueError(
+            f"kern's relay served this integrate but does not serve {root} now, so it holds no "
+            f"snapshot of the landing pull request #{landing_pull}: start kern for this checkout "
+            f"and read it with the GitHub tool {read}, or save that tool's answer's body and pass "
+            f"it as --landing-description <file>; then run --read-back again{rule}")
+    if relay is None:
+        raise QueueError(
+            "--read-back needs --landing-description <file>: the landing pull request's "
+            f"description as the GitHub tool {read} reads it once the plan's last step passed, "
+            f"or a checkout kern's relay served the integrate{rule}")
+    try:
+        path = relay.answer_file("pulls", owner, name, landing_pull, "landing pull request")
+    except se_relay.RelayError as error:
+        raise QueueError(f"{error}{rule}") from None
+    return str(json.loads(path.read_text(encoding="utf-8")).get("body") or "")
+
+
 def read_back_integration(root: Path, branch: str, landing_pull: int, check_run: str,
                           description: str | None) -> str:
     """The hand-off's second half: check the landing pull request's `description` for its
@@ -8579,15 +9038,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
             "first, which writes it")
     state = json.loads(path.read_text(encoding="utf-8"))
     if description is None:
-        relay = relay_for(root) if state.get("relay") else None
-        if relay is None:
-            raise QueueError(
-                "--read-back needs --landing-description <file>, the landing pull request's "
-                "description after the merge, or a checkout kern's relay served the integrate")
-        owner, name = api_repo(str(state["remote"])).split("/")
-        description = str(json.loads(
-            relay.answer_file("pulls", owner, name, landing_pull, "landing pull request")
-            .read_text(encoding="utf-8")).get("body") or "")
+        description = relayed_landing_description(root, state, landing_pull)
     metrics.note(issue=state["work_number"])
     landed_metrics(state, landing_pull, description)
     merged = None
@@ -8786,6 +9237,7 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
             "add_label": lambda arguments, label: issues.add_label(
                 int(arguments["issue_number"]), label),
             "close_issue": lambda arguments, _: issues.close_issue(int(arguments["issue_number"])),
+            "beat": beat_action_door(issues),
         })
         print(f"Issue #{work_number}: {issues.issue_state(work_number)} on GitHub after the merge")
     else:
@@ -11003,8 +11455,8 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
          arg("--landing-pull", type=int, help="with --read-back: the landing pull request's number"),
          arg("--check-run", help="with --read-back: the URL of its passed check run"),
          arg("--landing-description", type=Path, metavar="FILE",
-             help="with --read-back: the landing pull request's description after the merge, "
-                  "saved to a file; it must end in the plan's metrics line"),
+             help="with --read-back: the landing pull request's description once the plan's "
+                  "last step passed, saved to a file; it must end in the plan's metrics line"),
          arg("--build-command", help="project's output regeneration command"),
          INCLUDE_LATE,
          arg("--check-command", type=parse_check_commands, metavar="JSON",
@@ -11026,8 +11478,6 @@ def run_integrate(root: Path, args: argparse.Namespace) -> int:
         return 0
     if args.read_back is not None:
         read_back_arguments(args, "landing_pull", "check_run")
-        if args.landing_description is None and relay_for(root) is None:
-            read_back_arguments(args, "landing_description")  # no relay to read it from
         description = (read_file(args.landing_description, "the landing pull request's description")
                        if args.landing_description is not None else None)
         commit = read_back_integration(root, args.read_back, args.landing_pull, args.check_run,
@@ -11355,7 +11805,8 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("start", "start a ready work issue: worktree from the newest main, label in-progress; "
+@command("start", "start a ready work issue: claim its branch on the issue's remote, worktree "
+                  "from it, label in-progress; "
                   "without gh, the label change and the Started comment as GitHub steps, or "
                   "through kern's relay where it serves the checkout",
          WORKTREE,
@@ -11399,6 +11850,43 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+@command("claim", "claim a ready work issue for a worker your session tool starts: create its "
+                  "branch at the newest main on the remote that hosts the issue's repository; "
+                  "refused, changing nothing, where that branch exists there",
+         WORKTREE,
+         arg("issue", type=int),
+         REPO,
+         arg("--issue-body", type=Path, metavar="FILE",
+             help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
+                  "(method get) answered it, for its branch name"))
+def run_claim(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    branch = issue_branch(root, args.issue, repo, args.issue_body)
+    remote = claim(root, args.issue, repo, branch, newest_integration_commit(root))
+    print(f"Claimed #{args.issue}: branch {branch} on {remote}")
+    return 0
+
+
+def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) -> str:
+    """Work issue #`number`'s branch, its title: read with gh, else through kern's relay, else from
+    `issue_file`, the GitHub tools' issue_read answer."""
+    if not hand_off():
+        issue = fetch_issue(root, number, repo)
+    elif (door := relay_door(root, repo)) is not None:
+        issue = door.ask("issue_read", {"method": "get", "issue_number": number})
+    elif issue_file is not None:
+        issue = issue_answer(issue_file)
+    else:
+        raise QueueError(
+            f"claim: gh is not usable, so it cannot read #{number}: save your GitHub tools' "
+            f"issue_read (method get) answer of it to a file and pass --issue-body <file> "
+            f"({WITHOUT_GH})")
+    if not isinstance(issue, dict) or int(issue.get("number") or number) != number \
+            or not issue.get("title"):
+        raise QueueError(f"claim: the issue read is not #{number}: give issue_read's answer of it")
+    return str(issue["title"])
+
+
 @command("session-title", "print the title of a session a role starts: `SE`, "
                          "`SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` "
                          "(work model, Visible sessions)",
@@ -11437,10 +11925,28 @@ TRACKER_QUERY = (OPTIONAL_WORKTREE, REPO,
                      help="include tracker issues for every repository"))
 
 
-@command("ready", "list startable ready work issues", *TRACKER_QUERY)
+@command("ready", "list startable ready work issues, then each claimed one (labelled in-progress) "
+                  "as live or stale by its beat line, with the beat's age, and the stale ones for "
+                  "the person; neither is startable",
+         *TRACKER_QUERY,
+         arg("--claimed", type=Path, metavar="FILE",
+             help="without gh: judge only the claims, from the open issues labelled in-progress "
+                  "as your GitHub tools listed them (list_issues), the answer saved to FILE"))
 def run_ready(root: Path, args: argparse.Namespace) -> int:
-    for issue in ready_issues(root, resolve_repo(root, args.repo), args.all_repos):
-        print(f"#{issue['number']} {issue['title']}")
+    if args.claimed is not None:
+        claimed = tool_items(json_answer(args.claimed, "claimed issues"), "issues")
+        claimed = [issue for issue in claimed if IN_PROGRESS_LABEL in issue_labels(issue)
+                   and str(issue.get("state") or "open").lower() == "open"]
+    else:
+        startable, claimed = ready_and_claimed(root, resolve_repo(root, args.repo), args.all_repos)
+        for issue in startable:
+            print(f"#{issue['number']} {issue['title']}")
+    timeout, now = claim_timeout(root), utc_now()
+    claims = sorted((claim_of(issue, now, timeout) for issue in claimed), key=lambda c: c.number)
+    for claim in claims:
+        print(claim_line(claim, timeout))
+    if stale_claims_line(claims):
+        print(stale_claims_line(claims))
     return 0
 
 
@@ -11485,7 +11991,8 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
     """The queue's GitHub reads as a plan for the session's tools, where gh is not signed in: the
     pause search first, then the escalations, the delivered pull requests and the startable work
     issues, each with what keeps an item; the cloud's capacity is unlimited unless `[workers]`
-    `cloud` limits it, and then the workers running are read too."""
+    `cloud` limits it, and then the workers running are read too; last the claims, which
+    `ready --claimed` judges live or stale."""
     limit = worker_limit(root, cloud=True)
     where = owner_repo(repo)
     labels = [] if all_repos else [repository_label(root)]
@@ -11506,6 +12013,10 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
                   | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
                   "no branch yet and no file ownership an in-progress issue holds"),
         *([] if limit is None else [running_step(root, repo)]),
+        Step("claimed", "list_issues", {**where, "state": "OPEN",
+                                        "labels": ["work", "in-progress", *labels], "perPage": 100},
+             note="save the answer to a file and run work_tickets.py ready --claimed <file>: it "
+                  "names each claim live or stale by its beat, and the stale ones for the person"),
     ), then=capacity_line(limit))
 
 
@@ -11690,6 +12201,17 @@ def run_settings_check(root: Path, args: argparse.Namespace) -> int:
     return 1 if args.strict and any(line.kind == "difference" for line in lines) else 0
 
 
+@command("beat", "the worker's claim heartbeat, which the plugin's hook (scripts/se_hook.sh) starts "
+                 "on a tool call once the beat record intake wrote is due: it sets the work "
+                 "issue's beat line to now while the issue is open and in progress, and the next "
+                 "is due half the claim timeout later ([workers] claim_timeout_hours); before that "
+                 "it reads and writes nothing",
+         WORKTREE)
+def run_beat(root: Path, args: argparse.Namespace) -> int:
+    print(beat(root))
+    return 0
+
+
 @command("stop-check", "the plugin's Stop and SubagentStop hook: in a checkout whose ticket queue "
                        "is for a work issue, refuse the turn's end while its branch has no open "
                        "pull request whose description carries a field report that passes "
@@ -11826,19 +12348,17 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
       "backlog file", "backlog list", "block", "unhold", "paused")),
     ("delivery", "Delivery",
      "A worker's delivery: the field report and its guard, sync and identity, the gated push and "
-     "the pull request, and the Stop hook's check.",
+     "the pull request, the Stop hook's check and the claim's beat.",
      ("field-report", "guard", "sync", "identity", "deliver", "push", "verified", "pr-body",
-      "stop-check")),
+      "stop-check", "beat")),
     ("integration", "Integration",
      "The integrator's and SE's work: integrate, the release SE asks for, ref maintenance, the suite and "
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
-#: What the header of these components' declarations says they are generated from.
-COMPONENT_SOURCE = "its command registry"
 #: The commands a person waits on that only read: these go through kern where it runs
 #: (se_components.routed); every other command writes, or a hook, CI or a command runs it.
 INTERACTIVE_COMMANDS = frozenset(
@@ -11877,7 +12397,7 @@ READ_ONLY_COMMANDS = {
 #: goes through kern's `github.step` (RelayDoor) instead of a plan the session runs and reads back.
 STREAMED_COMMANDS = frozenset(
     {"integrate", "rehearse", "refs request", "refs apply", "file", "route", "fleet-check",
-     "start"})
+     "start", "beat"})
 
 
 def command_declarations(root: Path) -> dict[Path, str]:

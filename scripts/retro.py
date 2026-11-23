@@ -23,7 +23,7 @@ draft with
 
 - the previous retro's findings, each scored: the work issues of the window that name it
   (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
-  (recurred); where the overhaul countdown is on (overhaul.py due_after), one that an open issue
+  (recurred); where the overhaul countdown is on (overhaul.py countdown_on), one that an open issue
   takes is too early to score (TOO_EARLY), neither;
 
 and ends in a JSON block under BLOCK_MARKER (JSON is YAML too), which `read_block` parses back for
@@ -150,8 +150,9 @@ RULE_CHECKS = {
     "outside-pr": "no commit reached the integration branch outside a pull request",
     "field-report": "every closed work issue has a field report",
 }
-# A retro is due once this many work issues landed since the last one (se.toml [retro] due_after).
-DUE_AFTER = 10
+# A retro is due once what came back since the last one weighs this much (se.toml [retro]
+# due_after): a landing 1, a failure its failure_weight (SETTINGS).
+DUE_AFTER = 20
 # The state of an earlier run's finding whose issue is still open: it had no time to land, so the
 # run lists it and scores it neither way (no failure, no recurrence).
 TOO_EARLY = "too early to score"
@@ -362,6 +363,36 @@ class FileDoor:
             **work_tickets.owner_repo(self.remote), "method": "get_comments",
             "pullNumber": number},
             note=f"Save the answer as JSON to {self.directory / name}")), "comments")
+
+
+class ToolDoor:
+    """The countdowns' reads through kern's relay door (work_tickets.RelayDoor), where a command
+    runs as one call: each list page by page, as the host's GitHub tools answer it."""
+
+    def __init__(self, door) -> None:
+        self.door = door
+        self.missing: list[Step] = []
+
+    def closed_issues(self) -> list[dict]:
+        return self.door.issues("CLOSED")
+
+    def open_issues(self) -> list[dict]:
+        return self.door.issues("OPEN")
+
+    def pulls(self) -> list[dict]:
+        found: list[dict] = []
+        page = 1
+        while True:
+            items = work_tickets.tool_items(self.door.ask("list_pull_requests", {
+                "state": "closed", "perPage": 100, "page": page}), "pull_requests")
+            found += items
+            if len(items) < 100:
+                return found
+            page += 1
+
+    def issue(self, number: int) -> dict:
+        answer = self.door.ask("issue_read", {"method": "get", "issue_number": number})
+        return answer if isinstance(answer, dict) else {}
 
 
 def is_retro(issue: Issue) -> bool:
@@ -628,31 +659,156 @@ def landed(issue: Issue, landing: Pull | None) -> bool:
     return landing is not None and not is_duplicate(issue) and issue.state_reason != "not_planned"
 
 
-def landed_since_retro(door, tracker: str, branch: str) -> int | None:
-    """How many work issues landed in the next retro's window, read through `door`; None where
-    the door is still missing answers."""
-    found = read_window(door, 0)
-    if found is None:
+def run_start(issue: Issue) -> datetime | None:
+    """When a run (a retro or an overhaul issue) started: its creation, else, where the list
+    names none, its close."""
+    return when(issue.created_at) or when(issue.closed_at)
+
+
+def counted_run(issue: Issue) -> bool:
+    """A run that counts: not closed as a duplicate or as not planned."""
+    return not is_duplicate(issue) and issue.state_reason != "not_planned"
+
+
+@dataclass
+class Countdown:
+    """When a retro or an overhaul falls due (README "Retro due"): what came back since the newest
+    run of that kind started (`since`, from run `since_run`; None: the whole history), weighted
+    into `count`, and whether that, or `days` days since the start with anything come back, makes
+    one due; with the runs of that kind still open."""
+
+    kind: str
+    since: str | None
+    since_run: int | None
+    landed: int
+    failed: int
+    count: int
+    due_after: int
+    days: int
+    elapsed_days: int
+    due: bool
+    reason: str
+    open: list[int] = field(default_factory=list)
+
+
+def due_reason(kind: str, count: int, what: str, due_after: int, days: int, elapsed: int) -> str:
+    """Why a countdown is due, or "" where it is not: `count` at or above `due_after` (0: that
+    rule off), or `days` days (0: off) since its start with anything counted."""
+    if due_after and count >= due_after:
+        return f"{count} {what} since the last {kind} (due at {due_after})"
+    if days and count and elapsed >= days:
+        return f"{elapsed} days since the last {kind} with {count} {what} (due after {days} days)"
+    return ""
+
+
+def retro_countdown(closed: list[Issue], opened: list[Issue], pulls: list[Pull], tracker: str,
+                    branch: str, settings: dict[str, int], now: datetime) -> Countdown:
+    """The retro countdown, a pure function of the issues and pull requests it is given: what
+    came back since the newest retro started (its creation: a retro's counters reset when it
+    starts, so a late retro never makes the next one due at once). A work issue that landed adds
+    1; a work issue labelled ESCALATED_LABEL (an escalation or a refused landing) updated since
+    then adds `failure_weight`. Opening an issue counts nothing. components/retro-due counts the
+    same."""
+    runs = [issue for issue in [*closed, *opened] if is_retro(issue) and counted_run(issue)
+            and run_start(issue)]
+    newest = max(runs, key=run_start, default=None)
+    since = run_start(newest) if newest else None
+
+    def after(value: str) -> datetime | None:
+        moment = when(value)
+        return moment if moment and (since is None or moment > since) else None
+
+    naming: dict[int, list[Pull]] = {}
+    for pull in pulls:
+        number = reference(pull, tracker)
+        if number is not None:
+            naming.setdefault(number, []).append(pull)
+    moments: list[datetime] = []
+    landed = failed = 0
+    for issue in closed:
+        moment = after(issue.closed_at)
+        if (WORK_LABEL in issue.labels and not is_retro(issue) and moment
+                and landed_issue(issue, naming.get(issue.number, []), branch)):
+            landed += 1
+            moments.append(moment)
+    for issue in [*closed, *opened]:
+        moment = after(issue.updated_at)
+        if WORK_LABEL in issue.labels and ESCALATED_LABEL in issue.labels and not is_retro(issue) and moment:
+            failed += 1
+            moments.append(moment)
+    count = landed + failed * settings["failure_weight"]
+    start = since or min(moments, default=None)
+    elapsed = (now - start).days if start else 0
+    reason = due_reason("retro", count, "came back", settings["due_after"], settings["days"],
+                        elapsed)
+    return Countdown("retro", newest.created_at or newest.closed_at if newest else None,
+                     newest.number if newest else None, landed, failed, count,
+                     settings["due_after"], settings["days"], elapsed, bool(reason), reason,
+                     sorted(issue.number for issue in opened if is_retro(issue)))
+
+
+def landed_issue(issue: Issue, naming: list[Pull], branch: str) -> bool:
+    return landed(issue, landing_of(issue, naming, branch))
+
+
+def countdowns(door, tracker: str, branch: str, root: Path,
+               now: datetime) -> dict[str, Countdown] | None:
+    """The retro and the overhaul countdowns over what `door` reads: the closed and the open
+    issues and the pull requests, each closed issue's close time read one by one where the list
+    names none (the host's `list_issues`), only for those updated since the newest run started;
+    None where the door is still missing answers."""
+    closed = [issue_of(item) for item in door.closed_issues()]
+    opened = [issue_of(item) for item in door.open_issues()]
+    pulls = [pull_of(item) for item in door.pulls()]
+    if door.missing:
         return None
-    references = {pull.number: reference(pull, tracker) for pull in found.pulls}
-    return sum(landed(issue, landing_of(issue, [pull for pull in found.pulls
-                                                if references[pull.number] == issue.number],
-                                        branch))
-               for issue in found.window)
+    overhaul = sibling("overhaul")
+    starts = [run_start(issue) for issue in [*closed, *opened]
+              if (is_retro(issue) or overhaul.is_overhaul(issue)) and issue.created_at]
+    oldest = min((moment for moment in starts if moment), default=None)
+    for issue in closed:
+        if issue.closed_at:
+            continue
+        run = is_retro(issue) or overhaul.is_overhaul(issue)
+        if run or (WORK_LABEL in issue.labels and (oldest is None or not issue.updated_at
+                                                   or when(issue.updated_at) > oldest)):
+            read = issue_of(door.issue(issue.number))
+            issue.closed_at, issue.state_reason = read.closed_at, read.state_reason
+            issue.created_at = issue.created_at or read.created_at
+    if door.missing:
+        return None
+    return {"retro": retro_countdown(closed, opened, pulls, tracker, branch,
+                                     settings(root, "retro"), now),
+            "overhaul": overhaul.overhaul_countdown(closed, opened, settings(root, "overhaul"),
+                                                    now)}
 
 
-def due_after(root: Path, table: str = "retro", default: int = DUE_AFTER,
-              off: bool = False) -> int:
-    """`[<table>] due_after` in se.toml: how many counted items make a run of that kind due (for
-    a retro, landed work issues; for an overhaul, closed retros); built in `default`. With `off`,
-    0 is allowed too: the countdown is switched off."""
-    count = work_tickets.se_table(root, table).get("due_after", default)
-    least = 0 if off else 1
-    if isinstance(count, bool) or not isinstance(count, int) or count < least:
-        kind = "a whole number, 0 for off" if off else "a positive whole number"
-        raise QueueError(f"{table}.due_after in {root / 'se.toml'} must be {kind}; "
-                         f"fix it or remove it for the built-in {default}")
-    return count
+# The countdowns' settings (se.toml [retro] and [overhaul], README "Retro due"), each with its
+# built-in: how much makes a run due, what a failure weighs, and after how many days one with
+# anything to look at is due. 0 switches a rule off, except a retro's due_after.
+SETTINGS = {"retro": {"due_after": DUE_AFTER, "failure_weight": 5, "days": 7},
+            "overhaul": {"due_after": 3, "days": 30}}
+
+
+def settings(root: Path, table: str) -> dict[str, int]:
+    """`[<table>]` of se.toml as SETTINGS reads it, each key checked: a whole number, 0 for off
+    (a retro's due_after positive)."""
+    given = work_tickets.se_table(root, table)
+    found = {}
+    for key, default in SETTINGS[table].items():
+        value = given.get(key, default)
+        least = 1 if (table, key) == ("retro", "due_after") else 0
+        if isinstance(value, bool) or not isinstance(value, int) or value < least:
+            kind = "a positive whole number" if least else "a whole number, 0 for off"
+            raise QueueError(f"{table}.{key} in {root / 'se.toml'} must be {kind}; "
+                             f"fix it or remove it for the built-in {default}")
+        found[key] = value
+    return found
+
+
+def due_after(root: Path, table: str = "retro") -> int:
+    """`[<table>] due_after` in se.toml (SETTINGS): how much makes a run of that kind due."""
+    return settings(root, table)["due_after"]
 
 
 def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
@@ -764,10 +920,10 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
             return None
         previous = posted_block(texts, last.number, git_show(root))
     # An issue that takes one of the previous findings and is still open makes it too early to
-    # score, where the overhaul countdown is on (overhaul.py due_after): only then, and only with
+    # score, where the overhaul countdown is on (overhaul.py countdown_on): only then, and only with
     # findings to score, are the open issues read.
     opened = ([issue_of(item) for item in door.open_issues()]
-              if (previous or {}).get("findings") and sibling("overhaul").due_after(root) else [])
+              if (previous or {}).get("findings") and sibling("overhaul").countdown_on(root) else [])
     if door.missing:
         return None
     # The window's metrics: the local file's lines that started in it, and the line each landing
@@ -1617,13 +1773,67 @@ def run_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+# The retro's issue template, which the filing check files a due retro from, its scope DUE_SCOPE:
+# `retro-due-<yyyymmdd>`.
+TEMPLATE = Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / "retro.md"
+DUE_SCOPE = "due"
+
+
+def file_new(root: Path, repo: str | None) -> str:
+    """File a retro issue from TEMPLATE, labelled RETRO_LABEL (overhaul.py file_run)."""
+    return sibling("overhaul").file_run(root, repo, TEMPLATE, RETRO_LABEL, DUE_SCOPE)
+
+
+def countdown_lines(found: dict[str, Countdown]) -> list[str]:
+    """One line per countdown: what it counted since where it starts, and whether it is due or a
+    run of its kind is open."""
+    lines = []
+    for kind in ("retro", "overhaul"):
+        item = found[kind]
+        start = f"since #{item.since_run} started {item.since}" if item.since_run else "in the whole history"
+        counted = (f"{item.count} ({item.landed} landed, {item.failed} failed)"
+                   if kind == "retro" else f"{item.count} retros closed")
+        state = (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
+                 else f"due: {item.reason}" if item.due else "not due")
+        lines.append(f"{kind}: {counted} {start}, {item.elapsed_days} days; {state}")
+    return lines
+
+
+def run_due(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    tracker = work_tickets.resolve_repo(root, args.repo)
+    remote = work_tickets.remote_repo(root) or tracker
+    if args.answers is not None:
+        door = FileDoor(args.answers, tracker, remote)
+    elif work_tickets.hand_off():
+        door = FileDoor(Path("<dir>"), tracker, remote)
+    else:
+        door = GhDoor(root, tracker, remote)
+    found = countdowns(door, tracker, work_tickets.integration_branch(root), root,
+                       datetime.now(timezone.utc))
+    if found is None:
+        directory = args.answers or Path("<dir>")
+        then = (f"retro.py due --answers {directory}{' --json' if args.json else ''}"
+                f"{f' --repo {args.repo}' if args.repo else ''} --worktree {root}")
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools "
+              f"and saves their answers into {directory}:")
+        print(Plan("the retro and overhaul countdowns", tuple(door.missing), then).text())
+        return 0
+    if args.json:
+        print(json.dumps({kind: asdict(item) for kind, item in found.items()}, indent=2))
+    else:
+        print("\n".join(countdown_lines(found)))
+    return 0
+
+
 #: retro.py's commands as one kern component (README "Commands as components"), retro; each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
     "A retro: collect writes its draft from the work since the last one, file checks the judged "
-    "draft and closes the retro issue with its report.",
-    ("collect", "file")),)
+    "draft and closes the retro issue with its report, due says whether a retro or an overhaul "
+    "is due or open.",
+    ("collect", "file", "due")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as collect reads
 #: GitHub for minutes and writes the draft, and file writes.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
@@ -1689,6 +1899,22 @@ def make_parser() -> argparse.ArgumentParser:
     file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                              "tracker or origin remote)")
     file_command.set_defaults(run=run_file)
+    due_command = commands.add_parser(
+        "due", help="say whether a retro or an overhaul is due or open",
+        description="Count what came back since the newest retro started (a landing 1, an "
+                    "escalated work issue its failure_weight) and the retros closed since the "
+                    "newest overhaul started, and say whether either is due by se.toml [retro] "
+                    "and [overhaul] (README \"Retro due\") or a run of its kind is open; "
+                    "work_tickets.py file runs the same check first.")
+    due_command.add_argument("--json", action="store_true", help="the countdowns as JSON")
+    due_command.add_argument("--answers", type=Path, metavar="DIR",
+                             help="without gh: the directory the session saves the plan's "
+                                  "answers into")
+    due_command.add_argument("--worktree", default=".",
+                             help="the checkout of the repository (default: .)")
+    due_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
+                                            "tracker or origin remote)")
+    due_command.set_defaults(run=run_due)
     return top
 
 

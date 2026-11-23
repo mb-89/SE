@@ -318,8 +318,10 @@ QUEUE_ROUNDS = "1,6,5"
 BLOCKER_ROUNDS = "1,6,11"
 
 
-def queue_checkout(tmp_path: Path) -> Path:
-    """A checkout of the fake door whose origin holds main, as the queue's merge of main needs."""
+def queue_checkout(tmp_path: Path, monkeypatch) -> Path:
+    """A checkout of the fake door whose origin holds main, as the queue's merge of main needs;
+    its origin, a local path, stands for the remote that hosts the issues' repository."""
+    monkeypatch.setattr(work_tickets, "issue_remote", lambda root, repo: "origin")
     origin, checkout = tmp_path / "origin.git", tmp_path / "checkout"
     fake_git.init(origin, "--bare", "-b", "main")
     fake_git.clone(origin, checkout)
@@ -349,7 +351,7 @@ def test_queue_reads_the_door_at_once_and_declares_its_budget(slow_door, tmp_pat
     log = tmp_path / "door.jsonl"
     environment = {**slow_door["env"], "FAKE_GH_ROUNDS": QUEUE_ROUNDS, DOOR_LOG: str(log)}
     slow_door["metrics"].unlink(missing_ok=True)
-    checkout = queue_checkout(tmp_path)
+    checkout = queue_checkout(tmp_path, monkeypatch)
     result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
                             environment, monkeypatch)
     assert result.returncode == 0, result.stderr
@@ -369,7 +371,7 @@ def test_queue_reads_the_blockers_its_candidates_name_with_their_own_reads(
     log = tmp_path / "door.jsonl"
     environment = {**slow_door["env"], "FAKE_GH_ROUNDS": BLOCKER_ROUNDS, DOOR_LOG: str(log),
                    "FAKE_GH_BLOCKERS": "1"}
-    checkout = queue_checkout(tmp_path)
+    checkout = queue_checkout(tmp_path, monkeypatch)
     result = run_in_process(["queue", "--worktree", str(checkout), "--repo", "github.com/owner/repo"],
                             environment, monkeypatch)
     assert result.returncode == 0, result.stderr

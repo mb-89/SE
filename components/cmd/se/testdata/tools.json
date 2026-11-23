@@ -49,7 +49,7 @@
         "readOnlyHint": true,
         "title": "se greeting"
       },
-      "description": "se's start greeting, live from its core: what is due and what is queued. Use it at the start of a session, and whenever you ask what to do next. It reads:\n- `retro-due/due`: The work issues landed since the last retro and whether a retro is due; the retros closed since the last overhaul and whether an overhaul is due.\n- `fleet/findings`: Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
+      "description": "se's start greeting, live from its core: what is due and what is queued. Use it at the start of a session, and whenever you ask what to do next. It reads:\n- `retro-due/due`: What came back since the newest retro started and whether a retro is due or open; the retros closed since the newest overhaul started and whether an overhaul is due or open.\n- `fleet/findings`: Each stuck or stray piece of work, with its remedy, as fleet-check --json lists it.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -70,9 +70,50 @@
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": true,
+        "title": "se guidance"
+      },
+      "description": "SE's guidance: collect resolves the guidance trees of the project and its modules for a template or a set of tags, general before specific; project writes the tool files the notes implement; pin writes every template's resolution to tests/guidance-pins.yaml; and check finds what docs/guidance.md refuses in them. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `se_guidance.py check`: Finds what docs/guidance.md refuses in the project's guidance trees: front matter, names, tags, orphans, overrides, size and the generated files. Use it after changing a note. Usage: `se_guidance.py check [--root ROOT]`\n- `se_guidance.py collect`: Gives the guidance notes a template (--template) or a topic's tags (--tags a,b) get, general before specific, once per session (--session) and in pages. Use it before you work on or talk about a topic, and for a template's guidance before its input. Usage: `se_guidance.py collect (--template TEMPLATE | --tags TAGS) [--json] [--session SESSION] [--page PAGE] [--root ROOT]`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "se_guidance.py check",
+              "se_guidance.py collect"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "guidance",
+      "title": "se guidance"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true,
         "title": "se integration"
       },
-      "description": "The integrator's and SE's work: integrate, the release SE asks for, ref maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the generated docs. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `work_tickets.py capacity`: Shows how many more workers may start now: the worker limit less those running, on a local device also its cores and memory; unlimited in the cloud unless limited. Use it before starting workers. Usage: `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]`\n- `work_tickets.py config`: Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read. Usage: `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]`\n- `work_tickets.py fleet-check`: Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet. Usage: `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]`\n- `work_tickets.py metrics`: Prints what the commands cost from the line each run records: top spenders by wall time and GitHub calls, and each overrun of a budget. Use it to find what is slow. Usage: `work_tickets.py metrics [--since DATE] [--file FILE]`\n- `work_tickets.py parity`: Compares two commits' trees, such as one branch on two remotes, path by path apart from dependency lockfiles (se.lock, uv.lock). Use it to check that two remotes hold the same source. Usage: `work_tickets.py parity [--worktree WORKTREE] left right`\n- `work_tickets.py ready`: Lists the ready work issues a session may start now. Use it to choose the next package to start. Usage: `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]`\n- `work_tickets.py session-title`: Prints the title of a session a role starts, by the scheme SE/\u003cproject\u003e/\u003crole\u003e/\u003ctopic\u003e. Use it before starting a session, to give the host's session tool its title. Usage: `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]`\n- `work_tickets.py settings-check`: Compares the fleet's settings the repository records (fleet/settings.toml) with the live ones, one line per difference; advisory. Use it to see whether main's ruleset, the scheduled tasks or the cloud environment drifted. Usage: `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]`",
+      "description": "The integrator's and SE's work: integrate, the release SE asks for, ref maintenance, the suite and its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the generated docs. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `work_tickets.py capacity`: Shows how many more workers may start now: the worker limit less those running, on a local device also its cores and memory; unlimited in the cloud unless limited. Use it before starting workers. Usage: `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]`\n- `work_tickets.py config`: Shows the repository's and the machine-local settings in effect for a worktree. Use it when a command does not behave as expected, to see which settings it read. Usage: `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]`\n- `work_tickets.py fleet-check`: Lists every stuck or stray piece of work, each with its issue, pull request and remedy, or says healthy. Use it to see what needs attention across the fleet. Usage: `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]`\n- `work_tickets.py metrics`: Prints what the commands cost from the line each run records: top spenders by wall time and GitHub calls, and each overrun of a budget. Use it to find what is slow. Usage: `work_tickets.py metrics [--since DATE] [--file FILE]`\n- `work_tickets.py parity`: Compares two commits' trees, such as one branch on two remotes, path by path apart from dependency lockfiles (se.lock, uv.lock). Use it to check that two remotes hold the same source. Usage: `work_tickets.py parity [--worktree WORKTREE] left right`\n- `work_tickets.py ready`: Lists the ready work issues a session may start now. Use it to choose the next package to start. Usage: `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos] [--claimed FILE]`\n- `work_tickets.py session-title`: Prints the title of a session a role starts, by the scheme SE/\u003cproject\u003e/\u003crole\u003e/\u003ctopic\u003e. Use it before starting a session, to give the host's session tool its title. Usage: `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]`\n- `work_tickets.py settings-check`: Compares the fleet's settings the repository records (fleet/settings.toml) with the live ones, one line per difference; advisory. Use it to see whether main's ruleset, the scheduled tasks or the cloud environment drifted. Usage: `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]`",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -176,7 +217,7 @@
         "readOnlyHint": true,
         "title": "se templates"
       },
-      "description": "SE's templates: list names them, draft gives a template's fields, their instructions and their shape, check finds everything SE's filing commands would refuse in a text, or gives the Markdown to file, and fill checks an agent's fields against the raw input and gives the document. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `se_templates.py check`: Checks a text or a fields object against a template as SE's filing commands would: its first line is passes or refused, then every finding or, with --render, the Markdown to file. Use it before filing; it files nothing. Usage: `se_templates.py check (--body-file BODY_FILE | --fields FIELDS | --body BODY | --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]`\n- `se_templates.py draft`: Gives a template's fields, what belongs in each (field_says), their shape and a JSON Schema of them. Use it before writing an issue, a pull request or a report SE checks. Usage: `se_templates.py draft [--markdown] [--tree] template`\n- `se_templates.py fill`: Fills a template from the raw input: without fields it gives the template's instructions, guidance and empty draft; with fields and the raw input its first line is passes, then the document to write or file, or refused, then every finding. Use it to write any text a template shapes; it writes nothing. Usage: `se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT] [--fields FIELDS | --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template`\n- `se_templates.py list`: Lists SE's templates with the actions each shapes. Use it to find the template for a text before writing it. Usage: `se_templates.py list [--tree]`",
+      "description": "SE's templates: list names them, draft gives a template's fields, their instructions and their shape, check finds everything SE's filing commands would refuse in a text, or gives the Markdown to file, and fill checks an agent's fields against the raw input and gives the document. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `se_templates.py check`: Checks a text or a fields object against a template as SE's filing commands would: its first line is passes or refused, then every finding or, with --render, the Markdown to file. Use it before filing; it files nothing. Usage: `se_templates.py check (--body-file BODY_FILE | --fields FIELDS | --body BODY | --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]`\n- `se_templates.py draft`: Gives a template's guidance first, once per session (--session) and in pages, then on the last page its fields, what belongs in each (field_says), their shape and a JSON Schema of them. Use it before writing an issue, a pull request or a report SE checks. Usage: `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template`\n- `se_templates.py fill`: Fills a template from the raw input: without fields it gives the template's guidance first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, then the document to write or file, or refused, then every finding. Use it to write any text a template shapes; it writes nothing. Usage: `se_templates.py fill [--prompt PROMPT] [--input INPUT | --input-text INPUT_TEXT] [--fields FIELDS | --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template`\n- `se_templates.py list`: Lists SE's templates with the actions each shapes. Use it to find the template for a text before writing it. Usage: `se_templates.py list [--tree]`",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

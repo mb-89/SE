@@ -512,3 +512,59 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
     line.write_text("write\n", encoding="utf-8", newline="\n")  # the retired switch's line
     assert hook(home, project, "PreToolUse", event=calls[0]).returncode == 0
     assert gate_runs(home) == 5
+
+
+# The claim's heartbeat (README "Workers"): a fake uv logs each beat the hook starts, detached, and
+# rings the test's bell (tests/waiting.py), found beside the home.
+FAKE_BEAT_UV = """#!/bin/sh
+echo "$*" >> "$HOME/beats"
+"@PYTHON@" -c "@RING@" "$(cat "$HOME/../bell")" beat
+""".replace("@PYTHON@", sh(Path(sys.executable))).replace("@RING@", waiting.RING)
+
+
+def beat_due(project: Path, due: float) -> Path:
+    """The beat record intake writes, due at the Unix time `due`."""
+    record = project / ".se" / "work" / "beat.yaml"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(f"# The claim's heartbeat\nissue: 5\nrepo: \"git.example/owner/repo\"\n"
+                      f"beat: 2026-11-23T08:30Z\ndue: {int(due)}\n", encoding="utf-8", newline="\n")
+    return record
+
+
+def settled_hook(home: Path, project: Path, event: str = "PreToolUse") -> subprocess.CompletedProcess:
+    """The hook, returned once it and every process it started have exited (off Windows)."""
+    env = {"HOME": sh(home), "PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": sh(project)}
+    payload = '{"session_id":"s1","hook_event_name":"%s","tool_name":"Bash"}' % event
+    return waiting.settled_run([BASH, sh(SCRIPT), event], env=env, input=payload,
+                               capture_output=True, text=True, timeout=30)
+
+
+def test_a_tool_call_starts_the_claims_beat_once_it_is_due_and_before_reads_the_record_alone(machine):
+    home, project = machine
+    uv = home / ".local" / "bin" / "uv"
+    uv.write_text(FAKE_BEAT_UV, encoding="utf-8", newline="\n")
+    install(home, project)
+    beats, claim = home / "beats", project / ".se" / "work" / "beat.claim"
+
+    beat_due(project, time.time() + 3 * 3600)  # younger than half the timeout: nothing started
+    for event in ("PreToolUse", "PostToolUse"):
+        result = settled_hook(home, project, event)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert not beats.exists() and not claim.exists()
+    assert (home / "calls").read_text(encoding="utf-8").count("hook PreToolUse") == 1  # kern still told
+
+    beat_due(project, time.time() - 60)  # due: one beat, detached, its output in beat.log
+    assert settled_hook(home, project).returncode == 0
+    BELLS[home].wait(lambda heard: len(heard) >= 1)
+    assert beats.read_text(encoding="utf-8").splitlines() == [
+        f"run --no-project --python >=3.11 python {sh(ROOT)}/scripts/work_tickets.py beat "
+        f"--worktree {sh(project)}"]
+    assert claim.is_file() and (project / ".se" / "work" / "beat.log").is_file()
+
+    # While its claim stands, the next tool calls start no second beat; `beat` removes the claim.
+    assert settled_hook(home, project).returncode == 0
+    assert len(beats.read_text(encoding="utf-8").splitlines()) == 1
+    claim.unlink()
+    assert settled_hook(home, project).returncode == 0
+    BELLS[home].wait(lambda heard: len(heard) >= 2)
+    assert len(beats.read_text(encoding="utf-8").splitlines()) == 2

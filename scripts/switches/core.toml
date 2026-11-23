@@ -82,13 +82,14 @@ help = "README.md#project-settings"
 [[switch]]
 name = "[overhaul] due_after"
 kind = "se.toml"
-reader = "scripts/overhaul.py"
-default = "off"
+reader = "scripts/retro.py"
+default = "on"
 layers = ["se.toml"]
 key = "overhaul.due_after"
 off = [0]
 other = "on"
-help = "README.md#overhaul-due"
+help = "README.md#retro-due"
+note = "on (3): an overhaul falls due after that many retros; 0 turns that rule off, and the countdown is off where [overhaul] days is 0 too"
 
 [[switch]]
 name = "[tests] trust_integrator"

@@ -18,6 +18,7 @@ import (
 	"se/components/fleet"
 	"se/components/origin"
 	retrodue "se/components/retro-due"
+	"se/components/template"
 )
 
 // still is a host clock that never moves: SE's wiring places kern's clock,
@@ -76,7 +77,7 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	origin.Tracker = func(string) string { return "alice/SE" }
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +128,8 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 	}
 	var due retrodue.Due
 	get("retro-due/due", &due)
-	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 10 {
-		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, due after 10", due)
+	if due.Issues != 3 || due.Landed != 0 || due.Due || due.DueAfter != 20 || due.OverhaulAfter != 3 {
+		t.Fatalf("retro-due/due is %+v, and wants 3 issues read, none landed, the built-in due after 20 and 3 retros", due)
 	}
 }
 
@@ -171,7 +172,7 @@ func TestSEsTrackedWiringLeavesTheSessionRecordOff(t *testing.T) {
 	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
 	rec := session.New(session.Options{Dir: dir})
 	c, err := host.Serve(host.Options{Root: root, Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, rec.Component}})
+		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component, rec.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}

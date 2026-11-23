@@ -1,7 +1,7 @@
 [project]
 # The project's one semantic version, raised by work_tickets.py release when SE asks (README
 # "Project settings").
-version = "11.0.0"
+version = "11.1.0"
 # Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (README
 # "Release tags").
 release = "workflow"
@@ -28,6 +28,12 @@ authored_content = [
 # sets no [binary] and keeps running the bare kern.
 [binary]
 release = "components/release.toml"
+
+# The project's own commit checks, run by se's commit hook on the staged tree (README "Commit
+# checks"): every generated file marked and declared (scripts/generated.py), without its fresh runs,
+# which CI's hygiene step adds.
+[commit_checks]
+generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "check", "--no-rerun"]
 
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
 # integrator's own, so no commit on main carries an address (README "Landing on main").
@@ -159,6 +165,9 @@ skills = []
 skills = []
 
 [roles.reviewer]
+skills = []
+
+[roles.retro]
 skills = []
 
 [roles.worker]

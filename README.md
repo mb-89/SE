@@ -47,8 +47,8 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 
 | Place | Install | Choose SE | Check that it loaded |
 | --- | --- | --- | --- |
-| Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:reviewer` and `se:worker` |
-| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
+| Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:retro`, `se:reviewer` and `se:worker` |
+| Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:retro`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
 | GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
 | GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
 | GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
@@ -208,13 +208,12 @@ uv run python <se>/scripts/se_start.py refresh
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh is signed in, `check` also counts the work issues landed since
-  the last retro (the window of [`retro.py collect`](#work-commands)), the retros closed since
-  the last overhaul where that countdown is on, runs the [fleet check](#fleet-check), and caches
-  them.
-  - The greeting then names a retro that is [due](#retro-due), an overhaul that is
-    [due](#overhaul-due) and the fleet's findings by kind and issue, one line each with the command
-    to run, and a part whose read failed with its cause.
+- What is due in the work: where gh is signed in, `check` also counts what came back since the
+  newest retro started ([Retro due](#retro-due)), the retros closed since the newest overhaul
+  started where that countdown is on, runs the [fleet check](#fleet-check), and caches them.
+  - The greeting then names a retro that is [due or open](#retro-due), an overhaul that is
+    [due or open](#overhaul-due) and the fleet's findings by kind and issue, one line each with the
+    command to run, and a part whose read failed with its cause.
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
@@ -761,11 +760,13 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 [workers]
 local = 4
 cloud = 8
+claim_timeout_hours = 12
 ```
 
 `[workers]` limits how many working agents run at once. `local` holds a local device's limit,
 default 4; `cloud` holds the cloud's (a Claude Code cloud session, a CI runner), and unset leaves
-the cloud open. Each is a whole number of at least 1; other keys are refused.
+the cloud open. Each is a whole number of at least 1. `claim_timeout_hours` is the claim timeout
+below, a positive number of hours, default 12; other keys are refused.
 
 - **What counts.** A worker runs while its work issue is open and labelled `in-progress`.
   `work_tickets.py capacity` prints how many more may start: the limit less those running, on a
@@ -776,6 +777,23 @@ the cloud open. Each is a whole number of at least 1; other keys are refused.
   finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
   reached.
 - **Not limited.** Integrators, reviewers and SE's own session.
+- **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
+  one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
+  with the claim, and the close-out removes it.
+  - The worker's `intake` records its due time in `.se/work/beat.yaml`. On every tool call the
+    plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
+    passed it starts `work_tickets.py beat` in the background, which sets the line to now.
+  - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
+    so the session runs its read and write when the hook tells it. The write carries the issue's
+    own labels, so the [template gate](#templates) judges it by the issue's own template.
+  - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
+    and the template check ignore it.
+- **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
+  claim timeout) or stale (older, or no beat), with the beat's age; neither is startable. Its
+  last line names the stale ones for SE to pass to the person; without gh, `ready --claimed
+  <file>` judges the `list_issues` answer that `queue`'s plan reads.
+  - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
+    delete its branch, take off `in-progress` and remove the beat line.
 
 #### Commit checks
 
@@ -878,8 +896,9 @@ earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
     base, with the tested tree).
   - It finishes everything local of step 6 and prints its close-out plan: the work pull request's
     comment and close, and the work issue's comment, label and close.
-  - Before that it checks the landing pull request's description, saved after the merge: it must
-    end in the plan's [metrics](#metrics) line, or the read-back fails and closes nothing.
+  - Before that it checks the landing pull request's description, saved once the plan's last
+    step passed: it must end in the plan's [metrics](#metrics) line, or the read-back fails and
+    closes nothing.
   - An integration-fix commit, one the integrator pushes onto `land/<branch>` after the hand-off
     (a lock move), is recorded with `integrate --record-fix <branch>` before the read-back.
     - Each fix commit has one parent on the tested landing and is the project identity's, author
@@ -1167,33 +1186,53 @@ The same tree may be held by more than one remote or checkout
 
 ```toml
 [retro]
-due_after = 10
+due_after = 20      # what came back, weighed: a landing 1, a failure failure_weight
+failure_weight = 5  # an escalated work issue: an escalation or a refused landing
+days = 7            # or this many days after the last retro started, with anything come back; 0: off
 ```
 
-A retro is due once `due_after` work issues landed since the last closed retro issue, built in 10;
-the [start greeting](#start-and-refresh) names it. `scripts/retro.py` owns the count and the
-setting; SE's retro-due component counts the same from kern's GitHub names, for the greeting to read
-live ([components/README.md](components/README.md)).
+A retro falls due by what comes back to the project, never by what is opened: filing 20 issues in
+one session makes none due. Each work issue that landed since the newest retro started adds 1, each
+work issue labelled `escalated` (an escalation, a refused landing) updated since then adds
+`failure_weight`. At `due_after`, or `days` days after that start with anything counted, one is due.
+
+- **Filed first.** `work_tickets.py file` and `backlog file` run the filing check before they file
+  anything: a due retro or overhaul is filed first, from its issue template (labelled `retro` or
+  `discovery`, not `ready`), and the filing asked for is refused, naming it.
+- **Blocking.** While a retro or an overhaul is open, every other filing is refused with the
+  reason and its number, until the person has decided its findings in an SE session and it is
+  closed. Running work goes on, and issues keep coming back; they count towards the next run.
+- **Scope and reset.** A retro covers everything up to its start, what came back after it fell
+  due included; its counters reset when it starts (its issue's creation), so a late retro never
+  makes the next one due at once.
+- **Own session.** A [retro agent](src/agents/retro.md) runs each retro and overhaul in its own
+  session; its first step asks the person for the field feedback.
+- **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
+  `retro.py due` prints both countdowns. The [start greeting](#start-and-refresh) names a run due
+  or open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
+  read live ([components/README.md](components/README.md)).
+- **Not counted yet.** A red `main` and a worker stopped by the usage limit leave no mark on an
+  issue, so they add nothing until one does.
 
 ### Overhaul due
 
 ```toml
 [overhaul]
-due_after = 3  # absent or 0: off
+due_after = 3  # retros closed since the last overhaul started; 0: off
+days = 30      # or this many days after it started, with a retro closed; 0: off
 ```
 
-An overhaul is due once `due_after` retros closed since the last closed overhaul issue; a retro
-closed as a duplicate or as not planned does not count, as for the landings a retro counts. The
-[start greeting](#start-and-refresh) names it beside the retro.
+An overhaul falls due after `due_after` retros closed since the newest overhaul started, or `days`
+days after that start with a retro closed; a retro closed as a duplicate or as not planned does
+not count. It is filed first and holds filing back like a retro ([Retro due](#retro-due)).
 
-- **Off unless set.** Absent or 0 switches the countdown off, SE's own `se.toml` among them: the
-  greeting names no overhaul, and the retro and the overhaul score earlier findings as they did
-  before it.
+- **On unless both are 0.** With `due_after` and `days` both 0 the countdown is off: the greeting
+  names no overhaul, and the retro and the overhaul score earlier findings as they did before it.
 - **Too early to score.** With it on, an earlier finding that an issue still open takes is listed
   as `too early to score`, by `retro.py collect` and `overhaul.py read`, not scored as a failure.
-- **One store.** `scripts/overhaul.py` owns the count (`retros_since`, a pure function of the runs
-  it is given) and the setting; the retro-due component counts the same into its name,
-  `retro-due/due`, by its config `overhaul-after` (0, off, unless the wiring sets it).
+- **One store.** `scripts/overhaul.py` owns the count (`overhaul_countdown`, a pure function of the
+  runs it is given); the retro-due component counts the same into its name, `retro-due/due`, by its
+  configs `overhaul-after` and `overhaul-days`.
 
 ### Stop hook
 
@@ -1853,8 +1892,14 @@ uv run python <se>/scripts/se_workflows.py check
 - What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
   and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `suite-shard` and
   `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
-- `write` writes the files it names, or regenerates those the project holds; each is a generated
-  file whose first line names its source path, the pin and SE's place.
+  - Beside them, the files a project holds as SE has them: `RUNME.sh` and `RUNME.ps1`, the
+    installer beside the project's own `RUNME.conf`, and `ref-maintenance.yml`, which its owner
+    triggers by hand; each keeps its triggers (`WHOLE`).
+- `write` writes the files it names, or regenerates those the project holds. Each is a generated
+  file whose marker (the guidance note
+  [generated-files-are-marked](guidance/generated-files-are-marked.md)) names `se_workflows.py
+  write` and, as its source, SE's file, the pin and SE's place: its first line, or the line after
+  `RUNME.sh`'s `#!`.
 - `kern-at-pin` checks kern out at the commit a folder's `se.lock` locks into its
   `.se/modules/kern`, refusing a lock whose version is not the `require kern` of the `go.mod` that
   the folder's `se.toml` `[components.kern]` `go` names, naming both lines. A folder whose `se.lock`
@@ -1871,7 +1916,8 @@ uv run python <se>/scripts/se_workflows.py check
   project's own owner on its host is `${{ github.repository_owner }}/<name>`, so the copies name no
   owner; any other names its own `<owner>/<name>`. SE is public, so the run's token reads it.
 - Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
-  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
+  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`,
+  unless it is held whole.
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
   from what the pin generates: a project adds it to its integration checks, as SE runs
   `se_plugin.py check`.
@@ -2047,10 +2093,11 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 #### Delivery
 
 `components/delivery`: A worker's delivery: the field report and its guard, sync and identity, the
-gated push and the pull request, and the Stop hook's check.
+gated push and the pull request, the Stop hook's check and the claim's beat.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `work_tickets.py beat` | `work_tickets.py beat --worktree WORKTREE` | the worker's claim heartbeat, which the plugin's hook (scripts/se_hook.sh) starts on a tool call once the beat record intake wrote is due: it sets the work issue's beat line to now while the issue is open and in progress, and the next is due half the claim timeout later ([workers] claim_timeout_hours); before that it reads and writes nothing |
 | `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue. It first refuses an se outside the project's se pin ([components.se]), naming both versions, and never exits non-zero without a message |
 | `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out |
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
@@ -2070,6 +2117,7 @@ settings checks and the generated docs.
 | Command | Usage | What it does |
 |---|---|---|
 | `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running |
+| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue` | claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
 | `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (README "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
@@ -2080,15 +2128,15 @@ settings checks and the generated docs.
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
 | `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues. Without gh it syncs the checkout and prints its reads as a plan for the session's GitHub tools |
-| `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list startable ready work issues |
+| `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos] [--claimed FILE]` | list startable ready work issues, then each claimed one (labelled in-progress) as live or stale by its beat line, with the beat's age, and the stale ones for the person; neither is startable |
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py refs request` | `work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO] [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL] [--conclusion CONCLUSION] [--log-file LOG_FILE] issue` | for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its output and label the issue escalated; prints the line for SE. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
 | `work_tickets.py release` | `work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]` | release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README "Project settings"); with nothing integrated since, it releases nothing |
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
-| `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
+| `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
-| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] issue` | start a ready work issue: worktree from the newest main, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
+| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
 | `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
@@ -2107,11 +2155,13 @@ and the report it files as one comment.
 #### Retro
 
 `components/retro`: A retro: collect writes its draft from the work since the last one, file checks
-the judged draft and closes the retro issue with its report.
+the judged draft and closes the retro issue with its report, due says whether a retro or an overhaul
+is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
 | `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul
@@ -2160,8 +2210,8 @@ document.
 | `se_templates.py backstop` | `se_templates.py backstop --event-name EVENT_NAME --event EVENT [--backstop {off,on}] [--worktree WORKTREE]` | plan the label or failure a GitHub event's off-template text gets |
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
-| `se_templates.py draft` | `se_templates.py draft [--markdown] [--tree] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -2169,12 +2219,14 @@ document.
 
 `components/guidance`: SE's guidance: collect resolves the guidance trees of the project and its
 modules for a template or a set of tags, general before specific; project writes the tool files the
-notes implement; and check finds what docs/guidance.md refuses in them.
+notes implement; pin writes every template's resolution to tests/guidance-pins.yaml; and check finds
+what docs/guidance.md refuses in them.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `se_guidance.py check` | `se_guidance.py check [--root ROOT]` | find what docs/guidance.md refuses in the guidance trees |
-| `se_guidance.py collect` | `se_guidance.py collect (--template TEMPLATE \| --tags TAGS) [--json] [--root ROOT]` | print the guidance a template or a set of tags gets, general first |
+| `se_guidance.py collect` | `se_guidance.py collect (--template TEMPLATE \| --tags TAGS) [--json] [--session SESSION] [--page PAGE] [--root ROOT]` | print the guidance a template or a set of tags gets, general first |
+| `se_guidance.py pin` | `se_guidance.py pin [--root ROOT]` | write tests/guidance-pins.yaml, every template's resolution |
 | `se_guidance.py project` | `se_guidance.py project [--root ROOT]` | write each tool file the notes implement, its generated part from them |
 <!-- generated by `work_tickets.py docs`: end -->
 
@@ -2485,7 +2537,13 @@ turn, be pushed or pass CI; each refusal names the file, the template and each f
 An agent asks for a template through the MCP door's tool `templates`, `scripts/se_templates.py`: `list`
 names the templates, `draft <template>` gives `draft --json`'s answer, and `check` finds all the filing
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
-Markdown to file. It only reads; its first line is `passes` or `refused: <n> findings`.
+Markdown to file.
+
+It only reads; `check`'s first line is `passes` or `refused: <n> findings`.
+
+- `draft` and `fill` give the template's guidance first, as
+  [docs/guidance.md "Delivery"](docs/guidance.md#delivery) states: once per session (`--session`),
+  in pages of kern's page limit, the template on the last page.
 
 `fill` is one step from raw input to document ([docs/templates.md "Fill"](docs/templates.md#fill)):
 it takes the template, the prompt, the raw input and the agent's fields.
@@ -2500,6 +2558,11 @@ it takes the template, the prompt, the raw input and the agent's fields.
 - `templates.py` resolves a name for the project `--root` names, else the checkout holding
   `--path`: its own `templates/`, the template repositories its se.toml pins, then SE's
   ([docs/templates.md "Template repositories"](docs/templates.md#template-repositories)).
+- A template overlay, `templates/<name>.overlay.md` beside its template, adds instructions,
+  fields, tags and rules or makes a rule stricter; one that loosens its template does not load.
+- Before each fill, `templates.py fill` brings every template a `templates/imports.yaml` imports up
+  to date from its source tool, then the overlay applies (`scripts/template_import.py`; its
+  `refresh` does the same alone).
 
 The commands that file issues check with them where se.toml `[templates] enforce` says so: `file`
 against `work`, `backlog file` against `ticket` and `route` against `routed`. Each takes

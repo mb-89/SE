@@ -9,9 +9,14 @@ model. `gate` is the hook's and not the door's; it writes only its count of refu
 
 - `se_templates.py list [--tree]` prints what `templates.py list` prints: every template of SE's with its
   actions and, for an adapter, its checker.
-- `se_templates.py draft <template> [--markdown] [--tree]` prints the JSON `templates.py draft --json` prints:
+- `se_templates.py draft <template> [--markdown] [--worktree DIR] [--session ID] [--page N] [--tree]`
+  prints the template's guidance first, then the JSON `templates.py draft --json` prints:
   `template`, `says`, `fields`, `field_says`, `field_shape` and `schema`; `--markdown` the Markdown
   draft `templates.py draft` prints. An unknown template is answered with the list of templates, exit code 2.
+- *Guidance first* (`guided`, docs/guidance.md "Delivery"): `draft` and `fill` without fields print
+  the notes `--worktree`'s guidance trees resolve for the template, as `se_guidance.py collect
+  --template` delivers them, once per session (`--session`) and in pages (`--page` without one);
+  the template comes on the last page, under the line `## The template <name>` (TEMPLATE_HEADING).
 - `se_templates.py check` takes what `templates.py check` takes: a template, or `--action` with `--repo`,
   `--labels` and `--base` to select one as a write would; the text as one of `--body`,
   `--body-file`, `--fields` and `--fields-json`; `--title`; `--render`; `--tree`. Besides,
@@ -29,10 +34,11 @@ model. `gate` is the hook's and not the door's; it writes only its count of refu
     finds them, where the template's own check named none.
 
 - `se_templates.py fill <template> [--prompt TEXT] [--input FILE | --input-text TEXT] [--fields FILE |
-  --fields-json TEXT] [--title TEXT] [--worktree DIR] [--templates DIR] [--tree]` is the tool's
+  --fields-json TEXT] [--title TEXT] [--worktree DIR] [--session ID] [--page N] [--templates DIR] [--tree]`
+  is the tool's
   action `fill` (docs/templates.md "Fill"), `templates.py fill` with `check`'s findings:
-  - without fields it prints `templates.instructions` as JSON, the instructions first and the
-    guidance of `--worktree`'s trees, exit 0;
+  - without fields it prints the guidance first (Guidance first, above), then on the last page
+    `templates.instructions` as JSON, its `guidance` the notes' names and paths alone, exit 0;
   - with fields it needs the raw input and answers as `check --render` answers, `refused: <n>
     findings` or `passes` then the document (`templates.fill`): `check`'s findings for the title
     and the rendered text, and the `quote` findings against the raw input (`templates.quoted`); a
@@ -205,6 +211,9 @@ DANGLING_RULE = "dangling"
 COMMAND = "se_templates.py check"
 FILL_COMMAND = "se_templates.py fill"
 PASSES = "passes"
+#: The line that opens the template on the last page of a draft's or a fill's answer, after its
+#: guidance (`guided`).
+TEMPLATE_HEADING = "## The template {name}"
 #: The gate's bound on its own run, from its start to its answer: past it, the write passes.
 GATE_SECONDS = 10.0
 #: The gate's log of the writes it let pass without judging, under the project.
@@ -647,14 +656,15 @@ INTERACTIVE_COMMANDS = frozenset({"list", "draft", "check", "fill"})
 READ_ONLY_COMMANDS = {
     "list": "Lists SE's templates with the actions each shapes. Use it to find the template for a text "
             "before writing it.",
-    "draft": "Gives a template's fields, what belongs in each (field_says), their shape and a JSON "
+    "draft": "Gives a template's guidance first, once per session (--session) and in pages, then on "
+             "the last page its fields, what belongs in each (field_says), their shape and a JSON "
              "Schema of them. Use it before writing an issue, a pull request or a report SE "
              "checks.",
     "check": "Checks a text or a fields object against a template as SE's filing commands would: its "
              "first line is passes or refused, then every finding or, with --render, the Markdown "
              "to file. Use it before filing; it files nothing.",
-    "fill": "Fills a template from the raw input: without fields it gives the template's instructions, "
-            "guidance and empty draft; with fields and the raw input its first line is passes, "
+    "fill": "Fills a template from the raw input: without fields it gives the template's guidance "
+            "first, once per session (--session) and in pages, then its instructions and empty draft; with fields and the raw input its first line is passes, "
             "then the document to write or file, or refused, then every finding. Use it to write "
             "any text a template shapes; it writes nothing.",
 }
@@ -672,6 +682,8 @@ def make_parser() -> argparse.ArgumentParser:
         description="Print the JSON templates.py draft --json prints; --markdown the empty template.")
     drafting.add_argument("template", help="the template, as list names it")
     drafting.add_argument("--markdown", action="store_true", help="print the Markdown draft")
+    drafting.add_argument("--worktree", type=Path, default=Path("."),
+                          help="the project whose guidance is read (default: .)")
     drafting.add_argument("--tree", **tree)
     checking = commands.add_parser(
         "check", help="check a text against a template as SE's filing commands would",
@@ -715,6 +727,12 @@ def make_parser() -> argparse.ArgumentParser:
     filling.add_argument("--templates", type=Path,
                          help="read the templates from this folder instead of SE's templates/")
     filling.add_argument("--tree", **tree)
+    for command in (drafting, filling):
+        command.add_argument("--session", help="the session whose record names the guidance notes "
+                                               "already printed to it (default: none, every note "
+                                               "printed)")
+        command.add_argument("--page", type=int, default=1,
+                             help="without --session: the page of a longer answer (default: 1)")
     gating = commands.add_parser(
         "gate",
         help="SE's hook: judge one GitHub write's body, or a claimed file's write, against its template",
@@ -789,13 +807,28 @@ def run_list(options: argparse.Namespace) -> int:
     return 0
 
 
+def guided(template, options: argparse.Namespace, text: str) -> str:
+    """The answer that hands the agent `template` as `text`: the template's guidance first, once
+    per session and in pages, the template under TEMPLATE_HEADING on the last page
+    (docs/guidance.md "Delivery", se_guidance.py `delivered`)."""
+    guidance = sibling("se_guidance")
+    root = options.worktree.resolve()
+    try:
+        chosen = guidance.Template(template.name, frozenset(template.tags), template.path)
+        notes = guidance.for_template(guidance.load(root).notes, chosen)
+        return guidance.delivered(root, notes, f"Guidance for the template {template.name}",
+                                  session=options.session, page=options.page,
+                                  tail=f"\n{TEMPLATE_HEADING.format(name=template.name)}\n\n{text}")
+    except guidance.Usage as error:
+        raise Usage(str(error)) from error
+
+
 def run_draft(options: argparse.Namespace) -> int:
     templates = sibling("templates")
     template = named(loaded(options), options.template, "se_templates.py draft")
-    if options.markdown:
-        print(templates.draft(template), end="")
-    else:
-        print(json.dumps(templates.draft_fields(template), indent=2))
+    text = (templates.draft(template) if options.markdown
+            else json.dumps(templates.draft_fields(template), indent=2) + "\n")
+    print(guided(template, options, text), end="")
     return 0
 
 
@@ -953,7 +986,10 @@ def run_fill(options: argparse.Namespace) -> int:
     template = named(loaded(options), options.template, FILL_COMMAND)
     root = options.worktree.resolve()
     if options.fields is None and options.fields_json is None:
-        print(json.dumps(templates.instructions(template, options.prompt or "", root), indent=2))
+        answer = templates.instructions(template, options.prompt or "", root)
+        answer["guidance"] = [{key: note[key] for key in ("name", "path")}
+                              for note in answer["guidance"]]
+        print(guided(template, options, json.dumps(answer, indent=2) + "\n"), end="")
         return 0
     try:
         if options.input is not None:
