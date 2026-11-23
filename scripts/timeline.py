@@ -551,9 +551,9 @@ def build(files: dict[str, str], destination: Path, read_at: str) -> int:
         folder = Path(scratch) / "timeline"
         for path, content in files.items():
             (folder / path).parent.mkdir(parents=True, exist_ok=True)
-            (folder / path).write_text(content, encoding="utf-8")
+            (folder / path).write_text(content, encoding="utf-8", newline="\n")
         config = Path(scratch) / "obs-config.json"
-        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8")
+        config.write_text(json.dumps(CORE_CONFIG), encoding="utf-8", newline="\n")
         destination.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
             [*build_docs.obs_document_command(obs), "--adapter", build_docs.ADAPTER, "--config", str(config),
@@ -630,7 +630,7 @@ def main(argv: list[str] | None = None, post: Poster | None = None, now: datetim
             print(f"timeline: {error}", file=sys.stderr)
             return 1
     if args.save_snapshot:
-        args.save_snapshot.write_text(json.dumps(snapshot, indent=1), encoding="utf-8")
+        args.save_snapshot.write_text(json.dumps(snapshot, indent=1), encoding="utf-8", newline="\n")
     code = build(vault(snapshot, ages=ages), args.destination, snapshot["read_at"])
     if code:
         return code

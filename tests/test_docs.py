@@ -37,21 +37,22 @@ RUNTIME = ROOT / ".se" / ".runtime" / "runme-se"
 CONF = ROOT / "RUNME.conf"
 
 
-def fakes(folder: Path, log: Path) -> None:
+def fakes(folder: Path, log: Path) -> Path:
     """Fill ``folder``, put first on PATH, with a fake for every need of SE's RUNME.conf, so the build's
     RUNME installs nothing and reaches no network: ``se`` prints FAKE_HELP; each other command need
-    that PATH lacks exits 0; ``bash``, called as RUNME's ``get se`` line, writes RUNME's se need in its
-    working folder and records that folder in ``log``, and hands every other call to the real bash."""
+    that PATH lacks exits 0. Returns the file to set as BASH_ENV, which every non-interactive bash
+    reads first: where bash runs RUNME's ``get se`` line, it writes RUNME's se need in its working
+    folder, records that folder in ``log`` and ends that bash; every other bash goes on. Not a fake
+    ``bash`` on PATH: Git for Windows' sh puts its own /usr/bin before PATH."""
     folder.mkdir()
     conf = CONF.read_text(encoding="utf-8")
     home = Path(os.environ.get("HOME", str(Path.home())))
     extra = [str(home / line.split()[1][2:]) for line in conf.splitlines() if line.startswith("path ~/")]
     lookup = os.pathsep.join([os.environ.get("PATH", ""), *extra])
-    real_bash = shutil.which("bash", path=lookup)
-    assert real_bash, "the build's RUNME needs a bash on PATH"
+    assert shutil.which("bash", path=lookup), "the build's RUNME needs a bash on PATH"
 
     def write(name: str, body: str) -> None:
-        (folder / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
+        (folder / name).write_text(f"#!/bin/sh\n{body}", encoding="utf-8", newline="\n")
         (folder / name).chmod(0o755)
 
     write("se", f"printf '%s' '{FAKE_HELP}'\n")
@@ -59,11 +60,12 @@ def fakes(folder: Path, log: Path) -> None:
                         if line.startswith("need ") and line.split()[2] == "command"} - {"se", "bash"}):
         if not shutil.which(name, path=lookup):
             write(name, "exit 0\n")
-    write("bash", 'if [ "$*" = "scripts/bootstrap.sh --binary" ]; then\n'
-                  f'  pwd >>"{log}"\n'
-                  '  mkdir -p .se/.runtime && echo fake >.se/.runtime/runme-se\n'
-                  '  exit 0\nfi\n'
-                  f'exec "{real_bash}" "$@"\n')
+    bash_env = folder.parent / "bash-env.sh"
+    bash_env.write_text('if [ "$0 $*" = "scripts/bootstrap.sh --binary" ]; then\n'
+                        f'  pwd >>"{log.as_posix()}"\n'
+                        '  mkdir -p .se/.runtime && echo fake >.se/.runtime/runme-se\n'
+                        '  exit 0\nfi\n', encoding="utf-8", newline="\n")
+    return bash_env
 
 
 @pytest.fixture(scope="module")
@@ -73,8 +75,9 @@ def built(tmp_path_factory, obs):
     and RUNME need as they were before it."""
     folder = tmp_path_factory.mktemp("docs")
     log = folder / "bash.log"
-    fakes(folder / "bin", log)
-    env = dict(os.environ, PATH=os.pathsep.join([str(folder / "bin"), os.environ.get("PATH", "")]))
+    bash_env = fakes(folder / "bin", log)
+    env = dict(os.environ, PATH=os.pathsep.join([str(folder / "bin"), os.environ.get("PATH", "")]),
+               BASH_ENV=str(bash_env))
     before = snapshot()
     runtime = RUNTIME.read_bytes() if RUNTIME.exists() else None
     result = build("--destination", str(folder / "index.html"), "--document", str(folder / "docs.json"), env=env)

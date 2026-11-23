@@ -26,6 +26,8 @@ def test_the_probe_reads_a_runtimes_version_from_its_own_command():
     assert se_runtimes.Machine(path="").version("python") is None, "none on PATH: missing"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the sealed PATH holds shell shims and the "
+                    "runtime got is a shell script, neither of which Windows starts as a command")
 def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()
@@ -45,6 +47,8 @@ def test_runme_gets_a_missing_runtime_from_the_conf_the_check_writes(tmp_path, m
     assert (root / "runtimes" / "node").is_file(), "the get line ran in the root, as RUNME runs it there"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the sealed PATH holds shell shims and the "
+                    "runtime got is a shell script, neither of which Windows starts as a command")
 def test_runmes_own_remedy_names_a_runtime_it_could_not_get(tmp_path, monkeypatch):
     root, tools = tmp_path / "app", tmp_path / "bin"
     root.mkdir()

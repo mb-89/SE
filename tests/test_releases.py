@@ -44,7 +44,7 @@ def build_checkout(tmp_path: Path) -> None:
     fake_git.clone(origin, root)
     git(root, "config", "user.name", "mb")
     git(root, "config", "user.email", "mb")
-    (root / "se.toml").write_text(settings("1.2.3"), encoding="utf-8")
+    (root / "se.toml").write_text(settings("1.2.3"), encoding="utf-8", newline="\n")
     git(root, "add", "se.toml")
     git(root, "commit", "-q", "-m", "base")
     git(root, "tag", "v1.2.3")
@@ -74,7 +74,7 @@ def commit_on(root: Path, branch: str, text: str) -> str:
     """Commit `text` on `branch` (created where missing), back on main; returns the commit."""
     present = git_door.run("show-ref", "--verify", "--quiet", f"refs/heads/{branch}", root=root)
     git(root, "switch", "-q", branch) if present.returncode == 0 else git(root, "switch", "-q", "-c", branch)
-    (root / f"{branch.replace('/', '-')}.txt").write_text(text, encoding="utf-8")
+    (root / f"{branch.replace('/', '-')}.txt").write_text(text, encoding="utf-8", newline="\n")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", text)
     commit = git(root, "rev-parse", "HEAD")
@@ -264,7 +264,7 @@ def test_a_failed_push_of_the_landings_is_retried_and_the_release_raises_once(ch
 
 
 def test_an_untagged_version_is_tagged_as_it_is(checkout, capsys):
-    (checkout / "se.toml").write_text(settings("2.0.0"), encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("2.0.0"), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "start at 2.0.0")
     integrate(checkout, "feature/topic-20261106")
     assert release(checkout) == 0
@@ -294,7 +294,7 @@ def test_other_branches_and_merges_release_nothing(checkout, capsys):
 
 def release_trailer(root: Path, branch: str, breaking: bool, *arguments: str) -> int:
     body = root.parent / "issue.md"
-    body.write_text(issue_body(breaking), encoding="utf-8")
+    body.write_text(issue_body(breaking), encoding="utf-8", newline="\n")
     return work_tickets.main(["release-trailer", branch, "--issue-body", str(body),
                               "--worktree", str(root), *arguments])
 
@@ -352,7 +352,7 @@ def test_a_breaking_package_integrated_by_hand_releases_major(checkout, capsys):
 
 def released_at(root: Path, version: str) -> None:
     """Origin's main at project.version `version`, released: se.toml committed and tagged."""
-    (root / "se.toml").write_text(settings(version), encoding="utf-8")
+    (root / "se.toml").write_text(settings(version), encoding="utf-8", newline="\n")
     git(root, "commit", "-q", "-am", f"at {version}")
     git(root, "tag", f"v{version}")
     git(root, "push", "-q", "origin", "main", f"v{version}")
@@ -416,7 +416,7 @@ def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
     assert release(checkout) == 0
     assert released_as(checkout, "0.4.0")
     # The person states the interface stable by setting 1.0.0 by hand; the release tags it.
-    (checkout / "se.toml").write_text(settings("1.0.0"), encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.0.0"), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "Stable interface")
     assert release(checkout) == 0
     assert released_as(checkout, "1.0.0")
@@ -511,7 +511,7 @@ def report_at(root: Path, tip: str, kind: str = "patch") -> str:
     path = root.parent / "description.md"
     path.write_text(f"Fixes https://git.example/owner/repo/issues/5\n\n{work_tickets.REPORT_BEGIN}\n"
                     f"**Branch tip:** `{tip}`  **Re-integration kind:** patch\n{declared(kind)}"
-                    f"{work_tickets.REPORT_END}\n", encoding="utf-8")
+                    f"{work_tickets.REPORT_END}\n", encoding="utf-8", newline="\n")
     return str(path)
 
 
@@ -519,7 +519,7 @@ def test_release_trailer_refuses_a_pull_request_description_without_a_report(che
     tip = commit_on(checkout, "fix/topic-20261106", "reported")
     path = Path(report_at(checkout, tip))
     path.write_text(path.read_text(encoding="utf-8").replace(work_tickets.REPORT_END, ""),
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     assert release_trailer(checkout, "fix/topic-20261106", False, "--pr-description", str(path)) == 1
     captured = capsys.readouterr()
     assert captured.out == "" and "holds no field report" in captured.err
@@ -586,7 +586,7 @@ def test_release_trailer_refuses_a_commit_after_the_reported_tip_naming_it(check
 
 
 def test_without_a_version_release_says_how_to_release(checkout, capsys):
-    (checkout / "se.toml").write_text(settings(None), encoding="utf-8")
+    (checkout / "se.toml").write_text(settings(None), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "no version")
     assert release(checkout) == 0
     assert (f"Release off: no project.version in {checkout / 'se.toml'}; write it as "
@@ -608,7 +608,7 @@ def test_a_clone_with_a_foreign_identity_releases_with_the_project_identity(chec
 
 
 def test_without_an_identity_the_landing_s_push_refuses_naming_the_setting_and_sync(checkout, capsys):
-    (checkout / "se.toml").write_text(settings("1.2.3").replace(IDENTITY, ""), encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.2.3").replace(IDENTITY, ""), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "no identity")
     integrate(checkout, "fix/topic-20261106")
     before = git(checkout, "rev-parse", "origin/main")
@@ -625,7 +625,7 @@ def test_without_an_identity_the_landing_s_push_refuses_naming_the_setting_and_s
 def test_a_malformed_version_is_an_error_naming_the_file_and_the_remedy(checkout, capsys, version):
     value = f'"{version}"' if isinstance(version, str) else str(version)
     (checkout / "se.toml").write_text(f"[project]\nversion = {value}\npublic_check = false\n{IDENTITY}",
-                                      encoding="utf-8")
+                                      encoding="utf-8", newline="\n")
     assert release(checkout) == 1
     error = capsys.readouterr().err
     assert f"project.version in {checkout / 'se.toml'} is {version!r}, not MAJOR.MINOR.PATCH" in error
@@ -642,7 +642,7 @@ def test_the_work_issue_marks_a_breaking_change_in_its_package_kind(kind, breaki
 
 
 def by_workflow(root: Path, version: str = "1.2.3") -> None:
-    (root / "se.toml").write_text(settings(version) + 'release = "workflow"\n', encoding="utf-8")
+    (root / "se.toml").write_text(settings(version) + 'release = "workflow"\n', encoding="utf-8", newline="\n")
     git(root, "commit", "-q", "-am", "release by workflow")
 
 
@@ -676,7 +676,7 @@ def test_with_release_by_workflow_an_untagged_version_waits_for_the_workflow(che
 
 
 def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
-    (checkout / "se.toml").write_text(settings("1.2.3") + 'release = "manual"\n', encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.2.3") + 'release = "manual"\n', encoding="utf-8", newline="\n")
     assert release(checkout) == 1
     assert (f"project.release in {checkout / 'se.toml'} is 'manual'; set it to \"workflow\" or remove it"
             in capsys.readouterr().err)
@@ -687,7 +687,7 @@ def test_a_landed_merge_without_a_kind_is_released_by_hand_and_never_read_again(
     is, and the next release reads only what landed after it."""
     integrate(checkout, "fix/old-20261106", trailer="")
     assert release(checkout) == 1
-    (checkout / "se.toml").write_text(settings("1.2.4"), encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.2.4"), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "Release v1.2.4 by hand")
     assert release(checkout) == 0
     assert released(checkout) == ("1.2.4", "v1.2.4")
@@ -727,7 +727,7 @@ def plugin_checkout(checkout: Path, build: list[str]) -> Path:
     for name in ("se_plugin.py", "agent_lint.py", "generated.py"):  # the generator and what it loads
         shutil.copy2(PROJECT / "scripts" / name, checkout / "scripts" / name)
     (checkout / "se.toml").write_text(
-        settings("1.2.3") + f"release_build = {json.dumps(build)}\n", encoding="utf-8")
+        settings("1.2.3") + f"release_build = {json.dumps(build)}\n", encoding="utf-8", newline="\n")
     plugin("build", checkout)
     git(checkout, "add", ".")
     git(checkout, "commit", "-q", "-m", "plugin")
@@ -771,7 +771,7 @@ def test_a_failing_release_build_restores_se_toml_and_commits_nothing(checkout, 
 
 
 def test_a_malformed_release_build_is_an_error_naming_the_file(checkout, capsys):
-    (checkout / "se.toml").write_text(settings("1.2.3") + 'release_build = "make"\n', encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.2.3") + 'release_build = "make"\n', encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "malformed")
     integrate(checkout, "feature/topic-20261106")
     assert release(checkout) == 1
@@ -848,15 +848,15 @@ def missed_release(checkout: Path) -> str:
     """1.3.0 integrated but never tagged, then 1.3.1 tagged: SE's missed v1.0.0. Its first commit."""
     by_workflow(checkout)
     git(checkout, "switch", "-q", "-c", "feature/topic-20261106")
-    (checkout / "se.toml").write_text(settings("1.3.0") + 'release = "workflow"\n', encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.3.0") + 'release = "workflow"\n', encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "bump in the branch")
     git(checkout, "switch", "-q", "main")
     git(checkout, "merge", "-q", "--no-ff", "-m", "Integrate feature/topic-20261106: work", "feature/topic-20261106")
     first = git(checkout, "rev-parse", "HEAD")
-    (checkout / "note.txt").write_text("x", encoding="utf-8")
+    (checkout / "note.txt").write_text("x", encoding="utf-8", newline="\n")
     git(checkout, "add", ".")
     git(checkout, "commit", "-q", "-m", "still 1.3.0")
-    (checkout / "se.toml").write_text(settings("1.3.1") + 'release = "workflow"\n', encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("1.3.1") + 'release = "workflow"\n', encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "Release v1.3.1")
     git(checkout, "tag", "v1.3.1")
     git(checkout, "push", "-q", "origin", "main", "v1.3.1")
@@ -1013,12 +1013,12 @@ def test_the_squash_commit_onto_an_unrelated_main_releases_its_version_and_major
     git(checkout, "push", "-q", "origin", "main:se")
     git(checkout, "switch", "-q", "--orphan", "go")
     for name in ("go.mod", "main.go"):
-        (checkout / name).write_text(name, encoding="utf-8")
+        (checkout / name).write_text(name, encoding="utf-8", newline="\n")
         git(checkout, "add", name)
         git(checkout, "commit", "-q", "-m", f"Add {name}")
     git(checkout, "rm", "-q", "go.mod", "main.go")
     git(checkout, "checkout", "-q", "main", "--", ".")
-    (checkout / "se.toml").write_text(settings("2.0.0") + 'release = "workflow"\n', encoding="utf-8")
+    (checkout / "se.toml").write_text(settings("2.0.0") + 'release = "workflow"\n', encoding="utf-8", newline="\n")
     git(checkout, "add", ".")
     git(checkout, "commit", "-q", "-m", "se becomes main")
     squash = git(checkout, "rev-parse", "HEAD")

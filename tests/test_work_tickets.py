@@ -81,8 +81,8 @@ def git_worktree(case_root: Path) -> tuple[Path, Path]:
     fake_git.init(coordinator, "-b", "coordinator")
     assert git(coordinator, "config", "user.name", "Worker test").returncode == 0
     assert git(coordinator, "config", "user.email", "worker-test@example.invalid").returncode == 0
-    (coordinator / ".gitignore").write_text("/.se/\n", encoding="utf-8")
-    (coordinator / "README").write_text("baseline\n", encoding="utf-8")
+    (coordinator / ".gitignore").write_text("/.se/\n", encoding="utf-8", newline="\n")
+    (coordinator / "README").write_text("baseline\n", encoding="utf-8", newline="\n")
     assert git(coordinator, "add", ".").returncode == 0
     assert git(coordinator, "commit", "-m", "baseline").returncode == 0
     assert git(coordinator, "worktree", "add", "-b", "worker", str(worker)).returncode == 0
@@ -184,7 +184,7 @@ def test_guard_compares_against_the_fetched_remote_integration_branch(worktree: 
     assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (upstream / "test_example.py").write_text(
         "def test_removed_upstream():\n    pass\n", encoding="utf-8"
-    )
+    , newline="\n")
     assert git(upstream, "add", ".").returncode == 0
     assert git(upstream, "commit", "-m", "baseline tests").returncode == 0
     clone = worktree.parent / "guard-clone"
@@ -215,7 +215,7 @@ def test_guard_reads_a_branch_the_clone_only_fetched_and_names_the_fetch_otherwi
     assert git(upstream, "config", "user.name", "Guard test").returncode == 0
     assert git(upstream, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (upstream / "test_example.py").write_text("def test_removed_on_feature():\n    pass\n",
-                                              encoding="utf-8")
+                                              encoding="utf-8", newline="\n")
     assert git(upstream, "add", ".").returncode == 0
     assert git(upstream, "commit", "-m", "baseline tests").returncode == 0
     assert git(upstream, "checkout", "-q", "-b", "feature").returncode == 0
@@ -249,7 +249,7 @@ def test_guard_reads_a_branch_the_clone_only_fetched_and_names_the_fetch_otherwi
 def test_authored_content_globs_ignores_pyproject_settings(worktree: Path) -> None:
     (worktree / "pyproject.toml").write_text(
         "[tool.se]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
-    )
+    , newline="\n")
     assert work_tickets.authored_content_globs(worktree) == []
 
 
@@ -262,10 +262,10 @@ def authored_repository(repository: Path, branch: str, guide_text: str) -> tuple
     assert git(repository, "config", "user.email", "guard-test@example.invalid").returncode == 0
     (repository / "se.toml").write_text(
         "[project]\nauthored_content = [\"docs/**/*.md\"]\n", encoding="utf-8"
-    )
+    , newline="\n")
     guide = repository / "docs" / "guide.md"
     guide.parent.mkdir()
-    guide.write_text(guide_text, encoding="utf-8")
+    guide.write_text(guide_text, encoding="utf-8", newline="\n")
     assert git(repository, "add", ".").returncode == 0
     assert git(repository, "commit", "-m", "baseline prose").returncode == 0
     assert git(repository, "checkout", "-b", branch).returncode == 0
@@ -279,8 +279,8 @@ def test_guard_reports_removed_authored_sentences_until_field_report_names_them(
         worktree.parent / "authored-content-case", "remove-prose",
         "This sentence is removed.\nThis sentence is moved.\nThis sentence is retained.\n",
     )
-    guide.write_text("This sentence is retained.\n", encoding="utf-8")
-    (repository / "docs" / "moved.md").write_text("This sentence is moved.\n", encoding="utf-8")
+    guide.write_text("This sentence is retained.\n", encoding="utf-8", newline="\n")
+    (repository / "docs" / "moved.md").write_text("This sentence is moved.\n", encoding="utf-8", newline="\n")
     assert git(repository, "add", ".").returncode == 0
     assert git(repository, "commit", "-m", "move and remove prose").returncode == 0
     report = repository / "field-report.md"
@@ -316,10 +316,10 @@ def test_guard_reads_a_branch_behind_main_from_its_merge_base(worktree: Path) ->
     repository, guide = authored_repository(
         worktree.parent / "guard-merge-base-case", "behind-main", "This sentence stays.\n",
     )
-    guide.write_text("This sentence stays.\nThe branch adds this one.\n", encoding="utf-8")
+    guide.write_text("This sentence stays.\nThe branch adds this one.\n", encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "the branch's sentence").returncode == 0
     assert git(repository, "checkout", "main").returncode == 0
-    guide.write_text("This sentence stays.\nMain landed this one since.\n", encoding="utf-8")
+    guide.write_text("This sentence stays.\nMain landed this one since.\n", encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "main's new sentence").returncode == 0
 
     assert work_tickets.deleted_authored_sentences(repository, "behind-main") == []
@@ -335,7 +335,7 @@ def test_guard_keeps_dots_in_protected_content_whole(worktree: Path) -> None:
         "```\n"
         "The fenced block stays with this sentence.\n",
     )
-    guide.write_text("", encoding="utf-8")
+    guide.write_text("", encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "remove protected prose").returncode == 0
 
     removed = work_tickets.deleted_authored_sentences(repository, "remove-protected-content")
@@ -372,7 +372,7 @@ def test_guard_reports_only_the_paragraph_changed_between_two_unchanged_blocks(
     repository, guide = authored_repository(
         worktree.parent / f"guard-structure-case-{len(removed)}", "change-paragraph", base,
     )
-    guide.write_text(branch, encoding="utf-8")
+    guide.write_text(branch, encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "change one paragraph").returncode == 0
 
     assert work_tickets.deleted_authored_sentences(repository, "change-paragraph") == [
@@ -443,7 +443,7 @@ def test_guard_accepts_the_whole_sentence_with_a_path_quoted_across_lines(worktr
         worktree.parent / "guard-path-sentence-case", "remove-path-sentence",
         f"{sentence}\nThis sentence stays.\n",
     )
-    guide.write_text("This sentence stays.\n", encoding="utf-8")
+    guide.write_text("This sentence stays.\n", encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "remove a sentence holding a path").returncode == 0
 
     assert work_tickets.deleted_authored_sentences(repository, "remove-path-sentence") == [
@@ -548,16 +548,16 @@ def moved_folder_case(case: Path, destination_tests: str | None,
     assert git(repository, "remote", "add", "origin", str(case / "app.git")).returncode == 0
     folder = repository / "adapters" / "html" / "tests"
     folder.mkdir(parents=True)
-    (folder / "test_html.py").write_text(MOVED_TESTS, encoding="utf-8")
+    (folder / "test_html.py").write_text(MOVED_TESTS, encoding="utf-8", newline="\n")
     if destination_guide is not None:
         (repository / "se.toml").write_text('[project]\nauthored_content = ["**/*.md"]\n',
-                                             encoding="utf-8")
+                                             encoding="utf-8", newline="\n")
         (repository / "adapters" / "html" / "spec").mkdir()
         (repository / "adapters" / "html" / "spec" / "guide.md").write_text(MOVED_GUIDE,
-                                                                           encoding="utf-8")
+                                                                           encoding="utf-8", newline="\n")
     (repository / "tests").mkdir()
     (repository / "tests" / "test_app.py").write_text(
-        "def test_outside():\n    pass\n", encoding="utf-8")
+        "def test_outside():\n    pass\n", encoding="utf-8", newline="\n")
     assert git(repository, "add", ".").returncode == 0
     assert git(repository, "commit", "-qm", "baseline").returncode == 0
     assert git(repository, "checkout", "-q", "-b", "move-html").returncode == 0
@@ -573,10 +573,10 @@ def moved_folder_case(case: Path, destination_tests: str | None,
     for key, value in (("user.name", "Guard test"), ("user.email", "guard-test@example.invalid")):
         assert git(destination, "config", key, value).returncode == 0
     (destination / "tests").mkdir()
-    (destination / "tests" / "test_html.py").write_text(destination_tests, encoding="utf-8")
+    (destination / "tests" / "test_html.py").write_text(destination_tests, encoding="utf-8", newline="\n")
     if destination_guide is not None:
         (destination / "spec").mkdir()
-        (destination / "spec" / "guide.md").write_text(destination_guide, encoding="utf-8")
+        (destination / "spec" / "guide.md").write_text(destination_guide, encoding="utf-8", newline="\n")
     assert git(destination, "add", ".").returncode == 0
     assert git(destination, "commit", "-qm", "the html adapter").returncode == 0
     fake_git.init(case / "html.git", "--bare", "-b", "main")
@@ -713,7 +713,7 @@ def test_guard_refuses_a_moved_folder_whose_destination_cannot_be_fetched(
 
 def test_deliver_refuses_an_se_outside_the_projects_se_pin_naming_both_versions(
         worktree, monkeypatch, capsys):
-    (worktree / "se.toml").write_text('[components.se]\nversion = "^1.0"\n', encoding="utf-8")
+    (worktree / "se.toml").write_text('[components.se]\nversion = "^1.0"\n', encoding="utf-8", newline="\n")
     running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
     monkeypatch.setattr(work_tickets, "required_snapshot", lambda root: pytest.fail("delivered"))
 
@@ -728,9 +728,9 @@ def test_deliver_refuses_an_se_outside_the_projects_se_pin_naming_both_versions(
 def test_deliver_within_the_projects_se_pin_goes_on(worktree, monkeypatch):
     running = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"]["version"]
     (worktree / "se.toml").write_text(f'[components.se]\nversion = "^{running.split(".")[0]}.0"\n',
-                                      encoding="utf-8")
+                                      encoding="utf-8", newline="\n")
     work_tickets.refuse_se_outside_pin(worktree)
-    (worktree / "se.toml").write_text("[project]\n", encoding="utf-8")
+    (worktree / "se.toml").write_text("[project]\n", encoding="utf-8", newline="\n")
     work_tickets.refuse_se_outside_pin(worktree)
 
 
@@ -755,7 +755,7 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
         worktree.parent / "deliver-guard-case", "rewrite-prose",
         "This sentence is rewritten.\nThis sentence stays.\n",
     )
-    guide.write_text("This sentence is reworded.\nThis sentence stays.\n", encoding="utf-8")
+    guide.write_text("This sentence is reworded.\nThis sentence stays.\n", encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-am", "rewrite prose").returncode == 0
     report = repository / ".se" / "work" / "field-report.md"
     report.parent.mkdir(parents=True)
@@ -765,7 +765,7 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
         encoding="utf-8",
     )
     issue_body = repository / "issue.md"
-    issue_body.write_text("## Acceptance\n\n- [ ] A test.\n", encoding="utf-8")
+    issue_body.write_text("## Acceptance\n\n- [ ] A test.\n", encoding="utf-8", newline="\n")
     issue = {"number": 1, "title": "rewrite-prose", "url": "https://git.example/o/r/issues/1",
              "body": issue_body.read_text(encoding="utf-8")}
     pushed: list[str] = []
@@ -817,13 +817,13 @@ def behind_main_repository(case: Path, main_text: str, branch_text: str) -> tupl
     )
     assert git(repository, "remote", "add", "origin", str(origin)).returncode == 0
     assert git(repository, "push", "-q", "origin", "main").returncode == 0
-    guide.write_text(branch_text, encoding="utf-8")
+    guide.write_text(branch_text, encoding="utf-8", newline="\n")
     assert git(repository, "commit", "-qam", "branch change").returncode == 0
     landed = case / "landed"
     fake_git.clone(origin, landed)
     assert git(landed, "config", "user.name", "Guard test").returncode == 0
     assert git(landed, "config", "user.email", "guard-test@example.invalid").returncode == 0
-    (landed / "docs" / "guide.md").write_text(main_text, encoding="utf-8")
+    (landed / "docs" / "guide.md").write_text(main_text, encoding="utf-8", newline="\n")
     assert git(landed, "commit", "-qam", "another landing").returncode == 0
     assert git(landed, "push", "-q", "origin", "main").returncode == 0
     report = repository / ".se" / "work" / "field-report.md"
@@ -924,13 +924,13 @@ def test_queue_lifecycle_requires_checklist_and_evidence(worktree: Path) -> None
     held_ticket = queue / "held" / "T-1.md"
 
     body = held_ticket.read_text(encoding="utf-8").replace("- [ ]", "- [x]")
-    held_ticket.write_text(body, encoding="utf-8")
+    held_ticket.write_text(body, encoding="utf-8", newline="\n")
     assert move(worktree, "T-1", "done").returncode != 0
-    held_ticket.write_text(body + "\nEvidence: focused test passed.\n", encoding="utf-8")
+    held_ticket.write_text(body + "\nEvidence: focused test passed.\n", encoding="utf-8", newline="\n")
     completed = move(worktree, "T-1", "done")
     assert completed.returncode == 0, completed.stderr
 
-    (queue / "notes" / "result.txt").write_text("validated", encoding="utf-8")
+    (queue / "notes" / "result.txt").write_text("validated", encoding="utf-8", newline="\n")
     result = run_helper(*command(worktree, "status"), "--json")
     assert result.returncode == 0, result.stderr
     status = json.loads(result.stdout)
@@ -962,7 +962,7 @@ def test_done_validation_checks_every_acceptance_section(worktree: Path) -> None
         "- [ ] Complete the additional criterion.\n\n"
         "## Evidence\n",
     ).replace("- [ ] Add a checkable acceptance criterion.", "- [x] Add a checkable acceptance criterion.")
-    ticket.write_text(content, encoding="utf-8")
+    ticket.write_text(content, encoding="utf-8", newline="\n")
     held = move(worktree, "T-1", "held")
     assert held.returncode == 0, held.stderr
     held_ticket = worktree / ".se" / "work" / "held" / "T-1.md"
@@ -1117,7 +1117,7 @@ def test_create_and_move_never_overwrite_existing_ticket(worktree: Path) -> None
     assert ticket.read_text(encoding="utf-8") == original
 
     collision = worktree / ".se" / "work" / "held" / "T-1.md"
-    collision.write_text("do not overwrite", encoding="utf-8")
+    collision.write_text("do not overwrite", encoding="utf-8", newline="\n")
     result = move(worktree, "T-1", "held")
     assert result.returncode != 0
     assert collision.read_text(encoding="utf-8") == "do not overwrite"
@@ -1127,7 +1127,7 @@ def test_duplicate_ids_are_reported_and_move_is_ambiguous(worktree: Path) -> Non
     initialize(worktree)
     ticket = create(worktree)
     duplicate = worktree / ".se" / "work" / "held" / "copy.md"
-    duplicate.write_text(ticket.read_text(encoding="utf-8"), encoding="utf-8")
+    duplicate.write_text(ticket.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
 
     status = run_helper(*command(worktree, "status"), "--json")
     assert status.returncode != 0
@@ -1143,7 +1143,7 @@ def test_status_reports_malformed_state(worktree: Path) -> None:
     initialize(worktree)
     (worktree / ".se" / "work" / "todo" / "broken.md").write_text(
         "not a ticket", encoding="utf-8"
-    )
+    , newline="\n")
 
     result = run_helper(*command(worktree, "status"), "--json")
     assert result.returncode != 0
@@ -1195,7 +1195,7 @@ def test_review_note_appends_local_disposition_without_leaking_text(worktree: Pa
     initialize(worktree)
     note = worktree / ".se" / "work" / "notes" / "private.txt"
     private_text = "PRIVATE unfiltered finding: credentials and details"
-    note.write_text(private_text, encoding="utf-8")
+    note.write_text(private_text, encoding="utf-8", newline="\n")
 
     before = run_helper(*command(worktree, "status"), "--json")
     assert before.returncode == 0, before.stderr
@@ -1230,7 +1230,7 @@ def test_close_refuses_active_queue_and_unresolved_notes(worktree: Path) -> None
     initialize(worktree)
     create(worktree)
     unresolved = worktree / ".se" / "work" / "notes" / "question.txt"
-    unresolved.write_text("private question", encoding="utf-8")
+    unresolved.write_text("private question", encoding="utf-8", newline="\n")
 
     result = run_helper(*command(worktree, "close"), "--json")
     assert result.returncode != 0
@@ -1249,7 +1249,7 @@ def test_close_refuses_invalid_completed_ticket(worktree: Path) -> None:
     assert held.returncode == 0
     held_path = worktree / ".se" / "work" / "held" / "T-1.md"
     body = held_path.read_text(encoding="utf-8").replace("- [ ]", "- [x]")
-    held_path.write_text(body + "\nEvidence: present.\n", encoding="utf-8")
+    held_path.write_text(body + "\nEvidence: present.\n", encoding="utf-8", newline="\n")
     assert move(worktree, "T-1", "done").returncode == 0
     done_path = worktree / ".se" / "work" / "done" / "T-1.md"
     done_path.write_text(
@@ -1268,7 +1268,7 @@ def test_close_refuses_invalid_completed_ticket(worktree: Path) -> None:
 def test_close_checks_git_cleanliness_primary_and_integration(worktree: Path) -> None:
     coordinator, worker = git_worktree(worktree.parent / "git-case")
     initialize(worker)
-    (worker / "unintegrated.txt").write_text("not yet integrated\n", encoding="utf-8")
+    (worker / "unintegrated.txt").write_text("not yet integrated\n", encoding="utf-8", newline="\n")
     assert git(worker, "add", "unintegrated.txt").returncode == 0
     assert git(worker, "commit", "-m", "unintegrated worker change").returncode == 0
 
@@ -1278,10 +1278,10 @@ def test_close_checks_git_cleanliness_primary_and_integration(worktree: Path) ->
     assert not_integrated.returncode != 0
     assert "integrat" in not_integrated.stdout.lower()
 
-    (worker / "change.txt").write_text("worker change\n", encoding="utf-8")
+    (worker / "change.txt").write_text("worker change\n", encoding="utf-8", newline="\n")
     assert git(worker, "add", "change.txt").returncode == 0
     assert git(worker, "commit", "-m", "worker change").returncode == 0
-    (worker / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+    (worker / "dirty.txt").write_text("uncommitted\n", encoding="utf-8", newline="\n")
     dirty = run_helper(
         *command(worker, "close"), "--integration-target", "coordinator", "--json"
     )
@@ -1291,7 +1291,7 @@ def test_close_checks_git_cleanliness_primary_and_integration(worktree: Path) ->
 
     assert git(coordinator, "merge", "--no-ff", "worker", "-m", "integrate worker").returncode == 0
     note = worker / ".se" / "work" / "notes" / "reviewed.txt"
-    note.write_text("short local reminder", encoding="utf-8")
+    note.write_text("short local reminder", encoding="utf-8", newline="\n")
     reviewed_note = run_helper(
         *command(worker, "review-note"),
         "--note", note.name,
@@ -1316,7 +1316,7 @@ def test_close_checks_git_cleanliness_primary_and_integration(worktree: Path) ->
 def test_close_remove_requires_explicit_target_and_removes_normally(worktree: Path) -> None:
     coordinator, worker = git_worktree(worktree.parent / "remove-case")
     initialize(worker)
-    (worker / "change.txt").write_text("integrated\n", encoding="utf-8")
+    (worker / "change.txt").write_text("integrated\n", encoding="utf-8", newline="\n")
     assert git(worker, "add", "change.txt").returncode == 0
     assert git(worker, "commit", "-m", "worker work").returncode == 0
     assert git(coordinator, "merge", "--no-ff", "worker", "-m", "integrate worker").returncode == 0
@@ -1351,7 +1351,7 @@ def test_docs_check_refuses_a_stale_reference_and_docs_rewrites_it(tmp_path, mon
     readme = tmp_path / "README.md"
     stale = (f"# Title\n\nProse stays.\n\n{work_tickets.REFERENCE_BEGIN}\nOUTDATED REFERENCE\n"
              f"{work_tickets.REFERENCE_END}\n\nMore prose.\n")
-    readme.write_text(stale, encoding="utf-8")
+    readme.write_text(stale, encoding="utf-8", newline="\n")
     monkeypatch.setattr(work_tickets, "README", readme)
 
     assert work_tickets.main(["docs", "--check"]) == 1
@@ -1379,17 +1379,17 @@ def test_format_applies_every_fix_the_check_job_checks_and_a_second_run_writes_n
     se_plugin = work_tickets.sibling("se_plugin")
     se_plugin.build(root)
     stale = root / "skills" / "work-model" / "SKILL.md"
-    stale.write_text("edited by hand\n", encoding="utf-8")
+    stale.write_text("edited by hand\n", encoding="utf-8", newline="\n")
     (root / "agents" / "worker.md").unlink()
-    (root / "skills" / "orphan.md").write_text("no source\n", encoding="utf-8")
+    (root / "skills" / "orphan.md").write_text("no source\n", encoding="utf-8", newline="\n")
     (root / "README.md").write_text(
         f"# Title\n\n{work_tickets.REFERENCE_BEGIN}\nstale\n{work_tickets.REFERENCE_END}\n",
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     assert len(se_plugin.differences(root)) == 3
 
     shutil.copytree(PROJECT / "templates", root / "templates")
     shutil.copytree(PROJECT / "scripts" / "interfaces", root / "scripts" / "interfaces")
-    (root / "scripts" / "interfaces" / "escalation.json").write_text("{}\n", encoding="utf-8")
+    (root / "scripts" / "interfaces" / "escalation.json").write_text("{}\n", encoding="utf-8", newline="\n")
 
     assert work_tickets.main(["format", "--root", str(root)]) == 0
     output = capsys.readouterr().out
@@ -1488,7 +1488,7 @@ def refs_checkout(tmp_path: Path, monkeypatch) -> tuple[Path, FakeWorkflows, str
 
 def triples_file(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "triples.txt"
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
 
 
@@ -1611,7 +1611,7 @@ def test_refs_request_hands_off_a_plan_for_the_triples(refs_checkout, tmp_path, 
 
 def run_log_file(tmp_path: Path, fake: FakeWorkflows) -> Path:
     path = tmp_path / "run.log"
-    path.write_text(fake.log, encoding="utf-8")
+    path.write_text(fake.log, encoding="utf-8", newline="\n")
     return path
 
 
@@ -1647,7 +1647,7 @@ def test_refs_apply_hands_off_the_real_run_and_reads_the_new_refs_back(
     triples = f"{base} {ahead} refs/heads/main\n"
     work_tickets.refs_request(checkout, 5, triples_file(tmp_path, triples), REPO)  # as gh did
     comments = tmp_path / "comments.json"
-    comments.write_text(json.dumps(fake.comments_posted), encoding="utf-8")
+    comments.write_text(json.dumps(fake.comments_posted), encoding="utf-8", newline="\n")
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     posted, dispatched = len(fake.comments_posted), len(fake.dispatched)
     capsys.readouterr()
@@ -1891,9 +1891,9 @@ def test_an_ask_is_open_in_whole_utc_calendar_days() -> None:
 
 def test_fleet_ages_is_read_from_se_toml_and_off_where_absent(tmp_path: Path) -> None:
     assert work_tickets.fleet_ages(tmp_path) is False
-    (tmp_path / "se.toml").write_text("[fleet]\nages = true\n", encoding="utf-8")
+    (tmp_path / "se.toml").write_text("[fleet]\nages = true\n", encoding="utf-8", newline="\n")
     assert work_tickets.fleet_ages(tmp_path) is True
-    (tmp_path / "se.toml").write_text('[fleet]\nages = "yes"\n', encoding="utf-8")
+    (tmp_path / "se.toml").write_text('[fleet]\nages = "yes"\n', encoding="utf-8", newline="\n")
     with pytest.raises(work_tickets.QueueError, match="fleet.ages"):
         work_tickets.fleet_ages(tmp_path)
 
@@ -1924,7 +1924,7 @@ def test_fleet_check_reports_a_worker_stopped_on_a_usage_limit_and_restarts_it_o
         "id": "session_w", "title": "Work feat/limited", "status_bucket": "idle",
         "events": [{"data": {"result": {"is_error": True,
                                         "result": "Claude usage limit reached"}}}]}]}),
-        encoding="utf-8")
+        encoding="utf-8", newline="\n")
     arguments = ["fleet-check", "--worktree", str(tmp_path), "--repo", "owner/repo", "--json"]
     assert work_tickets.main(arguments) == 0  # without --sessions: as before, healthy
     assert json.loads(capsys.readouterr().out) == {"healthy": True, "findings": []}
@@ -1935,7 +1935,7 @@ def test_fleet_check_reports_a_worker_stopped_on_a_usage_limit_and_restarts_it_o
         "stopped on a limit", 1, "feat/limited")
     assert finding["remedy"].startswith("none: reported only")
 
-    (tmp_path / "se.toml").write_text("[fleet]\nrestart_after_limit = true\n", encoding="utf-8")
+    (tmp_path / "se.toml").write_text("[fleet]\nrestart_after_limit = true\n", encoding="utf-8", newline="\n")
     assert work_tickets.main([*arguments, "--sessions", str(sessions)]) == 1
     finding, = json.loads(capsys.readouterr().out)["findings"]
     assert finding["remedy"].startswith("once the limit lifts, resume session session_w")
@@ -1986,11 +1986,11 @@ def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(
     assert "GitHub plan: fleet check" in plan and "list_issues" in plan
     assert "pull_request_read" in plan and "--open-issues" in plan
     open_file, closed_file, pulls_file = (tmp_path / name for name in ("open.json", "closed.json", "pulls.json"))
-    open_file.write_text(json.dumps({"issues": []}), encoding="utf-8")
+    open_file.write_text(json.dumps({"issues": []}), encoding="utf-8", newline="\n")
     closed_file.write_text(json.dumps([{**fleet_issue(5, "feat/landed", "work", state="closed"),
                                         "state": "CLOSED", "state_reason": "COMPLETED",
-                                        "labels": ["work"]}]), encoding="utf-8")
-    pulls_file.write_text("[]", encoding="utf-8")
+                                        "labels": ["work"]}]), encoding="utf-8", newline="\n")
+    pulls_file.write_text("[]", encoding="utf-8", newline="\n")
     assert work_tickets.main([*arguments, "--open-issues", str(open_file), "--closed-issues",
                               str(closed_file), "--pulls", str(pulls_file), "--json"]) == 1
     data = json.loads(capsys.readouterr().out)
@@ -2000,8 +2000,8 @@ def test_fleet_check_without_gh_prints_its_plan_then_reads_the_answers(
     fresh = fleet_issue(1, "feat/fresh", "work", "in-progress")
     when = work_tickets.datetime.now(work_tickets.timezone.utc) - work_tickets.timedelta(minutes=5)
     open_file.write_text(json.dumps([{**fresh, "comments": [
-        {"body": "Started: worker session", "createdAt": when.isoformat()}]}]), encoding="utf-8")
-    closed_file.write_text("[]", encoding="utf-8")
+        {"body": "Started: worker session", "createdAt": when.isoformat()}]}]), encoding="utf-8", newline="\n")
+    closed_file.write_text("[]", encoding="utf-8", newline="\n")
     assert work_tickets.main([*arguments, "--open-issues", str(open_file), "--closed-issues",
                               str(closed_file), "--pulls", str(pulls_file)]) == 0
     assert capsys.readouterr().out.splitlines()[:2] == [
@@ -2019,13 +2019,13 @@ def stop_checkout(case_root: Path, monkeypatch, *, queue: bool = True) -> Path:
     fake_git.init(root, "-b", "main")
     for key, value in (("user.name", "Worker test"), ("user.email", "worker-test@example.invalid")):
         assert git(root, "config", key, value).returncode == 0
-    (root / ".gitignore").write_text("/.se/\n", encoding="utf-8")
+    (root / ".gitignore").write_text("/.se/\n", encoding="utf-8", newline="\n")
     assert git(root, "add", ".").returncode == 0
     assert git(root, "commit", "-q", "-m", "baseline").returncode == 0
     assert git(root, "checkout", "-q", "-b", "feat/example-20261112").returncode == 0
     if queue:
         (root / ".se" / "work").mkdir(parents=True)
-        (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
+        (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8", newline="\n")
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: False)
     monkeypatch.setattr(work_tickets, "_stop_gh_unusable_at", [])
     return root
@@ -2095,7 +2095,7 @@ def test_stop_check_refuses_a_report_that_fails_the_check_or_lags_the_branch(
     reason = stop_hook(root, monkeypatch, capsys)["reason"]
     assert "holds no field report" in reason
     fake_pull_requests(monkeypatch, root, delivered_description(root))
-    (root / "late.txt").write_text("late\n", encoding="utf-8")
+    (root / "late.txt").write_text("late\n", encoding="utf-8", newline="\n")
     assert git(root, "add", ".").returncode == 0
     assert git(root, "commit", "-q", "-m", "late").returncode == 0
     reason = stop_hook(root, monkeypatch, capsys)["reason"]
@@ -2111,13 +2111,13 @@ def test_stop_check_without_gh_judges_by_the_recorded_pull_request_and_else_fail
     assert "cannot judge" in answer["systemMessage"] and "gh is not usable" in answer["systemMessage"]
 
     description = tmp_path / "description.md"
-    description.write_text("Fixes it\n", encoding="utf-8")
+    description.write_text("Fixes it\n", encoding="utf-8", newline="\n")
     assert work_tickets.main(["stop-check", "--pull", "7", "--pr-description", str(description),
                               "--worktree", str(root)]) == 1
     assert "the Stop hook would refuse" in capsys.readouterr().err
     assert stop_hook(root, monkeypatch, capsys)["decision"] == "block"
 
-    description.write_text(delivered_description(root), encoding="utf-8")
+    description.write_text(delivered_description(root), encoding="utf-8", newline="\n")
     assert work_tickets.main(["stop-check", "--pull", "7", "--pr-description", str(description),
                               "--worktree", str(root)]) == 0
     assert "the Stop hook passes" in capsys.readouterr().out
@@ -2152,7 +2152,7 @@ def test_stop_check_never_refuses_without_a_work_issue_queue_or_for_other_agents
 
 def test_stop_check_refuses_at_most_its_cap_in_a_row(tmp_path, monkeypatch, capsys):
     root = stop_checkout(tmp_path, monkeypatch)
-    (root / "se.toml").write_text("[stop]\nrefusals = 2\n", encoding="utf-8")
+    (root / "se.toml").write_text("[stop]\nrefusals = 2\n", encoding="utf-8", newline="\n")
     fake_pull_requests(monkeypatch, root, None)
     assert "(1 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
     assert "(2 of 2 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
@@ -2185,7 +2185,7 @@ def test_under_copilot_refuse_stop_true_brings_the_refusal_back_and_a_bad_value_
         tmp_path, monkeypatch, capsys, setting):
     root = stop_checkout(tmp_path, monkeypatch)
     fake_pull_requests(monkeypatch, root, None)
-    (root / "se.toml").write_text(f"[copilot]\nrefuse_stop = {setting}\n", encoding="utf-8")
+    (root / "se.toml").write_text(f"[copilot]\nrefuse_stop = {setting}\n", encoding="utf-8", newline="\n")
     answer = stop_hook(root, monkeypatch, capsys, se_host="copilot")
     if setting == "true":
         assert answer["decision"] == "block" and "(1 of 5 in a row)" in answer["reason"]
@@ -2197,7 +2197,7 @@ def test_under_claude_code_the_copilot_setting_changes_nothing(tmp_path, monkeyp
     root = stop_checkout(tmp_path, monkeypatch)
     fake_pull_requests(monkeypatch, root, None)
     for text in ("", "[copilot]\nrefuse_stop = false\n"):
-        (root / "se.toml").write_text(text, encoding="utf-8")
+        (root / "se.toml").write_text(text, encoding="utf-8", newline="\n")
         (root / ".se" / "work" / work_tickets.STOP_COUNT).unlink(missing_ok=True)
         assert "(1 of 5 in a row)" in stop_hook(root, monkeypatch, capsys)["reason"]
 
@@ -2208,7 +2208,7 @@ def subagent_transcript(path: Path, prompt: str, *commands: str) -> Path:
     entries += [{"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}
                 for command in commands]
-    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+    path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8", newline="\n")
     return path
 
 
@@ -2357,7 +2357,7 @@ def test_a_group_command_is_recorded_by_its_words_and_its_exit_code(tmp_path, mo
 
 def test_a_metrics_write_that_fails_never_fails_the_command(tmp_path, monkeypatch, capsys):
     blocker = tmp_path / "file"
-    blocker.write_text("", encoding="utf-8")
+    blocker.write_text("", encoding="utf-8", newline="\n")
     monkeypatch.setenv("SE_METRICS", str(blocker / "metrics.jsonl"))  # its parent is a file
 
     assert work_tickets.main(["metrics", "--file", str(tmp_path / "none.jsonl")]) == 0
@@ -2434,7 +2434,7 @@ def test_the_metrics_report_flags_a_suite_beside_over_its_limit_as_it_does_the_s
 def test_the_metrics_command_reads_its_file_and_skips_unreadable_lines(tmp_path, capsys):
     source = tmp_path / "metrics.jsonl"
     source.write_text('{"command": "work_tickets.py sync", "start": "2026-11-12T00:00:00Z", '
-                      '"wall_seconds": 3}\nnot json\n', encoding="utf-8")
+                      '"wall_seconds": 3}\nnot json\n', encoding="utf-8", newline="\n")
 
     assert work_tickets.main(["metrics", "--file", str(source), "--since", "2026-11-12"]) == 0
 
@@ -2588,7 +2588,7 @@ def test_the_landing_plan_runs_the_pause_search_before_it_opens_the_pull_request
 def test_route_routes_nothing_while_paused(worktree, monkeypatch, capsys):
     calls = pause_door(monkeypatch, True)
     routing = worktree / "route.md"
-    routing.write_text("## Requirements\n\n1. One.\n", encoding="utf-8")
+    routing.write_text("## Requirements\n\n1. One.\n", encoding="utf-8", newline="\n")
 
     code = work_tickets.main(["route", "1", "--routing-file", str(routing),
                               "--worktree", str(worktree), "--repo", PAUSE_REPO])
@@ -2605,10 +2605,10 @@ def budget_suite(root: Path, monkeypatch, seconds: float, ci: float | None,
     """A suite in se.toml `[tests]` (limit 120 s, plus the `extra` lines) that a fake clock times
     at `seconds`, and CI's suite time on main faked as `ci` (None: unknown); returns a list
     that counts CI reads."""
-    (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8")
+    (root / "suite.py").write_text(BUDGET_SUITE, encoding="utf-8", newline="\n")
     (root / "se.toml").write_text(
         f"[tests]\ncommand = {json.dumps([sys.executable, 'suite.py'])}\n"
-        f"target_seconds = 60\nlimit_seconds = 120\n{extra}", encoding="utf-8")
+        f"target_seconds = 60\nlimit_seconds = 120\n{extra}", encoding="utf-8", newline="\n")
     readings = iter([0.0, seconds])
     monkeypatch.setattr(work_tickets, "clock", lambda: next(readings))
     reads: list[int] = []
@@ -3107,14 +3107,14 @@ def claimed_checkout(tmp_path: Path, monkeypatch, note: str, claims: bool = True
     root = stop_checkout(tmp_path, monkeypatch, queue=False)
     if claims:
         (root / "templates").mkdir()
-        (root / "templates" / "note.md").write_text(NOTE_TEMPLATE, encoding="utf-8")
+        (root / "templates" / "note.md").write_text(NOTE_TEMPLATE, encoding="utf-8", newline="\n")
     (root / "se.toml").write_text(
-        '[project]\nidentity = "Worker test <worker-test@example.invalid>"\n', encoding="utf-8")
+        '[project]\nidentity = "Worker test <worker-test@example.invalid>"\n', encoding="utf-8", newline="\n")
     assert git(root, "add", ".").returncode == 0
     assert git(root, "commit", "-q", "-m", "templates").returncode == 0
     assert git(root, "update-ref", "refs/remotes/origin/main", "HEAD").returncode == 0
     (root / "notes").mkdir()
-    (root / "notes" / "a.md").write_text(note, encoding="utf-8")
+    (root / "notes" / "a.md").write_text(note, encoding="utf-8", newline="\n")
     return root
 
 
@@ -3190,7 +3190,7 @@ def test_claimed_files_join_a_workers_undelivered_refusal_and_an_error_lets_the_
         tmp_path, monkeypatch, capsys):
     root = claimed_checkout(tmp_path, monkeypatch, OFF_TEMPLATE_NOTE)
     (root / ".se" / "work").mkdir(parents=True, exist_ok=True)
-    (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8")
+    (root / ".se" / "work" / "body-read.json").write_text('{"sha256": "0"}\n', encoding="utf-8", newline="\n")
     fake_pull_requests(monkeypatch, root, None)
     reason = stop_hook(root, monkeypatch, capsys)["reason"]
     assert "has no open pull request to main" in reason and "notes/a.md (note): Risks" in reason

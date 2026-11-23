@@ -43,11 +43,18 @@ FAKE_UNAME = '#!/bin/sh\necho "${FAKE_UNAME:-Linux}"\n'
 FAKE_ID = '#!/bin/sh\necho "${FAKE_UID:-1000}"\n'
 FAKE_SUDO = '#!/bin/sh\necho "sudo $*" >> "$HOME/calls"\n[ "$1" = -n ] && shift\nexec "$@"\n'
 # The tool: its arguments one a line between brackets, its folder, and the exit code TOOL_EXIT names.
+# On Windows its folder by drive (`pwd -W`): MSYS names the temporary folder /tmp or by its drive,
+# as the mount table its running processes share has it.
 TOOL = """#!/bin/sh
 echo "pwd=$(pwd)"
 for arg in "$@"; do echo "[$arg]"; done
 exit "${TOOL_EXIT:-0}"
-"""
+""".replace("$(pwd)", "$(pwd -W)" if WINDOWS else "$(pwd)")
+
+
+def shown(path: Path) -> str:
+    """`path` as the tool shows its folder."""
+    return path.as_posix() if WINDOWS else str(path)
 
 
 def script(path: Path, text: str) -> None:
@@ -105,7 +112,7 @@ def test_with_nothing_missing_runme_installs_nothing_prints_nothing_and_runs_the
     conf(project, "need sh command sh", "get sh apt sh", 'run "$RUNME_ROOT/tool"')
     result = runme(box, "a")
     assert result.returncode == 0 and result.stderr == ""
-    assert result.stdout == f"pwd={sh(project)}\n[a]\n"
+    assert result.stdout == f"pwd={shown(project)}\n[a]\n"
     assert calls(home) == []
 
 
@@ -116,7 +123,7 @@ def test_a_missing_need_runs_its_first_fitting_way_on_stderr_then_the_tool(box):
          'run "$RUNME_ROOT/tool"')
     result = runme(box, FAKE_UID="0")
     assert result.returncode == 0, result.stderr
-    assert result.stdout == f"pwd={sh(project)}\n", "the installer's output goes to stderr"
+    assert result.stdout == f"pwd={shown(project)}\n", "the installer's output goes to stderr"
     assert result.stderr.splitlines()[0] == ("RUNME: installing hello: apt-get update -q && "
                                              "apt-get install -y -q hello")
     assert "apt-get says hi" in result.stderr
@@ -133,7 +140,7 @@ def test_every_argument_reaches_the_tool_unchanged_in_the_callers_folder(box, ar
     caller.mkdir()
     result = runme(box, *arguments, cwd=caller)
     assert result.returncode == 0 and result.stderr == ""
-    assert result.stdout.splitlines() == [f"pwd={sh(caller)}", *(f"[{arg}]" for arg in arguments)]
+    assert result.stdout.splitlines() == [f"pwd={shown(caller)}", *(f"[{arg}]" for arg in arguments)]
 
 
 def test_the_tools_exit_code_is_runmes(box):
@@ -326,7 +333,9 @@ def test_the_templates_pair_is_ses_byte_for_byte_and_names_no_project():
             named.update(re.findall(r"https?://\S+", line))
     for name in PAIR:
         data = (ROOT / name).read_bytes()
-        assert (TEMPLATE / name).read_bytes() == data, f"kern's template/{name} differs from {name}"
+        # Line endings are the checkout's (git's autocrlf on Windows), not the file's.
+        assert (TEMPLATE / name).read_bytes().replace(b"\r\n", b"\n") == data.replace(b"\r\n", b"\n"), (
+            f"kern's template/{name} differs from {name}")
         text = data.decode("ascii")  # ASCII, for Windows PowerShell 5.1
         assert len(text.splitlines()) <= CEILINGS[name]
         if name == "RUNME.sh":  # sh reads LF only (.gitattributes); PowerShell reads either

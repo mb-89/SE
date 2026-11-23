@@ -198,14 +198,77 @@ def leaves(parser: argparse.ArgumentParser, words: tuple[str, ...] = ()
     return found
 
 
+def usage_parts(text: str) -> list[str]:
+    """`text` split as Python 3.14's argparse wraps a usage: at the spaces outside brackets, and a
+    group such as `(--a A | --b B)` after each of its ` |`."""
+    parts, depth, current, at, grouped = [], 0, "", 0, False
+    while at < len(text):
+        char = text[at]
+        if depth == 1 and grouped and text.startswith(" | ", at):
+            parts.append(current + " |")
+            current, at = "", at + 3
+            continue
+        if depth == 0:
+            grouped = char in "(["
+        depth += (char in "([") - (char in ")]")
+        if char == " " and depth == 0:
+            parts += [current] if current else []
+            current = ""
+        else:
+            current += char
+        at += 1
+    return parts + ([current] if current else [])
+
+
 def usage(prog: str, parser: argparse.ArgumentParser, width: int = REFERENCE_WIDTH) -> str:
     """A command's usage as argparse prints it under the program name `prog`, without its
-    "usage: " prefix and without -h."""
-    formatter = argparse.HelpFormatter(prog, width=width)
-    formatter.add_usage(None, [a for a in parser._actions if not isinstance(a, argparse._HelpAction)],
-                        parser._mutually_exclusive_groups)
-    # Without argparse's "usage: " prefix, its continuation lines move left by as much.
-    return "\n".join(line[len("usage: "):] for line in formatter.format_help().rstrip().splitlines())
+    "usage: " prefix and without -h. The lines wrap as Python 3.14's argparse wraps them on every
+    Python, as each version's argparse wraps a group differently and the reference would follow
+    the Python."""
+    actions = [a for a in parser._actions if not isinstance(a, argparse._HelpAction)]
+    optionals = [a for a in actions if a.option_strings]
+    positionals = [a for a in actions if not a.option_strings]
+    groups = parser._mutually_exclusive_groups
+
+    def one_line(chosen: list[argparse.Action]) -> str:
+        formatter = argparse.HelpFormatter(prog, width=10 ** 6)
+        formatter.add_usage(None, chosen, groups, prefix="")
+        return re.sub(r"\x1b\[[0-9;]*m", "", formatter.format_help()).strip()[len(prog):].strip()
+
+    parts = usage_parts(one_line(optionals + positionals))
+    if len("usage: ") + len(" ".join([prog, *parts])) <= width:
+        return " ".join([prog, *parts])
+    positional = len(usage_parts(one_line(positionals)))
+    opt_parts, pos_parts = parts[:len(parts) - positional], parts[len(parts) - positional:]
+
+    def lines_of(words: list[str], indent: str, first: bool = False) -> list[str]:
+        lines, line, length = [], [], (len("usage: ") if first else len(indent)) - 1
+        for word in words:
+            if length + 1 + len(word) > width and line:
+                lines.append(indent + " ".join(line))
+                line, length = [], len(indent) - 1
+            line.append(word)
+            length += len(word) + 1
+        if line:
+            lines.append(indent + " ".join(line))
+        if first:
+            lines[0] = lines[0][len(indent):]
+        return lines
+
+    if len("usage: ") + len(prog) <= 0.75 * width:
+        indent = " " * (len("usage: ") + len(prog) + 1)
+        if opt_parts:
+            lines = lines_of([prog, *opt_parts], indent, True) + lines_of(pos_parts, indent)
+        else:
+            lines = lines_of([prog, *pos_parts], indent, True)
+        lines = [lines[0], *(line[len("usage: "):] for line in lines[1:])]
+    else:
+        indent = " " * len("usage: ")
+        lines = lines_of(opt_parts + pos_parts, indent)
+        if len(lines) > 1:
+            lines = lines_of(opt_parts, indent) + lines_of(pos_parts, indent)
+        lines = [prog, *(line[len("usage: "):] for line in lines)]
+    return "\n".join(lines)
 
 
 def declared(parser: argparse.ArgumentParser, groups: Iterable[Group],

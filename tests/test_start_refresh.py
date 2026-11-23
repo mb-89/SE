@@ -28,7 +28,8 @@ TREE = ("scripts", "se.toml", "se.lock", ".claude-plugin", "agents", "skills", "
 FAKE_SE = """#!/bin/sh
 input=""
 [ "$1" = hook ] && input=" <<$(cat)"
-echo "${0##*/} $*$input" >> "$HOME/calls"
+name="${0##*/}"
+echo "${name%.exe} $*$input" >> "$HOME/calls"
 exit 0
 """
 START = '{"session_id":"s1","hook_event_name":"SessionStart"}'

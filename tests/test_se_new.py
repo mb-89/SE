@@ -58,7 +58,7 @@ def fake_git(fake_git_door):
 def write(root: Path, files: dict[str, str]) -> None:
     for name, text in files.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(text, encoding="utf-8")
+        (root / name).write_text(text, encoding="utf-8", newline="\n")
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ def small_se(root: Path, version: str = "0.1.0", tag: bool = True, lock: bool = 
         git(kern, "tag", f"v{version}")
     if lock:
         (root / "se.lock").write_text(se_modules.lock_text({"kern": (version, git(kern, "rev-parse", "HEAD"))}),
-                                      encoding="utf-8")
+                                      encoding="utf-8", newline="\n")
     write(kern, {"template/README.md": "# app\n\nchanged after the release\n"})
     git(kern, "-c", "user.name=alice", "-c", "user.email=alice", "commit", "-q", "-am", "later")
     return root
@@ -196,10 +196,10 @@ def test_a_lock_that_is_missing_or_off_the_pins_tag_is_refused_naming_the_sync(t
                                               r"python scripts/se_modules\.py sync kern in "):
         se_new.create("ledger", tmp_path / "a", source)
     later = git(se_modules.kern_dir(source), "rev-parse", "HEAD")
-    (source / "se.lock").write_text(se_modules.lock_text({"kern": ("0.1.0", later)}), encoding="utf-8")
+    (source / "se.lock").write_text(se_modules.lock_text({"kern": ("0.1.0", later)}), encoding="utf-8", newline="\n")
     with pytest.raises(se_new.NewError, match=rf"locks kern 0\.1\.0 at {later[:12]}, but its tag v0\.1\.0 is "):
         se_new.create("ledger", tmp_path / "b", source)
-    (source / "se.lock").write_text(se_modules.lock_text({"kern": ("0.0.9", later)}), encoding="utf-8")
+    (source / "se.lock").write_text(se_modules.lock_text({"kern": ("0.0.9", later)}), encoding="utf-8", newline="\n")
     with pytest.raises(se_new.NewError, match=r"se\.lock locks kern 0\.0\.9, but the pin is kern 0\.1\.0"):
         se_new.create("ledger", tmp_path / "c", source)
     assert not any((tmp_path / name).exists() for name in "abc"), "refused before anything is written"

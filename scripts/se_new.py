@@ -140,7 +140,7 @@ def place_kern(kern: Path, commit: str, path: Path) -> None:
     text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""
     if not {IGNORED, f"/{IGNORED}", ".se/", "/.se/"} & {line.strip() for line in text.splitlines()}:
         ignore.write_text(text + ("" if not text or text.endswith("\n") else "\n") + IGNORED + "\n",
-                          encoding="utf-8")
+                          encoding="utf-8", newline="\n")
 
 
 def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
@@ -150,7 +150,7 @@ def _fill(path: Path, old: re.Pattern | str, new, tag: str) -> None:
         what = old.pattern if isinstance(old, re.Pattern) else old
         raise NewError(f"kern's template at {tag} has no {what!r} in {path.name}: se_new.py no longer "
                        "matches the template; update the one with the other")
-    path.write_text(filled, encoding="utf-8")
+    path.write_text(filled, encoding="utf-8", newline="\n")
 
 
 # The workflows the template's CI calls, and the action the battery calls, written beside it as

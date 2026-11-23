@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -30,8 +31,22 @@ OWNER = "tests/time_bound.py"
 # tests/test_start_refresh.py::test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the_new_pins,
 # 7.88 s, which gives 30 s (3 x 7.88 = 23.64). Measure again the same way where a test rightly
 # takes longer.
-SLOWEST_SECONDS = 7.88
-BOUND = 30
+LINUX_SLOWEST_SECONDS = 7.88
+LINUX_BOUND = 30
+# Windows starts a process many times slower (uv, Git's bash and each MSYS tool it runs) and scans
+# each freshly written file on its first open, so its bound is derived the same way from the same
+# test measured on Windows: on 23 Nov 2026 on windows-suite, alone on a 28-CPU Windows 11 laptop
+# (Git for Windows' bash, uv with Python 3.12), setup and call took 45.36 s (6.88 + 38.48), which
+# gives 140 s (3 x 45.36 = 136.08).
+WINDOWS_SLOWEST_SECONDS = 45.36
+WINDOWS_BOUND = 140
+WINDOWS = sys.platform == "win32"
+SLOWEST_SECONDS = WINDOWS_SLOWEST_SECONDS if WINDOWS else LINUX_SLOWEST_SECONDS
+BOUND = WINDOWS_BOUND if WINDOWS else LINUX_BOUND
+#: How many times slower this platform runs the suite than the Linux host its bound was measured
+#: on: a test that holds a time of its own (tests/test_discovery_budget.py, the facts budget of
+#: tests/test_overhaul.py) scales it by this.
+SCALE = SLOWEST_SECONDS / LINUX_SLOWEST_SECONDS
 
 
 def beside(item: pytest.Item) -> bool:

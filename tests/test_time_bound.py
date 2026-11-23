@@ -40,7 +40,7 @@ def test_each_test_gets_the_bound_and_one_that_takes_obs_the_wait_on_top():
     deck = Item(TESTS / "test_deck.py", ["decks", "obs", "tmp_path"])
     kern = Item(se_modules.kern_dir(TESTS.parent) / "python" / "tests" / "test_example.py")
     time_bound.mark([plain, deck, kern], obs_wait=600)
-    assert plain.bound == time_bound.BOUND == 30
+    assert plain.bound == time_bound.BOUND
     assert deck.bound == time_bound.BOUND + 600
     assert kern.bound == time_bound.BOUND
 
@@ -54,7 +54,10 @@ def test_a_test_with_its_own_mark_keeps_it_and_one_beside_the_suite_gets_none():
 
 
 def test_the_bound_is_three_times_the_slowest_test_in_whole_tens():
-    assert time_bound.BOUND == -(-3 * time_bound.SLOWEST_SECONDS // 10) * 10
+    for slowest, bound in ((time_bound.LINUX_SLOWEST_SECONDS, time_bound.LINUX_BOUND),
+                           (time_bound.WINDOWS_SLOWEST_SECONDS, time_bound.WINDOWS_BOUND),
+                           (time_bound.SLOWEST_SECONDS, time_bound.BOUND)):
+        assert bound == -(-3 * slowest // 10) * 10
 
 
 PLANTED = """\
