@@ -1,6 +1,7 @@
 ---
 name: parse-dont-validate
 description: 'Parse, do not validate: a value is checked once, when its type is made, and relied on afterwards. Read it before you add a type, a check of a value, or a target that takes one.'
+tags: [work]
 ---
 
 The person's principle of 22 Nov, for every type, not only templates:

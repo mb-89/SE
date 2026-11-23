@@ -1,6 +1,7 @@
 ---
 name: parse-dont-validate
 description: 'Parse, do not validate: a value is checked once, when its type is made, and relied on afterwards. Read it before you add a type, a check of a value, or a target that takes one.'
+tags: [work]
 ---
 <!-- Generated from guidance/parse-dont-validate.md by scripts/se_plugin.py; edit the source and run `python scripts/se_plugin.py build`. -->
 

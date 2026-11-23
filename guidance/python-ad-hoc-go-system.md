@@ -1,6 +1,7 @@
 ---
 name: python-ad-hoc-go-system
 description: 'Python for ad hoc work, Go for what is part of the system: where new code goes, and when to port. Read it before you write a script, a component or a port.'
+tags: [work]
 ---
 
 The person's principle of 22 Nov:
