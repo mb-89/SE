@@ -40,6 +40,27 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   the core starts them. [`release.toml`](release.toml) owns the binary's version and its release,
   `se-v<version>`.
 
+## The template engine in Go
+
+`template/` is SE's template engine ported to Go (SE#1683): the same template notes, checks and
+answers as [scripts/templates.py](../scripts/templates.py), whose docstring owns the format.
+`Load` reads the notes, `Parse`, `Render`, `Check`, `Select`, `Draft`, `Schema` and `FillDocument`
+answer as the Python functions of their names do.
+
+- **One set of cases.** [tests/template_cases.py](../tests/template_cases.py) writes
+  `template/testdata/cases/`: every SE template and four fixture sets, filled, read, checked,
+  selected and broken, each with the Python engine's answer. `cases_test.go` holds Go to every
+  answer, word for word; `tests/test_template_cases.py` fails where the committed cases lag the
+  Python engine, so a change to either engine or to `templates/` refreshes them with
+  `uv run python tests/template_cases.py`.
+- **Code a template names.** A template names Python as `<module>:<NAME>`; Go holds its port of
+  each name SE's templates use in `References` and `Checkers` (`references.go`), and the cases
+  hold each port to the Python one. A name Go holds no port of does not load; an adapter whose
+  checker Go does not hold refuses its check, naming the checker.
+- **Not in Go.** The rule `dangling` (an SE command that does not exist) reads the checkout's
+  scripts and their parsers through `scripts/references.py`, and the adapters' checkers but
+  `deck:pugh_problems` are Python's: Go runs neither, and the cases hold no text either refuses.
+
 ## Who reads them
 
 [scripts/kern_names.py](../scripts/kern_names.py) reads `fleet/findings` and `retro-due/due` (the retro and the overhaul part) from the core
