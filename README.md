@@ -878,8 +878,9 @@ earlier ones give (`<pull number from step 1>`). Both paths run that one plan:
     base, with the tested tree).
   - It finishes everything local of step 6 and prints its close-out plan: the work pull request's
     comment and close, and the work issue's comment, label and close.
-  - Before that it checks the landing pull request's description, saved after the merge: it must
-    end in the plan's [metrics](#metrics) line, or the read-back fails and closes nothing.
+  - Before that it checks the landing pull request's description, saved once the plan's last
+    step passed: it must end in the plan's [metrics](#metrics) line, or the read-back fails and
+    closes nothing.
   - An integration-fix commit, one the integrator pushes onto `land/<branch>` after the hand-off
     (a lock move), is recorded with `integrate --record-fix <branch>` before the read-back.
     - Each fix commit has one parent on the tested landing and is the project identity's, author
