@@ -1,0 +1,57 @@
+# Every generator of this checkout, the source it reads and the tracked paths it writes, and how a
+# fresh run is compared (`check`, `held_by` or `unchecked`). scripts/generated.py reads it; the
+# guidance note generated-files-are-marked owns the rule. A program that writes a tracked file is
+# a generator and is declared here, with the marker it writes.
+generators:
+  - generator: se_plugin.py build
+    source: src/ and guidance/
+    outputs:
+      - agents/*.md
+      - skills/**
+      - .github/agents/*.agent.md
+      - .github/skills/**
+      - .claude-plugin/*.json
+      - .github/hooks/se.json
+      - .github/plugin/*.json
+      - .github/mcp.json
+    check: ["uv", "run", "python", "scripts/se_plugin.py", "check"]
+  - generator: work_tickets.py docs
+    source: the scripts' parsers
+    outputs:
+      - components/*/component.toml
+    check: ["uv", "run", "python", "scripts/work_tickets.py", "docs", "--check"]
+  - generator: templates.py interfaces
+    source: templates/
+    outputs:
+      - scripts/interfaces/*.json
+    check: ["uv", "run", "python", "scripts/templates.py", "interfaces", "--check"]
+  - generator: se_modules.py sync
+    source: se.toml
+    outputs:
+      - se.lock
+    held_by: .github/workflows/check.yml
+  - generator: se_guidance.py pin
+    source: guidance/ and templates/
+    outputs:
+      - tests/guidance-pins.yaml
+    held_by: tests/test_guidance.py
+  - generator: work_tickets.py file-seconds
+    source: CI's check run
+    outputs:
+      - tests/file-seconds.json
+    unchecked: "CI's measured seconds per test file: a fresh run measures anew, so no run reproduces them"
+  - generator: tests/recorded.py
+    source: tests/test_recorded_outputs.py
+    outputs:
+      - tests/recorded/*.txt
+    held_by: tests/test_recorded_outputs.py
+  - generator: tests/template_cases.py
+    source: scripts/templates.py
+    outputs:
+      - components/template/testdata/cases/*.json
+    held_by: tests/test_template_cases.py
+  - generator: mcp_surface_test.go -golden
+    source: SE's live tool list
+    outputs:
+      - components/cmd/se/testdata/tools.json
+    held_by: components/cmd/se/mcp_surface_test.go
