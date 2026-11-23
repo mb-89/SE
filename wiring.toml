@@ -57,6 +57,11 @@ command = ["uv", "run", "--no-project", "--python", ">=3.11", "python", "scripts
 [instances.github]
 component = "github"
 
+# kern's clock (kern's components/clock): the one reader of the system time; the GitHub component's
+# refresh counts its seconds.
+[instances.clock]
+component = "clock"
+
 [instances.origin]
 component = "origin"
 
@@ -69,6 +74,8 @@ component = "retro-due"
 config = { due-after = 10, base = "main" }
 
 [wires]
+"clock.second" = "clock/second"
+"github.second" = "clock/second"
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.comments" = "github/comments/<key>"

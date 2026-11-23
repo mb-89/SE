@@ -10,6 +10,7 @@ import (
 
 	"kern/cli"
 	// kern's shared components and SE's own, one blank import each.
+	_ "kern/components/clock"
 	_ "kern/components/github"
 	_ "kern/components/session"
 	_ "se/components/fleet"
