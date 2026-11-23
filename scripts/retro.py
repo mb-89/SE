@@ -18,6 +18,8 @@ draft with
 - the metrics of the window: the line each landing pull request's description ends in and the
   local metrics file's lines that started in the window, each run once (README "Metrics");
 - the previous retro's sizes, where its block is found;
+- the breaking-release check over the project's component tree (se_modules.py `breaking`), which
+  every collect runs once its answers are all there;
 
 - the previous retro's findings, each scored: the work issues of the window that name it
   (`retro #<n> finding <k>`), whether one closed, and whether the rule check it names broke again
@@ -480,12 +482,16 @@ class Collected:
     signals: dict | None = None
     refusals: list[dict] | None = None
     costs: dict | None = None  # the cloud sessions' costs (--sessions)
+    # The breaking-release check of the project's component tree, which run_collect runs at every
+    # retro (`breaking_releases`); None where it did not run.
+    breaking: dict | None = None
 
     def extras(self) -> dict:
         """What the flags asked for, by name: `--json` adds it beside the block's data."""
         return {name: value for name, value in (("signals", self.signals),
                                                 ("refusals", self.refusals),
-                                                ("costs", self.costs))
+                                                ("costs", self.costs),
+                                                ("breaking", self.breaking))
                 if value is not None}
 
     def data(self) -> dict:
@@ -792,6 +798,34 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         if previous else None, runs, {"landings": len(landed_runs), "local": len(local)}, adhoc,
         scripts, session_signals(signals, root) if signals is not None else None, records,
         cloud_costs(sessions, closed) if sessions is not None else None)
+
+
+def breaking_releases(root: Path) -> dict:
+    """The breaking-release check over the project's component tree, as se_modules.py `breaking`
+    prints it (docs/components.md "Breaking releases beyond a pin"): its `lines`, and its `error`
+    where the listing failed. A project without se.toml pins nothing."""
+    if not (root / "se.toml").is_file():
+        return {"lines": ["no breaking release beyond a pin: the project has no se.toml"], "error": None}
+    se_modules = sibling("se_modules")
+    try:
+        found = se_modules.breaking(root, se_modules.load_local(se_modules.default_local_config()))
+    except se_modules.ModuleError as error:
+        return {"lines": [], "error": str(error)}
+    return {"lines": found.lines(), "error": found.error()}
+
+
+def breaking_lines(breaking: dict | None) -> list[str]:
+    """The breaking-release check's section; none where it did not run."""
+    if breaking is None:
+        return []
+    lines = ["", "## Breaking releases beyond a pin", "",
+             "`se_modules.py breaking` over the project's component tree, as collect ran it; what "
+             "to do about a finding is the person's decision."]
+    if breaking["lines"]:
+        lines += ["", "```text", *breaking["lines"], "```"]
+    if breaking["error"]:
+        lines += ["", f"The check failed: {breaking['error']}"]
+    return lines
 
 
 def remote_of(door, tracker: str) -> str:
@@ -1126,6 +1160,7 @@ def draft(found: Collected) -> str:
               f"{len(found.runs)} runs: {found.run_sources.get('landings', 0)} from the landing "
               f"pull requests, {found.run_sources.get('local', 0)} from {metrics.path()}, each run "
               "once.", "", "```text", metrics.report(found.runs), "```"]
+    lines += breaking_lines(found.breaking)
     lines += ["", "## Ad hoc components to promote", ""]
     if found.adhoc:
         lines += [f"Used in {se_usage.PROMOTE_SESSIONS} or more sessions since the last retro; "
@@ -1569,6 +1604,7 @@ def run_collect(args: argparse.Namespace) -> int:
               f"and saves their answers into {directory}:")
         print(Plan(f"the window of retro #{args.retro}", tuple(door.missing), then).text())
         return 0
+    found.breaking = breaking_releases(root)
     output = (json.dumps({**found.data(), **found.extras()}, indent=2, ensure_ascii=False) + "\n"
               if args.json else draft(found))
     if args.out:

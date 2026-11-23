@@ -2252,6 +2252,9 @@ Each issue comes with the field report of the work pull request its landing pull
   - Where the [overhaul countdown](#overhaul-due) is on, a finding an issue still open takes is
     `too early to score`: filed after the previous retro's cut-off, it had no time to land, so it
     is listed and scored neither as failed nor as recurred.
+- the breaking releases beyond the pins of the project's component tree, as [`se_modules.py
+  breaking`](#commands) prints them, or why that listing failed; every collect runs it once its
+  answers are all there, and `--json` names it as `breaking`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
