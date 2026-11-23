@@ -123,11 +123,13 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem):
         yield
 
 
-# The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git: it
-# costs about 3 ms a git call, the fake in memory (`fake_git_door`) about 0.15 ms. So a test that ran
-# git through the state file and started no child process (as the spawn guard counts them,
-# scripts/spawn_guard.py `started`, a hook the state file runs among them) fails at its teardown,
-# naming the remedy, unless its file is named here with its reason. The list may only shrink.
+# The fake behind a state file (`shared_fake_git`) is for a test whose child processes run git, or
+# whose git runs hooks, which only the state file runs (in this process through the process door's
+# fake, tests/fake_processes.py): it costs about 3 ms a git call, the fake in memory
+# (`fake_git_door`) about 0.15 ms. So a test that ran git through the state file, ran no hook and
+# started no child process (as the spawn guard counts them, scripts/spawn_guard.py `started`)
+# fails at its teardown, naming the remedy, unless its file is named here with its reason. The
+# list may only shrink.
 IN_PROCESS_STATE_FILE: dict[str, str] = {
 }
 def item_file(item: pytest.Item) -> str:
@@ -147,13 +149,13 @@ class WatchedStateFile(fake_git.StateFile):
 
 
 def state_file_refusal(item: pytest.Item, state: WatchedStateFile) -> str:
-    """Why `item` may not have taken the state file, or "" where it may: it ran git through it and
-    started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
+    """Why `item` may not have taken the state file, or "" where it may: it ran git through it, ran
+    no hook and started no child process, and its file is not in IN_PROCESS_STATE_FILE."""
     started = spawn_guard.started(item)
-    if not state.runs or started or item_file(item) in IN_PROCESS_STATE_FILE:
+    if not state.runs or started or state.hooks_run or item_file(item) in IN_PROCESS_STATE_FILE:
         return ""
-    return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git) and "
-            "started no child process; take the fake_git_door fixture, the fake in memory, or name the "
+    return (f"{item.nodeid} ran git through the state file ({state.runs} commands, shared_fake_git), ran no "
+            "hook and started no child process; take the fake_git_door fixture, the fake in memory, or name the "
             "file in tests/conftest.py IN_PROCESS_STATE_FILE with its reason")
 
 
@@ -248,16 +250,16 @@ def obs() -> Path:
             held.enter_context(waiting.exclusive(ROOT / ".se" / "obs-setup.flock", OBS_LOCK_WAIT_SECONDS))
         except TimeoutError as error:
             pytest.fail(str(error))
-        with pytest.MonkeyPatch.context() as patch:
-            # Bringing SE's own checkout's obs module to its pin is the suite's setup, not a test:
-            # it fetches the real module, through real git.
+        # Bringing SE's own checkout's obs module to its pin and building it is the suite's setup,
+        # not a test: it fetches the real module through real git and runs the real programs.
+        with pytest.MonkeyPatch.context() as patch, process_door.use(process_door.RealProcesses()):
             patch.setenv(git_door.VARIABLE, "real")
             directory = build_docs.obs_dir()
-        subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
-                       env=build_docs.child_environment())
-        # The adapter component every build runs through, installed where it is missing, as a build
-        # installs it: once here, so no test's build waits for it.
-        adapter, refusal = build_docs.ready_adapter(directory)
+            subprocess.run(["uv", "sync", "--quiet", "--project", str(directory)], cwd=ROOT, check=True,
+                           env=build_docs.child_environment())
+            # The adapter component every build runs through, installed where it is missing, as a
+            # build installs it: once here, so no test's build waits for it.
+            adapter, refusal = build_docs.ready_adapter(directory)
         if adapter is None:
             pytest.fail(refusal)
         os.environ[build_docs.OBS_VARIABLE] = str(directory)  # the builds of the tests that take it

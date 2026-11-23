@@ -19,7 +19,9 @@ A test may start processes where it is
   test, anything else a justification read at review;
 - named in the baseline (`spawn_baseline` ini, default `tests/spawn-baseline.yaml`), the tests not
   converted yet. The baseline may only shrink: `--spawn-baseline=write` rewrites it from this run,
-  dropping each entry that ran and started nothing, and never adds a test; `--spawn-baseline=init`
+  dropping each entry that ran, passed and started nothing, and each one of a file that ran whole
+  (no `-k`, no `-m`) that names no test of it any more, and never adds a test (it runs each
+  listed test as converted, `allowed`, so a suite hands it its fakes); `--spawn-baseline=init`
   writes it from scratch, once, where none exists. A baseline entry that ran and started nothing
   fails, naming the remedy, so a converted test leaves the baseline in its own change.
 
@@ -248,6 +250,7 @@ class SpawnGuard:
         self.mode = ""
         self.ran: dict[str, int] = {}  # node id: its starts, for every test that ran (the controller)
         self.kinds: dict[str, str] = {}  # node id: "marked", "listed" or ""
+        self.failed: set[str] = set()  # the tests that failed a phase (the controller)
         self.written: tuple[int, int] | None = None
         self.counter = Counter()
         self.marked = self.listed = 0
@@ -333,6 +336,8 @@ class SpawnGuard:
             report.longrepr = message
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        if report.failed:
+            self.failed.add(report.nodeid)
         for name, value in report.user_properties:
             if name != PROPERTY:
                 continue
@@ -352,8 +357,12 @@ class SpawnGuard:
         if self.mode == "init":
             kept = unmarked
         else:
+            # An entry that did not run stays, unless its file ran whole: then its test is gone.
+            whole = not (session.config.option.keyword or session.config.option.markexpr)
+            files = {name.split("::", 1)[0] for name in self.ran} if whole else set()
             kept = {name: unmarked.get(name, count) for name, count in self.baseline.items()
-                    if name not in self.ran or name in unmarked}
+                    if name in unmarked or name in self.failed
+                    or name not in self.ran and name.split("::", 1)[0] not in files}
         write_baseline(self.baseline_path, kept)
         self.written = (len(kept), len(self.baseline))
 
@@ -375,16 +384,24 @@ STARTS = pytest.StashKey[int]()
 
 def started(item: pytest.Item) -> int:
     """The processes `item` started so far, its setup, call and teardown, the running phase included."""
-    plugin = item.config.pluginmanager.get_plugin(NAME)
+    plugin = guard(item.config)
     running = len(plugin.counter.calls) if plugin is not None and plugin.counter.active else 0
     return item.stash.get(STARTS, 0) + running
 
 
 def allowed(item: pytest.Item) -> bool:
-    """Whether `item` may start processes: a spawns mark with its reason, or a baseline entry."""
-    plugin = item.config.pluginmanager.get_plugin(NAME)
-    listed = plugin is not None and (item.nodeid in plugin.baseline or plugin.mode == "init")
+    """Whether `item` may start processes, for a suite that gives such tests the real programs and
+    the others their fakes: a spawns mark with its reason, or a baseline entry outside
+    `--spawn-baseline=write`, which tries each listed test as converted."""
+    plugin = guard(item.config)
+    listed = plugin is not None and (item.nodeid in plugin.baseline and plugin.mode != "write"
+                                     or plugin.mode == "init")
     return bool(reason(item)) or listed
+
+
+def guard(config: pytest.Config) -> SpawnGuard | None:
+    """The guard registered with `config`, by `register` or handed to pytest as a plugin object."""
+    return next((plugin for plugin in config.pluginmanager.get_plugins() if isinstance(plugin, SpawnGuard)), None)
 
 
 def register(pluginmanager: pytest.PytestPluginManager) -> SpawnGuard:

@@ -168,9 +168,13 @@ def test_the_baseline_only_shrinks(pytester: pytest.Pytester, no_starts) -> None
     path = pytester.path / spawn_guard.DEFAULT_BASELINE
     path.parent.mkdir()
     spawn_guard.write_baseline(path, {"test_planted.py::test_runs_git": 1, "test_planted.py::test_quiet": 2,
-                                      "test_gone.py::test_elsewhere": 3})
+                                      "test_planted.py::test_renamed": 1, "test_gone.py::test_elsewhere": 3})
     result = run(pytester, "--spawn-baseline=write", "test_planted.py", "test_new.py")
     result.assert_outcomes(passed=2, failed=1)  # the new spawning test is refused, never added
+    # test_quiet started nothing and test_renamed is no test of a file that ran whole: both go;
+    # test_elsewhere's file did not run, so it stays
+    assert baseline(pytester) == {"test_planted.py::test_runs_git": 1, "test_gone.py::test_elsewhere": 3}
+    run(pytester, "--spawn-baseline=write", "-k", "quiet", "test_planted.py")
     assert baseline(pytester) == {"test_planted.py::test_runs_git": 1, "test_gone.py::test_elsewhere": 3}
     assert "spawns: wrote" in result.stdout.str()
 
@@ -222,6 +226,27 @@ def test_the_controller_adds_up_its_workers_counts() -> None:
 ])
 def test_a_command_is_named_short(argv, shown: str) -> None:
     assert spawn_guard.command_text(argv) == shown
+
+
+def test_write_runs_a_listed_test_as_converted_and_keeps_it_where_it_fails(pytester: pytest.Pytester,
+                                                                           no_starts) -> None:
+    """Under --spawn-baseline=write a listed test is not `allowed` (a suite gives it its fakes), and
+    one that then fails stays listed."""
+    pytester.makeconftest("""\
+        import pytest
+        import spawn_guard
+
+        @pytest.fixture
+        def door(request):
+            return "real" if spawn_guard.allowed(request.node) else "fake"
+        """)
+    pytester.makepyfile(test_planted="def test_needs_the_real_door(door):\n    assert door == 'real'\n")
+    path = pytester.path / spawn_guard.DEFAULT_BASELINE
+    path.parent.mkdir()
+    spawn_guard.write_baseline(path, {"test_planted.py::test_needs_the_real_door": 1})
+    run(pytester).assert_outcomes(errors=1, passed=1)  # listed, it gets the real door and starts nothing
+    run(pytester, "--spawn-baseline=write").assert_outcomes(failed=1)
+    assert baseline(pytester) == {"test_planted.py::test_needs_the_real_door": 1}
 
 
 def test_the_suites_conftest_registers_the_guard(pytestconfig: pytest.Config) -> None:

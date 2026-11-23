@@ -1651,6 +1651,7 @@ class StateFile:
     def __init__(self, path: Path) -> None:
         self.path = Path(path).resolve()
         self.lock = self.path.with_name(self.path.name + ".flock")
+        self.hooks_run = 0  # the hooks this process's commands ran, in-process or as a child
         if not self.path.exists():
             self.save(FakeGit())
 
@@ -1710,6 +1711,7 @@ class StateFile:
         environment = {**(os.environ if env is None else env), git_door.VARIABLE: f"fake:{self.path}"}
         out = err = b""
         for hook in hooks:
+            self.hooks_run += 1
             ran = hook.run(environment, timeout)
             if hook.path.name == "pre-push":
                 out, err = out + ran.stdout, err + ran.stderr

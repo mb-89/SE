@@ -77,7 +77,10 @@ class Invocation:
         words = self.words
         if not words or not (python(words[0]) or Path(words[0]).name in ("uv", "uv.exe")):
             return None
-        return next((Path(word) for word in words[1:] if word.endswith(".py")), None)
+        script = next((Path(word) for word in words[1:] if word.endswith(".py")), None)
+        if script is not None and not script.is_absolute() and self.cwd is not None:
+            return self.cwd / script  # as the child resolves it, from its own working directory
+        return script
 
     @property
     def arguments(self) -> list[str]:
@@ -86,7 +89,7 @@ class Invocation:
         script = self.script
         if script is None:
             return words[1:]
-        return words[[Path(word) for word in words].index(script) + 1:]
+        return words[next(index for index, word in enumerate(words) if word.endswith(".py")) + 1:]
 
     def text(self) -> str:
         return " ".join(self.words)
