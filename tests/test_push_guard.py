@@ -1,9 +1,12 @@
 """Nothing reaches the integration branch without a passing suite and public check recorded on
 exactly the tree pushed: `work_tickets.py push` and the pre-push hook refuse alike.
 
-git is the door's fake (`door_fake`, tests/conftest.py): in memory for a test that runs the guard in
-its own process, behind a state file (`shared_fake_git`) for one whose suite or pre-push hook runs
-as a child process, as git runs it, and whose scripts reach the fake from there."""
+Every program the guard runs, its suite, se's hooks and the scripts they run, is answered in this
+process by the process door's fake (`fake_processes`, tests/fake_processes.py): the suite by
+`suite_of_verdict`, the hooks and scripts by their logic and `main`; the hooks' own shell runs in
+their entry tests (tests/test_public_check.py). git is the door's fake (`door_fake`,
+tests/conftest.py): in memory, or behind a state file (`HOOKS_RUN`) for a test whose git runs se's
+hooks, which only that fake runs."""
 import importlib.util
 import json
 import os
@@ -12,6 +15,7 @@ import sys
 
 import pytest
 import fake_git
+import fake_processes as fake_processes_module
 import git_door
 
 
@@ -21,10 +25,16 @@ work_tickets = importlib.util.module_from_spec(SPEC)
 sys.modules.setdefault("work_tickets", work_tickets)
 SPEC.loader.exec_module(work_tickets)
 verdicts = work_tickets.sibling("verdicts")
-# The interpreter by its bare name, found on the PATH the checkout fixture sets: se.toml is
-# committed and public-checked, so it carries no machine path (a runner's /home/<name>/...).
+# The interpreter by its bare name: se.toml is committed and public-checked, so it carries no
+# machine path (a runner's /home/<name>/...).
 INTERPRETER = Path(sys.executable)
 SUITE = f'["{INTERPRETER.name}", "-c", "import sys; sys.exit(open(\'verdict.txt\').read().strip() != \'pass\')"]'
+
+
+def suite_of_verdict(call: fake_processes_module.Invocation) -> fake_processes_module.Answer:
+    """`SUITE` as the process door's fake answers it: it passes where verdict.txt, in the checkout
+    the suite runs in, says pass."""
+    return fake_processes_module.Answer(int((call.cwd / "verdict.txt").read_text(encoding="utf-8").strip() != "pass"))
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -56,13 +66,21 @@ def build_checkout(tmp_path: Path) -> None:
     git(root, "push", "-q", "origin", "main")
 
 
+# A test whose git runs se's hooks takes the fake git behind a state file, the one that runs them;
+# so does a test whose `pusher` is the hook.
+HOOKS_RUN = pytest.mark.usefixtures("shared_fake_git")
+
+
 @pytest.fixture
-def checkout(tmp_path: Path, monkeypatch, door_fake) -> Path:
+def checkout(tmp_path: Path, monkeypatch, request: pytest.FixtureRequest, fake_processes) -> Path:
     """A clone of a bare origin on main, the integration branch, without hooks; its suite passes
-    where verdict.txt says pass. Its git is the fake in memory, or the state file where the test
-    takes `shared_fake_git` (tests/conftest.py `door_fake`)."""
+    where verdict.txt says pass (`suite_of_verdict`). Its git is the fake in memory, or the state
+    file where the test's git runs se's hooks (`HOOKS_RUN`, or the hook as its `pusher`)."""
+    callspec = getattr(request.node, "callspec", None)
+    hooked = "shared_fake_git" in request.fixturenames or (callspec and callspec.params.get("pusher") == "hook")
+    request.getfixturevalue("shared_fake_git" if hooked else "fake_git_door")
+    fake_processes.on(INTERPRETER.name, suite_of_verdict)
     monkeypatch.setattr(work_tickets, "local_config_path", lambda: tmp_path / "no-local.toml")
-    monkeypatch.setenv("PATH", f"{INTERPRETER.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     build_checkout(tmp_path)
     return tmp_path / "main"
 
@@ -118,7 +136,6 @@ CASES = {
 }
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 @pytest.mark.parametrize("pusher", ["push", "hook"])
 @pytest.mark.parametrize("case", CASES)
 def test_push_and_the_hook_agree_on_the_suite_verdict(checkout, capfd, pusher, case):
@@ -136,7 +153,7 @@ def test_push_and_the_hook_agree_on_the_suite_verdict(checkout, capfd, pusher, c
     assert "Remedy: check out" in output and "work_tickets.py suite" in output
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, capfd):
     git(checkout, "switch", "-q", "-c", "topic")
     commit(checkout)
@@ -147,7 +164,7 @@ def test_a_branch_other_than_the_integration_branch_needs_no_verdict(checkout, c
     assert git_door.run("push", "-q", "origin", "topic", root=checkout).returncode == 0
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 @pytest.mark.parametrize("landing", ["squash", "fast-forward"])
 def test_a_published_commit_github_made_merged_in_passes_the_push_gates_a_new_one_does_not(
         checkout, tmp_path, capfd, landing):
@@ -214,7 +231,6 @@ def _cut_from_the_other_host(checkout: Path, tmp_path: Path, tagged: bool) -> No
     commit(checkout, name="topic.txt")
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the clean push's public check runs git in a child
 @pytest.mark.parametrize("public_check", [True, False], ids=["checked", "unchecked"])
 @pytest.mark.parametrize("tagged", [False, True], ids=["untagged", "tagged"])
 def test_push_refuses_a_branch_carrying_history_only_another_remote_holds(checkout, tmp_path, capsys,
@@ -281,7 +297,6 @@ def test_without_a_public_check_the_guard_needs_the_suite_only(checkout):
     assert verified(checkout, "refs/heads/topic") == 0
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_records_pass_and_fail_on_the_tree_of_its_commit(checkout, capsys):
     head = commit(checkout)
     run_suite(checkout)
@@ -295,7 +310,6 @@ def test_the_suite_records_pass_and_fail_on_the_tree_of_its_commit(checkout, cap
     assert "Suite verdict recorded: failed" in capsys.readouterr().out
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_on_a_changed_checkout_records_nothing(checkout, capsys):
     commit(checkout)
     (checkout / "untracked.txt").write_text("x", encoding="utf-8")
@@ -304,7 +318,6 @@ def test_the_suite_on_a_changed_checkout_records_nothing(checkout, capsys):
     assert "Suite verdict not recorded" in capsys.readouterr().out
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_suite_over_its_limit_records_a_failure(checkout, monkeypatch):
     commit(checkout)
     ticks = iter([0.0, 500.0])
@@ -329,7 +342,6 @@ def test_the_public_check_of_a_rev_records_its_verdict(checkout, content, passed
     assert recorded["passed"] is passed
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_release_commit_carries_its_parents_suite_verdict(checkout):
     (checkout / "se.toml").write_text(
         f'{IDENTITY}version = "1.0.0"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
@@ -349,12 +361,17 @@ def test_a_release_commit_carries_its_parents_suite_verdict(checkout):
     assert recorded["passed"] is True and recorded["carried_from"] == merge_tree
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_suite_notes_its_time_and_limit_in_the_metrics_line(checkout, tmp_path, monkeypatch,
                                                                  capsys):
-    """README "Metrics": the suite's wall time and its [tests] limit, which the report flags."""
+    """README "Metrics": the suite's wall time and its [tests] limit, which the report flags. One
+    clock that ticks a second at each reading times the command and its suite, which the process
+    door's fake answers at once."""
     path = tmp_path / "metrics.jsonl"
     monkeypatch.setenv("SE_METRICS", str(path))
+    ticks = iter(range(1000))
+    tick = lambda: float(next(ticks))  # noqa: E731
+    monkeypatch.setattr(work_tickets, "clock", tick)
+    monkeypatch.setattr(work_tickets.metrics, "clock", tick)
 
     assert work_tickets.main(["suite", "--worktree", str(checkout)]) == 0
 
@@ -385,7 +402,7 @@ def delivered_work_branch(root: Path) -> str:
     return tip
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 def test_a_push_before_any_delivery_names_no_late_push(checkout, capfd):
     git(checkout, "switch", "-q", "-c", WORK_BRANCH)
     commit(checkout, name="fix.txt")
@@ -395,7 +412,7 @@ def test_a_push_before_any_delivery_names_no_late_push(checkout, capfd):
     assert "late push" not in output
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 def test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through(checkout, capfd):
     tip = delivered_work_branch(checkout)
     later = commit(checkout, name="late.txt")
@@ -410,7 +427,6 @@ def test_a_push_after_the_delivery_names_the_stale_delivery_and_goes_through(che
                      "push"]
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push(checkout, capsys):
     delivered_work_branch(checkout)
     assert verified(checkout, f"refs/heads/{WORK_BRANCH}") == 0
@@ -419,7 +435,7 @@ def test_a_push_of_the_delivered_tip_or_of_another_branch_names_no_late_push(che
     assert "late push" not in "".join(capsys.readouterr())
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 def test_with_the_setting_on_a_push_after_the_delivery_is_refused(checkout, capfd):
     (checkout / "se.toml").write_text(
         f'{IDENTITY}[deliver]\nlate_push = "refuse"\n[tests]\ncommand = {SUITE}\n', encoding="utf-8")
@@ -433,7 +449,7 @@ def test_with_the_setting_on_a_push_after_the_delivery_is_refused(checkout, capf
     assert "work_tickets.py push --redeliver" in output
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
+@HOOKS_RUN
 def test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_it_through(
         checkout, capfd):
     (checkout / "se.toml").write_text(
@@ -446,7 +462,6 @@ def test_push_redeliver_records_its_tip_first_so_even_the_refusing_setting_lets_
     assert late_push.load(checkout / ".se" / "work") == {"branch": WORK_BRANCH, "tip": later}
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_a_failed_redelivery_push_puts_the_record_back(checkout, monkeypatch):
     tip = delivered_work_branch(checkout)
     commit(checkout, name="late.txt")
@@ -540,7 +555,6 @@ def test_without_ci_the_guard_accepts_the_status_on_the_landing_head_that_landed
     assert f"(on {landing[:12]})" in capsys.readouterr().out
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_without_ci_push_accepts_the_status_as_the_hook_does(checkout, host, capfd):
     head = without_ci(checkout)
     host.write(checkout, head)
@@ -593,7 +607,6 @@ def origin_has(root: Path, branch: str) -> bool:
                         root=root.parent / "origin.git").returncode == 0
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
 def test_a_work_branch_is_never_published_to_an_origin_its_work_issue_is_not_for(checkout, capsys):
     """The reproduction: deliver pushes through push, which ran git push -u origin <branch>
     whatever repository origin is; a work issue for another repository now stops it first."""
@@ -638,7 +651,6 @@ UNRESOLVED = {
 }
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
 @pytest.mark.parametrize("case", UNRESOLVED)
 def test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_push(
         checkout, capsys, case):
@@ -655,7 +667,6 @@ def test_a_work_branch_whose_destination_is_unresolved_is_refused_before_any_pus
     assert not origin_has(checkout, WORK_BRANCH)
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the push gate's public check runs git in a child
 @pytest.mark.parametrize(("labels", "repo", "tracker"), [
     (("repo:ORIGIN",), "git.example/o/tracker", None),
     ((), "git.example/someone/origin", None),
@@ -678,7 +689,6 @@ def test_a_work_branch_is_published_where_its_work_issue_is_for(checkout, tmp_pa
     assert git(checkout.parent / "origin.git", "rev-parse", WORK_BRANCH) == tip
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child processes run git
 def test_the_integration_branch_is_pushed_whatever_work_issue_the_checkout_records(checkout):
     """Work publication guards work branches only: the integration branch keeps its own guard."""
     work_issue(checkout, WORK_BRANCH, "repo:elsewhere")
@@ -718,7 +728,7 @@ def push_topic(checkout: Path, remote: str, capfd) -> tuple[int, str]:
     return pushed.returncode, pushed.stdout + pushed.stderr + captured.out + captured.err
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the hooks run git in a child
+@HOOKS_RUN
 @pytest.mark.parametrize("pusher", ["push", "hook"])
 def test_a_remote_line_stops_a_push_to_its_remote_and_lets_the_commit_go_to_the_other(
         checkout, tmp_path, capfd, pusher):
@@ -742,7 +752,7 @@ def test_a_remote_line_stops_a_push_to_its_remote_and_lets_the_commit_go_to_the_
                         root=tmp_path / "mirror.git").returncode != 0
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # the hooks run git in a child
+@HOOKS_RUN
 @pytest.mark.parametrize("remote", ["origin", "mirror"])
 def test_a_line_without_remote_stops_the_push_to_every_remote(checkout, tmp_path, capfd, remote):
     with_a_mirror(checkout, tmp_path, f"{TERM}\\w*\n")
@@ -753,7 +763,6 @@ def test_a_line_without_remote_stops_the_push_to_every_remote(checkout, tmp_path
     assert "topic.txt:1:11: local-term:1" in output and TERM not in output.lower()
 
 
-@pytest.mark.usefixtures("shared_fake_git")  # its child process runs git
 def test_push_gates_its_branch_for_origin_with_the_remote_lines_for_origin(checkout, tmp_path,
                                                                         capsys):
     head = with_a_mirror(checkout, tmp_path, f"remote:origin {TERM}\\w*\n")
