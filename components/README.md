@@ -6,7 +6,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
   script commands (README ["Commands as components"](../README.md#commands-as-components)).
-- **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
+- **Go, compiled into the `se` binary**: fleet, retro-due, origin and template, SE's Go module
   `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[components.kern]` pins
   and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
   Beside them the binary carries kern's GitHub component and kern's clock, whose `clock/second`
@@ -19,6 +19,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 | `fleet` | `github/issues`, `github/pulls`, `github/checks`, `github/issue-lists`, `github/pull-lists` whole; `origin/branches`; config `lease-hours`, `repository`, `base` | `fleet/findings`: each stuck or stray piece of work with its remedy, as `fleet-check --json` lists it, with when it was computed, how many issues, pull requests and branches it read, whether that was a complete read of the open issue and pull-request lists (`complete`) and since when (`since`); only a complete read is `healthy` | `work_tickets.py` `fleet_findings` |
 | `retro-due` | `github/issues`, `github/pulls` whole; `origin/tracker`; config `due-after`, `overhaul-after` (0, off, unless set), `base` | `retro-due/due`: the work issues landed since the last retro, `due_after`, whether a retro is due, where the window starts; the retros closed since the last overhaul, `overhaul_after`, whether an overhaul is due, where that window starts | `retro.py` `landed_since_retro`, `overhaul.py` `retros_since_overhaul` |
 | `origin` | the checkout's git: `refs/remotes/origin` and origin's URL, at start and after SessionStart, UserPromptSubmit, Stop, SubagentStop and each Bash PostToolUse | `origin/branches`: each branch with the committer time of its tip; `origin/tracker`: `<owner>/<repository>` of the home origin names (kern's `kern/home`), `""` where it names none | `work_tickets.py` `fleet_branches`, without its fetch |
+| `template` | SE's `templates/` in the checkout its config `root` names, at each call | nothing: its verbs answer. `fill` makes a filled template ([The template engine in Go](#the-template-engine-in-go)); `accept` is a templated target's gate across the bus; `check` gives a text's findings | `scripts/templates.py` |
 
 - **Whole families.** fleet and retro-due count across issues, so each reads a GitHub family whole: an
   input of type `map[string]T` bound to a family of `T` reads every key standing, and the
@@ -39,6 +40,27 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   checkout's root `wiring.toml` names these components beside SE's four Python command groups, and
   the core starts them. [`release.toml`](release.toml) owns the binary's version and its release,
   `se-v<version>`.
+
+## The template engine in Go
+
+`template/` is SE's template engine ported to Go (SE#1683): the same template notes, checks and
+answers as [scripts/templates.py](../scripts/templates.py), whose docstring owns the format.
+`Load` reads the notes, `Parse`, `Render`, `Check`, `Select`, `Draft`, `Schema` and `FillDocument`
+answer as the Python functions of their names do.
+
+- **One set of cases.** [tests/template_cases.py](../tests/template_cases.py) writes
+  `template/testdata/cases/`: every SE template and four fixture sets, filled, read, checked,
+  selected and broken, each with the Python engine's answer. `cases_test.go` holds Go to every
+  answer, word for word; `tests/test_template_cases.py` fails where the committed cases lag the
+  Python engine, so a change to either engine or to `templates/` refreshes them with
+  `uv run python tests/template_cases.py`.
+- **Code a template names.** A template names Python as `<module>:<NAME>`; Go holds its port of
+  each name SE's templates use in `References` and `Checkers` (`references.go`), and the cases
+  hold each port to the Python one. A name Go holds no port of does not load; an adapter whose
+  checker Go does not hold refuses its check, naming the checker.
+- **Not in Go.** The rule `dangling` (an SE command that does not exist) reads the checkout's
+  scripts and their parsers through `scripts/references.py`, and the adapters' checkers but
+  `deck:pugh_problems` are Python's: Go runs neither, and the cases hold no text either refuses.
 
 ## Who reads them
 

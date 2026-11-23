@@ -364,9 +364,15 @@ def read_templates(source: Source, templates: dict[str, Template], findings: lis
         return
     engine = sibling("templates")
     for path in sorted(folder.glob(f"*{engine.TEMPLATE_SUFFIX}")):
+        if path.name.endswith(engine.OVERLAY_SUFFIX):
+            continue  # read with its template, whose tags it adds to
         where = source.where(path.relative_to(source.root).as_posix())
         try:
             data = engine.note_data(path.read_text(encoding="utf-8"), where)
+            overlay = path.with_name(path.name.removesuffix(engine.TEMPLATE_SUFFIX) + engine.OVERLAY_SUFFIX)
+            if overlay.is_file() and isinstance(data.setdefault("tags", []), list):
+                data["tags"] += engine.overlay_tags(overlay.read_text(encoding="utf-8"),
+                                                    source.where(overlay.relative_to(source.root).as_posix()))
         except UnicodeDecodeError as error:
             findings.append(f"{where}: not UTF-8 ({error}); fix the template")
             continue
