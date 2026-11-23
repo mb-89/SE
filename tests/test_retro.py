@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import retro
+import templates
 import se_component
 import se_usage
 import work_tickets
@@ -108,6 +109,28 @@ def report(retro_section: str, not_delivered: str) -> str:
             f"## Decisions\n\nNone\n\n## Retro\n\n{retro_section}\n<!-- se:field-report:end -->\n")
 
 
+def answered(**answers: str) -> str:
+    """A field report's Retro section: each standing question, `answers` by its field, else None."""
+    return "\n".join(f"### {item.heading}\n\n{answers.get(item.name, 'None.')}\n"
+                     for item in retro.questions().fields)
+
+
+def steps() -> str:
+    """The six steps of the retro template, filled from its example."""
+    template = retro.retro_template()
+    return retro.templates().render(template, template.example["fields"])
+
+
+def fill_steps(text: str) -> str:
+    """The draft `text` with what the judge writes into the steps: the field feedback, every
+    standing question answered None, the person's decisions."""
+    text = re.sub(r"^(<!-- field_feedback: [^\n]*-->)$", r"\1\n\n> The integrator stalled twice.",
+                  text, count=1, flags=re.MULTILINE)
+    text = re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", text, flags=re.MULTILINE)
+    return re.sub(r"^(<!-- decisions: [^\n]*-->)$", r"\1\n\nThe person accepted every finding.",
+                  text, count=1, flags=re.MULTILINE)
+
+
 def issue(number: int, title: str, closed: str, reason: str = "completed",
           labels: tuple[str, ...] = ("work",)) -> dict:
     return {"number": number, "title": title, "state": "closed", "closed_at": closed,
@@ -127,12 +150,11 @@ def answers(checkout: Path) -> dict[str, object]:
     #25 landed naming no work issue and one commit reached main by hand."""
     commit = shas(checkout)
     previous = {"version": 1, "sizes": {"closed": 7, "landed": 5, "duplicates": 0, "escalated": 3}}
-    work_a = report("- **Went well:** the fake door\n- **Cost time:** a slow fixture\n"
-                    "- **Proposed improvement:** None",
+    work_a = report(answered(goes_well="the fake door", goes_badly="a slow fixture"),
                     "- The live run against GitHub: no token in the container.\n"
                     "- A second item\n  that wraps.").replace(issue_url(0), issue_url(11))
-    work_b = report("- **Went well:** \n- **Cost time:** none\n- **Proposed improvement:** "
-                    "`src/agents/worker.md`: say it once", "None").replace(issue_url(0),
+    work_b = report(answered(bad_output_cause="`src/agents/worker.md`: say it once"),
+                    "None").replace(issue_url(0),
                                                                           issue_url(12))
     return {
         "issues.json": [
@@ -227,8 +249,8 @@ def test_the_window_gives_the_sizes_and_the_per_issue_counts(checkout):
     assert (by[11].landing_pull, by[11].report_pull) == (21, 22)
     assert (by[12].refused, by[12].escalations, by[12].suite_seconds) == (0, 1, 40.0)
     assert by[13].duplicate and not by[13].landed and not by[14].landed
-    assert by[11].retro == {"Went well": "the fake door", "Cost time": "a slow fixture"}
-    assert by[12].retro == {"Proposed improvement": "`src/agents/worker.md`: say it once"}
+    assert by[11].retro == {"goes_well": "the fake door", "goes_badly": "a slow fixture"}
+    assert by[12].retro == {"bad_output_cause": "`src/agents/worker.md`: say it once"}
     assert by[11].not_delivered == ["The live run against GitHub: no token in the container.",
                                     "A second item that wraps."]
     assert by[12].not_delivered == []
@@ -483,8 +505,9 @@ def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     assert "| landed | 2 | 5 |" in text
     assert "| #11 feat/a | 1 | 1 | 35.4 s | #22 |" in text
     assert "- **check**: " in text and "broken 1 of 3\n  - #23: check failure" in text
-    assert "### Cost time\n\n- #11: a slow fixture" in text
-    assert "## Not delivered\n\n- #11: The live run against GitHub" in text
+    assert "#### What goes badly, each with its moment in the log?\n\n- #11: a slow fixture" in text
+    assert ("### Planning misses\n\nWhat the field reports did not deliver:\n\n- #11: The live run "
+            "against GitHub") in text
     assert text.rstrip().endswith("```")
     block = retro.read_block(text)
     assert block == json.loads(json.dumps(found.data()))
@@ -626,12 +649,17 @@ def test_the_gh_door_reads_every_page_and_leaves_out_pull_requests(monkeypatch):
                      "issues?state=closed&per_page=100&page=2"]
 
 
+LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
+                "fix": "`integrate` refuses a landing without one",
+                "home": "scripts/work_tickets.py", "home_kind": "refusal"}
+
+
 def judged_draft(checkout: Path, **changes: object) -> str:
     """The collect's draft of retro #30 with its block judged: two findings of one class, the
     second controversial; `changes` replace the judgment's lists."""
     data = collected(checkout).data()
     data.update({
-        "classes": [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one"}],
+        "classes": [LOST_REPORTS],
         "findings": [
             {"title": "Refuse a landing whose work issue has no field report",
              "body": "#14 closed without one.", "class": "Lost reports",
@@ -641,7 +669,7 @@ def judged_draft(checkout: Path, **changes: object) -> str:
              "home": retro.RULE_BOOK, "controversial": True, "why": "it changes a rule"}],
         "went_well": ["The fake door kept the tests fast."]})
     data.update(changes)
-    text = retro.draft(collected(checkout))
+    text = fill_steps(retro.draft(collected(checkout)))
     return text[:text.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n" + retro.review.fenced(
         json.dumps(data, indent=2), "yaml") + "\n"
 
@@ -660,8 +688,14 @@ def finding(**changes: object) -> dict:
     ({"findings": [finding(**{"class": "Elsewhere"})]},
      'names the class "Elsewhere", which `classes` does not'),
     ({"findings": [finding(home="")]}, "has no home: the file it changes"),
-    ({"classes": [{"name": "Lost reports", "fix": " "}], "findings": [finding()]},
+    ({"classes": [{**LOST_REPORTS, "fix": " "}], "findings": [finding()]},
      'class "Lost reports" has no fix'),
+    ({"classes": [{**LOST_REPORTS, "cause": ""}], "findings": [finding()]},
+     'class "Lost reports" has no cause'),
+    ({"classes": [{**LOST_REPORTS, "home": ""}], "findings": [finding()]},
+     'class "Lost reports" has no home'),
+    ({"classes": [{**LOST_REPORTS, "home_kind": "wish"}], "findings": [finding()]},
+     'class "Lost reports": home_kind is the first of the home order that holds: check, refusal'),
     ({"findings": [finding(controversial=True)]}, "is controversial without a why"),
     ({"findings": [finding(home=retro.RULE_BOOK)]}, "changes a rule (its home is the rule book)"),
     ({"findings": [finding(check="speed")]}, 'names the check "speed", which is no rule check'),
@@ -731,8 +765,9 @@ def test_file_posts_the_report_proper_as_the_closing_comment_and_files_nothing(
     assert [name for name, _ in calls] == ["comment_issue", "close_issue"]
     assert all(arguments["issue_number"] == 30 for _, arguments in calls)
     comment = calls[0][1]["body"]
-    assert comment.startswith(retro.REPORT_MARKER + "\n## Retro #30: the report\n")
-    assert ("#### Lost reports (2)\n\nFix: `integrate` refuses a landing without one\n" in comment)
+    assert comment.startswith(retro.REPORT_MARKER + "\n# Retro #30: the report\n")
+    assert ("#### Lost reports (2)\n\nCause: a landing need not name a field report\n\n"
+            "Fix: `integrate` refuses a landing without one\n" in comment)
     assert ("- **1. Refuse a landing whose work issue has no field report** (work, for SE to "
             "bundle; home `scripts/work_tickets.py`; check `field-report`)") in comment
     assert ("- **2. Make the field report a rule of the rule book** (decision, for the owner's "
@@ -754,8 +789,8 @@ def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout
     """The first live retro's draft was 130,476 characters, most of it facts and block: the
     comment holds the report proper and links the doc for the rest."""
     text = judged_draft(checkout)
-    head = text.index("## Landed issues")
-    text = text[:head] + "## Long facts\n\n" + "- a landed issue's row\n" * 6000 + "\n" + text[head:]
+    head = text.index("### Landed issues")
+    text = text[:head] + "### Long facts\n\n" + "- a landed issue's row\n" * 6000 + "\n" + text[head:]
     assert len(text) > 130000
 
     calls = filed(checkout, monkeypatch, text)
@@ -778,7 +813,10 @@ def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkey
     total = len(comments)
     assert total > 3 and [name for name, _ in calls] == ["comment_issue"] * total + ["close_issue"]
     assert all(len(comment) <= retro.COMMENT_LIMIT for comment in comments)
-    assert comments[0].startswith(retro.REPORT_MARKER)
+    # Each part is unmarked, so the gate takes none for a whole report; file checked the whole.
+    assert comments[0].startswith("# Retro #30: the report\n")
+    assert not any(retro.REPORT_MARKER in comment or retro.templates().FLEET_MARKER in comment
+                   for comment in comments)
     label = "\n\n_Part {} of %d of the report of retro #30._\n" % total
     assert all(comment.endswith(label.format(index)) for index, comment in
                enumerate(comments, 1))
@@ -839,7 +877,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
     monkeypatch.setattr(work_tickets, "tracker_actions", tracker.actions)
     given = answers(checkout)
     block = {"version": 1, "sizes": {"closed": 7}, "window": {"retro": 5},
-             "classes": [{"name": "C", "fix": "F"}], "went_well": ["Something went well."],
+             "classes": [{**LOST_REPORTS, "name": "C"}], "went_well": ["Something went well."],
              "findings": [
                  finding(**{"class": "C", "title": "Name the fake door in every test"}),
                  finding(**{"class": "C", "check": "check",
@@ -847,7 +885,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
                  finding(**{"class": "C", "title": "A finding nobody took up yet"}),
                  finding(**{"class": "C", "check": "check",
                             "title": "Gate the landing on its check run"})]}
-    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
+    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + steps() + "\n" + retro.BLOCK_MARKER + "\n```yaml\n"
                        + json.dumps(block) + "\n```\n", "docs/retro-5.md")
     assert retro.main(["file", "5", "--draft", str(draft), "--repo", REPO,
                        "--worktree", str(checkout)]) == 0
@@ -883,7 +921,7 @@ def test_the_next_collect_scores_the_previous_findings(checkout, monkeypatch):
         {"finding": 4, "title": "Gate the landing on its check run", "class": "C", "kind": "work",
          "check": "check", "issues": [16], "state": "too early to score", "recurred": False}]
     text = retro.draft(found)
-    assert "## The findings of retro #5" in text
+    assert "### The findings of retro #5" in text
     assert "| 2. Run the check job on every landing | C | work | #12 | closed | yes (check) |" in text
     assert "| 3. A finding nobody took up yet | C | work | none | none | no check named |" in text
     assert ("| 4. Gate the landing on its check run | C | work | #16 | too early to score | "
@@ -921,9 +959,9 @@ def test_an_ad_hoc_component_used_in_enough_sessions_is_a_promotion_candidate(ch
     assert found.adhoc[0]["sessions"] == se_usage.PROMOTE_SESSIONS
     assert found.adhoc[0]["path"] == ".se/components/probe"
     text = retro.draft(found)
-    assert "## Ad hoc components to promote" in text
+    assert "### Ad hoc components to promote" in text
     assert "| probe |" in text and "`.se/components/probe`" in text
-    assert "once" not in text.split("## Ad hoc components to promote", 1)[1].split("##", 1)[0]
+    assert "once" not in text.split("### Ad hoc components to promote", 1)[1].split("###", 1)[0]
 
 
 def test_the_most_run_ad_hoc_scripts_are_promotion_candidates_beside_the_components(checkout):
@@ -947,7 +985,7 @@ def test_the_most_run_ad_hoc_scripts_are_promotion_candidates_beside_the_compone
     assert found.data()["scripts"] == found.scripts
     assert found.adhoc == []  # a script's run is no component's use
     text = retro.draft(found)
-    section = text.split("## Ad hoc scripts to promote", 1)[1].split("\n## ", 1)[0]
+    section = text.split("### Ad hoc scripts to promote", 1)[1].split("\n### ", 1)[0]
     assert f"since {found.window.since}" in section
     assert "| `probe.py` | 4 | 1 | `aaaaaaaaaaaa` |" in section
     assert "rare.py" not in section and "old.py" not in section
@@ -956,22 +994,25 @@ def test_the_most_run_ad_hoc_scripts_are_promotion_candidates_beside_the_compone
 def test_no_ad_hoc_use_leaves_the_draft_section_empty(checkout):
     found = collected(checkout)
     assert found.adhoc == [] and found.scripts == []
-    assert "## Ad hoc components to promote\n\nNone." in retro.draft(found)
-    assert "## Ad hoc scripts to promote\n\nNone." in retro.draft(found)
+    assert "### Ad hoc components to promote\n\nNone." in retro.draft(found)
+    assert "### Ad hoc scripts to promote\n\nNone." in retro.draft(found)
 
 
 # The two flags and the optional keys of a class: off by default, so the draft without them is
 # the draft as before.
 
-NEW_HEADINGS = ("## Session signals", "## Refused deliveries and declined reviews",
-                "## The classes of retro")
+NEW_HEADINGS = ("### Session signals", "### Refused deliveries and declined reviews",
+                "### The classes of retro")
 
 
 def without_block(text: str, heading: str) -> str:
     """`text` without the section under `heading`, up to the next heading of its level or the
     judging note."""
     start = text.index("\n" + heading)
-    ends = [at for at in (text.find("\n## ", start + 1), text.find("\n" + retro.JUDGE_BEGIN, start))
+    depth = len(heading.split(" ", 1)[0])
+    ends = [at for at in (*(text.find("\n" + "#" * level + " ", start + 1)
+                            for level in range(1, depth + 1)),
+                          text.find("\n" + retro.JUDGE_BEGIN, start))
             if at >= 0]
     return text[:start] + text[min(ends):]
 
@@ -1009,10 +1050,10 @@ def test_signals_adds_one_block_of_counts_with_a_line_per_source(checkout, tmp_p
     assert found.signals["given"] == 3 and found.signals["read"] == 1
     assert found.signals["signals"]["corrections"] == 1
     text = retro.draft(found)
-    assert "## Session signals\n\n1 files read of 3 given" in text
+    assert "### Session signals\n\n1 files read of 3 given" in text
     assert "- one.jsonl: 3 events, 2 hits\n- empty.jsonl: nothing read\n- gone.jsonl: not found" in text
     assert "| corrections | 1 |" in text
-    assert without_block(text, "## Session signals") == plain
+    assert without_block(text, "### Session signals") == plain
     assert retro.read_block(text) == retro.read_block(plain)
 
 
@@ -1071,12 +1112,12 @@ def test_refusals_lists_each_refused_delivery_and_declined_review(checkout):
         "> ### Acceptance"]
 
     text = retro.draft(found)
-    assert ("## Refused deliveries and declined reviews\n\n- #11 refused delivery: "
+    assert ("### Refused deliveries and declined reviews\n\n- #11 refused delivery: "
             "https://github.com/owner/repo/issues/11#issuecomment-1; author association OWNER, "
             "inside the fleet\n  Outside text from") in text
     assert ("- #12 declined review (pull request #24): https://github.com/owner/repo/pull/24"
             "#issuecomment-3; author association CONTRIBUTOR, outside the fleet") in text
-    assert without_block(text, "## Refused deliveries and declined reviews") == retro.draft(plain)
+    assert without_block(text, "### Refused deliveries and declined reviews") == retro.draft(plain)
 
 
 class NoPullComments(FakeDoor):
@@ -1099,7 +1140,7 @@ def test_refusals_without_a_declined_review_reads_nothing_more(checkout):
     found = retro.collect(checkout, 30, NoPullComments(given), REPO, "main", "origin/main", NOW,
                           refusals=True)
     assert found.refusals == []
-    assert "## Refused deliveries and declined reviews\n\nNone.\n" in retro.draft(found)
+    assert "### Refused deliveries and declined reviews\n\nNone.\n" in retro.draft(found)
 
 
 def test_a_declined_review_without_its_verdict_comment_names_the_escalation(checkout):
@@ -1160,43 +1201,109 @@ def test_the_flags_parse_and_json_carries_their_blocks(checkout, tmp_path, monke
     ({"owner": "alice"}, "class 1 has the unknown field owner"),
 ])
 def test_a_class_s_optional_keys_are_checked(checkout, keys, refusal):
-    classes = [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one", **keys}]
+    classes = [{**LOST_REPORTS, **keys}]
     with pytest.raises(work_tickets.QueueError, match=re.escape(refusal)):
         retro.judged(judged_draft(checkout, classes=classes), 30)
 
 
-def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_counts_its_pattern(
+def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_measures_it_again(
         checkout, monkeypatch):
-    keys = {"status": "watch", "pattern": r"(?i)integration stopped", "limits": ["only merges"]}
-    classes = [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one", **keys},
-               {"name": "Plain", "fix": "nothing"}]
+    """Retro #5 named two classes; the next collect measures each again, its rate before (its
+    findings per issue #5 closed: 2 of 4) against its rate now (the issues its pattern matches, per
+    issue), and checks it against the tree: Lost reports' mark is in its home, so fixed; Plain's
+    is not, so open."""
+    keys = {"status": "watch", "pattern": r"(?i)integration stopped", "limits": ["only merges"],
+            "mark": "refuses a landing without a field report"}
+    classes = [{**LOST_REPORTS, **keys},
+               {**LOST_REPORTS, "name": "Plain", "home_kind": "sentence", "home": "README.md"}]
     plain = filed(checkout, monkeypatch, judged_draft(checkout))[0][1]["body"]
     calls = filed(checkout, monkeypatch, judged_draft(checkout, classes=classes))
     comment = calls[0][1]["body"]
-    assert ("#### Lost reports (2)\n\nFix: `integrate` refuses a landing without one\n\n"
-            "Status: watch\nPattern: `(?i)integration stopped`\nLimits: only merges\n\n- **1."
-            in comment)
+    assert ("#### Lost reports (2)\n\nCause: a landing need not name a field report\n\n"
+            "Fix: `integrate` refuses a landing without one\n\nHome: refusal (home 2 of 8), "
+            "`scripts/work_tickets.py`; tree: open\n\nStatus: watch\nPattern: "
+            "`(?i)integration stopped`\nLimits: only merges\nMark: `refuses a landing without a "
+            "field report`\n\n- **1." in comment)
+    assert "#### Plain (0)" in comment and "Open classes: Lost reports, Plain." in comment
     assert "Status:" not in plain and "Pattern:" not in plain
 
     given = answers(checkout)
     block = retro.read_block(judged_draft(checkout, classes=classes))
     block["window"]["retro"] = 5
-    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + retro.BLOCK_MARKER + "\n```yaml\n"
-                       + json.dumps(block) + "\n```\n", "docs/retro-5.md")
+    draft = commit_doc(checkout, "# Retro draft for #5\n\n" + steps() + "\n" + retro.BLOCK_MARKER
+                       + "\n```yaml\n" + json.dumps(block) + "\n```\n", "docs/retro-5.md")
     given["comments-5.json"] = [{"body": retro.DOC_MARKER.format(
         sha=git(checkout, "rev-parse", "HEAD"), path=draft.relative_to(checkout).as_posix())}]
     given["issues.json"][3]["body"] = "Integration stopped twice before: integration stopped."
+    home = checkout / "scripts" / "work_tickets.py"
+    home.parent.mkdir(exist_ok=True)
+    home.write_text("# integrate refuses a landing without a field report\n", encoding="utf-8")
     found = collected(checkout, given)
     assert found.previous["classes"] == [
-        {"name": "Lost reports", "status": "watch", "pattern": r"(?i)integration stopped",
-         "limits": ["only merges"], "matches": 3, "issues": [11, 12]}]
+        {"name": "Lost reports", "status": "watch", "home": "scripts/work_tickets.py",
+         "home_kind": "refusal", "limits": ["only merges"], "before": 0.5,
+         "pattern": r"(?i)integration stopped", "matches": 3, "issues": [11, 12], "now": 0.5,
+         "tree": "fixed"},
+        {"name": "Plain", "status": None, "home": "README.md", "home_kind": "sentence",
+         "limits": None, "before": 0.0, "tree": "open"}]
     text = retro.draft(found)
-    assert ("## The classes of retro #5\n\nEach class that carries a pattern, counted over the "
-            "window's work issues (title, body, comments, field report).\n\n"
-            "| class | status | pattern | matches | issues | limits |\n|---|---|---|---|---|---|\n"
-            "| Lost reports | watch | `(?i)integration stopped` | 3 | #11, #12 | only merges |"
-            in text)
+    assert ("### The classes of retro #5, measured again\n\n" in text and
+            "| class | status | rate before | rate now | pattern | matches | issues | limits |\n"
+            "|---|---|---|---|---|---|---|---|\n"
+            "| Lost reports | watch | 0.5 | 0.5 | `(?i)integration stopped` | 3 | #11, #12 | "
+            "only merges |\n| Plain |  | 0 | no pattern | none |  |  |  |" in text)
+    assert ("| class | home | tree |\n|---|---|---|\n| Lost reports | refusal "
+            "`scripts/work_tickets.py` | fixed |\n| Plain | sentence `README.md` | open |") in text
     assert retro.read_block(text)["previous"]["classes"][0]["matches"] == 3
+
+
+def test_a_retro_built_from_the_fixtures_shows_the_six_steps_the_matrix_and_a_class_with_its_home(
+        checkout, monkeypatch):
+    """The acceptance of SE#1678: the draft collect writes from the fixtures and the report file
+    posts from it are documents of the retro template, its six steps in order, the standing
+    questions against the timeline's chapters in step 4's matrix, and in step 5 each class with
+    its home in the home order and its state against the tree."""
+    template = retro.retro_template()
+    headings = [item.heading for item in template.fields]
+    assert headings == ["1. Field feedback", "2. Collect", "3. Table of what happened",
+                        "4. The standing questions", "Answers to the standing questions",
+                        "5. Classes and homes", "6. The person decides"]
+    text = retro.draft(collected(checkout))
+    at = [text.index(f"\n## {heading}\n") for heading in headings]
+    assert at == sorted(at)
+    # Step 3: #11 landed 10:00 on 2 Nov, #12 10:00 on 3 Nov, #13 and #14 within six hours of it.
+    assert ("| chapter | from | to | steps |\n|---|---|---|---|\n"
+            "| 1 | 2026-11-02T10:00:00Z | 2026-11-02T10:00:00Z | #11 |\n"
+            "| 2 | 2026-11-03T10:00:00Z | 2026-11-03T13:00:00Z | #12, #13 |\n"
+            "| 3 | 2026-11-04T12:00:00Z | 2026-11-04T12:00:00Z | #14 |") in text
+    assert ("| #11 feat/a | 1 | the fake door | landed; 1 refused, 1 escalated, suite 35.4 s |  |"
+            in text)
+    # Step 4: the matrix names the issue whose field report answers a question in its chapter.
+    assert ("| question | 1 (2026-11-02 10:00) | 2 (2026-11-03 10:00) | 3 (2026-11-04 12:00) |"
+            in text)
+    assert "| What goes well, and what makes it go well? | #11 |  |  |" in text
+    assert ("| Which rule, prompt or tool made each bad output, and what change stops it? |  | "
+            "#12 |  |") in text
+    assert all(f"| {retro.cell(question.heading)} |" in text for question in retro.questions().fields)
+    assert "Home order, strongest first: check, refusal, gate, prefill, checklist line, command, " \
+           "setting, sentence." in text
+
+    unfilled = judged_draft(checkout).replace("> The integrator stalled twice.", "")
+    assert any(problem.startswith("1. Field feedback is empty")
+               for problem in retro.steps_problems(unfilled))
+    with pytest.raises(work_tickets.QueueError, match="leaves a step of the retro template"):
+        retro.run_file(retro.make_parser().parse_args(
+            ["file", "30", "--draft", str(commit_doc(checkout, unfilled)), "--repo", REPO,
+             "--worktree", str(checkout)]))
+    comment = filed(checkout, monkeypatch, judged_draft(checkout))[0][1]["body"]
+    at = [comment.index(f"\n## {heading}\n") for heading in headings]
+    assert at == sorted(at)
+    assert "## 1. Field feedback\n\n> The integrator stalled twice.\n" in comment
+    assert "| What goes well, and what makes it go well? | #11 |  |  |" in comment
+    assert ("Home: refusal (home 2 of 8), `scripts/work_tickets.py`; tree: open" in comment)
+    assert "Open classes: Lost reports." in comment
+    assert [finding.fix for finding in templates.check(template, templates.parse(
+        template, comment)) if finding.severity == templates.REFUSE] == []
 
 
 def result_event(cost: float | None, input_tokens: int, output_tokens: int) -> dict:
@@ -1240,10 +1347,10 @@ def test_sessions_adds_each_cloud_session_s_cost_by_its_title_per_issue_role_and
     assert found.extras() == {"costs": costs}
 
     text = retro.draft(found)
-    assert "## Session costs\n\n4 sessions of 5 given carry an SE title; 1 other" in text
+    assert "### Session costs\n\n4 sessions of 5 given carry an SE title; 1 other" in text
     assert "| #11 | 2 | 1800 | 30 | 300 | 350 | $2.50 |" in text
     assert "| kern | 1 | 40 | 10 | 100 | 8 | unknown |" in text
-    assert without_block(text, "## Session costs") == plain
+    assert without_block(text, "### Session costs") == plain
     assert retro.read_block(text) == retro.read_block(plain)
 
 
@@ -1297,11 +1404,11 @@ def test_collect_runs_the_breaking_release_check_and_the_draft_names_each_findin
     text, asked, window = run_collect_with(checkout, tmp_path, monkeypatch, behind)
 
     assert asked["root"] == checkout
-    assert ("## Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
+    assert ("### Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
             "tree, as collect ran it; what to do about a finding is the person's decision.\n\n"
             "```text\nSE pins obs ^5.0, newest 10.0.0\n```\n") in text
     plain = retro.draft(dataclasses.replace(window, breaking=None))
-    assert without_block(text, "## Breaking releases beyond a pin") == plain, "the rest is as before"
+    assert without_block(text, "### Breaking releases beyond a pin") == plain, "the rest is as before"
 
 
 def test_a_breaking_release_check_that_fails_is_named_in_the_draft(checkout, tmp_path, monkeypatch):
@@ -1310,7 +1417,7 @@ def test_a_breaking_release_check_that_fails_is_named_in_the_draft(checkout, tmp
 
     text, _, _ = run_collect_with(checkout, tmp_path, monkeypatch, fails)
 
-    assert ("## Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
+    assert ("### Breaking releases beyond a pin\n\n`se_modules.py breaking` over the project's component "
             "tree, as collect ran it; what to do about a finding is the person's decision.\n\n"
             "The check failed: the required component obs is missing (SE -> obs).\n") in text
 

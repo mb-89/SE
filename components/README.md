@@ -76,19 +76,16 @@ answer as the Python functions of their names do.
   to Python's tree for every script of SE's checkout, and the cases hold texts naming what exists,
   what does not and what a Requirement creates.
 - **The adapters' checkers.** `checkers.go` ports each of SE's: the field report's structure
-  (`work_tickets:field_report_problems`, against SE's `.github/pull_request_template.md`, without
-  the work issue), the squash commit's trailer (`work_tickets:merge_release_kind`), the review
-  report (`review:checked_report`), the retro's and the overhaul's judged block
-  (`retro:judgment_problems`, `overhaul:judgment_problems`) and the Pugh fence
-  (`deck:pugh_problems`), called as `adapter_findings` calls them: `extract`, `json_after` (read
-  as Python's `json.loads` reads it, its error text included, `pyjson.go`), `drop`, `missing`,
-  `with`, `none`, `text_as`, `title_as` and `result`. An adapter written wrong for the text (the
-  Python check's TypeError or AttributeError) fails the check with the Python engine's error. The
-  cases hold each adapter's texts: what its writer writes, every refusal and every such failure.
-- **Where Go answers otherwise.** A retro class's `pattern` is read as Go's `regexp` reads it:
-  one it refuses is refused naming Go's error, where Python names its own, and one it cannot read
-  that holds what only Python's `re` has (a look-around, a back reference) passes. Python keeps a
-  lone surrogate of a JSON string, Go reads it as U+FFFD.
+  (`work_tickets:field_report_problems`, against SE's `.github/pull_request_template.md` with the
+  standing questions nested in its Retro section, without the work issue), the squash commit's
+  trailer (`work_tickets:merge_release_kind`), the review report (`review:checked_report`) and
+  the Pugh fence (`deck:pugh_problems`), called as `adapter_findings` calls them: `extract`,
+  `json_after` (read as Python's `json.loads` reads it, its error text included, `pyjson.go`),
+  `drop`, `missing`, `with`, `none`, `text_as`, `title_as` and `result`. An adapter written wrong
+  for its checker fails the check with the Python engine's error. The cases hold each adapter's
+  texts: what its writer writes and every refusal.
+- **Where Go answers otherwise.** Python keeps a lone surrogate of a JSON string, Go reads it as
+  U+FFFD.
 
 ## Who reads them
 

@@ -8,25 +8,22 @@ import (
 	"kern/index"
 )
 
-// Each of the five adapters SE#1683 left to Python is judged in Go: the verb check passes the text
+// Each of SE's adapters SE#1683 left to Python is judged in Go (the retro and the overhaul are
+// fielded templates since SE#1678): the verb check passes the text
 // its writer writes and refuses a broken one with its checker's own refusal; the shared cases hold
 // every answer to the Python engine's.
-func TestTheVerbCheckJudgesEachOfTheFiveAdapters(t *testing.T) {
+func TestTheVerbCheckJudgesEachOfSEsAdapters(t *testing.T) {
 	startComponent(t)
 	block := "```yaml\n%s\n```\n"
 	review := `{"pull": 7, "verdict": "pass", "head": "0123456789abcdef0123456789abcdef01234567", "landed": true, "acceptance": [{"item": "It works.", "evidence": "tests pass"}], "findings": [], "clean": ["the code"]}`
-	retro := `{"findings": [], "classes": [], "went_well": ["the cases"]}`
-	overhaul := `{"rules": [{"id": "gen-001"}], "verdicts": [{"rule": "gen-001", "strays": "none", "how": "kept"}], "looked_at": {"outside": "x", "consistency": "x", "rules": "x", "retro": "x", "speed": "x", "mechanize": "x", "removal": "x"}, "findings": [], "went_well": ["the cases"]}`
 	subject := "Integrate plain-issue-titles"
 	cases := []struct {
 		template, passes, refused, refusal string
 		title                              *string
 	}{
-		{"field-report", fieldReport("**Result:** complete"), fieldReport("**Result:** done"), "Result must be exactly complete or partial", nil},
+		{"field-report", fieldReport(t, "**Result:** complete"), fieldReport(t, "**Result:** done"), "Result must be exactly complete or partial", nil},
 		{"merge-message", "A body.\n\nRelease-kind: minor\n", "A body.\n", "it states no kind", &subject},
 		{"review", "<!-- se:review -->\n" + sprintf(block, review), "<!-- se:review -->\n" + sprintf(block, strings.Replace(review, `"pass"`, `"decline"`, 1)), "A decline needs the evidence", nil},
-		{"retro", "<!-- se:retro-yaml -->\n" + sprintf(block, retro), "<!-- se:retro-yaml -->\n" + sprintf(block, `{"findings": [], "classes": [], "went_well": []}`), "`went_well` is empty", nil},
-		{"overhaul", "<!-- se:overhaul-yaml -->\n" + sprintf(block, overhaul), "<!-- se:overhaul-yaml -->\n" + sprintf(block, strings.Replace(overhaul, `"none"`, `"wide"`, 1)), "strays is one of none, slightly, far", nil},
 	}
 	for _, c := range cases {
 		for _, body := range []string{c.passes, c.refused} {
@@ -52,19 +49,24 @@ func TestTheVerbCheckJudgesEachOfTheFiveAdapters(t *testing.T) {
 	}
 }
 
-// An adapter written wrong for the text fails the check, naming the checker, as the Python
+// An adapter written wrong for its checker fails the check, naming the checker, as the Python
 // engine's TemplateError does; it never passes.
 func TestAnAdapterWrittenWrongFailsTheCheck(t *testing.T) {
-	startComponent(t)
-	_, err := Component.Serve(context.Background(), "check", map[string]any{"template": "retro", "body": "<!-- se:retro-yaml -->\n```yaml\n[]\n```\n"})
-	if err == nil || !strings.Contains(err.Error(), "templates/retro.md: retro:judgment_problems failed (AttributeError: 'list' object has no attribute 'get'); fix its adapter") {
-		t.Fatalf("a list as the retro's block did not fail the check: %v", err)
+	note := "---\nname: report\nversion: 1.0.0\nkind: document\ntags: [\"test\"]\nreader: fleet\nsays: A report.\nchecker: work_tickets:field_report_problems\napplies:\n  actions: [\"comment.create\"]\nadapter:\n  with:\n    issue_body: \"x\"\n---\n"
+	catalog, err := loadFixture(map[string]string{"report.md": note})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := catalog["report"]
+	_, err = CheckText(report, Parse(report, "Text.\n", nil), nil)
+	if err == nil || !strings.Contains(err.Error(), "templates/report.md: work_tickets:field_report_problems failed (NotImplementedError") {
+		t.Fatalf("an adapter that hands the field report's checker an issue body did not fail the check: %v", err)
 	}
 }
 
 func sprintf(format, value string) string { return strings.Replace(format, "%s", value, 1) }
 
-func fieldReport(result string) string {
+func fieldReport(t *testing.T, result string) string {
 	return "<!-- se:field-report -->\n**Work issue:** #12  **Branch:** `b`  " + result + `
 **Tested against ` + "`main`" + `:** ` + "`0123456`" + `
 **Branch tip:** ` + "`abcdef1`" + `
@@ -111,9 +113,21 @@ None
 
 ## Retro
 
-- **Went well:** x
-- **Cost time:** y
-- **Proposed improvement:** z
+` + questions(t) + `
 <!-- se:field-report:end -->
 `
+}
+
+// questions is the standing questions answered "None.", one "###" section each.
+func questions(t *testing.T) string {
+	t.Helper()
+	block, err := standingQuestions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, item := range block.Fields {
+		b.WriteString("### " + item.Heading + "\n\nNone.\n\n")
+	}
+	return b.String()
 }

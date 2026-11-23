@@ -253,8 +253,7 @@ def _report(header: dict[str, str | None] | None = None, sections: dict[str, str
                      "| Keep it | none | simple | high |",
         "Spec gaps": "None.",
         "Tickets for other repositories": "None",
-        "Retro": "- **Went well:** the cases.\n- **Cost time:** nothing.\n"
-                 "- **Proposed improvement:** none.",
+        "Retro": _questions(),
     }
     body.update(sections or {})
     text = "\n".join(line for line in head.values() if line is not None) + "\n"
@@ -264,28 +263,23 @@ def _report(header: dict[str, str | None] | None = None, sections: dict[str, str
     return f"{before}<!-- se:field-report -->\n{text}<!-- se:field-report:end -->\n{after}"
 
 
+def _questions(answer: str = "None.", drop: str = "", rename: str = "") -> str:
+    """The standing questions as a field report's Retro section answers them: one `###` section
+    each, `drop` left out and `rename` under another heading."""
+    block = templates.own("standing-questions")
+    parts = []
+    for item in block.fields:
+        if item.name == drop:
+            continue
+        heading = item.heading + "?" if item.name == rename else item.heading
+        parts.append(f"### {heading}\n\n{answer}")
+    return "\n\n".join(parts)
+
+
 REVIEW = {"pull": 7, "verdict": "pass", "head": "0123456789abcdef0123456789abcdef01234567", "landed": False,
           "acceptance": [{"item": "Titles say what changes.", "evidence": "tests pass"}],
           "findings": [], "clean": ["the title code"]}
 FINDING = {"title": "A title", "evidence": "x.py:3", "place": "x.py:3", "blocking": False, "why": "small"}
-RETRO = {"findings": [{"finding": 1, "kind": "work", "title": "Name the fix in the title",
-                       "body": "Titles say what changes.", "class": "titles", "home": "scripts/x.py",
-                       "controversial": False}],
-         "classes": [{"name": "titles", "fix": "plain titles", "status": "open", "pattern": "Title",
-                      "limits": ["one"]}],
-         "went_well": ["the cases"], "previous": {"findings": [{"check": "check", "recurred": True}]}}
-OVERHAUL = {"rules": [{"id": "gen-001"}, {"id": "pub-001"}],
-            "verdicts": [{"rule": "gen-001", "strays": "none", "how": "kept"},
-                         {"rule": "pub-001", "strays": "far", "how": "a leak"}],
-            "looked_at": {part: "nothing to change" for part in
-                          ("outside", "consistency", "rules", "retro", "speed", "mechanize", "removal")},
-            "findings": [{"finding": 1, "kind": "work", "rule_change": False,
-                          "title": "Name the fix in the title", "body": "Titles say it.",
-                          "rule": "gen-001", "place": "scripts/x.py", "controversial": False,
-                          "sources": ["#3"]}],
-            "went_well": ["the cases"]}
-
-
 def _changed(data: dict, **changes: object) -> dict:
     """`data` with each key changed (a value of DROP removes the key); `<key>__<n>__<field>`
     changes item n of a list."""
@@ -343,6 +337,10 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
             _report(sections={"Decisions": "None", "Review responses": "none."}),
             _report(sections={"Not delivered": "```\n## Retro\n```\nAll of it."}),
             _report(sections={"Retro": "- **Went well:** x"}),
+            _report(sections={"Retro": _questions(drop="real_use")}),
+            _report(sections={"Retro": _questions(answer="")}),
+            _report(sections={"Retro": _questions(answer="TBD", rename="stale_process")}),
+            _report(sections={"Retro": _questions(answer="We ran `review.py brief` by hand twice.")}),
             _report(sections={"Delivered": "| work issue ITEM | Result | Commits | Evidence |\n|---|---|---|---|\n"
                                            "| 1 \\| 2 | done | a | b |\n\n**Commit groupings:** a\n\n**Suite time:** 3 s"}),
             _report().replace("## Decisions", "## DECISIONS"),
@@ -390,54 +388,6 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
                        '{"é": "ü"  x}', "\n\n  [1,\n 2,]", "NaN", '[1e400, -0, 1.5e3, "\\ud83d\\ude00"]',
                        '{"verdict": "pass", "verdict": 1}', "\ufeff{}"):
             bodies.append(f"{review}\n```json\n{broken}\n```\n")
-        return [(body, None) for body in bodies]
-    if template.name == "retro":
-        def block(**changes: object) -> str:
-            return _fenced(retro, _changed(RETRO, **changes))
-        finding = RETRO["findings"][0]
-        bodies = [
-            "No block.\n", f"{retro}\nNothing fenced.\n", block(), block(previous=DROP),
-            block(findings="x"), block(classes=None, went_well={}), block(findings=[1]),
-            block(classes=[1, {"name": "titles", "fix": "f", "colour": "red"}]),
-            block(classes=[{"fix": "f"}, {"name": "titles"}]),
-            block(classes=[{"name": "titles", "fix": "f", "status": " ", "pattern": "Title(?=s)", "limits": [1]}]),
-            block(classes=[{"name": "titles", "fix": "f", "status": 3, "pattern": "", "limits": "one"}]),
-            block(findings=[{**finding, "extra": 1, "colour": 2, "title": "Too short"}]),
-            block(findings=[{"finding": 1}]),
-            block(findings=[{**finding, "class": "other", "home": " "}]),
-            block(findings=[{**finding, "controversial": "yes", "check": "nope"}]),
-            block(findings=[{**finding, "home": "src/skills/work-model/references/rules.md"}]),
-            block(findings=[{**finding, "check": "check"}]),
-            block(findings=[{**finding, "check": "check", "controversial": True, "why": "it recurred"}]),
-            block(findings=[{**finding, "controversial": True}]),
-            block(findings=[{**finding, "check": "work-issue"}], previous={"findings": ["x", {"check": "work-issue"}]}),
-            block(went_well=["", " "]), block(previous=[]), block(previous={"findings": {}}),
-            block(previous=[1]), block(previous="x"), block(previous={"findings": 5}),
-            block(previous={"findings": [{"check": ["x"], "recurred": True}]}),
-            f"{retro}\n```yaml\n[]\n```\n", f"{retro}\n```yaml\nnull\n```\n",
-            f"{retro}\n```yaml\n{{\"findings\": [], \n```\n",
-        ]
-        return [(body, None) for body in bodies]
-    if template.name == "overhaul":
-        def block(**changes: object) -> str:
-            return _fenced(overhaul, _changed(OVERHAUL, **changes))
-        finding = OVERHAUL["findings"][0]
-        bodies = [
-            "No block.\n", block(), block(verdicts="x", went_well=None), block(rules=DROP),
-            block(rules=[{"id": 1.0}, {"id": None}, "gen-001", {"id": True}],
-                  verdicts=[{"rule": "1.0", "strays": "none", "how": "x"}, {"rule": "None", "strays": "far", "how": "y"}]),
-            block(rules={"gen-001": 1}), block(rules="ab"), block(rules=5), block(rules=[{"id": ""}]),
-            block(verdicts=[1, {"rule": "gen-001", "strays": "none", "how": "x", "why": 1},
-                            {"rule": "gen-001", "strays": "a lot", "how": " "}, {"strays": "none", "how": "x"},
-                            {"rule": "zzz-009", "strays": None, "how": "x"}]),
-            block(looked_at=[]), block(looked_at={"outside": "x", "colour": "y", "aside": "z"}),
-            block(findings=[1, {"finding": 2}]),
-            block(findings=[{**finding, "rule": "zzz-001", "place": "", "controversial": 1, "sources": "x"}]),
-            block(findings=[{**finding, "rule": "new", "controversial": True, "sources": ["", "x"]}]),
-            block(findings=[{**finding, "rule": " ", "controversial": True, "why": "a rule", "extra": 1}]),
-            block(findings=[{key: value for key, value in finding.items() if key not in ("sources", "controversial")}]),
-            block(went_well=[1, None]), f"{overhaul}\n```yaml\n\"text\"\n```\n",
-        ]
         return [(body, None) for body in bodies]
     return []
 

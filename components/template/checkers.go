@@ -2,7 +2,6 @@ package template
 
 import (
 	"fmt"
-	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,9 +12,9 @@ import (
 // The adapters' checkers in Go: the port of each check an adapter names (`checker: <module>:<name>`)
 // and of what reads the body for it (`extract`), called as templates.py `adapter_findings` calls the
 // Python one. A checker answers what its result is: a list of texts for `problems`, any value for
-// `truth`, and for `raises` nothing, its refusal the error. A *fault is the Python error that means
-// the adapter is written wrong, never that the text is (templates.py `_MISCONFIGURED`): the check
-// fails, naming it, as Python's raises its TemplateError.
+// `truth`, and for `raises` nothing, its refusal the error. A *fault means the adapter is written
+// wrong for the checker, never that the text is (templates.py `_MISCONFIGURED`): the check fails,
+// naming it, as Python's raises its TemplateError.
 
 // Checker is an adapter's check, called with the value the body gives and the keywords the adapter
 // sets.
@@ -24,14 +23,15 @@ type Checker func(value any, keywords map[string]any) (any, error)
 // Extractor reads an adapter's value from the body, with the adapter's `extract_with`.
 type Extractor func(body string, keywords map[string]any) (any, error)
 
-// Checkers are the adapters' checks the Go engine holds, by the name the template gives.
-var Checkers = map[string]Checker{
-	"deck:pugh_problems":                 func(v any, _ map[string]any) (any, error) { return pughProblems(str(v)), nil },
-	"work_tickets:field_report_problems": fieldReportChecker,
-	"work_tickets:merge_release_kind":    mergeReleaseKind,
-	"review:checked_report":              checkedReport,
-	"retro:judgment_problems":            retroJudgmentProblems,
-	"overhaul:judgment_problems":         overhaulJudgmentProblems,
+// Checkers are the adapters' checks the Go engine holds, by the name the template gives. It is
+// filled at init: the field report's check checks its standing questions, which reads it again.
+var Checkers = map[string]Checker{}
+
+func init() {
+	Checkers["deck:pugh_problems"] = func(v any, _ map[string]any) (any, error) { return pughProblems(str(v)), nil }
+	Checkers["work_tickets:field_report_problems"] = fieldReportChecker
+	Checkers["work_tickets:merge_release_kind"] = mergeReleaseKind
+	Checkers["review:checked_report"] = checkedReport
 }
 
 // Extractors are the readings an adapter's `extract` names.
@@ -53,56 +53,6 @@ func refuseWith(format string, args ...any) error { return &refusal{fmt.Sprintf(
 type fault struct{ kind, msg string }
 
 func (f *fault) Error() string { return f.kind + ": " + f.msg }
-
-func pyType(v any) string {
-	switch v.(type) {
-	case nil:
-		return "NoneType"
-	case bool:
-		return "bool"
-	case int, *big.Int:
-		return "int"
-	case float64:
-		return "float"
-	case string:
-		return "str"
-	case []any:
-		return "list"
-	case Object:
-		return "dict"
-	}
-	return fmt.Sprintf("%T", v)
-}
-
-// get is Python's value.get(key): a fault where the value is no dict.
-func get(v any, key string) (any, error) {
-	o, ok := v.(Object)
-	if !ok {
-		return nil, &fault{"AttributeError", fmt.Sprintf("'%s' object has no attribute 'get'", pyType(v))}
-	}
-	return o.Value(key), nil
-}
-
-// iterate is Python's `for item in value`: a list's items, a dict's keys, a text's characters.
-func iterate(v any) ([]any, error) {
-	switch x := v.(type) {
-	case []any:
-		return x, nil
-	case Object:
-		keys := make([]any, len(x))
-		for i, pair := range x {
-			keys[i] = pair.Key
-		}
-		return keys, nil
-	case string:
-		var found []any
-		for _, r := range x {
-			found = append(found, string(r))
-		}
-		return found, nil
-	}
-	return nil, &fault{"TypeError", fmt.Sprintf("'%s' object is not iterable", pyType(v))}
-}
 
 // pyWords is review.py `words`: a text stripped, "" for anything else.
 func pyWords(v any) string {
@@ -389,6 +339,40 @@ var (
 	trailerLine          = regexp.MustCompile(`(?m)^` + releaseTrailer + `:[ \t]*(` + pyNotS + `*)[ \t]*$`)
 )
 
+// The field report's Retro section nests the standing questions, SE's block template of that name,
+// where the pull request template holds the placeholder (work_tickets.py `field_report_template`).
+const (
+	standingQuestionsName = "standing-questions"
+	questionsPlaceholder  = "<!-- se:standing-questions -->"
+	questionsSection      = "Retro"
+)
+
+// standingQuestions is templates.py `own(STANDING_QUESTIONS)`: SE's own template, read from the
+// working tree of SE's checkout.
+func standingQuestions() (*Template, error) {
+	own, err := LoadFolder(filepath.Join(seCheckout(), TemplatesFolder), SERepository)
+	if err != nil {
+		return nil, err
+	}
+	block, ok := own[standingQuestionsName]
+	if !ok {
+		return nil, fail("templates: the se checkout %s has no template %s", seCheckout(), standingQuestionsName)
+	}
+	return block, nil
+}
+
+// sectionsOf is templates.py `sections`: a fielded template's sections at a heading level, each
+// field's heading and its instruction comment.
+func sectionsOf(t *Template, level int) string {
+	var b strings.Builder
+	for _, item := range t.Fields {
+		if item.InBody() {
+			fmt.Fprintf(&b, "%s %s\n\n<!-- %s: %s -->\n\n", strings.Repeat("#", level), item.Heading, item.Name, item.Says)
+		}
+	}
+	return b.String()
+}
+
 // reportIn is work_tickets.py `report_in`: the field report between the markers.
 func reportIn(text, where string) (string, error) {
 	begin := strings.Index(text, reportBegin)
@@ -489,7 +473,12 @@ func fieldReportProblems(body string) ([]string, error) {
 	if err != nil {
 		return nil, refuseWith("Field-report template not found: %s: %v", fieldReportTemplateN, err)
 	}
-	template, err := reportIn(string(data), fieldReportTemplateN)
+	block, err := standingQuestions()
+	if err != nil {
+		return nil, err
+	}
+	text := strings.Replace(string(data), questionsPlaceholder, strings.TrimRight(sectionsOf(block, 3), "\n"), 1)
+	template, err := reportIn(text, fieldReportTemplateN)
 	if err != nil {
 		return nil, err
 	}
@@ -525,6 +514,17 @@ func fieldReportProblems(body string) ([]string, error) {
 			if strings.HasPrefix(strip(line), "|") {
 				problems = append(problems, tableProblems(where, strip(line), text)...)
 				break
+			}
+		}
+	}
+	if lines, ok := report[casefold(questionsSection)]; ok {
+		for _, f := range Check(block, Parse(block, strings.Join(lines, "\n"), nil), nil) {
+			if f.Severity == Refuse {
+				where := block.Path
+				if where == "" {
+					where = standingQuestionsName
+				}
+				problems = append(problems, fmt.Sprintf(`section "## %s": %s (one "### <question>" per standing question, %s; "None" answers one that does not apply)`, questionsSection, strings.ReplaceAll(f.Fix, "`## ", "`### "), where))
 			}
 		}
 	}
@@ -815,334 +815,3 @@ func checkedReport(given any, _ map[string]any) (any, error) {
 }
 
 func isString(v any) bool { _, ok := v.(string); return ok }
-
-// retro.py and overhaul.py: the judged block.
-
-const (
-	titleWords = 5
-	ruleBook   = "src/skills/work-model/references/rules.md"
-	newRule    = "new"
-)
-
-var (
-	retroFindingFields    = []string{"title", "body", "class", "home", "controversial", "why", "check"}
-	classFields           = []string{"name", "fix"}
-	classKeys             = []string{"status", "pattern", "limits"}
-	retroJudgment         = []string{"findings", "classes", "went_well"}
-	ruleChecks            = []string{"work-issue", "check", "outside-pr", "field-report"}
-	verdictFields         = []string{"rule", "strays", "how"}
-	strays                = []string{"none", "slightly", "far"}
-	lookedAt              = []string{"outside", "consistency", "rules", "retro", "speed", "mechanize", "removal"}
-	overhaulFindingFields = []string{"title", "body", "rule", "place", "controversial", "why", "sources"}
-)
-
-// findingBasics is retro.py `finding_basics`.
-func findingBasics(given Object, index int, fields []string) (string, []string) {
-	title := pyWords(given.Value("title"))
-	name := fmt.Sprintf("finding %d", index)
-	if title != "" {
-		name = fmt.Sprintf("finding %d (\"%s\")", index, title)
-	}
-	var problems []string
-	if extra := unknownKeys(given, fields...); len(extra) > 0 {
-		problems = append(problems, fmt.Sprintf("%s has the unknown field %s", name, extra[0]))
-	}
-	if len(words(title)) < titleWords {
-		problems = append(problems, fmt.Sprintf("%s needs a title of %d words or more that names the fix", name, titleWords))
-	}
-	if pyWords(given.Value("body")) == "" {
-		problems = append(problems, name+" has no body")
-	}
-	return name, problems
-}
-
-// pythonOnly finds what Python's re reads and Go's regexp does not: look-arounds, back references,
-// comments, conditionals, atomic groups and possessive repeats. A pattern Go refuses that holds one
-// is taken as Python's to judge, so it passes.
-var pythonOnly = regexp.MustCompile(`\(\?(?:=|!|<=|<!|P=|#|\(|>)|\\[1-9]|[*+?}]\+`)
-
-// classKeyProblems is retro.py `class_key_problems`. A pattern is read as Go's regexp reads it:
-// one Go refuses is refused with Go's error, where Python names its own (components/README.md).
-func classKeyProblems(given Object, name string) []string {
-	var problems []string
-	if status, ok := given.Get("status"); ok {
-		if s, isText := status.(string); !isText || strip(s) == "" {
-			problems = append(problems, name+": status is a text")
-		}
-	}
-	if pattern, ok := given.Get("pattern"); ok {
-		if p, isText := pattern.(string); !isText || p == "" {
-			problems = append(problems, name+": pattern is a regular expression, as a text")
-		} else if _, err := regexp.Compile(p); err != nil && !pythonOnly.MatchString(p) {
-			problems = append(problems, fmt.Sprintf("%s: pattern is no regular expression (%v)", name, err))
-		}
-	}
-	if limits, ok := given.Get("limits"); ok {
-		texts := isString(limits)
-		if list, isList := limits.([]any); isList {
-			texts = true
-			for _, entry := range list {
-				texts = texts && isString(entry)
-			}
-		}
-		if !texts {
-			problems = append(problems, name+": limits is a text or a list of texts")
-		}
-	}
-	return problems
-}
-
-func retroJudgmentProblems(v any, _ map[string]any) (any, error) {
-	lists := map[string][]any{}
-	var problems []string
-	for _, name := range retroJudgment {
-		value, err := get(v, name)
-		if err != nil {
-			return nil, err
-		}
-		list, ok := value.([]any)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("`%s` is not a list", name))
-		}
-		lists[name] = list
-	}
-	if len(problems) > 0 {
-		return problems, nil
-	}
-	block := v.(Object)
-	classes := map[string]bool{}
-	for i, g := range lists["classes"] {
-		index := i + 1
-		given, ok := g.(Object)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("class %d is not an object with %s", index, joinStrings(classFields)))
-			continue
-		}
-		extra := unknownKeys(given, append(append([]string{}, classFields...), classKeys...)...)
-		name := pyWords(given.Value("name"))
-		if len(extra) > 0 {
-			problems = append(problems, fmt.Sprintf("class %d has the unknown field %s", index, extra[0]))
-		}
-		label := fmt.Sprintf("class %d", index)
-		if name != "" {
-			label = fmt.Sprintf("class \"%s\"", name)
-		}
-		problems = append(problems, classKeyProblems(given, label)...)
-		if name == "" {
-			problems = append(problems, fmt.Sprintf("class %d has no name", index))
-		} else if pyWords(given.Value("fix")) == "" {
-			problems = append(problems, fmt.Sprintf("class \"%s\" has no fix", name))
-		}
-		classes[name] = true
-	}
-	recurred := map[string]bool{}
-	previous := block.Value("previous")
-	if !truthy(previous) {
-		previous = Object{}
-	}
-	earlier, err := get(previous, "findings")
-	if err != nil {
-		return nil, err
-	}
-	if !truthy(earlier) {
-		earlier = []any{}
-	}
-	items, err := iterate(earlier)
-	if err != nil {
-		return nil, err
-	}
-	for _, it := range items {
-		item, ok := it.(Object)
-		if !ok || !truthy(item.Value("recurred")) {
-			continue
-		}
-		switch check := item.Value("check").(type) {
-		case []any, Object:
-			return nil, &fault{"TypeError", fmt.Sprintf("unhashable type: '%s'", pyType(check))}
-		case string:
-			recurred[check] = true
-		}
-	}
-	for i, g := range lists["findings"] {
-		index := i + 1
-		given, ok := g.(Object)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("finding %d is not an object with %s", index, joinStrings(retroFindingFields)))
-			continue
-		}
-		name, found := findingBasics(given, index, retroFindingFields)
-		problems = append(problems, found...)
-		kind := pyWords(given.Value("class"))
-		if kind == "" {
-			problems = append(problems, name+" has no class")
-		} else if !classes[kind] {
-			problems = append(problems, fmt.Sprintf("%s names the class \"%s\", which `classes` does not", name, kind))
-		}
-		home := pyWords(given.Value("home"))
-		if home == "" {
-			problems = append(problems, name+" has no home: the file it changes")
-		}
-		controversial, held := given.Get("controversial")
-		if !held {
-			controversial = false
-		}
-		if !isBool(controversial) {
-			problems = append(problems, name+": controversial is true or false")
-		}
-		check := pyWords(given.Value("check"))
-		if check != "" && !in(check, ruleChecks) {
-			problems = append(problems, fmt.Sprintf("%s names the check \"%s\", which is no rule check (%s)", name, check, joinStrings(ruleChecks)))
-		}
-		sure := controversial == true
-		switch {
-		case home == ruleBook && !sure:
-			problems = append(problems, name+" changes a rule (its home is the rule book), so it is controversial, with its why")
-		case check != "" && recurred[check] && !sure:
-			problems = append(problems, fmt.Sprintf("%s names the check \"%s\", which recurred after the previous retro's fix, so it is controversial, with its why", name, check))
-		case sure && pyWords(given.Value("why")) == "":
-			problems = append(problems, name+" is controversial without a why")
-		}
-	}
-	if !anyWords(lists["went_well"]) {
-		problems = append(problems, "`went_well` is empty: record what went well")
-	}
-	return problems, nil
-}
-
-func anyWords(list []any) bool {
-	for _, entry := range list {
-		if pyWords(entry) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func overhaulJudgmentProblems(v any, _ map[string]any) (any, error) {
-	lists := map[string][]any{}
-	var problems []string
-	for _, name := range []string{"verdicts", "findings", "went_well"} {
-		value, err := get(v, name)
-		if err != nil {
-			return nil, err
-		}
-		list, ok := value.([]any)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("`%s` is not a list", name))
-		}
-		lists[name] = list
-	}
-	if len(problems) > 0 {
-		return problems, nil
-	}
-	block := v.(Object)
-	given := block.Value("rules")
-	if !truthy(given) {
-		given = []any{}
-	}
-	items, err := iterate(given)
-	if err != nil {
-		return nil, err
-	}
-	var rules []string
-	for _, r := range items {
-		if rule, ok := r.(Object); ok {
-			rules = append(rules, str(rule.Value("id")))
-		}
-	}
-	var judged []string
-	for i, g := range lists["verdicts"] {
-		index := i + 1
-		verdict, ok := g.(Object)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("verdict %d is not an object with %s", index, joinStrings(verdictFields)))
-			continue
-		}
-		rule := pyWords(verdict.Value("rule"))
-		name := fmt.Sprintf("verdict %d", index)
-		if rule != "" {
-			name = "the verdict on " + rule
-		}
-		if extra := unknownKeys(verdict, verdictFields...); len(extra) > 0 {
-			problems = append(problems, fmt.Sprintf("%s has the unknown field %s", name, extra[0]))
-		}
-		switch {
-		case !in(rule, rules) && rule != "":
-			problems = append(problems, name+" names no rule of the book")
-		case !in(rule, rules):
-			problems = append(problems, name+" has no rule")
-		case in(rule, judged):
-			problems = append(problems, rule+" has two verdicts")
-		}
-		if !in(rule, judged) {
-			judged = append(judged, rule)
-		}
-		if s, ok := verdict.Value("strays").(string); !ok || !in(s, strays) {
-			problems = append(problems, fmt.Sprintf("%s: strays is one of %s", name, joinStrings(strays)))
-		}
-		if pyWords(verdict.Value("how")) == "" {
-			problems = append(problems, name+" has no how")
-		}
-	}
-	for _, rule := range rules {
-		if !in(rule, judged) {
-			problems = append(problems, rule+" has no verdict")
-		}
-	}
-	if looked, ok := block.Value("looked_at").(Object); !ok {
-		problems = append(problems, fmt.Sprintf("`looked_at` is not an object with %s", joinStrings(lookedAt)))
-	} else {
-		for _, part := range unknownKeys(looked, lookedAt...) {
-			problems = append(problems, "`looked_at` has the unknown part "+part)
-		}
-		for _, part := range lookedAt {
-			if pyWords(looked.Value(part)) == "" {
-				problems = append(problems, fmt.Sprintf("`looked_at.%s` is empty (\"nothing to change\" is an answer)", part))
-			}
-		}
-	}
-	for i, g := range lists["findings"] {
-		index := i + 1
-		finding, ok := g.(Object)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("finding %d is not an object with %s", index, joinStrings(overhaulFindingFields)))
-			continue
-		}
-		name, found := findingBasics(finding, index, overhaulFindingFields)
-		problems = append(problems, found...)
-		rule := pyWords(finding.Value("rule"))
-		if rule == "" {
-			problems = append(problems, fmt.Sprintf("%s has no rule: a rule's id, or %s", name, newRule))
-		} else if rule != newRule && !in(rule, rules) {
-			problems = append(problems, fmt.Sprintf("%s names the rule \"%s\", which is not in the book", name, rule))
-		}
-		if pyWords(finding.Value("place")) == "" {
-			problems = append(problems, name+" has no place: the file it changes")
-		}
-		controversial, held := finding.Get("controversial")
-		if !held {
-			controversial = false
-		}
-		if !isBool(controversial) {
-			problems = append(problems, name+": controversial is true or false")
-		} else if controversial == true && pyWords(finding.Value("why")) == "" {
-			problems = append(problems, name+" is controversial without a why")
-		}
-		sources, held := finding.Get("sources")
-		if !held {
-			sources = []any{}
-		}
-		list, isList := sources.([]any)
-		good := isList
-		for _, item := range list {
-			good = good && pyWords(item) != ""
-		}
-		if !good {
-			problems = append(problems, name+": sources is a list of the places cited")
-		}
-	}
-	if !anyWords(lists["went_well"]) {
-		problems = append(problems, "`went_well` is empty: record what went well")
-	}
-	return problems, nil
-}
