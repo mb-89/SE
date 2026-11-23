@@ -9,6 +9,8 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 - **Go, compiled into the `se` binary**: fleet, retro-due and origin, SE's Go module
   `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[components.kern]` pins
   and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
+  Beside them the binary carries kern's GitHub component and kern's clock, whose `clock/second`
+  the GitHub refresh counts (`wiring.toml` binds `"github.second" = "clock/second"`).
 
 ## The Go components
 

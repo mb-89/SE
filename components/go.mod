@@ -5,7 +5,7 @@ go 1.25.14
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/sys v0.41.0
-	kern v0.14.1
+	kern v1.5.0
 )
 
 require (

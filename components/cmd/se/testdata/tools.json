@@ -2,6 +2,47 @@
   "tools": [
     {
       "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "se github (writes)"
+      },
+      "description": "Reaches GitHub, with a token or through the session's GitHub tools, and keeps what it reads as snapshots. Runs one of its writing commands, named in `command`, with `args` as its usage shows: it writes, each write a request the core delivers to the I/O verb the wiring binds, as se's every outside write goes. Use it:\n- `github issue-comment`: Comments on a GitHub issue or pull request from a filled template, never free text: name the template and pass its fields as one JSON object; a fill the template refuses answers its findings, and nothing is posted. Usage: `github issue-comment --repo OWNER/REPO --number N --template NAME --fields JSON`\n- `github issue-create`: Files a GitHub issue from a filled template, never free text: name the template and pass its fields as one JSON object; a fill the template refuses answers its findings, and nothing is filed. Usage: `github issue-create --repo OWNER/REPO --template NAME --fields JSON [--label LABEL]...`",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "its arguments after its name, as its usage shows; none by default",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "description": "the command to run, as the tool's description names it",
+            "enum": [
+              "github issue-comment",
+              "github issue-create"
+            ],
+            "type": "string"
+          },
+          "page": {
+            "description": "the page of an answer longer than 45000 bytes, which says how many it has; 1 by default",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "github_write",
+      "title": "se github (writes)"
+    },
+    {
+      "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,

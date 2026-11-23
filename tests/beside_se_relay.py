@@ -39,6 +39,7 @@ component = "github"
 config = { backend = "relay" }
 
 [wires]
+"github.second" = "built-in"
 "github.issues" = "github/issues/<key>"
 "github.pulls" = "github/pulls/<key>"
 "github.comments" = "github/comments/<key>"
