@@ -116,12 +116,16 @@ def _fill(template: templates.Template, example: dict, title: str | None, raw: s
 
 
 def _body(template: templates.Template, body: str, title: str | None) -> dict:
+    """What parse gives of a body, what check finds (or, where its adapter is written wrong for
+    the body, the error it raises) and the digest of render."""
     document = templates.parse(template, body, title)
-    found = templates.check(template, document)
-    rendered = templates.render(template, document)
-    return {"body": body, "title": title, "fields": document.fields,
-            "misses": sorted(document.misses), "recorded": document.recorded,
-            "findings": _findings(found), "render": _digest(rendered)}
+    case = {"body": body, "title": title, "fields": document.fields,
+            "misses": sorted(document.misses), "recorded": document.recorded}
+    try:
+        case["findings"] = _findings(templates.check(template, document))
+    except templates.TemplateError as error:
+        case["error"] = str(error)
+    return {**case, "render": _digest(templates.render(template, document))}
 
 
 def _fills(template: templates.Template, example: dict, title: str | None) -> list[dict]:
@@ -213,6 +217,227 @@ def _dangling(template: templates.Template, base: str) -> list[str]:
     return [base.rstrip("\n") + "\n\n" + text for text in DANGLING]
 
 
+# Adapters: the texts SE already writes, each checked by its own checker (templates.py "Adapters").
+
+
+def _fenced(marker: str, data: object, fence: str = "```yaml") -> str:
+    ticks = fence[:len(fence) - len(fence.lstrip("`"))]
+    return f"Above.\n\n{marker}\n{fence}\n{json.dumps(data, indent=2, ensure_ascii=False)}\n{ticks}\n"
+
+
+def _report(header: dict[str, str | None] | None = None, sections: dict[str, str | None] | None = None,
+            before: str = "", after: str = "") -> str:
+    """A field report between its markers: every section of SE's pull request template, filled,
+    with `header` lines and `sections` changed (None drops one)."""
+    lines = {"Work issue": "#12", "Branch": "`plain-issue-titles`", "Result": "complete"}
+    head = {"Work issue": "**Work issue:** #12  **Branch:** `plain-issue-titles`  **Result:** complete",
+            "Tested against": "**Tested against `main`:** `0123456789abcdef0123456789abcdef01234567`",
+            "Branch tip": "**Branch tip:** `abcdef1`",
+            "Release kind": "**Release kind:** patch — a fix of the title",
+            "Re-integration kind": "**Re-integration kind:** patch"}
+    del lines
+    head.update(header or {})
+    body = {
+        "User requirement (quoted back)": "> Titles say what changes.",
+        "Delivered": "| Work issue item | Result | Commits | Evidence |\n|---|---|---|---|\n"
+                     "| 1 | done | abcdef1 | `pytest` passed |\n\n**Commit groupings:** None\n\n"
+                     "**Suite time:** None",
+        "Not delivered": "None",
+        "Removed behaviour, deleted or weakened tests, and authored prose": "None",
+        "Review responses": "None",
+        "Decisions": "| Decision | Alternatives | Rationale | Confidence |\n|---|---|---|---|\n"
+                     "| Keep it | none | simple | high |",
+        "Spec gaps": "None.",
+        "Tickets for other repositories": "None",
+        "Retro": "- **Went well:** the cases.\n- **Cost time:** nothing.\n"
+                 "- **Proposed improvement:** none.",
+    }
+    body.update(sections or {})
+    text = "\n".join(line for line in head.values() if line is not None) + "\n"
+    for heading, content in body.items():
+        if content is not None:
+            text += f"\n## {heading}\n\n{content}\n"
+    return f"{before}<!-- se:field-report -->\n{text}<!-- se:field-report:end -->\n{after}"
+
+
+REVIEW = {"pull": 7, "verdict": "pass", "head": "0123456789abcdef0123456789abcdef01234567", "landed": False,
+          "acceptance": [{"item": "Titles say what changes.", "evidence": "tests pass"}],
+          "findings": [], "clean": ["the title code"]}
+FINDING = {"title": "A title", "evidence": "x.py:3", "place": "x.py:3", "blocking": False, "why": "small"}
+RETRO = {"findings": [{"finding": 1, "kind": "work", "title": "Name the fix in the title",
+                       "body": "Titles say what changes.", "class": "titles", "home": "scripts/x.py",
+                       "controversial": False}],
+         "classes": [{"name": "titles", "fix": "plain titles", "status": "open", "pattern": "Title",
+                      "limits": ["one"]}],
+         "went_well": ["the cases"], "previous": {"findings": [{"check": "check", "recurred": True}]}}
+OVERHAUL = {"rules": [{"id": "gen-001"}, {"id": "pub-001"}],
+            "verdicts": [{"rule": "gen-001", "strays": "none", "how": "kept"},
+                         {"rule": "pub-001", "strays": "far", "how": "a leak"}],
+            "looked_at": {part: "nothing to change" for part in
+                          ("outside", "consistency", "rules", "retro", "speed", "mechanize", "removal")},
+            "findings": [{"finding": 1, "kind": "work", "rule_change": False,
+                          "title": "Name the fix in the title", "body": "Titles say it.",
+                          "rule": "gen-001", "place": "scripts/x.py", "controversial": False,
+                          "sources": ["#3"]}],
+            "went_well": ["the cases"]}
+
+
+def _changed(data: dict, **changes: object) -> dict:
+    """`data` with each key changed (a value of DROP removes the key); `<key>__<n>__<field>`
+    changes item n of a list."""
+    data = copy.deepcopy(data)
+    for key, value in changes.items():
+        target, name = data, key
+        if "__" in key:
+            path, index, name = key.split("__")
+            target = data[path][int(index)]
+        if value is DROP:
+            target.pop(name, None)
+        else:
+            target[name] = value
+    return data
+
+
+DROP = object()
+
+
+def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]]:
+    """The bodies each of SE's adapters is checked on, with their titles."""
+    review, retro, overhaul = "<!-- se:review -->", "<!-- se:retro-yaml -->", "<!-- se:overhaul-yaml -->"
+    if template.name == "field-report":
+        bad_rows = "| Item | Result |\n|---|---|\n| 1 | done | extra |\n\n**Commit groupings:** None\n\n**Suite time:** None"
+        return [(text, None) for text in (
+            "Free text.\n", "<!-- se:field-report -->\n<!-- se:field-report:end -->\n",
+            "<!-- se:field-report:end -->\n<!-- se:field-report -->\n",
+            _report(), _report(before="A note above.\n\n", after="\nBelow.\n"),
+            _report(header={"Result": None, "Work issue": "**Work issue:** #<n>  **Branch:** `<branch>`"}),
+            _report(header={"Branch tip": "**Branch tip:** `<tip>`"}),
+            _report(header={"Branch tip": "**Branch tip:** abcdef1234"}),
+            _report(header={"Branch tip": "**Branch tip:** `abcdef`"}),
+            _report(header={"Branch tip": "**Branch tip:** `" + "a" * 41 + "`"}),
+            _report(header={"Branch tip": "**Branch tip:** `abcdef1`x"}),
+            _report(header={"Branch tip": "**Branch tip:** abcdef1 \u2014 the tip"}),
+            _report(header={"Release kind": None}),
+            _report(header={"Release kind": "**Release kind:** huge"}),
+            _report(header={"Release kind": "**Release kind:** minor: new titles"}),
+            _report(header={"Release kind": "**Release kind:** patch <!-- a comment --> — why"}),
+            _report(header={"Re-integration kind": "**Re-integration kind:** later"}),
+            _report(header={"Re-integration kind": None}),
+            _report(header={"Component kinds": "**Component kinds:** se patch, app minor — both"}),
+            _report(header={"Component kinds": "**Component kinds:** se big"}),
+            _report(header={"Component kinds": "**Component kinds:** se"}),
+            _report(header={"Work issue": "**Work issue:** #12  **Branch:** `b`  **Result:** done"}),
+            _report(header={"Work issue": "**Work issue:** #12  **Branch:** `b`  **Result:** partial  "}),
+            _report(sections={"Removed behaviour, deleted or weakened tests, and authored prose":
+                              "- **Breaking:** the old flag\n**Breaking:** the old name"}),
+            _report(header={"Release kind": "**Release kind:** minor — a breaking change"},
+                    sections={"Removed behaviour, deleted or weakened tests, and authored prose":
+                              "- **Breaking:** the old flag"}),
+            _report(sections={"Spec gaps": None, "Retro": None}),
+            _report(sections={"Delivered": bad_rows}),
+            _report(sections={"Delivered": "Done.\n\n**Commit groupings:** None"}),
+            _report(sections={"Decisions": "None", "Review responses": "none."}),
+            _report(sections={"Not delivered": "```\n## Retro\n```\nAll of it."}),
+            _report(sections={"Retro": "- **Went well:** x"}),
+            _report(sections={"Delivered": "| work issue ITEM | Result | Commits | Evidence |\n|---|---|---|---|\n"
+                                           "| 1 \\| 2 | done | a | b |\n\n**Commit groupings:** a\n\n**Suite time:** 3 s"}),
+            _report().replace("## Decisions", "## DECISIONS"),
+            _report().replace("\n## Spec gaps", "\n##   Spec gaps  "),
+        )]
+    if template.name == "merge-message":
+        long = "Integrate " + "word-" * 30 + "end: and **more** text"
+        return [
+            ("A body.\n\nRelease-kind: minor\n", "Integrate plain-issue-titles"),
+            ("A body.\n\nRelease-kind: minor\n", None),
+            ("A body.\n\nRelease-kind: minor\n", "Merge plain-issue-titles"),
+            ("No trailer.\n", "Integrate plain-issue-titles"),
+            ("Release-kind: patch\nRelease-kind: minor\n", "Integrate x"),
+            ("Release-kind: huge\n", "Integrate x: the **thing**"),
+            ("Release-kind:patch   \n", "Integrate x"),
+            ("Release-kind: \n", "Integrate x"),
+            ("Release-kind: minor more\n", "Integrate x"),
+            ("Text.\n\nRelease-kind: major", long),
+            ("", ""),
+        ]
+    if template.name == "review":
+        def report(**changes: object) -> str:
+            return _fenced(review, _changed(REVIEW, **changes))
+        bodies = [
+            "No marker.\n", f"{review}\nNo block.\n", f"{review}\n```\n\n```\n",
+            report(), report(pull=DROP, landed=DROP), _fenced(review, REVIEW, "````json"),
+            f"{review}\n```yaml\n{{}}\n```\n\n{review}\n```\n[]\n```\n",
+            report(extra=1), report(verdict="passed"), report(verdict=None), report(verdict=3),
+            report(verdict=["pass"]), report(verdict={"a": 1.5}), report(head="0123"),
+            report(head=" 0123456789abcdef0123456789abcdef01234567 "), report(clean=[]),
+            report(clean=["", "x"]), report(clean="x"), report(acceptance=[]),
+            report(acceptance=["x"]), report(acceptance=[{"item": "x", "proof": "y"}]),
+            report(acceptance=[{"item": " ", "evidence": "y"}]),
+            report(acceptance=[{"item": "x"}]), report(findings="none"), report(findings=[1]),
+            report(findings=[{**FINDING, "rank": 1}]), report(findings=[{**FINDING, "title": ""}]),
+            report(findings=[{**FINDING, "evidence": ""}]), report(findings=[{**FINDING, "place": None}]),
+            report(findings=[{**FINDING, "blocking": 1}]), report(findings=[{**FINDING, "why": " "}]),
+            report(verdict="decline"), report(verdict="decline", findings=[{**FINDING, "blocking": True}]),
+            report(findings=[FINDING]), report(findings=[{**FINDING, "blocking": True}] * 2),
+            report(verdict="pass with open points"),
+            report(verdict="pass with open points", findings=[FINDING, FINDING]),
+        ]
+        for broken in ("", "{", '{"a"', '{"a":', '{"a":1', '{"a":1,}', "[1,]", "[1 2]", '{1:2}',
+                       '"abc', '"a\\x"', '"a\\u12"', '"a\u0001"', "[1] x", "nul", "-", "1e",
+                       '{"é": "ü"  x}', "\n\n  [1,\n 2,]", "NaN", '[1e400, -0, 1.5e3, "\\ud83d\\ude00"]',
+                       '{"verdict": "pass", "verdict": 1}', "\ufeff{}"):
+            bodies.append(f"{review}\n```json\n{broken}\n```\n")
+        return [(body, None) for body in bodies]
+    if template.name == "retro":
+        def block(**changes: object) -> str:
+            return _fenced(retro, _changed(RETRO, **changes))
+        finding = RETRO["findings"][0]
+        bodies = [
+            "No block.\n", f"{retro}\nNothing fenced.\n", block(), block(previous=DROP),
+            block(findings="x"), block(classes=None, went_well={}), block(findings=[1]),
+            block(classes=[1, {"name": "titles", "fix": "f", "colour": "red"}]),
+            block(classes=[{"fix": "f"}, {"name": "titles"}]),
+            block(classes=[{"name": "titles", "fix": "f", "status": " ", "pattern": "Title(?=s)", "limits": [1]}]),
+            block(classes=[{"name": "titles", "fix": "f", "status": 3, "pattern": "", "limits": "one"}]),
+            block(findings=[{**finding, "extra": 1, "colour": 2, "title": "Too short"}]),
+            block(findings=[{"finding": 1}]),
+            block(findings=[{**finding, "class": "other", "home": " "}]),
+            block(findings=[{**finding, "controversial": "yes", "check": "nope"}]),
+            block(findings=[{**finding, "home": "src/skills/work-model/references/rules.md"}]),
+            block(findings=[{**finding, "check": "check"}]),
+            block(findings=[{**finding, "check": "check", "controversial": True, "why": "it recurred"}]),
+            block(findings=[{**finding, "controversial": True}]),
+            block(findings=[{**finding, "check": "work-issue"}], previous={"findings": ["x", {"check": "work-issue"}]}),
+            block(went_well=["", " "]), block(previous=[]), block(previous={"findings": {}}),
+            block(previous=[1]), block(previous="x"), block(previous={"findings": 5}),
+            block(previous={"findings": [{"check": ["x"], "recurred": True}]}),
+            f"{retro}\n```yaml\n[]\n```\n", f"{retro}\n```yaml\nnull\n```\n",
+            f"{retro}\n```yaml\n{{\"findings\": [], \n```\n",
+        ]
+        return [(body, None) for body in bodies]
+    if template.name == "overhaul":
+        def block(**changes: object) -> str:
+            return _fenced(overhaul, _changed(OVERHAUL, **changes))
+        finding = OVERHAUL["findings"][0]
+        bodies = [
+            "No block.\n", block(), block(verdicts="x", went_well=None), block(rules=DROP),
+            block(rules=[{"id": 1.0}, {"id": None}, "gen-001", {"id": True}],
+                  verdicts=[{"rule": "1.0", "strays": "none", "how": "x"}, {"rule": "None", "strays": "far", "how": "y"}]),
+            block(rules={"gen-001": 1}), block(rules="ab"), block(rules=5), block(rules=[{"id": ""}]),
+            block(verdicts=[1, {"rule": "gen-001", "strays": "none", "how": "x", "why": 1},
+                            {"rule": "gen-001", "strays": "a lot", "how": " "}, {"strays": "none", "how": "x"},
+                            {"rule": "zzz-009", "strays": None, "how": "x"}]),
+            block(looked_at=[]), block(looked_at={"outside": "x", "colour": "y", "aside": "z"}),
+            block(findings=[1, {"finding": 2}]),
+            block(findings=[{**finding, "rule": "zzz-001", "place": "", "controversial": 1, "sources": "x"}]),
+            block(findings=[{**finding, "rule": "new", "controversial": True, "sources": ["", "x"]}]),
+            block(findings=[{**finding, "rule": " ", "controversial": True, "why": "a rule", "extra": 1}]),
+            block(findings=[{key: value for key, value in finding.items() if key not in ("sources", "controversial")}]),
+            block(went_well=[1, None]), f"{overhaul}\n```yaml\n\"text\"\n```\n",
+        ]
+        return [(body, None) for body in bodies]
+    return []
+
+
 def _set(name: str, loaded: dict[str, templates.Template], source: str, files: dict | None = None,
          repository: str = "", bodies: dict[str, list[str]] | None = None) -> dict:
     data: dict[str, object] = {"generated": GENERATED.format(source=source), "set": name}
@@ -237,6 +462,8 @@ def _set(name: str, loaded: dict[str, templates.Template], source: str, files: d
                                             *_dangling(template, base)]]
             if any(item.source == "title" for item in template.fields):
                 entry["bodies"] += [_body(template, base, other) for other in TITLES if other != title]
+        else:
+            entry["bodies"] = [_body(template, body, title) for body, title in _adapter_bodies(template)]
         made[template.name] = entry
     data["templates"] = made
     data["select"] = _select(loaded, bases)

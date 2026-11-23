@@ -55,9 +55,9 @@ answer as the Python functions of their names do.
   Python engine, so a change to either engine or to `templates/` refreshes them with
   `uv run python tests/template_cases.py`.
 - **Code a template names.** A template names Python as `<module>:<NAME>`; Go holds its port of
-  each name SE's templates use in `References` and `Checkers` (`references.go`), and the cases
-  hold each port to the Python one. A name Go holds no port of does not load; an adapter whose
-  checker Go does not hold refuses its check, naming the checker.
+  each name SE's templates use in `References` (`references.go`), `Checkers` and `Extractors`
+  (`checkers.go`), and the cases hold each port to the Python one. A name Go holds no port of does
+  not load; an adapter whose checker or reading Go does not hold fails its check, naming it.
 - **The rule `dangling`.** An SE command or script a text names that does not exist
   (`dangling.go`, the port of `scripts/references.py` `dangling`): Go reads each script's
   subcommands from its source (`commands.go`: the parser `main` parses, its `add_parser` calls, a
@@ -65,8 +65,20 @@ answer as the Python functions of their names do.
   The config `se` names SE's checkout whose scripts it reads. `agreement/` holds the Go reading
   to Python's tree for every script of SE's checkout, and the cases hold texts naming what exists,
   what does not and what a Requirement creates.
-- **Not in Go.** The adapters' checkers but `deck:pugh_problems` are Python's: Go runs none, and
-  the cases hold no text one refuses.
+- **The adapters' checkers.** `checkers.go` ports each of SE's: the field report's structure
+  (`work_tickets:field_report_problems`, against SE's `.github/pull_request_template.md`, without
+  the work issue), the squash commit's trailer (`work_tickets:merge_release_kind`), the review
+  report (`review:checked_report`), the retro's and the overhaul's judged block
+  (`retro:judgment_problems`, `overhaul:judgment_problems`) and the Pugh fence
+  (`deck:pugh_problems`), called as `adapter_findings` calls them: `extract`, `json_after` (read
+  as Python's `json.loads` reads it, its error text included, `pyjson.go`), `drop`, `missing`,
+  `with`, `none`, `text_as`, `title_as` and `result`. An adapter written wrong for the text (the
+  Python check's TypeError or AttributeError) fails the check with the Python engine's error. The
+  cases hold each adapter's texts: what its writer writes, every refusal and every such failure.
+- **Where Go answers otherwise.** A retro class's `pattern` is read as Go's `regexp` reads it:
+  one it refuses is refused naming Go's error, where Python names its own, and one it cannot read
+  that holds what only Python's `re` has (a look-around, a back reference) passes. Python keeps a
+  lone surrogate of a JSON string, Go reads it as U+FFFD.
 
 ## Who reads them
 

@@ -227,7 +227,7 @@ func checkTemplate(c *checker, file string, tmpl *Template, entry Object, bases 
 	c.same(where, "fields", asJSON(fields), asJSON(info.Value("fields")))
 	ran := 1
 	if tmpl.IsAdapter() {
-		return ran
+		return ran + checkBodies(c, where, tmpl, entry)
 	}
 	c.same(where, "draft", Draft(tmpl), info.Value("draft").(string))
 	c.same(where, "draft_fields", asJSON(DraftFields(tmpl)), asJSON(info.Value("draft_fields")))
@@ -269,7 +269,15 @@ func checkTemplate(c *checker, file string, tmpl *Template, entry Object, bases 
 		c.same(at, "document digest", digest(document), cs.Value("digest").(string))
 		c.same(at, "findings", findingsJSON(found), asJSON(cs.Value("findings")))
 	}
-	for i, b := range entry.Value("bodies").([]any) {
+	return ran + checkBodies(c, where, tmpl, entry)
+}
+
+// checkBodies holds Go to each body case of a template: what Parse gives, what the check finds, or
+// the error it fails with, and the digest of Render.
+func checkBodies(c *checker, where string, tmpl *Template, entry Object) int {
+	ran := 0
+	bodies, _ := entry.Value("bodies").([]any)
+	for i, b := range bodies {
 		ran++
 		cs := b.(Object)
 		at := where + " body " + itoa(i)
@@ -279,7 +287,18 @@ func checkTemplate(c *checker, file string, tmpl *Template, entry Object, bases 
 		misses := sortedKeys(doc.Misses)
 		c.same(at, "misses", asJSON(toAny(misses)), asJSON(cs.Value("misses")))
 		c.same(at, "recorded", doc.Recorded, cs.Value("recorded").(string))
-		c.same(at, "findings", findingsJSON(Check(tmpl, doc, nil)), asJSON(cs.Value("findings")))
+		found, err := CheckText(tmpl, doc, nil)
+		if want, ok := cs.Get("error"); ok {
+			got := "<no error>"
+			if err != nil {
+				got = err.Error()
+			}
+			c.same(at, "error", got, want.(string))
+		} else if err != nil {
+			c.same(at, "error", err.Error(), "")
+		} else {
+			c.same(at, "findings", findingsJSON(found), asJSON(cs.Value("findings")))
+		}
 		rendered, err := Render(tmpl, doc)
 		if err != nil {
 			c.same(at, "render", err.Error(), "")

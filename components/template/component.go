@@ -211,7 +211,9 @@ func checkVerb(_ context.Context, req CheckRequest) (Checked, error) {
 		if t, err = named(templates, req.Template); err != nil {
 			return Checked{}, err
 		}
-		found = Check(t, Parse(t, req.Body, req.Title), nil)
+		if found, err = CheckText(t, Parse(t, req.Body, req.Title), nil); err != nil {
+			return Checked{}, err
+		}
 	case req.Action != "":
 		if t, found, err = Verdict(templates, req.Action, req.Body, req.Title, Where{Labels: req.Labels}); err != nil {
 			return Checked{}, err
