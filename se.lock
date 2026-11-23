@@ -6,5 +6,5 @@ version = "1.5.0"
 ref = "d04460fc85e07406ae8caeb0c1c0dac66f8829cf"
 
 [components.obs]
-version = "10.0.0"
-ref = "c1eca904b5e2228475030f429005304e4d8a9df9"
+version = "10.3.2"
+ref = "a6fb0f1a4cba7a8163e747eb03178ab1b90a3436"
