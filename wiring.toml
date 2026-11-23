@@ -101,6 +101,7 @@ component = "template"
 # The streamed commands' GitHub steps (README "Hand-offs through the relay").
 "integration.step" = "github.step"
 "issues.step" = "github.step"
+"delivery.step" = "github.step"
 
 # The Stop hooks (README "Stop hook"): the delivery component's stop-check answers them inside the
 # hook, in its own warm process; scripts/se_hook.sh falls back to running it directly.

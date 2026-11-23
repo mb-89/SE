@@ -760,11 +760,13 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 [workers]
 local = 4
 cloud = 8
+claim_timeout_hours = 12
 ```
 
 `[workers]` limits how many working agents run at once. `local` holds a local device's limit,
 default 4; `cloud` holds the cloud's (a Claude Code cloud session, a CI runner), and unset leaves
-the cloud open. Each is a whole number of at least 1; other keys are refused.
+the cloud open. Each is a whole number of at least 1. `claim_timeout_hours` is the claim timeout
+below, a positive number of hours, default 12; other keys are refused.
 
 - **What counts.** A worker runs while its work issue is open and labelled `in-progress`.
   `work_tickets.py capacity` prints how many more may start: the limit less those running, on a
@@ -775,6 +777,23 @@ the cloud open. Each is a whole number of at least 1; other keys are refused.
   finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
   reached.
 - **Not limited.** Integrators, reviewers and SE's own session.
+- **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
+  one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
+  with the claim, and the close-out removes it.
+  - The worker's `intake` records its due time in `.se/work/beat.yaml`. On every tool call the
+    plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
+    passed it starts `work_tickets.py beat` in the background, which sets the line to now.
+  - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
+    so the session runs its read and write when the hook tells it. The write carries the issue's
+    own labels, so the [template gate](#templates) judges it by the issue's own template.
+  - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
+    and the template check ignore it.
+- **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
+  claim timeout) or stale (older, or no beat), with the beat's age; neither is startable. Its
+  last line names the stale ones for SE to pass to the person; without gh, `ready --claimed
+  <file>` judges the `list_issues` answer that `queue`'s plan reads.
+  - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
+    delete its branch, take off `in-progress` and remove the beat line.
 
 #### Commit checks
 
@@ -2074,10 +2093,11 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 #### Delivery
 
 `components/delivery`: A worker's delivery: the field report and its guard, sync and identity, the
-gated push and the pull request, and the Stop hook's check.
+gated push and the pull request, the Stop hook's check and the claim's beat.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `work_tickets.py beat` | `work_tickets.py beat --worktree WORKTREE` | the worker's claim heartbeat, which the plugin's hook (scripts/se_hook.sh) starts on a tool call once the beat record intake wrote is due: it sets the work issue's beat line to now while the issue is open and in progress, and the next is due half the claim timeout later ([workers] claim_timeout_hours); before that it reads and writes nothing |
 | `work_tickets.py deliver` | `work_tickets.py deliver --worktree WORKTREE [--integrator-session INTEGRATOR_SESSION]` | sync, check the field report, push, and create or update the pull request whose description carries it; files no issue. It first refuses an se outside the project's se pin ([components.se]), naming both versions, and never exits non-zero without a message |
 | `work_tickets.py field-report` | `work_tickets.py field-report [--worktree WORKTREE] (--draft FILE \| --check FILE) [--issue-body FILE] [--comment-count N] [--newest-comment ID] [--check-runs FILE] [--component-kinds-to FILE]` | draft or check the field report a pull request description carries, laid out as .github/pull_request_template.md lays it out |
 | `work_tickets.py guard` | `work_tickets.py guard --worktree WORKTREE --branch BRANCH --pr-description FILE` | require the field report to name removed protected content, against origin/<integration branch> as sync fetched it (the local branch without origin) |
@@ -2108,7 +2128,7 @@ settings checks and the generated docs.
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
 | `work_tickets.py queue` | `work_tickets.py queue [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues. Without gh it syncs the checkout and prints its reads as a plan for the session's GitHub tools |
-| `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos]` | list startable ready work issues |
+| `work_tickets.py ready` | `work_tickets.py ready [--worktree WORKTREE] [--repo REPO] [--all-repos] [--claimed FILE]` | list startable ready work issues, then each claimed one (labelled in-progress) as live or stale by its beat line, with the beat's age, and the stale ones for the person; neither is startable |
 | `work_tickets.py refs apply` | `work_tickets.py refs apply --worktree WORKTREE [--repo REPO] [--comments-file COMMENTS_FILE] [--read-back] [--run-url RUN_URL] [--conclusion CONCLUSION] issue` | for SE, on the person's yes: run ref-maintenance for real with the triples the issue's newest request posted, read the refs back and post the result; prints the line for the integrator. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py refs request` | `work_tickets.py refs request --worktree WORKTREE --triples-file TRIPLES_FILE [--repo REPO] [--read-back] [--request-id REQUEST_ID] [--run-url RUN_URL] [--conclusion CONCLUSION] [--log-file LOG_FILE] issue` | for the integrator: post the triples on the issue, run ref-maintenance's dry run, post its output and label the issue escalated; prints the line for SE. Where gh is not signed in it prints these GitHub steps as a plan for the session's GitHub tools; --read-back then checks the refs and finishes |
 | `work_tickets.py rehearse` | `work_tickets.py rehearse --worktree WORKTREE [--repo REPO] --base BASE [--gap SECONDS]` | rehearse a whole landing through kern's relay against a scratch branch, never the integration branch: a relay read, a local phase (--gap makes it slow on purpose), the push of rehearse/<base>, the landing pull request into <base>, its check, the squash merge and the read-back. It releases and tags nothing and touches no issue; it runs only as one call through kern's relay |
