@@ -54,14 +54,14 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with the one `agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
 | GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/hooks/se.json`; it reads agents only from the repository's own `.github` folder, where SE ships none, so it offers no `se` agent; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task whose first line is `Act as the se agent defined in agents/se.md.` | its `sessionStart` hook hands the session SE's greeting, as above |
 
+Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
+showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
+for the first run with Copilot.
+
 **From an older SE.** A fresh clone needs nothing more: clone, run [RUNME](#getting-it-running),
 start the agent. A checkout or project that ran an older SE major also follows the
 [upgrade guide](docs/upgrading.md), one section per major from the one after its own, in order;
 the start greeting names those sections ([Start and refresh](#start-and-refresh)).
-
-Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
-showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
-for the first run with Copilot.
 
 SE's skills read files in the plugin's folder and run its scripts with `uv run python`, and that
 folder is outside your project. Claude Code asks you to allow this the first time. A headless
