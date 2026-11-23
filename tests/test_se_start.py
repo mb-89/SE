@@ -1762,3 +1762,12 @@ def test_the_boot_command_runs_from_the_command_line(booted, monkeypatch, capsys
     code = se_start.main(["--root", str(booted["project"]), "--local", str(booted["config"]), "boot"])
     out = capsys.readouterr().out
     assert code == 0 and out.startswith(f"SE boot of {booted['project'].as_posix()}, checking\n"), out
+
+
+def test_a_lock_outside_its_pin_is_one_the_upgrade_moves_into_it(booted):
+    se_modules.write_lock(booted["project"], {**se_modules.read_lock(booted["project"]),
+                                              "lib": ("2.0.0", git(booted["remotes"]["lib"], "rev-parse", "v2.0.0"))})
+    holder = se_modules.root_name(booted["project"])
+    lines, _ = boot(booted)
+    assert any(line.startswith(f"  {holder} pins lib ^1, locked 2.0.0, newest 2.0.0: the upgrade takes 1.1.0")
+               for line in lines), lines

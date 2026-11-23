@@ -1398,12 +1398,12 @@ def pin_move(pin, root: Path, se_root: Path) -> str:
 
 
 def _takes(pin, locked: dict) -> bool:
-    """Whether the upgrade moves this pin's lock: a range below the newest release it admits."""
+    """Whether the upgrade moves this pin's lock: a range locked at another release than the newest
+    it admits, below it or outside the pin."""
     module = pin.module
     if not module.version or module.go or pin.admitted is None:
         return False
-    have = se_modules.parse_version(locked.get(module.name, ("", ""))[0])
-    return have is None or have < pin.admitted
+    return se_modules.parse_version(locked.get(module.name, ("", ""))[0]) != pin.admitted
 
 
 def pin_row(pin, locked: dict, moved: dict, root: Path, se_root: Path, local_paths: frozenset[str] = frozenset()
