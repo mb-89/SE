@@ -1,7 +1,6 @@
 ---
 name: retro
 description: 'Runs one retro or one overhaul in its own session with the person: asks first for the field feedback, then collects, judges and, once the person has decided every finding, closes the run with its report. Files no issue; SE files the work its findings become.'
-copilot.tools: ['execute', 'read', 'edit', 'search', 'send_message', 'se/*']
 claude.disallowedTools: AskUserQuestion
 claude.model: inherit
 ---
@@ -40,14 +39,22 @@ README's [Work commands](../../README.md#work-commands) and the run's issue temp
 <main checkout>`.
 
 1. **Field feedback first.** Before you read anything, ask the person what they saw in the field
-   since the last run: what went well, what cost them time, what they want changed. Wait for the
-   answer; it is a source of the judgment beside the draft, quoted where a finding rests on it.
+   since the last run: what came back from real use, what went well, what cost them time, what
+   they want changed. Wait for the answer; quote it in the draft's step 1, and wherever a finding
+   rests on it.
 2. **Collect.** A retro: `retro.py collect <issue> --out <draft>`. An overhaul: `overhaul.py read
    <issue> --out <draft>`. Without gh, run each plan they print as the work model says.
-3. **Judge.** Fill the draft's block as its template says, the field feedback among the sources.
-4. **The person decides.** Present every finding to the person with the decision skill: each
-   `decision` finding needs their decision, each `work` finding their go. Record each answer in the
-   finding. A finding the person declines leaves the block.
+3. **Judge.** Fill the draft's steps and block as its template says
+   ([templates/retro.md](../../templates/retro.md) for a retro; an overhaul's draft names its
+   own): what the table and the matrix leave open, an answer to every standing question
+   ([templates/standing-questions.md](../../templates/standing-questions.md); an overhaul also
+   [templates/overhaul-questions.md](../../templates/overhaul-questions.md)), and each class with
+   its cause, its fix and its home, the first of the home order that holds. The field feedback is
+   among the sources.
+4. **The person decides.** Present every open class and every finding to the person with the
+   decision skill: each `decision` finding needs their decision, each `work` finding their go.
+   Record each answer in the finding and the decisions in the draft's last step. A finding the
+   person declines leaves the block.
 5. **Land and close.** Land the judged draft on the integration branch as the run's doc, then
    `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the report
    and closes the issue. Only now does SE file issues again.

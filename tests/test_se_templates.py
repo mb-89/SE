@@ -1171,6 +1171,156 @@ def test_fill_usage_errors_exit_2(capsys, arguments, error):
     assert code == 2 and error in out
 
 
-def test_fill_is_a_read_only_command_of_the_templates_tool():
-    assert "fill" in se_templates.READ_ONLY_COMMANDS and "fill" in se_templates.INTERACTIVE_COMMANDS
-    assert "fill" in se_templates.COMPONENTS[0].commands
+def test_fill_is_a_writing_command_of_the_templates_component_with_its_request_ports():
+    """The door serves fill in the tool templates_write: it writes only through the request ports
+    file-issue and file-comment, which the wiring binds to the GitHub component's write verbs."""
+    assert "fill" in se_templates.WRITING_COMMANDS and "fill" not in se_templates.READ_ONLY_COMMANDS
+    assert "fill" in se_templates.INTERACTIVE_COMMANDS and "fill" in se_templates.COMPONENTS[0].commands
+    declared = tomllib.loads((ROOT / "components" / "templates" / "component.toml").read_text(
+        encoding="utf-8"))
+    assert declared["commands"]["se_templates.py fill"]["writes"] is True
+    assert {port: request["type"] for port, request in declared["requests"].items()} == {
+        "file-issue": "github.issue-create", "file-comment": "github.issue-comment"}
+    wires = tomllib.loads((ROOT / "wiring.toml").read_text(encoding="utf-8"))["wires"]
+    assert wires["templates.file-issue"] == "github.issue-create"
+    assert wires["templates.file-comment"] == "github.issue-comment"
+
+
+# Filing through kern (docs/templates.md "Fill"): a fill with --repo files the document it checked
+# through kern's GitHub component, answered here from the component's own expectations.
+
+KERN_TEMPLATES = ROOT / "components" / "templates"
+#: The raw input the work example's fields come from.
+WORK_RAW = "\n".join(str(value) for value in FIELDS.values())
+
+
+def filing_fake():
+    """The templates component, its requests answered from its own expectation file
+    (components/templates/expect.toml), as kern's fake answers a reader's tests."""
+    import se_components
+
+    se_components.sdk()
+    from kern.fake import expecting
+
+    return expecting(se_components.attach("templates", "se_templates", KERN_TEMPLATES),
+                     KERN_TEMPLATES / "expect.toml")
+
+
+def checkout(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    return tmp_path
+
+
+def test_a_fill_of_the_work_template_files_an_issue_through_kern_s_github_component(tmp_path):
+    """Acceptance: the work fill passes SE's checks, then asks the request port file-issue, which
+    the wiring binds to the GitHub component's verb issue-create, with the template's name and
+    the fields kern renders the checked document from, never a body; kern reads the template it
+    wrote; the answer links the issue."""
+    import se_components
+
+    root = checkout(tmp_path)
+    fake = filing_fake()
+    out = fake.run("se_templates.py fill", se_components.CWD + str(root), "work", "--tree",
+                   "--worktree", str(root), "--repo", "alice/demo", "--label", "work",
+                   "--input-text", WORK_RAW, "--fields-json", json.dumps(FIELDS))
+    assert out == "passes\nfiled alice/demo#21: https://github.com/alice/demo/issues/21"
+    [asked] = fake.requests
+    document = templates.render(WORK, FIELDS)
+    assert asked.port == "file-issue"
+    assert asked.value == {"owner": "alice", "repo": "demo", "template": "work", "labels": ["work"],
+                           "fields": se_templates.kern_fields(WORK, document, TITLE)}
+    assert "body" not in asked.value and "body" not in asked.value["fields"]
+    written = json.loads((root / se_templates.KERN_TEMPLATES / "work.json").read_text(encoding="utf-8"))
+    assert written == se_templates.kern_template(WORK)
+    assert written["markers"] == document.splitlines()[:2]
+
+
+def test_a_fill_the_checks_refuse_files_nothing(tmp_path):
+    import se_components
+
+    root = checkout(tmp_path)
+    fake = filing_fake()
+    fields = {**FIELDS, "requirements": []}
+    out = fake.run("se_templates.py fill", se_components.CWD + str(root), "work", "--tree",
+                   "--worktree", str(root), "--repo", "alice/demo",
+                   "--input-text", WORK_RAW, "--fields-json", json.dumps(fields))
+    assert out.splitlines()[0] == "refused: 1 findings" and "requirements" in out
+    assert fake.requests == [] and not (root / se_templates.KERN_TEMPLATES).exists()
+
+
+def test_a_fill_kern_would_file_otherwise_than_it_was_checked_files_nothing(tmp_path):
+    """A value SE renders and kern would not, here a choice outside its choices, is refused
+    before anything reaches kern, naming the field."""
+    import se_components
+
+    root = checkout(tmp_path)
+    fake = filing_fake()
+    fields = {**FIELDS, "package_kind": "TBD"}
+    out = fake.run("se_templates.py fill", se_components.CWD + str(root), "work", "--tree",
+                   "--worktree", str(root), "--repo", "alice/demo",
+                   "--input-text", WORK_RAW + "\nTBD", "--fields-json", json.dumps(fields))
+    assert out.splitlines()[0] == "refused: 1 findings", out
+    assert "package_kind is one of its choices" in out and fake.requests == []
+
+
+def test_a_comment_template_s_fill_comments_through_kern_after_its_quote_check(tmp_path):
+    """--number files a comment through file-comment; the raw-input rule quote still refuses an
+    invented quote first, and then nothing is posted."""
+    import se_components
+    import test_templates
+
+    root = checkout(tmp_path)
+    test_templates.write_template(root, "work", test_templates.QUOTE_TEMPLATE.format(name="work").replace(
+        'actions: ["file.write"]\n  paths: ["findings/*.md"]', 'actions: ["comment.create"]'))
+    where = [se_components.CWD + str(root), "work", "--templates", str(root / "templates"),
+             "--worktree", str(root), "--repo", "alice/demo", "--number", "7",
+             "--input-text", test_templates.RAW]
+    fake = filing_fake()
+    invented = {**test_templates.FILLED, "seen": '"The export crashes the server"'}
+    out = fake.run("se_templates.py fill", *where, "--fields-json", json.dumps(invented))
+    assert out.splitlines()[0] == "refused: 1 findings" and fake.requests == []
+    out = fake.run("se_templates.py fill", *where, "--fields-json", json.dumps(test_templates.FILLED))
+    assert out == "passes\ncommented on alice/demo#7: https://github.com/alice/demo/issues/7#issuecomment-99"
+    [asked] = fake.requests
+    assert asked.port == "file-comment" and asked.value["number"] == 7
+    assert asked.value["fields"] == {"seen": test_templates.FILLED["seen"],
+                                     "impact": test_templates.FILLED["impact"]}
+
+
+def test_a_fill_run_directly_files_nothing_and_names_kern(capsys, tmp_path):
+    root = checkout(tmp_path)
+    code, out, _ = run(capsys, "fill", "work", "--tree", "--worktree", str(root), "--repo",
+                       "alice/demo", "--input-text", WORK_RAW, "--fields-json", json.dumps(FIELDS))
+    assert code == 2 and "nothing was filed" in out and "kern" in out
+    assert not (root / se_templates.KERN_TEMPLATES).exists()
+
+
+@pytest.mark.parametrize("arguments, error", [
+    (["--repo", "alice"], "--repo is OWNER/REPO"),
+    (["--number", "7"], "give --repo OWNER/REPO"),
+    (["--repo", "alice/demo", "--number", "7"], "work serves issue.create, issue.edit, not comment.create"),
+    (["--repo", "alice/demo", "--number", "7", "--label", "x"], "a comment carries no label"),
+])
+def test_filing_usage_errors_exit_2(capsys, arguments, error):
+    code, out, _ = run(capsys, "fill", "work", "--tree", "--input-text", WORK_RAW,
+                       "--fields-json", json.dumps(FIELDS), *arguments)
+    assert code == 2 and error in out, out
+
+
+def test_a_template_kern_cannot_render_is_not_filed(capsys):
+    code, out, _ = run(capsys, "fill", "raid-register", "--tree", "--repo", "alice/demo",
+                       "--input-text", "x", "--fields-json", "{}")
+    assert code == 2 and "kern cannot file raid-register" in out and "register" in out, out
+    code, out, _ = run(capsys, "fill", "decision", "--tree", "--repo", "alice/demo",
+                       "--input-text", "x", "--fields-json", "{}")
+    assert code == 2 and out.strip().endswith("decision serves deck.build, not issue.create"), out
+
+
+def test_the_engine_s_fill_with_repo_is_the_tool_s_fill(monkeypatch):
+    """templates.py fill --repo hands its call to se_templates.py fill, the one place that files."""
+    handed = []
+    monkeypatch.setattr(se_templates, "main", lambda argv: handed.append(argv) or 0)
+    assert templates.main(["fill", "work", "--tree", "--repo", "alice/demo", "--label", "work",
+                           "--input-text", "raw", "--fields-json", "{}"]) == 0
+    assert handed == [["fill", "work", "--repo", "alice/demo", "--label", "work", "--input-text",
+                       "raw", "--fields-json", "{}", "--tree"]]

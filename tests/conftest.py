@@ -319,7 +319,7 @@ REPORTS_VARIABLE = "SE_TEST_REPORTS"
 setup_seconds: dict[tuple[str, str], tuple[float, float]] = {}  # (test, worker): setup time, start
 
 
-# The suite builds the plugin layouts from src/ before its tests (AGENTS.md "Agents and skills"), so
+# The suite builds the plugin layout from src/ before its tests (AGENTS.md "Agents and skills"), so
 # no run tests stale generated files and nobody has to remember `se_plugin.py build`; on the
 # controller only, before pytest-xdist starts its workers.
 built_layouts = pytest.StashKey[list[str]]()

@@ -2,3 +2,14 @@
 .githooks/* text eol=lf
 *.sh text eol=lf
 RUNME.conf text eol=lf
+# Generated files in formats without comments, marked here instead of in a first line (the
+# guidance note generated-files-are-marked; generated.yaml declares each generator's outputs).
+/.claude-plugin/*.json linguist-generated generated-by=se_plugin.py:build
+/.github/hooks/se.json linguist-generated generated-by=se_plugin.py:build
+/.github/plugin/*.json linguist-generated generated-by=se_plugin.py:build
+/.github/mcp.json linguist-generated generated-by=se_plugin.py:build
+/scripts/interfaces/*.json linguist-generated generated-by=templates.py:interfaces
+/tests/file-seconds.json linguist-generated generated-by=work_tickets.py:file-seconds
+/tests/recorded/*.txt linguist-generated generated-by=tests/recorded.py
+/components/template/testdata/cases/*.json linguist-generated generated-by=tests/template_cases.py
+/components/cmd/se/testdata/tools.json linguist-generated generated-by=mcp_surface_test.go:-golden

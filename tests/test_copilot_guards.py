@@ -57,19 +57,13 @@ def test_the_greeting_names_the_guards_under_copilot_only(tmp_path):
     assert "[copilot] start_sessions = true: off" in line
 
 
-COPILOT_PROCEDURES = (".github/agents/se.agent.md", ".github/agents/integrator.agent.md",
-                      ".github/skills/catch-up/SKILL.md", ".github/skills/work-model/SKILL.md")
-CLAUDE_PROCEDURES = ("agents/se.md", "agents/integrator.md", "skills/catch-up/SKILL.md",
-                     "skills/work-model/SKILL.md")
+PROCEDURES = ("agents/se.md", "agents/integrator.md", "skills/catch-up/SKILL.md", "skills/work-model/SKILL.md")
 
 
 def test_every_role_that_starts_sessions_starts_none_under_copilot_unless_the_setting_says_so():
     """No code starts a Copilot session (the roles do, by their procedure): each procedure that
-    starts one prints its line instead under Copilot, unless the greeting reads the setting true;
-    Claude Code's layout does not carry it."""
-    for name in COPILOT_PROCEDURES:
+    starts one prints its line instead under Copilot, unless the greeting reads the setting true."""
+    for name in PROCEDURES:
         text = " ".join((ROOT / name).read_text(encoding="utf-8").split())
         assert "`[copilot] start_sessions = true`" in text, name
         assert "start no session" in text or "starts no session" in text or "start no worker" in text, name
-    for name in CLAUDE_PROCEDURES:
-        assert "start_sessions" not in (ROOT / name).read_text(encoding="utf-8"), name

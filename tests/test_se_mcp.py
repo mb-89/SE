@@ -574,7 +574,7 @@ def se_plugin_server(tmp_path: Path) -> dict:
     root = tmp_path / "built"
     shutil.copytree(ROOT / "src", root / "src")
     (root / "se.toml").write_text('[project]\nversion = "1.0.0"\n[plugin]\nclaude_mcp = true\n', encoding="utf-8")
-    return declared_server_of(module.expected(root, copilot=False))
+    return declared_server_of(module.expected(root))
 
 
 def declared_server_of(files: dict) -> dict:

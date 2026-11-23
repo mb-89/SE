@@ -35,7 +35,7 @@ read it the same way.
   - Its setup script is the one under [Claude Code cloud](#claude-code-cloud), which clones SE into
     `~/.claude/skills/se`, and its variable `SE_DEFAULT_AGENT=se`.
   - Elsewhere, the first message picks the agent: `Act as the se agent defined in
-    <se>/.github/agents/se.agent.md.`, which works in Copilot too.
+    <se>/agents/se.md.`, which works in Copilot too.
 - **Cowork, untested:** give the Cowork session the folder that holds SE's clone, and send the
   first message above with that folder as `<se>`. Nobody has tried it yet.
 
@@ -49,10 +49,10 @@ python scripts/se_home.py tracker` prints it in a clone); no file of SE names it
 | --- | --- | --- | --- |
 | Claude Code | from the clone: [RUNME](#getting-it-running), whose agent start runs `claude plugin install se --marketplace <clone>`; a copy from the GitHub marketplace (`<owner>/<repository>`) has no `.git`, so it gets no core release without `go`, no refresh at start and no documentation URL | `claude --agent se:se`, or `"agent": "se:se"` in a project's `.claude/settings.json` | `claude plugin list` shows `se@se`; `/agents` lists `se:se`, `se:integrator`, `se:retro`, `se:reviewer` and `se:worker` |
 | Claude Code cloud (claude.ai/code) | the environment's [setup script](#claude-code-cloud); an environment may cache its output, so a session can start with an older clone, which SE [refreshes at start](#start-and-refresh) | each session's first prompt, or SE_DEFAULT_AGENT=se on the environment ([below](#claude-code-cloud)) | `claude plugin list` shows `se@skills-dir`; ask the session which `se:` agents and skills it has: `se:se`, `se:integrator`, `se:retro`, `se:reviewer`, `se:worker`, `se:catch-up`, `se:decision`, `se:work-model` |
-| GitHub Copilot in VS Code, in se's own checkout | nothing: `git clone https://github.com/<owner>/<repository>` and open it; VS Code reads its `.github/agents/`, `.github/skills/`, `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `reviewer` and `worker`, and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
-| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), or copy `.github/agents/*.agent.md` to `~/.copilot/agents/` and `.github/skills/*` to `~/.copilot/skills/`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
-| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `.github/skills`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
-| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/agents/`, `.github/skills/` and `.github/hooks/se.json`; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task and pick `se` | its `sessionStart` hook hands the session SE's greeting, as above |
+| GitHub Copilot in VS Code, in se's own checkout | `git clone https://github.com/<owner>/<repository>`, open it, and install the plugin from the clone: **Chat: Install Plugin from Source** with the clone's folder (agent plugins, `chat.plugins.enabled`); VS Code reads the plugin through `.claude-plugin/plugin.json`, its agents from `agents/` and its skills from `skills/`, and the checkout's `.github/hooks/se.json` and `.github/mcp.json` | in the Chat view pick the session target **Copilot** and the agent `se` (where `se` is missing, turn on `github.copilot.chat.cli.customAgents.enabled`) | the agent list holds `se`, `integrator`, `retro`, `reviewer` and `worker`, each once: both hosts read the one `agents/<name>.md` ([VS Code](docs/copilot.md#vs-code)), and **Configure Skills** `catch-up`, `decision` and `work-model`; the first answer opens with the greeting, its first line `SE <version> started: <n> skills, <n> rules, <n> sub-agents.`; asked `status`, the tool `se/status` answers `se: running in <checkout>, pid <n>, ...` |
+| GitHub Copilot in VS Code, another repository | **Chat: Install Plugin from Source** with `https://github.com/<owner>/<repository>` (agent plugins, `chat.plugins.enabled`), which VS Code reads through `.claude-plugin/plugin.json`; a repository that opts in also runs `scripts/setup.sh <repo> --copilot` ([docs/copilot.md](docs/copilot.md#another-repository)) | as above | as above, `se/status` naming that repository |
+| GitHub Copilot CLI | `copilot plugin marketplace add <owner>/<repository>`, then `copilot plugin install se@se` (or `copilot plugin install <owner>/<repository>`, which the CLI calls deprecated) | `copilot --agent se` in a folder the CLI trusts (it asks once; `--trust-folder` for one run) | `copilot plugin list` shows `se@se`; `copilot skill list` shows `catch-up`, `decision` and `work-model` from the plugin's `skills/`, which its manifest `.github/plugin/plugin.json` names with the one `agents/`; in the session, the greeting as above and `se-status` answering `se: running in <project>, ...` |
+| GitHub Copilot cloud agent (github.com), in se's own checkout | nothing: it reads the repository's `.github/hooks/se.json`; it reads agents only from the repository's own `.github` folder, where SE ships none, so it offers no `se` agent; untested ([docs/copilot.md](docs/copilot.md#cloud-agent-optional-and-untested)) | the repository's **Agents** tab: start a task whose first line is `Act as the se agent defined in agents/se.md.` | its `sessionStart` hook hands the session SE's greeting, as above |
 
 Copilot's details are in [docs/copilot.md](docs/copilot.md): what a token-less Copilot CLI already
 showed, the opt-in for another repository, the self-test and smoke test, and the owner's checklist
@@ -101,11 +101,11 @@ repository's `.claude/settings.json` gives every session of that repository SE's
 workers included. So each session's first prompt names its role's file, `<se>` being
 `~/.claude/skills/se`:
 
-- SE: `Act as the se agent defined in <se>/.github/agents/se.agent.md.`
+- SE: `Act as the se agent defined in <se>/agents/se.md.`
 - Worker and integrator: the session prompt the work model's
   [Without gh](src/skills/work-model/SKILL.md#without-gh) names.
 - Reviewer, started by SE on "review PR #n": the line
-  `Act as the reviewer agent defined in <se>/.github/agents/reviewer.agent.md.`, then the pull
+  `Act as the reviewer agent defined in <se>/agents/reviewer.md.`, then the pull
   request, its repository and SE's session, one per line.
 
 An environment made for SE can set `SE_DEFAULT_AGENT=se` beside its setup script, in its
@@ -370,8 +370,11 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
 
 `se mcp --root <checkout>` is SE's MCP server over stdio, kern's door (kern's README "The MCP
 door"), for every agent host that reads an `mcp.json` (Claude Code,
-Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's read-only commands
-through it as tools. The host spawns it as the session starts; nobody starts anything else.
+Copilot in VS Code and its CLI): a host whose `mcp.json` names it calls SE's commands through it
+as tools. The host spawns it as the session starts; nobody starts anything else.
+
+- **What it offers.** SE's read-only commands, and the commands that write only through kern's
+  GitHub component (Writing, through requests only, below).
 
 - **What the host runs.** The launcher `scripts/se_mcp.sh --root <project>`, or its PowerShell
   twin `se_mcp.ps1`: standalone, it reads only the release pin (`components/release.toml`).
@@ -436,17 +439,23 @@ through it as tools. The host spawns it as the session starts; nobody starts any
 | `integration` | `config`, `ready`, `capacity`, `fleet-check`, `settings-check`, `parity`, `metrics` | `components/integration` |
 | `overhaul` | `overhaul.py facts` | `components/overhaul` |
 | `tickets` | `work_tickets.py status` | `components/tickets` |
-| `templates` | `list`, `draft`, `check`, `fill` | `components/templates` |
+| `templates` | `list`, `draft`, `check` | `components/templates` |
+| `templates_write` | `fill`, which with `--repo` files the document it checked ([docs/templates.md "Fill"](docs/templates.md#fill)) | `components/templates` |
+| `github_write` | `github issue-create`, `github issue-comment`, from a template's fields | kern's GitHub component |
 
 - **Read-only, command by command.** A script names the commands that change nothing in its
   `READ_ONLY_COMMANDS`, each with its MCP description, when an agent uses it; `work_tickets.py
   docs` writes `read-only = true` and that `mcp` line into its declaration. `work_tickets.py queue`
-  syncs the checkout (git fetch and merge), so no tool offers it, and no command that writes.
+  syncs the checkout (git fetch and merge), so no tool offers it.
+- **Writing, through requests only.** A command its script names in `WRITING_COMMANDS`, with its
+  MCP description, writes only through the request ports its `REQUESTS` declares, which
+  `wiring.toml` binds to an I/O verb; `work_tickets.py docs` writes `writes = true` and the ports,
+  and kern's door offers it in the tool `<instance>_write` (`templates_write`).
 - **Generated, never written per tool.** A command group with read-only commands is one tool,
   named in snake_case: `command` is one of them, `args` its arguments, `page` the page of a long
   answer.
-- **Approvals stay the host's.** Every tool says `readOnlyHint` and not `destructiveHint`, which
-  neither grants nor forces an approval. Allow a tool once per host: Copilot's CLI with
+- **Approvals stay the host's.** Every read-only tool says `readOnlyHint` and not
+  `destructiveHint`, which neither grants nor forces an approval; a writing tool says it writes. Allow a tool once per host: Copilot's CLI with
   `--allow-tool='se(<tool>)'`, Claude Code with the permission rule `mcp__se__<tool>`, VS Code
   through "Chat: Manage Tool Approval".
   - The door the Claude Code plugin declares takes the rule `mcp__plugin_se_se__<tool>`, such as
@@ -486,7 +495,7 @@ exits 1 on a problem; otherwise it exits 0.
 ### Host sizes
 
 `uv run python <se>/scripts/host_size.py report [--root DIR] [--tools FILE] [--json]` measures
-the generated layouts (`AGENTS.md`, `.github/agents`, `.github/skills`, `agents/`, `skills/`) and,
+the generated layout (`AGENTS.md`, `agents/`, `skills/`) and,
 with `--tools`, the JSON of a `tools/list` answer, against what each agent host caps.
 
 It prints one row per host, file or tool and subject, "over", "under" or "not measured", the
@@ -1178,7 +1187,7 @@ The same tree may be held by more than one remote or checkout
   source does not. Its content, presence and absence pass, and the command names it on one line,
   `lockfiles excluded:`. `work_tickets.py` `PARITY_LOCKFILES` owns the list; nothing else is excluded.
 - **Every other path fails:** a path that differs is listed as `changed:`, or `only in <ref>:` for
-  the side that holds it. Generated outputs (the layouts, `components/*/component.toml`) compare
+  the side that holds it. Generated outputs (the layout, `components/*/component.toml`) compare
   like source, and no text is normalized, whitespace included. Exit code 1 with any such path, 0
   without (`tests/test_parity.py`).
 
@@ -1892,8 +1901,14 @@ uv run python <se>/scripts/se_workflows.py check
 - What SE ships: `.github/workflows/` `branch-cleanup.yml`, `kern-battery.yml`, `kern-release.yml`
   and `release.yml`, and the actions `integrator-pass`, `kern-at-pin`, `suite-shard` and
   `suite-time` (`SHIPPED` in `scripts/se_workflows.py`).
-- `write` writes the files it names, or regenerates those the project holds; each is a generated
-  file whose first line names its source path, the pin and SE's place.
+  - Beside them, the files a project holds as SE has them: `RUNME.sh` and `RUNME.ps1`, the
+    installer beside the project's own `RUNME.conf`, and `ref-maintenance.yml`, which its owner
+    triggers by hand; each keeps its triggers (`WHOLE`).
+- `write` writes the files it names, or regenerates those the project holds. Each is a generated
+  file whose marker (the guidance note
+  [generated-files-are-marked](guidance/generated-files-are-marked.md)) names `se_workflows.py
+  write` and, as its source, SE's file, the pin and SE's place: its first line, or the line after
+  `RUNME.sh`'s `#!`.
 - `kern-at-pin` checks kern out at the commit a folder's `se.lock` locks into its
   `.se/modules/kern`, refusing a lock whose version is not the `require kern` of the `go.mod` that
   the folder's `se.toml` `[components.kern]` `go` names, naming both lines. A folder whose `se.lock`
@@ -1910,7 +1925,8 @@ uv run python <se>/scripts/se_workflows.py check
   project's own owner on its host is `${{ github.repository_owner }}/<name>`, so the copies name no
   owner; any other names its own `<owner>/<name>`. SE is public, so the run's token reads it.
 - Where SE's file reaches SE's own checkout, the copy checks out SE at the pin instead (in
-  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`.
+  `.se/ci/se`, which the project ignores with `.se/`); a workflow keeps only its `workflow_call`,
+  unless it is held whole.
 - `update se` regenerates them, and `check` fails, naming the file and `write`, where a copy differs
   from what the pin generates: a project adds it to its integration checks, as SE runs
   `se_plugin.py check`.
@@ -1996,7 +2012,7 @@ and git's first commit on `main` as the [project identity](#project-settings).
 
 ## Host validators
 
-`uv run python scripts/host_validate.py` runs each host's own validator over the built layouts
+`uv run python scripts/host_validate.py` runs each host's own validator over the built layout
 (`claude plugin validate --strict` on both manifests, `skills-ref validate` on each skill folder) and
 reports; SE's own lint in the build stays the first line. Exit codes: 0 passed, 1 a host refused a
 layout, 2 a validator could not run; `--skips-pass` answers 0 where only a tool is absent.
@@ -2116,7 +2132,7 @@ settings checks and the generated docs.
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
 | `work_tickets.py file-seconds` | `work_tickets.py file-seconds [--worktree WORKTREE] [--run ID] [--artifact FILE]` | write tests/file-seconds.json, the order the suite's workers take its test files in, from CI's seconds: the artifact file-seconds of a check run, by default the newest passing one of a push to the integration branch that kept it; prints each file that moved by 1 s or more |
 | `work_tickets.py fleet-check` | `work_tickets.py fleet-check [--worktree WORKTREE] [--repo REPO] [--json] [--open-issues OPEN_ISSUES] [--closed-issues CLOSED_ISSUES] [--pulls PULLS] [--sessions FILE]` | list every stuck or stray piece of work, each with its issue, pull request and remedy: in-progress work without a branch once the lease has passed since its Started comment (listed as starting before) or without a push within the lease, a delivered pull request whose check failed or that conflicts, a branch of a closed issue, a block by an issue closed as not planned or by itself, an se-person issue and what it holds up, and with --sessions a worker session stopped on a usage limit without delivering; 'healthy' and exit code 0 when there is none, exit code 1 otherwise. It only reads. Without gh it prints its GitHub plan and takes the answers from files |
-| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layouts (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
+| `work_tickets.py format` | `work_tickets.py format [--root ROOT]` | apply the fix of every check the check job runs that a fix can satisfy: write the generated layout (se_plugin.py build), the interface templates' generated schemas (templates.py interfaces) and the command reference with its declarations (docs); a second run writes nothing |
 | `work_tickets.py integrate` | `work_tickets.py integrate --worktree WORKTREE [--repo REPO] [--pr-description FILE] [--issue-body FILE] [--branch BRANCH] [--pr-comments FILE] [--read-back BRANCH] [--record-fix BRANCH] [--landing {squash,fast-forward}] [--landing-pull LANDING_PULL] [--check-run CHECK_RUN] [--landing-description FILE] [--build-command BUILD_COMMAND] [--include-late REASON] [--check-command JSON] [--check-command-temporary-directory] [pull_request]` | validate the field report a pull request's description carries, merge it on land/<branch>, test, land it through a squash pull request once check passes, and close the work issue. Where gh is not signed in it pushes land/<branch> and prints the GitHub steps as a plan for the session's GitHub tools; --read-back <branch> then checks the landing through git and finishes the close-out |
 | `work_tickets.py metrics` | `work_tickets.py metrics [--since DATE] [--file FILE]` | print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml) |
 | `work_tickets.py parity` | `work_tickets.py parity [--worktree WORKTREE] left right` | compare two commits' trees, such as one branch on two remotes: every tracked path that differs, apart from dependency lockfiles (se.lock and uv.lock at any depth), is listed as changed, only left or only right, and fails with exit code 1; lockfile differences are named and pass. It only reads |
@@ -2204,7 +2220,7 @@ document.
 | `se_templates.py check` | `se_templates.py check (--body-file BODY_FILE \| --fields FIELDS \| --body BODY \| --fields-json FIELDS_JSON) [--title TITLE] [--render] [--action ACTION] [--repo REPO] [--labels LABELS] [--base BASE] [--worktree WORKTREE] [--tree] [template]` | check a text against a template as SE's filing commands would |
 | `se_templates.py check-files` | `se_templates.py check-files [--changed REF] [--root ROOT] [--templates TEMPLATES] [PATH ...]` | check the files a template claims, given or changed since a ref |
 | `se_templates.py draft` | `se_templates.py draft [--markdown] [--worktree WORKTREE] [--tree] [--session SESSION] [--page PAGE] template` | print a template's fields, their instructions, their shape and its schema |
-| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
+| `se_templates.py fill` | `se_templates.py fill [--prompt PROMPT] [--input INPUT \| --input-text INPUT_TEXT] [--fields FIELDS \| --fields-json FIELDS_JSON] [--title TITLE] [--repo OWNER/REPO] [--number NUMBER] [--label LABEL] [--worktree WORKTREE] [--templates TEMPLATES] [--tree] [--session SESSION] [--page PAGE] template` | fill a template from the raw input: the instructions, or the checked document |
 | `se_templates.py gate` | `se_templates.py gate [--gate {off,warn,refuse}] [--templates TEMPLATES] [--root ROOT] [--runtime ROOT]` | SE's hook: judge one GitHub write's body, or a claimed file's write, against its template |
 | `se_templates.py list` | `se_templates.py list [--tree]` | name every template with its actions |
 
@@ -2287,13 +2303,22 @@ issue was created; only where no retro issue exists is it the whole history.
 issue closed, whose findings it then scores; the rule checks judge only the window.
 
 Each issue comes with the field report of the work pull request its landing pull request names
-(`<!-- se:field-report-in <n> -->`). The draft holds:
+(`<!-- se:field-report-in <n> -->`).
+
+The draft is a document of the retro template ([templates/retro.md](templates/retro.md)), the
+person's decision of 22 Nov. Its six steps are the field feedback, collect, the table of what
+happened, the standing questions with their matrix, classes and homes, and the person's decisions.
+
+The standing questions are one block
+([templates/standing-questions.md](templates/standing-questions.md)), which the overhaul and every
+field report's Retro section ask alike. Collect fills step 2 with what it read:
 
 - the sizes: closed, landed, duplicates, escalated, beside the previous retro's where its block is
   found;
 - per landed issue the deliveries `integrate` refused (its `Integration stopped:` comments), its
   escalations (those, or the `escalated` label) and the suite time of its `Integrated in` comment;
-- the field reports' Retro entries and "Not delivered" items, grouped;
+- the field reports' answers to the standing questions, by question, and their "Not delivered"
+  items, the planning misses;
 - the rule checks, each broken one with what broke it: every landing pull request names a work
   issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
   integration branch outside a pull request (`outside-pr`), every closed work issue has a field
@@ -2309,7 +2334,21 @@ Each issue comes with the field report of the work pull request its landing pull
     is listed and scored neither as failed nor as recurred.
 - the breaking releases beyond the pins of the project's component tree, as [`se_modules.py
   breaking`](#commands) prints them, or why that listing failed; every collect runs it once its
-  answers are all there, and `--json` names it as `breaking`.
+  answers are all there, and `--json` names it as `breaking`;
+- the previous retro's classes measured again: rate before (its findings per issue it closed)
+  against rate now (the issues of the window its `pattern` matches, per issue).
+
+Steps 3 to 5 it builds from the same record:
+
+- step 3, the timeline in chapters of up to six hours, by when each work issue came back (its
+  landing, else its close), and per step (each issue) what went well, what it cost and whether a
+  machine could do it, from its field report;
+- step 4, the matrix of the standing questions against the chapters, each cell naming the issues
+  whose field report answers that question there, then the questions for the judge to answer;
+- step 5, the home order (check, refusal, gate, prefill, checklist line, command, setting,
+  sentence) and the previous retro's classes against the tree: `fixed` where the class's home
+  holds its `mark`, `past` where it is not but its pattern matched nothing in the window, else
+  `open`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
@@ -2325,32 +2364,47 @@ answers are still missing, round by round, and reads the answers from the files 
 into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
 `retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge fills the draft's block:
+branch. The judge writes the person's field feedback into step 1, fills what steps 3 and 4 leave
+open, answers every standing question, records the person's decisions in step 6, and fills the
+draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
-- `classes`, each with `name` and `fix`;
+- `classes`, each with `name`, `cause`, `fix`, `home` (the file the fix changes) and `home_kind`
+  (the first of the home order that holds), and optionally `status`, `pattern`, `limits` and
+  `mark` (a text the fix leaves in its home, which the tree check looks for);
 - `went_well`, what went well.
 
 It refuses, writing nothing, an incomplete judgment: a finding without one of those, a class
-without a fix, a controversial finding without a why, a finding on the rule book, or on a check that
-recurred, that is not controversial, nothing that went well. It refuses, too, a draft the
-integration branch does not hold as it stands: land it there first.
+without a cause, a fix, a home or a home kind of the order, a controversial finding without a why,
+a finding on the rule book, or on a check that recurred, that is not controversial, nothing that
+went well.
+
+It refuses, too, a draft whose steps break the retro template, a step or a standing question left
+open among them, and a draft the integration branch does not hold as it stands: land it there
+first.
 
 It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report proper as the retro issue's closing comment and closes the issue. The report
-opens with `<!-- se:retro-report -->` and lists each finding, numbered, with its class's fix, its
-home and its kind:
+it posts the report proper as the retro issue's closing comment and closes the issue.
+
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template: the
+draft's steps 1, 3 and 4, and step 2 as the link to the retro doc. In step 5 come the classes,
+strongest home first, each with its cause, fix, home and state against the tree, and its findings,
+numbered, each with its home and its kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
-Then what went well and what follows. The facts and the block stay in the retro doc, which the
-report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the
-next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
-numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
+Then what went well, and in step 6 the person's decisions, the classes still open and what
+follows. The facts and the block stay in the retro doc, which the report links at the integration
+branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+them.
+
+A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
+without its markers, so no part is checked as a whole report: `file` checked the whole first.
+Without gh it prints the comments and the close as a plan.
 
 `scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
 their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts
@@ -2382,7 +2436,11 @@ filing path (`file --label discovery`): once, so an open overhaul answers a seco
 - the previous overhaul's findings, each with the issues that name it
   (`overhaul #<n> finding <k>`) and their state (`closed`, `open` where one is still open, or
   `none`; `too early to score` instead of `open` where the [countdown](#overhaul-due) is on);
-- the pruning facts (`facts`, below), beside the previous overhaul's counts.
+- the pruning facts (`facts`, below), beside the previous overhaul's counts;
+- the questions the judge answers: the standing questions, which the retro and every field report
+  ask too, and the overhaul's own ([templates/overhaul-questions.md](templates/overhaul-questions.md)):
+  the voice and style, the method, the guidance against the machines, whether every file earns its
+  place, a named design pattern, and what the outside world does and what we can learn from it.
 
 It ends in a JSON block under `<!-- se:overhaul-yaml -->`, which the next overhaul reads. Without
 gh it prints its reads round by round and takes the answers from `--answers <dir>`, as `retro.py
@@ -2399,12 +2457,13 @@ collect` does.
 
 It refuses, writing nothing, an incomplete judgment: a rule without a verdict, an empty
 `looked_at` part, a finding without a rule of the book, a place or a body, a controversial finding
-without a why, nothing that went well.
+without a why, nothing that went well, a question of either block left unanswered.
 
 It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
 it posts the report, opening with `<!-- se:overhaul-report -->`, as the overhaul issue's closing
-comment and closes the issue. Without gh it prints the comment and the close as a plan. Each
+comment and closes the issue. The report is a document of the overhaul template
+([templates/overhaul.md](templates/overhaul.md)); its judged block stays `overhaul.py`'s to check. Without gh it prints the comment and the close as a plan. Each
 finding is
 
 - `work`, for SE to bundle into work issues naming `overhaul #<n> finding <k>`, or
@@ -2458,13 +2517,15 @@ both.
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
-| `templates/overhaul.md` | An overhaul's report: the verdicts, the findings and the judged block the next one reads. |
+| `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
+| `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
-| `templates/retro.md` | A retro's report or draft: its judged block, under its marker. |
+| `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |

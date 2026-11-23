@@ -1,9 +1,9 @@
 """Standalone validators for agent and skill files: a file in, its findings out, for any repository.
 
-`copilot_agent` holds a Copilot custom agent (`<name>.agent.md`) to Copilot's fields;
-`skill` holds a skill (`<name>/SKILL.md`) to the agentskills.io rules. Each takes the file's path
+`copilot_agent` holds a Copilot custom agent (`<name>.agent.md`, or a plugin's `agents/<name>.md`,
+which Claude Code and Copilot both read) to Copilot's fields; `skill` holds a skill (`<name>/SKILL.md`) to the agentskills.io rules. Each takes the file's path
 and text and returns one line per finding, naming the path; none means the host loads it. The SE
-build (scripts/se_plugin.py) runs them on its generated layouts.
+build (scripts/se_plugin.py) runs them on its generated agents and skills.
 
     agent_lint.py <file>...    exit code 0 without findings, 1 with them, 2 for an unreadable file
 """
@@ -23,6 +23,9 @@ COPILOT_AGENT_FIELDS = frozenset({
     "name", "description", "tools", "model", "model-policy", "hooks", "target", "user-invocable",
     "disable-model-invocation", "argument-hint", "skills", "mcp-servers", "metadata", "reasoning-effort",
     "deferred-tool-loading", "include-custom-instructions", "github", "strict-tools-list"})
+# Claude Code's agent fields a Copilot host ignores with a warning ("unknown field ignored", the
+# Copilot CLI) and still loads the agent: an agent file both hosts read may carry them.
+CLAUDE_AGENT_FIELDS = frozenset({"disallowedTools"})
 COPILOT_TARGETS = frozenset({"vscode", "github-copilot"})
 # The agentskills.io rules: a name of lowercase letters, digits and single hyphens, at most 64
 # characters, equal to its folder (VS Code skips a skill whose name breaks them); a description of
@@ -56,10 +59,12 @@ def scalar(value: str) -> str:
     return value
 
 
-def copilot_agent(path: PurePath, text: str) -> list[str]:
-    """The findings of one Copilot custom agent file."""
+def copilot_agent(path: PurePath, text: str, shared: bool = False) -> list[str]:
+    """The findings of one Copilot custom agent file; `shared`, one Claude Code reads too, which may
+    carry CLAUDE_AGENT_FIELDS."""
     found = fields(text)
-    findings = [f"{path}: {key} is no Copilot agent field" for key in found if key not in COPILOT_AGENT_FIELDS]
+    known = COPILOT_AGENT_FIELDS | (CLAUDE_AGENT_FIELDS if shared else frozenset())
+    findings = [f"{path}: {key} is no Copilot agent field" for key in found if key not in known]
     if not scalar(found.get("description", "")):
         findings.append(f"{path}: a Copilot agent needs a description")
     if "target" in found and scalar(found["target"]) not in COPILOT_TARGETS:
@@ -84,17 +89,20 @@ def skill(path: PurePath, text: str) -> list[str]:
 
 
 def lint(path: PurePath, text: str) -> list[str]:
-    """The findings of a file by its kind: a `SKILL.md`, a `*.agent.md`; nothing for any other."""
+    """The findings of a file by its kind: a `SKILL.md`, a `*.agent.md`, an `agents/*.md` both hosts
+    read; nothing for any other."""
     if path.name == "SKILL.md":
         return skill(path, text)
     if path.name.endswith(".agent.md"):
         return copilot_agent(path, text)
+    if path.parent.name == "agents" and path.suffix == ".md":
+        return copilot_agent(path, text, shared=True)
     return []
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent_lint.py", description=__doc__.splitlines()[0])
-    parser.add_argument("files", nargs="+", type=Path, help="a Copilot `*.agent.md` or a skill's `SKILL.md`")
+    parser.add_argument("files", nargs="+", type=Path, help="a Copilot `*.agent.md`, a plugin's `agents/*.md` or a skill's `SKILL.md`")
     args = parser.parse_args(argv)
     findings = []
     for path in args.files:

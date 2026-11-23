@@ -14,25 +14,32 @@
 
 ## Agents and skills
 
-- Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`. Front
-  matter keys prefixed `copilot.` or `claude.` go only into that host's layout.
-- `uv run python scripts/se_plugin.py build` generates everything else from it: the Copilot layout
-  (`.github/agents/`, `.github/skills/`) and the Claude Code plugin (`agents/`, `skills/`,
-  `.claude-plugin/`). Never edit those by hand; `tests/test_se_plugin.py` checks they match.
-- Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into both
-  layouts as `skills/<name>/SKILL.md`, `<name>` its front matter's
+- Each agent and skill is written once, in `src/agents/<name>.md` and `src/skills/<name>/`, for
+  both hosts: its body serves Claude Code and Copilot (prose for one host says so, such as "Under
+  Copilot").
+  - Each agent becomes one file, `agents/<name>.md`, which both hosts read: Copilot reads Claude
+    Code's agent format, and a second copy would list every agent twice in VS Code.
+  - An agent has no `tools` list (Claude Code would read it as an allow-list and take tools from
+    the agent); a key prefixed `claude.` loses its prefix, and one prefixed `copilot.` is refused.
+- `uv run python scripts/se_plugin.py build` generates everything else from it:
+  - the Claude Code plugin (`agents/`, `skills/`, `.claude-plugin/`), which Copilot's manifest
+    names too;
+  - Copilot's manifest with its own hooks (`.github/plugin/`, `.github/hooks/`,
+    `.github/mcp.json`); both hosts load the one `agents/` and the one `skills/`.
+  - Never edit those by hand; `tests/test_se_plugin.py` checks they match.
+- Each guidance note, `guidance/**/<file>.md`, is also a skill: the build writes it into
+  `skills/<name>/SKILL.md`, `<name>` its front matter's
   ([docs/guidance.md "Notes in folders"](docs/guidance.md#notes-in-folders)).
   `se_plugin.py check` also runs `scripts/se_guidance.py check`, so an orphan note fails there.
 - The outside skills a role relies on are one list, `se.toml` `[roles.<role>] skills`, never an
   agent's own front matter.
   - Each entry is `<plugin>@<marketplace>:<skill>`; a skill Claude Code ships loads by itself and
     is not listed.
-  - The build preloads it into that agent's `skills` field where the host reads one (Claude Code;
-    Copilot's agents have none).
+  - The build preloads it into that agent's `skills` field.
   - The start greeting names an entry the session lacks
     ([README "Start and refresh"](README.md#start-and-refresh)).
 - Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
-  tests stale layouts and nobody runs the build by hand before it; commit what it wrote.
+  tests a stale layout and nobody runs the build by hand before it; commit what it wrote.
 - Installing SE on a clean machine is the README's [Getting it running](README.md#getting-it-running);
   on a host, its [Install](README.md#install).
 
@@ -90,6 +97,10 @@
   - Behind the door, `tests/conftest.py` refuses real git to every test outside its `REAL_GIT`
     list, and to the child processes it starts: only the contract suite, `tests/test_git_door.py`.
     A test that reaches real git without the fake fails, naming the command.
+  - It also fails where a file a program writes is not marked, a marked file is not declared in
+    `generated.yaml`, or a generator's fresh run differs (`scripts/generated.py`, the guidance
+    note `generated-files-are-marked`); the commit hook runs the same check without the fresh runs
+    (`se.toml` `[commit_checks]`).
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:
@@ -99,7 +110,7 @@
     ([Issues](src/skills/work-model/SKILL.md#issues)).
 - Fixes: `uv run python scripts/work_tickets.py format` writes what the `check` job's generated
   checks refuse; SE runs no code formatter or linter, and its other checks have no fix to apply.
-  - the layouts (`se_plugin.py check`);
+  - the layout (`se_plugin.py check`);
   - the interface templates' generated schemas (`templates.py interfaces --check`, held by
     `tests/test_interfaces.py`);
   - the README's command reference with its components' declarations (`work_tickets.py docs

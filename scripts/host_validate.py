@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""The hosts' own validators over the layouts SE generates: a report, run by hand, called by nothing.
+"""The hosts' own validators over the layout SE generates: a report, run by hand, called by nothing.
 
 SE's own lint (scripts/agent_lint.py, run by the build) stays the first line; this holds the built
-layouts to the real hosts, so a manifest key a host strips or a skill a host would skip shows before
+layout to the real hosts, so a manifest key a host strips or a skill a host would skip shows before
 a session meets it (README "Host validators").
 
 The validators are one table of data, `VALIDATORS`: name, host, tool, argument list, the layout
@@ -63,7 +63,7 @@ VALIDATORS: tuple[Validator, ...] = (
               args=("plugin", "validate", "--strict"),
               reads=(".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"), pinned="2.1.325"),
     Validator(name="skills-ref validate", host="Agent Skills", tool="skills-ref", args=("validate",),
-              reads=("skills/*/", ".github/skills/*/"), pinned="0.1.0"),
+              reads=("skills/*/",), pinned="0.1.0"),
     Validator(name="Copilot CLI", host="GitHub Copilot", tool=None,
               note="no validator; checked by hand on the Monday checklist"),
 )
@@ -174,7 +174,7 @@ def targets(root: Path, validator: Validator) -> tuple[str, ...]:
 
 def collect(root: Path, runner: Runner, validators: Sequence[Validator] = VALIDATORS,
             timeout: float = TIMEOUT_SECONDS) -> list[Result]:
-    """Every validator's answers over the layouts under root, each process through runner."""
+    """Every validator's answers over the layout under root, each process through runner."""
     results: list[Result] = []
     for validator in validators:
         if validator.tool is None:
@@ -207,13 +207,13 @@ def run_process(argv: Sequence[str], cwd: Path, timeout: float) -> Answer:
 def main(argv: Sequence[str] | None = None, runner: Runner = run_process,
          validators: Sequence[Validator] = VALIDATORS) -> int:
     parser = argparse.ArgumentParser(
-        description="Run the hosts' own validators over SE's generated layouts and report.",
+        description="Run the hosts' own validators over SE's generated layout and report.",
         epilog="Off by default: nothing runs it. To put it into every integration, the owner adds "
                "[tests.beside.host-validators] to se.toml with command "
                '["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_host_validators.py"]. '
                "Exit codes: 0 passed, 1 a host refused a layout, 2 a validator could not run.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1],
-                        help="the repository whose built layouts are checked (default: this se)")
+                        help="the repository whose built layout is checked (default: this se)")
     parser.add_argument("--skips-pass", action="store_true",
                         help="answer 0 where the only shortfall is an absent tool")
     parser.add_argument("--timeout", type=float, default=TIMEOUT_SECONDS,

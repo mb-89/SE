@@ -51,6 +51,16 @@ def test_findings_name_each_file_and_exit_one(tmp_path):
     ]
 
 
+def test_a_plugin_agent_both_hosts_read_may_carry_claude_codes_disallowed_tools(tmp_path, capsys):
+    """Copilot ignores `disallowedTools`; on a `*.agent.md`, Copilot's own file, it is a finding."""
+    text = "---\nname: x\ndescription: 'X.'\ndisallowedTools: AskUserQuestion\n---\n"
+    shared, copilot = tmp_path / "agents" / "x.md", tmp_path / "x.agent.md"
+    shared.parent.mkdir()
+    for path in (shared, copilot):
+        path.write_text(text, encoding="utf-8")
+    assert lint(capsys, shared, copilot)[:2] == (1, f"{copilot}: disallowedTools is no Copilot agent field\n")
+
+
 def test_an_unreadable_file_is_a_setup_error(tmp_path, capsys):
     code, _out, err = lint(capsys, tmp_path / "missing.agent.md")
     assert code == 2 and "missing.agent.md" in err

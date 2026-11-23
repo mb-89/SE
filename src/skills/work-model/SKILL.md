@@ -39,8 +39,8 @@ One issue in, one issue out; the same for local sessions and cloud agents.
     report and is refused.
   - Field-report issues filed before this are history: they keep their `field-report` label and
     are not migrated; nothing new gets that label.
-  - The field report holds what was not done, decisions with confidence, spec gaps, a short retro
-    and tickets for other repositories.
+  - The field report holds what was not done, decisions with confidence, spec gaps, its answers
+    to the standing questions (its Retro section) and tickets for other repositories.
   - Each "Tickets for other repositories" entry is one reusable capability and lists every source
     file it replaces.
 - **Integrator**: a subtype of worker and the only writer of the integration branch.
@@ -72,7 +72,11 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   needs the human's approval, obtained by SE.
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
-  script it changes. The retro's report closes the retro issue and files nothing; SE bundles its
+  script it changes.
+  - A retro takes the six steps of its template: field feedback, collect, the table of what
+    happened, the standing questions, classes and homes, and the person's decisions.
+  - The standing questions are one block, asked alike by the retro, the overhaul and every field
+    report; the overhaul adds its own. The retro's report closes the retro issue and files nothing; SE bundles its
   findings into work issues ([wrk-007](references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Retros and overhauls fall due by what comes back, never by what is opened, and are filed before
   any new issue: `work_tickets.py file` files a due one first and refuses every other filing while
@@ -990,7 +994,7 @@ for example:
   the role files, this skill and the project's `AGENTS.md`:
 
   ```text
-  Act as the worker agent defined in <se>/.github/agents/worker.agent.md (read it first, plus the project's AGENTS.md).
+  Act as the worker agent defined in <se>/agents/worker.md (read it first, plus the project's AGENTS.md).
   Work issue: <issue URL>
   Branch: <branch>
   Integrator session to notify at delivery: <integrator session>
@@ -1028,8 +1032,6 @@ The hand-off steps that land a pull request, by hand:
     above says.
 - `refs request` and `refs apply`: the same hand-off. `refs apply` takes the issue's comments
   as the GitHub tools read them, saved as a JSON list, with `--comments-file <file>`.
-
-<!-- copilot -->
 
 ## Host procedure under Copilot
 
@@ -1082,5 +1084,3 @@ harnesses.
 - **Ask tool** (`ask_user`): SE never uses it, on any host: a decision goes to the person as a deck,
   any other open point as the turn's last lines, as the catch-up skill ends every turn; workers and
   integrators never ask.
-
-<!-- /copilot -->

@@ -1,0 +1,16 @@
+# What the templates component's tests rely on of the requests it sends (kern's README
+# "Expectations"): a fill files through kern's GitHub component's write verbs, its template's name
+# and fields and never a body, and reads back where it filed. TOML, as kern reads this file.
+
+[[expect]]
+name = "github.issue-create"
+request = "file-issue"
+ask = { owner = "alice", repo = "demo", template = "work", fields = { title = "plain-titles" } }
+exact = ["ask.template"]
+answer = { repo = "alice/demo", number = 21, url = "https://github.com/alice/demo/issues/21" }
+
+[[expect]]
+name = "github.issue-comment"
+request = "file-comment"
+ask = { owner = "alice", repo = "demo", number = 7, template = "work", fields = {} }
+answer = { repo = "alice/demo", number = 7, url = "https://github.com/alice/demo/issues/7#issuecomment-99" }

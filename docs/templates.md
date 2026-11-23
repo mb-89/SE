@@ -54,7 +54,7 @@ reads. Nothing writes a schema by hand.
 
 - Where code reads a template's shape (kern's Go types, SE's scripts, obs's build), the schema is a
   generated file beside that code, and a test fails where it differs from the template, as
-  `tests/test_se_plugin.py` holds the plugin layouts to their sources.
+  `tests/test_se_plugin.py` holds the plugin layout to its sources.
 - The engine's `schema <template>` action prints it; `draft --json` keeps giving it with the
   fields.
 
@@ -107,10 +107,20 @@ and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
 ## Fill
 
 One command and one tool fill a template: `templates.py fill`, and the action `fill` of the MCP
-door's tool `templates`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
-rule `quote`) and `scripts/se_templates.py` (its `fill`) own what is built. Until kern's door
-offers a tool that writes, the tool's `fill` answers the checked document and writes nothing, and
-neither files through the tracker: the agent files what it answers.
+door's tool `templates_write`. The docstrings of `scripts/templates.py` (`fill`, "Not in input", the
+rule `quote`) and `scripts/se_templates.py` (its `fill`, `kern_template`) own what is built.
+
+- **Filing.** With `--repo`, a fill files an issue, or with `--number` a comment, through kern's
+  GitHub component, after the same checks as any fill: its request ports, which `wiring.toml`
+  binds to the component's write verbs, carry the template's name and fields, never a body.
+  `templates.py fill --repo` hands its call to the tool's `fill`, so one place files.
+- **What kern files is what was checked.** kern renders the body from the fields, so the fill
+  writes the template as kern reads it and refuses a value kern would write otherwise;
+  `components/template/kern_test.go` holds kern's render to SE's for every fill of the templates
+  kern can file (work, ticket, handover).
+- **Not yet.** A message has no writing tool in kern's door, and the tool's `fill` writes no
+  claimed file: `templates.py fill --path` writes it, until kern's files module takes only filled
+  templates (The filled template is a type).
 
 - It takes the template, the prompt, the raw input and the agent's fields; it resolves the template
   ([Template repositories](#template-repositories)), applies the overlay, checks the fields against
@@ -223,12 +233,12 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's eighteen template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's twenty template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's seventeen templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's nineteen templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
@@ -246,9 +256,11 @@ SE's seventeen templates are notes; the term list stays a TOML list until the gu
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
-| `templates/retro.md` | `retro`: its judged node | document | SE |
-| `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
+| `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
+| `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
+| `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |
+| `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already

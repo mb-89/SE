@@ -176,6 +176,10 @@ EVIDENCE_ROWS = """| Requirement 1 | complete | `abc1234` | `test`: passed |
 
 
 BEGIN, END = work_tickets.REPORT_BEGIN, work_tickets.REPORT_END
+# The standing questions as a field report answers them: the first, then "None" for the rest.
+ANSWERED_QUESTIONS = "\n".join(
+    f"### {item.heading}\n\n{'The tests.' if index == 0 else 'None.'}\n"
+    for index, item in enumerate(work_tickets.standing_questions().fields))
 COMPLETE_REPORT = BEGIN + """
 **Work issue:** #5  **Branch:** `feature/example-20261104`  **Result:** complete
 **Tested against `main`:** `abc1234`
@@ -223,10 +227,7 @@ None
 
 ## Retro
 
-- **Went well:** the tests.
-- **Cost time:** nothing.
-- **Proposed improvement:** none.
-""" + END + "\n"
+""" + ANSWERED_QUESTIONS + END + "\n"
 
 
 TIP = "fedcba9876543210fedcba9876543210fedcba98"
@@ -238,9 +239,15 @@ def reported_at(tip: str) -> str:
     """COMPLETE_REPORT describing the branch at `tip`."""
     return COMPLETE_REPORT.replace("**Branch tip:** `abc1234`", f"**Branch tip:** `{tip}`")
 
+def answer_questions(report: str) -> str:
+    """`report`, as field-report --draft writes it, with each standing question answered None."""
+    return re.sub(r"^(### [^\n]+\n\n)<!-- \w+: [^\n]*-->$", r"\1None.", report, flags=re.MULTILINE)
+
+
 def fill_evidence_rows(report: str) -> str:
-    """`report` with its evidence rows and its Release kind's reason filled in."""
-    return report.replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS).replace(
+    """`report` with its evidence rows, its Release kind's reason and its standing questions
+    filled in."""
+    return answer_questions(report).replace("|---|---|---|---|", "|---|---|---|---|\n" + EVIDENCE_ROWS).replace(
         "<reason>", "adds an example command")
 
 
@@ -743,6 +750,8 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
     delivered = draft.split("## Delivered", 1)[1].split("## Not delivered", 1)[0]
     assert "[Discovery evidence index](.se/work/probe/evidence.md)" in delivered
     assert "## Not delivered" in draft and "## Retro" in draft
+    assert all(f"### {item.heading}\n" in draft.split("## Retro", 1)[1]
+               for item in work_tickets.standing_questions().fields)
     report.write_text(
         fill_evidence_rows(draft).replace(
             "**Result:** complete | partial", "**Result:** complete"
@@ -752,6 +761,20 @@ def test_field_report_draft_writes_the_template_between_its_markers_and_files_no
 
     assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
     assert all(call[:2] == ["issue", "view"] for call in gh.calls)  # reads only; no issue filed
+
+
+def test_a_field_report_that_leaves_a_standing_question_out_is_refused(worktree, gh, capsys):
+    run(worktree, "intake", "--issue", "5")
+    question = work_tickets.standing_questions().fields[4].heading
+    left_out = re.sub(rf"### {re.escape(question)}\n\nNone\.\n\n", "", COMPLETE_REPORT)
+    assert left_out != COMPLETE_REPORT
+    report = worktree / "report.md"
+    report.write_text(left_out, encoding="utf-8")
+
+    assert run(worktree, "field-report", "--check", str(report)) == 1
+    assert f'section "## Retro": {question} is missing' in capsys.readouterr().err
+    report.write_text(COMPLETE_REPORT, encoding="utf-8")
+    assert run(worktree, "field-report", "--check", str(report)) == 0, capsys.readouterr().err
 
 
 def test_field_report_draft_names_the_configured_integration_branch_and_its_commit(
@@ -1755,7 +1778,7 @@ def test_tracker_from_local_config_overrides_origin(worktree, gh, local_config):
 
 def test_repo_help_matches_the_work_model_resolution_order():
     documentation = (
-        PROJECT / ".github" / "skills" / "work-model" / "SKILL.md"
+        PROJECT / "skills" / "work-model" / "SKILL.md"
     ).read_text(encoding="utf-8")
     documented_order = next(
         line for line in documentation.splitlines() if "`--repo` resolution order" in line

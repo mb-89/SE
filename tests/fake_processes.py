@@ -190,6 +190,17 @@ def script_main(path: Path) -> Callable[..., object]:
     return main
 
 
+def run_script(invocation: Invocation) -> Answer:
+    """A Python script that is none of SE's, such as one a test planted as a project's command, run
+    as `python <script>` would run it, in this process (`run_main`): for `on(<its name>, run_script)`."""
+    import runpy
+
+    path = invocation.script
+    if path is None:
+        pytest.fail(f"{OWNER}: run_script answers `python <script>.py` only, not `{invocation.text()}`", pytrace=False)
+    return run_main(lambda _arguments: runpy.run_path(str(path), run_name="__main__"), invocation, path.name)
+
+
 def se_script(invocation: Invocation) -> Answer:
     return run_main(script_main(invocation.script), invocation)
 
