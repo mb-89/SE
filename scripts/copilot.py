@@ -357,7 +357,10 @@ class Door:
 
     def __init__(self, command: list[str], cwd: Path, env: dict[str, str], parent_cwd: Path | None = None) -> None:
         if parent_cwd is not None:
-            command, cwd = [sys.executable, "-c", PARENT, str(cwd), *command], parent_cwd
+            # The base interpreter, not a venv's: on Windows that is a launcher whose own child
+            # would be the parent the server sees.
+            python = getattr(sys, "_base_executable", sys.executable)
+            command, cwd = [python, "-c", PARENT, str(cwd), *command], parent_cwd
         self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         text=True, encoding="utf-8", bufsize=1)
