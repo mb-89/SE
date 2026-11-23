@@ -1417,6 +1417,9 @@ repository leaves its tool environments and bytecode behind.
 The refusal names each folder and its remedy, `git clean -fdX <folder>`; a folder git never
 tracked, such as `.venv`, is no such folder.
 
+A folder that holds only Python's cache (`__pycache__` folders, `.pyc` files), as a restored
+container brings it back, refuses nothing: SE removes it and names it in one line.
+
 The two budgets are apart, and neither spends the other's time:
 
 - Each run prints and reports both times, `Suite: <result>; <time> (target, limit); go-components passed
