@@ -1194,14 +1194,18 @@ def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
     assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
 
 
-def test_the_se_agent_starts_the_breaking_release_check_in_the_background_after_its_greeting():
+def test_the_se_agent_boots_after_its_greeting_upgrading_at_once_in_the_cloud_and_on_a_yes_locally():
     text = (ROOT / "src" / "agents" / "se.md").read_text(encoding="utf-8")
-    greeting, check = text.index("- **Greeting**"), text.index("- **Breaking releases**")
-    step = text[check:text.index("- **Turn-start check**")]
-    assert greeting < check, "the check starts after the greeting, never before it"
+    greeting, boot = text.index("- **Greeting**"), text.index("- **Boot**")
+    step = " ".join(text[boot:text.index("- **Under Copilot**")].split())
+    assert greeting < boot, "the boot starts after the greeting, never before it"
     assert "right after the greeting, never before or instead of it" in step
-    assert "`uv run python <se>/scripts/se_modules.py --root <main checkout> breaking` in the background" in " ".join(step.split())
-    assert "tell the person once" in step and "the component, its pin and the newest release" in step
+    assert "`uv run python <se>/scripts/se_start.py --root <main checkout> boot`" in step
+    assert "In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) run it with `--upgrade` as your first action" in step
+    assert "On a local machine start it in the background" in step
+    assert "offer the upgrade; on the person's yes, run it again with `--upgrade`" in step
+    assert "report once" in step
+    assert "follow that repository's upgrade guide, `docs/upgrading.md`" in step
 
 
 # The outside skills SE's agents rely on (se.toml [roles]): the greeting names one the session lacks.
@@ -1601,3 +1605,170 @@ def test_start_components_of_a_project_without_components_says_nothing(tmp_path,
     write(tmp_path / "plain" / "se.toml", '[project]\nversion = "0.1.0"\n')
     assert se_start.start_components(tmp_path / "plain", None) == ([], False)
     assert se_start.start_components(None, None) == ([], False)
+
+
+# The boot (README "Boot"): the checkout current, every dependency listed, upgraded on --upgrade.
+
+
+@pytest.fixture
+def checkout(tmp_path, isolated_git):
+    """An origin with one commit on main and a clone of it, both with an identity to merge with."""
+    origin = fake_git.init(tmp_path / "origin", "-b", "main")
+    write(origin / "a.txt", "one\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-q", "-m", "one")
+    clone = fake_git.clone(origin, tmp_path / "clone")
+    for repo in (origin, clone):
+        git(repo, "config", "user.name", "alice")
+        git(repo, "config", "user.email", "alice@example.com")
+    return origin, clone
+
+
+def commit(repo: Path, name: str, text: str) -> str:
+    write(repo / name, text)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", f"change {name}")
+    return git(repo, "rev-parse", "HEAD")
+
+
+def test_the_boot_fast_forwards_the_integration_branch_and_says_when_it_is_current(checkout):
+    origin, clone = checkout
+    before = git(clone, "rev-parse", "HEAD")
+    assert se_start.current_checkout(clone, "main") == (
+        f"Checkout: main at {before[:7]}, current with origin/main", False)
+    tip = commit(origin, "b.txt", "two\n")
+    write(clone / "notes.txt", "untracked work\n")  # local work the fast-forward never touches
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert not stopped and line == f"Checkout: main {before[:7]} -> {tip[:7]} (fast-forward to origin/main)"
+    assert git(clone, "rev-parse", "HEAD") == tip and (clone / "notes.txt").read_text() == "untracked work\n"
+
+
+def test_the_boot_merges_the_integration_branch_into_a_work_branch(checkout):
+    origin, clone = checkout
+    git(clone, "checkout", "-q", "-b", "work")
+    mine = commit(clone, "mine.txt", "mine\n")
+    tip = commit(origin, "b.txt", "two\n")
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert not stopped and line.startswith(f"Checkout: work {mine[:7]} -> ") and line.endswith("(merged origin/main)")
+    assert se_modules.git_ok(clone, "merge-base", "--is-ancestor", tip, "HEAD")
+    assert (clone / "mine.txt").read_text() == "mine\n"
+
+
+def test_the_boot_stops_where_a_merge_needs_a_clean_tree_or_conflicts_and_discards_nothing(checkout):
+    origin, clone = checkout
+    git(clone, "checkout", "-q", "-b", "work")
+    mine = commit(clone, "a.txt", "mine\n")
+    commit(origin, "a.txt", "theirs\n")
+    write(clone / "mine.txt", "")
+    git(clone, "add", "mine.txt")  # a staged change: a merge would need a clean tree
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert stopped and line == ("Checkout: work needs a merge of origin/main and has local changes, the boot "
+                                "stops; commit them, then boot again")
+    git(clone, "commit", "-q", "-m", "staged")
+    head = git(clone, "rev-parse", "HEAD")
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert stopped and line.startswith("Checkout: merging origin/main into work does not merge cleanly, the boot "
+                                       "stops; the merge was aborted, nothing was discarded: ")
+    assert git(clone, "rev-parse", "HEAD") == head and (clone / "a.txt").read_text() == "mine\n"
+    assert mine != head
+
+
+def test_the_boot_moves_a_detached_head_its_integration_branch_leads_on_from(checkout):
+    origin, clone = checkout
+    before = git(clone, "rev-parse", "HEAD")
+    git(clone, "checkout", "-q", "--detach", before)
+    tip = commit(origin, "b.txt", "two\n")
+    assert se_start.current_checkout(clone, "main") == (
+        f"Checkout: detached {before[:7]} -> {tip[:7]} (origin/main)", False)
+    commit(clone, "c.txt", "own\n")  # its own commit: nothing to lead on from
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert not stopped and line.endswith("which origin/main does not lead on from; left as it is")
+
+
+def test_the_boot_stops_where_origin_cannot_be_fetched(checkout, tmp_path):
+    _, clone = checkout
+    git(clone, "remote", "set-url", "origin", str(tmp_path / "gone"))
+    line, stopped = se_start.current_checkout(clone, "main")
+    assert stopped and line.startswith("Checkout: fetching origin failed, the boot stops: ")
+
+
+@pytest.fixture
+def booted(repos, monkeypatch):
+    """The `repos` project, its checkout step answered: its origin is no repository here."""
+    monkeypatch.setattr(se_start, "current_checkout", lambda root, integration: (
+        f"Checkout: main current with origin/{integration}", False))
+    return repos
+
+
+def boot(r, upgrade=False):
+    return se_start.boot(r["se"], r["project"], r["config"], r["world"], upgrade)
+
+
+def test_the_boot_lists_se_and_every_pin_with_pinned_locked_and_newest_version(booted):
+    lines, failed = boot(booted)
+    assert not failed, lines
+    root, se = booted["project"].as_posix(), booted["se"].as_posix()
+    holder = se_modules.root_name(booted["project"])
+    assert lines[:3] == [f"SE boot of {root}, checking", "Checkout: main current with origin/main",
+                         "SE: installed 1.0.0, newest 2.0.0: the upgrade takes 2.0.0"]
+    assert (f"  {holder} pins lib ^1, locked 1.0.0, newest 2.0.0: the upgrade takes 1.1.0; breaking release "
+            f"2.0.0 beyond the pin, not taken; to take it: set version = \"^2.0\" in [components.lib] of "
+            f"{root}/se.toml, then run: uv run python {se}/scripts/se_start.py boot --upgrade") in lines
+    assert f"  {holder} pins tool ^1, locked 1.0.0, newest 1.0.0: current" in lines
+    assert any(line.startswith(f"  {holder} pins mine ^0.1, locked none, ") and
+               line.endswith(": a local path, the boot never touches it") for line in lines)
+    assert lines[-2:] == [f"Upgrade: 2 items to take within the pins; run: uv run python {se}/scripts/se_start.py "
+                          "boot --upgrade", "Left: 1 release beyond a pin, 1 of them breaking"]
+    assert se_modules.read_lock(booted["project"])["lib"][0] == "1.0.0", "the check moves nothing"
+    assert se_modules.checkout_version(booted["se"]) == (1, 0, 0)
+
+
+def test_the_upgrade_moves_se_and_each_lock_within_its_pin_and_takes_no_breaking_release(booted):
+    lines, failed = boot(booted, upgrade=True)
+    assert not failed, lines
+    holder = se_modules.root_name(booted["project"])
+    assert lines[2] == "SE: installed 1.0.0, newest 2.0.0: SE: " + lines[2].split(": SE: ")[1]
+    assert lines[2].endswith(" -> v2.0.0") and se_modules.checkout_version(booted["se"]) == (2, 0, 0)
+    assert any(line.startswith(f"  {holder} pins lib ^1, locked 1.1.0, newest 2.0.0: moved 1.0.0 -> 1.1.0 "
+                               "(se.lock; commit it); breaking release 2.0.0 beyond the pin, not taken")
+               for line in lines), lines
+    lock = se_modules.read_lock(booted["project"])
+    assert lock["lib"] == ("1.1.0", git(booted["remotes"]["lib"], "rev-parse", "v1.1.0"))
+    assert lock["tool"][0] == "1.0.0"
+    assert lines[-2:] == ["Moved: 2 items", "Left: 1 release beyond a pin, 1 of them breaking"]
+    again, failed = boot(booted, upgrade=True)
+    assert not failed and again[2] == "SE: installed 2.0.0, newest 2.0.0: current"
+    assert "Moved: 0 items" in again and se_modules.read_lock(booted["project"]) == lock
+
+
+def test_a_project_that_pins_se_keeps_se_within_that_pin(booted):
+    se_toml = booted["project"] / "se.toml"
+    state = se_start.SEState(se_start.Item("SE", "se", (1, 0, 0), "x"), (2, 0, 0), (1, 1, 0), "^1")
+    assert se_start.se_line(state) == ("SE: installed 1.0.0, pinned ^1 by the project, newest 2.0.0: the upgrade "
+                                       "takes 1.1.0; 2.0.0 lies beyond the pin, not taken; to take it, set "
+                                       "version = \"^2.0\" in [components.se] of the project's se.toml")
+    assert se_toml.is_file()
+
+
+def test_the_boot_stops_after_a_checkout_it_cannot_bring_current(booted, monkeypatch):
+    monkeypatch.setattr(se_start, "current_checkout", lambda root, integration: ("Checkout: stops", True))
+    lines, failed = boot(booted, upgrade=True)
+    assert failed and lines[1:] == ["Checkout: stops"]
+    assert se_modules.checkout_version(booted["se"]) == (1, 0, 0)
+
+
+def test_the_boot_command_runs_from_the_command_line(booted, monkeypatch, capsys):
+    monkeypatch.setattr(se_start, "SE_ROOT", booted["se"])
+    monkeypatch.setattr(se_start, "World", lambda: booted["world"])
+    code = se_start.main(["--root", str(booted["project"]), "--local", str(booted["config"]), "boot"])
+    out = capsys.readouterr().out
+    assert code == 0 and out.startswith(f"SE boot of {booted['project'].as_posix()}, checking\n"), out
+
+
+def test_a_lock_outside_its_pin_is_one_the_upgrade_moves_into_it(booted):
+    se_modules.write_lock(booted["project"], {**se_modules.read_lock(booted["project"]),
+                                              "lib": ("2.0.0", git(booted["remotes"]["lib"], "rev-parse", "v2.0.0"))})
+    holder = se_modules.root_name(booted["project"])
+    lines, _ = boot(booted)
+    assert any(line.startswith(f"  {holder} pins lib ^1, locked 2.0.0, newest 2.0.0: the upgrade takes 1.1.0")
+               for line in lines), lines

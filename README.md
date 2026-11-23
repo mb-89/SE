@@ -166,6 +166,7 @@ section:
 uv run python <se>/scripts/se_start.py status [--greeting]
 uv run python <se>/scripts/se_start.py check
 uv run python <se>/scripts/se_start.py refresh
+uv run python <se>/scripts/se_start.py boot [--upgrade]
 ```
 
 - Where it runs: in Claude Code, the plugin's start hook (`bootstrap.sh --hook`) shows the greeting
@@ -266,6 +267,41 @@ uv run python <se>/scripts/se_start.py refresh
     component of it, and an SE 6 refuses a `[modules]` table, naming the rename.
   - The remedy is a newer installed SE: `uv run python <se>/scripts/se_start.py refresh`, or a
     new session, whose start moves it.
+
+### Boot
+
+SE's boot gets a checkout up to speed by itself, like `npm outdated` and `npm update` in one
+command (work issue SE#1719, the person's decisions of 23 Nov 2026). `se_start.py boot` runs its
+steps in order, each decided from versions alone, and reports once:
+
+1. **The checkout current.** It fetches origin and brings the checkout to the newest tip of its
+   branch: `origin/<branch>`, and on a branch other than the integration branch
+   `origin/<integration branch>` too, by a fast-forward where it can, else by a merge.
+   - A detached HEAD moves to the integration branch's tip where that tip leads on from it; else
+     it stays, named.
+   - It never discards local work: a merge over local changes is not started, and one that
+     conflicts is aborted. Either, or a fetch that fails, is one `Checkout:` line, and the boot
+     stops there with exit code 1.
+2. **The dependencies listed.** SE itself, with its installed and newest version, and every pin of
+   the project's component tree, nested ones included, as [`se_modules.py breaking`](#commands)
+   reads them: one row each, `<holder> pins <name> <pin>, locked <version>, newest <version>`,
+   and its verdict.
+   - The verdict: `current`, or `the upgrade takes <version>`, the newest release the pin admits;
+     a local path is never touched.
+   - A release beyond a pin is listed as `breaking` or `newer`, with what moving the pin needs: for
+     the project's own pin the line to set and the command, for a component's own pin a ticket for
+     its repository. The boot never takes it.
+3. **The upgrade**, with `--upgrade` only. SE moves to its newest release, or the newest that the
+   project's `[components.se]` admits where it pins se, as [`refresh`](#start-and-refresh) moves
+   it, trial start included; a development checkout stays. Every range's lock moves to the newest
+   release its pin admits, as `sync` resolves the tree with every lock set aside; commit `se.lock`.
+4. **The report**: the rows, then `Moved: <n> items` after an upgrade, else the items there are to
+   take with the command that takes them, and `Left: <n> releases beyond a pin` where there are.
+
+It exits 0 where every step ran, and 1 where the boot stopped, a listing failed or a move failed,
+each named in its line. Where it runs: the [se agent](src/agents/se.md#tools) runs it right after
+its greeting, in a cloud session with `--upgrade` at once, on a local machine in the background,
+offering the upgrade that runs on the person's yes.
 
 ### Kern
 
