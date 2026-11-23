@@ -608,7 +608,7 @@ SESSION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 #: Without a core, a session's record is this file under the project's runtime folder.
 RECORD_FOLDER = Path(".se") / ".runtime" / "sessions"
 RECORD_FILE = "guidance.yaml"
-RECORD_HEAD = ("# The guidance notes se_guidance.py printed to this session, each name with the "
+RECORD_HEAD = ("# The guidance notes printed to this session by se_guidance.py, each name with the "
                "sha256 of its text.\n# Delete the file and the next call prints every note again.\n")
 
 
