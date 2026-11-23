@@ -59,13 +59,31 @@ the generated ones (`pyproject.toml` beside `[tool.ruff]`).
 - a generated file that does not match its notes, edited by hand or behind a changed note, naming
   `se_guidance.py project`; for a `.toml` file, a projection that is no TOML.
 
-**Commands.** `collect` and `check` only read; `project` writes only the generated files. None
+**Delivery** (`delivered`, which `collect` and the templates tool's `draft` and `fill` print
+through, scripts/se_templates.py):
+
+- *Once per session.* `--session ID` names the session (letters, digits, `.`, `_`, `-`); its
+  record is the file `.se/.runtime/sessions/<ID>/guidance.yaml` under the project, one
+  `<name>: "<sha256 of the note's text>"` a line (RECORD_FILE). A note the record holds with that
+  digest is not printed again: a run of them is the line `already printed this session: <name>,
+  <name>` where they would stand, and the first line counts them. Without `--session` nothing is
+  kept and every note prints.
+- *Pages.* An answer stays within kern's page limit (above): pages break between notes, never
+  inside one, each full to the limit less PAGE_RESERVE, and the template comes on the last page
+  (on a page of its own where it does not fit beside the last notes). A page that is not the last
+  ends with a line saying how many follow and how to ask for the next: in a session, the same
+  call again, as the record now holds the page's notes; without one, the same call with
+  `--page <next>`. A later page opens with the heading and its number. Each page's notes enter the
+  record as it is printed. `--page` with `--session` is refused.
+
+**Commands.** `collect` and `check` only read, but for a session's record; `project` writes only the generated files. None
 calls GitHub or starts a model.
 
-- `se_guidance.py collect (--template NAME | --tags A,B) [--json] [--root ROOT]` prints the
-  resolution: a line naming what was resolved and how many notes, then each note as a `##` heading
-  of its name, a line with its file, depth and tags, and its text. `--json` prints the list of
-  notes instead (`name`, `path`, `depth`, `tags`). An unknown template is answered with the list of
+- `se_guidance.py collect (--template NAME | --tags A,B) [--session ID] [--page N] [--json]
+  [--root ROOT]` prints the resolution as Delivery (below) pages it: a line naming what was
+  resolved and how many notes, then each note as a `##` heading of its name, a line with its file,
+  depth and tags, and its text. `--json` prints the list of notes instead (`name`, `path`,
+  `depth`, `tags`), whole, keeping no record. An unknown template is answered with the list of
   templates, exit code 2; a tag no note carries is named, with the tags that exist, before the
   rest. A note that does not load is left out and named on stderr.
 - `se_guidance.py check [--root ROOT]` prints every finding, one a line, exit code 1, or `passes:
@@ -81,6 +99,7 @@ else the working directory). Exit code 2 is a usage or setup error, named.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import re
@@ -517,6 +536,148 @@ def check(loaded: Loaded, limit: int) -> list[str]:
     return findings + projection_findings(loaded)
 
 
+# Delivery.
+
+#: The bytes of a page kept for the line that says how many pages follow, and the continued
+#: heading: a page's notes and template fill the page limit less this.
+PAGE_RESERVE = 400
+#: A session's id, as a file name may hold it.
+SESSION = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+#: Without a core, a session's record is this file under the project's runtime folder.
+RECORD_FOLDER = Path(".se") / ".runtime" / "sessions"
+RECORD_FILE = "guidance.yaml"
+RECORD_HEAD = ("# The guidance notes se_guidance.py printed to this session, each name with the "
+               "sha256 of its text.\n# Delete the file and the next call prints every note again.\n")
+
+
+def digest(note: Note) -> str:
+    """The digest of a note's text: a note whose text changed prints again."""
+    return hashlib.sha256(note.body.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class Record:
+    """The notes already printed to one session, by name and digest; without a session none, and
+    nothing is kept (docs/guidance.md "Once per session")."""
+
+    path: Path | None
+    seen: dict[str, str]
+
+    @classmethod
+    def of(cls, root: Path, session: str | None) -> "Record":
+        if session is None:
+            return cls(None, {})
+        if not SESSION.match(session):
+            raise Usage(f"se_guidance.py: --session {session!r} is no session id; give letters, "
+                        "digits, dots, dashes and underscores")
+        path = root / RECORD_FOLDER / session / RECORD_FILE
+        if not path.is_file():
+            return cls(path, {})
+        engine = sibling("templates")
+        try:
+            data = engine.front_data(path.read_text(encoding="utf-8"), path.as_posix(), 1)
+        except (OSError, UnicodeDecodeError, engine.TemplateError) as error:
+            raise Usage(f"se_guidance.py: the session record {path.as_posix()} does not read "
+                        f"({error}); delete it, and the next call prints every note again") from error
+        return cls(path, {str(name): str(value) for name, value in data.items()})
+
+    def holds(self, note: Note) -> bool:
+        return self.seen.get(note.name) == digest(note)
+
+    def add(self, notes: list[Note]) -> None:
+        """Record `notes` as printed, where a session keeps a record."""
+        if self.path is None or not notes:
+            return
+        self.seen.update((note.name, digest(note)) for note in notes)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(RECORD_HEAD + "".join(f"{name}: {json.dumps(value)}\n"
+                                                   for name, value in sorted(self.seen.items())),
+                             encoding="utf-8", newline="\n")
+
+
+def note_text(note: Note) -> str:
+    tags = ", ".join(sorted(note.tags)) or "none"
+    return (f"\n## {note.name}\n\n`{note.where}` · depth {note.depth} · tags: {tags}\n\n"
+            f"{note.body.rstrip()}\n")
+
+
+def blocks(notes: list[Note], record: Record) -> list[tuple[str, list[Note]]]:
+    """Each note's text with the note, in order; a run of notes the record holds is one line
+    that names them where they would stand."""
+    found: list[tuple[str, list[Note]]] = []
+    named: list[str] = []
+    for note in notes:
+        if record.holds(note):
+            named.append(note.name)
+            continue
+        if named:
+            found.append((f"\nalready printed this session: {', '.join(named)}\n", []))
+            named = []
+        found.append((note_text(note), [note]))
+    if named:
+        found.append((f"\nalready printed this session: {', '.join(named)}\n", []))
+    return found
+
+
+def size(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def paginated(head: str, found: list[tuple[str, list[Note]]], tail: str,
+              limit: int) -> list[tuple[str, list[Note]]]:
+    """The pages of an answer: `head`, then the blocks, a page breaking between them where the
+    next would pass the limit (less PAGE_RESERVE), and `tail` on the last page."""
+    budget = limit - PAGE_RESERVE
+    pages: list[tuple[str, list[Note]]] = []
+    text, notes, filled = head, [], False
+    for block, its in found:
+        if filled and size(text + block) > budget:
+            pages.append((text, notes))
+            text, notes = "", []
+        text, notes, filled = text + block, notes + its, True
+    if tail and filled and size(text + tail) > budget:
+        pages.append((text, notes))
+        text, notes = "", []
+    pages.append((text + tail, notes))
+    return pages
+
+
+def delivered(root: Path, notes: list[Note], heading: str, *, session: str | None = None,
+              page: int = 1, tail: str = "", before: str = "", limit: int | None = None) -> str:
+    """One page of the answer that delivers `notes` under `heading`, then `tail` (a template) on
+    the last page; the notes of the page printed enter the session's record (docs/guidance.md
+    "Delivery"). `before` opens the first page. With a session the next call with the same
+    arguments answers the next page, as the record holds this one's notes; without one, `page`
+    names the page."""
+    if page < 1:
+        raise Usage(f"se_guidance.py: --page {page}; pages count from 1")
+    if session is not None and page != 1:
+        raise Usage("se_guidance.py: --page is for a call without --session; with a session, "
+                    "call again with the same arguments for the next page")
+    record = Record.of(root, session)
+    found = blocks(notes, record)
+    named = sum(record.holds(note) for note in notes)
+    already = f"; {named} already printed this session" if named else ""
+    head = f"{before}{heading}: {plural(len(notes), 'note')}, general before specific{already}.\n"
+    pages = paginated(head, found, tail, limit or page_limit())
+    if page > len(pages):
+        raise Usage(f"se_guidance.py: --page {page}, but the answer has {plural(len(pages), 'page')}")
+    text, printed_notes = pages[page - 1]
+    if page > 1:
+        text = f"{heading}, page {page} of {len(pages)}.\n{text}"
+    rest = len(pages) - page
+    template = ", the template on the last" if tail else ""
+    if rest and session is not None:
+        text += (f"\n[{plural(rest, 'more page')} follow{'s' if rest == 1 else ''}{template}: call "
+                 "again with the same arguments for the next; this session's record now holds "
+                 "the notes above.]\n")
+    elif rest:
+        text += (f"\n[page {page} of {len(pages)}{template}: call again with the same arguments "
+                 f"and --page {page + 1} for the next.]\n")
+    record.add(printed_notes)
+    return text
+
+
 # Commands.
 
 def project_root(given: Path | None) -> Path:
@@ -542,22 +703,12 @@ def plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def printed(notes: list[Note], heading: str, as_json: bool) -> str:
-    if as_json:
-        return json.dumps([{"name": note.name, "path": note.where, "depth": note.depth,
-                            "tags": sorted(note.tags)} for note in notes], indent=2) + "\n"
-    parts = [f"{heading}: {plural(len(notes), 'note')}, general before specific.\n"]
-    for note in notes:
-        tags = ", ".join(sorted(note.tags)) or "none"
-        parts.append(f"\n## {note.name}\n\n`{note.where}` · depth {note.depth} · tags: {tags}\n\n"
-                     f"{note.body.rstrip()}\n")
-    return "".join(parts)
-
-
 def run_collect(options: argparse.Namespace) -> int:
-    loaded = load(project_root(options.root))
+    root = project_root(options.root)
+    loaded = load(root)
     for finding in loaded.findings:
         print(f"left out: {finding} ({CHECK})", file=sys.stderr)
+    before = ""
     if options.template is not None:
         template = loaded.templates.get(options.template)
         if template is None:
@@ -572,10 +723,18 @@ def run_collect(options: argparse.Namespace) -> int:
         heading = f"Guidance for the tags {', '.join(sorted(asked))}"
         carried = frozenset().union(*(note.tags for note in loaded.notes))
         unknown = sorted(asked - carried)
-        if unknown and not options.json:
-            print(f"No note carries the tag{'' if len(unknown) == 1 else 's'} "
-                  f"{', '.join(unknown)}; the tags are: {', '.join(sorted(carried)) or 'none'}.\n")
-    print(printed(notes, heading, options.json), end="")
+        if unknown:
+            before = (f"No note carries the tag{'' if len(unknown) == 1 else 's'} "
+                      f"{', '.join(unknown)}; the tags are: {', '.join(sorted(carried)) or 'none'}.\n\n")
+    if options.json:
+        if options.session is not None or options.page != 1:
+            raise Usage("se_guidance.py collect: --json lists every note and keeps no record; "
+                        "drop --session and --page")
+        print(json.dumps([{"name": note.name, "path": note.where, "depth": note.depth,
+                           "tags": sorted(note.tags)} for note in notes], indent=2))
+        return 0
+    print(delivered(root, notes, heading, session=options.session, page=options.page,
+                    before=before), end="")
     return 0
 
 
@@ -633,6 +792,11 @@ def make_parser() -> argparse.ArgumentParser:
     asked.add_argument("--tags", help="the tags, comma-separated: notes that carry all of them")
     collecting.add_argument("--json", action="store_true",
                             help="print the notes as JSON: name, path, depth and tags")
+    collecting.add_argument("--session", help="the session whose record names the notes already "
+                                              "printed to it, and gets this page's (default: none, "
+                                              "every note printed, nothing kept)")
+    collecting.add_argument("--page", type=int, default=1,
+                            help="without --session: the page of a longer answer (default: 1)")
     collecting.add_argument("--root", **root)
     checking = commands.add_parser(
         "check", help="find what docs/guidance.md refuses in the guidance trees",

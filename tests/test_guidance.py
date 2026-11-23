@@ -351,3 +351,101 @@ def test_the_check_refuses_each_bad_implementation_on_a_fixture(capsys, project,
     note(project, "guidance/work/n.md", "short-lines" if "TOML" in refusal else "n", body=body)
     code, out, _ = run(capsys, "check", "--root", str(project))
     assert (code, out.splitlines()[0]) == (1, finding)
+
+
+# Delivery (docs/guidance.md "Delivery"): once per session, in pages.
+
+def record_file(root: Path, session: str) -> Path:
+    return root / ".se" / ".runtime" / "sessions" / session / "guidance.yaml"
+
+
+def test_a_second_call_in_a_session_names_the_notes_already_printed(capsys, project):
+    asked = ("collect", "--template", "other", "--session", "s-1", "--root", str(project))
+    code, first, _ = run(capsys, *asked)
+    assert code == 0 and "## base" in first and "already printed" not in first
+    assert record_file(project, "s-1").is_file()
+    code, second, _ = run(capsys, *asked)
+    assert code == 0
+    assert second.splitlines()[0] == ("Guidance for the template other: 3 notes, general before "
+                                      "specific; 3 already printed this session.")
+    assert "already printed this session: zzz-lib, base, x" in second and "## " not in second
+    # A tag query in the same session names the notes it shares and prints the others.
+    code, tags, _ = run(capsys, "collect", "--tags", "testing", "--session", "s-1",
+                        "--root", str(project))
+    assert "already printed this session: zzz-lib, base\n" in tags and "## aaa-worker" in tags
+    # A note whose text changed since it was printed prints again; another session prints all.
+    note(project, "guidance/other/x.md", "x", body="x's new text.")
+    code, changed, _ = run(capsys, *asked)
+    assert "already printed this session: zzz-lib, base\n" in changed and "x's new text." in changed
+    code, other, _ = run(capsys, *asked[:-4], "--session", "s-2", "--root", str(project))
+    assert "already printed" not in other and other.count("## ") == 3
+
+
+def test_without_a_session_every_call_prints_every_note_and_keeps_nothing(capsys, project):
+    for _ in range(2):
+        code, out, _ = run(capsys, "collect", "--template", "other", "--root", str(project))
+        assert code == 0 and out.count("## ") == 3 and "already printed" not in out
+    assert not (project / ".se" / ".runtime").exists()
+
+
+def test_the_record_refuses_a_session_id_no_file_name_holds(capsys, project):
+    code, out, _ = run(capsys, "collect", "--template", "other", "--session", "../x",
+                       "--root", str(project))
+    assert code == 2 and "is no session id" in out
+
+
+def long_project(root: Path, count: int, size: int) -> None:
+    for index in range(count):
+        note(root, f"guidance/long/n{index}.md", f"n{index}", body=f"n{index} " + "word " * (size // 5))
+
+
+def test_pages_break_between_notes_with_the_template_on_the_last(project):
+    long_project(project, 6, 1000)
+    loaded = se_guidance.load(project)
+    notes = se_guidance.for_tags(loaded.notes, frozenset({"long"}))
+    limit, tail = 3000, "\n## The template long\n\nTAIL\n"
+    pages, page = [], 1
+    while True:
+        text = se_guidance.delivered(project, notes, "Guidance for long", page=page, tail=tail,
+                                     limit=limit)
+        pages.append(text)
+        if "--page" not in text:
+            break
+        page += 1
+    assert len(pages) > 2
+    for number, text in enumerate(pages, 1):
+        assert len(text.encode("utf-8")) <= limit
+        if number < len(pages):
+            assert (f"[page {number} of {len(pages)}, the template on the last: call again with "
+                    f"the same arguments and --page {number + 1} for the next.]") in text
+            assert "TAIL" not in text
+    assert pages[-1].rstrip().endswith("TAIL") and "TAIL" not in "".join(pages[:-1])
+    # Every note whole on one page, each once, in order.
+    printed = [line[3:] for text in pages for line in text.splitlines() if line.startswith("## n")]
+    assert printed == [item.name for item in notes if item.name.startswith("n")]
+    for item in notes:
+        assert sum(item.body.rstrip() in text for text in pages) == 1
+    with pytest.raises(se_guidance.Usage, match="has 4 pages|pages"):
+        se_guidance.delivered(project, notes, "Guidance for long", page=len(pages) + 1,
+                              tail=tail, limit=limit)
+
+
+def test_in_a_session_the_same_call_answers_the_next_page(project):
+    long_project(project, 6, 1000)
+    loaded = se_guidance.load(project)
+    notes = se_guidance.for_tags(loaded.notes, frozenset({"long"}))
+    tail, answers = "\n## The template long\n\nTAIL\n", []
+    for _ in range(10):
+        text = se_guidance.delivered(project, notes, "Guidance for long", session="s", tail=tail,
+                                     limit=3000)
+        answers.append(text)
+        if "TAIL" in text:
+            break
+    assert len(answers) > 2 and "TAIL" not in "".join(answers[:-1])
+    assert "more pages follow, the template on the last: call again with the same arguments" \
+        in answers[0]
+    # Each page prints the notes the record lacks; at the end every note is in it, once.
+    printed = [line[3:] for text in answers for line in text.splitlines() if line.startswith("## n")]
+    assert printed == [item.name for item in notes if item.name.startswith("n")]
+    with pytest.raises(se_guidance.Usage, match="--page is for a call without --session"):
+        se_guidance.delivered(project, notes, "Guidance for long", session="s", page=2)

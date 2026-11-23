@@ -4,7 +4,7 @@ contract = 1
 help = "SE's guidance: collect resolves the guidance trees of the project and its modules for a template or a set of tags, general before specific; project writes the tool files the notes implement; and check finds what docs/guidance.md refuses in them."
 
 [commands."se_guidance.py collect"]
-usage = "se_guidance.py collect (--template TEMPLATE | --tags TAGS) [--json] [--root ROOT]"
+usage = "se_guidance.py collect (--template TEMPLATE | --tags TAGS) [--json] [--session SESSION]\n                       [--page PAGE] [--root ROOT]"
 summary = "print the guidance a template or a set of tags gets, general first"
 group = "Guidance"
 help = "print the guidance a template or a set of tags gets, general first"
