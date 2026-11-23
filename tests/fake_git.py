@@ -1241,15 +1241,22 @@ class FakeGit:
         moves the remote's branch or tag (a non-fast-forward, or a tag that exists, refused unless
         forced: `--force`, a `+` spec), `:<dst>` deletes it; a lease that
         does not hold (`<ref>:` with no sha: the ref must not exist), or the remote's pre-receive
-        hook (`declining`), refuses the push."""
+        hook (`declining`), refuses the push. A branch already at the pushed commit is up to date,
+        before any lease is checked, as git judges it. `--porcelain` prints each ref's line,
+        `<flag>\t<src>:<dst>\t<summary>` (`*` new, `=` up to date, ` ` fast-forward, `+` forced,
+        `-` deleted)."""
         repository = self.find(call.where)
         name, *specs = [a for a in call.args if not a.startswith("-")]
         remote = self.remote(repository, name)
         leases = dict(a.partition("=")[2].split(":", 1) for a in call.args if a.startswith("--force-with-lease="))
+        lines = []
         for spec in specs:
             source, destination = self.push_refs(repository, spec)
             short = destination.removeprefix("refs/heads/")
             old = remote.refs.get(destination)
+            if source and old is not None and old == self.resolve(repository, source):
+                lines.append(f"=\t{source}:{destination}\t[up to date]")
+                continue
             if destination in leases and old != (self.resolve(repository, leases[destination])
                                                   if leases[destination] else None):
                 raise Refusal(1, f"To {name}\n ! [rejected]        {spec} (stale info)\n"
@@ -1264,6 +1271,7 @@ class FakeGit:
                                      f"error: failed to push some refs to '{name}'")
                 del remote.refs[destination]
                 repository.refs.pop(f"refs/remotes/{name}/{short}", None)
+                lines.append(f"-\t:{destination}\t[deleted]")
                 continue
             sha = self.resolve(repository, source)
             forced = "--force" in call.args or spec.startswith("+")
@@ -1277,7 +1285,12 @@ class FakeGit:
             remote.refs[destination] = sha
             if f"remote.{name}.url" in repository.config and destination.startswith("refs/heads/"):
                 repository.refs[f"refs/remotes/{name}/{destination.removeprefix('refs/heads/')}"] = sha
-        return ""
+            lines.append("*\t{0}:{1}\t[new branch]".format(source, destination) if old is None else
+                         f"{' ' if old in self.ancestors(sha) else '+'}\t{source}:{destination}\t"
+                         f"{old[:7]}..{sha[:7]}")
+        if "--porcelain" not in call.args:
+            return ""
+        return f"To {name}\n" + "".join(f"{line}\n" for line in lines) + "Done\n"
 
     def git_fetch(self, call: Call) -> str:
         repository = self.find(call.where)

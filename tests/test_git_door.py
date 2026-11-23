@@ -572,11 +572,17 @@ def test_push_under_an_empty_lease_creates_a_branch_only_where_it_does_not_exist
     git(root, "remote", "add", "origin", str(origin))
     first = commit(root, {"a.txt": "a\n"})
     second = commit(root, {"a.txt": "a2\n"})
-    git(root, "push", "-q", "--force-with-lease=refs/heads/claimed:", "origin", f"{first}:refs/heads/claimed")
+    created = git(root, "push", "--porcelain", "--force-with-lease=refs/heads/claimed:", "origin",
+                  f"{first}:refs/heads/claimed")
+    assert [line.split("\t")[0] for line in created.splitlines() if "\t" in line] == ["*"]
     assert git(origin, "rev-parse", "refs/heads/claimed") == first
     again = git_door.run("push", "--force-with-lease=refs/heads/claimed:", "origin",
                          f"{second}:refs/heads/claimed", root=root)
     assert again.returncode != 0 and git(origin, "rev-parse", "refs/heads/claimed") == first
+    # The same commit again is up to date, which git judges before the lease: it passes, unchanged.
+    same = git(root, "push", "--porcelain", "--force-with-lease=refs/heads/claimed:", "origin",
+               f"{first}:refs/heads/claimed")
+    assert [line.split("\t")[0] for line in same.splitlines() if "\t" in line] == ["="]
 
 
 def test_push_deletes_a_branch_under_a_lease_and_a_declining_remote_keeps_it(door, tmp_path: Path) -> None:

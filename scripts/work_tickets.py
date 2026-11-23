@@ -4064,11 +4064,16 @@ def newest_integration_commit(root: Path) -> str:
 def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
     """Claim work issue #`number`: create its branch at `commit` on the remote that hosts its
     repository (`issue_remote`), as a push that holds only while the branch does not exist there,
-    so of two starts the host lets the first create it and refuses the second. The remote."""
+    so of two starts the host lets the first create it and refuses the second. Only a push that
+    reports the branch new claims it: git passes a branch already at `commit` as up to date before
+    it checks the lease. The remote."""
     remote = issue_remote(root, repo)
     ref = f"refs/heads/{branch}"
-    pushed = run_git_push(root, [f"--force-with-lease={ref}:", remote, f"{commit}:{ref}"])
-    if pushed.returncode == 0:
+    pushed = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:", remote,
+                                 f"{commit}:{ref}"])
+    if pushed.returncode == 0 and any(
+            line.startswith("*\t") and line.split("\t")[1].endswith(f":{ref}")
+            for line in pushed.stdout.splitlines()):
         return remote
     listed = run_git(root, "ls-remote", remote, ref)
     if listed.returncode == 0 and listed.stdout.strip():
