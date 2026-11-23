@@ -1802,6 +1802,7 @@ the path where se lives in the project (`.` in se itself):
 ```sh
 uv run python <se>/scripts/se_modules.py sync [<name>...]
 uv run python <se>/scripts/se_modules.py status [<name>...]
+uv run python <se>/scripts/se_modules.py breaking [--all]
 uv run python <se>/scripts/se_modules.py update <name> [--to <ref>]
 uv run python <se>/scripts/se_modules.py update --all
 uv run python <se>/scripts/se_modules.py path <name>
@@ -1811,6 +1812,7 @@ uv run python <se>/scripts/se_modules.py path <name>
 |---|---|
 | `sync` | resolves the tree ([The tree](#the-tree)): a component with an existing local path is used from there; any other is found by name ([Finding a component](#finding-a-component)), cloned or fetched into `.se/modules/<name>` and checked out (detached) at its pin. A `version` range without a lock entry that admits it is resolved and locked first; a locked one stays where it is until `update`. A clone with local changes is never overwritten. Hosts ignore `.se/`. |
 | `status` | one line per component of the root's list with its source (`local` or `pinned`), the directory it is used from, the pin and the drift (below). It never fetches. |
+| `breaking` | one line per pin of the tree, nested ones included, whose component's newest release is a breaking one beyond it, or one line where none is; `--all` lists every pin. It changes nothing ([docs/components.md "Breaking releases beyond a pin"](docs/components.md#breaking-releases-beyond-a-pin)). |
 | `update` | finds the component again, its lock aside, and fetches it (through `.se/modules/<name>`, also when a local path is used), resolves the newest commit on its `main` (or `--to` a branch, tag or commit), rewrites only that `ref` in `se.toml`, prints the commits added (and dropped, if the pin moves back) and syncs. It does not commit; commit the new pin with the commit list. |
 | `path` | prints the directory a component is used from (its `path` included), for tools that load it. |
 | `--root` and `--local` | `--root <dir>` names the repository (default: the nearest ancestor with `se.toml`); `--local <file>` reads another machine-local file than `~/.se/local.toml`. |
@@ -2251,6 +2253,9 @@ Each issue comes with the field report of the work pull request its landing pull
   - Where the [overhaul countdown](#overhaul-due) is on, a finding an issue still open takes is
     `too early to score`: filed after the previous retro's cut-off, it had no time to land, so it
     is listed and scored neither as failed nor as recurred.
+- the breaking releases beyond the pins of the project's component tree, as [`se_modules.py
+  breaking`](#commands) prints them, or why that listing failed; every collect runs it once its
+  answers are all there, and `--json` names it as `breaking`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
