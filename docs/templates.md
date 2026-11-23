@@ -246,7 +246,7 @@ SE's nineteen templates are notes; the term list stays a TOML list until the gui
 | `templates/escalation.md` | `escalation`: an integrator's message to SE | interface | SE |
 | `templates/handover.md` | `handover`: the open handover issue | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
-| `templates/retro.md` | `retro`: its judged node | document | SE |
+| `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
 | `templates/overhaul.md` | `overhaul`: its judged node | document | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |

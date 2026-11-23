@@ -2267,13 +2267,22 @@ issue was created; only where no retro issue exists is it the whole history.
 issue closed, whose findings it then scores; the rule checks judge only the window.
 
 Each issue comes with the field report of the work pull request its landing pull request names
-(`<!-- se:field-report-in <n> -->`). The draft holds:
+(`<!-- se:field-report-in <n> -->`).
+
+The draft is a document of the retro template ([templates/retro.md](templates/retro.md)), the
+person's decision of 22 Nov. Its six steps are the field feedback, collect, the table of what
+happened, the standing questions with their matrix, classes and homes, and the person's decisions.
+
+The standing questions are one block
+([templates/standing-questions.md](templates/standing-questions.md)), which the overhaul and every
+field report's Retro section ask alike. Collect fills step 2 with what it read:
 
 - the sizes: closed, landed, duplicates, escalated, beside the previous retro's where its block is
   found;
 - per landed issue the deliveries `integrate` refused (its `Integration stopped:` comments), its
   escalations (those, or the `escalated` label) and the suite time of its `Integrated in` comment;
-- the field reports' Retro entries and "Not delivered" items, grouped;
+- the field reports' answers to the standing questions, by question, and their "Not delivered"
+  items, the planning misses;
 - the rule checks, each broken one with what broke it: every landing pull request names a work
   issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
   integration branch outside a pull request (`outside-pr`), every closed work issue has a field
@@ -2289,7 +2298,21 @@ Each issue comes with the field report of the work pull request its landing pull
     is listed and scored neither as failed nor as recurred.
 - the breaking releases beyond the pins of the project's component tree, as [`se_modules.py
   breaking`](#commands) prints them, or why that listing failed; every collect runs it once its
-  answers are all there, and `--json` names it as `breaking`.
+  answers are all there, and `--json` names it as `breaking`;
+- the previous retro's classes measured again: rate before (its findings per issue it closed)
+  against rate now (the issues of the window its `pattern` matches, per issue).
+
+Steps 3 to 5 it builds from the same record:
+
+- step 3, the timeline in chapters of up to six hours, by when each work issue came back (its
+  landing, else its close), and per step (each issue) what went well, what it cost and whether a
+  machine could do it, from its field report;
+- step 4, the matrix of the standing questions against the chapters, each cell naming the issues
+  whose field report answers that question there, then the questions for the judge to answer;
+- step 5, the home order (check, refusal, gate, prefill, checklist line, command, setting,
+  sentence) and the previous retro's classes against the tree: `fixed` where the class's home
+  holds its `mark`, `past` where it is not but its pattern matched nothing in the window, else
+  `open`.
 
 It ends in a JSON block (JSON is YAML too) under `<!-- se:retro-yaml -->`, which the next retro's
 commands read from the committed draft. `--json` prints the block's data alone.
@@ -2305,32 +2328,47 @@ answers are still missing, round by round, and reads the answers from the files 
 into `--answers <dir>` ([Without gh](src/skills/work-model/SKILL.md#without-gh)).
 
 `retro.py file` files a judged retro, the draft committed as the retro doc on the integration
-branch. The judge fills the draft's block:
+branch. The judge writes the person's field feedback into step 1, fills what steps 3 and 4 leave
+open, answers every standing question, records the person's decisions in step 6, and fills the
+draft's block:
 
 - `findings`, each with `title` (five words or more), `body`, `class`, `home` (the file it
   changes), `controversial` with its `why`, and optionally `check` (a rule check);
-- `classes`, each with `name` and `fix`;
+- `classes`, each with `name`, `cause`, `fix`, `home` (the file the fix changes) and `home_kind`
+  (the first of the home order that holds), and optionally `status`, `pattern`, `limits` and
+  `mark` (a text the fix leaves in its home, which the tree check looks for);
 - `went_well`, what went well.
 
 It refuses, writing nothing, an incomplete judgment: a finding without one of those, a class
-without a fix, a controversial finding without a why, a finding on the rule book, or on a check that
-recurred, that is not controversial, nothing that went well. It refuses, too, a draft the
-integration branch does not hold as it stands: land it there first.
+without a cause, a fix, a home or a home kind of the order, a controversial finding without a why,
+a finding on the rule book, or on a check that recurred, that is not controversial, nothing that
+went well.
+
+It refuses, too, a draft whose steps break the retro template, a step or a standing question left
+open among them, and a draft the integration branch does not hold as it stands: land it there
+first.
 
 It files no issue
 ([wrk-007](src/skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)):
-it posts the report proper as the retro issue's closing comment and closes the issue. The report
-opens with `<!-- se:retro-report -->` and lists each finding, numbered, with its class's fix, its
-home and its kind:
+it posts the report proper as the retro issue's closing comment and closes the issue.
+
+The report opens with `<!-- se:retro-report -->` and is a document of the retro template: the
+draft's steps 1, 3 and 4, and step 2 as the link to the retro doc. In step 5 come the classes,
+strongest home first, each with its cause, fix, home and state against the tree, and its findings,
+numbered, each with its home and its kind:
 
 - `work`: SE bundles these into as few work issues as the work needs, each naming
   `retro #<n> finding <k>` for every finding it takes;
 - `decision`: for the owner's decision list.
 
-Then what went well and what follows. The facts and the block stay in the retro doc, which the
-report links at the integration branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the
-next collect and overhaul read them. A report over GitHub's 65,536 characters is posted as
-numbered parts in order, never cut. Without gh it prints the comments and the close as a plan.
+Then what went well, and in step 6 the person's decisions, the classes still open and what
+follows. The facts and the block stay in the retro doc, which the report links at the integration
+branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+them.
+
+A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
+without its markers, so no part is checked as a whole report: `file` checked the whole first.
+Without gh it prints the comments and the close as a plan.
 
 `scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
 their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts
@@ -2443,7 +2481,7 @@ both.
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
-| `templates/retro.md` | A retro's report or draft: its judged block, under its marker. |
+| `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |

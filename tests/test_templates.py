@@ -118,10 +118,11 @@ uv run pytest
 
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
-ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "retro",
-            "overhaul", "pugh")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "overhaul",
+            "pugh")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
-NESTING = ("decision", "raid-register", "raid-entry", "standing-questions", "overhaul-questions")
+NESTING = ("decision", "raid-register", "raid-entry", "retro", "standing-questions",
+           "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("delivery-notice", "escalation", "handover")
 EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
@@ -289,7 +290,6 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
-        "retro": (marked_block(retro.BLOCK_MARKER, retro_block()), None),
         "overhaul": (marked_block(overhaul.BLOCK_MARKER, overhaul_block()), None),
         "pugh": (test_deck.PUGH, None),
     }
@@ -1307,7 +1307,7 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     lines = {line.split(" ")[0]: line for line in capsys.readouterr().out.splitlines()}
     assert "pr.create, pr.edit: checker work_tickets:field_report_problems:" in lines["field-report"]
     assert "comment.create, comment.edit: checker review:checked_report:" in lines["review"]
-    assert "checker retro:judgment_problems" in lines["retro"]
+    assert "comment.create, comment.edit: A retro's report and its draft:" in lines["retro"]
     assert "checker overhaul:judgment_problems" in lines["overhaul"]
     assert "a node of a document: checker deck:pugh_problems:" in lines["pugh"]
     assert "deck.build: A decision note:" in lines["decision"]
@@ -1554,7 +1554,7 @@ def test_the_review_adapter_gives_checked_reports_verdict(catalog, given):
 def retro_block(**changes: object) -> dict:
     """The judgment tests/test_retro.py's judged draft holds, `changes` applied."""
     block = {"window": {"retro": 30}, "previous": {},
-             "classes": [{"name": "Lost reports", "fix": "`integrate` refuses a landing without one"}],
+             "classes": [test_retro.LOST_REPORTS],
              "findings": [test_retro.finding(),
                           test_retro.finding(title="Make the field report a rule of the rule book",
                                              home=retro.RULE_BOOK, controversial=True,
@@ -1568,22 +1568,15 @@ def marked_block(marker: str, block: dict) -> str:
                                                                        "yaml") + "\n"
 
 
-@pytest.mark.parametrize("changes", [{}] + [changes for changes, _ in parametrized(
-    test_retro.test_file_refuses_an_incomplete_judgment_and_writes_nothing)])
-def test_the_retro_adapter_gives_judgment_problems_verdict(catalog, changes):
-    block = retro_block(**changes)
-    assert adapter_verdict(catalog["retro"], marked_block(retro.BLOCK_MARKER, block)) == \
-        retro.judgment_problems(block)
-
-
-def test_the_retro_report_links_its_block_and_warns_without_refusing(catalog):
-    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
-    text = retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
-                        "a" * 40)
-    template, found = templates.verdict(catalog, "comment.create", text, repo=REPO, home=HOME)
+def test_the_retro_report_is_a_document_of_the_retro_template_and_passes(catalog):
+    template, found = templates.verdict(catalog, "comment.create", retro_report(), repo=REPO,
+                                        home=HOME)
     assert template.name == "retro"
-    assert [(finding.rule, finding.severity) for finding in found] == [("checker", templates.WARN)]
-    assert f"no {retro.BLOCK_MARKER} block" in found[0].fix
+    assert [finding for finding in found if finding.severity == templates.REFUSE] == []
+    unfilled = retro_report().replace("> The integrator stalled twice on a red suite.", "")
+    _, found = templates.verdict(catalog, "comment.create", unfilled, repo=REPO, home=HOME)
+    assert [(finding.field, finding.rule) for finding in found
+            if finding.severity == templates.REFUSE] == [("field_feedback", "required")]
 
 
 def overhaul_block(**changes: object) -> dict:
@@ -1802,9 +1795,10 @@ def review_run(catalog, monkeypatch) -> list[Case]:
 
 
 def retro_report() -> str:
-    block = retro.judged(marked_block(retro.BLOCK_MARKER, retro_block()), 30)
-    return retro.report(block, 30, "docs/retro-30.md", f"https://{REPO}/blob/x/docs/retro-30.md",
-                        "a" * 40)
+    text = "# Retro draft for #30\n\n" + test_retro.steps() + "\n" + marked_block(
+        retro.BLOCK_MARKER, retro_block())
+    return retro.report(retro.judged(text, 30), 30, "docs/retro-30.md",
+                        f"https://{REPO}/blob/x/docs/retro-30.md", "a" * 40, text)
 
 
 def overhaul_report() -> str:
@@ -1817,7 +1811,7 @@ def retro_steps(catalog, monkeypatch) -> list[Case]:
     for text, template in ((retro_report(), "retro"), (overhaul_report(), "overhaul")):
         cases += step_cases(retro.file_steps(REPO, 30, [text]), {"comment_issue": template})
     parts = retro.parts(retro_report(), 30, limit=400)
-    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": "retro"})
+    cases += step_cases(retro.file_steps(REPO, 30, parts[:1]), {"comment_issue": FREE})
     cases += step_cases(retro.file_steps(REPO, 30, parts[1:2]), {"comment_issue": FREE})
     return cases
 
