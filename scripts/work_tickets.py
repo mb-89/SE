@@ -6524,8 +6524,10 @@ def tier_lines(parts: list[SuitePart], tier_of) -> list[str]:
 
 def spawns_line(output: str) -> str:
     """The spawn guard's total of the suite's process starts (scripts/spawn_guard.py), its last
-    `spawns:` line in the suite's output, or "" where the suite runs no guard."""
-    return next((line.strip() for line in reversed(output.splitlines()) if line.startswith("spawns: ")), "")
+    `spawns: <n> processes` line in the suite's output (under `warn` its list of refused tests
+    follows it), or "" where the suite runs no guard."""
+    return next((line.strip() for line in reversed(output.splitlines())
+                 if line.startswith("spawns: ") and line[len("spawns: "):][:1].isdigit()), "")
 
 
 def output_tail(output: str) -> str:

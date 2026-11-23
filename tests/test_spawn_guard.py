@@ -266,6 +266,7 @@ def test_the_suite_gate_prints_the_guards_total() -> None:
     import work_tickets
 
     output = ("....\nspawns: 3 processes started by 2 of 9 tests; 3 in contract and entry-point tests, 0 refused "
-              "in 0 tests (failed); 0 shells (scripts/spawn_guard.py error)\n9 passed in 1.00s\n")
+              "in 0 tests (failed); 0 shells (scripts/spawn_guard.py error)\nspawns: warn: the refused tests by "
+              "file, each to convert: tests/test_a.py 1\n9 passed in 1.00s\n")
     assert work_tickets.spawns_line(output).startswith("spawns: 3 processes started by 2 of 9 tests")
     assert work_tickets.spawns_line("9 passed in 1.00s\n") == ""
