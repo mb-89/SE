@@ -37,11 +37,16 @@ def decision_deck(tmp_path: Path) -> str:
 
 
 DRAWN = "<svg the build machine drew from the source>"
+# A component that built the deck (obs-html) is recorded by name and kind: its version and commit are
+# whichever release the build machine installed (`obs-components install obs-html`).
+INSTALLED_VERSION = "<the version installed on the build machine>"
+INSTALLED_COMMIT = "<its commit>"
 
 
 def _drawn(document: str) -> str:
     """``document`` with each diagram's drawn ``svg`` replaced by DRAWN once it is one: its size follows
-    the machine's fonts (301 px high here, 299 on CI's runner), while its ``source`` is the note's own."""
+    the machine's fonts (301 px high here, 299 on CI's runner), while its ``source`` is the note's own;
+    and each component's version and commit by INSTALLED_VERSION and INSTALLED_COMMIT."""
     def walk(node):
         if isinstance(node, dict):
             if "source" in node and "svg" in node:
@@ -53,7 +58,10 @@ def _drawn(document: str) -> str:
             for value in node:
                 walk(value)
         return node
-    return json.dumps(walk(json.loads(document)), indent=2, ensure_ascii=False) + "\n"
+    found = walk(json.loads(document))
+    for component in found.get("components", []):  # the release this machine installed
+        component.update(version=INSTALLED_VERSION, commit=INSTALLED_COMMIT)
+    return json.dumps(found, indent=2, ensure_ascii=False) + "\n"
 
 
 def timeline_page(_: Path) -> str:
