@@ -4,7 +4,6 @@ import importlib.util
 import json
 import re
 import shutil
-import subprocess
 import sys
 import tomllib
 
@@ -41,14 +40,31 @@ def test_the_committed_layouts_match_their_source(capsys):
     assert se_plugin.main(["check"]) == 0, capsys.readouterr().err
 
 
-def suite_run(checkout: Path) -> subprocess.CompletedProcess:
-    """A pytest run in the copy, with se's conftest.py and one probe test, as the suite runs."""
-    shutil.copytree(ROOT / "tests", checkout / "tests", dirs_exist_ok=True,
-                    ignore=lambda folder, names: [name for name in names
-                                                  if name not in ("conftest.py", "fake_git.py", "fake_processes.py",
-                                                                  "network_guard.py", "time_bound.py",
-                                                                  "waiting.py")])
+class SuiteWiring:
+    """What tests/conftest.py does when a run starts and ends, as a plugin of a planted run: its own
+    `pytest_configure` (the build of the layouts among it) and `pytest_terminal_summary`."""
+
+    def __init__(self, conftest) -> None:
+        self.conftest = conftest
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_configure(self, config) -> None:
+        self.conftest.pytest_configure(config)
+
+    def pytest_terminal_summary(self, terminalreporter, config) -> None:
+        self.conftest.pytest_terminal_summary(terminalreporter, config)
+
+
+def suite_run(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, conftest) -> pytest.RunResult:
+    """A pytest run in the copy (pytester's folder), in this process, as the suite runs: se's
+    conftest.py's start and end with the copy as its checkout, and one probe test. Placing kern
+    and the file order stay out: neither is what the run proves, and placing kern runs git."""
+    checkout = pytester.path
+    monkeypatch.setattr(conftest, "ROOT", checkout)
+    monkeypatch.setattr(conftest, "place_kern", lambda: None)
+    monkeypatch.setattr(conftest, "order_by_file_seconds", lambda config: None)
     (checkout / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (checkout / "tests").mkdir(exist_ok=True)
     (checkout / "tests" / "test_probe.py").write_text(
         "from pathlib import Path\n"
         "def test_the_layout_has_the_change():\n"
@@ -56,24 +72,26 @@ def suite_run(checkout: Path) -> subprocess.CompletedProcess:
         "    for layout in ('skills', '.github/skills'):\n"
         "        text = (root / layout / 'work-model' / 'SKILL.md').read_text(encoding='utf-8')\n"
         "        assert 'unbuilt change' in text\n", encoding="utf-8")
-    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                           "tests/test_probe.py"],
-                          cwd=checkout, capture_output=True, text=True, check=False)
+    return pytester.runpytest_inprocess("-q", "-p", "no:cacheprovider", "tests/test_probe.py",
+                                        plugins=[SuiteWiring(conftest)])
 
 
-def test_the_suite_builds_an_unbuilt_source_change_before_its_tests(tmp_path):
-    shutil.copytree(ROOT / "src", tmp_path / "src")
-    shutil.copytree(ROOT / "scripts", tmp_path / "scripts",
+def test_the_suite_builds_an_unbuilt_source_change_before_its_tests(pytester, monkeypatch, pytestconfig):
+    checkout = pytester.path
+    shutil.copytree(ROOT / "src", checkout / "src")
+    shutil.copytree(ROOT / "scripts", checkout / "scripts",
                     ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copy(ROOT / "se.toml", tmp_path)
-    assert se_plugin.main(["build", "--root", str(tmp_path)]) == 0
-    source = tmp_path / "src" / "skills" / "work-model" / "SKILL.md"
+    shutil.copy(ROOT / "se.toml", checkout)
+    assert se_plugin.main(["build", "--root", str(checkout)]) == 0
+    source = checkout / "src" / "skills" / "work-model" / "SKILL.md"
     source.write_text(source.read_text(encoding="utf-8") + "\nAn unbuilt change.\n", encoding="utf-8")
-    assert se_plugin.differences(tmp_path)
-    result = suite_run(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "se_plugin.py build: wrote skills/work-model/SKILL.md" in result.stdout
-    assert se_plugin.differences(tmp_path) == []
+    assert se_plugin.differences(checkout)
+    conftest = pytestconfig.pluginmanager.get_plugin(str(ROOT / "tests" / "conftest.py"))
+    assert conftest is not None, "tests/conftest.py is this run's conftest"
+    result = suite_run(pytester, monkeypatch, conftest)
+    assert result.ret == 0, result.stdout.str() + result.stderr.str()
+    assert "se_plugin.py build: wrote skills/work-model/SKILL.md" in result.stdout.str()
+    assert se_plugin.differences(checkout) == []
 
 
 def test_check_refuses_a_hand_edit_and_passes_after_rebuild(checkout, capsys):
@@ -980,13 +998,20 @@ def test_ses_own_notes_are_skills_of_both_layouts():
         assert (ROOT / layout / "guidance-comes-first" / "SKILL.md").is_file(), layout
 
 
-def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys):
+def test_check_of_a_checkout_without_a_guidance_tree_needs_no_guidance_script(tmp_path, capsys, monkeypatch):
     """A copy of the generator alone (se_plugin.py, agent_lint.py) checks its layouts as before."""
     root = drafts_copy(tmp_path)
     (root / "scripts").mkdir()
     for name in ("se_plugin.py", "agent_lint.py"):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)
     assert se_plugin.main(["build", "--root", str(root)]) == 0
-    done = subprocess.run([sys.executable, str(root / "scripts" / "se_plugin.py"), "check", "--root", str(root)],
-                          capture_output=True, text=True, check=False)
-    assert done.returncode == 0, done.stderr
+    # The copy runs as itself, in this process: its own module, its own agent_lint.py, and no
+    # se_guidance.py loaded, so a check that reached for it would fail to load it.
+    for name in ("agent_lint", "se_guidance"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    spec = importlib.util.spec_from_file_location("se_plugin_copy", root / "scripts" / "se_plugin.py")
+    copy = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, copy)
+    spec.loader.exec_module(copy)
+    assert copy.main(["check", "--root", str(root)]) == 0, capsys.readouterr().err
+    assert "se_guidance" not in sys.modules
