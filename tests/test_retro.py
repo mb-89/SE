@@ -454,6 +454,27 @@ def test_the_settings_hold_the_thresholds_and_refuse_a_bad_one(tmp_path):
         retro.settings(tmp_path, "retro")
 
 
+def test_due_prints_each_countdown_and_without_gh_its_plan(checkout, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    assert retro.main(["due", "--repo", REPO, "--worktree", str(checkout)]) == 0
+    out = capsys.readouterr().out
+    assert "GitHub plan: the retro and overhaul countdowns" in out
+    assert "list_issues" in out and "list_pull_requests" in out
+    answers_dir = tmp_path / "answers"
+    answers_dir.mkdir()
+    given = answers(checkout)
+    for name in ("issues.json", "open-issues.json", "pulls.json"):
+        (answers_dir / name).write_text(json.dumps(given[name]), encoding="utf-8")
+    for item in given["issues.json"]:
+        (answers_dir / f"issue-{item['number']}.json").write_text(json.dumps(item), encoding="utf-8")
+    assert retro.main(["due", "--answers", str(answers_dir), "--repo", REPO,
+                       "--worktree", str(checkout)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("retro: 2 (2 landed, 0 failed) since #5 started ")
+    assert "days since the last retro with 2 came back (due after 7 days)" in lines[0]
+    assert lines[1].startswith("overhaul: 1 retros closed in the whole history")
+
+
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)

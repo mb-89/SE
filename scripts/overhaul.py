@@ -572,25 +572,39 @@ WORK, DECISION = "work", "decision"
 RULE_CHANGE = "it changes a rule"
 
 
-def template_body() -> tuple[str, str]:
-    """The overhaul issue's title pattern and body, from its template without the front matter."""
-    text = sibling("work_tickets").read_file(TEMPLATE, "the overhaul template")
+def template_body(template: Path = TEMPLATE) -> tuple[str, str]:
+    """An issue template's title pattern and body without the front matter: the overhaul's, or
+    `template`."""
+    text = sibling("work_tickets").read_file(template, "the issue template")
     match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
     if match is None:
-        raise ValueError(f"{TEMPLATE} has no front matter")
+        raise ValueError(f"{template} has no front matter")
     title = re.search(r'^title:\s*"?([^"\n]+)"?\s*$', match[1], re.MULTILINE)
     return (title[1] if title else f"{OVERHAUL_TITLE}<yyyymmdd>"), text[match.end():]
 
 
-def run_new(args: argparse.Namespace) -> int:
+def file_run(root: Path, repo: str | None, template: Path, label: str, scope: str = "") -> str:
+    """File a run (an overhaul, a retro) from its issue template through `work_tickets.py file`'s
+    filing path, once, labelled `label` and not ready, as its own agent runs it, not a worker
+    (README "Retro due"); its title the template's with today's date (and `scope`). The filing
+    check does not hold it back: it is what that check files first. Returns file's line."""
     work_tickets = sibling("work_tickets")
-    root = work_tickets.worktree_root(args.worktree)
-    pattern, body = template_body()
-    title = pattern.replace("<yyyymmdd>", work_tickets.today_stamp())
+    pattern, body = template_body(template)
+    title = pattern.replace("<yyyymmdd>", work_tickets.today_stamp()).replace("<scope>", scope)
     with work_tickets.tempfile.TemporaryDirectory() as directory:
-        file = Path(directory) / "overhaul.md"
+        file = Path(directory) / "run.md"
         file.write_text(body, encoding="utf-8")
-        print(work_tickets.file_work_issue(root, title, file, [], args.repo, (OVERHAUL_LABEL,)))
+        return work_tickets.file_work_issue(root, title, file, [], repo, (label,), gate=False,
+                                            ready=False)
+
+
+def file_new(root: Path, repo: str | None) -> str:
+    """File the overhaul issue (file_run)."""
+    return file_run(root, repo, TEMPLATE, OVERHAUL_LABEL)
+
+
+def run_new(args: argparse.Namespace) -> int:
+    print(file_new(sibling("work_tickets").worktree_root(args.worktree), args.repo))
     return 0
 
 

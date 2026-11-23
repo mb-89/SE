@@ -5579,20 +5579,25 @@ def work_issue_filing(repo: str, title: str, body: str, labels: list[str]) -> St
 
 def file_work_issue(
     root: Path, title: str, file: Path | None, blockers: list[int], repo: str | None,
-    extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False,
+    extra: tuple[str, ...] = (), fields: Path | None = None, hold: bool = False, *,
+    gate: bool = True, ready: bool = True,
 ) -> str:
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
     blockers are linked. The body is `file`, or `fields` rendered through the work template, checked
-    against it (README "Templates"). Returns the filed issue's URL, or the line naming the twin it
-    answered."""
+    against it (README "Templates"). The filing check runs first (`filing_check`), unless `gate` is
+    off: a run it files itself. Without `ready` the issue carries no `ready` label, as a run its
+    own agent runs. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
         raise QueueError("file needs a title, the ticket's name and its branch")
     title = checked_name("file", title)
     body, given = template_body(root, "work", "file", file, fields, lambda path: fleet_marked(
         read_text_file(path, "work issue body") + "\n"))
-    labels = [*work_labels(root, repo), *(label for label in extra if label.strip())]
+    labels = [*(label for label in work_labels(root, repo) if ready or label != "ready"),
+              *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
+    if gate:
+        filing_check(root, repo, "file")
     first = [label for label in labels if not blockers or label != "ready"]
     if hand_off() and blockers:
         raise QueueError(
@@ -5606,10 +5611,61 @@ def file_work_issue(
     if outcome.number is not None and not outcome.duplicate and blockers:
         for blocker in blockers:
             block(root, outcome.number, blocker, repo)
-        if not outcome.held:
+        if not outcome.held and ready:
             run_gh(root, ["issue", "edit", str(outcome.number), "--add-label", "ready",
                           *repo_arguments(repo)])
     return outcome.line(repo, "work issue")
+
+
+class ReviewDueError(QueueError):
+    """A retro or an overhaul is due or open: SE files no other issue until the person has decided
+    its findings (README "Retro due")."""
+
+
+REVIEW_HELP = 'README "Retro due"'
+
+
+def filing_door(root: Path, repo: str):
+    """retro.py's read door for the filing check: gh where it is signed in, else kern's relay
+    door where the command runs as one call, else None (the command prints its plan)."""
+    retro = sibling("retro")
+    if not hand_off():
+        return retro.GhDoor(root, repo, remote_repo(root) or repo)
+    door = relay_door(root, repo)
+    return retro.ToolDoor(door) if door is not None else None
+
+
+def filing_check(root: Path, repo: str, command: str, door=None,
+                 now: datetime | None = None) -> None:
+    """The filing check (README "Retro due"), which every issue SE files passes first: while a
+    retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
+    first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
+    work goes on: only filing is held. Where `command` only prints its plan (no gh, no relay),
+    print the check's command first, for the session to run before the plan."""
+    door = door if door is not None else filing_door(root, repo)
+    if door is None:
+        print(f"Before filing: run `uv run python {SE_ROOT.as_posix()}/scripts/retro.py due "
+              f"--worktree {root.as_posix()}` and its plan; while it names a retro or an "
+              f"overhaul due or open, file nothing else ({REVIEW_HELP})")
+        return
+    retro = sibling("retro")
+    found = retro.countdowns(door, repo, integration_branch(root), root,
+                             now or datetime.now(timezone.utc))
+    if found is None:
+        raise QueueError(f"work_tickets.py {command}: the filing check could not read GitHub; "
+                         f"run `retro.py due --worktree {root.as_posix()}` ({REVIEW_HELP})")
+    held = (f"{command} files no other issue until the person has decided every finding of it in "
+            f"an SE session and it is closed; running work goes on ({REVIEW_HELP})")
+    for kind in ("retro", "overhaul"):
+        if found[kind].open:
+            names = ", ".join(f"#{number}" for number in found[kind].open)
+            raise ReviewDueError(f"work_tickets.py {command}: the {kind} {names} is open; {held}")
+    for kind, file_new in (("retro", retro.file_new), ("overhaul", sibling("overhaul").file_new)):
+        if found[kind].due:
+            line = file_new(root, repo)
+            article = "an" if kind == "overhaul" else "a"
+            raise ReviewDueError(f"work_tickets.py {command}: {article} {kind} is due "
+                                 f"({found[kind].reason}), filed first: {line.strip()}; {held}")
 
 
 def today_stamp() -> str:
@@ -5760,6 +5816,7 @@ def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
         raise QueueError("backlog file needs a title and a body")
     body, given = template_body(root, "ticket", "backlog file", file, fields, read)
     title = checked_name("backlog file", title)
+    filing_check(root, repo, "backlog file")
     filing = Step("create", "issue_write", {
         **owner_repo(repo), "method": "create", "title": title.strip(),
         "body": body, "labels": [BACKLOG_LABEL, PERSON_LABEL]},

@@ -365,6 +365,36 @@ class FileDoor:
             note=f"Save the answer as JSON to {self.directory / name}")), "comments")
 
 
+class ToolDoor:
+    """The countdowns' reads through kern's relay door (work_tickets.RelayDoor), where a command
+    runs as one call: each list page by page, as the host's GitHub tools answer it."""
+
+    def __init__(self, door) -> None:
+        self.door = door
+        self.missing: list[Step] = []
+
+    def closed_issues(self) -> list[dict]:
+        return self.door.issues("CLOSED")
+
+    def open_issues(self) -> list[dict]:
+        return self.door.issues("OPEN")
+
+    def pulls(self) -> list[dict]:
+        found: list[dict] = []
+        page = 1
+        while True:
+            items = work_tickets.tool_items(self.door.ask("list_pull_requests", {
+                "state": "closed", "perPage": 100, "page": page}), "pull_requests")
+            found += items
+            if len(items) < 100:
+                return found
+            page += 1
+
+    def issue(self, number: int) -> dict:
+        answer = self.door.ask("issue_read", {"method": "get", "issue_number": number})
+        return answer if isinstance(answer, dict) else {}
+
+
 def is_retro(issue: Issue) -> bool:
     return issue.title.startswith(RETRO_TITLE) or RETRO_LABEL in issue.labels
 
@@ -1742,13 +1772,67 @@ def run_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+# The retro's issue template, which the filing check files a due retro from, its scope DUE_SCOPE:
+# `retro-due-<yyyymmdd>`.
+TEMPLATE = Path(__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / "retro.md"
+DUE_SCOPE = "due"
+
+
+def file_new(root: Path, repo: str | None) -> str:
+    """File a retro issue from TEMPLATE, labelled RETRO_LABEL (overhaul.py file_run)."""
+    return sibling("overhaul").file_run(root, repo, TEMPLATE, RETRO_LABEL, DUE_SCOPE)
+
+
+def countdown_lines(found: dict[str, Countdown]) -> list[str]:
+    """One line per countdown: what it counted since where it starts, and whether it is due or a
+    run of its kind is open."""
+    lines = []
+    for kind in ("retro", "overhaul"):
+        item = found[kind]
+        start = f"since #{item.since_run} started {item.since}" if item.since_run else "in the whole history"
+        counted = (f"{item.count} ({item.landed} landed, {item.failed} failed)"
+                   if kind == "retro" else f"{item.count} retros closed")
+        state = (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
+                 else f"due: {item.reason}" if item.due else "not due")
+        lines.append(f"{kind}: {counted} {start}, {item.elapsed_days} days; {state}")
+    return lines
+
+
+def run_due(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    tracker = work_tickets.resolve_repo(root, args.repo)
+    remote = work_tickets.remote_repo(root) or tracker
+    if args.answers is not None:
+        door = FileDoor(args.answers, tracker, remote)
+    elif work_tickets.hand_off():
+        door = FileDoor(Path("<dir>"), tracker, remote)
+    else:
+        door = GhDoor(root, tracker, remote)
+    found = countdowns(door, tracker, work_tickets.integration_branch(root), root,
+                       datetime.now(timezone.utc))
+    if found is None:
+        directory = args.answers or Path("<dir>")
+        then = (f"retro.py due --answers {directory}{' --json' if args.json else ''}"
+                f"{f' --repo {args.repo}' if args.repo else ''} --worktree {root}")
+        print("gh is not signed in, so the session runs these GitHub steps with its GitHub tools "
+              f"and saves their answers into {directory}:")
+        print(Plan("the retro and overhaul countdowns", tuple(door.missing), then).text())
+        return 0
+    if args.json:
+        print(json.dumps({kind: asdict(item) for kind, item in found.items()}, indent=2))
+    else:
+        print("\n".join(countdown_lines(found)))
+    return 0
+
+
 #: retro.py's commands as one kern component (README "Commands as components"), retro; each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
     "A retro: collect writes its draft from the work since the last one, file checks the judged "
-    "draft and closes the retro issue with its report.",
-    ("collect", "file")),)
+    "draft and closes the retro issue with its report, due says whether a retro or an overhaul "
+    "is due or open.",
+    ("collect", "file", "due")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as collect reads
 #: GitHub for minutes and writes the draft, and file writes.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
@@ -1814,6 +1898,22 @@ def make_parser() -> argparse.ArgumentParser:
     file_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                              "tracker or origin remote)")
     file_command.set_defaults(run=run_file)
+    due_command = commands.add_parser(
+        "due", help="say whether a retro or an overhaul is due or open",
+        description="Count what came back since the newest retro started (a landing 1, an "
+                    "escalated work issue its failure_weight) and the retros closed since the "
+                    "newest overhaul started, and say whether either is due by se.toml [retro] "
+                    "and [overhaul] (README \"Retro due\") or a run of its kind is open; "
+                    "work_tickets.py file runs the same check first.")
+    due_command.add_argument("--json", action="store_true", help="the countdowns as JSON")
+    due_command.add_argument("--answers", type=Path, metavar="DIR",
+                             help="without gh: the directory the session saves the plan's "
+                                  "answers into")
+    due_command.add_argument("--worktree", default=".",
+                             help="the checkout of the repository (default: .)")
+    due_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
+                                            "tracker or origin remote)")
+    due_command.set_defaults(run=run_due)
     return top
 
 

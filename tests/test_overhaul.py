@@ -656,23 +656,24 @@ def test_new_files_the_overhaul_issue_through_file_labelled_discovery(checkout, 
     filed = []
     real = work_tickets.file_work_issue
 
-    def recorded(root, title, file, blockers, repo, extra=()):
-        filed.append((title, file.read_text(encoding="utf-8"), blockers, repo, extra))
-        return real(root, title, file, blockers, repo, extra)
+    def recorded(root, title, file, blockers, repo, extra=(), **options):
+        filed.append((title, file.read_text(encoding="utf-8"), blockers, repo, extra, options))
+        return real(root, title, file, blockers, repo, extra, **options)
 
     monkeypatch.setattr(work_tickets, "file_work_issue", recorded)
     monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
     monkeypatch.setattr(work_tickets, "today_stamp", lambda: "20261112")
 
     assert overhaul.main(["new", "--repo", REPO, "--worktree", str(checkout)]) == 0
-    title, body, blockers, repo, extra = filed[0]
+    title, body, blockers, repo, extra, options = filed[0]
     assert (title, blockers, repo, extra) == ("overhaul-20261112", [], REPO, ("discovery",))
+    assert options == {"gate": False, "ready": False}  # the filing check files it; no worker
     assert body.startswith("<!-- se:fleet -->\n\n## Situation\n") and "---" not in body.split("\n")[0]
     assert "overhaul.py read <this issue> --out <draft>" in body
     assert "overhaul.py file <this issue> --draft <draft>" in body
     out = capsys.readouterr().out
     assert "GitHub plan: file overhaul-20261112" in out
-    assert '"labels": ["work", "ready", "repo:repo", "discovery"]' in out
+    assert '"labels": ["work", "repo:repo", "discovery"]' in out
     assert '"title": "overhaul-20261112"' in out
 
 
@@ -694,7 +695,7 @@ def test_new_files_the_overhaul_template_while_the_work_template_refuses(checkou
     assert "the work template refuses" not in captured.err  # at most the title-shape warning
     out = captured.out
     assert "GitHub plan: file overhaul-20261116" in out
-    assert '"labels": ["work", "ready", "repo:repo", "discovery"]' in out
+    assert '"labels": ["work", "repo:repo", "discovery"]' in out
     assert "<!-- se:template se/work " in out
     assert "overhaul.py read <this issue> --out <draft>" in out
     assert "overhaul.py file <this issue> --draft <draft>" in out
