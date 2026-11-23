@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import ast
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+import build_docs
 import story_check
 from story_check import NOT_YET_RUN, check, halves, main, render, slides
 
@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 STORY = ROOT / "components" / "render" / "story"
 TEMPLATE = STORY / "template" / "deck.md"
 EXAMPLE = STORY / "copilot-install" / "deck.md"
-BUILD = ROOT / "scripts" / "build_docs.py"
 
 
 def _slide(part: str | None, claim: str | None = "The actor does one thing.", evidence: str | None = "It ran.",
@@ -52,13 +51,15 @@ def _run(manifest: Path) -> list[str]:
                          for name in slides(manifest.read_text(encoding="utf-8"))}))
 
 
-def test_both_vaults_build_with_build_docs_without_a_warning(tmp_path, obs):
+@pytest.mark.spawns("tool: build_docs.py builds each vault with the real obs, obs-document in obs's own Python "
+                    "environment, whose warnings are the point; it runs only as a process")
+def test_both_vaults_build_with_build_docs_without_a_warning(tmp_path, obs, capsys):
     for manifest in (TEMPLATE, EXAMPLE):
         destination = tmp_path / f"{manifest.parent.name}.html"
-        result = subprocess.run([sys.executable, str(BUILD), "--source", str(manifest),
-                                 "--destination", str(destination)], capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr + result.stdout
-        assert "warning" not in (result.stdout + result.stderr).casefold(), result.stderr
+        code = build_docs.main(["--source", str(manifest), "--destination", str(destination)])
+        result = capsys.readouterr()
+        assert code == 0, result.err + result.out
+        assert "warning" not in (result.out + result.err).casefold(), result.err
         assert destination.stat().st_size > 0
 
 
