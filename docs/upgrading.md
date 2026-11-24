@@ -371,6 +371,13 @@ On main, released as 16.0.0 at the next release.
 - **Check:** `git grep -nE 'work_tickets\.py (start|claim) .*--issue-body' | grep -v -- '--delivered'`
   prints nothing.
 
+### SE's own kern pin moved: kern 3
+
+- **Change:** SE builds on kern 3.0.0. One version per name holds over the tree, so a project that
+  pins se and also kern must admit a kern 3 release; else `sync` fails, naming both pins.
+- **Steps:** follow the component section [kern 3](#kern-3).
+- **Check:** `uv run python <se>/scripts/se_modules.py sync 2>&1 | grep -c 'admits both'` prints `0`.
+
 ### Every pull request into the integration branch states its release kind
 
 - **Change:** CI's release-kind gate refuses a pull request into the integration branch whose
@@ -577,3 +584,28 @@ commit `<go.mod>`, `go.sum` and `se.lock`.
   tests that assert on all findings assert on `lint.Errors(...)`.
 - **Check:** `uv run python <se>/scripts/generated.py --root . check --no-rerun` exits 0, and
   `grep -c 'gopkg.in/yaml.v3' <go.mod>` prints `1`.
+
+## kern 3
+
+### An I/O module's zero value does no I/O
+
+- **Change:** `github.Options`, `clock.Options`, `files.Options` and `session.Options` reach
+  nothing where a field is unset: no token, no proxy, no cloud session, no watcher, and a clock no
+  one moves (`host.Still`). Each package's `Environment()` names the environment, and the
+  `Component` its blank import registers is built from it, so a binary that blank-imports them
+  reaches the environment as before.
+- **Steps:** write `require kern v3.0.0+incompatible` in `<go.mod>`, then `go mod tidy`; where
+  code outside a test builds one with `New(<package>.Options{...})`, start from
+  `<package>.Environment()` and set the fields on it; a test keeps the zero value.
+- **Check:** `grep -cE 'kern v3\.[0-9]+\.[0-9]+\+incompatible' <go.mod>` prints `1`, and
+  `git grep -nE '(clock|files|github|session)\.New\(' -- '*.go' ':!*_test.go'` prints nothing.
+
+### A port and a verb of one name are refused
+
+- **Change:** the catalog check refuses a component that declares a port (a request port, an
+  input or an output) and a verb of one name, naming both: a wire to that name would bind the
+  port, never the verb. The core does not start.
+- **Steps:** rename the port, as SE's templates component names `file-issue` for the verb
+  `issue-create`, in its declaration and its wire in `wiring.toml`.
+- **Check:** `<binary> lint --root . 2>&1 | grep -c 'of one name'` prints `0`, `<binary>` the
+  application's core (`kern` for a bare application).

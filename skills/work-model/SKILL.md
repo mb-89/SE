@@ -736,9 +736,9 @@ of the whole suite is judged against the shards times it; otherwise it is the wh
 - No sleeping and no wall clock: time comes from an injected clock, waiting from an event.
 - Tests run in parallel and share no state; fixtures are built once and reused.
 - Browser checks are batched: one browser session serves every check of a run.
-- A worker whose change adds tests runs `work_tickets.py suite` before and after the change and
-  reports both times in its field report (`**Suite time:**`); each new test that takes over 2 s is
-  named there with its reason.
+- A worker does not time the suite; the integrator's landing measures it against its budget
+  ([Test budget](../../docs/tests.md#test-budget)). Each new test that takes over 2 s in the
+  focused run is named in the field report's evidence with its reason.
 - A field report names each test its branch deletes or renames under "Removed behaviour", as
   `integrate`'s landing guard reads them. A folder that moves with its tests to another repository
   is named once instead, `Moved: <folder> to <repository> at <commit>`, adding `as <path>` where

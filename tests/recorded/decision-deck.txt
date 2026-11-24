@@ -148,7 +148,7 @@
               "type": "text",
               "attrs": {},
               "children": [],
-              "text": "This is one case of how any decision reaches the person, so it decides the mechanism for every"
+              "text": "Today SE shows each decision as one option table in a chat message, one decision per turn, and"
             },
             {
               "type": "text",
@@ -160,7 +160,7 @@
               "type": "text",
               "attrs": {},
               "children": [],
-              "text": "decision, not for one. Today SE shows each decision as one option table in a chat message, one"
+              "text": "the person answers in the chat. Whatever is decided here applies to every decision SE brings to"
             },
             {
               "type": "text",
@@ -172,10 +172,10 @@
               "type": "text",
               "attrs": {},
               "children": [],
-              "text": "decision per turn, and the person answers in the chat."
+              "text": "the person, not to one."
             }
           ],
-          "id": "paragraph-7635060f"
+          "id": "paragraph-37e9488f"
         },
         {
           "type": "figures",
@@ -605,7 +605,7 @@
         }
       },
       "bless": {
-        "version": "6c5cbf4467a34f20a238f891b834f80e0af0ffc2e18a19e60c81f00a0d2fce2c"
+        "version": "0b6860b56b0632022274c3506a5013abf7df431de08b1c7606c48173f16dca05"
       }
     }
   ],
