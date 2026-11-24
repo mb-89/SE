@@ -2569,11 +2569,18 @@ that differs from its template.
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
-`templates.py check --path <file>` checks one against the template its front matter's `template:`
-line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
+`templates.py check --path <file>` checks one against the template its front matter's
+`derived_from` names or the conditions pick, refuses one none picks and leaves unclaimed files free.
 
-The front matter and `#` title stay as they are, but for the `template`, `version` and `overlay`
-lines the front matter records its template by.
+The front matter and `#` title stay as they are, but for the `derived_from` and `overlay` lines the
+front matter records its template by.
+
+A template imported as obs's note types is a template manifest, `templates/<name>/manifest.md`,
+with its template nodes beside it; `templates.py fill <name>` fills it into one note that obs
+builds ([docs/templates.md "Template manifests"](docs/templates.md#template-manifests)).
+
+`templates.py stale --path <folder>` lists the documents there whose template has a newer version
+than the one their `derived_from` names.
 
 A document is checked against the template version its marker or front matter records: another
 minor or patch version warns, another major version refuses, naming both versions and the fill
