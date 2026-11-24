@@ -41,6 +41,7 @@ both.
 | `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro-deck.md` | A retro's or an overhaul's deck: a title page, every step it ran as a chapter, then the decisions. |
 | `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |

@@ -40,9 +40,9 @@ var (
 	fieldKinds     = []string{"line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register", "rows", "case"}
 	templateKinds  = []string{"document", "block", "entry", "interface", "code"}
 	partKinds      = []string{"block", "entry"}
-	refuseRules    = []string{"required", "choice", "not-picked", "duplicate", "dangling"}
+	refuseRules    = []string{"required", "choice", "not-picked", "duplicate", "dangling", "checkable"}
 	warnRules      = []string{"words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms", "unnamed-entry", "title-shape"}
-	fieldKeys      = set("name", "kind", "heading", "required", "none_ok", "says", "exact_heading", "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers", "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape", "quote", "node", "entries", "fence", "row", "cases")
+	fieldKeys      = set("name", "kind", "heading", "required", "none_ok", "says", "exact_heading", "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers", "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape", "quote", "checkable", "node", "entries", "items", "since", "carried", "fence", "row", "cases")
 	templateKeys   = set("name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown", "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message")
 	appliesKeys    = set("actions", "order", "marker", "marker_pattern", "title", "labels", "base", "fallback", "paths")
 	adapterKeys    = set("extract", "extract_with", "json_after", "sections", "drop", "missing", "text_as", "title_as", "with", "none", "when", "result", "refusal", "title_rule", "lines")
@@ -112,8 +112,11 @@ type Field struct {
 	NotPicked          bool
 	Shape              string
 	Quote              bool
+	Checkable          bool // each of its texts is one checkable statement (rule checkable)
 	Node               string
 	Pin                string
+	Since              string   // the first version of its template whose documents its nested parts are checked in
+	Carried            []string // the fields of a list's items the document carries elsewhere
 	Fence              string
 	Row                string // a rows field's one line per row, its columns as {<column>}
 	Cases              Object // a case field's lines by key, in their order
@@ -1150,6 +1153,13 @@ func makeField(entry Object, where string, sectioned bool) (*Field, error) {
 	f.OneSentence = truthy(entry.Value("one_sentence"))
 	f.NotPicked = truthy(entry.Value("not_picked"))
 	f.Quote = truthy(entry.Value("quote"))
+	f.Checkable = truthy(entry.Value("checkable"))
+	f.Since = optionalString(entry, "since")
+	if carried, ok := entry.Value("carried").([]any); ok {
+		for _, part := range carried {
+			f.Carried = append(f.Carried, str(part))
+		}
+	}
 	if v, ok := entry.Get("max_words"); ok {
 		n, isInt := v.(int)
 		if !isInt {
@@ -1194,30 +1204,43 @@ func optionalString(entry Object, key string) string {
 	return ""
 }
 
+// nodeKeys are the keys that pin a field's nested template, each with the kind of field it makes
+// (templates.py NODE_KEYS), in their order.
+var nodeKeys = [][2]string{{"node", "node"}, {"entries", "register"}, {"items", "list"}}
+
 func nodeEntry(entry Object, where, name string) (Object, error) {
 	var given []string
-	for _, key := range []string{"node", "entries"} {
-		if entry.Has(key) {
-			given = append(given, key)
+	kinds := map[string]string{}
+	for _, pair := range nodeKeys {
+		kinds[pair[0]] = pair[1]
+		if entry.Has(pair[0]) {
+			given = append(given, pair[0])
 		}
 	}
 	if len(given) > 1 {
-		return nil, fail("%s: field %s is a node or a register, not both; keep `node:` or `entries:`", where, name)
+		var keys []string
+		for _, key := range given {
+			keys = append(keys, "`"+key+":`")
+		}
+		return nil, fail("%s: field %s names one nested template; keep one of %s", where, name, joinStrings(keys))
 	}
 	if len(given) == 0 {
 		if kind, ok := entry.Value("kind").(string); ok && (kind == "node" || kind == "register") {
 			return nil, fail("%s: field %s has kind %s without its template; write `node: <template>@<version>` or `entries: <template>@<version>`", where, name, kind)
 		}
-		if entry.Has("fence") {
-			return nil, fail("%s: field %s has a fence but is no node; write `node: <template>@<version>` beside it", where, name)
+		for _, key := range []string{"fence", "since", "carried"} {
+			if entry.Has(key) {
+				said := key
+				if key == "fence" {
+					said = "a fence"
+				}
+				return nil, fail("%s: field %s has %s but is no node; write `node: <template>@<version>` beside it", where, name, said)
+			}
 		}
 		return entry, nil
 	}
 	key := given[0]
-	kind := "register"
-	if key == "node" {
-		kind = "node"
-	}
+	kind := kinds[key]
 	pinned := str(entry.Value(key))
 	entry.Delete(key)
 	pin := nodePin.FindStringSubmatch(pinned)
@@ -1231,9 +1254,29 @@ func nodeEntry(entry Object, where, name string) (Object, error) {
 	if truthy(fence) && (kind != "node" || !fenceWord.MatchString(str(fence))) {
 		return nil, fail("%s: field %s fence: a node's fence is its info word, such as pugh, and goes with `node:` alone", where, name)
 	}
+	since := entry.Value("since")
+	if truthy(since) && !semver.MatchString(str(since)) {
+		return nil, fail("%s: field %s since: write the template version its nested parts are checked from, such as 1.1.0", where, name)
+	}
+	if carried, ok := entry.Get("carried"); ok && truthy(carried) {
+		list, isList := carried.([]any)
+		good := kind == "list" && isList
+		for _, part := range list {
+			if text, isText := part.(string); !isText || text == "" {
+				good = false
+			}
+		}
+		if !good {
+			return nil, fail("%s: field %s carried: a list of the item's fields the document carries elsewhere, with `items:` alone", where, name)
+		}
+	}
+	allowed := []string{}
+	if kind == "list" {
+		allowed = []string{"numbered", "continue_numbers", "markers"}
+	}
 	var extra []string
-	for _, k := range []string{"choices", "numbered", "continue_numbers", "markers", "lang", "verbatim", "quote", "shape", "label", "source"} {
-		if entry.Has(k) {
+	for _, k := range []string{"choices", "numbered", "continue_numbers", "markers", "lang", "verbatim", "quote", "shape", "label", "source", "checkable"} {
+		if entry.Has(k) && !in(k, allowed) {
 			extra = append(extra, k)
 		}
 	}
@@ -1245,6 +1288,17 @@ func nodeEntry(entry Object, where, name string) (Object, error) {
 	entry.Set("node", pin[1])
 	entry.Set("pin", pin[2])
 	return entry, nil
+}
+
+// nestWord is what a nesting field is called in a refusal (templates.py `_nest_word`).
+func nestWord(item *Field) string {
+	switch item.Kind {
+	case "register":
+		return "register"
+	case "list":
+		return "list of items"
+	}
+	return "node"
 }
 
 func article(word string) string {
@@ -1283,8 +1337,13 @@ func nest(templates map[string]*Template, digests map[string]string) (Catalog, e
 			if target.Version != item.Pin {
 				return nil, fail("%s pins %s %s, but %s is at %s; pin %s@%s", where, item.Node, item.Pin, item.Node, target.Version, item.Node, target.Version)
 			}
+			if t.Manifest && item.Kind == "node" && target.Kind == "entry" {
+				slot := *item // a slot of entries, one per item
+				slot.Kind, slot.Numbered = "list", true
+				item = &slot
+			}
 			wanted := []string{"block", "document"}
-			if item.Kind == "register" {
+			if item.Kind == "register" || item.Kind == "list" {
 				wanted = []string{"entry"}
 			} else if item.Fence != "" {
 				wanted = []string{"block"}
@@ -1296,11 +1355,7 @@ func nest(templates map[string]*Template, digests map[string]string) (Catalog, e
 				} else if len(target.Scope) > 0 {
 					msg += " read after a marker"
 				}
-				if item.Kind == "register" {
-					msg += "; a register"
-				} else {
-					msg += "; a node"
-				}
+				msg += "; a " + nestWord(item)
 				if item.Fence != "" {
 					msg += " fence"
 				}
@@ -1310,6 +1365,18 @@ func nest(templates map[string]*Template, digests map[string]string) (Catalog, e
 			nested, err := resolved(item.Node, append(append([]string{}, seen...), name))
 			if err != nil {
 				return nil, err
+			}
+			var unknown, names []string
+			for _, part := range item.Carried {
+				if nested.Field(part) == nil {
+					unknown = append(unknown, part)
+				}
+			}
+			for _, f := range nested.Fields {
+				names = append(names, f.Name)
+			}
+			if len(unknown) > 0 {
+				return nil, fail("%s carried: %s is no field of %s; name its fields, %s", where, joinStrings(unknown), item.Node, joinStrings(names))
 			}
 			chain.Write([]byte(nested.Digest))
 			chain.Write([]byte{0})

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -381,8 +382,10 @@ func fieldFindings(t *Template, doc *Document, raw *string) []Finding {
 			}
 			found = append(found, Finding{item.Name, slotRule, Refuse, fmt.Sprintf("section %s still holds the fill slot %s: write the section in its place", name, slot)})
 		}
-		if item.Node != "" {
-			found = append(found, nestedFindings(item, text, raw)...)
+		if item.Node != "" { // its own template checks it, by its own rules, from its since on
+			if !before(t, doc, item.Since) {
+				found = append(found, nestedFindings(item, text, raw, value, t.Name)...)
+			}
 			continue
 		}
 		if item.Quote {
@@ -441,6 +444,24 @@ func fieldFindings(t *Template, doc *Document, raw *string) []Finding {
 			for number, entry := range entryTexts(value) {
 				if sentenceEnd.MatchString(prose(entry)) {
 					add("one-sentence", item.Name, fmt.Sprintf("%s item %d has more than one sentence: one sentence per step", item.Heading, number+1))
+				}
+			}
+		}
+		if item.Checkable {
+			_, isList := value.([]any)
+			for number, entry := range entryTexts(value) {
+				if problem := uncheckable(entry); problem != "" {
+					name := item.Heading
+					if name == "" {
+						name = item.Label
+					}
+					if name == "" {
+						name = item.Name
+					}
+					if isList {
+						name += fmt.Sprintf(" item %d", number+1)
+					}
+					add("checkable", item.Name, name+" "+problem)
 				}
 			}
 		}
@@ -560,13 +581,40 @@ func title(t *Template, item *Field, text string, doc *Document, add func(rule, 
 	}
 }
 
-func nestedFindings(item *Field, text string, raw *string) []Finding {
+// nestedFindings is templates.py `nested_findings`: the findings of node field item's text by the
+// template it names, each under the field, its fix led by its path from the document (within) down
+// to the part: a node's as one document, a register's entry by entry, a list's item by item (value).
+func nestedFindings(item *Field, text string, raw *string, value any, within string) []Finding {
 	nested := item.nested
+	titled := false
+	for _, f := range nested.Fields {
+		if f.Source == "title" {
+			titled = true
+			break
+		}
+	}
 	checked := func(body string, title *string) []Finding {
+		if !titled {
+			title = nil
+		}
 		return Check(nested, Parse(nested, body, title), raw)
 	}
-	under := func(f Finding, where string) Finding {
-		return Finding{item.Name, f.Rule, f.Severity, where + ": " + strings.TrimPrefix(f.Fix, nested.Name+": ")}
+	head := item.Heading
+	if head == "" {
+		head = item.Name
+	}
+	section := head
+	if within != "" {
+		section = within + " > " + head
+	}
+	under := func(f Finding, part string) Finding {
+		fix := strings.TrimPrefix(f.Fix, nested.Name+": ")
+		deeper := strings.TrimPrefix(fix, nested.Name+" > ")
+		path := section + " > " + part
+		if deeper != fix {
+			return Finding{item.Name, f.Rule, f.Severity, path + " > " + deeper}
+		}
+		return Finding{item.Name, f.Rule, f.Severity, path + ": " + fix}
 	}
 	var found []Finding
 	if item.Kind == "node" {
@@ -575,32 +623,126 @@ func nestedFindings(item *Field, text string, raw *string) []Finding {
 		}
 		return found
 	}
+	if item.Kind == "list" {
+		number := 0
+		list, _ := value.([]any)
+		for _, entry := range list {
+			text, isText := entry.(string)
+			if !isText || wholeComment(text) {
+				continue
+			}
+			number++
+			body := text
+			var named *string
+			if titled {
+				title, rest := itemParts(nested, text)
+				named, body = &title, rest
+			}
+			for _, f := range checked(body, named) {
+				if f.Rule == "required" && in(f.Field, item.Carried) {
+					continue
+				}
+				found = append(found, under(f, fmt.Sprintf("%s %d", nested.Name, number)))
+			}
+		}
+		return found
+	}
 	listed := registerEntries(text)
 	if len(listed) == 0 {
-		head := item.Heading
-		if head == "" {
-			head = item.Name
-		}
-		return []Finding{{item.Name, nodeRule, Refuse, fmt.Sprintf("%s holds no entry: write each entry as a heading of its own, `### <name>`, then its %s fields", head, nested.Name)}}
-	}
-	titled := false
-	for _, f := range nested.Fields {
-		if f.Source == "title" {
-			titled = true
-			break
-		}
+		return []Finding{{item.Name, nodeRule, Refuse, fmt.Sprintf("%s holds no entry: write each entry as a heading of its own, `### <name>`, then its %s fields", section, nested.Name)}}
 	}
 	for _, entry := range listed {
-		var named *string
-		if titled {
-			name := entry[0]
-			named = &name
-		}
-		for _, f := range checked(entry[1], named) {
-			found = append(found, under(f, fmt.Sprintf("entry %s (%s)", repr(entry[0]), nested.Name)))
+		name := entry[0]
+		for _, f := range checked(entry[1], &name) {
+			found = append(found, under(f, fmt.Sprintf("%s %s", nested.Name, repr(entry[0]))))
 		}
 	}
 	return found
+}
+
+// itemParts is templates.py `_item_parts`: a list item as its title and its body, its lines up to
+// the first that starts with one of the template's labels, joined, then the rest.
+func itemParts(t *Template, entry string) (string, string) {
+	var labels []*regexp.Regexp
+	for _, f := range t.Fields {
+		if f.Label != "" {
+			labels = append(labels, regexp.MustCompile(`(?i)^[ \t]*`+regexp.QuoteMeta(f.Label)+`[ \t]*:`))
+		}
+	}
+	lines := strings.Split(entry, "\n")
+	at := len(lines)
+	for i, line := range lines {
+		for _, label := range labels {
+			if label.MatchString(line) {
+				at = i
+				break
+			}
+		}
+		if at != len(lines) {
+			break
+		}
+	}
+	var title []string
+	for _, line := range lines[:at] {
+		if strip(line) != "" {
+			title = append(title, strip(line))
+		}
+	}
+	return strings.Join(title, " "), strings.Join(lines[at:], "\n")
+}
+
+// vague are the words that make a statement uncheckable (templates.py VAGUE).
+var vague = []string{"as needed", "as necessary", "as appropriate", "if possible", "where possible", "as far as possible",
+	"and so on", "etc", "and/or", "user-friendly", "appropriate", "adequate", "sufficient", "tbd"}
+
+// uncheckable is templates.py `uncheckable`: why text is not one checkable statement, else "".
+func uncheckable(text string) string {
+	plain := prose(comment.ReplaceAllString(text, ""))
+	if sentenceEnd.MatchString(plain) {
+		return "holds more than one sentence: write one statement a test or a look can check, and each further one as a requirement of its own"
+	}
+	for _, word := range vague {
+		for _, at := range regexp.MustCompile(`(?i)`+regexp.QuoteMeta(word)).FindAllStringIndex(plain, -1) {
+			if boundedWord(plain, at[0], at[1]) {
+				return fmt.Sprintf("says %s, which nobody can check: say what a test measures or a reader sees instead", repr(word))
+			}
+		}
+	}
+	return ""
+}
+
+func boundedWord(text string, start, end int) bool {
+	if start > 0 {
+		r, _ := utf8.DecodeLastRuneInString(text[:start])
+		if isWordRune(r) || r == '-' {
+			return false
+		}
+	}
+	if end < len(text) {
+		r, _ := utf8.DecodeRuneInString(text[end:])
+		if isWordRune(r) || r == '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// before is templates.py `_before`: whether doc records a version of t older than since.
+func before(t *Template, doc *Document, since string) bool {
+	if since == "" || doc.Recorded == "" {
+		return false
+	}
+	recorded, ok := versionParts(t, doc.Recorded)
+	if !ok {
+		return false
+	}
+	wanted, _ := versionParts(t, since)
+	for i := range recorded {
+		if recorded[i] != wanted[i] {
+			return recorded[i] < wanted[i]
+		}
+	}
+	return false
 }
 
 // registerEntries are a register's entries, (name, text): each heading at the shallowest level the

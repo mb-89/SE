@@ -102,8 +102,8 @@ docs/design.md "Templates".
 
 ## Requirements
 
-1. `make install-tools`: installs every tool.
-   Continued line of the first requirement.
+1. `make install-tools`: installs every tool
+   that the checks run, on a continued line.
 2. Issue tooling in `scripts/work_tickets.py`.
 
 ## Acceptance
@@ -126,7 +126,7 @@ ISSUE_TEMPLATES = ("ticket", "work", "routed")
 ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh",
             "retro-judgment", "overhaul-judgment")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
-NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
+NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
 #: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
 DECKS = ("retro-deck",)
@@ -264,13 +264,15 @@ def test_the_marker_names_the_repository_the_template_its_version_and_its_digest
     work = catalog["work"]
     texts = [(ROOT / "templates" / f"{name}.md").read_text(encoding="utf-8") for name in ("work", "ticket")]
     digest = hashlib.sha256("".join(text + "\0" for text in texts).encode("utf-8")).hexdigest()
-    assert work.marker_line == f"<!-- se:template se/work 1.0.0 sha256:{digest} -->"
+    requirement = hashlib.sha256((ROOT / "templates" / "requirement.md").read_bytes() + b"\0").hexdigest()
+    nested = hashlib.sha256(f"sha256:{digest}\0sha256:{requirement}\0".encode("utf-8")).hexdigest()
+    assert work.marker_line == f"<!-- se:template se/work 1.1.0 sha256:{nested} -->"
     assert templates.render(work, work_fields(catalog)).splitlines()[1] == work.marker_line
     assert templates.TEMPLATE_MARKER_PATTERN.findall(work.marker_line) == ["work"]
     assert templates.TEMPLATE_MARKER_PATTERN.findall("<!-- se:template work -->\n<!-- se:form work -->") == []
     shutil.copytree(ROOT / "templates", tmp_path / "templates")
     own = templates.load(tmp_path, tree=True)["work"]
-    assert own.marker_line == f"<!-- se:template project/work 1.0.0 sha256:{digest} -->"
+    assert own.marker_line == f"<!-- se:template project/work 1.1.0 sha256:{nested} -->"
 
 
 def test_render_writes_the_markers_once_and_keeps_unknown_and_verbatim_bytes(catalog):
@@ -335,7 +337,8 @@ def test_each_template_renders_and_parses_its_example_back(catalog, name):
         assert templates.render(template, document) == body
     else:
         example = dict(template.example["fields"])
-        document = templates.parse(template, templates.render(template, example), example.get("title"))
+        title = next((item.name for item in template.fields if item.source == "title"), "title")
+        document = templates.parse(template, templates.render(template, example), example.get(title))
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
@@ -359,7 +362,7 @@ def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike
 
 def test_a_note_s_skeleton_gives_each_field_its_heading_and_its_instruction(catalog):
     work = catalog["work"]
-    assert (work.version, work.kind, work.tags) == ("1.0.0", "document", ("issue", "work"))
+    assert (work.version, work.kind, work.tags) == ("1.1.0", "document", ("issue", "work"))
     assert catalog["routed"].kind == "block" and catalog["merge-message"].kind == "interface"
     goal = work.field("goal")
     assert goal.heading == "Goal" and goal.says.startswith("What is true once this is done")
@@ -1027,7 +1030,7 @@ def test_draft_prints_the_empty_template_with_its_says(capsys, catalog):
     assert templates.main(["draft", "work", "--tree"]) == 0
     out = capsys.readouterr().out
     assert out.startswith(f"{templates.FLEET_MARKER}\n{catalog['work'].marker_line}\n")
-    assert "## Requirements\n\n<!-- Numbered, checkable requirements" in out
+    assert "## Requirements\n\n<!-- Numbered requirements in the order to do them, each one checkable" in out
     assert rules(templates.check(catalog["work"], templates.parse(catalog["work"], out)), "refuse")
 
 
@@ -1195,7 +1198,7 @@ def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_th
 def test_render_brings_an_issue_s_marker_up_to_the_template_s_version(catalog):
     work = catalog["work"]
     rendered = templates.render(work, work_fields(catalog))
-    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.0.0 ", " 0.9.0 "))
+    old = rendered.replace(work.marker_line, work.marker_line.replace(" 1.1.0 ", " 0.9.0 "))
     assert old != rendered
     assert templates.render(work, templates.parse(work, old)) == rendered
 
@@ -2180,20 +2183,22 @@ def test_a_register_with_one_bad_entry_fails_naming_the_entry(catalog, tmp_path,
     found = templates.check(register, templates.parse(register, body))
     assert [(finding.field, finding.rule, finding.severity) for finding in found] == [
         ("entries", "choice", templates.REFUSE)]
-    assert found[0].fix.startswith("entry 'The mirror stays up' (raid-entry): Type is 'hazard': write one of risk")
+    assert found[0].fix.startswith("raid-register > Entries > raid-entry 'The mirror stays up': Type is "
+                                   "'hazard': write one of risk")
     path = tmp_path / "raid.md"
     path.write_text(body, encoding="utf-8")
     assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 1
     out = capsys.readouterr().out
-    assert "entry 'The mirror stays up'" in out and "The release slips" not in out
+    assert "raid-entry 'The mirror stays up'" in out and "The release slips" not in out
 
 
 def test_each_bad_entry_is_named_by_its_own_heading_and_its_owner_line_by_its_label(catalog):
     register = catalog["raid-register"]
     body = raid_register(catalog).replace("Owner: alice\n", "").replace("Status: watched", "Status: gone")
     fixes = [finding.fix for finding in templates.check(register, templates.parse(register, body))]
-    assert fixes[0].startswith("entry 'The release slips' (raid-entry): Owner is missing: write a `Owner:` line")
-    assert fixes[1].startswith("entry 'The mirror stays up' (raid-entry): Status is 'gone'")
+    assert fixes[0].startswith("raid-register > Entries > raid-entry 'The release slips': Owner is missing: "
+                               "write a `Owner:` line")
+    assert fixes[1].startswith("raid-register > Entries > raid-entry 'The mirror stays up': Status is 'gone'")
     assert len(fixes) == 2
 
 
@@ -2218,7 +2223,7 @@ def test_a_decision_s_pugh_fence_is_checked_by_the_pugh_block(catalog):
     one = re.sub(r"\n  - \{key: deck.*", "", body)
     found = templates.check(decision, templates.parse(decision, one))
     assert [(finding.field, finding.rule) for finding in found] == [("options", "checker")]
-    assert found[0].fix == "pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
+    assert found[0].fix == "decision > options > pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
     without = re.sub(r"```pugh.*```\n", "", body, flags=re.DOTALL)
     assert [finding.rule for finding in templates.check(decision, templates.parse(decision, without))] == [
         "required"]
@@ -2305,7 +2310,7 @@ def test_a_section_node_is_checked_by_its_template_under_its_field(tmp_path):
     assert templates.check(whole, templates.parse(whole, good)) == []
     bad = templates.render(whole, {"intro": "Why.", "part": "Nobody."})
     assert [str(finding) for finding in templates.check(whole, templates.parse(whole, bad))] == [
-        "refuse: part [required]: part: Owner is missing: write a `Owner:` line: Who owns it. "
+        "refuse: part [required]: whole > Part > part: Owner is missing: write a `Owner:` line: Who owns it. "
         f"(or `Not in input` where the input does not say) (why: {templates.REASONS['required']})"]
 
 
@@ -2335,7 +2340,7 @@ def test_a_node_that_does_not_resolve_does_not_load(tmp_path, node, kind, error)
 
 
 @pytest.mark.parametrize("entry, kind, error", [
-    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "is a node or a register, not both"),
+    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "names one nested template; keep one of `node:`, `entries:`"),
     ("    entries: part@1.2.0\n", "block", "part is a block; a register names an entry template"),
     ("    node: part@1.2.0\n    fence: pugh\n    says: It.\n", "document",
      "part is a document; a node fence names a block template"),
@@ -3347,3 +3352,97 @@ def test_a_folder_of_material_is_the_raw_input_each_text_file_named_and_hidden_o
     (tmp_path / "empty").mkdir()
     with pytest.raises(templates.TemplateError, match="holds no text file"):
         templates.raw_input(tmp_path / "empty")
+
+
+# Nesting in both source forms (docs/templates.md "Nesting"): a manifest node and a list name the
+# requirement template, and each nested finding names its path, as the shared cases hold it
+
+def nested_folder(root: Path, **changed: str) -> Path:
+    """The nesting fixture's `templates/` under `root` (tests/template_cases.py), `changed` written over it."""
+    folder = root / "templates"
+    for name, text in {**template_cases._nested_files(), **changed}.items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8", newline="\n")
+    return folder
+
+
+def test_a_manifest_node_that_names_the_requirement_template_holds_requirement_items(tmp_path):
+    loaded = templates.load(tmp_path, folder=nested_folder(tmp_path))
+    spec, requirement = loaded["spec"], loaded["requirement"]
+    needs = spec.field("needs")
+    assert (needs.kind, needs.numbered, needs.node, needs.pin) == ("list", True, "requirement", "1.0.0")
+    assert needs.nested is requirement and spec.field("purpose").kind == "text"
+    document, found, _ = templates.fill(spec, dict(spec.example["fields"]), "x")
+    assert found == [] and "1. The pump stops at the high limit.\n   Acceptance: A test drives" in document
+    without = template_cases.SPEC_DOCUMENT.replace("   Acceptance: A test drains the tank.\n", "")
+    assert [str(finding) for finding in templates.check(spec, templates.parse(spec, without))] == [
+        "refuse: needs [required]: spec > Requirements > requirement 2: Acceptance is missing: write a "
+        "`Acceptance:` line: How it is checked: the test, the command or what a reader sees. (or `Not in "
+        f"input` where the input does not say) (why: {templates.REASONS['required']})"]
+
+
+def test_a_requirement_s_continued_statement_is_its_title_and_its_labels_its_fields(tmp_path):
+    spec = templates.load(tmp_path, folder=nested_folder(tmp_path))["spec"]
+    items = templates.parse(spec, template_cases.SPEC_DOCUMENT).fields["needs"]
+    assert items[1] == ("The pump starts at the low limit\nonce the level falls below it.\n"
+                        "Acceptance: A test drains the tank.\nSource: The brief.")
+    requirement = spec.field("needs").nested
+    assert templates._item_parts(requirement, items[1]) == (
+        "The pump starts at the low limit once the level falls below it.",
+        "Acceptance: A test drains the tank.\nSource: The brief.")
+
+
+@pytest.mark.parametrize("statement, problem", [
+    ("The pump stops. It also beeps.", "holds more than one sentence"),
+    ("The pump stops as needed.", "says 'as needed', which nobody can check"),
+    ("The pump stops and/or beeps.", "says 'and/or', which nobody can check"),
+    ("The pump stops at `etc.` in code.", ""),
+    ("The pump stops at the high limit; it beeps once.", ""),
+])
+def test_one_checkable_statement_has_one_sentence_and_no_word_nobody_can_check(statement, problem):
+    assert templates.uncheckable(statement).startswith(problem) and bool(problem) == bool(
+        templates.uncheckable(statement))
+
+
+def test_a_nested_finding_names_its_path_from_the_document_down_through_each_part(tmp_path):
+    middle = template_cases.PLAN.replace("name: plan\nversion: 1.2.0", "name: mid\nversion: 1.0.0").replace(
+        "se:plan", "se:mid")
+    write_template(tmp_path, "mid", middle)
+    write_template(tmp_path, "requirement", (ROOT / "templates" / "requirement.md").read_text(encoding="utf-8"))
+    write_template(tmp_path, "whole", WHOLE.format(node="mid@1.0.0"))
+    whole = templates.load(tmp_path, tree=True)["whole"]
+    body = templates.render(whole, {"intro": "Why.", "part": "### Steps\n\n1. The plan names its owner."})
+    assert [finding.fix for finding in templates.check(whole, templates.parse(whole, body))] == [
+        "whole > Part > mid > Steps > requirement 1: Acceptance is missing: write a `Acceptance:` line: How "
+        "it is checked: the test, the command or what a reader sees. (or `Not in input` where the input "
+        "does not say)"]
+
+
+def test_a_list_of_items_leaves_carried_fields_and_documents_filed_before_since_alone(tmp_path):
+    plan = templates.load(tmp_path, folder=nested_folder(tmp_path))["plan"]
+    body = template_cases.PLAN_BODY
+    rules_of = lambda text: [(finding.rule, finding.fix.split(":")[0])  # noqa: E731
+                             for finding in templates.check(plan, templates.parse(plan, text))]
+    assert rules_of(body) == [("checkable", "plan > Steps > requirement 2"),
+                              ("required", "plan > Steps > requirement 2")]  # its Source is carried
+    older = body.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.0.0 sha256:00 -->")
+    assert rules_of(older) == [("version", "the document records plan 1.0.0; the template is at 1.2.0, "
+                                           "another minor or patch version")]
+    at_since = body.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.1.0 sha256:00 -->")
+    assert [rule for rule, _ in rules_of(at_since)] == ["checkable", "required", "version"]
+
+
+def test_the_correction_pass_reaches_inside_nested_items_as_at_the_top(tmp_path):
+    spec = templates.load(tmp_path, folder=nested_folder(tmp_path))["spec"]
+    trivial = template_cases.SPEC_DOCUMENT.replace("1. The pump stops", "1) The pump stops").replace(
+        "Source: The brief.\n2.", "Source: The brief.  \n2.")
+    document, found, corrections = templates.fill(spec, {}, "x", body=trivial)
+    assert found == [] and [(fix.field, fix.kinds) for fix in corrections] == [
+        ("needs", ("list-marker",)), ("needs", ("whitespace",))]
+    assert "1. The pump stops at the high limit.\n" in document and "Source: The brief.\n2." in document
+    values, fixes = templates.correct(spec, {"needs": ["The pump stops.  \n   Acceptance: A test.\n   "
+                                                       "Source: The brief.  "]})
+    assert values["needs"] == ["The pump stops.\n   Acceptance: A test.\n   Source: The brief."]
+    assert [fix.kinds for fix in fixes] == [("whitespace",)]
+    rendered = templates.render(spec, {"purpose": "It pumps.", **values})
+    assert "1. The pump stops.\n   Acceptance: A test.\n   Source: The brief.\n" in rendered

@@ -121,8 +121,10 @@ fills it), `says` (what belongs there, the fix's wording and the draft's comment
 (only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
 back as it stands). Besides: `source: title` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
-`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`
-and `fence` (Nesting, below), `max_words`,
+`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`,
+`items`, `since`, `carried` and `fence` (Nesting, below), `checkable` (rule `checkable`: each of the
+field's texts is one checkable statement, `uncheckable`: one sentence, and none of VAGUE's words
+outside code), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
 should have, 0 for none), `actor`, `one_sentence`, `not_picked`, `shape`, a title's (rule
 `title-shape`), and `quote` (rule `quote`: the value quotes the raw input word for word).
@@ -153,14 +155,31 @@ another template checks, which the field pins at its version, `<template>@<versi
 - `entries: <template>@<version>` (kind `register`): the field's section is a register, each of its
   headings at the shallowest level it holds an entry (`entries`), its text up to the next one a
   document of that template, an entry. A register without an entry refuses.
+- `items: <template>@<version>` (kind `list`, with `numbered`, `continue_numbers` and `markers` as
+  any list): each item of the list, but a kept marker, is one document of that entry template. Its
+  lines up to the first that starts with one of the template's labels are its title, joined, where
+  the template has a title field, and the rest its body (`_item_parts`); `parse` reads its further
+  lines without the indentation they share (`_item_text`) and `render` indents them under the
+  item's marker. `carried: [<field>, ...]` names the item's fields the document carries elsewhere,
+  so an item is not refused for lacking one (the work issue's Acceptance carries the acceptance of
+  each of its requirement items).
+- `since: <version>`, beside any of the three: the field's nested parts are checked only in a
+  document that records that version of its own template or a later one, or none (`_before`), so a
+  minor version that nests a part leaves the documents filed before it as they were read.
+
+A template manifest's node names its slot's template in its own front matter (Template manifests).
 
 `load` refuses a node that names no template, pins another version than the template's, names a
-template of another kind (an entry for a register, a block for a fence, a block or a document for
-any other node; never a file's or a scoped template), or nests in a cycle; each node field then
-holds its template as `nested`. `check` checks each node by its template, by that template's rules,
-and gives each finding under the node's field, its fix naming the template, and for a register
-the entry by its heading (`nested_findings`). A node records no provenance of its own: the
-document's template digest covers its nodes' (Writing).
+template of another kind (an entry for a register or a list's items, a block for a fence, a block or
+a document for any other node; never a file's or a scoped template), carries a field its template
+lacks, or nests in a cycle; each node field then holds its template as `nested`. `check` checks each
+node by its template, by that template's rules, so a document passes only where every nested part
+passes, and gives each finding under the node's field, its fix led by its path from the document
+down to the part, `<document> > <section> > <part>: <fix>` (`nested_findings`): the part is the
+template's name for a node, `<template> '<heading>'` for a register's entry and `<template> <n>` for
+a list's nth item, and a part nested in a part extends the path, `<document> > <section> > <part> >
+<section> > <part>: <fix>`. A node records no provenance of its own: the document's template digest
+covers its nodes' (Writing).
 
 **Reading.** `parse` skips front matter and accepts a field's heading at `#` to `####`, in any case
 and with a trailing colon, and `_No response_` as empty, except where a field sets `exact_heading`.
@@ -195,6 +214,9 @@ overlays, `fill`, `check` and the digest are one path for both forms:
   turn `contents`, `Why: <motivation>`, `Form: <form>` and `Sources: <sources>`, which the fill
   hands the agent; its body is its fill slot alone, a paragraph of `{{slot}}` (SLOT). Any other
   chapter is an ordinary one, such as a note on how to use the template, and no field;
+- a template node whose front matter carries `template: <name>@<version>` (NODE_PIN) names the
+  template its slot is filled by, resolved as a note's `node:` is (Nesting): an entry template makes
+  the slot a numbered list of its items (`items:`), a block or a document one node of it (`_nest`);
 - the template is a `document` shaping no action of its own (fill it by name), `reader: owner`, no
   tags, the rule `required` refusing; its document is a file, written as a `file.write` template's
   (`Template.writes_file`): the front matter and the `##` sections, no marker and none of the guidance;
@@ -282,8 +304,11 @@ cannot change the document's meaning, and nothing else, so a trivial deviation c
 - `none` and `not-in-input`: a whole text that spells None (`none`, `NONE.`) or NOT_IN_INPUT in
   another case or spacing becomes `None` or `Not in input`, its closing period or colon kept.
 
-Lines inside a fence are code and stay; so do a title, a `verbatim` field, a code field, a node and
-a snippet's rows and cases (`_correctable`), and a text holding a comment keeps its spelling.
+Lines inside a fence are code and stay; so do a title, a `verbatim` field, a code field, a fence node
+and a snippet's rows and cases (`_correctable`), and a text holding a comment keeps its spelling.
+A node's, a register's and a list's items' text is corrected as any text, so the corrections apply
+inside a nested part as at the top; a heading inside one is its parent's place, at its parent's
+level, and the `heading` correction leaves it as written.
 `correct` corrects field values; `correct_body` a whole document a fill takes instead of fields
 (`fill(body=)`, `fill --body-file`), its headings and each correctable section's lines, before
 `parse` reads it into the values `correct` then takes. Each change is a `Correction`: its field, its
@@ -464,6 +489,9 @@ KINDS = ("line", "text", "choice", "list", "object", "issue", "checklist", "code
 SNIPPET_KINDS = ("rows", "case")
 #: The kinds of a node field (`node:`, `entries:`): its text is checked by another template.
 NODE_KINDS = ("node", "register")
+#: The keys that pin a field's nested template (the module docstring: Nesting), each with the kind
+#: of field it makes: a node, a register of entries, a list whose every item is an entry.
+NODE_KEYS = {"node": "node", "entries": "register", "items": "list"}
 #: A node's or a register's pin, `<template>@<version>` (docs/templates.md "Nesting").
 NODE_PIN = re.compile(r"^([\w-]+)@((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$")
 #: The rule of a document's nodes: where a fence node sits, and a register without entries. It
@@ -483,14 +511,15 @@ SLOT_RULE = "slot"
 #: `>` lines.
 QUOTE_SPANS = re.compile(r'"([^"\n]+)"|“([^”\n]+)”')
 QUOTE_LINE = re.compile(r"^[ \t]*>[ \t]?(.*?)[ \t]*$")
-REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling")
+REFUSE_RULES = ("required", "choice", "not-picked", "duplicate", "dangling", "checkable")
 ADAPTER_RULES = ("checker", "line", "title", "template")  # always refuse; an adapter has no rules
 WARN_RULES = ("words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms",
               "unnamed-entry", "title-shape")
 FIELD_KEYS = {"name", "kind", "heading", "required", "none_ok", "says", "exact_heading",
               "verbatim", "source", "label", "choices", "numbered", "continue_numbers", "markers",
               "lang", "max_words", "first_sentence_chars", "actor", "one_sentence", "not_picked", "shape",
-              "quote", "node", "entries", "fence", "row", "cases"}
+              "quote", "checkable", "node", "entries", "items", "since", "carried", "fence", "row",
+              "cases"}
 TEMPLATE_KEYS = {"name", "version", "kind", "tags", "reader", "says", "applies", "extends", "remove", "order", "keep_unknown",
              "rules", "actors", "example", "scope", "fields", "checker", "adapter", "message", "imported"}
 APPLIES_KEYS = {"actions", "order", "marker", "marker_pattern", "title", "labels", "base",
@@ -564,9 +593,18 @@ class Field:
     not_picked: bool = False
     shape: str = ""
     quote: bool = False
-    #: A node's or a register's template and the version it pins (`node:`, `entries:`).
+    #: Whether each of the field's texts is one checkable statement (rule `checkable`).
+    checkable: bool = False
+    #: A node's, a register's or a list's items' template and the version it pins (`node:`,
+    #: `entries:`, `items:`).
     node: str = ""
     pin: str = ""
+    #: The first version of the field's own template whose documents its nested parts are checked
+    #: in (`since:`): a document that records an older one is read as before.
+    since: str = ""
+    #: The fields of a list's items that the document carries elsewhere (`carried:`), so an item
+    #: that lacks them is not refused for it.
+    carried: tuple[str, ...] = ()
     #: A node with no section: the info word of the fence that is its text (`fence:`).
     fence: str = ""
     #: A `rows` field's one line per row, its columns as `{<column>}`.
@@ -721,6 +759,8 @@ REASONS = {
     "slot": "the fill slot marks where the text goes; a section that still holds it was never written",
     "private": "the repository is publishable at any time; a private term written there is published",
     "name": "the name is the branch too; one outside the name rule breaks the branch and the list",
+    "checkable": "a requirement is met or not by one test or one look; two statements in one, or a "
+                 "word nobody can measure, cannot be checked off",
 }
 
 
@@ -740,6 +780,10 @@ class Finding:
     def __str__(self) -> str:
         return f"{self.severity}: {self.field} [{self.rule}]: {self.fix} (why: {self.why})"
 
+
+#: The words that make a statement uncheckable (rule `checkable`): each leaves open what is met.
+VAGUE = ("as needed", "as necessary", "as appropriate", "if possible", "where possible", "as far as possible",
+         "and so on", "etc", "and/or", "user-friendly", "appropriate", "adequate", "sufficient", "tbd")
 
 #: The kinds of correction the correction pass makes, in the order it applies them (the module
 #: docstring: Corrections); none changes a word of content.
@@ -1176,8 +1220,17 @@ def _template_node(text: str, where: str, target: str, alias: str) -> dict[str, 
                             "lower-case letters, digits and hyphens")
     says = _says(guidance["contents"], *(f"{GUIDANCE_LABELS[part]}: {guidance[part]}"
                                          for part in ("motivation", "form", "sources") if part in guidance))
-    return {"name": field, "kind": "text", "required": guidance["gate"] == "mandatory",
-            "heading": alias or target, "says": says}
+    made: dict[str, object] = {"name": field, "kind": "text", "required": guidance["gate"] == "mandatory",
+                               "heading": alias or target, "says": says}
+    if "template" in front:  # the template its slot is filled by, resolved as a node's (`_nest`)
+        pinned = front["template"]
+        if not isinstance(pinned, str) or NODE_PIN.match(pinned) is None:
+            raise TemplateError(f"{where}: template is {pinned!r}; write the template the slot is "
+                                "filled by and the version it pins, `<template>@<version>`, such as "
+                                "requirement@1.0.0")
+        del made["kind"]
+        made["node"] = pinned
+    return made
 
 
 def _interface_data(data: dict[str, object], body: str, where: str, first: int) -> dict[str, object]:
@@ -1853,24 +1906,27 @@ def _field(entry: dict, where: str, *, sectioned: bool = True) -> Field:
 
 
 def _node_entry(entry: dict, where: str) -> dict:
-    """A field entry's `node:` or `entries:` pin as the field's kind (`node`, `register`), `node`
-    and `pin`; `fence` goes with `node:` alone. The template it names is checked at `load`."""
+    """A field entry's `node:`, `entries:` or `items:` pin as the field's kind (`node`, `register`,
+    `list`), `node` and `pin`; `fence` goes with `node:` alone, `carried` with `items:` alone, and
+    `since` with any of them. The template it names is checked at `load`."""
     name = entry.get("name", "?")
-    given = [key for key in ("node", "entries") if key in entry]
+    given = [key for key in NODE_KEYS if key in entry]
     if len(given) > 1:
-        raise TemplateError(f"{where}: field {name} is a node or a register, not both; keep `node:` "
-                            "or `entries:`")
+        raise TemplateError(f"{where}: field {name} names one nested template; keep one of "
+                            f"{', '.join(f'`{key}:`' for key in given)}")
     if not given:
         if entry.get("kind") in NODE_KINDS:
             raise TemplateError(f"{where}: field {name} has kind {entry['kind']} without its "
                                 "template; write `node: <template>@<version>` or `entries: "
                                 "<template>@<version>`")
-        if "fence" in entry:
-            raise TemplateError(f"{where}: field {name} has a fence but is no node; write `node: "
-                                "<template>@<version>` beside it")
+        for key in ("fence", "since", "carried"):
+            if key in entry:
+                raise TemplateError(f"{where}: field {name} has {'a fence' if key == 'fence' else key} "
+                                    "but is no node; write `node: "
+                                    "<template>@<version>` beside it")
         return entry
     key = given[0]
-    kind = "node" if key == "node" else "register"
+    kind = NODE_KEYS[key]
     pin = NODE_PIN.match(str(entry.pop(key)))
     if pin is None:
         raise TemplateError(f"{where}: field {name} {key}: write the template and the version it "
@@ -1882,12 +1938,24 @@ def _node_entry(entry: dict, where: str) -> dict:
     if fence and (kind != "node" or not re.fullmatch(r"[\w-]+", str(fence))):
         raise TemplateError(f"{where}: field {name} fence: a node's fence is its info word, such "
                             "as pugh, and goes with `node:` alone")
-    extra = sorted(set(entry) & {"choices", "numbered", "continue_numbers", "markers", "lang",
-                                 "verbatim", "quote", "shape", "label", "source"})
+    since = entry.get("since", "")
+    if since and not SEMVER.match(str(since)):
+        raise TemplateError(f"{where}: field {name} since: write the template version its nested "
+                            "parts are checked from, such as 1.1.0")
+    carried = entry.get("carried", [])
+    if carried and (kind != "list" or not isinstance(carried, list)
+                    or not all(isinstance(part, str) and part for part in carried)):
+        raise TemplateError(f"{where}: field {name} carried: a list of the item's fields the "
+                            "document carries elsewhere, with `items:` alone")
+    allowed = {"numbered", "continue_numbers", "markers"} if kind == "list" else set()
+    extra = sorted(set(entry) & ({"choices", "numbered", "continue_numbers", "markers", "lang",
+                                  "verbatim", "quote", "shape", "label", "source", "checkable"}
+                                 - allowed))
     if extra:
         raise TemplateError(f"{where}: field {name} is a {kind}, checked by its template; take out "
                             f"{', '.join(extra)}")
-    entry.update(kind=kind, node=pin.group(1), pin=pin.group(2))
+    entry.update(kind=kind, node=pin.group(1), pin=pin.group(2), since=str(since),
+                 carried=tuple(carried))
     return entry
 
 
@@ -1916,16 +1984,22 @@ def _nest(templates: dict[str, Template], digests: dict[str, str]) -> dict[str, 
             if target.version != item.pin:
                 raise TemplateError(f"{where} pins {item.node} {item.pin}, but {item.node} is at "
                                     f"{target.version}; pin {item.node}@{target.version}")
-            wanted = ("entry",) if item.kind == "register" else ("block",) if item.fence else \
+            if template.manifest and item.kind == "node" and target.kind == "entry":
+                item = replace(item, kind="list", numbered=True)  # a slot of entries, one per item
+            wanted = ("entry",) if item.kind in ("register", "list") else ("block",) if item.fence else \
                 ("block", "document")
             if target.kind not in wanted or target.is_file or target.scope:
                 raise TemplateError(f"{where}: {item.node} is {_a(target.kind)}"
                                     + (" that shapes files" if target.is_file else
                                        " read after a marker" if target.scope else "")
-                                    + f"; a {'register' if item.kind == 'register' else 'node'}"
+                                    + f"; a {_nest_word(item)}"
                                     + f"{' fence' if item.fence else ''} names "
                                     + _a(" or ".join(wanted)) + " template, part of a document")
             nested = resolved(item.node, (*seen, name))
+            unknown = [part for part in item.carried if nested.field(part) is None]
+            if unknown:
+                raise TemplateError(f"{where} carried: {', '.join(unknown)} is no field of {item.node}; "
+                                    f"name its fields, {', '.join(field.name for field in nested.fields)}")
             chain.update(nested.digest.encode("utf-8") + b"\0")
             fields.append(replace(item, nested=nested))
         nodes = [item for item in fields if item.node]
@@ -1934,6 +2008,11 @@ def _nest(templates: dict[str, Template], digests: dict[str, str]) -> dict[str, 
         return done[name]
 
     return {name: resolved(name, ()) for name in sorted(templates)}
+
+
+def _nest_word(item: Field) -> str:
+    """What a nesting field is called in a refusal: a register, a list of items, or a node."""
+    return {"register": "register", "list": "list of items"}.get(item.kind, "node")
 
 
 def _a(word: str) -> str:
@@ -2054,7 +2133,7 @@ def value_of(item: Field, raw: str) -> object:
         inner = raw.strip("\n").splitlines()[1:]
         inner = inner[:-1] if inner and FENCE.match(inner[-1]) else inner
         return "\n".join(inner).strip() if not_in_input("\n".join(inner)) else raw.strip("\n")
-    if item.verbatim or item.node:
+    if item.verbatim or (item.node and item.kind != "list"):
         return raw.strip("\n")
     text = _uncomment(raw, keep_markers=item.markers)
     if text.strip().casefold() == NO_RESPONSE:
@@ -2066,8 +2145,8 @@ def value_of(item: Field, raw: str) -> object:
     if item.kind == "text":
         return text.strip()
     if item.kind == "list":
-        return [body for _, body in _items(text, NUMBERED if item.numbered else BULLET,
-                                           item.markers)]
+        found = [body for _, body in _items(text, NUMBERED if item.numbered else BULLET, item.markers)]
+        return [_item_text(body) for body in found] if item.node else found
     if item.kind == "checklist":
         return [{"done": mark in "xX", "text": body}
                 for mark, body in _items(text, CHECKBOX, False)]
@@ -2098,6 +2177,17 @@ def value_of(item: Field, raw: str) -> object:
                 inner.append(later)
             return "\n".join(inner).strip("\n")
     return text.strip()
+
+
+def _item_text(body: str) -> str:
+    """A nested list item's text: its first line, then its further lines without the indentation
+    they share, which only places them under the item's marker."""
+    first, _, rest = body.partition("\n")
+    if not rest:
+        return first
+    lines = rest.split("\n")
+    shared = min(len(line) - len(line.lstrip(" \t")) for line in lines if line.strip())
+    return "\n".join([first, *(line[shared:] if line.strip() else "" for line in lines)])
 
 
 def parse(template: Template, body: str, title: str | None = None) -> Document:
@@ -2429,7 +2519,7 @@ def _scoped(template: Template, text: str) -> tuple[list[Part], str]:
 
 def _format(item: Field, value: object, first: int) -> str:
     """A field's value as Markdown; `first` is the number a numbered list starts at."""
-    if item.verbatim or item.node or item.kind in ("line", "choice", "text") or (
+    if item.verbatim or (item.node and item.kind != "list") or item.kind in ("line", "choice", "text") or (
             isinstance(value, str) and not_in_input(value)):
         return str(value)
     if item.kind == "list":
@@ -2437,11 +2527,13 @@ def _format(item: Field, value: object, first: int) -> str:
         for entry in value:
             if WHOLE_COMMENT.match(str(entry)):
                 lines.append(str(entry))
-            elif item.numbered:
-                lines.append(f"{number}. {entry}")
-                number += 1
-            else:
-                lines.append(f"- {entry}")
+                continue
+            marker = f"{number}. " if item.numbered else "- "
+            number += 1 if item.numbered else 0
+            text = str(entry)
+            if item.node:  # an item's further lines are indented under its marker, as Markdown reads them
+                text = _item_text(text).replace("\n", "\n" + " " * len(marker))
+            lines.append(marker + text)
         return "\n".join(lines)
     if item.kind == "checklist":
         return "\n".join(
@@ -3116,8 +3208,10 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
         if holds_slot(text):
             found.append(Finding(item.name, SLOT_RULE, REFUSE, f"section {item.heading or item.label or item.name} "
                                  f"still holds the fill slot {SLOT}: write the section in its place"))
-        if item.node:  # its own template checks it, by its own rules
-            found += nested_findings(item, text, root=root, bare_scripts=bare_scripts, raw=raw)
+        if item.node:  # its own template checks it, by its own rules, from its `since` on
+            if not _before(template, document, item.since):
+                found += nested_findings(item, text, root=root, bare_scripts=bare_scripts, raw=raw,
+                                         value=value, within=template.name)
             continue
         if item.quote:
             found += [Finding(item.name, QUOTE_RULE, REFUSE, fix) for fix in quoted(item, text, raw)]
@@ -3154,6 +3248,13 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
                 if SENTENCE_END.search(_prose(entry)):
                     add("one-sentence", item.name, f"{item.heading} item {number} has more than "
                         "one sentence: one sentence per step")
+        if item.checkable:
+            listed = _entries(value)
+            for number, entry in enumerate(listed, 1):
+                problem = uncheckable(entry)
+                if problem:
+                    add("checkable", item.name, f"{item.heading or item.label or item.name}"
+                        f"{f' item {number}' if isinstance(value, list) else ''} {problem}")
         if item.kind == "issue":
             for entry in _entries(value):
                 if BARE_ISSUE.match(entry.strip()):
@@ -3196,6 +3297,28 @@ def check(template: Template, document: Document, *, root: Path = ROOT,
                                               order.get(finding.field, len(order))))
 
 
+def uncheckable(text: str) -> str:
+    """Why `text` is not one checkable statement (rule `checkable`), else "": it holds more than one
+    sentence, or a word nobody can check (VAGUE)."""
+    plain = _prose(COMMENT.sub("", text))
+    if SENTENCE_END.search(plain):
+        return ("holds more than one sentence: write one statement a test or a look can check, and "
+                "each further one as a requirement of its own")
+    word = next((word for word in VAGUE if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", plain,
+                                                     re.IGNORECASE)), "")
+    if word:
+        return (f"says {word!r}, which nobody can check: say what a test measures or a reader sees "
+                "instead")
+    return ""
+
+
+def _before(template: Template, document: Document, since: str) -> bool:
+    """Whether `document` records a version of `template` older than `since` (a field's `since:`);
+    one that records none, or no version of the template's form, is not."""
+    recorded = version_parts(template, document.recorded) if since and document.recorded else None
+    return recorded is not None and recorded < version_parts(template, since)
+
+
 def holds_slot(text: str) -> bool:
     """Whether `text` holds the fill slot `{{slot}}` outside code: a fence, or a code span."""
     kept, fence = [], None
@@ -3212,35 +3335,62 @@ def holds_slot(text: str) -> bool:
 
 
 def nested_findings(item: Field, text: str, *, root: Path = ROOT, bare_scripts: bool = True,
-                    raw: str | None = None) -> list[Finding]:
-    """The findings of node field `item`'s `text` by the template it names, each under the field:
-    a node's as one document, a register's entry by entry, each fix naming its entry (`entries`);
-    a register without an entry refuses (rule `node`)."""
+                    raw: str | None = None, value: object = None, within: str = "") -> list[Finding]:
+    """The findings of node field `item`'s `text` by the template it names, each under the field,
+    its fix led by its path from the document down to the part (`<document> > <section> >
+    <part>`, `within` the document's name): a node's as one document, a register's entry by
+    entry, a list's item by item (`value`, its items), each its first lines up to its first label
+    line the item's title where its template has one; a register without an entry refuses (rule
+    `node`), and a field the document carries (`carried`) is not refused as missing."""
     nested: Template = item.nested
     if nested is None:
         raise TemplateError(f"templates: field {item.name} names {item.node}, which is not loaded; "
                             "load the templates with load()")
+    title = next((field.name for field in nested.fields if field.source == "title"), None)
+    section = f"{within} > {item.heading or item.name}" if within else item.heading or item.name
 
-    def checked(body: str, title: str | None) -> list[Finding]:
-        return check(nested, parse(nested, body, title), root=root, bare_scripts=bare_scripts, raw=raw)
+    def checked(body: str, named: str | None) -> list[Finding]:
+        return check(nested, parse(nested, body, named if title else None), root=root,
+                     bare_scripts=bare_scripts, raw=raw)
 
-    def under(finding: Finding, where: str) -> Finding:
+    def under(finding: Finding, part: str) -> Finding:
         fix = finding.fix.removeprefix(f"{nested.name}: ")
-        return Finding(item.name, finding.rule, finding.severity, f"{where}: {fix}")
+        deeper = fix.removeprefix(f"{nested.name} > ")
+        path = f"{section} > {part}"
+        return Finding(item.name, finding.rule, finding.severity,
+                       f"{path} > {deeper}" if deeper != fix else f"{path}: {fix}")
 
     if item.kind == "node":
         return [under(finding, nested.name) for finding in checked(text, None)]
+    if item.kind == "list":
+        found = []
+        listed = [entry for entry in (value if isinstance(value, list) else [])
+                  if isinstance(entry, str) and not WHOLE_COMMENT.match(entry)]
+        for number, entry in enumerate(listed, 1):
+            named, body = _item_parts(nested, entry) if title else (None, entry)
+            found += [under(finding, f"{nested.name} {number}") for finding in checked(body, named)
+                      if not (finding.rule == "required" and finding.field in item.carried)]
+        return found
     listed = entries(text)
     if not listed:
-        return [Finding(item.name, NODE_RULE, REFUSE, f"{item.heading or item.name} holds no entry: "
+        return [Finding(item.name, NODE_RULE, REFUSE, f"{section} holds no entry: "
                         f"write each entry as a heading of its own, `### <name>`, then its "
                         f"{nested.name} fields")]
-    title = next((field.name for field in nested.fields if field.source == "title"), None)
     found = []
     for name, body in listed:
-        found += [under(finding, f"entry {name!r} ({nested.name})")
-                  for finding in checked(body, name if title else None)]
+        found += [under(finding, f"{nested.name} {name!r}") for finding in checked(body, name)]
     return found
+
+
+def _item_parts(template: Template, entry: str) -> tuple[str, str]:
+    """A list item as its title and its body: its lines up to the first that starts with one of
+    `template`'s labels, joined, then the rest."""
+    labels = [re.compile(rf"^[ \t]*{re.escape(field.label)}[ \t]*:", re.IGNORECASE)
+              for field in template.fields if field.label]
+    lines = entry.split("\n")
+    at = next((index for index, line in enumerate(lines) if any(label.match(line) for label in labels)),
+              len(lines))
+    return " ".join(line.strip() for line in lines[:at] if line.strip()), "\n".join(lines[at:])
 
 
 def entries(text: str) -> list[tuple[str, str]]:
@@ -3836,9 +3986,10 @@ def corrected_text(text: str, whole: bool = False) -> tuple[str, tuple[str, ...]
 
 def _correctable(item: Field) -> bool:
     """Whether the correction pass touches `item`'s value: never a title, a verbatim field, code, a
-    node or a snippet's rows and cases, which are kept as they stand."""
-    return not (item.source == "title" or item.verbatim or item.node or item.fence
-                or item.kind in ("code", *NODE_KINDS, *SNIPPET_KINDS))
+    fence node or a snippet's rows and cases, which are kept as they stand; a node's, a register's
+    and a list's items' text as any text, as inside a nested part as at the top."""
+    return not (item.source == "title" or item.verbatim or item.fence
+                or item.kind in ("code", *SNIPPET_KINDS))
 
 
 def correct(template: Template, values: dict[str, object]) -> tuple[dict[str, object], list[Correction]]:
@@ -3861,7 +4012,7 @@ def correct(template: Template, values: dict[str, object]) -> tuple[dict[str, ob
 
         value = given[item.name]
         if isinstance(value, str):
-            given[item.name] = fixed(value, item.kind != "text")
+            given[item.name] = fixed(value, item.kind not in ("text", *NODE_KINDS))
         elif isinstance(value, list):
             given[item.name] = [{**entry, "text": fixed(entry["text"])}
                                 if isinstance(entry, dict) and "text" in entry else fixed(entry)

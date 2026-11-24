@@ -9,7 +9,7 @@ import (
 const schemaDialect = "https://json-schema.org/draft/2020-12/schema"
 
 func format(item *Field, value any, first int) string {
-	if s, ok := value.(string); item.Verbatim || item.Node != "" || item.Kind == "line" || item.Kind == "choice" || item.Kind == "text" || (ok && notInInput(s)) {
+	if s, ok := value.(string); item.Verbatim || (item.Node != "" && item.Kind != "list") || item.Kind == "line" || item.Kind == "choice" || item.Kind == "text" || (ok && notInInput(s)) {
 		return str(value)
 	}
 	switch item.Kind {
@@ -18,15 +18,19 @@ func format(item *Field, value any, first int) string {
 		number := first
 		for _, entry := range listOf(value) {
 			text := str(entry)
-			switch {
-			case wholeComment(text):
+			if wholeComment(text) {
 				lines = append(lines, text)
-			case item.Numbered:
-				lines = append(lines, fmt.Sprintf("%d. %s", number, text))
-				number++
-			default:
-				lines = append(lines, "- "+text)
+				continue
 			}
+			marker := "- "
+			if item.Numbered {
+				marker = fmt.Sprintf("%d. ", number)
+				number++
+			}
+			if item.Node != "" { // an item's further lines are indented under its marker, as Markdown reads them
+				text = strings.ReplaceAll(itemText(text), "\n", "\n"+strings.Repeat(" ", len(marker)))
+			}
+			lines = append(lines, marker+text)
 		}
 		return strings.Join(lines, "\n")
 	case "checklist":

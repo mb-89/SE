@@ -127,6 +127,7 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 local = 4
 cloud = 8
 claim_timeout_hours = 12
+queue_limit = 10
 ```
 
 `[workers]` limits how many working agents run at once. `local` holds a local device's limit,
@@ -142,6 +143,14 @@ below, a positive number of hours, default 12; other keys are refused.
   starts no more, and after each landing starts the next startable issue, so a worker that
   finished frees its place. The [dispatcher](fleet.md#dispatcher) fires nothing while the limit is
   reached.
+- **The landing queue.** No worker starts while more than `queue_limit` delivered pull requests
+  wait for the integrator: one started then branches from a `main` several landings old and
+  merges them all again. `queue_limit` is a whole number of at least 0, default 10.
+  - `start` and `claim` refuse, naming the count and the limit. Without gh they read the open
+    pull requests through kern's relay, or from `--delivered <file>`, their `list_pull_requests`
+    answer.
+  - `queue` prints the count against the limit, and after a landing `integrate` starts none
+    while the queue is over it.
 - **Not limited.** Integrators, reviewers and SE's own session.
 - **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
   one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
