@@ -147,6 +147,19 @@ def own_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         yield home
 
 
+@pytest.fixture(autouse=True)
+def fresh_gh_backend(request: pytest.FixtureRequest) -> Iterator[None]:
+    """This test's own choice of how gh reaches GitHub (`work_tickets._gh_backend`, decided once
+    per process): it starts with none, and what it chooses ends with it. It covers the copy of
+    work_tickets.py loaded as `work_tickets` and each copy the test's module holds as a global."""
+    loaded = [sys.modules.get("work_tickets"), *vars(request.module).values()]
+    with pytest.MonkeyPatch.context() as patch:
+        for module in {id(module): module for module in loaded
+                       if isinstance(getattr(module, "_gh_backend", None), dict)}.values():
+            patch.setattr(module, "_gh_backend", {})
+        yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def local_machine() -> Iterator[None]:
     """Every test runs as on a local machine, whatever runs the suite: the runner's variables are
