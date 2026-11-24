@@ -12,6 +12,7 @@ is missing. What each command does and where SE runs it is the README section "S
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib.util
 import json
 import os
@@ -161,6 +162,7 @@ class Local:
     errors: list[str] = field(default_factory=list)
     lacking: list[tuple["se_plugin.RoleSkill", tuple[str, ...]]] = field(default_factory=list)
     skills_error: str = ""  # se.toml [roles] could not be read
+    required: list[Item] = field(default_factory=list)  # SE's own components (`required_items`)
 
 
 def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> Local:
@@ -188,8 +190,23 @@ def read_local(se_root: Path, root: Path | None, local_config: Path | None) -> L
         missing, skills_error = lacking(se_root), ""
     except se_plugin.SourceError as error:
         missing, skills_error = [], str(error)
-    return Local(se_version, _docs_url(se_root), counts(se_root), items, errors,
-                 missing, skills_error)
+    required, problem = required_items(se_root, local)
+    return Local(se_version, _docs_url(se_root), counts(se_root), items, errors + problem,
+                 missing, skills_error, required)
+
+
+def required_items(se_root: Path, local) -> tuple[list[Item], list[str]]:
+    """SE's own required components, every one its se.toml `[components]` declares and does not mark
+    optional, each as an Item at SE's lock, looked up where its clone was found (docs/boot.md
+    "Required components"); and what could not be read."""
+    if not (se_root / se_modules.MANIFEST).is_file():
+        return [], []
+    try:
+        locked = se_modules.read_lock(se_root)
+        return [_module_item(se_root, module, local, locked) for module in se_modules.load_manifest(se_root)
+                if not module.optional], []
+    except ModuleError as error:
+        return [], [f"SE's own components in {se_root / se_modules.MANIFEST}: {error}"]
 
 
 def _claude_dir() -> Path:
@@ -543,6 +560,8 @@ class Report:
     work: dict | None = None  # the cached work_check
     root: Path | None = None  # the project
     components: dict | None = None  # the cached component listing of the project, where it answers
+    required: list["Loaded"] = field(default_factory=list)  # SE's required components, as they answered
+    required_states: list[State] = field(default_factory=list)  # their update check
 
     @property
     def errors(self) -> list[str]:
@@ -591,15 +610,28 @@ def update_case(states: list[State]) -> str:
     return "current"
 
 
+def required_row(loaded: Loaded, states: list[State]) -> dict[str, str]:
+    """The row of one of SE's required components: the version that answered, never the locked one
+    ("none" where it did not load), and the newest release its update check read."""
+    state = next((s for s in states if s.item.name == loaded.name), None)
+    newest = report_row(state)["newest"] if state else "unknown"
+    return {"name": loaded.name, "loaded": loaded.version or "none", "newest": newest}
+
+
 def report_values(report: Report) -> dict[str, object]:
     """The fields of the start report: SE's version, the counts and their pages, the table and the
-    update line's case."""
+    update line's case. The table holds SE, then SE's required components as they answered, then the
+    project's own components but those, which the required rows already show."""
     local, c = report.local, report.local.counts
     states = [s for s in report.states if s.item.name != "se"]  # SE itself is its first row, "SE"
+    required = {loaded.name.lower() for loaded in report.required}
+    se, *own = states  # read_local lists SE first
+    table = ([report_row(se)] + [required_row(loaded, report.required_states) for loaded in report.required]
+             + [report_row(state) for state in own if state.item.name.lower() not in required])
     return {"version": _v(local.se_version), "skills": str(c.skills), "rules": str(c.rules),
             "subagents": str(c.subagents), "docs": local.docs_url or ".",
             **{key: page_link(local.docs_url, page) for key, page in PAGE_OF.items()},
-            "components": [report_row(state) for state in states], "update": update_case(states)}
+            "components": table, "update": update_case(states)}
 
 
 def greeting(report: Report, se_root: Path) -> list[str]:
@@ -611,8 +643,21 @@ def greeting(report: Report, se_root: Path) -> list[str]:
 def session_lines(report: Report, se_root: Path) -> list[str]:
     """What the start found for the session, never shown to the person in the report: a stale plugin,
     a check that failed, the project's components listing, missing skills, the work that is due."""
-    return (stale_plugin_lines(se_root, report.root) + _check_lines(report, se_root)
+    return (required_lines(report) + stale_plugin_lines(se_root, report.root) + _check_lines(report, se_root)
             + component_lines(report, se_root) + skill_lines(report.local) + work_lines(report, se_root))
+
+
+def required_lines(report: Report) -> list[str]:
+    """What the session alone is told of SE's required components: a core the machine switched off,
+    and each the project locks at another version than the one SE loaded, which its row shows."""
+    lines = [loaded.note for loaded in report.required if loaded.note]
+    answered = {loaded.name.lower(): loaded.version for loaded in report.required if loaded.version}
+    for state in report.states:
+        name, version = state.item.name, state.item.version
+        loaded = answered.get(name.lower())
+        if loaded and version and se_modules.parse_version(loaded) and se_modules.parse_version(loaded) != version:
+            lines.append(f"{name}: the project locks {_v(version)}; SE loaded {loaded} for itself")
+    return lines
 
 
 def _plugin_name(root: Path) -> str | None:
@@ -814,12 +859,15 @@ def _plural(count: int, word: str) -> str:
 # Commands
 
 
+KERN_WAIT = 10  # seconds `kern status` waits for a core that is still starting
+
+
 def kern_status(binary: Path, root: Path) -> dict | None:
-    """`kern status --json` of the core in the checkout at root: its state and health, or None
-    where the binary does not answer."""
+    """`kern status --json` of the core in the checkout at root, waiting `KERN_WAIT` for one still
+    starting: its state and health, or None where the binary does not answer."""
     try:
-        result = subprocess.run([str(binary), "status", "--root", str(root), "--json"],
-                                capture_output=True, text=True, timeout=2)
+        result = subprocess.run([str(binary), "status", "--root", str(root), "--wait", f"{KERN_WAIT}s", "--json"],
+                                capture_output=True, text=True, timeout=KERN_WAIT + 5)
         return json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -828,27 +876,25 @@ def kern_status(binary: Path, root: Path) -> dict | None:
 @dataclass
 class Kern:
     """What bootstrap.sh said of kern at the session's start (README "Kern"): the binary it started,
-    why the core is still starting, or why it failed."""
+    why it failed, or why the machine switched the core off."""
 
     binary: Path | None = None
-    starting: str = ""
     failed: str = ""
+    off: str = ""
 
 
 def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path], dict | None]) -> list[str]:
     """The greeting's line on kern: running, starting, or failed with the cause; none where
     bootstrap.sh said nothing of kern."""
-    if not (kern.binary or kern.starting or kern.failed):
+    if not (kern.binary or kern.failed):
         return []
     try:
         binary = se_modules.app_binary(se_modules.app_root(se_root, root))
         name = f"{binary.name} {binary.version}"
     except ModuleError:
         name = "kern ?"
-    if kern.failed:
+    if kern.failed or kern.binary is None:
         return [f"{name}: failed: {kern.failed}"]
-    if kern.starting or kern.binary is None:
-        return [f"{name}: starting: {kern.starting}"]
     answer = ask(kern.binary, root)
     state = (answer or {}).get("state")
     if state == "running":
@@ -871,12 +917,215 @@ def kern_line(se_root: Path, root: Path, kern: Kern, ask: Callable[[Path, Path],
 WITHOUT_KERN = "SE runs without kern: every step goes through SE's scripts and gh."
 
 
-def without_kern(kern: list[str], host: str, none: bool = False) -> list[str]:
-    """The line that says SE runs without kern: under Copilot, after a kern line that failed or
-    where bootstrap.sh started no core, the project being inside no git checkout; none elsewhere, so
-    Claude Code's greeting stays as it is."""
+def without_kern(kern: list[str], host: str) -> list[str]:
+    """The line that says SE runs without kern: under Copilot, after a kern line that failed; none
+    elsewhere, so Claude Code's greeting stays as it is."""
     failed = bool(kern) and ": failed: " in kern[0]
-    return [WITHOUT_KERN] if host == "copilot" and (failed or none) else []
+    return [WITHOUT_KERN] if host == "copilot" and failed else []
+
+
+# SE's required components (docs/boot.md "Required components"): every start loads each from SE's
+# root, wherever the session starts, and the report shows the version that answered.
+
+
+@dataclass(frozen=True)
+class Loaded:
+    """One of SE's required components as the start found it: the version that answered, or why it
+    did not load."""
+
+    name: str
+    version: str = ""  # the version that answered; "" where it did not load
+    cause: str = ""  # why it did not load
+    note: str = ""  # what the session alone is told, such as a core switched off
+
+
+def run_command(argv: list[str], cwd: Path, timeout: float) -> tuple[int, str, str]:
+    """A loader's command through the process door: its exit code, stdout and stderr; a command that
+    does not start or takes too long answers 127 and why. uv's deprecated UV_NATIVE_TLS becomes
+    UV_SYSTEM_CERTS and the caller's VIRTUAL_ENV is dropped, as the documentation build runs obs."""
+    environment = dict(os.environ)
+    environment.pop("VIRTUAL_ENV", None)
+    if environment.pop("UV_NATIVE_TLS", None):
+        environment.setdefault("UV_SYSTEM_CERTS", "1")
+    try:
+        result = process_door.run(argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", stdin=subprocess.DEVNULL, timeout=timeout, env=environment)
+    except subprocess.TimeoutExpired:
+        return 127, "", f"{argv[0]} took more than {timeout:g} s"
+    except OSError as error:
+        return 127, "", f"{argv[0]} does not start: {error}"
+    return result.returncode, result.stdout or "", result.stderr or ""
+
+
+#: What obs answers once it imports, in its own environment: the version of the obs that imported
+#: (its checkout's se.toml, where SE's version of a component lives) and every component it has
+#: installed, an adapter with the folder and the command it runs.
+OBS_PROBE = """import json, tomllib
+from pathlib import Path
+import obs
+from obs.adapter import adapter_location, load_adapter
+from obs.components import installed
+root = Path(obs.__file__).resolve().parents[2]
+said = {"obs": tomllib.loads((root / "se.toml").read_text(encoding="utf-8"))["project"]["version"], "installed": {}}
+for name, entry in installed().items():
+    said["installed"][name] = {"version": entry["version"], "kind": entry["kind"]}
+    if entry["kind"] == "adapter":
+        said["installed"][name].update(folder=str(adapter_location(name).folder), command=load_adapter(name)["command"])
+print(json.dumps(said))
+"""
+LOAD_TIMEOUT = 300  # seconds a loader's command may take: a first start installs its environment
+
+
+def _last(out: str, err: str, code: int) -> str:
+    said = (err.strip() or out.strip()).splitlines()
+    return said[-1] if said else f"exit code {code}"
+
+
+def probe_obs(obs: Path, run: Callable) -> tuple[dict | None, str]:
+    """What obs answers (`OBS_PROBE`) from its clone, or None and why."""
+    code, out, err = run(["uv", "run", "--quiet", "--project", str(obs), "python", "-c", OBS_PROBE], obs,
+                         LOAD_TIMEOUT)
+    try:
+        said = json.loads(out.strip().splitlines()[-1]) if code == 0 and out.strip() else None
+    except ValueError:
+        said = None
+    if not isinstance(said, dict) or not isinstance(said.get("installed"), dict):
+        return None, f"obs does not import from {obs}: {_last(out, err, code)}"
+    return said, ""
+
+
+def load_obs_component(name: str, locked: str, obs: Path, said: dict, run: Callable) -> Loaded:
+    """A component obs installs (obs-html, its adapter): installed at SE's locked version where obs
+    has another or none (`obs-components install <name> <version>`), then run where it is an adapter,
+    its command with `--help` from its folder."""
+    entry = said["installed"].get(name)
+    if entry is None or entry.get("version") != locked:
+        code, out, err = run(["uv", "run", "--quiet", "--project", str(obs), "obs-components", "install", name,
+                              locked], obs, LOAD_TIMEOUT)
+        if code:
+            return Loaded(name, cause=f"`obs-components install {name} {locked}` from {obs} failed: "
+                                      f"{_last(out, err, code)}")
+        said, why = probe_obs(obs, run)
+        if said is None:
+            return Loaded(name, cause=why)
+        entry = said["installed"].get(name)
+        if entry is None or entry.get("version") != locked:
+            found = entry.get("version") if entry else "none"
+            return Loaded(name, cause=f"obs has {name} {found} installed after installing {locked}")
+    if entry.get("kind") == "adapter":
+        command, folder = entry.get("command"), entry.get("folder")
+        if not isinstance(command, list) or not command or not folder:
+            return Loaded(name, cause=f"obs names no command for its adapter {name}")
+        code, out, err = run([*map(str, command), "--help"], Path(folder), LOAD_TIMEOUT)
+        if code:
+            return Loaded(name, cause=f"{' '.join(map(str, command))} --help in {folder} failed: "
+                                      f"{_last(out, err, code)}")
+    return Loaded(name, entry["version"])
+
+
+def kern_root(se_root: Path, root: Path | None) -> Path:
+    """The checkout the core runs for: the project where it lies inside a git checkout, as
+    bootstrap.sh starts it there, else SE's root."""
+    if root is not None:
+        for directory in [root, *root.parents]:
+            if (directory / ".git").exists():
+                return root
+    return se_root
+
+
+def kern_binary(kern: Kern, core_root: Path) -> Path | None:
+    """The binary bootstrap.sh started for the core: the one it handed over, else the one it named in
+    the core's checkout (`.se/.runtime/kern.path`)."""
+    if kern.binary is not None:
+        return kern.binary
+    try:
+        named = (core_root / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return Path(named) if named else None
+
+
+def kern_version(se_root: Path, root: Path | None) -> str:
+    """The kern version the session's binary is built on: the bare kern's own, else the version the
+    application's lock holds for kern, the one its Go components build on."""
+    app = se_modules.app_root(se_root, root)
+    binary = se_modules.app_binary(app)
+    if binary.name == se_modules.KERN:
+        return binary.version
+    return se_modules.read_lock(app).get(se_modules.KERN, ("", ""))[0]
+
+
+def load_kern(se_root: Path, root: Path | None, kern: Kern, ask: Callable[[Path, Path], dict | None]) -> Loaded:
+    """kern: the binary bootstrap.sh placed and started answers `status` with a running core; else
+    why not. A core the machine switched off is no failure, the person's choice."""
+    if kern.off:
+        return Loaded(se_modules.KERN, "off", note=f"kern is not loaded: {kern.off}")
+    if kern.failed:
+        return Loaded(se_modules.KERN, cause=kern.failed)
+    core_root = kern_root(se_root, root)
+    binary = kern_binary(kern, core_root)
+    if binary is None:
+        return Loaded(se_modules.KERN, cause=f"no binary is placed for {core_root}; the start's hook places "
+                                             f"and starts it: bash {se_root.as_posix()}/scripts/bootstrap.sh --hook")
+    answer = ask(binary, core_root)
+    state = (answer or {}).get("state")
+    if state != "running":
+        log = core_root / ".se" / ".runtime" / "core.log"
+        cause = ("its status does not answer" if answer is None else
+                 "the core ended at its start" if (answer or {}).get("died") else f"the core is {state or 'not running'}")
+        return Loaded(se_modules.KERN, cause=f"{binary} {cause}; see {log}")
+    try:
+        version = kern_version(se_root, root)
+    except ModuleError as error:
+        return Loaded(se_modules.KERN, cause=f"its version cannot be read: {error}")
+    return Loaded(se_modules.KERN, version or "unknown")
+
+
+def load_required(se_root: Path, root: Path | None, local_config: Path | None, kern: Kern,
+                  world: "World") -> tuple[list[Loaded], list[str]]:
+    """Load SE's required components from SE's root, whatever the working directory: SE's tree placed
+    at its lock (from what is placed first, as `start-components` places a project's), then each
+    answering, kern as `load_kern`, obs by importing, every other as a component obs installs
+    (`load_obs_component`). What loaded, and the stop lines (`STOP`) naming each that did not."""
+    if not (se_root / se_modules.MANIFEST).is_file():
+        return [], []
+    try:
+        local = se_modules.load_local(local_config or se_modules.default_local_config())
+        modules = [module for module in se_modules.load_manifest(se_root) if not module.optional]
+        locked = se_modules.read_lock(se_root)
+    except ModuleError as error:
+        return [], [f"{STOP}: SE's required components cannot be read: {error}"]
+    if not modules:
+        return [], []
+    names = [module.name for module in modules]
+    try:
+        world.place(se_root, local)
+    except ModuleError as error:
+        first, *rest = str(error).splitlines()
+        return ([Loaded(name, cause="not placed") for name in names],
+                [f"{STOP}: SE's required components ({', '.join(names)}) cannot be placed in {se_root}: {first}", *rest])
+    said, why, obs = None, "", None
+    if any(name != se_modules.KERN for name in names):
+        obs_module = next((module for module in modules if module.name == "obs"), None)
+        if obs_module is None:
+            why = "SE's se.toml declares no obs, which loads them"
+        else:
+            obs = se_modules.resolve(se_root, obs_module, local).checkout
+            said, why = probe_obs(obs, world.run)
+    loaded = []
+    for module in modules:
+        if module.name == se_modules.KERN:
+            loaded.append(load_kern(se_root, root, kern, world.kern))
+        elif said is None:
+            loaded.append(Loaded(module.name, cause=why))
+        elif module.name == "obs":
+            loaded.append(Loaded("obs", str(said.get("obs") or "unknown")))
+        else:
+            loaded.append(load_obs_component(module.name, locked.get(module.name, ("", ""))[0], obs, said,
+                                             world.run))
+    stops = [f"{STOP}: the required component {item.name} did not load: {item.cause}" for item in loaded
+             if item.cause]
+    return loaded, stops
 
 
 def detached_options(os_name: str) -> dict:
@@ -916,6 +1165,8 @@ class World:
     claude: Callable[[list[str]], subprocess.CompletedProcess] = _claude
     kern: Callable[[Path, Path], dict | None] = kern_status
     live: Callable[[Path | None], dict | None] = kern_names.live_work
+    place: Callable[[Path, object], object] = lambda root, local: se_modules.place_tree(root, local)
+    run: Callable[[list[str], Path, float], tuple[int, str, str]] = run_command
 
 
 def status(se_root: Path, root: Path | None, local_config: Path | None, cache_path: Path,
@@ -924,7 +1175,7 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
     local = read_local(se_root, root, local_config)
     now = world.clock()
     cache = Cache.read(cache_path)
-    urls = {item.url for item in local.items if item.url}
+    urls = {item.url for item in local.items + local.required if item.url}
     running = cache.running(now)
     key = listing_key(root)
     if not offline and not cache.fresh(urls, now, key) and not running:
@@ -934,9 +1185,10 @@ def status(se_root: Path, root: Path | None, local_config: Path | None, cache_pa
         argv += (["--root", str(root)] if root else []) + (["--local", str(local_config)] if local_config else [])
         world.spawn(argv + ["check"])
         running = True
-    states = [assess(item, cache.remotes if cache.checked_at is not None else None) for item in local.items]
+    remotes = cache.remotes if cache.checked_at is not None else None
+    states = [assess(item, remotes) for item in local.items]
     return Report(local, states, cache.checked_at, running, now, live_or_cached(world, root, cache.work), root,
-                  components_of(cache, key))
+                  components_of(cache, key), required_states=[assess(item, remotes) for item in local.required])
 
 
 def live_or_cached(world: World, root: Path | None, cached: dict | None) -> dict | None:
@@ -952,7 +1204,7 @@ def check(se_root: Path, root: Path | None, local_config: Path | None, cache_pat
     (work_check) and the project's component listing (list_components), where it sets one; keep
     them in the cache. Without `work` the cached work and listing stay."""
     local = read_local(se_root, root, local_config)
-    remotes = run_check({item.url for item in local.items if item.url}, world.remote)
+    remotes = run_check({item.url for item in local.items + local.required if item.url}, world.remote)
     key = listing_key(root)
     if work:
         found = world.work(root)
@@ -963,7 +1215,8 @@ def check(se_root: Path, root: Path | None, local_config: Path | None, cache_pat
     now = world.clock()
     Cache(now, None, remotes, found, listing).write(cache_path)
     return Report(local, [assess(item, remotes) for item in local.items], now, False, now, found, root,
-                  components_of(Cache(components=listing), key))
+                  components_of(Cache(components=listing), key),
+                  required_states=[assess(item, remotes) for item in local.required])
 
 
 # Refresh: new location first, check that it starts, then switch
@@ -1832,10 +2085,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--note", action="append", default=[], help="a line to show above the greeting")
     status_parser.add_argument("--offline", action="store_true", help="never start the update check")
     status_parser.add_argument("--kern-bin", type=Path, help="bootstrap.sh: the kern binary it started for the project")
-    status_parser.add_argument("--kern-starting", default="", help="bootstrap.sh: why kern is still starting")
     status_parser.add_argument("--kern-failed", default="", help="bootstrap.sh: why kern failed to start")
-    status_parser.add_argument("--kern-none", action="store_true",
-                               help="bootstrap.sh: no core starts, the project being inside no git checkout")
+    status_parser.add_argument("--kern-off", default="", help="bootstrap.sh: why the machine switched the core off")
     commands.add_parser("check", help="read every remote now, in parallel, and, where gh is signed in, "
                         "the work landed since the last retro and the fleet check; cache the result")
     commands.add_parser("refresh", help="move every module due within its range, and SE itself, into place")
@@ -1919,19 +2170,32 @@ def run(args: argparse.Namespace, world: World | None) -> int:
         print("\n".join(full(report, SE_ROOT)))
         return 1 if report.errors else 0
     report = status(SE_ROOT, root, args.local, cache_path, world, args.offline)
-    kern = kern_line(SE_ROOT, root or Path.cwd(), Kern(args.kern_bin, args.kern_starting, args.kern_failed),
-                     world.kern)
-    found = (kern + without_kern(kern, args.host, args.kern_none)
+    answers: dict[tuple[Path, Path], dict | None] = {}
+
+    def ask(binary: Path, at: Path) -> dict | None:  # kern asked once, for its line and its row
+        if (binary, at) not in answers:
+            answers[(binary, at)] = world.kern(binary, at)
+        return answers[(binary, at)]
+
+    told = Kern(args.kern_bin, args.kern_failed, args.kern_off)
+    kern = kern_line(SE_ROOT, kern_root(SE_ROOT, root), told, ask)
+    found = (kern + without_kern(kern, args.host)
              + (_load("copilot_guards").greeting(root, args.host) if args.host == "copilot" else []))
     if not (args.hook or args.greeting):
         print("\n".join(args.note + full(report, SE_ROOT)[:1] + found + full(report, SE_ROOT)[1:]))
         return 0
+    try:
+        loaded, stops = load_required(SE_ROOT, root, args.local, told, dataclasses.replace(world, kern=ask))
+    except Exception as error:  # noqa: BLE001 - the start fails closed, whatever went wrong
+        loaded, stops = [], [f"{STOP}: loading SE's required components failed: {type(error).__name__}: {error}"]
+    report = dataclasses.replace(report, required=loaded)
+    notes = stops + args.note
     lines, session = greeting(report, SE_ROOT), found + session_lines(report, SE_ROOT)
     if args.hook:
-        print(hook_output(lines, args.note, SE_ROOT, args.host, session=session))
+        print(hook_output(lines, notes, SE_ROOT, args.host, session=session))
     else:
-        print(handed(shown_notes(args.note) + lines,
-                     [note for note in args.note if note not in shown_notes(args.note)] + session))
+        print(handed(shown_notes(notes) + lines,
+                     [note for note in notes if note not in shown_notes(notes)] + session))
     return 0
 
 

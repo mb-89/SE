@@ -65,6 +65,48 @@ class Remotes:
         return [se_modules.parse_version(tag[1:]) for tag in self.tags.get(url, [])]
 
 
+class Placed(list):
+    """The fake placing of SE's own tree (se_modules.place_tree): records each root, or refuses with
+    `refusal`."""
+
+    def __init__(self, refusal: str = ""):
+        super().__init__()
+        self.refusal = refusal
+
+    def __call__(self, root, local):
+        self.append(root)
+        if self.refusal:
+            raise se_modules.ModuleError(self.refusal)
+
+
+class Loaders(list):
+    """The fake of the loaders' commands (se_start.run_command), in-process: obs's probe answers
+    `obs` and the components in `installed`; `obs-components install` installs one where `offered`
+    holds it; an adapter's `--help` answers 0 unless its name is in `broken`. Records each command."""
+
+    def __init__(self, obs: str | None = "10.3.2", installed: dict | None = None, offered: tuple = (),
+                 broken: tuple = ()):
+        super().__init__()
+        self.obs, self.installed, self.offered, self.broken = obs, dict(installed or {}), offered, broken
+
+    def __call__(self, argv, cwd, timeout):
+        self.append(list(argv))
+        if argv[-2:-1] == ["-c"] and argv[-1] == se_start.OBS_PROBE:
+            if self.obs is None:
+                return 1, "", "ModuleNotFoundError: No module named 'obs'"
+            return 0, json.dumps({"obs": self.obs, "installed": self.installed}) + "\n", ""
+        if "obs-components" in argv:
+            name, version = argv[-2], argv[-1]
+            if name not in self.offered:
+                return 1, "", f"obs-components: install: {name}: no remote offers it"
+            self.installed[name] = {"version": version, "kind": "adapter", "folder": f"/obs/{name}",
+                                    "command": ["uv", "run", name]}
+            return 0, f"obs-components: installed {name} {version} (adapter)\n", ""
+        if argv[-1] == "--help":
+            return (1, "", "ImportError: broken") if argv[2] in self.broken else (0, "usage: ...\n", "")
+        raise AssertionError(f"unexpected loader command {argv}")
+
+
 class Spawns(list):
     def __call__(self, argv):
         self.append(argv)
@@ -131,7 +173,8 @@ ref = "{SHA}"
     tags = {SE_URL: ["v1.2.0", "v1.3.0", "v2.0.0"], LIB_URL: ["v1.2.0", "v1.4.1", "v2.0.0"],
             TOOL_URL: ["v2.0.3", "v2.1.0"], OBS_URL: ["v0.9.0"]}
     remotes = Remotes(clock, tags)
-    world = se_start.World(clock=clock, remote=remotes, spawn=Spawns(), work=Work())
+    world = se_start.World(clock=clock, remote=remotes, spawn=Spawns(), work=Work(), place=Placed(),
+                           run=Loaders())
     return dict(se=se, project=project, config=config, cache=tmp_path / "cache.json",
                 clock=clock, remotes=remotes, world=world)
 
@@ -460,38 +503,50 @@ def bare_kern(se: Path) -> None:
           'version = "0.2.0"\ndownload = "https://example.com/alice/kern/releases/download/v{version}"\n')
 
 
-def kern_greeting(setup, capsys, monkeypatch, *args, answer=None):
-    """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`."""
+def kern_greeting(setup, capsys, monkeypatch, *args, answer=None, stops=None):
+    """The hook's greeting lines with bootstrap.sh's kern arguments, kern's status answering `answer`,
+    the project inside a git checkout, so the core runs for it. kern is SE's one required component
+    here: the report shows the person its row and, where it did not load, the stop."""
     monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
     bare_kern(setup["se"])
+    write(setup["project"] / ".git" / "HEAD", "")
     asked = []
     world = dataclasses.replace(setup["world"], kern=lambda binary, root: asked.append((binary, root)) or answer)
     assert se_start.main(["--root", str(setup["project"]), "--local", str(setup["config"]),
                           "--cache", str(setup["cache"]), "status", "--hook", "--offline", *args],
                          world=world) == 0
     data = json.loads(capsys.readouterr().out)
-    assert "kern" not in data["systemMessage"], "no daemon line in the report"
+    shown = data["systemMessage"].splitlines()
+    assert not any(line.startswith("kern 0.2.0:") for line in shown), "no daemon line in the report"
+    stop = [line for line in shown if line.startswith(se_start.STOP)]
+    if stops is not None:
+        assert len(stop) == 1 and stop[0].startswith(f"{se_start.STOP}: the required component kern did not "
+                                                     f"load: {stops}")
     context = data["hookSpecificOutput"]["additionalContext"].splitlines()
     return context[context.index(se_start.FOR_SESSION):], asked
 
 
 def test_the_greeting_names_a_running_kern_under_its_first_line(setup, capsys, monkeypatch):
     lines, asked = kern_greeting(setup, capsys, monkeypatch, "--kern-bin", "/k/kern-0.2.0",
-                                 answer={"state": "running", "health": {"pid": 42}})
+                                 answer={"state": "running", "health": {"pid": 42}}, stops=None)
     assert lines[1] == "kern 0.2.0: running", "no pid"
-    assert asked == [(Path("/k/kern-0.2.0"), setup["project"].resolve())]
+    assert asked == [(Path("/k/kern-0.2.0"), setup["project"].resolve())], "asked once, for its line and its row"
 
 
-@pytest.mark.parametrize(("args", "answer", "line"), [
-    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting"),
-    (["--kern-starting", "fetching release v0.2.0 for linux-amd64 in the background"], None,
-     "kern 0.2.0: starting: fetching release v0.2.0 for linux-amd64 in the background"),
-    (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"}, "kern 0.2.0: failed: kern start: boom"),
-    (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see "),
-    (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see "),
+@pytest.mark.parametrize(("args", "answer", "line", "stop"), [
+    (["--kern-bin", "/k"], {"state": "starting"}, "kern 0.2.0: starting", "/k the core is starting; see "),
+    (["--kern-failed", "kern start: boom", "--kern-bin", "/k"], {"state": "running"},
+     "kern 0.2.0: failed: kern start: boom", "kern start: boom"),
+    (["--kern-bin", "/k"], {"state": "not running"}, "kern 0.2.0: failed: not running after its start; see ",
+     "/k the core is not running; see "),
+    (["--kern-bin", "/k"], None, "kern 0.2.0: failed: its status does not answer; see ",
+     "/k its status does not answer; see "),
 ])
-def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys, monkeypatch, args, answer, line):
-    lines, _ = kern_greeting(setup, capsys, monkeypatch, *args, answer=answer)
+def test_the_greeting_names_kern_starting_or_failed_with_the_cause(setup, capsys, monkeypatch, args, answer, line,
+                                                                   stop):
+    """A kern that does not answer running stops the start, naming it and the cause (docs/boot.md
+    "Required components"); the session's line says the same as before."""
+    lines, _ = kern_greeting(setup, capsys, monkeypatch, *args, answer=answer, stops=stop)
     assert lines[1].startswith(line)
     if "see " in line:
         assert lines[1].endswith(str(setup["project"].resolve() / ".se" / ".runtime" / "core.log"))
@@ -514,10 +569,7 @@ def test_the_greeting_names_a_core_that_ended_at_its_start_with_the_first_lines_
 
 @pytest.mark.parametrize(("host", "args", "said"), [
     ("copilot", ["--kern-failed", "no se 0.3.0 release, and no go to build it"], True),
-    ("copilot", ["--kern-starting", "fetching"], False),
     ("claude", ["--kern-failed", "no se 0.3.0 release, and no go to build it"], False),
-    ("copilot", ["--kern-none"], True),
-    ("claude", ["--kern-none"], False),
 ])
 def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monkeypatch, host, args, said):
     """Copilot's sessions work with no core, through SE's scripts and gh, and the greeting says so;
@@ -530,11 +582,170 @@ def test_under_copilot_a_failed_kern_says_se_runs_without_it(setup, capsys, monk
     out = json.loads(capsys.readouterr().out)
     text = out["additionalContext"] if host == "copilot" else out["hookSpecificOutput"]["additionalContext"]
     assert (se_start.WITHOUT_KERN in text.splitlines()) is said
-    if said and "--kern-failed" in args:
+    if said:
         lines = text.splitlines()
         assert lines[lines.index(se_start.WITHOUT_KERN) - 1].startswith("kern 0.2.0: failed: ")
-    if "--kern-none" in args:  # no core started: no line on kern
-        assert not any(line.startswith("kern ") for line in text.splitlines())
+
+
+# SE's required components (docs/boot.md "Required components"): kern, obs and obs-html, loaded from
+# SE's root wherever the session starts, each row the version that answered.
+
+OBS_HTML = {"version": "0.5.2", "kind": "adapter", "folder": "/obs/obs-html", "command": ["uv", "run", "obs-html"]}
+
+
+def required_se(se: Path) -> None:
+    """The installed SE declares kern (by its go.mod), obs and obs-html, and locks them; kern's clone
+    is placed, its binary named in SE's runtime as bootstrap.sh names it for SE's root."""
+    bare_kern(se)
+    manifest = se / "se.toml"
+    write(manifest, manifest.read_text(encoding="utf-8")
+          + '\n[components.obs]\nversion = "^10.3.2"\n\n[components.obs-html]\nversion = "^0.5.2"\n')
+    write(se / "se.lock", f'[components.kern]\nversion = "0.2.0"\nref = "{SHA}"\n\n'
+          f'[components.obs]\nversion = "10.3.2"\nref = "{SHA}"\n\n'
+          f'[components.obs-html]\nversion = "0.5.2"\nref = "{SHA}"\n')
+    write(se / ".se" / ".runtime" / "kern.path", "/bin/se-kern-0.2.0\n")
+
+
+def required_start(setup, monkeypatch, capsys, *args, loaders=None, answer=None, placed=None, where=None):
+    """`status --greeting` of the SE `required_se` made, started in `where` (default: a folder that
+    is no repository and holds no project), each door an in-process fake: the placing, the loaders'
+    commands and kern's status, which answers `answer` (default: running). The report's lines, what
+    the session alone gets, and the fakes."""
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    if not (setup["se"] / "se.lock").is_file():
+        required_se(setup["se"])
+    folder = where or setup["se"].parent / "home"
+    folder.mkdir(exist_ok=True)
+    asked = []
+    loaders = Loaders(installed={"obs-html": dict(OBS_HTML)}) if loaders is None else loaders
+    placed = Placed() if placed is None else placed
+    answer = {"state": "running", "health": {"pid": 7}} if answer is None else answer
+    world = dataclasses.replace(setup["world"], run=loaders, place=placed,
+                                kern=lambda binary, root: asked.append((binary, root)) or answer)
+    assert se_start.main(["--root", str(folder), "--local", str(setup["config"]), "--cache", str(setup["cache"]),
+                          "status", "--greeting", "--offline", *args], world=world) == 0
+    out = capsys.readouterr().out
+    report, _, session = out.partition(f"\n\n{se_start.FOR_SESSION}\n")
+    return report.splitlines(), session.splitlines(), dict(asked=asked, loaders=loaders, placed=placed)
+
+
+def table(lines: list[str]) -> list[str]:
+    return [line for line in lines if line.startswith("| ") and not line.startswith("| component")]
+
+
+def test_started_in_a_folder_that_is_no_repository_the_report_lists_se_kern_obs_and_obs_html_as_they_answered(
+        setup, monkeypatch, capsys):
+    report, _, fakes = required_start(setup, monkeypatch, capsys)
+    assert table(report) == ["| SE | 1.2.0 | unknown |", "| kern | 0.2.0 | unknown |",
+                             "| obs | 10.3.2 | unknown |", "| obs-html | 0.5.2 | unknown |"]
+    assert not any(line.startswith(se_start.STOP) for line in report)
+    assert fakes["placed"] == [setup["se"]], "SE's own tree, placed from SE's root"
+    assert fakes["asked"] == [(Path("/bin/se-kern-0.2.0"), setup["se"])], "the core runs for SE's root"
+    probe, run = fakes["loaders"]
+    assert probe[:5] == ["uv", "run", "--quiet", "--project", str(setup["se"] / ".se" / "modules" / "obs")]
+    assert run == ["uv", "run", "obs-html", "--help"], "obs-html runs, not only installs"
+
+
+def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(setup, monkeypatch, capsys):
+    """obs answers 10.4.0 from its clone while SE locks 10.3.2: the row says 10.4.0."""
+    report, _, _ = required_start(setup, monkeypatch, capsys,
+                                  loaders=Loaders(obs="10.4.0", installed={"obs-html": dict(OBS_HTML)}))
+    assert "| obs | 10.4.0 | unknown |" in table(report)
+
+
+def test_obs_html_missing_is_installed_at_ses_locked_version_and_then_answers(setup, monkeypatch, capsys):
+    loaders = Loaders(installed={}, offered=("obs-html",))
+    report, _, _ = required_start(setup, monkeypatch, capsys, loaders=loaders)
+    assert "| obs-html | 0.5.2 | unknown |" in table(report)
+    install = [argv for argv in loaders if "obs-components" in argv]
+    assert install == [["uv", "run", "--quiet", "--project", str(setup["se"] / ".se" / "modules" / "obs"),
+                        "obs-components", "install", "obs-html", "0.5.2"]]
+
+
+def test_obs_html_at_another_version_is_installed_at_the_locked_one(setup, monkeypatch, capsys):
+    loaders = Loaders(installed={"obs-html": {**OBS_HTML, "version": "0.4.0"}}, offered=("obs-html",))
+    report, _, _ = required_start(setup, monkeypatch, capsys, loaders=loaders)
+    assert "| obs-html | 0.5.2 | unknown |" in table(report)
+    assert any(argv[-3:] == ["install", "obs-html", "0.5.2"] for argv in loaders)
+
+
+@pytest.mark.parametrize(("loaders", "stops"), [
+    (Loaders(installed={}), ["obs-html did not load: `obs-components install obs-html 0.5.2` from "]),
+    (Loaders(installed={"obs-html": dict(OBS_HTML)}, broken=("obs-html",)),
+     ["obs-html did not load: uv run obs-html --help in /obs/obs-html failed: ImportError: broken"]),
+    (Loaders(obs=None), ["obs did not load: obs does not import from ", "obs-html did not load: obs does not import"]),
+], ids=["not-offered", "does-not-run", "obs-does-not-import"])
+def test_a_required_component_that_does_not_load_stops_the_start_naming_it_and_the_cause(
+        setup, monkeypatch, capsys, loaders, stops):
+    report, _, _ = required_start(setup, monkeypatch, capsys, loaders=loaders)
+    shown = [line for line in report if line.startswith(se_start.STOP)]
+    assert len(shown) == len(stops)
+    for line, stop in zip(shown, stops):
+        assert line.startswith(f"{se_start.STOP}: the required component {stop}")
+    assert report.index(shown[-1]) < report.index(next(line for line in report if line.endswith(" started")))
+    assert any(line.startswith(f"| {stops[-1].split()[0]} | none |") for line in table(report))
+
+
+def test_with_kerns_binary_missing_the_start_stops_naming_kern_and_the_command_that_places_it(
+        setup, monkeypatch, capsys):
+    required_se(setup["se"])
+    (setup["se"] / ".se" / ".runtime" / "kern.path").unlink()
+    report, _, fakes = required_start(setup, monkeypatch, capsys)
+    stop = [line for line in report if line.startswith(se_start.STOP)]
+    assert stop == [f"{se_start.STOP}: the required component kern did not load: no binary is placed for "
+                    f"{setup['se']}; the start's hook places and starts it: bash "
+                    f"{setup['se'].as_posix()}/scripts/bootstrap.sh --hook"]
+    assert "| kern | none | unknown |" in table(report) and fakes["asked"] == []
+
+
+def test_a_kern_bootstrap_could_not_place_stops_the_start_with_its_cause(setup, monkeypatch, capsys):
+    report, _, _ = required_start(setup, monkeypatch, capsys, "--kern-failed",
+                                  "no se 1.1.0 release at https://example.com, and no go to build it")
+    assert [line for line in report if line.startswith(se_start.STOP)] == [
+        f"{se_start.STOP}: the required component kern did not load: no se 1.1.0 release at "
+        "https://example.com, and no go to build it"]
+
+
+def test_a_core_the_machine_switched_off_is_no_stop_and_the_session_is_told(setup, monkeypatch, capsys):
+    report, session, fakes = required_start(setup, monkeypatch, capsys, "--kern-off",
+                                            "SE_HOOK_CORE is off in the environment")
+    assert "| kern | off | unknown |" in table(report)
+    assert not any(line.startswith(se_start.STOP) for line in report) and fakes["asked"] == []
+    assert "kern is not loaded: SE_HOOK_CORE is off in the environment" in session
+
+
+def test_se_s_tree_that_cannot_be_placed_stops_the_start_naming_its_components(setup, monkeypatch, capsys):
+    report, _, _ = required_start(setup, monkeypatch, capsys,
+                                  placed=Placed("the required component obs is missing (se -> obs)."))
+    assert [line for line in report if line.startswith(se_start.STOP)] == [
+        f"{se_start.STOP}: SE's required components (kern, obs, obs-html) cannot be placed in {setup['se']}: "
+        "the required component obs is missing (se -> obs)."]
+
+
+def test_in_a_project_its_own_components_follow_and_one_ses_rows_show_is_not_listed_twice(
+        setup, monkeypatch, capsys):
+    """The project of `setup` locks lib and tool; it also locks obs at 10.1.0, which SE's row already
+    shows as loaded: one row, and the session is told the project's lock differs."""
+    project = setup["project"]
+    write(project / "se.lock", (project / "se.lock").read_text(encoding="utf-8")
+          + f'\n[components.obs]\nversion = "10.1.0"\nref = "{SHA}"\n')
+    write(project / "se.toml", (project / "se.toml").read_text(encoding="utf-8").replace(
+        f'[components.obs]\nref = "{SHA}"', '[components.obs]\nversion = "^10.1"'))
+    report, session, _ = required_start(setup, monkeypatch, capsys, where=project)
+    names = [line.split(" | ")[0][2:] for line in table(report)]
+    assert names == ["SE", "kern", "obs", "obs-html", "lib", "tool", "mine"]
+    assert "obs: the project locks 10.1.0; SE loaded 10.3.2 for itself" in session
+
+
+def test_the_hook_shows_the_stop_above_the_report(setup, monkeypatch, capsys):
+    monkeypatch.setattr(se_start, "SE_ROOT", setup["se"])
+    required_se(setup["se"])
+    world = dataclasses.replace(setup["world"], run=Loaders(obs=None), kern=lambda binary, root: {"state": "running"})
+    assert se_start.main(["--root", str(setup["se"].parent / "home"), "--local", str(setup["config"]),
+                          "--cache", str(setup["cache"]), "status", "--hook", "--offline"], world=world) == 0
+    shown = json.loads(capsys.readouterr().out)["systemMessage"].splitlines()
+    assert shown[0].startswith(f"{se_start.STOP}: the required component obs did not load: ")
+    assert shown[2] == "SE 1.2.0 started"
 
 
 @pytest.mark.parametrize("host", ("copilot", "claude"))
