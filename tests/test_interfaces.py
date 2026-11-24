@@ -15,9 +15,10 @@ import templates
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
-              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
+              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
+              "started-comment", "claim-undone")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
-            "finding-ref")
+            "finding-ref", "started-comment", "claim-undone")
 
 
 @pytest.fixture(scope="module")
@@ -222,3 +223,17 @@ def test_every_comment_syntax_wraps_the_generated_marker_s_words_and_reads_them_
         assert generated.marker_at(line + "\n", syntax) == generated.Marker("se_plugin.py build", "src/a.md")
     with pytest.raises(interfaces.InterfaceError, match="source is required"):
         generated.line("g", "", "hash")
+
+
+def test_the_started_and_claim_undone_comments_are_the_lines_start_and_unclaim_wrote_by_hand():
+    import work_tickets
+
+    branch, started = "feature/x", "https://example.com/issues/7#issuecomment-1"
+    assert work_tickets.started_comment(branch) == "Started: worker session on branch `{branch}`\n".format(
+        branch=branch)
+    assert interfaces.write("claim-undone", {"started": started, "branch": branch}) + "\n" == (
+        "Claim undone: {started} started no worker; `ready`, `claim` and `start` take its branch "
+        "`{branch}` again.\n").format(started=started, branch=branch)
+    assert work_tickets.started_comment(branch).startswith(work_tickets.STARTED_PREFIX)
+    assert interfaces.write("claim-undone", {"started": started, "branch": branch}).startswith(
+        work_tickets.UNCLAIMED_MARK)

@@ -4513,9 +4513,7 @@ def forget_claim(root: Path, number: int) -> None:
     claim_record_path(root, number).unlink(missing_ok=True)
 
 
-UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment
-UNCLAIMED_COMMENT = (UNCLAIMED_MARK + " {started} started no worker; `ready`, `claim` and `start` "
-                     "take its branch `{branch}` again.\n")
+UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment (templates/claim-undone.md)
 
 
 def unclaim(root: Path, number: int, repo: str) -> str:
@@ -4548,7 +4546,7 @@ def unclaim(root: Path, number: int, repo: str) -> str:
                           for comment in comments[starts[-1] + 1:]):
         started = str(comments[starts[-1]].get("url") or "") or "its Started comment"
         run_gh_with_body(root, ["issue", "comment", str(number), *where],
-                         UNCLAIMED_COMMENT.format(started=started, branch=branch))
+                         interface_message("claim-undone", started=started, branch=branch) + "\n")
         done.append("Started comment answered")
     return f"Unclaimed #{number}: {', '.join(done) if done else 'nothing left to undo'}"
 
@@ -4877,7 +4875,7 @@ def start(
 def post_started(root: Path, number: int, repo: str, branch: str) -> None:
     """Post the Started comment on work issue #`number` through gh, as `start_plan`'s last step."""
     run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)],
-                     STARTED_COMMENT.format(branch=branch))
+                     started_comment(branch))
 
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
@@ -4943,7 +4941,9 @@ def branch_worktree(root: Path, branch: str) -> Path | None:
     return None
 
 
-STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
+def started_comment(branch: str) -> str:
+    """The Started comment of a worker on `branch` (templates/started-comment.md)."""
+    return interface_message("started-comment", branch=branch) + "\n"
 
 
 def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
@@ -4961,7 +4961,7 @@ def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: b
             "assignees": [agent]}),) if agent else ()),
         Step("comment_issue", "add_issue_comment", {
             **owner_repo(repo), "issue_number": number,
-            "body": STARTED_COMMENT.format(branch=branch)},
+            "body": started_comment(branch)},
             note="followed by the host's footer where it requires one on every comment"),
     ), f"#{number} is started: in-progress, with its Started comment")
 

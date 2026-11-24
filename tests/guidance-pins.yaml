@@ -5,6 +5,9 @@
 boot-report:
   - discover-cheap-load-late
   - guidance-comes-first
+claim-undone:
+  - discover-cheap-load-late
+  - guidance-comes-first
 decision:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -104,6 +107,9 @@ skills-page:
   - discover-cheap-load-late
   - guidance-comes-first
 standing-questions:
+  - discover-cheap-load-late
+  - guidance-comes-first
+started-comment:
   - discover-cheap-load-late
   - guidance-comes-first
 sub-agents-page:

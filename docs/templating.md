@@ -22,6 +22,7 @@ both.
 |---|---|
 | `templates/decision.md` | A decision note: the situation, the problem and what others do, then the options' pugh fence. |
 | `templates/boot-report.md` | SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command. |
+| `templates/claim-undone.md` | The answer to a Started comment whose claim was undone: that comment and the branch the next start takes. |
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/generated-marker.md` | A generated file's marker words. |
@@ -52,6 +53,7 @@ both.
 | `templates/rules-page.md` | The page `docs/rules.md`. |
 | `templates/skills-page.md` | The page `docs/skills.md`. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
+| `templates/started-comment.md` | A work issue's Started comment: the branch its worker works on. |
 | `templates/sub-agents-page.md` | The page `docs/sub-agents.md`. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
@@ -80,9 +82,9 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `delivery-notice`, `escalation`, `finding-ref`,
-`generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`, `rules-page`,
-`skills-page`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
+The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `escalation`,
+`finding-ref`, `generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`,
+`rules-page`, `skills-page`, `started-comment`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
 other.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
@@ -90,7 +92,8 @@ other.
 
 Through `scripts/interfaces.py`:
 
-- `work_tickets.py deliver` and `escalate` write their messages;
+- `work_tickets.py deliver` and `escalate` write their messages, `start` its Started comment and
+  `unclaim` its answer to it;
 - `se_start.py` its start report, a snippet of several lines with a table and a line of three
   cases;
 - `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;

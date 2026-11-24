@@ -1,0 +1,25 @@
+{
+  "template": "se/claim-undone",
+  "version": "1.0.0",
+  "says": "The answer to a Started comment whose claim was undone: that comment and the branch the next start takes.",
+  "message": "Claim undone: {started} started no worker; `ready`, `claim` and `start` take its branch `{branch}` again.",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "started": {
+        "type": "string",
+        "description": "The Started comment answered: its URL, or `its Started comment` where it has none."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The work branch, named like the work issue's title."
+      }
+    },
+    "required": [
+      "started",
+      "branch"
+    ],
+    "additionalProperties": false
+  }
+}

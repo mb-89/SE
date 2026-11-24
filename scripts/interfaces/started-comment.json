@@ -1,0 +1,20 @@
+{
+  "template": "se/started-comment",
+  "version": "1.0.0",
+  "says": "A work issue's Started comment: the branch its worker works on.",
+  "message": "Started: worker session on branch `{branch}`",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "branch": {
+        "type": "string",
+        "description": "The work branch, named like the work issue's title."
+      }
+    },
+    "required": [
+      "branch"
+    ],
+    "additionalProperties": false
+  }
+}
