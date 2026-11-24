@@ -372,7 +372,7 @@ def test_the_countdown_counts_the_landings_as_collect_does_from_the_lists(checko
     assert found["retro"].landed == collected(checkout).sizes["landed"] == 2
     assert (found["retro"].since_run, found["retro"].count, found["retro"].due) == (5, 2, True)
     assert found["retro"].reason == "11 days since the last retro with 2 came back (due after 7 days)"
-    assert door.reads == ["issues.json", "open-issues.json", "pulls.json"]
+    assert door.reads == ["open-issues.json", "issues.json", "pulls.json"]
 
     given = answers(checkout)
     given["issues.json"].append(issue(31, "docs/retro-20261105", "2026-11-05T00:00:00Z",
@@ -666,6 +666,257 @@ def test_the_gh_door_reads_every_page_and_leaves_out_pull_requests(monkeypatch):
     assert [item["number"] for item in door.closed_issues()][-2:] == [99, 100]
     assert calls == ["issues?state=closed&per_page=100&page=1",
                      "issues?state=closed&per_page=100&page=2"]
+
+
+def run_item(number: int, title: str, created: str, closed: str = "", updated: str = "",
+             labels: tuple[str, ...] = ("work",), reason: str = "completed") -> dict:
+    """An issue as the REST API lists it: closed at `closed`, else open."""
+    return {"number": number, "title": title, "state": "closed" if closed else "open",
+            "created_at": created, "closed_at": closed or None,
+            "updated_at": updated or closed or created, "state_reason": reason if closed else None,
+            "labels": [{"name": name} for name in labels], "body": ""}
+
+
+def run_pull(number: int, issue: int, merged: str, updated: str = "") -> dict:
+    return {"number": number, "title": f"feat/n{issue}", "body": f"Fixes #{issue}",
+            "base": {"ref": "main"}, "head": {"ref": f"feat/n{issue}", "sha": f"{number:040d}"},
+            "merged_at": merged or None, "updated_at": updated or merged, "merge_commit_sha": None}
+
+
+def run_history() -> dict[str, list[dict]]:
+    """Two retros (#1, #4) and an overhaul (#2) between them, and a retro named by its title
+    alone (#14) after the overhaul. #6 closed after retro #4 started but its landing merged just
+    before; #9 closed long ago and was commented on since; #8
+    escalated, #10 closed as not planned; #3, #5 and #11 lie before the cut-off."""
+    return {
+        "closed": [
+            run_item(1, "docs/retro-20261001", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z",
+                     labels=("retro",)),
+            run_item(2, "overhaul-20261010", "2026-10-10T00:00:00Z", "2026-10-12T00:00:00Z",
+                     labels=("discovery",)),
+            run_item(3, "feat/n3", "2026-10-03T00:00:00Z", "2026-10-05T00:00:00Z"),
+            run_item(4, "docs/retro-20261101", "2026-11-01T00:00:00Z", "2026-11-03T00:00:00Z",
+                     labels=("retro",)),
+            run_item(5, "feat/n5", "2026-10-15T00:00:00Z", "2026-10-20T00:00:00Z"),
+            run_item(6, "feat/n6", "2026-10-30T00:00:00Z", "2026-11-01T01:00:00Z"),
+            run_item(7, "feat/n7", "2026-11-04T00:00:00Z", "2026-11-05T00:00:00Z"),
+            run_item(8, "feat/n8", "2026-10-25T00:00:00Z", "2026-11-06T00:00:00Z",
+                     labels=("work", "escalated")),
+            run_item(9, "feat/n9", "2026-08-20T00:00:00Z", "2026-09-01T00:00:00Z",
+                     "2026-11-07T00:00:00Z"),
+            run_item(10, "feat/n10", "2026-11-02T00:00:00Z", "2026-11-08T00:00:00Z",
+                     reason="not_planned"),
+            run_item(11, "Not a work issue", "2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z",
+                     labels=()),
+            run_item(14, "docs/retro-20261018", "2026-10-18T00:00:00Z", "2026-10-19T00:00:00Z",
+                     labels=()),
+        ],
+        "open": [run_item(12, "feat/n12", "2026-11-02T00:00:00Z", updated="2026-11-09T00:00:00Z",
+                          labels=("work", "escalated")),
+                 run_item(13, "feat/n13", "2026-11-09T00:00:00Z")],
+        "pulls": [run_pull(103, 3, "2026-10-05T00:00:00Z"),
+                  run_pull(105, 5, "2026-10-20T00:00:00Z"),
+                  run_pull(106, 6, "2026-10-31T23:00:00Z"),
+                  run_pull(107, 7, "2026-11-05T00:00:00Z"),
+                  run_pull(108, 9, "2026-09-01T00:00:00Z"),
+                  run_pull(199, 11, "", "2026-07-01T00:00:00Z")],
+    }
+
+
+def newest_first(items: list[dict]) -> list[dict]:
+    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
+
+class WholeDoor:
+    """A door with no cut-off read over `history`: every list whole, as FileDoor reads it."""
+
+    def __init__(self, history: dict[str, list[dict]]) -> None:
+        self.history, self.missing, self.read = history, [], {"issues": [], "pulls": []}
+
+    def closed_issues(self):
+        self.read["issues"] += [item["number"] for item in self.history["closed"]]
+        return list(self.history["closed"])
+
+    def open_issues(self):
+        return list(self.history["open"])
+
+    def pulls(self):
+        self.read["pulls"] += [item["number"] for item in self.history["pulls"]]
+        return list(self.history["pulls"])
+
+    def issue(self, number):
+        return next(item for item in self.history["closed"] if item["number"] == number)
+
+
+class CutOffDoor(WholeDoor):
+    """The same history with the cut-off reads (retro.CUT_OFF_READS), as GitHub answers them:
+    newest update first and by label; records what it handed over."""
+
+    def until(self, kind: str, items: list[dict], stop) -> list[dict]:
+        found = []
+        for item in newest_first(items):
+            if stop(item):
+                break
+            self.read[kind].append(item["number"])
+            found.append(item)
+        return found
+
+    def closed_issues_until(self, stop):
+        return self.until("issues", self.history["closed"], stop)
+
+    def closed_issues_labelled(self, label):
+        return [item for item in self.history["closed"] if label in retro.label_names(item)]
+
+    def pulls_until(self, stop):
+        return self.until("pulls", self.history["pulls"], stop)
+
+
+def overhaul_off(root: Path) -> None:
+    (root / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
+
+
+def test_the_cut_off_read_gives_the_countdowns_of_the_whole_read(tmp_path):
+    """On one history with two retros and an overhaul, the cut-off read stops the closed issues
+    at the older of the newest retro's and overhaul's starts and the pull requests at the newest
+    retro's, read on past it for #6's landing, merged just before retro #4 started: the
+    countdowns are those of the whole read. With the overhaul countdown off, the issues stop at
+    the retro's start, and the retro countdown is the whole read's; the overhaul's, off, counts
+    the retros the label read finds (docs/fleet.md "Retro due")."""
+    whole, cut = WholeDoor(run_history()), CutOffDoor(run_history())
+    expected = retro.countdowns(whole, REPO, "main", tmp_path, NOW)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    assert found == expected
+    assert (found["retro"].since_run, found["retro"].landed, found["retro"].failed) == (4, 2, 2)
+    assert (found["overhaul"].since_run, found["overhaul"].count) == (2, 2)
+    assert cut.read == {"issues": [10, 9, 8, 7, 4, 6, 5, 14, 2], "pulls": [107, 106]}
+    assert len(whole.read["issues"]) == 12 and len(whole.read["pulls"]) == 6
+
+    overhaul_off(tmp_path)
+    cut = CutOffDoor(run_history())
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    expected = retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    assert found["retro"] == expected["retro"]
+    assert (found["overhaul"].due, expected["overhaul"].due) == (False, False)
+    assert (found["overhaul"].count, expected["overhaul"].count) == (1, 2)
+    assert cut.read == {"issues": [10, 9, 8, 7, 4, 6], "pulls": [107, 106]}
+
+
+def test_with_no_run_yet_the_cut_off_read_reads_the_whole_history(tmp_path):
+    """Where no retro exists, nothing bounds what can count: every closed issue and pull request
+    is read, with the countdowns of the whole read. Where retros exist but no overhaul, the read
+    stops at the newest retro's start and the overhaul countdown counts the retros found by their
+    label: the whole read's, as long as each older retro carries it."""
+    history = run_history()
+    history["closed"] = [item for item in history["closed"] if item["number"] not in (1, 2, 4, 14)]
+    cut = CutOffDoor(history)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["retro"].since_run is None and found["overhaul"].since_run is None
+    assert sorted(cut.read["issues"]) == [3, 5, 6, 7, 8, 9, 10, 11]
+    assert sorted(cut.read["pulls"]) == [103, 105, 106, 107, 108, 199]
+
+    history = run_history()
+    history["closed"] = [item for item in history["closed"] if item["number"] != 2]
+    cut = CutOffDoor(history)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    expected = retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["retro"] == expected["retro"]
+    assert cut.read["issues"] == [10, 9, 8, 7, 4, 6]
+    assert (found["overhaul"].count, expected["overhaul"].count) == (2, 3)
+
+    next(item for item in history["closed"] if item["number"] == 14)["labels"] = [{"name": "retro"}]
+    found = retro.countdowns(CutOffDoor(history), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["overhaul"].count == 3
+
+class FakeRelay:
+    """kern's relay door as the host's GitHub tools answer over `history`: list_issues in pages
+    of `size` with a cursor, newest update first with orderBy, by label, without close times
+    (the tools name none) and labels as names; list_pull_requests by page; issue_read whole."""
+
+    def __init__(self, history: dict[str, list[dict]], size: int = 100) -> None:
+        self.history, self.size, self.calls = history, size, []
+
+    def ask(self, tool, arguments, note="", wait=""):
+        self.calls.append((tool, dict(arguments)))
+        if tool == "issue_read":
+            return next(item for item in self.history["closed"]
+                        if item["number"] == arguments["issue_number"])
+        if tool == "list_pull_requests":
+            items = self.history["pulls"]
+            if arguments.get("sort") == "updated":
+                items = newest_first(items)
+            start = (arguments["page"] - 1) * arguments["perPage"]
+            return items[start:start + arguments["perPage"]]
+        items = self.history["closed" if arguments["state"] == "CLOSED" else "open"]
+        if arguments.get("orderBy") == "UPDATED_AT":
+            assert arguments["direction"] == "DESC"
+            items = newest_first(items)
+        if arguments.get("labels"):
+            items = [item for item in items if set(arguments["labels"]) <= set(retro.label_names(item))]
+        start = int(arguments.get("after") or 0)
+        page = [{**{key: value for key, value in item.items() if key != "closed_at"},
+                 "labels": retro.label_names(item)} for item in items[start:start + self.size]]
+        more = start + self.size < len(items)
+        return {"issues": page, "pageInfo": {"hasNextPage": more,
+                                             "endCursor": str(start + self.size) if more else ""}}
+
+    def issues(self, state):
+        found, after = [], ""
+        while True:
+            data = self.ask("list_issues", {"state": state, "perPage": 100,
+                                            **({"after": after} if after else {})})
+            found += data["issues"]
+            after = data["pageInfo"]["endCursor"]
+            if not after:
+                return found
+
+
+def test_the_relay_and_gh_doors_read_cut_off_and_the_answer_files_whole(tmp_path, monkeypatch):
+    """kern's relay door (ToolDoor) reads newest update first and by label, page by page up to
+    where the countdowns stop it, and reads each close time its list does not name: the
+    countdowns of the whole read. gh's door (GhDoor) asks the REST API sorted the same and
+    stops within a page. The answer files (FileDoor) have no cut-off read and are read whole."""
+    relay = FakeRelay(run_history(), size=3)
+    found = retro.countdowns(retro.ToolDoor(relay), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    lists = [arguments for tool, arguments in relay.calls if tool == "list_issues"
+             and arguments["state"] == "CLOSED"]
+    assert [item.get("labels") for item in lists if "labels" in item] == [["retro"], ["discovery"]]
+    ordered = [item for item in lists if item.get("orderBy") == "UPDATED_AT"]
+    assert [item.get("after") for item in ordered] == [None, "3", "6", "9"]
+    assert [arguments for tool, arguments in relay.calls if tool == "list_pull_requests"] == [
+        {"state": "closed", "sort": "updated", "direction": "desc", "perPage": 100, "page": 1}]
+
+    calls = []
+    history = run_history()
+
+    class FakeGitHub:
+        def __init__(self, root, repo):
+            pass
+
+        def api(self, path):
+            calls.append(path)
+            if path.startswith("pulls?"):
+                return newest_first(history["pulls"])
+            if "labels=" in path:
+                label = path.split("labels=")[1].split("&")[0]
+                return [item for item in history["closed"] if label in retro.label_names(item)]
+            if "state=open" in path:
+                return history["open"]
+            return newest_first(history["closed"]) + [{"number": 99, "pull_request": {},
+                                                       "updated_at": "2026-01-01T00:00:00Z"}]
+
+    monkeypatch.setattr(work_tickets, "GitHub", FakeGitHub)
+    found = retro.countdowns(retro.GhDoor(tmp_path, REPO, REPO), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    assert "issues?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "issues?state=closed&labels=retro&per_page=100&page=1" in calls
+
+    assert not any(hasattr(retro.FileDoor, name) for name in retro.CUT_OFF_READS)
+    assert all(hasattr(door, name) for door in (retro.GhDoor, retro.ToolDoor)
+               for name in retro.CUT_OFF_READS)
 
 
 LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
