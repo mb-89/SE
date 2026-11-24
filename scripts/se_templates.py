@@ -171,8 +171,9 @@ and CI's `check` job run it (README "Templates").
 - Which files: the PATHs given; or, with `--changed REF`, every file that differs between REF's
   merge base with HEAD and the working tree (committed, staged or not) and every untracked file
   git does not ignore, where a template claims its path. A deleted file is not checked; where no
-  template claims a path, it says so in one line and reads no git. `--root` is
-  the project root the templates' paths are relative to (default: the git checkout holding the
+  template claims a path outside `.se/` (LOCAL_STATE, SE's local state, which no project commits:
+  SE's own claim, a work issue's body file, is the gate's alone), it says so in one line and reads
+  no git. `--root` is the project root the templates' paths are relative to (default: the git checkout holding the
   working directory).
 - Which templates: `--templates DIR`'s; else the root's `templates/` (at `origin/<integration branch>` where
   it holds them, `templates.load`); where the root has none, SE's own.
@@ -265,6 +266,9 @@ GITHUB_FILE_TOOLS = ("push_files", "create_or_update_file")
 #: claims a path, its first line FILES_CLAIMED, then each glob a template owns (`templates.owned`).
 FILES_RUNTIME = Path(".se") / ".runtime" / "templates-files"
 FILES_CLAIMED = "claimed"
+#: SE's local state, which no project commits: a claim under it is the gate's alone, as git never
+#: carries such a file to check-files --changed (stop-check, push, CI).
+LOCAL_STATE = ".se/"
 #: The shell reader (the module docstring: The shell reader). The input keys of a shell tool.
 SHELL_KEYS = ("command", "input", "script")
 #: `gh` as a word followed by a space, as se_hook.sh's filter finds it (`\n` and `\t` as JSON
@@ -1524,6 +1528,11 @@ def claims_a_path(catalog: dict) -> bool:
     return bool(sibling("templates").owned(catalog))
 
 
+def claims_a_carried_path(catalog: dict) -> bool:
+    """Whether a template of `catalog` claims a path git may carry: one outside LOCAL_STATE."""
+    return any(not glob.startswith(LOCAL_STATE) for glob, _ in sibling("templates").owned(catalog))
+
+
 def claim_templates(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
     """The templates check-files checks against and the folder `templates.py draft --templates` reads them
     from (None: SE's own): `folder`'s, else the root's, else SE's where the root has none."""
@@ -1637,9 +1646,9 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
     lines where a changed claimed file breaks its template; None where no template claims a path
-    or every such file passes. Errors raise."""
+    outside LOCAL_STATE or every such file passes. Errors raise."""
     catalog, source = claim_templates(root, None)
-    if not claims_a_path(catalog):
+    if not claims_a_carried_path(catalog):
         return None
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
@@ -1654,8 +1663,8 @@ def run_check_files(options: argparse.Namespace) -> int:
     try:
         if options.changed:
             catalog, source = claim_templates(root, options.templates)
-            if not claims_a_path(catalog):
-                print(f"{CHECK_FILES}: no template claims a path; nothing checked")
+            if not claims_a_carried_path(catalog):
+                print(f"{CHECK_FILES}: no template claims a path outside {LOCAL_STATE}; nothing checked")
                 return 0
             paths = changed_files(root, options.changed)
         else:

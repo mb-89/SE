@@ -860,7 +860,7 @@ def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys
             (folder / note.name).write_bytes(note.read_bytes())
     assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path),
                "--templates", str(folder))[:2] == (
-        0, "se_templates.py check-files: no template claims a path; nothing checked\n")
+        0, "se_templates.py check-files: no template claims a path outside .se/; nothing checked\n")
 
 
 WORK_FILE_GLOB = ".se/issues/*.md"

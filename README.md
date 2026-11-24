@@ -2602,12 +2602,12 @@ turn, be pushed or pass CI; each refusal names the file, the template and each f
 - `scripts/se_templates.py check-files` with `--changed` and a ref checks every claimed file changed
   since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
 - `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
-  `check` job against the pull request's base. Where no template claims a path, it checks nothing.
+  `check` job against the pull request's base. Where no template claims a path outside `.se/`, SE's
+  local state that no project commits, it checks nothing.
 - Under Copilot the Stop hook only advises.
 - SE's one claimed path is a work issue's body file, `.se/issues/<name>.md` (`work-file`): SE
   writes it with `templates.py fill work-file --path .se/issues/<name>.md`, then files it with
-  `work_tickets.py file --title <name> --body-file .se/issues/<name>.md`, which reads it against
-  `work`, its front matter left out.
+  `work_tickets.py file` and `--body-file`, which reads it against `work`, its front matter left out.
 - SE's template gate denies every Write, Edit or MultiEdit of a claimed file before it runs, and
   each path of `push_files` and `create_or_update_file`, whatever it would leave. It names the
   template and the fill, `templates.py fill <template> --path <file>`, which writes the file itself.

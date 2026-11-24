@@ -3181,7 +3181,8 @@ ON_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n- The sc
 
 def claimed_checkout(tmp_path: Path, monkeypatch, note: str, claims: bool = True) -> Path:
     """A checkout, no worker's, whose origin/main holds the template `note` claiming notes/*.md
-    (none of its own where `claims` is false, so SE's, which claim no path); notes/a.md untracked."""
+    (none of its own where `claims` is false, so SE's, which claim no path outside .se/); notes/a.md
+    untracked."""
     root = stop_checkout(tmp_path, monkeypatch, queue=False)
     if claims:
         (root / "templates").mkdir()
@@ -3254,7 +3255,7 @@ def test_no_template_claiming_a_path_answers_stop_and_push_as_before(tmp_path, m
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()
     assert pushed(root, monkeypatch) == "gated"
     assert check_files(root, capsys) == (0, "se_templates.py check-files: no template claims a "
-                                            "path; nothing checked\n")
+                                            "path outside .se/; nothing checked\n")
 
 
 def test_claimed_files_are_read_from_origin_so_a_branch_cannot_drop_its_templates(
