@@ -15,9 +15,12 @@ import templates
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
-              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
+              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
+              "started-comment", "claim-undone", "review-declined", "limit-restart",
+              "release-trailer", "review-done", "run-closed")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
-            "finding-ref")
+            "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
+            "release-trailer", "review-done", "run-closed")
 
 
 @pytest.fixture(scope="module")
@@ -223,3 +226,78 @@ def test_every_comment_syntax_wraps_the_generated_marker_s_words_and_reads_them_
         assert generated.marker_at(line + "\n", syntax) == generated.Marker("se_plugin.py build", "src/a.md")
     with pytest.raises(interfaces.InterfaceError, match="source is required"):
         generated.line("g", "", "hash")
+
+
+def test_the_started_and_claim_undone_comments_are_the_lines_start_and_unclaim_wrote_by_hand():
+    import work_tickets
+
+    branch, started = "feature/x", "https://example.com/issues/7#issuecomment-1"
+    assert work_tickets.started_comment(branch) == "Started: worker session on branch `{branch}`\n".format(
+        branch=branch)
+    assert interfaces.write("claim-undone", {"started": started, "branch": branch}) + "\n" == (
+        "Claim undone: {started} started no worker; `ready`, `claim` and `start` take its branch "
+        "`{branch}` again.\n").format(started=started, branch=branch)
+    assert work_tickets.started_comment(branch).startswith(work_tickets.STARTED_PREFIX)
+    assert interfaces.write("claim-undone", {"started": started, "branch": branch}).startswith(
+        work_tickets.UNCLAIMED_MARK)
+
+
+def test_the_decline_comment_is_the_line_review_wrote_by_hand_and_the_retro_reads_it():
+    import retro
+    import review
+
+    number, url = 5, "https://example.com/pull/5"
+    comment = review.escalation(number, url)
+    assert comment == (f"Declined by the review of pull request #{number} ({url}): the change is "
+                       "fundamentally wrong and does not land. The review comment there holds the findings; "
+                       "SE re-scopes this issue or takes it to the owner.\n")
+    assert retro.DECLINED.match(comment).groups() == ("5", url)
+
+
+def test_the_limit_restart_comment_is_the_line_the_remedy_named_by_hand_and_its_reader_finds_it():
+    import limit_restart
+
+    comment = limit_restart.restarted_comment("session_a")
+    assert comment == f"{limit_restart.RESTARTED} session session_a"
+    assert limit_restart.restarted([{"body": comment}])
+
+
+def test_the_release_trailer_is_the_line_written_by_hand_its_pattern_reads_and_refuses_other_kinds():
+    import work_tickets
+
+    for kind in work_tickets.RELEASE_ORDER:
+        trailer = interfaces.write("release-trailer", {"kind": kind})
+        assert trailer == f"{work_tickets.RELEASE_TRAILER}: {kind}"
+        assert work_tickets.RELEASE_TRAILER_PATTERN.search(f"Integrate x\n\n{trailer}\n")[1] == kind
+    with pytest.raises(interfaces.InterfaceError, match="se/release-trailer") as refused:
+        interfaces.write("release-trailer", {"kind": "huge"})
+    assert "kind" in str(refused.value)
+
+
+
+@pytest.mark.parametrize("name, stated, placeholders", [
+    ("review-done", "review of PR #<n>: <verdict>, <comment URL>",
+     {"pr": "<n>", "verdict": "<verdict>", "url": "<comment URL>"}),
+    ("run-closed", "<retro|overhaul> #<n> closed: <report link>",
+     {"kind": "<retro|overhaul>", "number": "<n>", "link": "<report link>"}),
+])
+def test_an_agent_s_end_message_is_the_line_its_agent_text_stated_and_its_example_renders_it(
+        catalog, name, stated, placeholders):
+    template = catalog[name]
+    assert interfaces.line(template.message, placeholders) == stated
+    example = template.example["fields"]
+    expected = stated
+    for field, mark in placeholders.items():
+        expected = expected.replace(mark, example[field])
+    rendered = interfaces.write(name, dict(example))
+    assert rendered == expected
+    assert interfaces.read(name, rendered) == example
+
+
+def test_the_review_s_end_message_takes_only_the_review_s_verdicts():
+    import review
+
+    assert [interfaces.write("review-done", {"pr": "5", "verdict": verdict, "url": "u"})
+            for verdict in review.VERDICTS] == [f"review of PR #5: {verdict}, u" for verdict in review.VERDICTS]
+    with pytest.raises(interfaces.InterfaceError, match="se/review-done"):
+        interfaces.write("review-done", {"pr": "5", "verdict": "fine", "url": "u"})

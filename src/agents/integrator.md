@@ -282,8 +282,8 @@ person sets the version by hand in a pull request, which the next release tags a
   labels it `escalated` and comments the file: its first line the one-line question, then the
   decision note's link and your recommendation.
   - At the top level, then send SE session one queued message (`send_message`, delivery
-    `queue`): the escalation `escalate` prints after `Send SE:`, `escalated #<n>: <one-line
-    question>` (the interface template `templates/escalation.md`), as it stands.
+    `queue`): the escalation `escalate` prints after `Send SE:` (the interface template
+    `templates/escalation.md`), as it stands.
   - Do not wait for the answer; continue with the next integration.
 - A step only the person may approve (a one-way ref change through `work_tickets.py refs
   request`, a setting, a permission) is prepared and escalated as the work model's
