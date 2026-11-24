@@ -218,7 +218,8 @@ def test_without_gh_the_release_prints_its_landing_plan_and_the_read_back_finish
         assert landing.plans == []
         assert "Pushed land/release-v1.2.4 at " in out
         assert '"head": "land/release-v1.2.4"' in out and '"title": "Release v1.2.4"' in out
-        assert '"commit_message": "fix/one-20261106: patch"' in out
+        assert '"commit_message": "fix/one-20261106: patch\\n\\nRelease-kind: patch"' in out
+        assert "Release-kind: patch\\n" in out.split('"body": ', 1)[1].split('", "', 1)[0]
         assert f"work_tickets.py release --read-back v1.2.4 --worktree {checkout}" in out
         assert released(checkout) == ("1.2.3", "v1.2.3")
         plan = work_tickets.handoff_path(checkout, work_tickets.RELEASE_HANDOFF)
@@ -507,6 +508,16 @@ def test_a_merge_whose_kind_cannot_be_told_is_refused_with_the_remedy(checkout, 
             "--pr-description <file> prints it from the field report in the pull request "
             "description; one already on the integration branch stays as it is: set "
             "project.version by hand in a pull request, which the release then tags as it is") in error
+
+
+def test_a_merge_whose_message_is_the_field_report_github_took_releases_by_its_kind(checkout):
+    """GitHub's own squash takes the pull request's description as the message: the report's
+    Release kind is the kind that integration states (work_tickets.py stated_release_kinds)."""
+    integrate(checkout, "fix/topic-20261106", trailer=(
+        "<!-- se:field-report -->\n<!-- **Release kind:** patch|minor|major — <reason> -->\n"
+        "**Release kind:** minor — new behaviour\n<!-- se:field-report:end -->"))
+    assert release(checkout) == 0
+    assert released(checkout) == ("1.3.0", "v1.3.0")
 
 
 def test_a_second_integration_of_a_branch_releases_a_patch_and_the_first_its_kind(checkout):

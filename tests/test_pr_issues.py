@@ -83,7 +83,8 @@ def github() -> Iterator[FakeGitHub]:
 
 def run(github: FakeGitHub, tmp_path: Path, body: str, *, base: str = "main",
         author: str = "alice", labels: tuple[str, ...] = (), token: str = TOKEN,
-        head: str = "topic", capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
+        head: str = "topic", gate: str | None = None,
+        capsys: pytest.CaptureFixture[str]) -> tuple[int, str]:
     """The job's step: the event file, the token and the repository as Actions passes them."""
     event = tmp_path / "event.json"
     event.write_text(json.dumps({
@@ -94,7 +95,7 @@ def run(github: FakeGitHub, tmp_path: Path, body: str, *, base: str = "main",
     }), encoding="utf-8")
     env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_TOKEN": token, "GITHUB_REPOSITORY": REPO,
            "GITHUB_API_URL": github.url}
-    code = pr_issues.main(["--repo", str(tmp_path)], env)
+    code = pr_issues.main(["--repo", str(tmp_path), *((gate,) if gate else ())], env)
     return code, capsys.readouterr().out
 
 
@@ -270,3 +271,72 @@ def test_a_pull_request_whose_description_names_its_issue_after_opening_passes(
     code, out = run(github, tmp_path, "", capsys=capsys)
     assert code == 0, out
     assert "Refs #5: open work issue" in out
+
+
+# CI's release-kind gate (pr_issues.py --release-kind): every pull request into the integration
+# branch states its kind, whichever way it is merged.
+
+KIND = "--release-kind"
+ACTION = Path(__file__).resolve().parents[1] / ".github" / "actions" / "release-kind" / "action.yml"
+
+
+@pytest.mark.parametrize("author, labels", [("alice", ()), ("carol", ("housekeeping",))],
+                         ids=["anyone", "the-owners-housekeeping"])
+def test_a_pull_request_stating_no_kind_is_refused_naming_the_line_to_add(
+        github: FakeGitHub, tmp_path: Path, author: str, labels: tuple[str, ...],
+        capsys: pytest.CaptureFixture[str]) -> None:
+    # #1812 and #1813 of 24 Nov: a quick fix's description, merged by GitHub's own squash.
+    body = "Integrate fix/retro-doc-size-exemption: retro reports are exempt from the size cap.\n"
+    code, out = run(github, tmp_path, body, author=author, labels=labels, gate=KIND, capsys=capsys)
+    assert code == 1, out
+    assert ("::error::release-kind: pull request #900 into main states no release kind: add the "
+            "line `Release-kind: major|minor|patch` to the description") in out
+    assert github.requests == [f"/repos/{REPO}/issues/900"]  # read once as it is now, not found
+
+
+def test_a_field_report_a_landing_and_a_release_each_pass_by_the_kind_they_state(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import work_tickets  # scripts/ is on the path (tests/conftest.py)
+
+    bodies = {
+        "patch": f"Refs {ISSUE_URL}/5\n\n<!-- se:field-report -->\n**Release kind:** patch — a fix\n",
+        "minor": work_tickets.landing_description(f"{PULL_URL}/7", 7, f"{ISSUE_URL}/5", "minor"),
+        "major": work_tickets.release_description("v2.0.0", "feat/x: major", "major"),
+    }
+    for kind, body in bodies.items():
+        code, out = run(github, tmp_path, body, gate=KIND, capsys=capsys)
+        assert code == 0 and f"release-kind: pull request #900 into main states {kind}" in out, out
+    assert github.requests == []  # the event's description states it: nothing is read
+
+
+@pytest.mark.parametrize("body, said", [
+    ("Release-kind: minor\n\nRelease-kind: patch\n", "states 'minor', 'patch'"),
+    ("Release-kind: huge\n", "states 'huge'"),
+    ("<!-- **Release kind:** patch|minor|major — <reason> -->\n", "states no release kind"),
+], ids=["two", "unknown", "in-a-comment"])
+def test_two_kinds_an_unknown_one_or_one_in_a_comment_is_refused(
+        github: FakeGitHub, tmp_path: Path, body: str, said: str,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    code, out = run(github, tmp_path, body, gate=KIND, capsys=capsys)
+    assert code == 1 and f"into main {said}: add the line" in out, out
+
+
+def test_a_kind_stated_after_opening_passes_and_another_branch_is_not_checked(
+        github: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    github.items[900] = {"number": 900, "state": "open", "body": "Tidy.\n\nRelease-kind: patch\n",
+                         "labels": [], "pull_request": {"url": f"{PULL_URL}/900"}}
+    code, out = run(github, tmp_path, "Tidy.", gate=KIND, capsys=capsys)
+    assert code == 0 and "as it is now" in out and "states patch" in out, out
+    code, out = run(github, tmp_path, "Tidy.", base="next", gate=KIND, capsys=capsys)
+    assert code == 0 and "targets next, not main: not checked" in out
+
+
+def test_the_check_job_calls_the_release_kind_action_and_it_runs_the_gate() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    at = text.index("uses: ./.github/actions/release-kind")
+    step = text[text.rindex("- name:", 0, at):at]
+    assert "if: github.event_name == 'pull_request'" in step
+    action = ACTION.read_text(encoding="utf-8")
+    assert ('python3 "$GITHUB_ACTION_PATH/../../../scripts/pr_issues.py" --release-kind '
+            '--repo "$WORKTREE"') in action
+    assert "GITHUB_TOKEN: ${{ inputs.token }}" in action and "default: ${{ github.token }}" in action

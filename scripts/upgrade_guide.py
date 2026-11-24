@@ -9,7 +9,8 @@ release raises (work_tickets.py `released_version`). A section may also follow a
 whose consumers must act; the release check requires only the breaking ones.
 
 `sections` answers the sections between two versions, for any pair; `missing` is the refusal the
-release check (work_tickets.py `release`) raises where a breaking release has no section yet.
+release check (work_tickets.py `release`) raises where a breaking release has no section yet, and
+the landing check (work_tickets.py `major_guide_gate`) where a major landing's tree holds none.
 
     uv run python scripts/upgrade_guide.py show --name SE --from 5.134.2 --to 12.0.1
     uv run python scripts/upgrade_guide.py show --guide <clone>/docs/upgrading.md --name obs --from 5.0.0 --to 10.3.2
@@ -82,9 +83,9 @@ def sections(text: str, name: str, running: Version, newest: Version) -> list[Se
     return sorted(own, key=lambda s: s.version)
 
 
-def missing(root: Path, name: str, version: Version) -> str | None:
+def missing(root: Path, name: str, version: Version, then: str = "release again") -> str | None:
     """The refusal of a breaking release `version` of `name` in `root` whose guide holds no section
-    for it, None where it does."""
+    for it, None where it does; it ends naming the step `then` that follows the section."""
     path = root / GUIDE
     want = f"## {name} {label(version)}"
     try:
@@ -96,8 +97,7 @@ def missing(root: Path, name: str, version: Version) -> str | None:
         return None
     return (f"{GUIDE.as_posix()} has no section `{want}` for this breaking release: add it, with "
             "each change, the steps a project takes and the check that each is done, in the "
-            "landing that makes the change (docs/upgrading.md \"How the guide is kept\"), then "
-            "release again")
+            f"landing that makes the change (docs/upgrading.md \"How the guide is kept\"), then {then}")
 
 
 def main(argv: list[str] | None = None) -> int:

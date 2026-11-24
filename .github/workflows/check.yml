@@ -6,7 +6,8 @@
 # and, through the job kern-platforms, SE's start, hook and setup scripts and its worktree removal
 # tests on Windows (darwin is built by the release, not tested), and, through the job showcase, the
 # README's one command on a fresh runner (the guidance note readme-is-one-page); on a pull request
-# also the work model's issue rule. kern's own tests run in kern's repository, in its check.
+# also the work model's issue rule and its release-kind gate. kern's own tests run in kern's
+# repository, in its check.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, the Go checks and kern-platforms do not run;
@@ -82,6 +83,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/pr_issues.py
+      # The work model's "Release kind": nothing lands on the integration branch without stating its
+      # kind, whichever way it is merged; the action every project's check calls (docs/running.md
+      # "Workflows").
+      - name: The pull request states its release kind
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/release-kind
       - uses: astral-sh/setup-uv@v7
       # kern at the version components/go.mod requires (se.toml [components.kern], docs/modules.md "Modules"),
       # in .se/modules/kern, which go.mod's replace names; a committed se.lock that lags the require

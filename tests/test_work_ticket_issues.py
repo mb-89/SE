@@ -3697,11 +3697,12 @@ def delivered_worker(main_checkout: Path, monkeypatch,
     return head, integration_fakes(monkeypatch, head, branch=branch)
 
 
-# The landing pull request's description for PR #7 of work issue #5: it names both and carries the
-# marker by which CI's field-report step reads the report from PR #7 (docs/settings.md "Landing on main").
+# The landing pull request's description for PR #7 of work issue #5: it names both, carries the
+# marker by which CI's field-report step reads the report from PR #7 (docs/settings.md "Landing on main")
+# and states the landing's kind, the one its squash commit's trailer carries, for CI's release-kind gate.
 LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
                 "Lands https://git.example/owner/repo/pull/7, whose description is the field report."
-                "\n\n<!-- se:field-report-in 7 -->\n")
+                "\n\n<!-- se:field-report-in 7 -->\n\nRelease-kind: minor\n")
 
 
 def landing_body_and_metrics(body: str) -> tuple[str, dict | None]:
@@ -3752,6 +3753,41 @@ def test_integrate_lands_through_a_squash_pull_request_after_waiting_for_check(
     assert "Check check: not started" in out and "Check check: in_progress" in out
     assert git_run(main_checkout, "rev-parse", "--verify", landing).returncode != 0
     assert git_run(main_checkout.parent / "origin.git", "rev-parse", "--verify", f"refs/heads/{landing}").returncode != 0
+
+
+def test_a_major_landing_without_the_next_majors_upgrade_section_is_refused(main_checkout,
+                                                                           monkeypatch, github):
+    """The release would refuse it (#1873 for #1840 of 24 Nov held v15.0.0): the landing does."""
+    delivered_worker(main_checkout, monkeypatch)
+    before = origin_main(main_checkout)
+    monkeypatch.setattr(work_tickets, "project_version", lambda root: (14, 2, 0))
+    monkeypatch.setattr(work_tickets, "release_trailer", lambda *args: "Release-kind: major")
+    with pytest.raises(work_tickets.QueueError) as refused:
+        work_tickets.integrate(main_checkout, 7, None, None)
+    assert str(refused.value).startswith(
+        "Cannot land a major release kind: docs/upgrading.md has no section `## repo 15` for this "
+        "breaking release: add it")
+    assert "then deliver it and integrate again; nothing was merged" in str(refused.value)
+    assert github.calls == [] and origin_main(main_checkout) == before
+    assert git_run(main_checkout, "rev-parse", "--verify", "land/feature/worker").returncode != 0
+
+
+@pytest.mark.parametrize("trailer, guide, refused", [
+    ("Release-kind: major", "## repo 15\n\nThe steps.\n", False),
+    ("Release-kind: major", "## repo 14\n\nThe old steps.\n", True),
+    ("Release-kind: minor", "", False),
+], ids=["its-section", "an-older-section", "not-major"])
+def test_the_major_landing_gate_reads_the_landing_trees_guide(tmp_path, monkeypatch, trailer, guide,
+                                                              refused):
+    monkeypatch.setattr(work_tickets, "project_version", lambda root: (14, 2, 0))
+    monkeypatch.setattr(work_tickets, "origin_repository_name", lambda root: "repo")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "upgrading.md").write_text(f"# Upgrading\n\n{guide}", encoding="utf-8")
+    if refused:
+        with pytest.raises(work_tickets.QueueError, match="no section `## repo 15`"):
+            work_tickets.major_guide_gate(tmp_path, trailer)
+    else:
+        assert work_tickets.major_guide_gate(tmp_path, trailer) is None
 
 
 def test_integrate_reuses_the_open_landing_pull_request(main_checkout, monkeypatch, github, capsys):
@@ -7989,7 +8025,7 @@ def test_a_rehearsal_runs_only_through_kerns_relay(main_checkout, monkeypatch, c
 
 #: The landing description a plan tells, ending in its metrics line.
 TOLD_LANDING = work_tickets.landing_description(
-    "https://git.example/owner/repo/pull/7", 7, "https://git.example/owner/tracker/issues/5",
+    "https://git.example/owner/repo/pull/7", 7, "https://git.example/owner/tracker/issues/5", "minor",
     {"command": "integrate", "start": "2026-11-14T10:00:00Z", "seconds": 12.5})
 #: The footers a host's GitHub tool appends to the body it was told to write.
 TOOL_FOOTERS = [

@@ -26,6 +26,14 @@ A pull request into another branch is not checked. Exit code 0 passed, 1 refused
 (no event, no token, the API failing). A single server error (HTTP 5xx) on a read is read again once,
 RETRY_SECONDS later, so one hiccup of GitHub does not fail the required check; a second fails it.
 
+`--release-kind` is CI's release-kind gate (the work model's "Release kind"): a pull request into
+the integration branch passes only where its description states its kind, a field report's
+`**Release kind:** <kind>` or a `Release-kind: <kind>` line, as a landing and a release state it,
+read by work_tickets.py's `stated_release_kind`, the reader `release` reads a merge's message by.
+Nothing is exempt, so GitHub's merge button cannot land a pull request that states none. It reads
+the event's description first and, where that states none, the description as it is now, as the
+issue rule does; a refusal names the line to add. A pull request into another branch is not checked.
+
 `references` is the one parser of how a pull request names its issue. The field-report step of the
 same job uses it too: `--work-issue <file>` prints the number of the issue the first line of the
 description in `<file>` names (`Fixes|Refs <issue url>` as `work_tickets.py pr-body` writes it, or
@@ -199,6 +207,42 @@ def check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
     return 1, lines
 
 
+KIND_REMEDY = ("add the line `{line}` to the description: a worker's field report states it as "
+               "`**Release kind:** <kind> — <reason>` (work_tickets.py field-report --draft), a "
+               "landing and a release as that line (integrate and release write it); there is no "
+               "default (work model, \"Release kind\")")
+
+
+def kind_check(event: dict, api: Api, branch: str) -> tuple[int, list[str]]:
+    """CI's release-kind gate on the pull request of `event`: (exit code, lines to print)."""
+    import work_tickets  # late: only this gate reads a release kind
+
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict):
+        raise SetupError("the event carries no pull_request")
+    number = pull.get("number")
+    base = str((pull.get("base") or {}).get("ref", ""))
+    if base != branch:
+        return 0, [f"release-kind: pull request #{number} targets {base}, not {branch}: not checked"]
+    lines: list[str] = []
+    body = str(pull.get("body") or "")
+    kind = work_tickets.stated_release_kind(body)
+    if kind is None and isinstance(number, int):
+        # The event is the pull request as it was opened; an edit may have stated the kind since.
+        current = api.issue(number)
+        if current is not None:
+            body = str(current.get("body") or "")
+            kind = work_tickets.stated_release_kind(body)
+            lines.append(f"release-kind: pull request #{number} as it is now:")
+    if kind is not None:
+        return 0, [*lines, f"release-kind: pull request #{number} into {branch} states {kind}"]
+    kinds = work_tickets.stated_release_kinds(body)
+    stated = f"states {', '.join(map(repr, kinds))}" if kinds else "states no release kind"
+    lines.append(f"::error::release-kind: pull request #{number} into {branch} {stated}: "
+                 + KIND_REMEDY.format(line=work_tickets.RELEASE_KIND_LINE))
+    return 1, lines
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--repo", type=Path, default=Path("."),
@@ -208,6 +252,10 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                              "request description in FILE names; exit code 1 where it names none")
     parser.add_argument("--repository", metavar="OWNER/REPO",
                         help="with --work-issue: the repository; default GITHUB_REPOSITORY")
+    parser.add_argument("--release-kind", action="store_true",
+                        help="CI's release-kind gate instead of the issue rule: refuse a pull "
+                             "request into the integration branch whose description states no "
+                             "release kind")
     args = parser.parse_args(argv)
     env = os.environ if environ is None else environ
     if args.work_issue is not None:
@@ -229,7 +277,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         event = json.loads(Path(env["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         api = Api(env.get("GITHUB_API_URL") or "https://api.github.com", env["GITHUB_TOKEN"],
                   env["GITHUB_REPOSITORY"])
-        code, lines = check(event, api, integration_branch(args.repo))
+        judge = kind_check if args.release_kind else check
+        code, lines = judge(event, api, integration_branch(args.repo))
     except (SetupError, OSError, ValueError) as error:
         print(f"::error::pr-issues: {error}")
         return 2

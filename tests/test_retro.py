@@ -174,11 +174,11 @@ def answers(checkout: Path) -> dict[str, object]:
         ],
         "pulls.json": [
             pull(21, "land/feat/a", work_tickets.landing_description(
-                "https://github.com/owner/repo/pull/22", 22, issue_url(11)),
+                "https://github.com/owner/repo/pull/22", 22, issue_url(11), "minor"),
                  "2026-11-02T10:00:00Z", commit["Integrate feat/a"], "Integrate feat/a"),
             pull(22, "feat/a", work_a),
             pull(23, "land/feat/b", work_tickets.landing_description(
-                "https://github.com/owner/repo/pull/24", 24, issue_url(12)),
+                "https://github.com/owner/repo/pull/24", 24, issue_url(12), "minor"),
                  "2026-11-03T10:00:00Z", commit["Integrate feat/b"], "Integrate feat/b"),
             pull(24, "feat/b", work_b),
             pull(25, "chore/c", "Tidy up.", "2026-11-03T11:00:00Z", commit["Tidy up (#25)"],

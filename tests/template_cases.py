@@ -375,6 +375,11 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
             ("Release-kind: minor more\n", "Integrate x"),
             ("Text.\n\nRelease-kind: major", long),
             ("", ""),
+            ("<!-- se:field-report -->\n**Release kind:** minor — new\n", "Integrate x (#5)"),
+            ("<!-- **Release kind:** patch|minor -->\n**Release kind:** huge — no\n", "Integrate x"),
+            ("<!-- **Release kind:** patch -->\nNone stated.\n", "Integrate x"),
+            ("feat/x: minor\n\nRelease-kind: minor\n", "Release v1.3.0"),
+            ("Release-kind: minor\n", "Release v1.3"),
         ]
     if template.name == "review":
         def report(**changes: object) -> str:

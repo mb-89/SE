@@ -313,8 +313,8 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
     body is its writer's, so its template keeps no copy."""
     return {
         "field-report": (f"Refs {ISSUE_URL}\n\n{issue_tests.reported_at(issue_tests.TIP)}", "feat/x"),
-        "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL), "feat/x"),
-        "housekeeping": ("Refresh the lock.\n", "Refresh the lock"),
+        "landing": (work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor"), "feat/x"),
+        "housekeeping": ("Refresh the lock.\n\nRelease-kind: patch\n", "Refresh the lock"),
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
@@ -1375,9 +1375,9 @@ def test_list_shows_each_adapter_with_its_checker_and_actions(capsys):
     assert "a node of a document: checker deck:pugh_problems:" in lines["pugh"]
     assert "deck.build: A decision note:" in lines["decision"]
     assert ("pr.merge: checker work_tickets:merge_release_kind, title "
-            "work_tickets:INTEGRATION_SUBJECT_PATTERN:") in lines["merge-message"]
-    assert "pr.create, pr.edit: checker none, 3 lines:" in lines["landing"]
-    assert "pr.create, pr.edit: checker none (no field required):" in lines["housekeeping"]
+            "work_tickets:MERGE_SUBJECT_PATTERN:") in lines["merge-message"]
+    assert "pr.create, pr.edit: checker none, 4 lines:" in lines["landing"]
+    assert "pr.create, pr.edit: checker none, 1 lines:" in lines["housekeeping"]
 
 
 def test_every_name_an_adapter_gives_resolves(catalog):
@@ -1420,7 +1420,7 @@ def test_applies_refuses_what_selection_cannot_read(tmp_path, applies, error):
 
 
 def test_an_adapter_body_is_never_marked_and_has_no_fields_to_render(catalog):
-    body = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL)
+    body = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor")
     landing = catalog["landing"]
     assert templates.render(landing, templates.parse(landing, body)) == body
     assert landing.marker_line not in templates.render(landing,
@@ -1437,7 +1437,7 @@ def test_select_gives_landing_on_integrates_open_pull_step_and_merge_message_on_
     title = work_tickets.integration_merge_message(
         "feat/templates-adapters-20261116", 7, 5, True, "## Goal\n\nEvery text selects a template.\n")
     message = "Release-kind: minor"
-    description = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1})
+    description = work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor", {"took": 1})
     plan = work_tickets.landing_plan(REPO, "land/feat/x", "main", "a" * 40, "b" * 40, title,
                                      message, description, "then", REPO)
     steps = {step.action: step.arguments for step in plan.steps}
@@ -1451,7 +1451,7 @@ def test_select_gives_landing_on_integrates_open_pull_step_and_merge_message_on_
 
 
 @pytest.mark.parametrize("title, message, refusal", [
-    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate ([^\\\\s:()]+)'"),
+    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate [^\\\\s:()]+|Release v"),
     ("Integrate feat/x", "No trailer.", "it states no kind"),
     ("Integrate feat/x", "Release-kind: minor\n\nRelease-kind: patch", "it states 'minor', 'patch'"),
     ("Integrate feat/x", "Release-kind: huge", "it states 'huge'"),
@@ -1466,12 +1466,31 @@ def test_the_merge_message_holds_its_title_and_merge_release_kinds_rule(catalog,
         assert refused == [str(raised.value)]
 
 
+@pytest.mark.parametrize("title, message", [
+    ("Integrate feat/x (#5)", "<!-- se:field-report -->\n**Release kind:** minor — new behaviour\n"),
+    ("Release v1.3.0", "feat/x: minor\n\nRelease-kind: minor"),
+], ids=["a-field-report-github-takes", "the-release-merge"])
+def test_the_merge_message_passes_a_kind_a_field_report_states_and_the_release_merge(catalog, title,
+                                                                                     message):
+    assert adapter_verdict(catalog["merge-message"], message, title) == []
+    assert work_tickets.merge_release_kind("", title, message) == "minor"
+
+
+def test_a_kind_in_a_comment_is_no_statement_and_a_merge_without_one_names_the_line_to_add(catalog):
+    message = "<!-- **Release kind:** patch|minor|major — <reason> -->\nNo kind here.\n"
+    assert work_tickets.stated_release_kinds(message) == []
+    refused = adapter_verdict(catalog["merge-message"], message, "Integrate feat/x")
+    assert len(refused) == 1 and "Cannot release this merge (Integrate feat/x): it states no kind" in refused[0]
+    assert "end with one trailer Release-kind: major|minor|patch" in refused[0]
+
+
 @pytest.mark.parametrize("change, says", [
     (lambda body: body.replace("Refs ", "See "), "the first line is `Refs <work issue url>`"),
     (lambda body: body.replace("Lands ", "Brings "), "a line `Lands <work pull request url>"),
-], ids=["no-refs", "no-lands"])
+    (lambda body: body.replace("Release-kind: minor\n", ""), "the line `Release-kind: <patch|minor|major>`"),
+], ids=["no-refs", "no-lands", "no-release-kind"])
 def test_the_landing_needs_each_line_landing_description_writes(catalog, change, says):
-    body = change(work_tickets.landing_description(PULL_URL, 5, ISSUE_URL))
+    body = change(work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor"))
     template, found = templates.verdict(catalog, "pr.create", body, "Integrate feat/x", base="main")
     assert template.name == "landing" and [finding.rule for finding in found] == ["line"]
     assert says in found[0].fix
@@ -1488,10 +1507,13 @@ def test_a_work_issue_carrying_the_decision_marker_is_refused(catalog):
 
 
 def test_a_housekeeping_pull_request_needs_no_field_report_and_main_without_the_label_does(catalog):
-    body = "Tidy the README's wording.\n"
+    body = "Tidy the README's wording.\n\nRelease-kind: patch\n"
     template, found = templates.verdict(catalog, "pr.create", body, "Tidy the README", base="main",
                                 labels=["housekeeping"])
     assert template.name == "housekeeping" and found == []
+    template, found = templates.verdict(catalog, "pr.create", "Tidy the README's wording.\n",
+                                        "Tidy the README", base="main", labels=["housekeeping"])
+    assert [finding.rule for finding in found] == ["line"] and "Release-kind:" in found[0].fix
     template, found = templates.verdict(catalog, "pr.create", body, "Tidy the README", base="main")
     assert template.name == "field-report"
     assert [finding.rule for finding in found] == ["checker"]
@@ -1817,16 +1839,26 @@ def merge_title() -> str:
 
 
 def landing(catalog, monkeypatch) -> list[Case]:
+    """integrate's landing plan, its pull request and its squash, and release's squash: each states
+    its kind. (The release pull request's description selects field-report, which refuses it: a
+    gap of its own, not of the kind.)"""
     plan = work_tickets.landing_plan(
         REPO, f"land/{WORK_TITLE}", "main", "a" * 40, "b" * 40, merge_title(), "Release-kind: minor",
-        work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, {"took": 1}), "then", REPO)
-    return step_cases(plan, {"open_pull": "landing", "squash": "merge-message"})
+        work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor", {"took": 1}), "then", REPO)
+    packages = f"{WORK_TITLE}: minor"
+    release = work_tickets.landing_plan(
+        REPO, "land/release-v1.3.0", "main", "a" * 40, "b" * 40, "Release v1.3.0",
+        f"{packages}\n\n{work_tickets.release_kind_line('minor')}",
+        work_tickets.release_description("v1.3.0", packages, "minor"), "then", REPO)
+    return [*step_cases(plan, {"open_pull": "landing", "squash": "merge-message"}),
+            *(case for case in step_cases(release, {"open_pull": "field-report", "squash": "merge-message"})
+              if case.action == "pr.merge")]
 
 
 def landing_door(catalog, monkeypatch, action: str) -> list[Case]:
     if action == "pr.merge":
         return [Case(action, "merge-message", "Release-kind: minor", merge_title(), "main")]
-    return [Case(action, "landing", work_tickets.landing_description(PULL_URL, 5, ISSUE_URL),
+    return [Case(action, "landing", work_tickets.landing_description(PULL_URL, 5, ISSUE_URL, "minor"),
                  merge_title(), "main")]
 
 

@@ -1,0 +1,24 @@
+# CI's release-kind gate (the work model's "Release kind"): scripts/pr_issues.py --release-kind refuses a
+# pull request into the integration branch whose description states no release kind, naming the line
+# to add, so GitHub's merge button cannot land it either. A project's required check `check` calls it
+# on its pull requests; SE's own check.yml does. SE's scripts run from this action's own checkout; a
+# project's copy (scripts/se_workflows.py, docs/running.md "Workflows") checks out SE at the
+# project's pin and runs them there.
+name: se release kind
+description: Refuse a pull request into the integration branch whose description states no release kind.
+inputs:
+  worktree:
+    description: The project's checkout, whose se.toml names the integration branch.
+    default: .
+  token:
+    description: The token that reads the pull request as it is now (issues read).
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PYTHONUNBUFFERED: "1"
+        GITHUB_TOKEN: ${{ inputs.token }}
+        WORKTREE: ${{ inputs.worktree }}
+      run: python3 "$GITHUB_ACTION_PATH/../../../scripts/pr_issues.py" --release-kind --repo "$WORKTREE"

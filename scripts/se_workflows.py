@@ -18,11 +18,13 @@ the project's own `.github/`, and the project calls them as `uses: ./.github/...
 - `plan`: what `write` and `check` work from: the files, the pin and SE's location, from the
   arguments, the project's `[components.se]`, then the copies it holds already; with each action a
   workflow among them calls (`CALLS`), so a project that holds the battery's or the release's copy
-  gets the action `kern-at-pin` beside it.
+  gets the action `kern-at-pin` beside it, and with each file every project holds (`EVERY_PROJECT`):
+  the action `release-kind`, the release-kind gate the project's check calls.
 
 `se_workflows.py write [--root <project>] [<path>...]` writes the copies (default: those the project
 holds); `se_workflows.py check [--root <project>]` fails where a copy differs from what the pin
-generates or an action a held workflow calls is missing, naming the file and the remedy, and where
+generates, or an action a held workflow calls or a file every project holds is missing, naming the
+file and the remedy, and where
 a workflow's call of the `suite-time` action runs another number of shards than `se.toml` `[tests]
 shards` (`shard_mismatches`), naming both files and both numbers. `se_modules.py update se` regenerates them at the new pin.
 Exit code 0, 1 findings, 2 a refusal naming its remedy.
@@ -55,6 +57,7 @@ SHIPPED = (
     ".github/workflows/ref-maintenance.yml",
     ".github/actions/integrator-pass/action.yml",
     ".github/actions/kern-at-pin/action.yml",
+    ".github/actions/release-kind/action.yml",
     ".github/actions/suite-shard/action.yml",
     ".github/actions/suite-time/action.yml",
     "RUNME.sh",
@@ -71,6 +74,11 @@ CALLS = {
     ".github/workflows/kern-battery.yml": ".github/actions/kern-at-pin/action.yml",
     ".github/workflows/kern-release.yml": ".github/actions/kern-at-pin/action.yml",
 }
+
+# The shipped files every project holds, whichever others it calls: the release-kind gate its
+# required check `check` runs on each pull request (the work model's "Release kind"). `plan` adds
+# each where the pin ships it, and `check` names one missing.
+EVERY_PROJECT = (".github/actions/release-kind/action.yml",)
 
 # Each copy's marker (scripts/generated.py) names this generator and, as its source, SE's file:
 # `SE's <path> at <commit> of <repository>`.
@@ -254,8 +262,9 @@ def plan(root: Path, paths: list[str], ref: str | None = None, repository: str |
 
 
 def with_calls(paths: tuple[str, ...], source: Path, pin: str) -> tuple[str, ...]:
-    """`paths` and each action one of them calls (`CALLS`) where SE at `pin` ships it."""
-    called = [CALLS[path] for path in paths if path in CALLS]
+    """`paths`, each action one of them calls (`CALLS`) and each file every project holds
+    (`EVERY_PROJECT`), the last two where SE at `pin` ships them."""
+    called = [*(CALLS[path] for path in paths if path in CALLS), *EVERY_PROJECT]
     return tuple(dict.fromkeys([*paths, *(action for action in called if action not in paths
                                            and git_door.run("cat-file", "-e", f"{pin}:{action}",
                                                             root=source).returncode == 0)]))
@@ -290,6 +299,9 @@ def check(root: Path, plan: Plan) -> list[str]:
         callers = [workflow for workflow, action in CALLS.items() if action == path and (root / workflow).is_file()]
         if not (root / path).is_file() and callers:
             findings.append(f"{path}: missing, though {' and '.join(callers)} calls it; run se_workflows.py write")
+        elif not (root / path).is_file() and path in EVERY_PROJECT:
+            findings.append(f"{path}: missing, though every project holds it for its check to call; "
+                            "run se_workflows.py write")
         elif not (root / path).is_file() or (root / path).read_text(encoding="utf-8") != expected(plan, path):
             findings.append(f"{path}: differs from SE's file at the pin {plan.ref[:12]}; run se_workflows.py write")
     return findings + shard_mismatches(root)
