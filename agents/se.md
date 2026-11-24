@@ -108,6 +108,15 @@ its tools.
   - Write its body file, `.se/issues/<name>.md`, with `templates.py fill work-file --path <file>`
     and file it with `--body-file <file>`; the hook refuses a write that leaves it off its template
     ([docs/templating.md "Templates"](../docs/templating.md#templates)).
+  - Split its requirements by the repository that owns them: a work issue holds only what its
+    own repository can meet. A part another repository's code owns becomes that repository's
+    issue.
+    - The work issue that needs that part is blocked by its release at a version its pin admits,
+      its Blocked by line `<owner>/<repository>#<n>, released in v<x.y.z>`.
+    - `work_tickets.py file` refuses another repository's issue there that names no release.
+  - Each premise its Approach states about the code (a term, a capability, a cause) names how it
+    was checked, the file and line read or the command run, as the
+    [work template](../templates/work.md)'s Approach says; `file` refuses one that names none.
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) says.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with
