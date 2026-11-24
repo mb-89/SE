@@ -1423,7 +1423,7 @@ def test_select_gives_landing_on_integrates_open_pull_step_and_merge_message_on_
 
 
 @pytest.mark.parametrize("title, message, refusal", [
-    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate ([^\\\\s:()]+)'"),
+    ("Merge feat/x", "Release-kind: minor", "does not match 'Integrate [^\\\\s:()]+|Release v"),
     ("Integrate feat/x", "No trailer.", "it states no kind"),
     ("Integrate feat/x", "Release-kind: minor\n\nRelease-kind: patch", "it states 'minor', 'patch'"),
     ("Integrate feat/x", "Release-kind: huge", "it states 'huge'"),

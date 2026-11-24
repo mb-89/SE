@@ -82,8 +82,10 @@ judged by their own rules (The file tools, below).
   carries one, holds `github`. Each tool maps to an action and to the arguments that hold its
   body, title, labels and base; `issue_write` is `issue.create` with method `create` and
   `issue.edit` otherwise, its `issue_number` the issue edited, `update_issue_comment`'s
-  `comment_id` the comment. A create without a body passes, and an edit that changes none of
-  body, title and labels. The repository is `owner`/`repo`.
+  `comment_id` the comment, `merge_pull_request` `pr.merge` with `commit_message` its body,
+  `commit_title` its title and `pullNumber` the pull request (Merges, below). A create without a
+  body passes, and an edit that changes none of body, title and labels; a merge never passes so.
+  The repository is `owner`/`repo`.
 - The shell reader (SHELL_KEYS to shell_writes): a call of any other tool whose input holds a
   string `command`, `input` or `script` naming `gh` as a word followed by a space (GH_WORD, the
   filter se_hook.sh runs in builtins) is split with shlex at `&&`, `||`, `;`, `|`, `&` and line
@@ -91,8 +93,9 @@ judged by their own rules (The file tools, below).
   in a `powershell` tool's command a backslash escapes nothing, so a Windows path is read whole.
   Each part that is one of these writes is judged as the GitHub tools' call of its action:
   - `gh issue` with `create`, `edit` or `comment` (`--edit-last`: `comment.edit`): `issue.create`,
-    `issue.edit`, `comment.create`; `gh pr` with `create`, `edit`, `comment` or `review`:
-    `pr.create`, `pr.edit`, `comment.create` (GH_WRITES). Their parts: `--title`/`-t`,
+    `issue.edit`, `comment.create`; `gh pr` with `create`, `edit`, `comment`, `review` or `merge`:
+    `pr.create`, `pr.edit`, `comment.create`, `pr.merge` (GH_WRITES). Their parts: `--title`/`-t`
+    (`gh pr merge`'s `--subject`),
     `--body`/`-b`, `--body-file`/`-F` (`-` reads the part's stdin: a heredoc, a here-string or
     `< <file>`), `--label`/`-l` (repeated or comma-separated), `gh issue edit`'s `--add-label` and
     `--remove-label`, `--base`/`-B`, `-R`/`--repo` or an issue's URL, the number at its end the
@@ -103,7 +106,8 @@ judged by their own rules (The file tools, below).
     and `{repo}` as origin's) with POST or PATCH, by `-X`/`--method` or, without one, a field:
     `-f`/`-F`/`--field`/`--raw-field` `title=`, `body=`, `labels[]=`, `base=`, `-F body=@<file>`
     read from the file, `--input <file>` read as JSON; `issues/<n>` names the issue edited,
-    `issues/comments/<id>` the comment. A GET, another endpoint (`issues/<n>/labels` among them),
+    `issues/comments/<id>` the comment. `.../pulls/<n>/merge` with PUT is `pr.merge`, its
+    `commit_message` the body and `commit_title` the title (GH_API_FIELDS). A GET, another endpoint (`issues/<n>/labels` among them),
     `gh api graphql` and every other command pass.
   - A body it cannot read (UNREAD): from `$(...)`, backticks or a variable, a pipe into
     `--body-file -`, an unquoted heredoc holding `$` or a backtick, a file that does not exist yet,
@@ -114,6 +118,15 @@ judged by their own rules (The file tools, below).
     never runs the command or any part of it.
   - A command it cannot split (an unclosed quote) passes and logs. The first deny among the
     command's writes is the answer.
+- Merges (MERGE, `merging`): a merge into the integration branch is judged against the template
+  `merge-message`, with or without a message, so nothing lands there without stating its release
+  kind (the work model's "Release kind"). The pull request it merges is read as it stands
+  (`pull_document`: kern's snapshot where a fresh one stands, else one REST read of `pulls/<n>`):
+  its base decides whether the template applies; where the call carries no message, its
+  description is judged as the message GitHub takes, and where it carries no title, its title with
+  ` (#<n>)`. A description's own template marker is then no finding. Where the pull request cannot
+  be read, the base is the integration branch and the call is judged as it is, a missing message
+  as an empty one, so it is refused, naming the `Release-kind:` line to add.
 - Which se.toml decides: the project's (the checkout holding the payload's `cwd`) where its home
   repositories (`templates.home_repositories`) hold the target, else that of the SE this script runs
   from where its home holds it, else the write is free. Its `[templates] gate` (`templates.enforcement`,
@@ -286,7 +299,11 @@ GATE_TOOLS = {
     "pull_request_review_write": ("comment.create", "body", None, None, None),
     "add_comment_to_pending_review": ("comment.create", "body", None, None, None),
     "add_reply_to_pull_request_comment": ("comment.create", "body", None, None, None),
+    "merge_pull_request": ("pr.merge", "commit_message", "commit_title", None, None),
 }
+#: A merge (Merges, in the module docstring): judged with or without a message, as the pull request's
+#: description where the call carries none.
+MERGE = "pr.merge"
 #: The edits whose template is the document's own, read from the document they leave behind
 #: (Which template, in the module docstring).
 DOCUMENT_EDITS = ("issue.edit", "comment.edit")
@@ -314,25 +331,29 @@ SHELL_PREFIXES = {"env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-strin
 #: The gh writes read: group, then command, to the action, as the GitHub tools' table maps them.
 GH_WRITES = {"issue": {"create": "issue.create", "edit": "issue.edit", "comment": "comment.create"},
              "pr": {"create": "pr.create", "edit": "pr.edit", "comment": "comment.create",
-                    "review": "comment.create"}}
+                    "review": "comment.create", "merge": MERGE}}
 #: gh's options that take a value, for `gh issue` and `gh pr`, and for `gh api`.
 GH_VALUES = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-l", "--label", "-B", "--base",
              "-R", "--repo", "-a", "--assignee", "-m", "--milestone", "-p", "--project", "-H",
              "--head", "-r", "--reviewer", "-T", "--template", "--add-label", "--remove-label",
              "--add-assignee", "--remove-assignee", "--add-project", "--remove-project",
-             "--add-reviewer", "--remove-reviewer", "--recover", "--type"}
+             "--add-reviewer", "--remove-reviewer", "--recover", "--type", "--subject",
+             "--match-head-commit", "-A", "--author-email"}
 GH_API_VALUES = {"-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header",
                  "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache", "-p",
                  "--preview"}
 #: The options with which gh writes the body itself, so the gate cannot read it.
 GH_OWN_BODY = {"--fill", "--fill-first", "--fill-verbose", "--template", "-T", "--editor", "-e"}
-#: `gh api`'s endpoints read, each to its action for POST and for PATCH.
-GH_API_PATHS = ((re.compile(r"issues"), "issue.create", None),
-                (re.compile(r"issues/(\d+)"), None, "issue.edit"),
-                (re.compile(r"issues/(\d+)/comments"), "comment.create", None),
-                (re.compile(r"issues/comments/\d+"), None, "comment.edit"),
-                (re.compile(r"pulls"), "pr.create", None),
-                (re.compile(r"pulls/\d+"), None, "pr.edit"))
+#: `gh api`'s endpoints read, each to its action by method.
+GH_API_PATHS = ((re.compile(r"issues"), {"POST": "issue.create"}),
+                (re.compile(r"issues/(\d+)"), {"PATCH": "issue.edit"}),
+                (re.compile(r"issues/(\d+)/comments"), {"POST": "comment.create"}),
+                (re.compile(r"issues/comments/\d+"), {"PATCH": "comment.edit"}),
+                (re.compile(r"pulls"), {"POST": "pr.create"}),
+                (re.compile(r"pulls/\d+"), {"PATCH": "pr.edit"}),
+                (re.compile(r"pulls/\d+/merge"), {"PUT": MERGE}))
+#: The fields of a `gh api` write that hold its body and title: a merge's are its commit's.
+GH_API_FIELDS = {MERGE: ("commit_message", "commit_title")}
 #: In a prepared command, a value the shell computes ($ or a backtick outside single quotes), and
 #: a heredoc by its index.
 COMPUTED, HEREDOC = "", ""
@@ -596,7 +617,7 @@ def gh_write(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite
     call.number = int(number.group(1)) if number and COMPUTED not in target else None
     for name, value in found:
         value = value or ""
-        if name in ("-t", "--title"):
+        if name in ("-t", "--title", "--subject"):
             call.title = call.text(value, "title")
         elif name in ("-l", "--label"):
             call.labels = (call.labels or []) + [label.strip() for label in value.split(",")
@@ -636,14 +657,15 @@ def gh_api(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite |
     method = next((value for name, value in found if name in ("-X", "--method")), None)
     method = (method or ("POST" if fields or given else "GET")).upper()
     action = None
-    for pattern, posted, patched in GH_API_PATHS:
+    for pattern, actions in GH_API_PATHS:
         if pattern.fullmatch(where.group(2)):
-            action = {"POST": posted, "PATCH": patched}.get(method)
+            action = actions.get(method)
     if action is None:
         return None
+    body_key, title_key = GH_API_FIELDS.get(action, ("body", "title"))
     call = ShellWrite(write, f"gh api {positional[0]}", action, where.group(1))
-    call.remedy = "-F body=@<file>"
-    number = re.fullmatch(r"issues/(\d+)", where.group(2))
+    call.remedy = f"-F {body_key}=@<file>"
+    number = re.fullmatch(r"(?:issues|pulls)/(\d+)(?:/merge)?", where.group(2))
     call.number = int(number.group(1)) if number else None
     comment = re.fullmatch(r"issues/comments/(\d+)", where.group(2))
     call.comment = int(comment.group(1)) if comment else None
@@ -654,21 +676,21 @@ def gh_api(write: "Write", words: list[str], stdin, origin: str) -> ShellWrite |
         except ValueError:
             data = {}
         data = data if isinstance(data, dict) else {}
-        if isinstance(data.get("body"), str):
-            call.body = data["body"]
-        if isinstance(data.get("title"), str):
-            call.title = data["title"]
+        if isinstance(data.get(body_key), str):
+            call.body = data[body_key]
+        if isinstance(data.get(title_key), str):
+            call.title = data[title_key]
         if isinstance(data.get("labels"), list):
             call.labels = [str(item) for item in data["labels"]]
         if isinstance(data.get("base"), str):
             call.base = data["base"]
     for name, field in fields:
         key, _, value = field.partition("=")
-        if key == "body" and name in ("-F", "--field") and value.startswith("@"):
+        if key == body_key and name in ("-F", "--field") and value.startswith("@"):
             call.body, call.unread = read_file(value[1:], write.cwd, stdin)
-        elif key == "body":
+        elif key == body_key:
             call.body = call.text(value, "body")
-        elif key == "title":
+        elif key == title_key:
             call.title = call.text(value, "title")
         elif key == "labels[]":
             call.labels = (call.labels or []) + [value]
@@ -1229,7 +1251,7 @@ class Write:
         self.labels = self.listed(labels)
         self.base = self.text(base)
         self.repo = "/".join(str(self.input.get(key) or "").strip() for key in ("owner", "repo"))
-        self.number = self.whole("issue_number")
+        self.number = self.whole("pullNumber" if action == MERGE else "issue_number")
         self.comment = self.whole("comment_id") if action == "comment.edit" else None
         self.add_labels: list[str] = []
         self.remove_labels: list[str] = []
@@ -1371,14 +1393,55 @@ def current_document(write, root: Path) -> dict | None:
     return document
 
 
-def snapshot_issue(write, root: Path) -> dict | None:
-    """The issue `write` edits as kern's snapshot holds it, where one younger than se_relay's
-    MAX_AGE_SECONDS stands; None otherwise, also where no kern serves `root`."""
+def merging(write, root: Path, project: Path | None) -> bool:
+    """Fill a merge call (Merges, in the module docstring) with what GitHub merges by: the pull
+    request as it stands (`pull_document`) gives its base, and where the call carries no message
+    its description, and no title its title with ` (#<n>)`; where it cannot be read, the base is the
+    integration branch and the call is judged as it is. True where the message is the description."""
+    pull = pull_document(write, project or root)
+    base = pull.get("base") if pull is not None else None
+    write.base = (str(base.get("ref") or "") if isinstance(base, dict) else "") \
+        or sibling("work_tickets").integration_branch(root)
+    if getattr(write, "unread", None):
+        return False
+    if pull is None:  # judged as it is: a call without a message states nothing
+        write.body = write.body if write.body is not None else ""
+        return False
+    if write.title is None and pull.get("title"):
+        write.title = f"{pull['title']} (#{write.number})"
+    if write.body is None:
+        write.body = str(pull.get("body") or "")
+        return True
+    return False
+
+
+def pull_document(write, root: Path) -> dict | None:
+    """The pull request a merge call merges as it stands on GitHub: kern's snapshot where a fresh
+    one stands, else one REST read through gh (`work_tickets.issue_api`, `pulls/<n>`); None where
+    the call names no number or neither answers, the reason one line in GATE_LOG."""
+    if write.number is None:
+        log_line(root, f"{write.action} in {write.repo}: the call names no pull request number, so "
+                       "its pull request is not read")
+        return None
+    found = snapshot_issue(write, root, "pulls")
+    try:
+        found = found or sibling("work_tickets").issue_api(root, write.repo, f"pulls/{write.number}")
+    except Exception as error:  # GitHub cannot be read: no pull request, and the log says why
+        log_line(root, f"{write.action} in {write.repo}: the pull request it merges cannot be read "
+                       f"({type(error).__name__}: {(str(error).splitlines() or [''])[0][:160]})")
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def snapshot_issue(write, root: Path, kind: str = "issues") -> dict | None:
+    """The issue `write` edits (`kind` "pulls": the pull request it merges) as kern's snapshot
+    holds it, where one younger than se_relay's MAX_AGE_SECONDS stands; None otherwise, also where
+    no kern serves `root`."""
     try:
         relay = sibling("se_relay")
         door = relay.relay(root)
         owner, _, name = write.repo.partition("/")
-        found = door.snapshot("issues", owner, name, write.number) if door is not None else None
+        found = door.snapshot(kind, owner, name, write.number) if door is not None else None
         if found is None:
             return None
         read = relay.parse_time(found.get("read"))
@@ -1483,9 +1546,10 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
     templates = sibling("templates")
     unread = getattr(write, "unread", None)
     edit = write.action in DOCUMENT_EDITS
+    merge = write.action == MERGE
     changes = (write.body, write.title, write.labels) if edit else (write.body,)
     try:
-        if (all(value is None for value in changes) and unread is None
+        if (all(value is None for value in changes) and unread is None and not merge
                 and not (edit and (write.add_labels or write.remove_labels))) \
                 or write.repo.startswith("/") or write.repo.endswith("/"):
             return ""
@@ -1501,8 +1565,11 @@ def judge_one(write, project: Path | None, switch: str | None) -> str:
         if getattr(write, "default_base", False):  # gh's default base, taken as the integration
             write.base = sibling("work_tickets").integration_branch(root)
         catalog = templates.load(templates.ROOT)
+        described = merging(write, root, project) if merge else False
         template, met, unmarked = (edited(catalog, write, root, project) if edit
                                    else (*gate_template(catalog, write, root), ""))
+        if described:  # the description GitHub takes: its own template's marker is no finding
+            met = ()
         if unmarked:
             return context(unmarked) if switch == templates.WARN else deny(unmarked)
         if template is None:

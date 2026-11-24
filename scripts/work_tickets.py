@@ -3048,6 +3048,9 @@ RELEASE_TRAILER_HELP = (
     "it from the field report in the pull request description"
 )
 INTEGRATION_SUBJECT_PATTERN = re.compile(r"Integrate ([^\s:()]+)")
+#: The subject of every merge into the integration branch (templates/merge-message.md's title rule):
+#: an integration's, or the release landing's `Release v<version>` (land_release).
+MERGE_SUBJECT_PATTERN = re.compile(r"Integrate [^\s:()]+|Release v\d+\.\d+\.\d+")
 
 
 def breaking_kind(version: tuple[int, int, int] | None) -> str:
