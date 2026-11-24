@@ -36,7 +36,7 @@
 # only, so every other call costs what it did. SE_TEMPLATES_GATE=off skips it.
 # Where a template claims a path, which SE's start leaves as the line `claimed` in
 # <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), followed by each glob the templates
-# own (`templates.py owned`), the gate also runs for Claude Code's Write, Edit and MultiEdit of a
+# own (`templates.py list --owned`), the gate also runs for Claude Code's Write, Edit and MultiEdit of a
 # project file whose path matches one of those globs as a bash pattern, and for the GitHub tools that
 # write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a claimed
 # path's write, which only the fill makes; every other call costs what it did.

@@ -1011,20 +1011,15 @@ def test_list_names_every_template_with_its_actions(capsys):
                in ISSUE_TEMPLATES)
 
 
-def test_owned_lists_each_glob_with_its_template_and_the_fill_that_writes_it(capsys, tmp_path):
+def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tmp_path):
     """Requirement 1: the engine's one listing of the paths the templates own, SE's work issue body
-    file among them, as lines and as JSON; a project's own claim joins SE's."""
-    assert templates.main(["owned", "--tree"]) == 0
-    assert capsys.readouterr().out == ".se/issues/*.md: work-file: templates.py fill work-file --path <file>\n"
-    assert templates.main(["owned", "--tree", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == [
-        {"path": ".se/issues/*.md", "template": "work-file", "fill": "templates.py fill work-file --path <file>"}]
+    file's among them, and another folder's own."""
+    assert templates.main(["list", "--owned", "--tree"]) == 0
+    assert capsys.readouterr().out == ".se/issues/*.md: work-file\n"
     write_template(tmp_path, "steps", MINIMAL.format(
-        name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md"]\n'))
-    assert templates.main(["owned", "--root", str(tmp_path), "--tree"]) == 0
-    assert capsys.readouterr().out.splitlines() == [
-        ".se/issues/*.md: work-file: templates.py fill work-file --path <file>",
-        "book/*/steps/*.md: steps: templates.py fill steps --path <file>"]
+        name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
+    assert templates.main(["list", "--owned", "--templates", str(tmp_path / "templates")]) == 0
+    assert capsys.readouterr().out == "a/*.md: steps\nbook/*/steps/*.md: steps\n"
     assert templates.owned({name: template for name, template in templates.load(ROOT, tree=True).items()
                             if not template.is_file}) == []
 

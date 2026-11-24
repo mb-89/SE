@@ -140,7 +140,7 @@ judged by their own rules (The file tools, below).
 (FILE_TOOLS, GITHUB_FILE_TOOLS), whatever it would leave. `scripts/se_hook.sh` runs it for one only
 where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) found a template that claims a
 path and left the line `claimed` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME), then
-each glob the templates own, one a line, as `templates.py owned` lists them: the hook starts the gate
+each glob the templates own, one a line, as `templates.py list --owned` lists them: the hook starts the gate
 for Claude Code's file tools only where the path, relative to the project, matches one of them as a
 bash pattern, a superset of the engine's match (a `*` there also crosses folders), and the gate decides.
 

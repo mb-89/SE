@@ -219,7 +219,7 @@ Each source tool gets one adapter; a source with headings only gives sections wi
 instructions, which the overlay supplies.
 
 A template owns the paths its `applies.paths` globs claim, in whichever repository it resolves
-from; `templates.py owned` is the one listing of them, each glob with its template and fill, and
+from; `templates.py list --owned` is the one listing of them, each glob with its template, and
 SE's start publishes those globs for its hook, which refuses a direct write of an owned path before
 it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
 

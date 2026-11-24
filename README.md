@@ -2580,8 +2580,8 @@ that differs from its template.
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
-`templates.py owned` lists every glob the templates own, each with its template and the fill that
-alone writes it (`--json` for code).
+`templates.py list --owned` lists every glob the templates own, each with its template, whose fill
+alone writes such a file.
 
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
 line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
