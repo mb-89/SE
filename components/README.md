@@ -47,11 +47,15 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 manifests (`manifest.go`), checks and answers as [scripts/templates.py](../scripts/templates.py),
 whose docstring owns the format.
 `Load` reads the notes, `Parse`, `Render`, `Check`, `Select`, `Draft`, `Schema` and `FillDocument`
-answer as the Python functions of their names do.
+answer as the Python functions of their names do; `Reasons` (`reasons.go`) is its `REASONS`, each
+rule's why, and `corrections.go` its correction pass (`Correct`, `CorrectBody`, `RecordCorrections`).
+`Fill` and `FillBody`, by the fields or by the whole document, are the one constructor of a filled
+template, which carries the fill's corrections; the verb `fill` takes either.
 
 - **One set of cases.** [tests/template_cases.py](../tests/template_cases.py) writes
-  `template/testdata/cases/`: every SE template and five fixture sets, filled, read, checked,
-  selected and broken, each with the Python engine's answer. `cases_test.go` holds Go to every
+  `template/testdata/cases/`: every SE template and its fixture sets, filled, read, checked,
+  selected, corrected and broken, each with the Python engine's answer, and the rules' reasons
+  (`reasons.json`). `cases_test.go` holds Go to every
   answer, word for word; `tests/test_template_cases.py` fails where the committed cases lag the
   Python engine, so a change to either engine or to `templates/` refreshes them with
   `uv run python tests/template_cases.py`.

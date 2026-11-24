@@ -166,6 +166,28 @@ rule `quote`) and `scripts/se_templates.py` (its `fill`, `file_document`) own wh
   ([Tags and guidance](#tags-and-guidance)); a call with no fields answers with those and the
   empty draft.
 
+A refusal names, for each finding, the field, what fails, the fix and why the rule holds: each
+rule states its reason once, beside it in the engine (`REASONS` in `scripts/templates.py`,
+`Reasons` in Go), so an agent refused learns the cause and not only the symptom.
+
+**The correction pass.** Before it checks, a fill corrects what cannot change the document's
+meaning, so a trivial deviation costs the agent no round; everything else is refused, never
+guessed. The fill takes the agent's fields, or the whole document it wrote at once (`fill
+--body-file`, the verb `fill`'s `body`), which the pass corrects and then reads into the fields.
+
+- **What it corrects.** Line endings and trailing whitespace; a section heading that names a field
+  but for its case or level; `*` and `+` bullets and `1)` numbers; `>text` quote markers; and the
+  spellings of `None` and `Not in input`, their closing period kept.
+- **Its limits.** It changes no word of content: code and fences, a `verbatim` field, a node, a
+  title and a text that holds a comment stay as written, and `check` and the gate correct nothing,
+  as they judge a text as written.
+- **Reported and recorded.** The fill's answer lists each correction, its field, what it was and
+  what it became; the document records the kinds made, a file in its front matter's `corrected`,
+  any other document in a line `<!-- se:corrected <kinds> -->` after its template marker.
+
+The docstring of `scripts/templates.py` (Corrections) owns the details, and the shared cases hold
+the Go engine to the same corrections, findings and reasons.
+
 Fields stay honest about their source:
 
 - Every field allows the value "Not in input", whatever its other rules; a required field so
@@ -192,8 +214,9 @@ a target relies on its type and checks nothing again.
   where nothing refuses, constructs it; the zero value is none. Across the bus its JSON carries a
   seal that decoding verifies, so JSON of its shape written by hand is no filled template.
 - **The constructor.** The template component's verb `fill` answers it (components/README.md
-  [The template engine in Go](../components/README.md#the-template-engine-in-go)); a refused fill
-  answers every finding and makes nothing.
+  [The template engine in Go](../components/README.md#the-template-engine-in-go)), by the fields or
+  by the whole document; a refused fill answers every finding and makes nothing, for a note's
+  template and a template manifest's alike, and a filled template carries the fill's corrections.
 - **The targets.** A Go verb that takes a `template.Filled` is never handed a text: kern's index
   refuses a request of another type. A target that reads JSON calls `template.Accept`, which
   refuses free text, a body, field values and a value whose seal does not hold, naming the
