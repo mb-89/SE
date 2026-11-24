@@ -371,6 +371,13 @@ On main, released as 16.0.0 at the next release.
 - **Check:** `git grep -nE 'work_tickets\.py (start|claim) .*--issue-body' | grep -v -- '--delivered'`
   prints nothing.
 
+### SE's own kern pin moved: kern 3
+
+- **Change:** SE builds on kern 3.0.0. One version per name holds over the tree, so a project that
+  pins se and also kern must admit a kern 3 release; else `sync` fails, naming both pins.
+- **Steps:** follow the component section [kern 3](#kern-3).
+- **Check:** `uv run python <se>/scripts/se_modules.py sync 2>&1 | grep -c 'admits both'` prints `0`.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:
