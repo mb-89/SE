@@ -16,9 +16,9 @@ type ShapeFunc func(title string) string
 // References are the names SE's templates give, each as Go holds it: a list of choices, a pattern or
 // a shape function.
 var References = map[string]any{
-	"work_tickets:RELEASE_KINDS":               []string{"feature", "feat", "fix", "perf", "chore", "docs", "test"},
-	"work_tickets:name_refusal":                ShapeFunc(nameRefusal),
-	"work_tickets:INTEGRATION_SUBJECT_PATTERN": regexp.MustCompile(`Integrate ([^\s:()]+)`),
+	"work_tickets:RELEASE_KINDS":         []string{"feature", "feat", "fix", "perf", "chore", "docs", "test"},
+	"work_tickets:name_refusal":          ShapeFunc(nameRefusal),
+	"work_tickets:MERGE_SUBJECT_PATTERN": regexp.MustCompile(`Integrate [^\s:()]+|Release v\d+\.\d+\.\d+`),
 }
 
 // The name rule (work_tickets.py `NAME_PATTERN`, the work model's Issues).
