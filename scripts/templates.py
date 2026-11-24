@@ -324,7 +324,8 @@ an older version than the template's now, `<file>: derived from <template> <vers
 is at <version>`, and warns on stderr of one whose template does not resolve; a version that is
 none of its template's form cannot be ordered and counts as older where it differs (`stale`). Exit
 0. `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. Each command resolves its template names by `catalog` for the project
+adapter, its checker; `list --owned` names each owned glob, `<glob>: <template>`
+(`owned`). Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
 the working tree's `templates/`; `--templates DIR`, on each of them, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
@@ -2615,6 +2616,11 @@ def _checked_by(template: Template) -> str:
     return ", ".join(parts) + ("" if len(parts) > 1 or template.checker else " (no field required)")
 
 
+def owned(templates: dict[str, Template]) -> list[tuple[str, str]]:
+    """Each (glob, template) a `file.write` template owns, sorted."""
+    return sorted((glob, item.name) for item in templates.values() if item.is_file for glob in item.paths)
+
+
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
@@ -3957,6 +3963,7 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
+    listing.add_argument("--owned", action="store_true", help="the paths the templates own")
     staling = commands.add_parser("stale", help="list the documents under a folder whose template has a "
                                   "newer version than the one they derive from")
     staling.add_argument("--path", type=Path, required=True, help="the folder of the documents")
@@ -4019,7 +4026,8 @@ def main(arguments: list[str] | None = None) -> int:
                      if options.templates is not None
                      else catalog(_project(options), tree=tree))
         if options.command == "list":
-            print("\n".join(list_templates(templates)))
+            print("\n".join(f"{glob}: {name}" for glob, name in owned(templates)) if options.owned
+                  else "\n".join(list_templates(templates)))
             return 0
         if options.command == "stale":
             older, unresolved = stale(templates, options.path)

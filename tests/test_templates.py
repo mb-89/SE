@@ -127,7 +127,9 @@ NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "stan
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
+#: The templates that claim files (`file.write`): the work issue's body file.
+FILES = ("work-file",)
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
@@ -136,6 +138,7 @@ def test_every_template_loads_with_its_actions_and_the_terms(catalog):
     assert all(catalog[name].is_adapter for name in ADAPTERS)
     assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING, *INTERFACES))
     assert all(catalog[name].kind == "interface" for name in INTERFACES)
+    assert all(catalog[name].actions == (templates.FILE_ACTION,) and catalog[name].paths for name in FILES)
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == templates.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -297,7 +300,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_template_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -309,7 +312,7 @@ def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalo
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 20
+    assert len(catalog) == len(EVERY)
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
@@ -1008,6 +1011,19 @@ def test_list_names_every_template_with_its_actions(capsys):
     assert sorted(names) == sorted(EVERY)
     assert all("issue.create, issue.edit" in line for line in out if line.split(" ")[0]
                in ISSUE_TEMPLATES)
+
+
+def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tmp_path):
+    """Requirement 1: the engine's one listing of the paths the templates own, SE's work issue body
+    file's among them, and another folder's own."""
+    assert templates.main(["list", "--owned", "--tree"]) == 0
+    assert capsys.readouterr().out == ".se/issues/*.md: work-file\n"
+    write_template(tmp_path, "steps", MINIMAL.format(
+        name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
+    assert templates.main(["list", "--owned", "--templates", str(tmp_path / "templates")]) == 0
+    assert capsys.readouterr().out == "a/*.md: steps\nbook/*/steps/*.md: steps\n"
+    assert templates.owned({name: template for name, template in templates.load(ROOT, tree=True).items()
+                            if not template.is_file}) == []
 
 
 @pytest.mark.parametrize("arguments, error", [

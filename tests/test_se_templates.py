@@ -851,17 +851,109 @@ def test_check_files_usage_errors(capsys):
 
 
 def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys, tmp_path):
-    """No git checkout at all: it answers before it reads one, as CI's check job runs it on SE's."""
-    assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path))[:2] == (
-        0, "se_templates.py check-files: no template claims a path; nothing checked\n")
+    """No git checkout at all: where no template claims a path (SE's templates without work-file, the
+    one that claims), it answers before it reads one."""
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    for note in (ROOT / "templates").iterdir():
+        if note.name != "work-file.md":
+            (folder / note.name).write_bytes(note.read_bytes())
+    assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path),
+               "--templates", str(folder))[:2] == (
+        0, "se_templates.py check-files: no template claims a path outside .se/; nothing checked\n")
 
 
-def test_no_template_of_ses_claims_a_path_and_no_se_toml_switch_turns_the_file_gate():
-    """SE's own check-files and file gate have nothing to judge yet, and no `files` switch is left."""
-    assert not any(template.paths for template in CATALOG.values())
-    assert not se_templates.claims_a_path(CATALOG)
+WORK_FILE_GLOB = ".se/issues/*.md"
+
+
+def test_ses_one_owned_path_is_the_work_issue_body_file_and_no_se_toml_switch_turns_the_file_gate():
+    """SE's own templates claim one glob, the work issue body file's (work-file), and no `files`
+    switch is left."""
+    assert templates.owned(CATALOG) == [(WORK_FILE_GLOB, "work-file")]
+    assert se_templates.claims_a_path(CATALOG)
     assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["templates"]
     assert not hasattr(templates.Enforcement(), "files") and not hasattr(templates, "FILES_VALUES")
+
+
+# The work issue body file (templates/work-file.md): only its fill writes it, and what it writes files
+# as the work issue it shapes.
+
+def test_a_direct_write_of_a_work_issue_body_file_passes_where_it_parses_and_else_names_the_finding_and_the_fill(
+        capsys, monkeypatch, tmp_path):
+    """The acceptance, against SE's own templates, as SE's comment of 24 Nov narrows it: the gate judges
+    the file a write leaves. An Edit, a MultiEdit or a Write that leaves the body file parsing passes;
+    one that leaves it broken, or a new file naming no template, is refused, naming each finding and
+    `templates.py fill work-file --path <file>`."""
+    root = tmp_path / "project"
+    (root / ".git").mkdir(parents=True)
+    body = root / ".se" / "issues" / f"{TITLE}.md"
+    body.parent.mkdir(parents=True)
+    on_template = templates.render(CATALOG["work-file"], dict(FIELDS))
+    body.write_text(on_template, encoding="utf-8")
+    relative = body.relative_to(root).as_posix()
+
+    def judged(tool: str, **given) -> str:
+        return gate(capsys, monkeypatch, file_payload(tool, root, **given), "--templates", str(ROOT / "templates"),
+                    "--root", str(root))
+
+    passing = [
+        judged("Edit", file_path=str(body), old_string=FIELDS["goal"], new_string="Every title reads plainly."),
+        judged("MultiEdit", file_path=str(body), edits=[{"old_string": FIELDS["situation"], "new_string": "Titles."},
+                                                         {"old_string": "plain title", "new_string": "title"}]),
+        judged("Write", file_path=str(body), content=on_template),
+        judged("Edit", file_path=str(body), old_string="not in the file", new_string="x"),
+    ]
+    assert passing == ["", "", "", ""]
+    fill = (f"  {relative}: its fill: uv run python {ROOT / 'scripts' / 'templates.py'} fill work-file "
+            f"--path {body} --root {root} --templates {(ROOT / 'templates').resolve()}")
+    broken = denial(judged("Edit", file_path=str(body), old_string="## Requirements", new_string="## Wishes"))
+    assert broken.splitlines() == [
+        f"Edit of {relative}: the file it leaves breaks the template that claims its path:",
+        f"  {relative} (work-file): Requirements: missing: write `## Requirements`: Numbered, checkable "
+        "requirements, in the order to do them. (or `Not in input` where the input does not say)",
+        fill,
+        "Fix the write so the file parses, or fill it: without --fields the fill answers the template's "
+        "instructions; with --fields and --input it writes the file"]
+    emptied = denial(judged("MultiEdit", file_path=str(body), edits=[
+        {"old_string": FIELDS["goal"], "new_string": ""}, {"old_string": FIELDS["problem"], "new_string": ""}]))
+    assert f"  {relative} (work-file): Goal: " in emptied and f"  {relative} (work-file): Problem: " in emptied
+    fresh = body.parent / "new-package.md"
+    named = denial(judged("Write", file_path=str(fresh), content="## Goal\n\nx\n"))
+    assert ".se/issues/new-package.md (no template): body: .se/issues/new-package.md: no template takes this " \
+           "file; name its template in the front matter" in named
+    assert f"fill work-file --path {fresh} --root {root}" in named
+    assert body.read_text(encoding="utf-8") == on_template and not fresh.exists()
+
+
+def test_a_fill_and_templates_write_pass_the_gate_and_the_fills_file_files_as_its_work_issue(
+        capsys, monkeypatch, tmp_path):
+    """Requirement 3: the fill's shell call and the door's templates_write reach no deny; the file the
+    fill writes holds its template in the front matter and files, through `work`, as the work issue."""
+    root = tmp_path / "project"
+    (root / ".git").mkdir(parents=True)
+    body = root / ".se" / "issues" / f"{TITLE}.md"
+    fill = ["fill", "work-file", "--path", str(body), "--root", str(root), "--templates", str(ROOT / "templates"),
+            "--input-text", FIELDS["user_requirement"], "--fields-json", json.dumps(FIELDS)]
+    passing = [
+        json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(root),
+                    "tool_name": "Bash", "tool_input": {"command": " ".join(
+                        ["uv", "run", "python", str(ROOT / "scripts" / "templates.py"), *fill[:5]])}}),
+        json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(root),
+                    "tool_name": "mcp__plugin_se_se__templates_write",
+                    "tool_input": {"action": "fill", "args": ["work", "--repo", f"{OWNER}/{REPO_NAME}"]}}),
+    ]
+    for text in passing:
+        assert gate(capsys, monkeypatch, text, "--gate", "refuse", "--templates", str(ROOT / "templates"),
+                    "--root", str(root)) == ""
+    monkeypatch.chdir(root)
+    assert templates.main(fill) == 0
+    assert capsys.readouterr().out == f"wrote .se/issues/{TITLE}.md: work-file 1.0.0\n"
+    written = body.read_text(encoding="utf-8")
+    assert templates.front_matter_template(written) == "work-file"
+    filed = templates.filled(WORK, body=written, enforce=templates.REFUSE)
+    assert filed == templates.render(WORK, dict(FIELDS)) and "template: se/work-file" not in filed
+    assert not [found for found in templates.check(WORK, templates.parse(WORK, filed, TITLE))
+                if found.severity == templates.REFUSE]
 
 
 def test_se_tomls_own_gate_on_its_integration_branch_decides_the_gate(capsys, monkeypatch, tmp_path):
@@ -901,29 +993,43 @@ def file_gate(capsys, monkeypatch, root: Path, text: str) -> str:
                 "--root", str(root))
 
 
-def test_every_free_write_of_a_claimed_path_is_denied_naming_its_template_and_the_fill(
+def test_a_write_of_a_claimed_path_is_judged_by_the_file_it_leaves_never_by_the_edit_text(
         capsys, monkeypatch, tmp_path):
-    """Requirement 1: whatever the call would leave, on its template or off it, the gate denies it."""
+    """SE's comment of 24 Nov: Write's content, the file with an Edit's or a MultiEdit's replacements
+    applied, parsed as its template; a result that parses passes, one that does not is denied naming
+    each finding and the fill. A call the tool itself would refuse writes nothing and passes."""
     steps = step_book(tmp_path, step=GOOD_STEP)
     step = steps / "step.md"
-    denied = {
+    passing = {
         "Write": {"file_path": str(step), "content": GOOD_STEP},
-        "Write off": {"file_path": str(step), "content": EMPTY_STEP},
         "Edit": {"file_path": str(step), "old_string": "misses a tool", "new_string": "misses two"},
         "Edit missing": {"file_path": str(step), "old_string": "not there", "new_string": ""},
-        "MultiEdit": {"file_path": str(step), "edits": [{"old_string": "scan", "new_string": "search"}]},
+        "Edit no file": {"file_path": str(steps / "none.md"), "old_string": "a", "new_string": "b"},
+        "MultiEdit": {"file_path": str(step), "edits": [{"old_string": "scan", "new_string": "search"},
+                                                        {"old_string": "tool", "new_string": "file"}]},
         "Write new": {"file_path": str(steps / "new.md"), "content": GOOD_STEP},
     }
+    for name, given in passing.items():
+        assert file_gate(capsys, monkeypatch, tmp_path, file_payload(name.split()[0], tmp_path, **given)) == "", name
+    denied = {
+        "Write": {"file_path": str(step), "content": EMPTY_STEP},
+        "Edit": {"file_path": str(step), "old_string": "- The scan misses a tool.\n", "new_string": ""},
+        "MultiEdit": {"file_path": str(step), "edits": [{"old_string": "scan", "new_string": "search"},
+                                                        {"old_string": "## Risks\n\n- The search", "new_string": "## Gone\n\n- The"}]},
+        "Write new": {"file_path": str(steps / "new.md"), "content": EMPTY_STEP},
+        "Edit all": {"file_path": str(step), "old_string": "Risks", "new_string": "Gone", "replace_all": True},
+    }
     for name, given in denied.items():
-        reason = denial(file_gate(capsys, monkeypatch, tmp_path,
-                                  file_payload(name.split()[0], tmp_path, **given)))
+        tool = name.split()[0]
+        reason = denial(file_gate(capsys, monkeypatch, tmp_path, file_payload(tool, tmp_path, **given)))
         relative = Path(given["file_path"]).relative_to(tmp_path).as_posix()
-        assert reason.startswith(f"{name.split()[0]} of {relative}: a template claims this path, "
-                                 "so only its fill writes it:"), name
-        assert f"  {relative} (step-risks): uv run python " in reason
-        assert (f"templates.py fill step-risks --path {tmp_path / relative} --root {tmp_path} "
-                f"--templates {(tmp_path / 'templates').resolve()}") in reason
-    passing = [
+        assert reason.startswith(f"{tool} of {relative}: the file it leaves breaks the template that claims "
+                                 "its path:"), name
+        assert f"  {relative} (step-risks): Risks: " in reason, name
+        assert (f"  {relative}: its fill: uv run python {ROOT / 'scripts' / 'templates.py'} fill step-risks "
+                f"--path {tmp_path / relative} --root {tmp_path} --templates {(tmp_path / 'templates').resolve()}"
+                ) in reason, name
+    free = [
         file_payload("Write", tmp_path, file_path=str(tmp_path / "notes.md"), content="# Notes\n"),
         file_payload("Edit", tmp_path, file_path=str(tmp_path / "notes.md"), old_string="a",
                      new_string="b"),
@@ -932,13 +1038,13 @@ def test_every_free_write_of_a_claimed_path_is_denied_naming_its_template_and_th
         file_payload("Write", tmp_path, content=EMPTY_STEP),
         file_payload("Read", tmp_path, file_path=str(step)),
     ]
-    for text in passing:
+    for text in free:
         assert file_gate(capsys, monkeypatch, tmp_path, text) == ""
     assert step.read_text(encoding="utf-8") == GOOD_STEP
     assert not (steps / "new.md").exists()
 
 
-def test_a_github_file_write_names_each_claimed_path_and_passes_without_one(
+def test_a_github_file_write_names_each_claimed_file_that_breaks_its_template_and_passes_else(
         capsys, monkeypatch, tmp_path, home_repo):
     step_book(tmp_path)
     files = [{"path": "book/m1/steps/s1.md", "content": GOOD_STEP},
@@ -949,15 +1055,17 @@ def test_a_github_file_write_names_each_claimed_path_and_passes_without_one(
                        "tool_input": {"owner": OWNER, "repo": REPO_NAME, "branch": "b",
                                       "files": files, "message": "m"}})
     reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
-    assert reason.startswith(f"push_files in {OWNER}/{REPO_NAME}: a template claims this path")
-    assert "  book/m1/steps/s1.md (step-risks)" in reason
-    assert "  book/m1/steps/s2.md (step-risks)" in reason and "notes.md" not in reason
+    assert reason.startswith(f"push_files in {OWNER}/{REPO_NAME}: the file it leaves breaks the template")
+    assert "  book/m1/steps/s2.md (step-risks): Risks: " in reason
+    assert "s1.md" not in reason and "notes.md" not in reason
     one = {"owner": OWNER, "repo": REPO_NAME, "branch": "b", "message": "m",
            "path": "book/m1/steps/s1.md", "content": GOOD_STEP}
     single = json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(tmp_path),
                          "tool_name": "mcp__github__create_or_update_file", "tool_input": one})
-    assert "s1.md (step-risks)" in denial(file_gate(capsys, monkeypatch, tmp_path, single))
-    free = single.replace("book/m1/steps/s1.md", "notes.md")
+    assert file_gate(capsys, monkeypatch, tmp_path, single) == ""
+    broken = single.replace(json.dumps(GOOD_STEP), json.dumps(EMPTY_STEP))
+    assert "s1.md (step-risks): Risks: " in denial(file_gate(capsys, monkeypatch, tmp_path, broken))
+    free = broken.replace("book/m1/steps/s1.md", "notes.md")
     assert file_gate(capsys, monkeypatch, tmp_path, free) == ""
 
 
@@ -971,7 +1079,7 @@ def test_a_file_gate_crash_after_the_claim_denies_and_one_before_passes_and_logs
         raise RuntimeError("the disk is gone")
 
     with monkeypatch.context() as patch:
-        patch.setattr(se_templates, "free_write", broken)
+        patch.setattr(se_templates, "judged_write", broken)
         reason = denial(file_gate(capsys, monkeypatch, tmp_path, text))
     assert reason.startswith("SE's template gate failed on this write (RuntimeError)")
     assert "templates.py fill <template> --path <file>" in reason and "SE_TEMPLATES_GATE=off" in reason
@@ -986,7 +1094,7 @@ def test_the_file_gate_needs_no_se_toml_switch_and_counts_its_refusals(capsys, m
     """Requirement 2: no se.toml at all, and one whose old `files` says off, deny alike."""
     steps = step_book(tmp_path, step=GOOD_STEP)
     (tmp_path / ".git").mkdir()
-    text = file_payload("Write", tmp_path, file_path=str(steps / "step.md"), content=GOOD_STEP)
+    text = file_payload("Write", tmp_path, file_path=str(steps / "step.md"), content=EMPTY_STEP)
     plain = ("--gate", "refuse", "--templates", str(tmp_path / "templates"))
     assert "(step-risks)" in denial(gate(capsys, monkeypatch, text, *plain))
     (tmp_path / "se.toml").write_text('[templates]\nfiles = "off"\n', encoding="utf-8")
@@ -998,15 +1106,21 @@ def test_the_file_gate_needs_no_se_toml_switch_and_counts_its_refusals(capsys, m
     assert templates.refusals(key, {"SE_SESSION": SESSION}) == 2
 
 
-def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(capsys, tmp_path):
+def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(capsys, monkeypatch, tmp_path):
+    """The start publishes the owned globs after the line claimed: SE's own, the work issue body
+    file's, for a project without templates of its own; the project's where it has them; none and no
+    file where nothing is claimed."""
     line = tmp_path / ".se" / ".runtime" / "templates-files"
-    assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
+    assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
+    assert line.read_text(encoding="utf-8") == f"{se_templates.FILES_CLAIMED}\n{WORK_FILE_GLOB}\n"
     step_book(tmp_path)
     (tmp_path / "se.toml").write_text('[templates]\nfiles = "off"\n', encoding="utf-8")
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
-    assert line.read_text(encoding="utf-8") == f"{se_templates.FILES_CLAIMED}\n"
-    (tmp_path / "templates" / "step-risks.md").unlink()
-    (tmp_path / "templates").rmdir()
+    owned = sorted({glob for glob, _ in templates.owned(templates.load(tmp_path))})
+    assert "book/*/steps/*.md" in owned
+    assert line.read_text(encoding="utf-8") == "".join(f"{text}\n" for text in (se_templates.FILES_CLAIMED,
+                                                                                *owned))
+    monkeypatch.setattr(templates, "owned", lambda catalog: [])
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
     assert capsys.readouterr().out == ""
 
@@ -1015,20 +1129,21 @@ def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(
 @pytest.mark.spawns("shell: scripts/se_hook.sh's `filed` test, bash builtins, sends a Write of a project file to "
                     "the gate only where templates-files says claimed, and the fill's shell call past it; run "
                     "only as a process")
-def test_the_hook_denies_a_write_of_a_claimed_path_and_lets_its_fill_write_it(
+def test_the_hook_denies_a_write_that_breaks_a_claimed_file_and_lets_its_fill_write_it(
         capsys, monkeypatch, tmp_path, shared_fake_git):
-    """The acceptance: through SE's hook as the plugin runs it, a Write of a claimed path is denied
-    naming the fill, and the fill of the same path passes the hook and writes the file on template."""
+    """Through SE's hook as the plugin runs it, a Write that leaves a claimed file off its template is
+    denied naming the fill, and the fill of the same path passes the hook and writes it on template."""
     root = hook_project(tmp_path, None)
     steps = step_book(root)
     step = steps / "s1.md"
     assert se_templates.main(["gate", "--runtime", str(root)]) == 0
-    write = file_payload("Write", root, file_path=str(step), content=GOOD_STEP)
+    write = file_payload("Write", root, file_path=str(step), content=EMPTY_STEP)
     result = hooked(tmp_path, write, CLAUDE_PROJECT_DIR=sh(root))
     reason = denial(result.stdout)
     assert result.returncode == 0 and reason.startswith(
-        "Write of book/m1/steps/s1.md: a template claims this path, so only its fill writes it:")
-    assert f"  book/m1/steps/s1.md (step-risks): uv run python " in reason
+        "Write of book/m1/steps/s1.md: the file it leaves breaks the template that claims its path:")
+    assert "  book/m1/steps/s1.md (step-risks): Risks: " in reason
+    assert f"  book/m1/steps/s1.md: its fill: uv run python " in reason
     assert f"templates.py fill step-risks --path {step} --root {root}" in reason
     assert not step.exists()
     fill = ["fill", "step-risks", "--path", str(step), "--root", str(root), "--templates", str(root / "templates"),

@@ -4156,8 +4156,8 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
 
 def claimed_files_problem(root: Path) -> str | None:
     """What the claimed files refuse in the checkout `root`: the lines of `se_templates.py
-    check-files --changed origin/<integration branch>`; None where no template claims a path or
-    every changed claimed file passes. Errors raise."""
+    check-files --changed origin/<integration branch>`; None where no template claims a path
+    outside .se/ or every changed claimed file passes. Errors raise."""
     lines = sibling("se_templates").changed_refusal(root, f"origin/{integration_branch(root)}")
     if lines is None:
         return None
