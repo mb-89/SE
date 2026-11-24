@@ -31,6 +31,7 @@ import test_retro
 import test_review
 import test_work_ticket_issues as issue_tests
 import work_tickets
+from manual import page
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work.md"
@@ -1876,6 +1877,15 @@ def beat_edit(catalog, monkeypatch) -> list[Case]:
             for body in (beaten, work_tickets.without_beat(beaten))]
 
 
+def unclaimed(catalog, monkeypatch) -> list[Case]:
+    """What `unclaim` sends: the work issue's own body without its beat line, and its one-line
+    answer to the Started comment."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 24, 14, 50, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", work_tickets.without_beat(beaten), labels=WORK_LABELS),
+            Case("comment.create", FREE, work_tickets.UNCLAIMED_COMMENT.format(
+                started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example"))]
+
+
 def without_beats(plan):
     """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
     return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
@@ -1906,6 +1916,7 @@ CONTRACT = {
     "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
     "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:unclaim": ("unclaim", unclaimed),
     "work_tickets:post_started": ("start", comment(
         work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
@@ -2084,9 +2095,10 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
 
 
 def missing_from_readme(readme: str) -> list[str]:
-    """The files under `templates/` that README's "Templates" section does not name with their `says`."""
-    start = readme.index("\n### Templates\n")
-    after = re.search(r"\n#{1,3} ", readme[start + 1:])
+    """The files under `templates/` that docs/templating.md's "Templates" section does not name
+    with their `says`."""
+    start = readme.index("\n## Templates\n")
+    after = re.search(r"\n#{1,2} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
     for path in sorted((ROOT / "templates").iterdir()):
@@ -2099,13 +2111,13 @@ def missing_from_readme(readme: str) -> list[str]:
 
 
 def test_readme_templates_names_every_file_under_templates_with_its_says():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     assert missing_from_readme(readme) == []
     assert "No command checks with them yet" not in readme
 
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]
@@ -3040,3 +3052,118 @@ def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, ob
     built = parsed.read_text(encoding="utf-8")
     assert '"derived-from"' in built and '"guidance"' not in built and "{{slot}}" not in built
 
+
+
+# Filling templates from material (docs/templates.md "Filling templates from material"): the worked
+# example, examples/fill-templates/pump-x, filled again and checked as it stands, and the
+# fill-templates skill's two ends, every document passing and each gap named
+
+EXAMPLE = ROOT / "examples" / "fill-templates" / "pump-x"
+
+
+def example_repository(root: Path) -> Path:
+    """The worked example's small repository under `root`, its templates and material alone: the
+    documents are the fill's to write."""
+    repository = root / "pump-x"
+    for folder in ("templates", "material"):
+        shutil.copytree(EXAMPLE / folder, repository / folder)
+    return repository
+
+
+def documents_by_main(capsys, repository: Path, *arguments: str) -> tuple[int, str]:
+    code = templates.main(["documents", "--path", str(repository / "documents"), "--root", str(repository),
+                           "--tree", *arguments])
+    return code, capsys.readouterr().out
+
+
+def test_the_worked_example_fills_two_documents_that_pass_link_the_material_and_name_their_templates(
+        tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    assert templates.main(["list", "--root", str(repository), "--tree"]) == 0
+    listed = capsys.readouterr().out
+    assert "label-spec (owner): file.write: documents/label-*.md: A product label" in listed
+    assert "test-plan (owner): a node of a document: One test plan per product." in listed
+    resolved = templates.catalog(repository, tree=True)
+    readme = (EXAMPLE / "README.md").read_text(encoding="utf-8")
+    for document, named in (("label-pump.md", "label-spec"), ("test-plan-pump.md", "test-plan")):
+        template = resolved[named]
+        assert template.repository == templates.PROJECT_REPOSITORY
+        expected = (EXAMPLE / "documents" / document).read_text(encoding="utf-8")
+        fields = templates.parse(template, expected).fields
+        target = repository / "documents" / document
+        common = ["fill", named, "--path" if template.is_file else "--out", str(target), "--root",
+                  str(repository), "--tree", "--input", str(repository / "material")]
+        assert templates.main(common) == 0
+        told = json.loads(capsys.readouterr().out)
+        assert told["template"] == named and list(told["fields"]) == list(fields)
+        assert templates.main([*common, "--fields-json", json.dumps(fields)]) == 0
+        assert capsys.readouterr().out.endswith(f": {named} {template.version}\n")
+        text = target.read_text(encoding="utf-8")
+        assert text == expected
+        assert templates.derived_from(text)[2:] == (named, template.version)
+        links = re.findall(r"\]\((\.\./material/[^)]+)\)", text)
+        assert links and all((target.parent / link).resolve().is_file() for link in links)
+        assert templates.SLOT not in text and "<!--" not in text
+        assert f"| [{document}](documents/{document}) | {named} | {template.version} |" in readme
+    code, out = documents_by_main(capsys, repository, "--input", str(repository / "material"))
+    assert (code, out) == (0, "label-pump.md: Languages: not in input\n2 documents: pass; 1 section the "
+                              "material did not fill, named above: tell the person each\n")
+    assert f"```text\n{out}```" in (ROOT / "docs" / "templates.md").read_text(encoding="utf-8")
+    assert documents_by_main(capsys, EXAMPLE)[0] == 0  # the committed documents pass as they stand
+
+
+def test_material_without_a_mandatory_section_s_content_ends_with_it_named_and_no_slot(tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    resolved = templates.catalog(repository, tree=True)
+    label, plan = resolved["label-spec"], resolved["test-plan"]
+    documents = repository / "documents"
+    documents.mkdir()
+    no_review = {**templates.parse(label, (EXAMPLE / "documents" / "label-pump.md").read_text(
+        encoding="utf-8")).fields,
+                 "warnings": "Not in input", "languages": "Not in input"}
+    (documents / "label-pump.md").write_text(templates.fill(label, no_review, "")[0], encoding="utf-8")
+    plan_text = templates.fill(plan, {"scope": "Both warnings.", "cases": "Not in input"}, "")[0]
+    (documents / "test-plan-pump.md").write_text(plan_text, encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 0 and out.splitlines() == [
+        "label-pump.md: Warnings: not in input", "label-pump.md: Languages: not in input",
+        "test-plan-pump.md: Test cases: not in input",
+        "2 documents: pass; 3 sections the material did not fill, named above: tell the person each"]
+    left = plan_text.replace("Both warnings.", "Both warnings.\n\n{{slot}}")
+    (documents / "test-plan-pump.md").write_text(left, encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "test-plan-pump.md: refuse: scope [slot]: section Scope still holds the fill slot" in out
+    assert out.splitlines()[-1].startswith("2 documents: refused; fix every finding and fill again")
+    (documents / "test-plan-pump.md").write_text(plan_text.replace("## Scope\n\nBoth warnings.\n", ""),
+                                                 encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "test-plan-pump.md: refuse: scope [required]" in out
+
+
+def test_documents_refuses_a_folder_without_documents_and_a_template_that_does_not_resolve(tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    (repository / "documents").mkdir()
+    (repository / "documents" / "notes.md").write_text("# Notes\n\nNo template.\n", encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "no document here derives from a template" in out
+    (repository / "documents" / "gone.md").write_text(
+        '---\nderived_from: {template: gone, version: "1"}\n---\n', encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and out.startswith("gone.md: refuse: derived_from [template]: gone is no template here")
+    assert templates.main(["documents", "--path", str(tmp_path / "none"), "--tree"]) == 2
+    assert "is no folder" in capsys.readouterr().err
+
+
+def test_a_folder_of_material_is_the_raw_input_each_text_file_named_and_hidden_ones_left_out(tmp_path):
+    material = tmp_path / "material"
+    (material / "notes").mkdir(parents=True)
+    (material / ".hidden").mkdir()
+    (material / "b.md").write_text("Second.\n", encoding="utf-8")
+    (material / "notes" / "a.txt").write_text("First.\n", encoding="utf-8")
+    (material / ".hidden" / "c.md").write_text("Hidden.\n", encoding="utf-8")
+    (material / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+    assert templates.raw_input(material) == "--- b.md ---\nSecond.\n\n--- notes/a.txt ---\nFirst.\n"
+    assert templates.raw_input(material / "b.md") == "Second.\n"
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(templates.TemplateError, match="holds no text file"):
+        templates.raw_input(tmp_path / "empty")

@@ -4,7 +4,7 @@
 # folder's module), which reads the folder's release.toml. On a pull request it only builds; on a
 # push to main it publishes the release that folder's release.toml names, where it does not exist
 # yet, so a push that changes the version cuts its release. kern's own release runs in kern's
-# repository. An application calls the copy SE writes into it (scripts/se_workflows.py, SE's README
+# repository. An application calls the copy SE writes into it (scripts/se_workflows.py, SE's docs/running.md
 # "Workflows"), with
 #
 #   jobs:
@@ -14,7 +14,7 @@
 #         directory: <the application's binary folder, e.g. components>
 #
 # SE's own se-release.yml does, for the `se` binary. kern is placed at the commit the checkout's
-# se.lock locks (README "Modules") in .se/modules/kern, which the folder's go.mod replaces kern by,
+# se.lock locks (docs/modules.md "Modules") in .se/modules/kern, which the folder's go.mod replaces kern by,
 # through the action kern-at-pin, as the battery places it.
 name: kern-release
 

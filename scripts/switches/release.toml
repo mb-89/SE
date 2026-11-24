@@ -9,5 +9,5 @@ default = "off"
 layers = ["se.toml"]
 key = "project.release"
 on = ["workflow"]
-help = "README.md#release-tags"
+help = "docs/settings.md#release-tags"
 note = "off: push pushes the tags itself; on (\"workflow\"): the release workflow pushes them"

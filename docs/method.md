@@ -118,7 +118,7 @@ is replaced by the integrator's verdict, written where every host's tools can wr
 
 - **The verdict line**: the landing pull request's description ends in one line naming the SE commit
   that ran the checks, the landing head's tree, each check's verdict and the suite's hash, beside
-  the metrics line it already ends in ([README "Metrics"](../README.md#metrics)).
+  the metrics line it already ends in ([docs/running.md "Metrics"](running.md#metrics)).
 - **Read back**: `integrate --read-back` refuses a landing whose description lacks that line, or
   whose line names another tree than the commit landed, and closes nothing.
 - **The host's own record** stays the project's required check: the landing waits for it as today,
@@ -139,7 +139,7 @@ and every push, as the project chooses. It runs no SE step, clones no SE and rea
 
 ### What goes with the second run
 
-- **Trusted landings** for a project ([README "Trusted landings"](../README.md#trusted-landings)):
+- **Trusted landings** for a project ([docs/tests.md "Trusted landings"](tests.md#trusted-landings)):
   the shortcut let a project's CI skip SE's suite on a record of the integrator's pass. With no SE
   step in that CI there is nothing to skip; a project that wants fewer minutes trims its own CI.
 - **Landing without CI** stays: where a host has no runners, the integrator's verdict is the only
@@ -155,18 +155,16 @@ a project's CI stops running it; each project's package follows SE's release of 
    `scripts/work_tickets.py`: `integrate` runs `pr_issues.py` and `field-report --check` of the work
    pull request on the landing head, writes the verdict line into the landing description, and
    `--read-back` refuses a landing without it; the landing waits for the check `[integrate]` names.
-   README [Landing on main](../README.md#landing-on-main); `tests/test_work_tickets.py`.
+   [Landing on main](settings.md#landing-on-main); `tests/test_work_tickets.py`.
 2. **se: no SE pin in a project** (`no-se-pin-in-projects`). `scripts/se_modules.py` refuses
    `[modules.se]` outside SE; `scripts/public_check.py` drops the pin comparison and keeps naming
-   its SE commit; rule pub-007 in `src/skills/work-model/references/rules.md`; README
-   [Modules](../README.md#modules) and [Project settings](../README.md#project-settings); the work
+   its SE commit; rule pub-007 in `src/skills/work-model/references/rules.md`; [Modules](modules.md#modules) and [Project settings](settings.md#project-settings); the work
    model's [What the project provides](../src/skills/work-model/SKILL.md#what-the-project-provides).
 3. **se: workflows copied once** (`workflows-copied-once`). `scripts/se_workflows.py`: `write`
    copies a plain file without the generated header, `check` and the regeneration at `update se`
    go, `SHIPPED` loses `integrator-pass`, `suite-shard` and `suite-time`; trusted landings for
-   projects go (`scripts/ci_trust.py`, `se-pass-record.yml`); README
-   [Workflows](../README.md#workflows), [Release tags](../README.md#release-tags) and
-   [Trusted landings](../README.md#trusted-landings).
+   projects go (`scripts/ci_trust.py`, `se-pass-record.yml`); [Workflows](running.md#workflows), [Release tags](settings.md#release-tags) and
+   [Trusted landings](tests.md#trusted-landings).
 4. **se: the start check of a managed project** (`managed-project-start-check`). `work_tickets.py
    sync` runs the public check on the tree it starts from and stops on a hit; `scripts/setup.sh`
    and `setup.ps1` keep a project's hooks as local configuration only; their tests.

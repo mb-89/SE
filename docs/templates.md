@@ -10,7 +10,7 @@ template system for everything agents write; the names template, schema and docu
 separate guidance system that templates use. The guidance system has its own design; this note
 states only the one call a template makes to it ([Tags and guidance](#tags-and-guidance)).
 
-Until the packages land, README ["Templates"](../README.md#templates) describes the engine as it
+Until the packages land, ["Templates"](templating.md#templates) describes the engine as it
 runs today; the [Map](#map) says where each of its parts goes.
 
 ## Names
@@ -256,7 +256,7 @@ se.toml.
 
 - se.toml lists them by name, `[templates] repositories = ["<name>", ...]`, each a component
   `[components.<name>]` pinned by `ref` or `version` as any other and placed by `se_modules.py
-  sync` ([README "Modules"](../README.md#modules)); its templates are its `templates/`, under its
+  sync` ([docs/modules.md "Modules"](modules.md#modules)); its templates are its `templates/`, under its
   `path` where it sets one.
 - The engine resolves a template name in order: the project's own `templates/`, then each pinned
   template repository in the order se.toml lists them, then SE's own.
@@ -296,6 +296,65 @@ its template before it runs ([Fill](#fill)). SE's own templates own one, a work 
 The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
 refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
 adapters' interface and the first adapter, which reads a Markdown template note.
+
+## Filling templates from material
+
+The skill [fill-templates](../src/skills/fill-templates/SKILL.md) gives anyone using SE one
+capability: hand the agent templates, raw material and maybe a prompt, and get the finished
+documents back in a small repository of their own. The skill owns the steps; this section owns
+the worked example, which `tests/test_templates.py` fills again and checks as it stands.
+
+The engine adds two things to the fill and the check above:
+
+- `templates.py fill --input <folder>` takes a folder of material as its raw input: each text file
+  under it, outside hidden folders, after a line naming the file.
+- `templates.py documents --path <folder>` checks every document under the folder against the
+  template its `derived_from` names, then lists each section the material did not fill, by its
+  heading. It refuses where a document does not pass, or where the folder holds none.
+
+A section the material cannot fill holds `Not in input` ([Fill](#fill)), which passes the check,
+so `documents` names it for the person; a slot left in a document refuses.
+
+### The worked example
+
+The request: "write me a label spec and a test plan for Pump X, the templates are label-spec and
+test-plan, my raw data is in `material/`". The repository the agent sets up is
+[examples/fill-templates/pump-x](../examples/fill-templates/pump-x/README.md), whole:
+
+- `templates/`: the single note [label-spec](../examples/fill-templates/pump-x/templates/label-spec.md),
+  which writes a file, and the template manifest
+  [test-plan](../examples/fill-templates/pump-x/templates/test-plan/manifest.md) with two template nodes
+  ([Template manifests](#template-manifests));
+- `material/`: three raw notes, a [brief](../examples/fill-templates/pump-x/material/pump-brief.md), a
+  [safety review](../examples/fill-templates/pump-x/material/safety-review.md) and a
+  [test log](../examples/fill-templates/pump-x/material/test-log.md);
+- `documents/`: [label-pump](../examples/fill-templates/pump-x/documents/label-pump.md) and
+  [test-plan-pump](../examples/fill-templates/pump-x/documents/test-plan-pump.md), each recording its template in
+  `derived_from` and linking the notes it comes from rather than repeating them;
+- the README, naming each template and version, the material and the prompt.
+
+The agent asks each fill for its instructions first, then fills it with its fields, run from the
+repository's root with `<se>` SE's checkout; `--root .` resolves the names there first:
+
+```sh
+uv run python <se>/scripts/templates.py fill label-spec --root . --path documents/label-pump.md --input material
+uv run python <se>/scripts/templates.py fill label-spec --root . --path documents/label-pump.md --input material \
+  --fields-json '{"product": "...", "warnings": "...", "languages": "Not in input"}'
+uv run python <se>/scripts/templates.py fill test-plan --root . --out documents/test-plan-pump.md \
+  --input material --fields-json '{"scope": "...", "cases": "..."}'
+```
+
+The material names no language, so that section holds `Not in input`. The check passes both
+documents and names the gap, which the agent reports to the person:
+
+```sh
+uv run python <se>/scripts/templates.py documents --root . --path documents --input material
+```
+
+```text
+label-pump.md: Languages: not in input
+2 documents: pass; 1 section the material did not fill, named above: tell the person each
+```
 
 ## Tags and guidance
 

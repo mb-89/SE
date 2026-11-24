@@ -1,5 +1,5 @@
 # Re-runs once a first attempt of check that kern-platforms-queue cancelled because a platform leg
-# never got a runner (README "Platform legs and their queue"); scripts/ci_queue.py rerun decides
+# never got a runner (docs/tests.md "Platform legs and their queue"); scripts/ci_queue.py rerun decides
 # from the run's jobs, so a run that failed, or a second attempt, is left as it ended.
 name: check rerun
 

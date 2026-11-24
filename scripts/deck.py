@@ -431,7 +431,7 @@ def answers(path: Path, record: Path | None, destination: Path | None) -> int:
     return build(record, destination, path) if record else 0
 
 
-#: deck.py's commands in the render component timeline.py names (README "Commands as
+#: deck.py's commands in the render component timeline.py names (docs/start.md "Commands as
 #: components"); each command's usage and help come from make_parser.
 COMPONENTS = (se_components.script("timeline").COMPONENTS[0]._replace(
     commands=("build", "serve", "answers")),)

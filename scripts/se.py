@@ -1,5 +1,5 @@
 """The `se` command: `uv run python <se>/scripts/se.py <command>`. Each command's module owns what it
-does; this file only names them (README "New application")."""
+does; this file only names them (docs/applications.md "New application")."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def _sibling(name: str):
     return module
 
 
-#: se.py's commands as one kern component (README "Commands as components"); each command's usage
+#: se.py's commands as one kern component (docs/start.md "Commands as components"); each command's usage
 #: and help come from make_parser.
 COMPONENTS = (_sibling("se_components").Group(
     "scaffold", "Scaffold",

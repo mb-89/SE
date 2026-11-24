@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The dispatcher (README "Dispatcher"): a check with no model that fires the scheduled task whose
+"""The dispatcher (docs/fleet.md "Dispatcher"): a check with no model that fires the scheduled task whose
 session is a fresh integrator, where startable work waits, no integrator runs and the worker
 limit leaves room.
 
@@ -122,7 +122,7 @@ def secrets(environ: dict[str, str] | os._Environ = os.environ) -> tuple[str, st
                if not value]
     if missing:
         raise FireError(f"dispatch --fire: {' and '.join(missing)} not set; set the repository "
-                        "secrets README \"Dispatcher\" names, or run --dry-run")
+                        "secrets docs/fleet.md \"Dispatcher\" names, or run --dry-run")
     url = urllib.parse.urlsplit(trigger)
     if url.scheme != "https" or not url.netloc or not TRIGGER_PATH.match(url.path):
         raise FireError(f"dispatch --fire: {TRIGGER_VARIABLE} is not a scheduled task's fire URL "
