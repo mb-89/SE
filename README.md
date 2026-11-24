@@ -2543,6 +2543,7 @@ both.
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
@@ -2550,6 +2551,9 @@ both.
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
+| `templates/python-component.md` | An ad hoc Python component: its component.toml with one command, and its __init__.py answering it. |
+| `templates/python-module.md` | A Python module other scripts import: its template marker, its docstring, and a slot for its code. |
+| `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through scripts/se_script.py, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
@@ -2593,6 +2597,20 @@ that differs from its template.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.
+
+Code templates (kind `code`, [docs/templates.md "Code templates"](docs/templates.md#code-templates))
+shape scripts and modules: `python-script` and `python-module` claim `scripts/*.py`, `go-module`
+every `go.mod`, `python-component` the ad hoc components under `.se/components/`.
+
+- `templates.py scaffold <template> --path <file or folder> --says <one line>` writes a new one,
+  its marker recording the template and version, and only its slots left to fill; it refuses a
+  file that exists. `se component add` renders its files through `python-component`.
+- A script's shared part is `scripts/se_script.py`: the uv entry runs `main` through
+  `se_script.run`, which sets up logging (`SE_LOG_LEVEL`), and `se_script.parser` gives the help.
+- The check and SE's gate hold each claimed file to its template's lines (the marker; for a script
+  the uv entry, the library, the help and the entry), so a script written freehand is refused,
+  naming the scaffold call, and an edit that keeps the shape passes. SE's own scripts and its
+  `components/go.mod` carry their templates.
 
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
 line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
