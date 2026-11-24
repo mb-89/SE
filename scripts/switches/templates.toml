@@ -12,7 +12,7 @@ layers = ["se.toml"]
 key = "templates.enforce"
 off = ["off"]
 other = "on"
-help = "README.md#templates"
+help = "docs/templating.md#templates"
 note = "off (or unset): filing as without templates, byte for byte; warn prints the findings and files; refuse refuses, listing every finding"
 
 [[switch]]
@@ -22,7 +22,7 @@ reader = "scripts/templates.py"
 default = "set"
 layers = ["se.toml"]
 key = "templates.refusals"
-help = "README.md#templates"
+help = "docs/templating.md#templates"
 note = "set: 2 unless se.toml names another count, the refusals of one issue in one session after which --hold files it labelled off-template"
 
 [[switch]]
@@ -34,7 +34,7 @@ layers = ["se.toml"]
 key = "templates.gate"
 off = ["off"]
 other = "on"
-help = "README.md#templates"
+help = "docs/templating.md#templates"
 note = "off (or unset): GitHub writes through the GitHub tools run unchecked; warn hands the findings to the agent; refuse denies a write whose body breaks its template (scripts/se_templates.py gate)"
 
 [[switch]]
@@ -46,7 +46,7 @@ layers = ["se.toml"]
 key = "templates.backstop"
 off = ["off"]
 other = "on"
-help = "README.md#templates"
+help = "docs/templating.md#templates"
 note = "off (or unset): the templates workflow marks nothing; on: an off-template fleet issue gets the label off-template, an off-template marked comment a failed run (scripts/se_templates.py backstop, .github/workflows/templates.yml)"
 
 [[switch]]
@@ -58,5 +58,5 @@ layers = ["environment"]
 off = ["off"]
 other = "on"
 fold = true
-help = "README.md#machine-local-selocaltoml"
+help = "docs/running.md#machine-local-selocaltoml"
 note = "off: the template gate judges no GitHub write and no write of a claimed file on this machine, whatever se.toml [templates] gate says; unset, it follows se.toml"

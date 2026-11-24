@@ -1,4 +1,4 @@
-"""The branch-cleanup workflow (.github/workflows/branch-cleanup.yml, README "Workflows"): a closed
+"""The branch-cleanup workflow (.github/workflows/branch-cleanup.yml, docs/running.md "Workflows"): a closed
 pull request's head branch goes, unless a guard holds it; each outcome is one summary line."""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 import se_workflows
+from manual import page
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "branch-cleanup.yml"
@@ -166,7 +167,7 @@ def test_the_workflow_is_shipped_and_its_copy_is_only_called():
 
 
 def test_the_readme_s_trigger_file_calls_the_copy_with_every_input():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("running")
     block = readme.split("name: branch-cleanup-on-close\n", 1)[1].split("```", 1)[0]
     trigger = yaml.safe_load("name: branch-cleanup-on-close\n" + block)
     (job,) = trigger["jobs"].values()

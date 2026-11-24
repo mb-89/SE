@@ -1,5 +1,5 @@
 """Feedback within a second: the time budgets of the `work_tickets.py` and `se_start.py` commands,
-declared once here, and what keeps a slow command from reading as hung (README "Feedback budgets").
+declared once here, and what keeps a slow command from reading as hung (docs/running.md "Feedback budgets").
 
 - Every subcommand prints its first line within `FIRST_LINE_SECONDS`: `watched` prints one for a
   run that has shown nothing by half of it.

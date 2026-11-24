@@ -3,7 +3,7 @@
 # and uv, vets the Go code, and runs the application's tests, its Go and its Python tests,
 # as its se.toml [tests] command declares them, held to that table's one budget: over target_seconds
 # it warns, over limit_seconds or on a failed test it fails. An application calls the copy SE writes
-# into it at kern's pin (scripts/se_workflows.py, SE's README "Workflows") with
+# into it at kern's pin (scripts/se_workflows.py, SE's docs/running.md "Workflows") with
 #
 #   jobs:
 #     check:
@@ -11,7 +11,7 @@
 #
 # Where the application's se.toml [tests] sets trust_integrator = true, the job trust passes it on
 # the integrator's record of exactly the tree checked out, and the battery's vet and tests do not
-# run (SE's README "Trusted landings"). Its action, integrator-pass, runs from the kern commit this
+# run (SE's docs/tests.md "Trusted landings"). Its action, integrator-pass, runs from the kern commit this
 # workflow runs at (job.workflow_sha), in an application's copy the pin it was written at. The default
 # is off: the battery runs in full, and the application grants nothing more than contents: read.
 #
@@ -29,11 +29,11 @@ on:
 
 # No permissions of its own: the jobs take the caller's, contents: read where trust is off; where it
 # is on the application grants checks: write (the full pass's mark) and actions: read (the record's
-# run), as SE's README "Trusted landings" names.
+# run), as SE's docs/tests.md "Trusted landings" names.
 
 jobs:
   # Whether this run passes on the integrator's record of exactly this tree instead of running the
-  # battery (SE's README "Trusted landings"): only where the application's se.toml [tests]
+  # battery (SE's docs/tests.md "Trusted landings"): only where the application's se.toml [tests]
   # trust_integrator is on, never on the safety net's runs. Its full history counts the landings for
   # se.toml [tests] full_every.
   trust:
@@ -93,7 +93,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
         run: |
-          # se.toml [tests]: command, target_seconds, limit_seconds, as SE's own (SE's README "Test budget").
+          # se.toml [tests]: command, target_seconds, limit_seconds, as SE's own (SE's docs/tests.md "Test budget").
           import subprocess, sys, time, tomllib
 
           with open("se.toml", "rb") as handle:

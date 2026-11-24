@@ -1,4 +1,4 @@
-"""The filing check (README "Retro due"): `work_tickets.py file` and `backlog file` run it first;
+"""The filing check (docs/fleet.md "Retro due"): `work_tickets.py file` and `backlog file` run it first;
 a due retro or overhaul is filed first and every other filing is refused while one is due or open,
 naming it. Running work goes on: only filing runs the check."""
 
@@ -97,7 +97,7 @@ def test_twenty_that_come_back_file_the_retro_first_and_refuse_the_filing(tmp_pa
         "work_tickets.py file: a retro is due (20 came back since the last retro (due at 20)), "
         "filed first: Filed work issue https://github.com/owner/repo/issues/91; file files no "
         "other issue until the person has decided every finding of it in an SE session and it is "
-        "closed; running work goes on (README \"Retro due\")")
+        "closed; running work goes on (docs/fleet.md \"Retro due\")")
     assert issubclass(work_tickets.ReviewDueError, work_tickets.QueueError)
 
 
@@ -159,7 +159,7 @@ def test_without_gh_or_relay_the_plan_names_the_check_first(tmp_path, monkeypatc
     assert capsys.readouterr().out == (
         f"Before filing: run `uv run python {work_tickets.SE_ROOT.as_posix()}/scripts/retro.py "
         f"due --worktree {tmp_path.as_posix()}` and its plan; while it names a retro or an "
-        "overhaul due or open, file nothing else (README \"Retro due\")\n")
+        "overhaul due or open, file nothing else (docs/fleet.md \"Retro due\")\n")
 
 
 def test_file_runs_the_check_first_and_fails_naming_the_open_retro(tmp_path, monkeypatch,

@@ -1,6 +1,6 @@
 """Build se's documentation, one HTML file, from `docs.md` with the obs module.
 
-The README section "Documentation" owns what this builds and where it is published. Exit code 0:
+docs/documentation.md "Documentation" owns what this builds and where it is published. Exit code 0:
 built without a warning; 1: the build failed or obs warned (each warning is printed); 2: setup error.
 """
 
@@ -256,7 +256,7 @@ def runme(vault: Path, folder: Path) -> int:
     if result.returncode:
         print(f"build_docs: sh RUNME.sh --help in the build's copy of {folder} failed with exit code "
               f"{result.returncode}; the pinned se must be in ~/.se/bin: run bash scripts/bootstrap.sh "
-              "--binary in the checkout first (README \"Documentation\")", file=sys.stderr)
+              "--binary in the checkout first (docs/documentation.md \"Documentation\")", file=sys.stderr)
         return 1
     return 0
 

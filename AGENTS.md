@@ -37,11 +37,11 @@
     is not listed.
   - The build preloads it into that agent's `skills` field.
   - The start greeting names an entry the session lacks
-    ([README "Start and refresh"](README.md#start-and-refresh)).
+    ([docs/start.md "Start and refresh"](docs/start.md#start-and-refresh)).
 - Every pytest run builds them first (`tests/conftest.py`, naming each file it wrote), so no suite
   tests a stale layout and nobody runs the build by hand before it; commit what it wrote.
-- Installing SE on a clean machine is the README's [Getting it running](README.md#getting-it-running);
-  on a host, its [Install](README.md#install).
+- Installing SE on a clean machine is [Getting it running](docs/install.md#getting-it-running);
+  on a host, its [Install](docs/install.md#install).
 
 ## Tests
 
@@ -49,7 +49,7 @@
 |---|---|---|
 | Focused | `uv run pytest -q tests/<file>.py` (add `-k <name>` for one test) | the tests of what changed |
 | SE's Go components under `components/` | `uv run python scripts/se_modules.py sync kern`, then `cd components && go vet ./... && go test ./...` | on kern at the pin `se.toml` `[components.kern]` reads from `components/go.mod`, in `.se/modules/kern` (every pytest run places it first, `tests/conftest.py`); declared beside the suite as `se.toml` `[tests.beside.go-components]`; their agreement test holds the Go fleet and retro-due components to the Python paths ([components/README.md](components/README.md#tests)); kern's own tests run in kern's repository |
-| Complete | `uv run pytest -q` and the suites beside it | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([README "Test budget"](README.md#test-budget)) |
+| Complete | `uv run pytest -q` and the suites beside it | declared with their time budgets in `se.toml` `[tests]`; `integrate` runs both against them, and `work_tickets.py suite --worktree <checkout>` runs them the same way ([docs/tests.md "Test budget"](docs/tests.md#test-budget)) |
 | Repository hygiene | `uv run python scripts/hygiene.py` | a step of the `check` job, not a test: it checks SE's own checkout through git's real door; its logic is unit-tested on the fake, each check failing on a fixture (`tests/test_repository.py`, `tests/test_references.py`) |
 | Dangling references | the same command | it fails where the agents, the skills (the rule book among them), README.md or AGENTS.md name what the repository lacks |
 
@@ -105,9 +105,14 @@
     `generated.yaml`, or a generator's fresh run differs (`scripts/generated.py`, the guidance
     note `generated-files-are-marked`); the commit hook runs the same check without the fresh runs
     (`se.toml` `[commit_checks]`).
+  - It also fails where README.md is not one page with its one command first (`scripts/readme.py`,
+    the guidance note [readme-is-one-page](guidance/readme-is-one-page.md)); the commit hook runs the
+    same check, and the `check` job's `showcase` runs that command on a fresh runner.
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:
+  - A section reference, `<page>.md "<section>"` or `README "<section>"`, in any tracked text file
+    whose page holds no such heading (the check `sections`).
   - A link to a missing file, a missing repository path in code (`scripts/…`, `src/…`, `tests/…`,
     `.github/…`), or a script subcommand its argument parser does not define.
   - `scripts/references.py` owns what counts; the issue-filing commands call it too
@@ -117,7 +122,7 @@
   - the layout (`se_plugin.py check`);
   - the interface templates' generated schemas (`templates.py interfaces --check`, held by
     `tests/test_interfaces.py`);
-  - the README's command reference with its components' declarations (`work_tickets.py docs
+  - the command reference (`docs/work-commands.md`) with its components' declarations (`work_tickets.py docs
     --check`).
 - Test environment: none to load; `tests/conftest.py` clears the runner's variables (`CI`,
   `SE_CLOUD_AGENT`, `SE_DEFAULT_AGENT`, every `GITHUB_*`) for the session, and a test that needs one sets it. Where uv warns that it cannot verify TLS behind a proxy, set
@@ -166,12 +171,12 @@ pass it; they refuse:
 | The project identity, in the commit gates of a `--range` only | [pub-002](src/skills/work-model/references/rules.md#pub-002-a-generic-commit-identity) | where the project sets an `identity` (or the machine a `public_identity`, which wins), a commit whose author or committer differs, naming the commit, the identity found (redacted) and the remedy | named in the refusal | a full check leaves it alone; a commit already published passes by its reasoned commit entry in `.public-check-allow` |
 
 - Attribution trailers: every author is refused, the owner included; a co-author line's hit also
-  names the editor setting that writes it ([README "Install"](README.md#install)).
+  names the editor setting that writes it ([docs/install.md "Install"](docs/install.md#install)).
 - The project identity:
   - Where `se.toml` `[integrate] landing` is `"fast-forward"`, the gate is strict: a commit
     GitHub made is foreign like any other, its web-flow committer (`GitHub`, `noreply` at
     `github.com`) and a squash merge's account author alike, as every landing is the
-    integrator's own commit ([README "Landing on main"](README.md#landing-on-main)).
+    integrator's own commit ([docs/settings.md "Landing on main"](docs/settings.md#landing-on-main)).
   - While it is `"squash"`, the built-in, GitHub's web-flow identity passes as committer, never
     as author. On such a commit the author may be the account that owns `origin` on
     `github.com`, by its `users.noreply.github.com` address: the squash merge of a pull request
@@ -192,7 +197,7 @@ pass it; they refuse:
   - The same job runs every other check an integration runs: `se_plugin.py check`,
     `work_tickets.py docs --check`, `hygiene.py`, `field-report --check` of a pull request's
     description against its work issue where it carries a report (a landing pull request's, from
-    the work pull request it links, README [Landing on main](README.md#landing-on-main)), and
+    the work pull request it links, [Landing on main](docs/settings.md#landing-on-main)), and
     `work_tickets.py suite` in budget.
   - On a pull request it also runs `pr_issues.py`, the work model's rule that the description
     names an open work issue ([Integration branch](src/skills/work-model/SKILL.md#integration-branch)).
@@ -226,7 +231,7 @@ pass it; they refuse:
   - It is never checked in ([pub-005](src/skills/work-model/references/rules.md#pub-005-private-terms-stay-local)): the check refuses to run while git tracks it, naming `git rm --cached`;
     `scripts/setup.sh` and `setup.ps1` add it to the source's `.gitignore`.
 - One se version per check ([pub-007](src/skills/work-model/references/rules.md#pub-007-one-se-version-per-check)): every verdict names the se commit that ran it, and a repository that
-  pins se (`[components.se]` in its `se.toml`, [README "Modules"](README.md#modules)) is refused with
+  pins se (`[components.se]` in its `se.toml`, [Modules](docs/modules.md#modules)) is refused with
   exit code 2 when the running se is not at that pin: another commit than its `ref`, or a version
   outside its `version` range or none readable, naming both; `scripts/se_modules.py sync` brings
   the clone there.
@@ -238,7 +243,7 @@ pass it; they refuse:
   - an `off:` line in the local list, for a public entry this source never treats as private.
 - Hooks: run `scripts/setup.ps1` or `scripts/setup.sh` once per clone. They set `core.hooksPath` to
   `.githooks`: pre-commit checks the staged content and then runs the project's own
-  [commit checks](README.md#commit-checks) on the staged tree, commit-msg the message and
+  [commit checks](docs/settings.md#commit-checks) on the staged tree, commit-msg the message and
   identity, pre-push every pushed commit the destination remote does not hold yet.
   - A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>` (or
     `scripts/setup.sh <path>`) and so runs se's check without copying it.

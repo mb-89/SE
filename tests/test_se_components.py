@@ -1,4 +1,4 @@
-"""SE's command groups as kern components, against kern's Python fake core (README "Commands as
+"""SE's command groups as kern components, against kern's Python fake core (docs/start.md "Commands as
 components"): each group's declaration is what docs writes from its script's argparse parser, its
 process answers its commands with the script's own code, and a command runs directly wherever kern
 does not serve it."""
@@ -118,16 +118,16 @@ def test_two_scripts_share_the_render_component_under_the_group_the_first_names(
 
 
 def test_no_command_is_hand_listed_outside_the_reference() -> None:
-    """The README lists every SE command's usage once, in the reference the catalog renders: outside
-    it, a code span naming a catalog command carries no argument synopsis (an option in brackets, a
-    `<placeholder>`, an upper-case metavar), as `git grep` finds it."""
-    lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    """docs/work-commands.md lists every SE command's usage once, in the reference the catalog
+    renders: outside it, a code span naming a catalog command carries no argument synopsis (an option
+    in brackets, a `<placeholder>`, an upper-case metavar), as `git grep` finds it."""
+    lines = (ROOT / work_tickets.REFERENCE_PAGE).read_text(encoding="utf-8").splitlines()
     begin, end = lines.index(work_tickets.REFERENCE_BEGIN), lines.index(work_tickets.REFERENCE_END)
     names = sorted({name for d in se_components.catalog(ROOT, GROUPS) for name in d.commands},
                    key=len, reverse=True)
     synopsis = re.compile(r"(?<![\w.-])(" + "|".join(map(re.escape, names))
                           + r")(?![\w.-])[^`\n]*(\[-|<[a-z][a-z -]*>|\b[A-Z]{3,}\b)")
-    found = [f"README.md:{n}: {line}" for n, line in enumerate(lines, 1)
+    found = [f"{work_tickets.REFERENCE_PAGE.as_posix()}:{n}: {line}" for n, line in enumerate(lines, 1)
              if not begin < n - 1 < end and synopsis.search(line)]
     assert not found, "\n".join(found)
 
@@ -184,7 +184,7 @@ def test_each_group_answers_its_commands_with_the_scripts_code(components, tmp_p
 
     # integration: the command reference check, against this checkout.
     assert components["integration"].run("work_tickets.py docs", "--check") == (
-        "README.md: the command reference is up to date")
+        "docs/work-commands.md: the command reference is up to date")
 
     # review: review.py's own code, its refusal of a report that does not exist.
     with pytest.raises(KernError, match=r"\Aexit code 1\n") as refused:
@@ -237,10 +237,11 @@ def test_a_component_refuses_a_command_its_script_does_not_run(tmp_path) -> None
 
 def test_docs_check_refuses_a_stale_declaration_and_docs_rewrites_it(tmp_path, monkeypatch,
                                                                      capsys) -> None:
-    readme = tmp_path / "README.md"
-    readme.write_text(f"{work_tickets.REFERENCE_BEGIN}\n{work_tickets.REFERENCE_END}\n",
-                      encoding="utf-8")
-    monkeypatch.setattr(work_tickets, "README", readme)
+    page = tmp_path / work_tickets.REFERENCE_PAGE
+    page.parent.mkdir()
+    page.write_text(f"{work_tickets.REFERENCE_BEGIN}\n{work_tickets.REFERENCE_END}\n",
+                    encoding="utf-8")
+    monkeypatch.setattr(work_tickets, "CHECKOUT", tmp_path)
     assert work_tickets.main(["docs"]) == 0
     declaration = tmp_path / "components" / "tickets" / "component.toml"
     declaration.write_text(declaration.read_text(encoding="utf-8").replace(

@@ -216,7 +216,7 @@ A watch is a subscription: `val.github.>` sees every GitHub name. A subscriber t
 sees a previous revision that does not match its own and sends a `get` (v5's "A push names its
 predecessor").
 
-`call.` streams so a command keeps the [feedback budgets](../README.md#feedback-budgets): every
+`call.` streams so a command keeps the [feedback budgets](running.md#feedback-budgets): every
 `Phase: <what>` a long command announces reaches its caller as it is said.
 
 ### Progress and long calls
@@ -374,17 +374,17 @@ darwin is built, not tested. The binary is fetched into
   so no file names a host, owner or repository. Without an origin, or with one that names no home
   (a local proxy's URL), the start builds the binary from its folder, as where no release matches.
 
-- **Cloud:** as local: the environment's setup script only clones SE (README ["Claude Code
-  cloud"](../README.md#claude-code-cloud)), so `bootstrap.sh` fetches the binary at the session
+- **Cloud:** as local: the environment's setup script only clones SE (["Claude Code
+  cloud"](install.md#claude-code-cloud)), so `bootstrap.sh` fetches the binary at the session
   start that first meets a version; a container snapshot the cloud keeps can carry an older one
-  (README ["Cloud sessions"](../README.md#cloud-sessions)).
+  (["Cloud sessions"](install.md#cloud-sessions)).
 - **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background, and
   the start waits for it: kern is required, so one that does not land in time stops the start
   ([boot.md "Required components"](boot.md#required-components)).
 - **RUNME:** `bootstrap.sh --binary` places SE's pinned binary in the foreground, from its release
-  (built with `go` only where none matches), links it and starts nothing (README ["Kern"](../README.md#kern)).
+  (built with `go` only where none matches), links it and starts nothing (["Kern"](start.md#kern)).
 - **Which pins:** the installed SE's `release.toml`, after the refresh at start moved it to its
-  latest release (README ["Start and refresh"](../README.md#start-and-refresh)); where the
+  latest release (["Start and refresh"](start.md#start-and-refresh)); where the
   session's working tree is SE's own checkout, that checkout's, so a session on `main` tests `main`.
 - **A checkout of the core or of an application's Go code:** built from source (warm build 0.12 s,
   one changed file 0.9 to 1.0 s), so its own changes run.
@@ -394,8 +394,8 @@ darwin is built, not tested. The binary is fetched into
   refuses that change, `se.toml` `[tests.beside.release-guard]` (kern's README "Release"): a
   release is built from one commit and is never changed, so
   the files it is built from are the release's own contents, and the guard needs no download. The
-  landing assigns the raised version from the kind the branch states (README ["Component
-  versions"](../README.md#component-versions)), and the push to `main` cuts it; a session that
+  landing assigns the raised version from the kind the branch states (["Component
+  versions"](settings.md#component-versions)), and the push to `main` cuts it; a session that
   starts before its release is published builds it from source.
 
 ### Lifetime: bound to the session
@@ -500,7 +500,7 @@ without its end. Either way the start spawns a core, and the core that serves wr
 | UserPromptSubmit | the prompt's id | context the core holds back for it: a work issue changed since it was read, an escalation pending |
 | PreToolUse | the tool and its input | guards the rules mechanically, as the cage did: a hand-typed `git push` (`work_tickets.py push` is the door), `--no-verify` ([pub-006](../src/skills/work-model/references/rules.md#pub-006-never-bypass-the-hooks)), a write outside the worker's box; each guard is a component, switched on per role |
 | PostToolUse | the tool, its input and its response | the GitHub component reads the session's GitHub tool answers ([GitHub in the cloud](#github-in-the-cloud)); a ticket move or a commit updates the delivery names |
-| Stop, SubagentStop | the stop | the delivery component's `stop-check` answers within the hook, in its warm process: 24 to 57 ms after the first, against 434 to 586 ms through `uv` (README "Stop hook") |
+| Stop, SubagentStop | the stop | the delivery component's `stop-check` answers within the hook, in its warm process: 24 to 57 ms after the first, against 434 to 586 ms through `uv` (docs/fleet.md "Stop hook") |
 | SessionEnd | the end | returns the lease; the last one out stops the core after its grace |
 
 The file half is built: kern's session component (its README in kern's repository),
@@ -561,8 +561,8 @@ stand-in, and takes the proxy where REST answers through it, else the relay.
 
 SE's callers ask the backend (`se_relay.py` `backend`): only on `relay` does a streamed command run
 as one call through kern with its GitHub steps relayed. On `token` and `proxy` it runs directly,
-reaches GitHub itself and says so on stderr (README
-[Hand-offs through the relay](../README.md#hand-offs-through-the-relay)).
+reaches GitHub itself and says so on stderr
+([Hand-offs through the relay](settings.md#hand-offs-through-the-relay)).
 
 Every GitHub tool answer the session receives, a plan's or not, lands in the snapshot
 (`github/issues/<key>`, `github/pulls/<key>`, `github/checks/<key>`, `github/comments/<key>`) or
@@ -679,7 +679,7 @@ what SE's start does without it, is [components.md](components.md), the one owne
 components.
 
 **Pinning it.** An application pins the core in `se.toml [components.kern]` with `go`, the `go.mod`
-that requires it (README [Modules](../README.md#modules)): the version that `go.mod` requires of
+that requires it ([Modules](modules.md#modules)): the version that `go.mod` requires of
 `kern` is the pin, resolved to the tag `v<version>` and locked in `se.lock`, so the pin has one
 owner. SE's is `components/go.mod`, which requires `kern v<version>` and replaces it by
 `../.se/modules/kern`. Above major 1 it requires `kern v<version>+incompatible`, as Go spells a
@@ -687,14 +687,14 @@ major above 1 of a module path without `/v<major>`, and the pin is the version w
 (`se_modules.go_version`). CI's `check` syncs kern and fails where the committed `se.lock` lags the
 require. Every session hook runs `scripts/se_hook.sh <event>`, which execs the `se` binary: bash
 builtins up to one exec, not Python, whose interpreter start alone costs about twice kern's whole
-hook, and through `uv` six to ten times (README [Kern](../README.md#kern) owns the measurements).
+hook, and through `uv` six to ten times ([Kern](start.md#kern) owns the measurements).
 
 **When kern is released.** kern's repository cuts its release where a push to its `main` changes
 `release.toml`'s `version` (kern's README "Release"). SE takes it by moving `components/go.mod`'s
 `require kern` and running `se_modules.py sync kern`, which writes `se.lock`. That move changes an
 input of `se`: the release guard refuses it without `**Component kinds:** se <kind>`, and the
 landing gives `se` its next version, so a new kern reaches sessions only in a new `se`
-(README [Component versions](../README.md#component-versions)).
+([Component versions](settings.md#component-versions)).
 
 ### Switching components on and off
 
@@ -750,7 +750,7 @@ kern's module path names no host, so no build can fetch it, and the application 
 does, carrying no copy: its `go.mod` requires kern at the pin and replaces the module by its clone
 in `.se/modules/kern`, and its `se.lock` locks the commit SE's locks. `se new app` copies SE's clone
 there, ignored, so the application builds before it has an origin; its CI places kern at that
-commit with the action `kern-at-pin` (README [New application](../README.md#new-application)).
+commit with the action `kern-at-pin` ([New application](applications.md#new-application)).
 
 A new application then gets components by adding instances, CI from the reusable workflow, and its
 test budget from `se.toml [tests]`, in the same shape as SE's.
@@ -783,7 +783,7 @@ runs.
 Once the core runs, the skills, agents and specs read from it instead of restating or recomputing:
 
 - **The catalog:** every command's usage, summary and help from its one declaration, through
-  `<app> help <command>`. The README's command reference is rendered from the catalog, Python and
+  `<app> help <command>`. The command reference (docs/work-commands.md) is rendered from the catalog, Python and
   Go components alike, so no skill copies a usage line.
 - **The greeting and SE's first turn:** what is due (a retro, an overhaul), stuck (the fleet
   findings), waiting on the person (escalations), live instead of from an hour-old cache.
@@ -896,7 +896,7 @@ goal and blockers, and the dispatcher files them.
 | 5 | the release workflow, `battery.yml` and the bare template | kern |
 | 6 | SE pins the core, fetches its release, SessionStart starts it and the greeting names it; the hook client posts every event, probing PostToolUse | SE |
 | 7 | the GitHub component: token and relay backends, the snapshot names | kern |
-| 8 | SE's script commands attach as Python components; the README's command reference renders from the catalog | SE |
+| 8 | SE's script commands attach as Python components; the command reference renders from the catalog | SE |
 | 9 | `integrate` and every hand-off run through the relay: no retyped files | SE |
 | 10 | fleet check and retro due as Go components, read live by the greeting | SE |
 | 11 | `stop-check` answered from the core within the hook | SE |
