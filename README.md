@@ -809,7 +809,8 @@ below, a positive number of hours, default 12; other keys are refused.
     plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
     passed it starts `work_tickets.py beat` in the background, which sets the line to now.
   - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
-    so the session runs its read and write when the hook tells it.
+    so the session runs its read and write when the hook tells it. The write carries the issue's
+    own labels, so the [template gate](#templates) judges it by the issue's own template.
   - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
     and the template check ignore it.
 - **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
@@ -2628,6 +2629,8 @@ names the templates, `draft <template>` gives `draft --json`'s answer, and `chec
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
 Markdown to file.
 
+It only reads; `check`'s first line is `passes` or `refused: <n> findings`.
+
 - `draft` and `fill` give the template's guidance first, as
   [docs/guidance.md "Delivery"](docs/guidance.md#delivery) states: once per session (`--session`),
   in pages of kern's page limit, the template on the last page.
@@ -2656,10 +2659,10 @@ against `work`, `backlog file` against `ticket` and `route` against `routed`. Ea
 `--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
 always rendered through the template.
 
-- `enforce` is `off` (the default: a `--body-file` body is filed as given, with its template's
-  marker), `warn` (the findings go to stderr and the issue is filed) or `refuse` (nothing is
-  printed, asked or written; the refusal lists every finding in at most ten lines). With `warn` or
-  `refuse` a `--body-file` body is parsed and rendered again, its unknown sections kept.
+- `enforce` is `off` (the default: a `--body-file` body is filed byte for byte as before), `warn`
+  (the findings go to stderr and the issue is filed) or `refuse` (nothing is printed, asked or
+  written; the refusal lists every finding in at most ten lines). With `warn` or `refuse` a
+  `--body-file` body is parsed and rendered again, its unknown sections kept.
 - They read `[templates]` from `se.toml` at `origin/<integration branch>`, the working tree's only
   where that ref does not exist, so a branch cannot switch its own check off.
 - `refusals` (default 2) caps the retries: refusals are counted per session, template and issue in
@@ -2690,14 +2693,13 @@ denied, naming the template, every finding and the templates tool).
     naming `--body-file`.
   - It does not see `gh api graphql`, `curl` or another program that calls GitHub's API.
 - It reads `[templates] gate` as `enforce` is read, from the se.toml of the project whose home holds
-  the target, else of SE itself; a write elsewhere or that no template covers runs as before.
-  `SE_TEMPLATES_GATE=off` turns it off for a machine.
-- An edit is judged as the document it leaves, by the template that document names
-  ([docs/templates.md](docs/templates.md#which-template-a-write-is-judged-by)).
+  the target, else of SE itself; a write elsewhere, without a body or that no template covers runs as
+  before. `SE_TEMPLATES_GATE=off` turns it off for a machine.
 - From `refusals` on, a refused issue write may be sent again labelled `off-template` and without
   `ready`, the hold `--hold` files; a private term is never held.
-- It fails open, logged, where it is slow or cannot judge; it fails closed only on a crash once it
-  knows a template applies.
+- It fails open when it is slow: past 10 s, or where the host cancels it, the call runs.
+  It fails open where it cannot judge (no Python 3.11, a payload it cannot read), and logs it in
+  `.se/.runtime/templates-gate.log`; it fails closed only on a crash once it knows a template applies.
 
 SE's templates backstop marks what reaches GitHub past every hook, where se.toml `[templates] backstop` is
 `on` (default `off`): a person's write on github.com, a session without SE's hooks, a label change.
