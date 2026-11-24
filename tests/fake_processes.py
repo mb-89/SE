@@ -10,7 +10,7 @@ handler that matches it, and none starts a process:
 - a script of SE (`python <se>/scripts/<name>.py ...`, also through `uv run ... python`) by its
   `main(argv)`, imported and called in this process with the call's working directory,
   environment, standard input and output (`run_main`), on by default;
-- se's git hooks (`.githooks/pre-commit`, `pre-merge-commit`, `commit-msg`, `pre-push`), which the
+- se's git hooks (`.githooks/pre-commit`, `post-merge`, `commit-msg`, `pre-push`), which the
   fake git runs on a commit or push, by their logic in-process (`HOOKS`): the shell around se's
   scripts, written out;
 - anything else by what the test hands `on(<program>, <handler>)`: `gh` by its answers, a suite
@@ -226,7 +226,7 @@ def joined(*answers: Answer) -> Answer:
 
 
 def pre_commit(invocation: Invocation) -> Answer:
-    regenerated = pre_merge_commit(invocation)
+    regenerated = hook_script("generated.py", ["--root", ".", "regenerate", "--merging", "--warn"], invocation)
     if regenerated.returncode:
         return regenerated
     check = hook_script("public_check.py", ["--staged"], invocation)
@@ -235,8 +235,10 @@ def pre_commit(invocation: Invocation) -> Answer:
     return joined(regenerated, check, hook_script("commit_checks.py", [], invocation))
 
 
-def pre_merge_commit(invocation: Invocation) -> Answer:
-    return hook_script("generated.py", ["--root", ".", "regenerate", "--merging"], invocation)
+def post_merge(invocation: Invocation) -> Answer:
+    if invocation.arguments[:1] == ["1"]:
+        return Answer()
+    return hook_script("generated.py", ["--root", ".", "regenerate", "--warn", "--commit"], invocation)
 
 
 def commit_msg(invocation: Invocation) -> Answer:
@@ -270,7 +272,7 @@ def pre_push(invocation: Invocation) -> Answer:
     return result
 
 
-HOOKS: dict[str, Handler] = {"pre-commit": pre_commit, "pre-merge-commit": pre_merge_commit,
+HOOKS: dict[str, Handler] = {"pre-commit": pre_commit, "post-merge": post_merge,
                              "commit-msg": commit_msg, "pre-push": pre_push}
 
 

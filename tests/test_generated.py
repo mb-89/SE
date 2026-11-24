@@ -282,3 +282,31 @@ def test_regenerate_while_merging_runs_only_during_a_merge(tmp_path: Path, fake_
     assert (root / "out.toml").read_text() == "stale\n" and not fake_processes.calls
     assert generated.main(["--root", str(root), "regenerate"]) == 0
     assert capsys.readouterr().out == "generated.py: gen.py write regenerated out.toml\n"
+
+
+@pytest.mark.usefixtures("fake_git_door")
+def test_the_hooks_regenerate_warns_on_a_failing_generator_and_commits_the_rest(
+        tmp_path: Path, fake_processes, capsys) -> None:
+    """post-merge's call: a generator that cannot run here is a warning, not a stopped merge, and
+    what the others rewrote is committed as its own commit."""
+    import git_door
+
+    fake_processes.on("gen.py", fake_programs.run_script).on("fail.py", fake_programs.run_script)
+    how = '    held_by: generated.yaml\n    regenerate: [{python}, "{script}"]\n'
+    root = checkout(tmp_path, {
+        "gen.py": GENERATOR, "fail.py": FAILING, "src.txt": "x\n", "out.toml": "stale\n", "other.toml": "kept\n",
+        "generated.yaml": declare(
+            entry("checker", "src.txt", ["other.toml"], how.format(python=json.dumps(sys.executable), script="fail.py")),
+            entry("gen.py write", "src.txt", ["out.toml"], how.format(python=json.dumps(sys.executable), script="gen.py")))})
+    for key, value in (("user.name", "alice"), ("user.email", "alice")):
+        git_door.run("config", key, value, root=root)
+    assert generated.main(["--root", str(root), "regenerate", "--warn", "--commit"]) == 0
+    out, err = capsys.readouterr()
+    assert out == ("generated.py: gen.py write regenerated out.toml\n"
+                   f"generated.py: committed them: {generated.COMMIT_MESSAGE}\n")
+    assert err.startswith(f"generated.py: warning: checker ({sys.executable} fail.py) failed, so its outputs "
+                          "keep our side of the merge: the source does not parse;")
+    assert git_door.run("log", "-1", "--format=%s", root=root).stdout.strip() == generated.COMMIT_MESSAGE
+    assert git_door.run("status", "--porcelain", root=root).stdout == ""
+    # Without --warn the failing generator fails the command, as a hand's run should.
+    assert generated.main(["--root", str(root), "regenerate"]) == 1

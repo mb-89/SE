@@ -1,10 +1,10 @@
 #!/bin/sh
 # While a merge is in progress (one that stopped on a conflict and is committed now), the generated
-# files a merge can rerun are regenerated and staged first, as pre-merge-commit does for a merge
-# that commits by itself. Then the public-safety check of the staged content, then the project's
+# files a merge can rerun are regenerated and staged first, as post-merge does for a merge that
+# commits by itself. Then the public-safety check of the staged content, then the project's
 # own commit checks on the staged tree (se.toml [commit_checks], scripts/commit_checks.py): a
 # failure of any refuses the commit.
 hooks="$(dirname "$0")"
-"$hooks/se-script" generated.py --root . regenerate --merging || exit $?
+"$hooks/se-script" generated.py --root . regenerate --merging --warn || exit $?
 "$hooks/se-script" public_check.py --staged || exit $?
 exec "$hooks/se-script" commit_checks.py

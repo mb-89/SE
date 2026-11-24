@@ -18,10 +18,12 @@ one check keeps that true (the guidance note `generated-files-are-marked`, which
   the command that writes its outputs afresh in the checkout, offline.
 - **The merge** (`regenerate`, `regenerable`): a merge never stops on a generated file. Each
   output of a generator with `regenerate` carries `merge=se-generated` in `.gitattributes`, the
-  merge driver SE's setup installs (`DRIVER`), which keeps our side; the merge's commit hooks
-  (`.githooks/pre-merge-commit`, and `pre-commit` while a merge is in progress) then run every
-  `regenerate` and stage what it rewrote, as `integrate`'s merge does (scripts/work_tickets.py
-  `regenerate_merge`).
+  merge driver SE's setup installs (`DRIVER`), which keeps our side; then the hooks run every
+  `regenerate`, as `integrate`'s merge does (scripts/work_tickets.py `regenerate_merge`):
+  `.githooks/post-merge` after a merge that committed by itself, committing what they rewrote as
+  its own commit (`COMMIT_MESSAGE`; git writes a merge commit's tree before any hook could stage
+  into it), and `pre-commit` while a merge that stopped on a conflict is committed, staging it into
+  that commit. A hook warns where one fails and goes on; `integrate` stops.
 - **The lock files** (`LOCKS`): third-party lock files, by name, with the tool that writes them,
   are exempt from the marker; a single line a program edits in a hand-written file (a release's
   version line) is no generated file and is declared nowhere.
@@ -34,9 +36,10 @@ one check keeps that true (the guidance note `generated-files-are-marked`, which
 `generated.py check [--root DIR] [--no-rerun]` runs the check on the tracked files (a folder that
 is no git checkout, such as the commit hook's copy of the staged tree, on every file in it);
 `--no-rerun` leaves out the fresh runs, as the commit hook does. `generated.py notice PATH` prints a
-file's notice. `generated.py regenerate [--merging]` runs every declared `regenerate` and stages
-what it rewrote; `--merging` does nothing unless a merge is in progress, as the commit hooks call
-it. Exit code 0 passed (or the notice printed, or regenerated), 1 findings (or the file is not
+file's notice. `generated.py regenerate [--merging] [--warn] [--commit]` runs every declared
+`regenerate` and stages what it rewrote; `--merging` does nothing unless a merge is in progress, as
+pre-commit calls it, `--warn` makes a failing one a warning, as both hooks do, and `--commit`
+commits what it staged, as post-merge does. Exit code 0 passed (or the notice printed, or regenerated), 1 findings (or the file is not
 generated, or a `regenerate` failed), 2 a declaration that cannot be read.
 """
 
@@ -59,9 +62,11 @@ ATTRIBUTE = "generated-by"
 LINGUIST = "linguist-generated"
 MERGE = "merge"
 #: The merge driver of a regenerable output (`.gitattributes` `merge=se-generated`): it keeps our
-#: side, as the merge's commit hooks regenerate the file. scripts/setup.sh and setup.ps1 install it
+#: side, as the hooks regenerate the file after the merge. scripts/setup.sh and setup.ps1 install it
 #: as git config `merge.se-generated.driver`, the command `true`.
 DRIVER = "se-generated"
+#: The commit post-merge makes of what it regenerated.
+COMMIT_MESSAGE = "Regenerate the generated files on the merge"
 
 # Each comment syntax: what opens and what closes a comment line.
 SYNTAXES = {
@@ -503,33 +508,45 @@ def unstaged(root: Path) -> set[str]:
     return paths
 
 
-def regenerate(root: Path, commands: list[tuple[str, tuple[str, ...]]]) -> list[tuple[str, list[str]]]:
+def regenerate(root: Path, commands: list[tuple[str, tuple[str, ...]]],
+               failed: list[RegenerateError] | None = None) -> list[tuple[str, list[str]]]:
     """Run each `(label, command)` in `root`, through the process door, and stage what it rewrote:
     the files it left differing from the index that differed from it before (an edit the checkout
     held already stays out). Each label with the paths it staged; RegenerateError, naming the
-    command and its output, where one fails."""
+    command and its output, where one fails, or, given `failed`, that error added to it and the
+    next command run."""
+    done = []
+    for label, command in commands:
+        try:
+            done.append((label, regenerate_one(root, label, command)))
+        except RegenerateError as error:
+            if failed is None:
+                raise
+            failed.append(error)
+    return done
+
+
+def regenerate_one(root: Path, label: str, command: tuple[str, ...]) -> list[str]:
+    """`regenerate` of one command: the paths it staged."""
     import git_door
     import process_door
 
-    done = []
-    for label, command in commands:
-        before = unstaged(root)
-        try:
-            result = process_door.run(list(command), cwd=root, capture_output=True, text=True,
-                                      encoding="utf-8", errors="replace", check=False,
-                                      timeout=RERUN_SECONDS)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise RegenerateError(f"{label} ({' '.join(command)})", f"did not run: {error}") from None
-        if result.returncode != 0:
-            output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
-            raise RegenerateError(f"{label} ({' '.join(command)})", output)
-        paths = sorted(unstaged(root) - before)
-        if paths:
-            added = git_door.run("add", "--", *paths, root=root)
-            if added.returncode != 0:
-                raise RegenerateError(f"git add in {root}", added.stderr.strip())
-        done.append((label, paths))
-    return done
+    before = unstaged(root)
+    try:
+        result = process_door.run(list(command), cwd=root, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", check=False,
+                                  timeout=RERUN_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RegenerateError(f"{label} ({' '.join(command)})", f"did not run: {error}") from None
+    if result.returncode != 0:
+        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
+        raise RegenerateError(f"{label} ({' '.join(command)})", output)
+    paths = sorted(unstaged(root) - before)
+    if paths:
+        added = git_door.run("add", "--", *paths, root=root)
+        if added.returncode != 0:
+            raise RegenerateError(f"git add in {root}", added.stderr.strip())
+    return paths
 
 
 def declared_commands(root: Path) -> list[tuple[str, tuple[str, ...]]]:
@@ -575,11 +592,15 @@ def main(argv: list[str] | None = None) -> int:
     regenerating = commands.add_parser("regenerate", help="run every declared regenerate and stage "
                                        "what it rewrote")
     regenerating.add_argument("--merging", action="store_true",
-                              help="do nothing unless a merge is in progress (the commit hooks)")
+                              help="do nothing unless a merge is in progress (pre-commit)")
+    regenerating.add_argument("--warn", action="store_true",
+                              help="a failing regenerate is a warning, and the rest run (the hooks)")
+    regenerating.add_argument("--commit", action="store_true",
+                              help="commit what it staged as its own commit (post-merge)")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     if args.command == "regenerate":
-        return run_regenerate(root, args.merging)
+        return run_regenerate(root, args.merging, args.warn, args.commit)
     try:
         if args.command == "notice":
             said = notice(root, PurePosixPath(args.path).as_posix())
@@ -603,18 +624,36 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def run_regenerate(root: Path, only_merging: bool) -> int:
-    """`generated.py regenerate`: each declared `regenerate`, its rewritten files staged."""
+def run_regenerate(root: Path, only_merging: bool, warn: bool, commit: bool) -> int:
+    """`generated.py regenerate`: each declared `regenerate`, its rewritten files staged, and with
+    `commit` committed. With `warn`, as the hooks run it, a failing one is a warning and the rest
+    run: the merge keeps our side of its outputs, which the check then names stale, and a
+    generator that cannot run in this checkout (a fresh clone without kern's) does not hold up a
+    worker's merge."""
     if only_merging and not merging(root):
         return 0
+    failed: list[RegenerateError] = []
     try:
-        done = regenerate(root, declared_commands(root))
+        done = regenerate(root, declared_commands(root), failed if warn else None)
     except RegenerateError as error:
         print(f"generated.py: {error}", file=sys.stderr)
         return 1
     for label, paths in done:
         if paths:
             print(f"generated.py: {label} regenerated {', '.join(paths)}")
+    if commit and any(paths for _, paths in done):
+        import git_door
+
+        committed = git_door.run("commit", "-q", "-m", COMMIT_MESSAGE, root=root)
+        if committed.returncode != 0:
+            print(f"generated.py: the regenerated files stay staged, as git commit failed: "
+                  f"{(committed.stdout + committed.stderr).strip()}", file=sys.stderr)
+            return 1
+        print(f"generated.py: committed them: {COMMIT_MESSAGE}")
+    for error in failed:
+        tail = " | ".join(error.output.splitlines()[-3:])
+        print(f"generated.py: warning: {error.what} failed, so its outputs keep our side of the merge: "
+              f"{tail}; run it once it runs here and commit what it writes", file=sys.stderr)
     return 0
 
 

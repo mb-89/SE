@@ -245,6 +245,8 @@ pass it; they refuse:
   `.githooks`: pre-commit checks the staged content and then runs the project's own
   [commit checks](docs/settings.md#commit-checks) on the staged tree, commit-msg the message and
   identity, pre-push every pushed commit the destination remote does not hold yet.
+  - They also set the merge driver of generated files, and post-merge regenerates them after a
+    merge (the guidance note generated-files-are-marked, "The merge").
   - A repository that uses se as a module runs `scripts/setup.ps1 -Repo <path>` (or
     `scripts/setup.sh <path>`) and so runs se's check without copying it.
   - A commit already published, such as main's merged into a branch, was gated where it was
