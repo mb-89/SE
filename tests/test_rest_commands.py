@@ -168,8 +168,11 @@ def test_start_creates_the_worktree_and_marks_the_issue_over_rest(
     assert in_one_call(rest_gh, out, main_checkout)
 
 
+@pytest.mark.parametrize("cloud", [False, True], ids=["local", "cloud"])
 def test_integrate_lands_and_closes_the_work_issue_over_rest(
-        main_checkout, rest_gh, monkeypatch, capsys):
+        main_checkout, rest_gh, monkeypatch, capsys, cloud):
+    """In the cloud the close-out claims none of three ready issues (SE#1881): no branch, no
+    label changed, `Started: none here`."""
     branch = "feature/worker"
     worker = main_checkout.parent / "worker"
     git_ok("-C", str(main_checkout), "worktree", "add", "-q", "-b", branch, str(worker))
@@ -188,13 +191,29 @@ def test_integrate_lands_and_closes_the_work_issue_over_rest(
     monkeypatch.setattr(work_tickets, "run_project_command", lambda root, command, label: "1 passed")
     monkeypatch.setattr(work_tickets, "run_suite", lambda root, **_: suite_passed(root, "1 passed"))
     monkeypatch.setattr(work_tickets, "guard", lambda root, branch, report: [])
-    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 0)
+    ready = (9, 10, 11)
+    if cloud:  # what start_startable would claim, read over REST like everything else
+        monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+        for number in ready:
+            rest_gh.issue(SLUG, number, f"ready-{number}", "## Goal\n\nWait.\n",
+                          labels=["work", "ready", "repo:repo"])
+    else:
+        monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [])
+        monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 0)
     monkeypatch.setattr(work_tickets, "fetch_issue", lambda root, number, repo: {"body": report})
 
     assert run(main_checkout, "integrate", "7") == 0
 
     out = capsys.readouterr().out
+    assert ("Started: none here; start what is unblocked with the host's session tool\n" in out
+            if cloud else "Started: 0" in out)
+    if cloud:
+        heads = git_run(main_checkout.parent / "origin.git", "for-each-ref", "--format=%(refname)",
+                        "refs/heads/").stdout.split()
+        assert not any(head.startswith("refs/heads/ready-") for head in heads)
+        for number in ready:
+            assert rest_gh.label_names(SLUG, number) == ["work", "ready", "repo:repo"]
+            assert rest_gh.issues[SLUG][number]["body"] == "## Goal\n\nWait.\n"
     assert [call[0] for call in github.calls][:2] == ["open_pull", "create_pull"]
     landed = git_run(main_checkout.parent / "origin.git", "show", f"{origin_main(main_checkout)}:worker.txt")
     assert landed.stdout == "worker\n"  # squashed onto origin's main
