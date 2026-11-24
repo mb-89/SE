@@ -1,0 +1,30 @@
+{
+  "template": "se/retro-part",
+  "version": "1.0.0",
+  "says": "The label a part of a split retro report ends in: which part of how many, of which retro's report.",
+  "message": "_Part {index} of {total} of the report of retro #{number}._",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "index": {
+        "type": "string",
+        "description": "The part's number, from 1, digits alone."
+      },
+      "total": {
+        "type": "string",
+        "description": "How many parts the report is posted in, digits alone."
+      },
+      "number": {
+        "type": "string",
+        "description": "The retro issue's number, digits alone."
+      }
+    },
+    "required": [
+      "index",
+      "total",
+      "number"
+    ],
+    "additionalProperties": false
+  }
+}

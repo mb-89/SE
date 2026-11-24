@@ -73,7 +73,8 @@ finding with its proposed fix and its kind (`work`, which SE bundles into work i
 `decision`, for the owner's decision list), and the person's decisions and what follows in step 6,
 as the retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
-reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
+reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut, each ending
+in its label, the message `templates/retro-part.md` (PART_TEMPLATE).
 
 `retro.py due` prints the retro's and the overhaul's countdowns, one line each, the snippet
 `templates/retro-due.md` (DUE_TEMPLATE, `countdown_lines`), or with `--json` their data.
@@ -131,6 +132,8 @@ DOC_PATTERN = re.compile(r"<!-- se:retro-doc ([0-9a-f]{40}) (\S+) -->")
 # PART_ROOM of them.
 COMMENT_LIMIT = 65536
 PART_ROOM = 100
+# The label each part ends in (templates/retro-part.md).
+PART_TEMPLATE = "retro-part"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
 # A work issue names each retro finding it takes as `retro #<n> finding <k>`.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
@@ -1912,8 +1915,10 @@ def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
             room = size - len(chunks[-1])
             chunks[-1], line = chunks[-1] + line[:room], line[room:]
     total = len(chunks)
-    return [f"{chunk.rstrip(chr(10))}\n\n_Part {index} of {total} of the report of retro "
-            f"#{number}._\n" for index, chunk in enumerate(chunks, 1)]
+    labels = [sibling("interfaces").write(PART_TEMPLATE, {"index": str(index), "total": str(total),
+                                                          "number": str(number)})
+              for index in range(1, total + 1)]
+    return [f"{chunk.rstrip(chr(10))}\n\n{label}\n" for chunk, label in zip(chunks, labels)]
 
 
 def committed_doc(root: Path, draft: Path, text: str, ref: str) -> tuple[str, str]:
