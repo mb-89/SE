@@ -3,7 +3,7 @@
 # a snippet, which scripts/se_start.py fills and scripts/interfaces.py writes through the schema
 # generated into scripts/interfaces/. scripts/templates.py's docstring owns this note's format.
 name: boot-report
-version: 1.0.0
+version: 1.1.0
 kind: interface
 reader: owner
 says: "SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command."
@@ -58,9 +58,15 @@ fields:
     required: true
     cases:
       due: "To update: /se:update"
+      next: "The next SE release brings {names}."
+      due_next: "To update: /se:update. The next SE release brings {names}."
+      stopped: "Not loaded: {names}. SE cannot start."
       current: "Everything is current."
       unknown: "Newest versions not read yet; the next start shows them."
-    says: "due where a newer release than one loaded exists, current where none does, unknown where a newest version is not read."
+    says: "From the table's rows alone (docs/boot.md \"The start report\"): stopped where a required row did not load; else next where a row SE locks is behind its newest release, due where another row is, due_next where both are; else unknown where a newest version is not read; else current."
+  - name: names
+    kind: line
+    says: "What the case names: the required components that did not load, or each row SE locks that is behind, with its newest release (`kern 2.2.0 and obs 10.4.0`); empty for the other cases."
 example:
   fields:
     version: "12.0.1"
@@ -77,12 +83,13 @@ example:
         newest: "13.0.0"
       - name: kern
         loaded: "2.1.0"
-        newest: "2.1.0"
+        newest: "2.2.0"
       - name: obs
         loaded: "10.3.2"
         newest: "10.3.2"
       - name: obs-html
         loaded: "0.5.2"
         newest: "0.5.2"
-    update: due
+    update: due_next
+    names: "kern 2.2.0"
 ---
