@@ -2554,6 +2554,7 @@ both.
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/retro-due.md` | The retro and overhaul countdowns: per kind what it counted since where it starts, the days, and whether it is due or open. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
@@ -2586,13 +2587,14 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`) shape the
-texts SE shows and its sessions pass to each other. `templates.py interfaces` writes each one's
-schema beside the code that uses it, `scripts/interfaces/<name>.json`, and `--check` names a file
-that differs from its template.
+The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`,
+`retro-due`) shape the texts SE shows and its sessions pass to each other. `templates.py
+interfaces` writes each one's schema beside the code that uses it, `scripts/interfaces/<name>.json`,
+and `--check` names a file that differs from its template.
 
-`work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`, and
-`se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
+`work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`,
+`se_start.py` its start report, a snippet of several lines with a table and a line of three cases,
+and `retro.py due` its two countdown lines.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.

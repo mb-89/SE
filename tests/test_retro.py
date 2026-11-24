@@ -497,6 +497,25 @@ def test_due_prints_each_countdown_and_without_gh_its_plan(checkout, tmp_path, m
     assert lines[1].startswith("overhaul: 1 retros closed in the whole history")
 
 
+def test_the_countdown_lines_are_the_retro_due_snippet_as_due_printed_them():
+    """templates/retro-due.md shapes `retro due`: each state of a countdown keeps its line."""
+    def countdown(kind, **changes):
+        return retro.Countdown(**{"kind": kind, "since": "2026-11-01", "since_run": 30, "landed": 10,
+                                  "failed": 2, "count": 12, "due_after": 10, "days": 14,
+                                  "elapsed_days": 23, "due": False, "reason": "", "open": [],
+                                  **changes})
+    assert retro.countdown_lines({"retro": countdown("retro", due=True, reason="12 came back"),
+                                  "overhaul": countdown("overhaul", count=2, since=None, since_run=None)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; due: 12 came back",
+        "overhaul: 2 retros closed in the whole history, 23 days; not due"]
+    assert retro.countdown_lines({"retro": countdown("retro", open=[31, 32]),
+                                  "overhaul": countdown("overhaul", count=0)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; open: #31, #32",
+        "overhaul: 0 retros closed since #30 started 2026-11-01, 23 days; not due"]
+    lines = retro.countdown_lines({"retro": countdown("retro"), "overhaul": countdown("overhaul")})
+    assert retro.sibling("interfaces").read(retro.DUE_TEMPLATE, "\n".join(lines))["overhaul_days"] == "23"
+
+
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)

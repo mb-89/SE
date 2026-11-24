@@ -75,6 +75,9 @@ as the retro issue's closing comment, and closes the issue. The facts and the bl
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
 reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
 
+`retro.py due` prints the retro's and the overhaul's countdowns, one line each, the snippet
+`templates/retro-due.md` (DUE_TEMPLATE, `countdown_lines`), or with `--json` their data.
+
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
 from the files the session saved into `--answers <dir>`, as the work model's "Without gh" says for
@@ -2082,19 +2085,25 @@ def file_new(root: Path, repo: str | None) -> str:
     return sibling("overhaul").file_run(root, repo, TEMPLATE, RETRO_LABEL, DUE_SCOPE)
 
 
+# The snippet `retro due` prints, one line per countdown (templates/retro-due.md).
+DUE_TEMPLATE = "retro-due"
+
+
 def countdown_lines(found: dict[str, Countdown]) -> list[str]:
-    """One line per countdown: what it counted since where it starts, and whether it is due or a
-    run of its kind is open."""
-    lines = []
+    """One line per countdown, the snippet DUE_TEMPLATE: what it counted since where it starts,
+    and whether it is due or a run of its kind is open."""
+    retro_item = found["retro"]
+    values = {"retro_landed": str(retro_item.landed), "retro_failed": str(retro_item.failed)}
     for kind in ("retro", "overhaul"):
         item = found[kind]
-        start = f"since #{item.since_run} started {item.since}" if item.since_run else "in the whole history"
-        counted = (f"{item.count} ({item.landed} landed, {item.failed} failed)"
-                   if kind == "retro" else f"{item.count} retros closed")
-        state = (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
-                 else f"due: {item.reason}" if item.due else "not due")
-        lines.append(f"{kind}: {counted} {start}, {item.elapsed_days} days; {state}")
-    return lines
+        values |= {
+            f"{kind}_count": str(item.count),
+            f"{kind}_start": (f"since #{item.since_run} started {item.since}" if item.since_run
+                              else "in the whole history"),
+            f"{kind}_days": str(item.elapsed_days),
+            f"{kind}_state": (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
+                              else f"due: {item.reason}" if item.due else "not due")}
+    return sibling("interfaces").write(DUE_TEMPLATE, values).split("\n")
 
 
 def run_due(args: argparse.Namespace) -> int:

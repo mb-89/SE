@@ -14,7 +14,7 @@ import templates
 
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover", "retro-due")
 MESSAGES = ("delivery-notice", "escalation")
 
 
