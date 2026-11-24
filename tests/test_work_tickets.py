@@ -3288,8 +3288,10 @@ def test_no_template_claiming_a_path_answers_stop_and_push_as_before(tmp_path, m
     assert stop_hook(root, monkeypatch, capsys) == {}
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()
     assert pushed(root, monkeypatch) == "gated"
-    assert check_files(root, capsys) == (0, "se_templates.py check-files: no template claims a "
-                                            "path outside .se/; nothing checked\n")
+    # SE's own code templates claim scripts and every go.mod in every project, so check-files reads the
+    # changes and finds no claimed file among them (docs/templates.md "Code templates")
+    assert check_files(root, capsys) == (0, "se_templates.py check-files: no template claims a file "
+                                            "checked\n")
 
 
 def test_claimed_files_are_read_from_origin_so_a_branch_cannot_drop_its_templates(

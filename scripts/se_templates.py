@@ -1711,9 +1711,14 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
     lines where a changed claimed file breaks its template; None where no template claims a path
-    outside LOCAL_STATE or every such file passes. Errors raise."""
+    outside LOCAL_STATE, where `ref` shares no merge base with HEAD (no such ref yet: a checkout
+    with nothing published to compare with, whose pull request CI's check job checks against its
+    base), or where every such file passes. Errors raise."""
     catalog, source = claim_templates(root, None)
     if not claims_a_carried_path(catalog):
+        return None
+    base = sibling("git_door").run("merge-base", ref, "HEAD", root=root)
+    if base.returncode != 0 or not base.stdout.strip():
         return None
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
