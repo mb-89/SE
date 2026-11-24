@@ -63,6 +63,17 @@ def test_a_tracked_file_over_the_bound_fails_and_a_stale_entry_too(tmp_path: Pat
     ]
 
 
+def test_a_large_retro_report_passes_but_other_large_docs_do_not(tmp_path: Path, fake_git_door) -> None:
+    repo = fixture_repo(
+        tmp_path, {"docs/retro-2026-11-24.md": b"x" * 201, "docs/guide.md": b"x" * 201}
+    )
+
+    assert large_findings(repo, {}, limit=200) == [
+        "docs/guide.md: 201 bytes, over 200; git rm --cached it and ignore it, split it, "
+        "or allow it with a reason",
+    ]
+
+
 def test_a_marker_without_an_issue_fails(tmp_path: Path, fake_git_door) -> None:
     todo, fixme = "TO" + "DO", "FIX" + "ME"
     repo = fixture_repo(

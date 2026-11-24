@@ -8,7 +8,7 @@ each named with its check.
 
 - binary: no tracked binary file (a NUL byte in its first BINARY_PEEK bytes, git's own test) outside
   BINARY_ALLOWED;
-- large: no tracked file over MAX_BYTES outside LARGE_ALLOWED;
+- large: no tracked file over MAX_BYTES outside LARGE_ALLOWED and LARGE_REPORTS;
 - marker: no marker of unfinished work in `scripts/` or `tests/` that names no issue;
 - git-door: git runs only through its door (rule book des-004): `scripts/git_door.py` runs every git
   command and `tests/fake_git.py` is its fake; a git subprocess anywhere else in scripts, tests and
@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import re
 import sys
 from pathlib import Path
@@ -57,6 +58,10 @@ LARGE_ALLOWED: dict[str, str] = {
     "scripts/work_tickets.py": "the work model's one command; its split is a package of its own",
     "tests/test_work_ticket_issues.py": "the issue tests of work_tickets.py, which follow its size",
 }
+
+# Dated reports that only list what one run found, kept whole however large (the owner's decision,
+# 2026-11-24): a retro drops nothing to fit the bound. Documentation that stays is not one of them.
+LARGE_REPORTS = ("docs/retro-*.md",)
 
 BINARY_PEEK = 8000
 
@@ -113,9 +118,12 @@ def binary_findings(repo: Path, allowed: dict[str, str]) -> list[str]:
     ]
 
 
-def large_findings(repo: Path, allowed: dict[str, str], limit: int = MAX_BYTES) -> list[str]:
-    """Tracked files over `limit` bytes outside `allowed`, and entries of `allowed` naming none."""
-    sizes = {p: (repo / p).stat().st_size for p in tracked(repo)}
+def large_findings(repo: Path, allowed: dict[str, str], limit: int = MAX_BYTES,
+                   reports: tuple[str, ...] = LARGE_REPORTS) -> list[str]:
+    """Tracked files over `limit` bytes outside `allowed` and the `reports` patterns, and entries of
+    `allowed` naming none."""
+    sizes = {p: (repo / p).stat().st_size for p in tracked(repo)
+             if not any(fnmatch.fnmatchcase(p, pattern) for pattern in reports)}
     large = {p for p, size in sizes.items() if size > limit}
     return [
         f"{p}: {sizes[p]} bytes, over {limit}; git rm --cached it and ignore it, split it, "
