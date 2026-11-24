@@ -122,7 +122,7 @@ limit_seconds = 90
 # SE's components, found by name under the owners of the checkout's remotes (README "Modules"),
 # both required. obs builds the documentation (README "Documentation").
 [components.obs]
-version = "^10.3.2"
+version = "^10.4.0"
 
 # kern, the Go core SE's binary is built on (docs/go-core.md "Pinning it"): its pin is the version
 # components/go.mod requires, so a move of that line is a change of se's inputs (README "Modules").
