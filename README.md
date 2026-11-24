@@ -801,6 +801,8 @@ below, a positive number of hours, default 12; other keys are refused.
   starts no more, and after each landing starts the next startable issue, so a worker that
   finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
   reached.
+  - In the cloud the landing itself starts nothing; the integrator starts its workers with the
+    host's session tool.
 - **Not limited.** Integrators, reviewers and SE's own session.
 - **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
   one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first

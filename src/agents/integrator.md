@@ -184,10 +184,15 @@ merge or a start.
    repository's automatic head-branch deletion removes it. Never retry the deletion.
 7. **Start what is unblocked**, after each landing, before the next delivered pull request.
 
+   A landing in the cloud starts nothing on its own: `integrate`'s close-out claims no issue
+   there and prints `Started: none here; start what is unblocked with the host's session tool`,
+   as a claim in the cloud starts no worker session. You start each worker yourself, as below.
+
    Use `work_tickets.py ready` and `capacity` as helpers. Every work issue `ready` lists (labelled
-   `ready`, not waiting on a person, blockers closed, no branch yet, file ownership that does not
-   clash with running workers) gets a fresh worktree from the newest integration branch
-   (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
+   `ready`, not waiting on a person, blockers closed, no branch yet or only an unused claim, file
+   ownership that does not clash with running workers) gets a fresh worktree from the newest
+   integration branch (`work_tickets.py start`, see
+   [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
    `ready` also names each claimed issue live or stale by its beat; put the stale ones it names
    into your report to SE, and release none
