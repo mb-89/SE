@@ -27,6 +27,9 @@ const (
 	nodeRule          = "node"
 	versionRule       = "version"
 	quoteRule         = "quote"
+	slotRule          = "slot"
+	manifestFile      = "manifest.md"
+	slot              = "{{slot}}"
 )
 
 var (
@@ -49,6 +52,14 @@ var (
 	instruction    = regexp.MustCompile(`^[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*((?s:.*?))[ \t\r\n]*-->[ \t\r\n]*$`)
 	fenceWord      = regexp.MustCompile(`^[\w-]+$`)
 	placeholderRef = regexp.MustCompile(`\{([a-z_][a-z0-9_]*)\}`)
+	// The template manifest's form (templates.py "Template manifests").
+	manifestVersion = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){0,2}$`)
+	tocLine         = regexp.MustCompile(`^[ \t]*[-*+][ \t]+\[\[([^\]|#]+)(?:\|([^\]]+))?\]\][ \t]*$`)
+	guidanceKeys    = []string{"contents", "motivation", "form", "sources", "gate"}
+	guidanceLabels  = map[string]string{"motivation": "Why", "form": "Form", "sources": "Sources"}
+	gates           = []string{"mandatory", "judgment"}
+	nodeFieldName   = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	nodeNameSpaces  = regexp.MustCompile(`[-\s]+`)
 )
 
 func set(items ...string) map[string]bool {
@@ -145,6 +156,8 @@ type Template struct {
 	Tags          []string
 	Digest        string
 	Message       string
+	// Manifest reports whether the template is a template manifest with its nodes, not a note.
+	Manifest bool
 }
 
 // MarkerLine is the template's marker, `<!-- se:template <repository>/<name> <version> <digest> -->`.
@@ -152,10 +165,14 @@ func (t *Template) MarkerLine() string {
 	return fmt.Sprintf("<!-- se:template %s/%s %s %s -->", t.Repository, t.Name, t.Version, t.Digest)
 }
 
-// frontLines are what a claimed file's front matter records: its template, version and overlay.
+// frontLines are what a file document's front matter records: derived_from and overlay.
 func (t *Template) frontLines() [][2]string {
-	return [][2]string{{"template", t.Repository + "/" + t.Name}, {"version", t.Version}, {"overlay", t.Digest}}
+	return [][2]string{{"derived_from", fmt.Sprintf(`{template: %s, version: "%s"}`, t.Name, t.Version)}, {"overlay", t.Digest}}
 }
+
+// writesFile reports whether its document is a file, its head the front matter: a file.write
+// template's, or a template manifest's.
+func (t *Template) writesFile() bool { return t.IsFile() || t.Manifest }
 
 // IsFile reports whether the template shapes files (file.write), claimed by its paths.
 func (t *Template) IsFile() bool { return in(FileAction, t.Actions) }
@@ -238,6 +255,25 @@ func Load(layers ...Layer) (Catalog, error) {
 				}
 				continue
 			}
+			if folder, note, nested := strings.Cut(name, "/"); nested {
+				if note != manifestFile {
+					continue // a template node, read with its manifest
+				}
+				if _, both := layer.Files[folder+templateSuffix]; both {
+					return nil, fail("%s: %s/%s%s is a template of that name too; keep one of the two", where, TemplatesFolder, folder, templateSuffix)
+				}
+				if _, taken := raw[folder]; taken {
+					continue
+				}
+				data, digested, err := manifestData(folder, layer.Files, layer.Where)
+				if err != nil {
+					return nil, err
+				}
+				data.Set("path", where)
+				raw[folder], texts[folder], repositories[folder] = data, digested, layer.Repository
+				won[folder] = true
+				continue
+			}
 			if !strings.HasSuffix(name, templateSuffix) || strings.HasSuffix(name, overlaySuffix) {
 				continue
 			}
@@ -259,11 +295,13 @@ func Load(layers ...Layer) (Catalog, error) {
 		}
 		for _, name := range sortedKeys(layer.Files) {
 			base, isOverlay := strings.CutSuffix(name, overlaySuffix)
-			if !isOverlay {
+			if !isOverlay || strings.Contains(name, "/") {
 				continue
 			}
-			if _, beside := layer.Files[base+templateSuffix]; !beside {
-				return nil, fail("%s: an overlay of %s, which this %s/ does not hold; an overlay lies beside its template, %s/%s%s", layer.Where(name), repr(base), TemplatesFolder, TemplatesFolder, base, templateSuffix)
+			_, beside := layer.Files[base+templateSuffix]
+			_, manifest := layer.Files[base+"/"+manifestFile]
+			if !beside && !manifest {
+				return nil, fail("%s: an overlay of %s, which this %s/ does not hold; an overlay lies beside its template, %s/%s%s or %s/%s/%s", layer.Where(name), repr(base), TemplatesFolder, TemplatesFolder, base, templateSuffix, TemplatesFolder, base, manifestFile)
 			}
 			if won[base] { // an earlier layer's template of that name takes no overlay of this one
 				overlays[base] = [2]string{layer.Files[name], layer.Where(name)}
@@ -392,6 +430,9 @@ func noteData(text, where string) (Object, error) {
 	data, body, first, err := noteParts(text, where)
 	if err != nil {
 		return nil, err
+	}
+	if data.Has("manifest") { // the mark of a template manifest's data, which no note writes
+		return nil, fail("%s: unknown keys manifest; the template file format is scripts/templates.py's docstring", where)
 	}
 	fieldsValue, has := data.Get("fields")
 	if !has {
@@ -567,7 +608,7 @@ func build(name string, raw map[string]Object, terms []Term, seen []string) (*Te
 	where := str(data.Value("path"))
 	var unknown []string
 	for _, key := range data.Keys() {
-		if !templateKeys[key] && key != "path" {
+		if !templateKeys[key] && key != "path" && key != "manifest" {
 			unknown = append(unknown, key)
 		}
 	}
@@ -610,7 +651,7 @@ func build(name string, raw map[string]Object, terms []Term, seen []string) (*Te
 		isPart = true
 	}
 	switch {
-	case (!hasApplies || appliesValue == nil) && parent == nil && isPart:
+	case (!hasApplies || appliesValue == nil) && parent == nil && (isPart || truthy(data.Value("manifest"))):
 		applies = Object{{"actions", []any{}}}
 	case !appliesIsObject || !truthy(applies.Value("actions")):
 		if parent == nil {
@@ -635,7 +676,11 @@ func build(name string, raw map[string]Object, terms []Term, seen []string) (*Te
 		}
 	}
 	version, kind, tags := data.Value("version"), kindValue, data.Value("tags")
-	if s, ok := version.(string); !ok || !semver.MatchString(s) {
+	versionForm := semver
+	if truthy(data.Value("manifest")) {
+		versionForm = manifestVersion
+	}
+	if s, ok := version.(string); !ok || !versionForm.MatchString(s) {
 		return nil, fail("%s: version is %s; write the template's semantic version, such as 1.2.0", where, repr(version))
 	}
 	if s, ok := kind.(string); !ok || !in(s, templateKinds) {
@@ -789,7 +834,7 @@ func build(name string, raw map[string]Object, terms []Term, seen []string) (*Te
 		Name: name, Version: version.(string), Kind: kind.(string), Reader: reader.(string),
 		Actions: actions, Fields: fields, Rules: rules, Terms: terms, Path: where,
 		MarkerPattern: markerPattern, Base: baseBranch, Checker: "", Adapter: adapter,
-		Message: str(message), Order: 100, KeepUnknown: true,
+		Message: str(message), Order: 100, KeepUnknown: true, Manifest: truthy(data.Value("manifest")),
 	}
 	for _, tag := range tagList {
 		t.Tags = append(t.Tags, tag.(string))

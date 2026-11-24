@@ -18,7 +18,7 @@ help = "rehearse a whole landing through kern's relay against a scratch branch, 
 class = "batch"
 
 [commands."work_tickets.py release"]
-usage = "work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]"
+usage = "work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]\n                        [--kind COMMIT=KIND REASON]"
 summary = "release when SE asks: raise project.version by the highest Release- ..."
 group = "Integration"
 help = "release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README \"Project settings\"); with nothing integrated since, it releases nothing"
@@ -107,9 +107,16 @@ class = "batch"
 
 [commands."work_tickets.py claim"]
 usage = "work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue"
-summary = "claim a ready work issue for a worker your session tool starts: ..."
+summary = "claim a ready issue for a session-tool start: its branch at the ..."
 group = "Integration"
-help = "claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there"
+help = "claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it"
+class = "batch"
+
+[commands."work_tickets.py unclaim"]
+usage = "work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]"
+summary = "undo claims no worker took"
+group = "Integration"
+help = "undo claims no worker took"
 class = "batch"
 
 [commands."work_tickets.py session-title"]

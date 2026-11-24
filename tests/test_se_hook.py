@@ -516,7 +516,8 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
 
 
 # The file gate's filter (README "Templates"): the file tools reach se_templates.py gate only where SE's
-# start left `claimed` in templates-files, and only for a file in the project; the fake uv logs each run.
+# start left `claimed` in templates-files, and only for a file in the project whose path matches a glob
+# the templates own, the file's other lines; the fake uv logs each run.
 
 def file_event(tool: str, **given) -> str:
     return json.dumps({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": tool,
@@ -543,7 +544,7 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
         assert result.returncode == 0 and result.stdout == ""
     assert gate_runs(home) == 0 and (home / "calls").read_text(encoding="utf-8").count("hook ") == 5
     line = project / ".se" / ".runtime" / "templates-files"
-    line.write_text("claimed\n", encoding="utf-8", newline="\n")
+    line.write_text("claimed\nbook/*.md\n", encoding="utf-8", newline="\n")
     for event in calls:
         assert hook(home, project, "PreToolUse", event=event).returncode == 0
     assert gate_runs(home) == 5
@@ -555,6 +556,36 @@ def test_file_tools_run_no_gate_without_the_starts_line_and_only_in_the_project_
     line.write_text("write\n", encoding="utf-8", newline="\n")  # the retired switch's line
     assert hook(home, project, "PreToolUse", event=calls[0]).returncode == 0
     assert gate_runs(home) == 5
+
+
+@GATE
+def test_a_file_tool_reaches_the_gate_only_for_a_path_an_owned_glob_matches(machine):
+    """Requirement 2's filter: SE's own glob, `.se/issues/*.md`, the work issue body file's; a project
+    file no glob matches costs what it did, and a path the gate must resolve first reaches it."""
+    home, project = machine
+    install(home, project)
+    line = project / ".se" / ".runtime" / "templates-files"
+    line.parent.mkdir(parents=True, exist_ok=True)
+    line.write_text("claimed\r\n.se/issues/*.md\r\nbook/**/steps/*.md", encoding="utf-8", newline="")
+    owned = [file_event("Write", file_path=sh(project / ".se" / "issues" / "plain-titles.md"), content="x"),
+             file_event("Edit", file_path=sh(project / ".se" / "issues" / "new.md"), old_string="a",
+                        new_string="b"),
+             file_event("MultiEdit", file_path=sh(project / "book" / "m1" / "steps" / "s.md"), edits=[]),
+             file_event("Write", file_path=sh(project / "src") + "/../.se/issues/x.md", content="x")]
+    for event in owned:
+        assert hook(home, project, "PreToolUse", event=event).returncode == 0
+    assert gate_runs(home) == 4
+    free = [file_event("Write", file_path=sh(project / "notes.md"), content="x"),
+            file_event("Edit", file_path=sh(project / ".se" / "work" / "field-report.md"), old_string="a",
+                       new_string="b"),
+            file_event("Write", file_path=sh(project / ".se" / "issues.md"), content="x")]
+    for event in free:
+        result = hook(home, project, "PreToolUse", event=event)
+        assert result.returncode == 0 and result.stdout == ""
+    assert gate_runs(home) == 4
+    line.write_text("claimed\n", encoding="utf-8", newline="\n")  # no glob: no file tool is judged
+    assert hook(home, project, "PreToolUse", event=owned[0]).returncode == 0
+    assert gate_runs(home) == 4
 
 
 # The claim's heartbeat (README "Workers"): a fake uv logs each beat the hook starts, detached, and

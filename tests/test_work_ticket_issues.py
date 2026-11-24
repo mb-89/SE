@@ -2000,7 +2000,7 @@ class StartableFleet:
             return ""
         if args[:2] == ["issue", "view"] and "body" in args:
             return json.dumps({"body": ""})
-        if args[:2] == ["issue", "edit"] and "--body-file" in args:
+        if args[:2] in (["issue", "edit"], ["issue", "comment"]) and "--body-file" in args:
             return ""
         raise AssertionError(f"gh {args}")
 
@@ -2410,6 +2410,103 @@ def test_start_assigns_a_cloud_worker_without_creating_a_worktree(
     ] in fake.calls
 
 
+class ReadyGh(StartGh):
+    """StartGh that also lists #5 among the open issues labelled work and ready, and none in
+    progress, for `ready_issues` to read."""
+
+    def __call__(self, root: Path, arguments: list[str]) -> str:
+        if arguments[:2] == ["issue", "list"]:
+            self.calls.append(arguments)
+            listed = [{"number": 5, "title": BRANCH, "body": "", "assignees": [],
+                       "labels": [{"name": label} for label in self.labels]}]
+            return json.dumps(listed if "ready" in arguments else [])
+        return super().__call__(root, arguments)
+
+
+def ready_fakes(monkeypatch) -> ReadyGh:
+    fake = ReadyGh()
+    monkeypatch.setattr(work_tickets, "run_gh", fake)
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
+    return fake
+
+
+def unused_claim_of(main_checkout: Path) -> tuple[Path, str, str]:
+    """#5's branch on origin as a landing in the cloud left it (SE#1881): created at an older
+    main, no commit of its own. (origin, that commit, the newest main)"""
+    origin = main_checkout.parent / "origin.git"
+    git_ok("-C", str(main_checkout), "fetch", "-q", "origin")
+    newest = git_run(main_checkout, "rev-parse", "origin/main", check=True).stdout.strip()
+    older = git_run(main_checkout, "rev-parse", "origin/main~1", check=True).stdout.strip()
+    git_ok("-C", str(main_checkout), "push", "-q", "origin", f"{older}:refs/heads/{BRANCH}")
+    return origin, older, newest
+
+
+def test_an_unused_claim_leaves_its_ready_issue_startable_and_start_takes_its_branch(
+        main_checkout, monkeypatch, capsys):
+    """An issue labelled work and ready whose branch on origin holds no commit beyond main is
+    listed by `ready`, and `start` moves that branch to the newest main and starts on it."""
+    fake = ready_fakes(monkeypatch)
+    origin, _, newest = unused_claim_of(main_checkout)
+
+    assert [issue["number"] for issue in work_tickets.ready_issues(
+        main_checkout, "git.example/owner/repo")] == [5]
+    assert run(main_checkout, "ready") == 0
+    assert f"#5 {BRANCH}\n" in capsys.readouterr().out
+
+    assert run(main_checkout, "start", "5") == 0
+    worktree = main_checkout.parent / f"{main_checkout.name}.worktrees" / "feature-example-20261104"
+    assert f"worktree={worktree}" in capsys.readouterr().out
+    assert git_run(origin, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == newest
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
+    assert git_run(worktree, "rev-parse", "HEAD").stdout.strip() == newest
+    assert ["issue", "edit", "5", "--remove-label", "ready", "--add-label", "in-progress",
+            "--repo", "git.example/owner/repo"] in fake.calls
+
+
+def test_claim_takes_an_unused_claim_of_an_issue_not_in_progress_and_refuses_it_in_progress(
+        main_checkout, monkeypatch, capsys):
+    ready_fakes(monkeypatch).labels = ("work", "in-progress")
+    origin, older, newest = unused_claim_of(main_checkout)
+
+    assert run(main_checkout, "claim", "5") == 1  # its issue in progress: its worker's branch
+    assert f"its branch {BRANCH} exists on origin" in capsys.readouterr().err
+    assert git_run(origin, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == older
+
+    ready_fakes(monkeypatch)
+    assert run(main_checkout, "claim", "5") == 0
+    assert f"Claimed #5: branch {BRANCH} on origin" in capsys.readouterr().out
+    assert git_run(origin, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == newest
+    assert run(main_checkout, "claim", "5") == 1  # now a claim at the newest main: a start's
+    assert "so another start holds its claim" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("branch", ["own commit", "at the newest main"])
+def test_a_claim_with_a_commit_of_its_own_or_at_the_newest_main_keeps_its_issue_unstartable(
+        main_checkout, monkeypatch, capsys, branch):
+    """A worker's branch, or a claim a start is taking now (made at the newest main), is no unused
+    claim: `ready` leaves its issue out and `start` changes nothing."""
+    fake = ready_fakes(monkeypatch)
+    origin, _, newest = unused_claim_of(main_checkout)
+    if branch == "own commit":
+        other = main_checkout.parent / "other"
+        git_ok("-C", str(other), "fetch", "-q", "origin", BRANCH)
+        git_ok("-C", str(other), "checkout", "-q", "-b", "work", "FETCH_HEAD")
+        git_ok("-C", str(other), "-c", "user.name=Other", "-c", "user.email=other@example.invalid",
+               "commit", "-q", "--allow-empty", "-m", "the worker's")
+        git_ok("-C", str(other), "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    else:
+        git_ok("-C", str(main_checkout), "push", "-q", "origin", f"+{newest}:refs/heads/{BRANCH}")
+    tip = git_run(origin, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip()
+
+    assert work_tickets.ready_issues(main_checkout, "git.example/owner/repo") == []
+    assert run(main_checkout, "start", "5") == 1
+    assert "Issue #5 is not startable" in capsys.readouterr().err
+    assert git_run(origin, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip() == tip
+    assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)
+
+
 ISSUE_REMOTE = "https://git.example/owner/repo.git"  # the host of the issue's repository
 MIRROR_REMOTE = "https://mirror.example/other/repo.git"  # another remote of the same project
 
@@ -2509,13 +2606,87 @@ def test_claim_creates_the_branch_on_the_issue_remote_for_a_session_tool_start_a
     fake = claim_fakes(monkeypatch)
 
     assert run(second, "claim", "5", "--repo", "git.example/owner/repo") == 0
-    assert capsys.readouterr().out.endswith(f"Claimed #5: branch {BRANCH} on upstream\n")
+    assert f"Claimed #5: branch {BRANCH} on upstream; start #5 here takes this claim\n" in \
+        capsys.readouterr().out
     assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
     assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
 
     assert run(first, "claim", "5", "--repo", "git.example/owner/repo") == 1
     assert f"its branch {BRANCH} exists on origin" in capsys.readouterr().err
     assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)  # the labels follow
+
+
+def test_start_after_its_own_claim_takes_it_creates_the_worktree_labels_and_comments(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False: (
+        [{"number": 5, "title": BRANCH}] if allow_existing_branch else []))
+    repo = ("--repo", "git.example/owner/repo")
+
+    assert run(second, "claim", "5", *repo) == 0
+    claimed = git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip()
+    assert run(first, "start", "5", *repo) == 1  # another checkout's claim is no claim of its own
+    assert "Issue #5 is not startable" in capsys.readouterr().err
+
+    assert run(second, "start", "5", *repo) == 0
+    out = capsys.readouterr().out
+    worktree = second.parent / "main.worktrees" / "feature-example-20261104"
+    assert f"worktree={worktree}" in out and "Started #5" in out
+    assert git_run(worktree, "rev-parse", "HEAD").stdout.strip() == claimed
+    assert ["issue", "edit", "5", "--remove-label", "ready", "--add-label", "in-progress",
+            *repo] in fake.calls
+    assert [call[:3] for call in fake.calls if call[:2] == ["issue", "comment"]] == [
+        ["issue", "comment", "5"]]
+    assert not work_tickets.claimed_here(second, 5)  # taken once: a second start claims anew
+    assert run(second, "start", "5", *repo) == 1
+
+
+def test_start_after_its_own_claim_reuses_the_worktree_on_the_claimed_branch(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+    existing = tmp_path / "existing-worker"
+    git_ok("-C", str(first), "fetch", "-q", "origin", BRANCH)
+    git_ok("-C", str(first), "worktree", "add", "-b", BRANCH, str(existing), "FETCH_HEAD")
+
+    assert run(first, "start", "5", *repo) == 0
+    assert f"worktree={existing.resolve()}" in capsys.readouterr().out
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+
+def test_a_cloud_start_after_its_own_claim_takes_it_and_assigns_the_worker(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: None)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+
+    assert run(first, "start", "5", *repo, "--cloud-agent", "worker-login") == 0
+    assert "Launch worker:" not in capsys.readouterr().out
+    assert ["issue", "edit", "5", "--add-assignee", "worker-login", "--remove-label", "ready",
+            "--add-label", "in-progress", *repo] in fake.calls
+    assert any(call[:3] == ["issue", "comment", "5"] for call in fake.calls)
+
+
+def test_start_without_gh_after_its_own_claim_plans_the_label_change_and_the_comment(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    claim_fakes(monkeypatch)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(first, "start", "5", *repo, "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out
+    steps = [line.split(" ", 2)[1] for line in out.splitlines() if line[:1].isdigit()]
+    assert steps == ["list_issues", "issue_write", "issue_write", "issue_write", "add_issue_comment"]
+    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in out
+    worktree = first.parent / "main.worktrees" / "feature-example-20261104"
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
 
 
 def test_the_issue_remote_is_the_remote_naming_the_issue_repository_else_its_url(
@@ -2759,8 +2930,13 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
     assert "GitHub plan:" not in out and "Started #5\n" in out
 
 
+@pytest.mark.parametrize("cloud", [False, True])
 def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(
-        main_checkout, local_config, monkeypatch, capsys):
+        main_checkout, local_config, monkeypatch, capsys, cloud):
+    """On a local device the close-out starts what capacity leaves room for; in the cloud, with
+    the same GitHub access, it claims and starts none of the three ready issues (SE#1881)."""
+    if cloud:
+        monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
         'commit_trailer = "Co-authored-by: Agent <agent@users.noreply.github.com>"\n',
@@ -2815,8 +2991,9 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     monkeypatch.setattr(
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
-    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
+    monkeypatch.setattr(work_tickets, "ready_issues",
+                        lambda root, repo: [{"number": 9}, {"number": 10}, {"number": 11}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1 - len(started))
     monkeypatch.setattr(
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
@@ -2824,7 +3001,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert squashed_onto_origin(main_checkout, commit)
-    assert commit and started == [9]
+    assert commit and started == ([] if cloud else [9])
     message = git_run(main_checkout, "log", "-1", "--format=%B").stdout
     assert "work issue #5, PR #7" in message
     assert message.rstrip().endswith("Co-authored-by: Agent <agent@users.noreply.github.com>")
@@ -2836,7 +3013,8 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     output = capsys.readouterr().out
     assert "Suite: 214 passed" in output
     assert "Cleanup: worker worktree removed" in output
-    assert "Started: 1" in output
+    assert ("Started: none here; start what is unblocked with the host's session tool\n" if cloud
+            else "Started: 1; 2 startable wait for capacity") in output
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
     assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]  # only the work issue
     pause = ["issue", "list", "--state", "open", "--label", "pause"]

@@ -549,6 +549,27 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert "No removed protected content found." in guarded.stdout
 
 
+def test_guard_ignores_a_sentence_whose_links_only_point_elsewhere(worktree: Path) -> None:
+    """A section moved to another page keeps its words; its links point from there (SE#1796)."""
+    repository, guide = authored_repository(
+        worktree.parent / "retargeted-content-case", "retarget-links",
+        "Read [the rule book](rules.md#use) before you start.\n",
+    )
+    guide.write_text("Read [the rule book](../rules.md#use) before you start.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "retarget a link").returncode == 0
+    report = repository / "field-report.md"
+    report.write_text(
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    guarded = run_helper(
+        "guard", "--branch", "retarget-links", "--pr-description", str(report),
+        "--worktree", str(repository),
+    )
+    assert guarded.returncode == 0, guarded.stderr
+    assert work_tickets.prose_key("See [it](a.md#x) and [that](<b c.md>).") == "See [it]() and [that](<b c.md>)."
+
+
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
@@ -786,7 +807,8 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     report.parent.mkdir(parents=True)
     section = "## Removed behaviour, deleted or weakened tests, and authored prose\n\n"
     report.write_text(
-        f"<!-- se:field-report -->\n**Work issue:** #1\n{section}None\n<!-- se:field-report:end -->\n",
+        f"<!-- se:field-report -->\n**Work issue:** #1  **Branch:** `rewrite-prose`\n{section}None\n"
+        "<!-- se:field-report:end -->\n",
         encoding="utf-8",
     )
     issue_body = repository / "issue.md"
@@ -825,6 +847,39 @@ def test_deliver_and_its_check_run_the_landing_guard_before_any_push_or_pull_req
     assert work_tickets.main(check) == 0
     assert work_tickets.deliver(repository) == 9
     assert pushed == ["rewrite-prose"] and unlisted in posted[0]
+
+
+def test_field_report_check_fills_branch_tip_only_from_the_head_branch_never_from_main(
+    worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository, _ = authored_repository(worktree.parent / "tip-case", "tip-branch", "Prose.\n")
+    (repository / "docs" / "new.md").write_text("Added.\n", encoding="utf-8", newline="\n")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "the branch's work").returncode == 0
+    head = git(repository, "rev-parse", "HEAD").stdout.strip()
+    description = repository.parent / "description.md"
+    description.write_text(
+        "Fixes #1\n\n<!-- se:field-report -->\n**Work issue:** #1  **Branch:** `tip-branch`\n"
+        "**Branch tip:** `0000000`\n## Removed behaviour, deleted or weakened tests, and authored "
+        "prose\n\nNone\n<!-- se:field-report:end -->\n", encoding="utf-8", newline="\n")
+    issue_body = repository.parent / "issue.md"
+    issue_body.write_text("## Acceptance\n\n- [ ] A test.\n", encoding="utf-8", newline="\n")
+    monkeypatch.setattr(work_tickets, "field_report_problems", lambda report, body, version: [])
+    check = ["field-report", "--check", str(description), "--worktree", str(repository),
+             "--issue-body", str(issue_body)]
+
+    assert work_tickets.main(check) == 0  # the worker's checkout of the head branch fills it
+    filled = description.read_text(encoding="utf-8")
+    assert f"**Branch tip:** `{head}`" in filled
+
+    assert git(repository, "checkout", "main").returncode == 0  # the integrator's main checkout
+    main_head = git(repository, "rev-parse", "HEAD").stdout.strip()
+    assert main_head != head
+    assert work_tickets.main(check) == 0
+    assert description.read_text(encoding="utf-8") == filled  # left as it is, its tip the branch's
+    report = work_tickets.report_in(filled, "description")
+    assert work_tickets.check_branch_tip(repository, report, "tip-branch", head, None) == []
+    capsys.readouterr()
 
 
 GUIDE = "First line.\nMiddle line one.\nMiddle line two.\nLast line.\n"
@@ -2541,14 +2596,14 @@ def test_queue_refuses_while_paused(worktree, monkeypatch, capsys, paused):
 @pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
 def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
     calls = pause_door(monkeypatch, paused,
-                       lambda arguments: "" if arguments[:2] == ["issue", "edit"]
+                       lambda arguments: "" if arguments[:2] in (["issue", "edit"], ["issue", "comment"])
                        else '{"body": ""}' if arguments[:2] == ["issue", "view"] else None)
     read: list[int] = []
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:
                         read.append(1) or [{"number": 5, "title": "feat/five"}])
     monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
     monkeypatch.setattr(work_tickets, "newest_integration_commit", lambda root: "abc1234")
-    monkeypatch.setattr(work_tickets, "claim", lambda root, number, repo, branch, commit: "origin")
+    monkeypatch.setattr(work_tickets, "claim", lambda root, number, repo, branch, commit, reuse=False: "origin")
 
     code = work_tickets.main(["start", "5", "--cloud-agent", "bot", "--worktree", str(worktree),
                               "--repo", PAUSE_REPO])
@@ -3175,13 +3230,14 @@ fields:
 
 <!-- risks: One item per risk, or None. -->
 '''
-OFF_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n"
-ON_TEMPLATE_NOTE = "---\ntemplate: note\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
+OFF_TEMPLATE_NOTE = "---\nderived_from: {template: note, version: \"1.0.0\"}\n---\n\n# A note\n\n## Risks\n\n"
+ON_TEMPLATE_NOTE = "---\nderived_from: {template: note, version: \"1.0.0\"}\n---\n\n# A note\n\n## Risks\n\n- The scan misses a tool.\n"
 
 
 def claimed_checkout(tmp_path: Path, monkeypatch, note: str, claims: bool = True) -> Path:
     """A checkout, no worker's, whose origin/main holds the template `note` claiming notes/*.md
-    (none of its own where `claims` is false, so SE's, which claim no path); notes/a.md untracked."""
+    (none of its own where `claims` is false, so SE's, which claim no path outside .se/); notes/a.md
+    untracked."""
     root = stop_checkout(tmp_path, monkeypatch, queue=False)
     if claims:
         (root / "templates").mkdir()
@@ -3254,7 +3310,7 @@ def test_no_template_claiming_a_path_answers_stop_and_push_as_before(tmp_path, m
     assert not (root / ".se" / "work" / work_tickets.STOP_COUNT).exists()
     assert pushed(root, monkeypatch) == "gated"
     assert check_files(root, capsys) == (0, "se_templates.py check-files: no template claims a "
-                                            "path; nothing checked\n")
+                                            "path outside .se/; nothing checked\n")
 
 
 def test_claimed_files_are_read_from_origin_so_a_branch_cannot_drop_its_templates(

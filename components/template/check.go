@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -373,6 +374,16 @@ func fieldFindings(t *Template, doc *Document, raw *string) []Finding {
 		}
 		filled.Set(item.Name, value)
 		text := plain(value)
+		if holdsSlot(text) {
+			name := item.Heading
+			if name == "" {
+				name = item.Label
+			}
+			if name == "" {
+				name = item.Name
+			}
+			found = append(found, Finding{item.Name, slotRule, Refuse, fmt.Sprintf("section %s still holds the fill slot %s: write the section in its place", name, slot)})
+		}
 		if item.Node != "" {
 			found = append(found, nestedFindings(item, text, raw)...)
 			continue
@@ -677,7 +688,9 @@ func fenceOrder(t *Template, doc *Document) []Finding {
 
 func provenance(t *Template, doc *Document) []Finding {
 	recorded, current := doc.Recorded, t.Version
-	if recorded == "" || current == "" || recorded == current {
+	parts, isVersion := versionParts(t, recorded)
+	now, _ := versionParts(t, current)
+	if recorded == "" || current == "" || recorded == current || isVersion && parts == now {
 		return nil
 	}
 	named := fmt.Sprintf("the document records %s %s; the template is at %s", t.Name, recorded, current)
@@ -685,14 +698,53 @@ func provenance(t *Template, doc *Document) []Finding {
 	if t.IsFile() {
 		where, given = "--path <file>", ""
 	}
-	if semver.MatchString(recorded) && strings.Split(recorded, ".")[0] == strings.Split(current, ".")[0] {
+	if isVersion && parts[0] == now[0] {
 		return []Finding{{"template", versionRule, Warn, fmt.Sprintf("%s, another minor or patch version: render it again to record %s: `templates.py check %s%s --render`", named, current, where, given)}}
 	}
 	why := "another major version, which the document no longer fits"
-	if !semver.MatchString(recorded) {
+	if !isVersion {
 		why = fmt.Sprintf("and %s is no semantic version", recorded)
 	}
 	return []Finding{{"template", versionRule, Refuse, fmt.Sprintf("%s, %s: fill it again at %s: `templates.py draft %s --json` gives its fields, and `templates.py check %s --fields <fields> --render` writes it", named, why, current, where, where)}}
+}
+
+// holdsSlot is templates.py `holds_slot`: whether text holds the fill slot outside code, a fence or
+// a code span.
+func holdsSlot(text string) bool {
+	var kept []string
+	open := ""
+	for _, line := range splitLines(text, false) {
+		m := fence.FindStringSubmatch(line)
+		switch {
+		case open == "" && m != nil:
+			open = m[1]
+		case open != "":
+			if m != nil && strings.HasPrefix(m[1], open) {
+				open = ""
+			}
+		default:
+			kept = append(kept, codeSpan.ReplaceAllString(line, ""))
+		}
+	}
+	return strings.Contains(strings.Join(kept, "\n"), slot)
+}
+
+// versionParts is templates.py `version_parts`: version as its three whole numbers, ok false where
+// it is no version of t's form: a semantic version, or for a template manifest one to three
+// numbers, the missing ones 0.
+func versionParts(t *Template, version string) ([3]int, bool) {
+	form := semver
+	if t.Manifest {
+		form = manifestVersion
+	}
+	if !form.MatchString(version) {
+		return [3]int{}, false
+	}
+	var parts [3]int
+	for i, part := range strings.Split(version, ".") {
+		parts[i], _ = strconv.Atoi(part)
+	}
+	return parts, true
 }
 
 // adapterFindings are an adapter's findings: its lines, its title rule, then its checker's answer
@@ -959,7 +1011,7 @@ func selectFile(templates Catalog, body string, title *string, path string) Sele
 				return Selection{Template: t}
 			}
 		}
-		refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: the front matter names template: %s, which does not claim this file; name one of %s", path, named, joinStrings(names))})
+		refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: the front matter is derived from template %s, which does not claim this file; name one of %s", path, named, joinStrings(names))})
 	}
 	lines := strippedLines(body)
 	for _, t := range candidates {
@@ -967,7 +1019,7 @@ func selectFile(templates Catalog, body string, title *string, path string) Sele
 			return Selection{t, refused}
 		}
 	}
-	refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: no template takes this file; name its template in the front matter, template: <name> (one of %s)", path, joinStrings(names))})
+	refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: no template takes this file; name its template in the front matter, derived_from: {template: <name>, version: <version>} (one of %s)", path, joinStrings(names))})
 	return Selection{nil, refused}
 }
 

@@ -15,10 +15,12 @@ from pathlib import Path
 
 import pytest
 
+import build_docs
 import deck
 import fake_git
 import git_door
 import templates
+import template_cases
 import outside_text
 import overhaul
 import retro
@@ -125,7 +127,9 @@ NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "stan
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES)
+#: The templates that claim files (`file.write`): the work issue's body file.
+FILES = ("work-file",)
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
@@ -134,6 +138,7 @@ def test_every_template_loads_with_its_actions_and_the_terms(catalog):
     assert all(catalog[name].is_adapter for name in ADAPTERS)
     assert not any(catalog[name].is_adapter for name in (*ISSUE_TEMPLATES, *NESTING, *INTERFACES))
     assert all(catalog[name].kind == "interface" for name in INTERFACES)
+    assert all(catalog[name].actions == (templates.FILE_ACTION,) and catalog[name].paths for name in FILES)
     assert catalog["ticket"].terms and catalog["ticket"].severity("terms") == templates.WARN
     work = catalog["work"]
     assert [item.name for item in work.fields][:5] == ["title", "situation", "problem", "goal",
@@ -295,7 +300,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 
 @pytest.mark.parametrize("name", EVERY)
-def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalog, name):
+def test_each_template_renders_and_parses_its_example_back(catalog, name):
     template = catalog[name]
     if template.is_adapter:
         body, title = adapter_examples()[name]
@@ -307,7 +312,7 @@ def test_each_of_the_twenty_templates_renders_and_parses_its_example_back(catalo
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
-    assert len(catalog) == 20
+    assert len(catalog) == len(EVERY)
 
 
 def test_every_template_is_a_note_whose_front_matter_any_yaml_reader_reads_alike():
@@ -1008,6 +1013,19 @@ def test_list_names_every_template_with_its_actions(capsys):
                in ISSUE_TEMPLATES)
 
 
+def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tmp_path):
+    """Requirement 1: the engine's one listing of the paths the templates own, SE's work issue body
+    file's among them, and another folder's own."""
+    assert templates.main(["list", "--owned", "--tree"]) == 0
+    assert capsys.readouterr().out == ".se/issues/*.md: work-file\n"
+    write_template(tmp_path, "steps", MINIMAL.format(
+        name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
+    assert templates.main(["list", "--owned", "--templates", str(tmp_path / "templates")]) == 0
+    assert capsys.readouterr().out == "a/*.md: steps\nbook/*/steps/*.md: steps\n"
+    assert templates.owned({name: template for name, template in templates.load(ROOT, tree=True).items()
+                            if not template.is_file}) == []
+
+
 @pytest.mark.parametrize("arguments, error", [
     (["check", "nope", "--tree", "--body-file", "x.md"], "no template 'nope'"),
     (["check", "work", "--tree", "--body-file", "missing.md"], "cannot read --body-file"),
@@ -1092,22 +1110,23 @@ def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
                                                                  path=path)
     free = pick(STEP, "notes/x.md")
     assert free.template is None and not free.findings
-    assert pick("---\nid: S5B\ntemplate: goals\n---\n").name == "goals"
+    assert pick("---\nid: S5B\nderived_from: {template: goals, version: \"1.0.0\"}\n---\n").name == "goals"
+    assert pick("---\nid: S5B\nderived_from:\n  template: goals\n  version: \"1.0.0\"\n---\n").name == "goals"
     assert pick("---\nid: S5B\n---\n").name == "risks"
-    outside = pick("---\nid: S5B\ntemplate: work\n---\n")
+    outside = pick("---\nid: S5B\nderived_from: {template: work, version: \"1.0.0\"}\n---\n")
     assert outside.name == "risks" and rules(list(outside.findings), "refuse") == {"template"}
     none = pick("---\nid: S9\n---\n\n# Other\n")
     assert none.template is None
     assert [finding.fix for finding in none.findings] == [
         "book/m1/steps/x.md: no template takes this file; name its template in the front matter, "
-        "template: <name> (one of goals, risks)"]
+        "derived_from: {template: <name>, version: <version>} (one of goals, risks)"]
     with pytest.raises(templates.TemplateError, match="give path"):
         templates.select(catalog, "file.write", STEP)
 
 
 def recorded(template: templates.Template) -> str:
     """The front matter lines a claimed file records its template by."""
-    return (f"template: project/{template.name}\nversion: {template.version}\n"
+    return (f'derived_from: {{template: {template.name}, version: "{template.version}"}}\n'
             f"overlay: {template.digest}\n")
 
 
@@ -1127,12 +1146,14 @@ def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_templat
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
 
 
-def test_render_records_template_version_and_overlay_in_place_and_selection_reads_them(tmp_path):
+def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_them(tmp_path):
     template = step_templates(tmp_path, risks="")["risks"]
-    old = "---\nversion: 0.1.0\nid: S5B\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    old = ("---\nderived_from:\n  template: risks\n  version: \"0.1.0\"\nid: S5B\noverlay: x\n---\n\n"
+           "# Risks\n\n## Risks\n\nNone\n")
+    assert templates.parse(template, old).recorded == "0.1.0"
     rendered = templates.render(template, templates.parse(template, old))
-    assert rendered == ("---\nversion: 1.0.0\n"
-                        f"overlay: {template.digest}\nid: S5B\ntemplate: project/risks\n---\n\n"
+    assert rendered == ('---\nderived_from: {template: risks, version: "1.0.0"}\n'
+                        f"id: S5B\noverlay: {template.digest}\n---\n\n"
                         "# Risks\n\n## Risks\n\nNone\n")
     crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
                                                          "## Risks\r\n\r\nNone\r\n"))
@@ -1171,7 +1192,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
-    assert code == 1 and "template: <name>" in out.out
+    assert code == 1 and "derived_from: {template: <name>" in out.out
     assert run("check", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
@@ -1206,15 +1227,15 @@ def test_a_document_at_its_template_s_current_version_passes(catalog, tmp_path):
     assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
     risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
     page = templates.render(risks, templates.parse(risks, STEP))
-    assert "version: 2.3.0\n" in page and version_findings(risks, page) == []
+    assert 'version: "2.3.0"}\n' in page and version_findings(risks, page) == []
 
 
 def test_a_document_that_records_no_version_passes(catalog, tmp_path):
     work = at_version(catalog["work"], "2.3.0")
     assert templates.parse(work, WORK_BODY).recorded == "" and version_findings(work, WORK_BODY) == []
     risks = step_templates(tmp_path, risks="")["risks"]
-    assert version_findings(risks, STEP.replace("name: Risks\n", "template: risks\n")) == []
-    other = STEP.replace("name: Risks\n", "template: goals\nversion: 0.1.0\n")
+    assert version_findings(risks, STEP.replace("name: Risks\n", "derived_from: {template: risks}\n")) == []
+    other = STEP.replace("name: Risks\n", "derived_from: {template: goals, version: \"0.1.0\"}\n")
     assert templates.parse(risks, other).recorded == ""
 
 
@@ -1245,7 +1266,7 @@ def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_pat
     assert "`templates.py check work --fields <fields> --render`" in found[0].fix
     risks = step_templates(tmp_path, risks="")["risks"]
     page = templates.render(risks, templates.parse(risks, STEP)).replace(
-        "version: 1.0.0", f"version: {recorded}")
+        'version: "1.0.0"', f'version: "{recorded}"')
     moved = at_version(risks, "2.3.0")
     assert [f.severity for f in version_findings(moved, page)] == ["refuse"]
     assert "`templates.py draft --path <file> --json`" in version_findings(moved, page)[0].fix
@@ -1847,6 +1868,15 @@ def beat_edit(catalog, monkeypatch) -> list[Case]:
             for body in (beaten, work_tickets.without_beat(beaten))]
 
 
+def unclaimed(catalog, monkeypatch) -> list[Case]:
+    """What `unclaim` sends: the work issue's own body without its beat line, and its one-line
+    answer to the Started comment."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 24, 14, 50, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", work_tickets.without_beat(beaten), labels=WORK_LABELS),
+            Case("comment.create", FREE, work_tickets.UNCLAIMED_COMMENT.format(
+                started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example"))]
+
+
 def without_beats(plan):
     """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
     return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
@@ -1876,6 +1906,9 @@ CONTRACT = {
     "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
     "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:unclaim": ("unclaim", unclaimed),
+    "work_tickets:post_started": ("start", comment(
+        work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),
     "work_tickets:escalation_plan": ("integrate", plan_of(
         lambda: work_tickets.escalation_plan(REPO, 7, "the suite failed"), {"comment_issue": FREE})),
@@ -2809,3 +2842,284 @@ def test_an_overlay_applies_to_its_own_repository_s_template_only(tmp_path, fake
     assert templates.catalog(project, tree=True)["note"].tags == ("test", "shared")
     write_template(project, "note", OVERLAID)
     assert templates.catalog(project, tree=True)["note"].tags == ("test",)
+
+
+# Template manifests (templates.py "Template manifests"): obs's worked example, its three template
+# nodes and an ordinary chapter, as the shared cases hold it (tests/template_cases.py)
+
+#: Each guidance text of the fixture's nodes, which the fill hands the agent and the document never holds.
+GUIDANCE = ("The problem the product solves, and for whom.", "Every later section is judged against it.",
+            "One paragraph of at most five sentences.", "The product brief.",
+            "What the product does and what it leaves to others.", "Two lists, in scope and out of scope.",
+            "The risks that could stop the product, each with its owner.",
+            "A risk without an owner is not handled.")
+MANIFEST_FILLED = {"purpose": "The pump controller keeps the tank level between its limits for the plant operators.",
+          "scope": "- In scope: the level loop and its alarms.\n- Out of scope: the pump drives.",
+          "risks": "The level sensor may drift; the instrument team owns its calibration."}
+BRIEF = "The product brief: the pump controller keeps the tank level for the plant operators."
+OBS_BUILDS = ("tool: obs-document, in obs's own Python environment, builds the filled document, so only "
+              "the real obs proves it reads the document's derived_from; it runs only as a process")
+
+
+def manifest_folder(root: Path, **changed: str | None) -> Path:
+    """The fixture's `templates/` under `root`, each of `changed` as `_manifest_files` takes it."""
+    folder = root / "templates"
+    for name, text in template_cases._manifest_files(**changed).items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8", newline="\n")
+    return folder
+
+
+def filled_by_main(capsys, folder: Path, *arguments: str) -> tuple[int, str, str]:
+    code = templates.main(["fill", "requirements", "--templates", str(folder), *arguments])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_a_template_manifest_fills_a_document_that_derives_from_it_and_holds_none_of_its_guidance(
+        tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    code, out, _ = filled_by_main(capsys, folder)
+    told = json.loads(out)
+    assert code == 0 and told["version"] == "2"
+    assert told["field_says"] == {
+        "purpose": "The problem the product solves, and for whom. Why: Every later section is judged "
+                   "against it. Form: One paragraph of at most five sentences. Sources: The product brief.",
+        "scope": "What the product does and what it leaves to others. Form: Two lists, in scope and out "
+                 "of scope.",
+        "risks": "The risks that could stop the product, each with its owner. Why: A risk without an "
+                 "owner is not handled."}
+    assert all(text in told["draft"] for text in GUIDANCE)
+    assert told["schema"]["required"] == ["purpose", "scope"]  # the mandatory gates; risks is judgment
+    document = tmp_path / "documents" / "pump.md"
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert (code, out) == (0, f"wrote {document}: requirements 2\n")
+    text = document.read_text(encoding="utf-8")
+    template = templates.load(tmp_path, folder=folder)["requirements"]
+    assert text.startswith('---\nderived_from: {template: requirements, version: "2"}\n'
+                           f"overlay: {template.digest}\n---\n")
+    assert [line for line in text.splitlines() if line.startswith("#")] == ["## Purpose", "## Scope", "## Risks"]
+    assert not [part for part in (*GUIDANCE, templates.SLOT, "<!--", "Why:") if part in text]
+    parsed = templates.parse(template, text)
+    assert (parsed.fields, parsed.recorded) == (MANIFEST_FILLED, "2")
+    assert template.manifest and template.actions == () and template.kind == "document"
+
+
+def test_a_missing_mandatory_section_and_a_leftover_slot_each_refuse_naming_the_section(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    document = tmp_path / "pump.md"
+    missing = {key: value for key, value in MANIFEST_FILLED.items() if key != "scope"}
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(missing), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert code == 1 and "scope [required]: Scope is missing: write `## Scope`" in out
+    assert "nothing was written" in out and not document.exists()
+    left = {**MANIFEST_FILLED, "risks": "The sensor may drift.\n\n{{slot}}"}
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(left), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert code == 1 and "risks [slot]: section Risks still holds the fill slot {{slot}}" in out
+    assert not document.exists()
+    template = templates.load(tmp_path, folder=folder)["requirements"]
+    quoted = {**MANIFEST_FILLED, "risks": "Write `{{slot}}` literally:\n\n```\n{{slot}}\n```"}
+    assert templates.fill(template, quoted, BRIEF)[1] == []  # a slot in code is literal and no slot
+    judged = {key: value for key, value in MANIFEST_FILLED.items() if key != "risks"}
+    assert templates.fill(template, judged, BRIEF)[1] == []  # a judgment gate may stay empty
+
+
+def test_stale_lists_a_document_only_once_its_template_s_version_moved(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    documents = tmp_path / "documents"
+    assert filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                          "--out", str(documents / "pump.md"))[0] == 0
+    (documents / "notes.md").write_text("# Notes\n\nNo template.\n", encoding="utf-8")
+    (documents / ".hidden").mkdir()
+    (documents / ".hidden" / "old.md").write_text(
+        '---\nderived_from: {template: requirements, version: "1"}\n---\n', encoding="utf-8")
+    stale = lambda: (templates.main(["stale", "--path", str(documents), "--templates", str(folder)]),
+                     capsys.readouterr())
+    code, out = stale()
+    assert (code, out.out, out.err) == (0, "", "")
+    manifest = folder / "requirements" / "manifest.md"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('version: "2"', 'version: "2.1"'),
+                        encoding="utf-8")
+    (documents / "gone.md").write_text('---\nderived_from: {template: gone, version: "1"}\n---\n',
+                                       encoding="utf-8")
+    code, out = stale()
+    assert (code, out.out) == (0, "pump.md: derived from requirements 2; the template is at 2.1\n")
+    assert out.err == "warning: gone.md: derived from gone 1, which is no template here\n"
+    assert templates.main(["stale", "--path", str(tmp_path / "none"), "--templates", str(folder)]) == 2
+    assert "is no folder" in capsys.readouterr().err
+
+
+def test_an_overlay_adds_to_a_template_manifest_and_never_loosens_it(tmp_path):
+    template = templates.load(tmp_path, folder=manifest_folder(tmp_path))["requirements"]
+    risks = template.field("risks")
+    assert risks.required and risks.says.endswith("not handled. Name each owner by role.")
+    assert template.tags == ("requirements",) and template.says.endswith("Agents quote the brief.")
+    plain = templates.load(tmp_path, folder=manifest_folder(tmp_path / "plain",
+                                                            requirements_dot_overlay_dot_md=None))
+    assert template.digest != plain["requirements"].digest
+    loose = template_cases.MANIFEST_OVERLAY.replace("  - name: risks\n    required: true\n",
+                                                    "  - name: purpose\n    required: false\n")
+    with pytest.raises(templates.TemplateError, match="field purpose: required is turned off"):
+        templates.load(tmp_path, folder=manifest_folder(tmp_path / "loose",
+                                                        requirements_dot_overlay_dot_md=loose))
+
+
+def test_a_project_s_template_manifest_resolves_before_se_s_templates(tmp_path):
+    manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    resolved = templates.catalog(tmp_path, tree=True)
+    assert resolved["requirements"].repository == templates.PROJECT_REPOSITORY
+    assert resolved["requirements"].path == "templates/requirements/manifest.md"
+    assert resolved["work"].repository == templates.SE_REPOSITORY
+
+
+@pytest.mark.parametrize("front, named", [
+    ('---\nderived_from: {template: requirements, version: "2"}\n---\n', ("requirements", "2")),
+    ('---\ntitle: T\nderived_from:\n  template: se/work\n  version: "1.0.0"\nid: 1\n---\n', ("se/work", "1.0.0")),
+    ("---\nderived_from: {template: x, version: 3}\n---\n", ("x", "3")),
+    ("---\nderived_from: {template: x}\n---\n", ("", "")),
+    ("---\nderived_from: x\n---\n", ("", "")),
+    ("---\nderived_from: {template: x, version: 1.5}\n---\n", ("", "")),
+])
+def test_derived_from_reads_a_flow_mapping_or_an_indented_one(front, named):
+    found = templates.derived_from(front)
+    assert found is not None and found[2:] == named
+    assert front[found[0]:found[1]].startswith("derived_from:")
+    assert templates.derived_from("---\ntitle: T\n---\n") is None
+
+
+@pytest.mark.spawns(OBS_BUILDS)
+def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, obs, capsys):
+    note = (obs / "spec" / "capabilities" / "templates.md").read_text(encoding="utf-8")
+    folder = tmp_path / "templates"
+    for match in re.finditer(r"^```text template/(\S+)\n(.*?)^```$", note, re.MULTILINE | re.DOTALL):
+        (folder / "requirements" / match.group(1)).parent.mkdir(parents=True, exist_ok=True)
+        (folder / "requirements" / match.group(1)).write_text(match.group(2), encoding="utf-8")
+    assert sorted(path.name for path in (folder / "requirements").iterdir()) == [
+        "manifest.md", "purpose.md", "risks.md", "scope.md"]
+    vault = tmp_path / "document"
+    assert filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                          "--out", str(vault / "manifest.md"))[0] == 0
+    parsed = tmp_path / "document.json"
+    code = build_docs.obs_document(obs, ["--source", str(vault / "manifest.md"), "--document", str(parsed)],
+                                   "templates", adapter=False)
+    assert code == 0, capsys.readouterr().err
+    built = parsed.read_text(encoding="utf-8")
+    assert '"derived-from"' in built and '"guidance"' not in built and "{{slot}}" not in built
+
+
+
+# Filling templates from material (docs/templates.md "Filling templates from material"): the worked
+# example, examples/fill-templates/pump-x, filled again and checked as it stands, and the
+# fill-templates skill's two ends, every document passing and each gap named
+
+EXAMPLE = ROOT / "examples" / "fill-templates" / "pump-x"
+
+
+def example_repository(root: Path) -> Path:
+    """The worked example's small repository under `root`, its templates and material alone: the
+    documents are the fill's to write."""
+    repository = root / "pump-x"
+    for folder in ("templates", "material"):
+        shutil.copytree(EXAMPLE / folder, repository / folder)
+    return repository
+
+
+def documents_by_main(capsys, repository: Path, *arguments: str) -> tuple[int, str]:
+    code = templates.main(["documents", "--path", str(repository / "documents"), "--root", str(repository),
+                           "--tree", *arguments])
+    return code, capsys.readouterr().out
+
+
+def test_the_worked_example_fills_two_documents_that_pass_link_the_material_and_name_their_templates(
+        tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    assert templates.main(["list", "--root", str(repository), "--tree"]) == 0
+    listed = capsys.readouterr().out
+    assert "label-spec (owner): file.write: documents/label-*.md: A product label" in listed
+    assert "test-plan (owner): a node of a document: One test plan per product." in listed
+    resolved = templates.catalog(repository, tree=True)
+    readme = (EXAMPLE / "README.md").read_text(encoding="utf-8")
+    for document, named in (("label-pump.md", "label-spec"), ("test-plan-pump.md", "test-plan")):
+        template = resolved[named]
+        assert template.repository == templates.PROJECT_REPOSITORY
+        expected = (EXAMPLE / "documents" / document).read_text(encoding="utf-8")
+        fields = templates.parse(template, expected).fields
+        target = repository / "documents" / document
+        common = ["fill", named, "--path" if template.is_file else "--out", str(target), "--root",
+                  str(repository), "--tree", "--input", str(repository / "material")]
+        assert templates.main(common) == 0
+        told = json.loads(capsys.readouterr().out)
+        assert told["template"] == named and list(told["fields"]) == list(fields)
+        assert templates.main([*common, "--fields-json", json.dumps(fields)]) == 0
+        assert capsys.readouterr().out.endswith(f": {named} {template.version}\n")
+        text = target.read_text(encoding="utf-8")
+        assert text == expected
+        assert templates.derived_from(text)[2:] == (named, template.version)
+        links = re.findall(r"\]\((\.\./material/[^)]+)\)", text)
+        assert links and all((target.parent / link).resolve().is_file() for link in links)
+        assert templates.SLOT not in text and "<!--" not in text
+        assert f"| [{document}](documents/{document}) | {named} | {template.version} |" in readme
+    code, out = documents_by_main(capsys, repository, "--input", str(repository / "material"))
+    assert (code, out) == (0, "label-pump.md: Languages: not in input\n2 documents: pass; 1 section the "
+                              "material did not fill, named above: tell the person each\n")
+    assert f"```text\n{out}```" in (ROOT / "docs" / "templates.md").read_text(encoding="utf-8")
+    assert documents_by_main(capsys, EXAMPLE)[0] == 0  # the committed documents pass as they stand
+
+
+def test_material_without_a_mandatory_section_s_content_ends_with_it_named_and_no_slot(tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    resolved = templates.catalog(repository, tree=True)
+    label, plan = resolved["label-spec"], resolved["test-plan"]
+    documents = repository / "documents"
+    documents.mkdir()
+    no_review = {**templates.parse(label, (EXAMPLE / "documents" / "label-pump.md").read_text(
+        encoding="utf-8")).fields,
+                 "warnings": "Not in input", "languages": "Not in input"}
+    (documents / "label-pump.md").write_text(templates.fill(label, no_review, "")[0], encoding="utf-8")
+    plan_text = templates.fill(plan, {"scope": "Both warnings.", "cases": "Not in input"}, "")[0]
+    (documents / "test-plan-pump.md").write_text(plan_text, encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 0 and out.splitlines() == [
+        "label-pump.md: Warnings: not in input", "label-pump.md: Languages: not in input",
+        "test-plan-pump.md: Test cases: not in input",
+        "2 documents: pass; 3 sections the material did not fill, named above: tell the person each"]
+    left = plan_text.replace("Both warnings.", "Both warnings.\n\n{{slot}}")
+    (documents / "test-plan-pump.md").write_text(left, encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "test-plan-pump.md: refuse: scope [slot]: section Scope still holds the fill slot" in out
+    assert out.splitlines()[-1].startswith("2 documents: refused; fix every finding and fill again")
+    (documents / "test-plan-pump.md").write_text(plan_text.replace("## Scope\n\nBoth warnings.\n", ""),
+                                                 encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "test-plan-pump.md: refuse: scope [required]" in out
+
+
+def test_documents_refuses_a_folder_without_documents_and_a_template_that_does_not_resolve(tmp_path, capsys):
+    repository = example_repository(tmp_path)
+    (repository / "documents").mkdir()
+    (repository / "documents" / "notes.md").write_text("# Notes\n\nNo template.\n", encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and "no document here derives from a template" in out
+    (repository / "documents" / "gone.md").write_text(
+        '---\nderived_from: {template: gone, version: "1"}\n---\n', encoding="utf-8")
+    code, out = documents_by_main(capsys, repository)
+    assert code == 1 and out.startswith("gone.md: refuse: derived_from [template]: gone is no template here")
+    assert templates.main(["documents", "--path", str(tmp_path / "none"), "--tree"]) == 2
+    assert "is no folder" in capsys.readouterr().err
+
+
+def test_a_folder_of_material_is_the_raw_input_each_text_file_named_and_hidden_ones_left_out(tmp_path):
+    material = tmp_path / "material"
+    (material / "notes").mkdir(parents=True)
+    (material / ".hidden").mkdir()
+    (material / "b.md").write_text("Second.\n", encoding="utf-8")
+    (material / "notes" / "a.txt").write_text("First.\n", encoding="utf-8")
+    (material / ".hidden" / "c.md").write_text("Hidden.\n", encoding="utf-8")
+    (material / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+    assert templates.raw_input(material) == "--- b.md ---\nSecond.\n\n--- notes/a.txt ---\nFirst.\n"
+    assert templates.raw_input(material / "b.md") == "Second.\n"
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(templates.TemplateError, match="holds no text file"):
+        templates.raw_input(tmp_path / "empty")

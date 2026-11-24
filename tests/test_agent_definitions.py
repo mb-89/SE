@@ -1065,6 +1065,9 @@ def test_integrator_starts_the_next_startable_issue_after_each_landing_and_recor
     assert "**Start what is unblocked**, after each landing, before the next delivered pull request." in integrator
     assert "write what you did into the issue you landed" in integrator
     assert "`Started: none startable`" in integrator
+    assert ("A landing in the cloud starts nothing on its own: `integrate`'s close-out claims no "
+            "issue there and prints `Started: none here; start what is unblocked with the host's "
+            "session tool`") in integrator
 
 
 # What the work of 22 Nov showed, as the built layout carries it: each role reads it where it runs.
@@ -1179,3 +1182,52 @@ def test_the_worker_definition_names_the_guidance_notes_of_kern_and_go():
         assert f"[`{note}`](../../guidance/pull-request/field-report/{note}.md)" in worker, note
     for rule in ("go test -count", "filepath.ToSlash", "*_windows.go", "green leg"):
         assert rule not in worker, rule
+
+
+# A release follows the work (the work model's "Roles and flow", rule-book dec-011, the person's
+# decision of 24 Nov 2026): SE asks the integrator for it and never the person.
+RELEASE = re.compile(r"\breleas\w*", re.IGNORECASE)
+ASKS = re.compile(r"\b(?:approv\w*|ask\w*|confirm\w*|consent\w*|wait\w*|yes)\b", re.IGNORECASE)
+NOT = re.compile(r"\b(?:never|not|no|nor|without)\b|n't\b", re.IGNORECASE)
+BUILT_PROSE = sorted([*(ROOT / "agents").glob("*.md"), *(ROOT / "skills").rglob("*.md")])
+
+
+def asks_the_person_to_release(text: str) -> list[str]:
+    """The sentences that have a release wait on the person's approval or answer."""
+    sentences = re.split(r"(?<=[.!?:;])\s+", " ".join(text.split()))
+    return [sentence for sentence in sentences
+            if RELEASE.search(sentence) and PERSON.search(sentence) and ASKS.search(sentence)
+            and not NOT.search(sentence)]
+
+
+@pytest.mark.parametrize("path", BUILT_PROSE, ids=lambda path: path.relative_to(ROOT).as_posix())
+def test_no_agent_or_skill_asks_the_person_before_a_release(path):
+    assert asks_the_person_to_release(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("text", [
+    "When everything is integrated, ask the user to approve the release.",
+    "A release needs the human's approval, obtained by SE.",
+    "Something only the person can do (grant access, approve a release, sign in) is a task.",
+])
+def test_the_release_check_flags_a_release_that_waits_on_the_person(text):
+    assert asks_the_person_to_release(text) == [text]
+
+
+@pytest.mark.parametrize("text", [
+    "Send the integrator `release` without asking the user.",
+    "It is never a question to the person, and no one asks the person.",
+    "SE asks the integrator for a release.",
+])
+def test_the_release_check_passes_a_release_that_follows_the_work(text):
+    assert asks_the_person_to_release(text) == []
+
+
+def test_releases_follow_the_work_in_the_work_model_se_and_the_integrator():
+    assert "**Releases follow the work**: a release is SE's call to the integrator" in normalized(WORK_MODEL)
+    steps = normalized(WORK_MODEL).split("### Steps only the person approves", 1)[1].split("## Pause", 1)[0]
+    assert "never a release, which [follows the work](#roles-and-flow)" in steps
+    assert "never ask the person whether to release" in normalized(AGENTS / "se.md")
+    assert "never waiting for the person" in normalized(AGENTS / "integrator.md")
+    dec_011 = normalized(RULE_BOOK).split("### dec-011", 1)[1].split("### dec-012", 1)[0]
+    assert "the person's decision of 24 Nov 2026" in dec_011

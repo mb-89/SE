@@ -88,6 +88,8 @@ PROTECTED_QUESTION = "\uE002"
 FIELD_REPORT_RESULT_PATTERN = re.compile(r"\*\*Result:\*\*\s*(complete|partial)\s*(?:\n|$)")
 BRANCH_TIP_FIELD = re.compile(r"(\*\*Branch tip:\*\*[ \t]*)(`[^`\n]*`|\S*)")
 BRANCH_TIP_PATTERN = re.compile(r"\*\*Branch tip:\*\*[ \t]*`?([0-9a-f]{7,40})`?(?=[ \t]|$)", re.MULTILINE)
+#: The field report's Branch, the pull request's head branch: `**Branch:** `<branch>``.
+REPORT_BRANCH_PATTERN = re.compile(r"\*\*Branch:\*\*[ \t]*`([^`\n]+)`")
 REINTEGRATION_KIND_PATTERN = re.compile(r"\*\*Re-integration kind:\*\*[ \t]*([^\s<]*)")
 RELEASE_KIND_PATTERN = re.compile(r"\*\*Release kind:\*\*[ \t]*(\w*)[ \t]*[—–:,-]*[ \t]*([^\n]*)")
 # A breaking change's line under Removed behaviour: one that starts with the marker, as a list item
@@ -2727,6 +2729,16 @@ def authored_sentences(text: str) -> list[str]:
     return sentences
 
 
+#: A Markdown link's target: a sentence whose words stay and whose links only point elsewhere, as
+#: when its section moves to another page, removes no prose.
+LINK_TARGET = re.compile(r"\]\([^)\s]*\)")
+
+
+def prose_key(sentence: str) -> str:
+    """`sentence` with its link targets left out: what the guard compares."""
+    return LINK_TARGET.sub("]()", sentence)
+
+
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     """Each authored sentence `branch` removes, as `<path>: <sentence>`."""
     return [f"{path}: {sentence}" for path, sentence in deleted_authored_places(root, branch)]
@@ -2734,7 +2746,8 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
 
 def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
     """The (path, sentence) pairs of the authored sentences `branch` removes: a sentence of an
-    authored file where it forked that no authored file on the branch holds."""
+    authored file where it forked that no authored file on the branch holds, its link targets
+    aside (`prose_key`)."""
     globs = authored_content_globs(root)
     if not globs:
         return []
@@ -2784,7 +2797,7 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
         return result.stdout
 
     new_sentences = {
-        sentence
+        prose_key(sentence)
         for path, revision in new_files
         for sentence in authored_sentences(content(path, revision))
     }
@@ -2793,7 +2806,7 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
         if path is None:
             continue
         for sentence in authored_sentences(content(path, revision)):
-            if sentence not in new_sentences and (path, sentence) not in found:
+            if prose_key(sentence) not in new_sentences and (path, sentence) not in found:
                 found.append((path, sentence))
     return found
 
@@ -3258,18 +3271,53 @@ def remote_tags(root: Path) -> dict[str, str]:
     return tags | peeled
 
 
-def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, str]]:
+@dataclass(frozen=True)
+class StatedKind:
+    """One `release --kind <commit>=<kind> <reason>`: the release kind stated, at the release, for
+    an integration on the integration branch that states none in its trailer, with the reason.
+    Parsed once (`parse`); there is no default kind (the person's decision of 24 Nov 2026)."""
+
+    commit: str
+    kind: str
+    reason: str
+
+    @classmethod
+    def parse(cls, statement: str, reason: str) -> "StatedKind":
+        commit, equals, kind = statement.partition("=")
+        form = f"--kind <commit>={'|'.join(reversed(RELEASE_ORDER))} <reason>"
+        if not equals or not commit.strip() or kind not in RELEASE_ORDER:
+            raise QueueError(f"--kind {statement!r}: write {form}; nothing was written")
+        if not reason.strip():
+            raise QueueError(f"--kind {statement}: give its reason, {form}; nothing was written")
+        return cls(commit.strip(), kind, " ".join(reason.split()))
+
+    def line(self) -> str:
+        """How the release commit's message records the statement."""
+        return f"Kind stated for {self.commit}: {self.kind}, {self.reason}"
+
+
+def integrated_packages(root: Path, tip: str, released: str,
+                        stated: tuple[StatedKind, ...] = ()) -> list[tuple[str, str]]:
     """(branch, release kind) of each integration on `tip`'s first-parent history since the
     commit `released`, the last release's, oldest first: what the next release raises the version
     by (README "Project settings").
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
     integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
-    Release-kind trailer, and one without it is refused. Other merges release nothing and are
-    named."""
+    Release-kind trailer, and one that states an unknown kind or two is refused. One that states
+    none takes the kind `stated` names for it; without a statement for each such commit the
+    release is refused, naming each, as is a statement for a commit that is none of them. Other
+    merges release nothing and are named."""
+    by_commit: dict[str, StatedKind] = {}
+    for statement in stated:
+        found = run_git(root, "rev-parse", "--verify", "--quiet", f"{statement.commit}^{{commit}}")
+        if found.returncode != 0:
+            raise QueueError(f"--kind {statement.commit}={statement.kind}: no commit "
+                             f"{statement.commit} in {root}; nothing was written")
+        by_commit[found.stdout.strip()] = statement
     log = checked_git(root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e", tip,
                       f"^{released}")
-    packages = []
+    packages, unkinded, used = [], [], set()
     for record in filter(str.strip, log.split("\x1e")):
         commit, _, rest = record.strip().partition("\x00")
         parents, _, message = rest.partition("\x00")
@@ -3279,7 +3327,27 @@ def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, 
             if len(parents.split()) > 1:
                 print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
             continue
-        packages.append((match[1], merge_release_kind(commit, subject, message)))
+        if RELEASE_TRAILER_PATTERN.findall(message):
+            packages.append((match[1], merge_release_kind(commit, subject, message)))
+        elif commit in by_commit:
+            used.add(commit)
+            print(f"Release: integration {commit[:7]} ({one_line(subject)}) states no "
+                  f"{RELEASE_TRAILER}; {by_commit[commit].line()}")
+            packages.append((match[1], by_commit[commit].kind))
+        else:
+            unkinded.append(f"{commit[:7]} ({one_line(subject)})")
+    if unkinded:
+        raise QueueError(
+            f"Cannot release: {len(unkinded)} integration(s) since {released[:7]} state no "
+            f"{RELEASE_TRAILER}: {'; '.join(unkinded)}. There is no default kind: state each with "
+            f"--kind <commit>={'|'.join(reversed(RELEASE_ORDER))} <reason> (the kind its field "
+            "report declares), or set project.version by hand in a pull request, which the release "
+            "then tags as it is; nothing was written")
+    unused = [statement for full, statement in by_commit.items() if full not in used]
+    if unused:
+        raise QueueError(
+            f"--kind names {', '.join(statement.commit for statement in unused)}, which is no "
+            f"integration since {released[:7]} that states no {RELEASE_TRAILER}; nothing was written")
     return list(reversed(packages))
 
 
@@ -3362,14 +3430,16 @@ def release_tags(root: Path) -> dict[str, str]:
     return tags
 
 
-def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None:
+def release(root: Path, branch: str,
+            stated: tuple[StatedKind, ...] = ()) -> tuple[str, list[tuple[str, str]]] | None:
     """Release `branch`, checked out in `root`: raise project.version by the highest Release-kind
     of the integrations on its first-parent history since the last release, the commit the tag of
     the current version names, and commit `Release v<version>` with what `project.release_build`
     regenerates, carrying its parent's suite verdict. Returns the release's tag and the
     (branch, kind) of each integration it releases, none where no release commit was written: an
     untagged version is released as it is, the first tag of a project. None where nothing was
-    integrated since the last release, or no version is set."""
+    integrated since the last release, or no version is set. `stated` gives the kinds of
+    integrations that state none (integrated_packages); the commit's message records each."""
     version = project_version(root)
     if version is None:
         print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to release")
@@ -3381,7 +3451,7 @@ def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None
         print(f"Release: {current} carries no tag yet; it is released as it is, the first tag of "
               "project.version")
         return current, []
-    packages = integrated_packages(root, branch, released)
+    packages = integrated_packages(root, branch, released, stated)
     if not packages:
         print(f"Release: nothing was integrated since {current}; the version stays")
         return None
@@ -3403,6 +3473,7 @@ def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None
     checked_git(root, "add", "--", *paths)
     checked_git(root, "commit", "-q", "-m", f"Release {tag}",
                 "-m", "\n".join(f"{name}: {kind}" for name, kind in packages),
+                *(("-m", "\n".join(statement.line() for statement in stated)) if stated else ()),
                 *(("-m", trailer) if trailer else ()), env=environment)
     sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
@@ -4096,8 +4167,8 @@ def copilot_advises(root: Path, event: dict[str, object]) -> bool:
 
 def claimed_files_problem(root: Path) -> str | None:
     """What the claimed files refuse in the checkout `root`: the lines of `se_templates.py
-    check-files --changed origin/<integration branch>`; None where no template claims a path or
-    every changed claimed file passes. Errors raise."""
+    check-files --changed origin/<integration branch>`; None where no template claims a path
+    outside .se/ or every changed claimed file passes. Errors raise."""
     lines = sibling("se_templates").changed_refusal(root, f"origin/{integration_branch(root)}")
     if lines is None:
         return None
@@ -4285,26 +4356,182 @@ def newest_integration_commit(root: Path) -> str:
     return checked_git(root, "rev-parse", f"origin/{integration_branch(root)}^{{commit}}").strip()
 
 
-def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+def claim(root: Path, number: int, repo: str, branch: str, commit: str,
+          reuse: bool = False) -> str:
     """Claim work issue #`number`: create its branch at `commit` on the remote that hosts its
     repository (`issue_remote`), as a push that holds only while the branch does not exist there,
     so of two starts the host lets the first create it and refuses the second. Only a push that
     reports the branch new claims it: git passes a branch already at `commit` as up to date before
-    it checks the lease. The remote."""
+    it checks the lease. With `reuse`, for an issue its caller read as not in progress, an unused
+    claim there (`unused_claim`) is taken instead: moved to `commit` with a lease on its tip, so
+    of two starts that both find it only the first moves it. The remote."""
     remote = issue_remote(root, repo)
     ref = f"refs/heads/{branch}"
     pushed = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:", remote,
                                  f"{commit}:{ref}"])
-    if pushed.returncode == 0 and any(
-            line.startswith("*\t") and line.split("\t")[1].endswith(f":{ref}")
-            for line in pushed.stdout.splitlines()):
+    if pushed.returncode == 0 and pushed_as(pushed.stdout, ref, "*"):
         return remote
     listed = run_git(root, "ls-remote", remote, ref)
     if listed.returncode == 0 and listed.stdout.strip():
+        unused = unused_claim(root, repo, branch) if reuse else None
+        if unused is not None and merged_into(root, remote, unused, commit):
+            moved = run_git_push(root, ["--porcelain", f"--force-with-lease={ref}:{unused}",
+                                        remote, f"{commit}:{ref}"])
+            if moved.returncode == 0 and pushed_as(moved.stdout, ref, " "):
+                return remote
         raise QueueError(f"Issue #{number} is not startable: its branch {branch} exists on "
                          f"{remote}, so another start holds its claim; nothing was changed")
     raise QueueError(f"Issue #{number} is not startable: its branch {branch} could not be "
                      f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
+
+
+def pushed_as(porcelain: str, ref: str, flag: str) -> bool:
+    """Whether `git push --porcelain` reports `ref` with `flag` (`*` new, ` ` fast-forward)."""
+    return any(line.startswith(f"{flag}\t") and line.split("\t")[1].endswith(f":{ref}")
+               for line in porcelain.splitlines())
+
+
+def merged_into(root: Path, remote: str, ancestor: str, descendant: str) -> bool:
+    """Whether commit `ancestor` is an ancestor of `descendant` and not that commit itself: asked
+    of this checkout, and where it lacks either, after fetching both from `remote` by their ids,
+    which moves no ref."""
+    if ancestor == descendant:
+        return False
+    held = run_git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+    if held.returncode not in (0, 1):  # an object this checkout lacks
+        if run_git(root, "fetch", "--no-write-fetch-head", remote, ancestor,
+                   descendant).returncode != 0:
+            return False
+        held = run_git(root, "merge-base", "--is-ancestor", ancestor, descendant)
+    return held.returncode == 0
+
+
+def claim_tips(root: Path, repo: str, branch: str) -> tuple[str, str | None, str | None]:
+    """The remote that hosts the issue's repository (`issue_remote`), and there the tips of
+    `branch` and of the integration branch, each None where it is not there; a QueueError where
+    the remote cannot be read."""
+    remote = issue_remote(root, repo)
+    base = f"refs/heads/{integration_branch(root)}"
+    listed = run_git(root, "ls-remote", remote, f"refs/heads/{branch}", base)
+    if listed.returncode != 0:
+        raise QueueError(f"Cannot read branch {branch} on {remote}: {failure_detail(listed)}")
+    tips = {name.strip(): sha.strip() for sha, _, name in
+            (line.partition("\t") for line in listed.stdout.splitlines())}
+    return remote, tips.get(f"refs/heads/{branch}"), tips.get(base)
+
+
+def unused_claim(root: Path, repo: str, branch: str) -> str | None:
+    """The tip of `branch` on the remote that hosts the issue's repository (`issue_remote`) where
+    it is an unused claim, a branch nobody worked on: it holds no commit beyond the integration
+    branch there and is behind it, so the claim was made at an older main and no start is taking
+    it now (a start's claim is made at the newest main). None where the branch is not there, holds
+    a commit of its own, is at the newest main, or either branch cannot be read. Whether its issue
+    is in progress is the caller's: only an issue not labelled in-progress has its claim reused."""
+    try:
+        remote, tip, newest = claim_tips(root, repo, branch)
+    except QueueError:
+        return None
+    if not tip or not newest or not merged_into(root, remote, tip, newest):
+        return None
+    return tip
+
+
+def local_branch(root: Path, branch: str) -> bool:
+    """Whether this checkout has a branch named `branch`."""
+    return run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
+
+
+CLAIMS = Path(".se") / "claims"  # .se/claims/<issue>: what this checkout's `claim` claimed
+
+
+def claim_record_path(root: Path, number: int) -> Path:
+    path = root / CLAIMS / str(number)
+    inside_root(root, path)
+    return path
+
+
+def record_claim_here(root: Path, number: int, remote: str, branch: str, commit: str) -> None:
+    """Record that this checkout's `claim` claimed work issue #`number`: its remote, its branch and
+    the commit the branch was created at, which this checkout's `start` takes as its own claim."""
+    path = claim_record_path(root, number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{remote}\n{branch}\n{commit}\n", encoding="utf-8", newline="\n")
+
+
+def claimed_here(root: Path, number: int) -> bool:
+    """Whether this checkout's `claim` recorded a claim of work issue #`number`."""
+    return claim_record_path(root, number).is_file()
+
+
+def own_claim(root: Path, number: int, repo: str, branch: str) -> str | None:
+    """The remote of this checkout's own claim of work issue #`number`, which `start` takes instead
+    of claiming again: where `claim` recorded it here for `branch` on the issue's remote, and that
+    branch there still holds the claimed commit (its tip, or behind the worker's commits). None
+    where no record names it or the branch there is no longer that claim's."""
+    try:
+        remote, claimed, commit = claim_record_path(root, number).read_text(encoding="utf-8").split()
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if claimed != branch or remote != issue_remote(root, repo):
+        return None
+    fetched = run_git(root, "fetch", remote, f"refs/heads/{branch}")
+    if fetched.returncode != 0:
+        return None
+    held = run_git(root, "merge-base", "--is-ancestor", commit, "FETCH_HEAD")
+    return remote if held.returncode == 0 else None
+
+
+def take_claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+    """Claim work issue #`number` for `start` (`claim`, reusing an unused claim: `start` reads the
+    issue as ready and not in progress first), or take this checkout's own claim of it where
+    `claim` made one here (`own_claim`): the remote."""
+    return own_claim(root, number, repo, branch) or claim(root, number, repo, branch, commit,
+                                                          reuse=True)
+
+
+def forget_claim(root: Path, number: int) -> None:
+    """Remove the record of this checkout's claim of #`number`, once `start` has taken it."""
+    claim_record_path(root, number).unlink(missing_ok=True)
+
+
+UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment
+UNCLAIMED_COMMENT = (UNCLAIMED_MARK + " {started} started no worker; `ready`, `claim` and `start` "
+                     "take its branch `{branch}` again.\n")
+
+
+def unclaim(root: Path, number: int, repo: str) -> str:
+    """Undo work issue #`number`'s claim that no worker took, such as the claims a landing in the
+    cloud made before it started nothing there: its beat line removed, `ready` set where
+    `in-progress` is, and its last `Started:` comment answered with one line saying so, each only
+    where it is still to do. Refused, changing nothing, where its branch on the issue's remote
+    holds a commit beyond the integration branch: that is a worker's. The branch stays, an unused
+    claim `start` takes (`unused_claim`). The line naming what it did."""
+    issue = fetch_issue(root, number, repo)
+    branch, where = str(issue["title"]), repo_arguments(repo)
+    remote, tip, newest = claim_tips(root, repo, branch)
+    if tip and tip != newest and not (newest and merged_into(root, remote, tip, newest)):
+        raise QueueError(f"unclaim: #{number}'s branch {branch} on {remote} holds commits beyond "
+                         f"{integration_branch(root)}, a worker's; its claim is not undone and "
+                         "nothing was changed")
+    done = []
+    body = str(issue["body"])
+    if beat_of(body) is not None:
+        run_gh_with_body(root, ["issue", "edit", str(number), *where], without_beat(body))
+        done.append("beat line removed")
+    if IN_PROGRESS_LABEL in issue_labels(issue):
+        run_gh(root, ["issue", "edit", str(number), "--remove-label", IN_PROGRESS_LABEL,
+                      "--add-label", "ready", *where])
+        done.append("ready again")
+    comments = [comment for comment in issue["comments"] if isinstance(comment, dict)]
+    starts = [index for index, comment in enumerate(comments)
+              if str(comment.get("body") or "").startswith("Started:")]
+    if starts and not any(str(comment.get("body") or "").startswith(UNCLAIMED_MARK)
+                          for comment in comments[starts[-1] + 1:]):
+        started = str(comments[starts[-1]].get("url") or "") or "its Started comment"
+        run_gh_with_body(root, ["issue", "comment", str(number), *where],
+                         UNCLAIMED_COMMENT.format(started=started, branch=branch))
+        done.append("Started comment answered")
+    return f"Unclaimed #{number}: {', '.join(done) if done else 'nothing left to undo'}"
 
 
 def utc_now() -> datetime:
@@ -4580,7 +4807,7 @@ def start(
     refuse_while_paused("start", pause_issues(root, repo))
     candidates = (
         ready_issues(root, repo, allow_existing_branch=True)
-        if not create else ready_issues(root, repo)
+        if not create or claimed_here(root, number) else ready_issues(root, repo)
     )
     issue = next(
         (candidate for candidate in candidates if candidate["number"] == number),
@@ -4598,7 +4825,7 @@ def start(
     if cloud:
         if not agent:
             raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
-        claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
+        take_claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
         run_gh(
             root,
             [
@@ -4615,20 +4842,31 @@ def start(
             ],
         )
         beat_action_gh(root, repo)({"issue_number": number}, "set")
+        post_started(root, number, repo, str(issue["title"]))
+        forget_claim(root, number)
         return None
 
     path = start_worktree(root, number, repo, str(issue["title"]), worktree_root, create)
     mark_in_progress(root, number, repo)
     beat_action_gh(root, repo)({"issue_number": number}, "set")
+    post_started(root, number, repo, str(issue["title"]))
+    forget_claim(root, number)
     return path
+
+
+def post_started(root: Path, number: int, repo: str, branch: str) -> None:
+    """Post the Started comment on work issue #`number` through gh, as `start_plan`'s last step."""
+    run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)],
+                     STARTED_COMMENT.format(branch=branch))
 
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
                    create: bool) -> Path:
-    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`): with
-    `create`, the branch created at the newest integration branch on the issue's remote and the
-    worktree created from it there; without, the one the project's own script created, its branch
-    claimed at its commit; synced."""
+    """The worker's worktree of `branch`, once work issue #`number` is claimed (`claim`, reusing an
+    unused claim, as `start` read the issue ready and not in progress): with `create`, the branch
+    created at the newest integration branch on the issue's remote and the worktree created from
+    it there; without, the one the project's own script created, its branch claimed at its commit;
+    synced."""
     if create:
         sync(root)
         directory = configured_worktree_root(root, worktree_root)
@@ -4637,9 +4875,15 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
             if directory is not None else default_worktree_root(root)
         )
         path = directory_path / branch.replace("/", "-")
+        own = own_claim(root, number, repo, branch)
+        existing = branch_worktree(root, branch) if own else None
+        if existing is not None:
+            sync(existing)
+            return existing
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
-        remote = claim(root, number, repo, branch, newest_integration_commit(root))
+        remote = own or claim(root, number, repo, branch, newest_integration_commit(root),
+                              reuse=True)
         try:
             directory_path.mkdir(parents=True, exist_ok=True)
         except OSError as error:
@@ -4654,25 +4898,29 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
                              f"{failure_detail(added)}; #{number}'s branch {branch} is claimed on "
                              f"{remote}, its labels unchanged")
     else:
-        listed = run_git(root, "worktree", "list", "--porcelain")
-        if listed.returncode != 0:
-            detail = failure_detail(listed)
-            raise QueueError(f"Cannot list worktrees: {detail}")
-        worktree = ""
-        path = None
-        for line in listed.stdout.splitlines():
-            if line.startswith("worktree "):
-                worktree = line.removeprefix("worktree ")
-            elif line == f"branch refs/heads/{branch}" and worktree:
-                path = Path(worktree).resolve()
-                break
+        path = branch_worktree(root, branch)
         if path is None:
             raise QueueError(f"No worktree exists for branch {branch}")
         if current_branch(path) != branch:
             raise QueueError(f"Worktree {path} is not on branch {branch}")
-        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip())
+        claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip(),
+              reuse=True)
         sync(path)
     return path
+
+
+def branch_worktree(root: Path, branch: str) -> Path | None:
+    """The linked worktree of `root`'s repository that has `branch` checked out, None where none has."""
+    listed = run_git(root, "worktree", "list", "--porcelain")
+    if listed.returncode != 0:
+        raise QueueError(f"Cannot list worktrees: {failure_detail(listed)}")
+    worktree = ""
+    for line in listed.stdout.splitlines():
+        if line.startswith("worktree "):
+            worktree = line.removeprefix("worktree ")
+        elif line == f"branch refs/heads/{branch}" and worktree:
+            return Path(worktree).resolve()
+    return None
 
 
 STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
@@ -4833,7 +5081,7 @@ def start_handed_off(
         raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
     branch = str(issue["title"])
     if cloud:
-        claim(root, number, repo, branch, newest_integration_commit(root))
+        take_claim(root, number, repo, branch, newest_integration_commit(root))
     path = None if cloud else start_worktree(root, number, repo, branch, worktree_root, create)
     plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
     if door is None:
@@ -4844,6 +5092,7 @@ def start_handed_off(
                                      if key not in ("owner", "repo")})
 
         run_plan(plan, {**workflow_actions(door), "assign": assign, "beat": beat_action_door(door)})
+    forget_claim(root, number)
     return path, web_url(issue) or issue_url(repo, number), branch
 
 
@@ -4874,8 +5123,7 @@ def issue_ownership(issue: dict[str, object]) -> set[str]:
 
 def branch_exists(root: Path, branch: str, repo: str) -> bool:
     """Whether `branch` exists here or on the remote that hosts the issue's repository `repo`."""
-    local = run_git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
-    if local.returncode == 0:
+    if local_branch(root, branch):
         return True
     origin = run_git(root, "remote", "get-url", "origin")
     if origin.returncode != 0:
@@ -4907,7 +5155,8 @@ def ready_and_claimed(
     root: Path, repo: str, all_repos: bool = False, allow_existing_branch: bool = False
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """The startable work issues: open, `work` and `ready`, not held, not waiting on a person
-    (`waiting_on_person`), unblocked, with no branch yet and no file ownership an issue in
+    (`waiting_on_person`), unblocked, with no branch yet (or only an unused claim of it on the
+    issue's remote, `unused_claim`, which `start` takes) and no file ownership an issue in
     progress holds; and the claimed ones, the open issues labelled in-progress, with their bodies
     (`claim_of`). The two listings are read at once,
     then each candidate's blockers and branch at once."""
@@ -4932,8 +5181,10 @@ def ready_and_claimed(
     def ready(candidate: dict[str, object]) -> bool:
         detail = issue_api(root, repo, f"issues/{int(candidate['number'])}")
         blockers = int((detail.get("issue_dependencies_summary") or {}).get("blocked_by", 0))
-        return blockers == 0 and (allow_existing_branch
-                                  or not branch_exists(root, str(candidate["title"]), repo))
+        branch = str(candidate["title"])
+        return blockers == 0 and (allow_existing_branch or not branch_exists(root, branch, repo)
+                                  or (not local_branch(root, branch)
+                                      and unused_claim(root, repo, branch) is not None))
 
     def state(number: int) -> dict[str, object] | None:
         try:
@@ -5307,22 +5558,30 @@ def body_at_delivery(root: Path, body: str) -> str:
 def checked_report(root: Path | None, file: Path, issue_body: str) -> str:
     """The field report `file` carries between its markers (a worker's draft or a whole pull
     request description), refused where it departs from its template or misses evidence against
-    `issue_body`. In a worktree its Branch tip is first set to the branch's commit and written back,
-    and `integrate`'s guard runs against the checked-out branch, so a delivery shows the refusal
-    the landing would."""
+    `issue_body`. In a checkout of the report's own Branch, the pull request's head branch, its
+    Branch tip is first set to that branch's commit and written back, and `integrate`'s guard runs
+    against it, so a delivery shows the refusal the landing would. Any other checkout (the main
+    checkout an integrator reads a pull request in) leaves the file and its Branch tip as they are."""
     text = read_file(file, "field report")
+    branch = None if root is None else own_branch(root, text)
     if root is not None:
         text = with_branch_tip(root, text)
     report = report_in(text, f"Field report {file.name}")
     problems = field_report_problems(report, issue_body, project_version(root or Path.cwd()))
     if problems:
         raise field_report_error(file.name, problems)
-    if root is not None:
-        branch = current_branch(root)
-        if branch:
-            guard(root, branch, report)
+    if branch is not None:
+        guard(root, branch, report)
         file.write_text(text, encoding="utf-8", newline="\n")
     return report
+
+
+def own_branch(root: Path, body: str) -> str | None:
+    """The branch checked out in `root` where it is the one the field report in `body` names as
+    its Branch, the pull request's head branch; None anywhere else, the main checkout among it."""
+    named = REPORT_BRANCH_PATTERN.search(body)
+    branch = current_branch(root)
+    return branch if named is not None and branch and named[1] == branch else None
 
 
 def check_field_report(
@@ -5384,8 +5643,10 @@ def branch_tip(root: Path) -> str | None:
 
 def with_branch_tip(root: Path, body: str) -> str:
     """`body` with its Branch tip set to the branch's commit in `root`, the one value it records;
-    unchanged where `root` has no commit, and the template check then names an unfilled tip."""
-    tip = branch_tip(root)
+    unchanged where `root` has no commit, and the template check then names an unfilled tip, or
+    where `root` has another branch checked out than the report's Branch (`own_branch`): the tip
+    comes only from the pull request's head branch, never from the main checkout."""
+    tip = branch_tip(root) if own_branch(root, body) is not None else None
     if tip is None:
         return body
     return BRANCH_TIP_FIELD.sub(lambda match: f"{match[1]}`{tip}`", body, count=1)
@@ -9371,8 +9632,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                        run_url: str, door: GitHub | None) -> str:
     """After the read-back: the checkout at the landed commit, the landing branch
     gone, the mirrors pushed, the close-out plan run through `door` (or, without one, printed for
-    the session), the worker's worktree and branch removed and, with a door, what is unblocked
-    started."""
+    the session), the worker's worktree and branch removed and, with a door on a local device,
+    what is unblocked started; in the cloud it starts nothing, whatever door it has."""
     target, landing = str(state["target"]), str(state["landing"])
     tracker, remote = str(state["tracker"]), str(state["remote"])
     pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
@@ -9484,12 +9745,20 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if summary:
         print(summary)
     if door is None or getattr(door, "relayed", False):
-        print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
+        print(f"{STARTED_NONE_HERE} ({WITHOUT_GH})")
+        return short
+    if in_cloud():  # a cloud claim starts no session: the integrator starts its own (SE#1881)
+        print(STARTED_NONE_HERE)
         return short
     started, waiting = start_startable(root, tracker)
     print(f"Started: {started}" + (f"; {waiting} startable wait for capacity, the next landing "
                                    "starts them" if waiting else ""))
     return short
+
+
+# What the close-out prints where it starts nothing itself: without a door, through kern's relay,
+# and in the cloud, where a claim starts no worker session and the integrator starts its own.
+STARTED_NONE_HERE = "Started: none here; start what is unblocked with the host's session tool"
 
 
 def start_startable(root: Path, repo: str) -> tuple[int, int]:
@@ -10827,8 +11096,10 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
                       "the template, without writing GitHub: its header lines, sections, tables, "
                       "field labels, placeholders and evidence gate, and, in a worktree with a "
                       "comments-read or body-read record, refuse comments after it and a changed "
-                      "body; in a worktree also integrate's guard against its branch; refuses a "
-                      "FILE without the markers"),
+                      "body; in a checkout of the report's Branch, the pull request's head branch, "
+                      "it fills Branch tip from that branch and runs integrate's guard against "
+                      "it; any other checkout, the main checkout among them, leaves FILE and its "
+                      "Branch tip as they are; refuses a FILE without the markers"),
          ), required=True),
          arg("--issue-body", type=Path, metavar="FILE",
              help="with --check: the work issue's body as your GitHub tools read it now, for the "
@@ -11812,7 +12083,7 @@ def release_description(tag: str, packages: str) -> str:
             + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
 
 
-def land_release(root: Path, repo: str | None) -> str | None:
+def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = ()) -> str | None:
     """Release what was integrated since the last release, when SE asks (README "Project
     settings"): on `land/release-v<version>` at origin's newest integration branch, the release
     commit release() writes, with its suite verdict (carried from its parent's tree, else the
@@ -11858,7 +12129,7 @@ def land_release(root: Path, repo: str | None) -> str | None:
     feedback.phase(f"release what was integrated on {target}")
     checked_git(root, "checkout", "-q", "--detach", base)
     try:
-        released = release(root, "HEAD")
+        released = release(root, "HEAD", stated)
     except Exception:
         checked_git(root, "switch", "-q", "--discard-changes", target)
         raise
@@ -11893,7 +12164,8 @@ def land_release(root: Path, repo: str | None) -> str | None:
         abandon_landing(root, target, landing)
         raise
     title = f"Release {tag}"
-    packages = "\n".join(f"{name}: {kind}" for name, kind in released[1])
+    packages = "\n".join([*(f"{name}: {kind}" for name, kind in released[1]),
+                          *(statement.line() for statement in stated)])
     verdict = status_verdict(root, remote, base, landed) if without_ci else None
     state = {"tag": tag, "landing": landing, "target": target, "base": base, "landed": landed,
              "remote": remote, "landing_mode": mode}
@@ -11975,10 +12247,19 @@ def finish_release(root: Path, state: dict[str, object], commit: str) -> str:
          WORKTREE, REPO,
          arg("--read-back", metavar="TAG",
              help="without gh: once the plan's steps ran, read the landed release TAG back and "
-                  "finish"))
+                  "finish"),
+         arg("--kind", nargs=2, action="append", default=[], metavar=("COMMIT=KIND", "REASON"),
+             help="the release kind (major, minor or patch) of an integration on the integration "
+                  "branch that states none, with its reason, such as the kind its field report "
+                  "declares; one per such commit, which the release commit records; there is no "
+                  "default kind"))
 def run_release(root: Path, args: argparse.Namespace) -> int:
+    stated = tuple(StatedKind.parse(statement, reason) for statement, reason in args.kind)
+    if stated and args.read_back:
+        raise QueueError("--kind states kinds for the release commit, which --read-back only reads "
+                         "back; give --kind to the release itself")
     result = (read_back_release(root, args.read_back) if args.read_back
-              else land_release(root, args.repo))
+              else land_release(root, args.repo, stated))
     if result:
         print(result)
     return 0
@@ -12061,26 +12342,31 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("claim", "claim a ready work issue for a worker your session tool starts: create its "
-                  "branch at the newest main on the remote that hosts the issue's repository; "
-                  "refused, changing nothing, where that branch exists there",
+@command("claim", "claim a ready issue for a session-tool start: its branch at the newest main "
+                  "on the issue's remote, or an unused claim there; refused where another start "
+                  "holds it",
          WORKTREE,
          arg("issue", type=int),
          REPO,
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
-                  "(method get) answered it, for its branch name"))
+                  "(method get) answered it, for its branch name and its labels"))
 def run_claim(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
-    branch = issue_branch(root, args.issue, repo, args.issue_body)
-    remote = claim(root, args.issue, repo, branch, newest_integration_commit(root))
-    print(f"Claimed #{args.issue}: branch {branch} on {remote}")
+    issue = claimed_issue(root, args.issue, repo, args.issue_body)
+    branch, commit = str(issue["title"]), newest_integration_commit(root)
+    remote = claim(root, args.issue, repo, branch, commit,
+                   reuse=IN_PROGRESS_LABEL not in issue_labels(issue))
+    record_claim_here(root, args.issue, remote, branch, commit)
+    print(f"Claimed #{args.issue}: branch {branch} on {remote}; start #{args.issue} here takes "
+          "this claim")
     return 0
 
 
-def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) -> str:
-    """Work issue #`number`'s branch, its title: read with gh, else through kern's relay, else from
-    `issue_file`, the GitHub tools' issue_read answer."""
+def claimed_issue(root: Path, number: int, repo: str, issue_file: Path | None) -> dict[str, object]:
+    """Work issue #`number` as `claim` reads it, for its branch (its title) and its labels: read
+    with gh, else through kern's relay, else from `issue_file`, the GitHub tools' issue_read
+    answer."""
     if not hand_off():
         issue = fetch_issue(root, number, repo)
     elif (door := relay_door(root, repo)) is not None:
@@ -12095,7 +12381,22 @@ def issue_branch(root: Path, number: int, repo: str, issue_file: Path | None) ->
     if not isinstance(issue, dict) or int(issue.get("number") or number) != number \
             or not issue.get("title"):
         raise QueueError(f"claim: the issue read is not #{number}: give issue_read's answer of it")
-    return str(issue["title"])
+    return issue
+
+
+@command("unclaim", "undo claims no worker took",
+         WORKTREE,
+         arg("issues", type=int, nargs="+", metavar="issue"),
+         REPO)
+def run_unclaim(root: Path, args: argparse.Namespace) -> int:
+    repo, refused = resolve_repo(root, args.repo), False
+    for number in args.issues:
+        try:
+            print(unclaim(root, number, repo))
+        except QueueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            refused = True
+    return 1 if refused else 0
 
 
 @command("session-title", "print the title of a session a role starts: `SE`, "
@@ -12222,7 +12523,8 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
                                       "perPage": 100},
              note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
                   | WAITING_ON_PERSON_LABELS)) + ", no assignee, no open blocker (its Blocked by), "
-                  "no branch yet and no file ownership an in-progress issue holds"),
+                  "no branch yet (or only an unused claim: a branch behind main with no commit "
+                  "of its own) and no file ownership an in-progress issue holds"),
         *([] if limit is None else [running_step(root, repo)]),
         Step("claimed", "list_issues", {**where, "state": "OPEN",
                                         "labels": ["work", "in-progress", *labels], "perPage": 100},
@@ -12685,7 +12987,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "unclaim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
 #: The commands a person waits on that only read: these go through kern where it runs

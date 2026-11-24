@@ -68,8 +68,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   `Integrated in …`, an escalation) is followed by that footer, unchanged. Nothing else repeats
   this rule.
 - Issues are read and written with `gh`, bodies through `--body-file`; where the host offers no
-  `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed; a release
-  needs the human's approval, obtained by SE.
+  `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed.
+- **Releases follow the work**: a release is SE's call to the integrator, the message `release`,
+  made whenever landed work is needed in a released version; it is never a question to the
+  person ([dec-011](references/rules.md#dec-011-persons-decide-agents-execute)).
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
   script it changes.
@@ -209,9 +211,9 @@ no procedure but SE's sends the person to a session.
   Without a signed-in `gh` both commands hand their GitHub steps to the session as a plan and
   read the refs back with `--read-back` ([Without gh](#without-gh)).
 - **Every other step only the person may approve** (a setting, an environment, a permission, a
-  push to a protected branch) is escalated the same way: the escalation names the step and its
-  exact command or setting. SE runs it on the person's yes, or names the one setting the person
-  changes.
+  push to a protected branch; never a release, which [follows the work](#roles-and-flow)) is
+  escalated the same way: the escalation names the step and its exact command or setting. SE runs
+  it on the person's yes, or names the one setting the person changes.
 
 ## Pause
 
@@ -568,16 +570,16 @@ Pull requests built on an old `main` cause most integration trouble.
   only through a native link. `ready` is only [SE's approval](#issues); startable = `ready` and
   zero open blockers.
 - Labels change only in these steps: SE's `file` and `route` ([Issues](#issues)); `start` changes
-  `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
-  `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
-  issue.
+  `ready` to `in-progress`, also after `claim` where the integrator starts a worker with
+  `create_session`; the integrator removes `in-progress` when it closes the issue.
   - `start` writes the first beat line with the label, and the close-out removes it with the
-    label. A worker started after `claim` beats on its first tool call, as intake finds no beat.
+    label. A worker started after `claim` alone beats on its first tool call, as intake finds no
+    beat.
   - The label change follows the [claim](#worktrees) and is no lock: two starters can both read
     `ready`, and only the claim refuses the second.
 - After each integration the integrator starts every startable work issue that has no branch yet
-  and whose file ownership does not clash with running workers, starts its session itself and
-  comments on the landed issue what it started.
+  (or only an [unused claim](#worktrees)) and whose file ownership does not clash with running
+  workers, starts its session itself and comments on the landed issue what it started.
 - A startable issue also waits on no person: none labelled `se-person` or `escalated`, none
   assigned to someone (`work_tickets.py ready`).
 - **Dispatcher**: where no integrator runs, a four-hourly workflow with no model fires the
@@ -608,19 +610,32 @@ Pull requests built on an old `main` cause most integration trouble.
   - The branch is created at the newest `main` with a push that holds only while the branch does
     not exist there, so the host lets the first starter create it and refuses every other.
   - A refused claim names the branch and the remote and changes nothing.
+  - An unused claim is no claim: a branch there with no commit beyond `main` and behind it, of an
+    issue not labelled `in-progress`. `ready` lists its issue, and `claim` and `start` take it,
+    moving it to the newest `main` with a lease on its tip, so only the first of two starts does.
+    A branch at the newest `main` is a start's claim in flight and stays refused.
+  - A claim no worker took, such as one a landing made before it started nothing in the cloud,
+    is undone with `work_tickets.py unclaim`, for one or more issues: the beat line removed,
+    `ready` set where `in-progress` is, and the `Started:` comment answered with one line. It
+    refuses an issue whose branch holds commits beyond `main`, a worker's; the branch stays, an
+    unused claim.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
-  - it refuses an issue that is not startable (including open blockers, an existing branch, a
-    file-ownership clash or exhausted capacity, the worker limit among it);
+  - it refuses an issue that is not startable (including open blockers, an existing branch that
+    is no unused claim, a file-ownership clash or exhausted capacity, the worker limit among it);
   - it fetches and claims the issue's branch, then runs
     `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> <claimed branch>`,
-    from the issue's remote even where `origin` is another, and changes the issue's `ready` label
-    to `in-progress`;
+    from the issue's remote even where `origin` is another, changes the issue's `ready` label
+    to `in-progress` and posts its `Started:` comment;
   - it prints the worker launch line with the exact created path.
   - In a cloud runner, pass `--cloud-agent <login>` (or set `SE_CLOUD_AGENT`) to claim, assign the
     worker and change the labels without creating a local worktree.
   - A worker started with the session tool (`create_session`) is claimed first with
-    `work_tickets.py claim <issue>`.
+    `work_tickets.py claim <issue>`, which records the claim in the checkout
+    (`.se/claims/<issue>`).
+    - `start` of that issue in the same checkout takes it as its own claim while the branch there
+      still holds the claimed commit, and runs its worktree, label and `Started:` comment steps.
+    - A start in another checkout is refused, as the claim is not its own.
 - Copilot CLI offers a platform-enforced alternative, not the local-worker launch path:
   `copilot --agent worker --no-ask-user --allow-all-tools --prompt "<worker prompt>"`. Keep
   agent-host `create_session` workers as the default until a separate decision changes that path.

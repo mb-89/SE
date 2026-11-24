@@ -42,7 +42,8 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
   its release kind and moves no version; without SE's request you do not release and do not ask,
-  and a release that looks due is a line in your report to SE.
+  and a release that looks due is a line in your report to SE. SE's `release` is all the release
+  needs: no one asks the person ([Roles and flow](../skills/work-model/SKILL.md#roles-and-flow)).
 - A branch whose commits carry attribution trailers is refused at the public check's gate; it
   goes back to its worker to reword.
 - Paths and shell follow the work model's
@@ -106,6 +107,9 @@ merge or a start.
      `work_tickets.py field-report --check <description file> --issue-body <issue file>`; refuse a
      report it rejects with its messages (`integrate` runs the same check, and refuses a
      description without a report).
+   - The check fills the Branch tip only from the pull request's head branch, in a checkout of
+     it; run without `--worktree`, or with the main checkout, it leaves the saved description and
+     its Branch tip as the worker delivered them.
    - Run `work_tickets.py guard --branch <branch> --pr-description <file> --worktree <its worktree>`.
    - Refuse with reasons when it writes outside its box (files owned by another package, another
      repository), lacks tests for changed behaviour, or claims unverified work.
@@ -180,10 +184,15 @@ merge or a start.
    repository's automatic head-branch deletion removes it. Never retry the deletion.
 7. **Start what is unblocked**, after each landing, before the next delivered pull request.
 
+   A landing in the cloud starts nothing on its own: `integrate`'s close-out claims no issue
+   there and prints `Started: none here; start what is unblocked with the host's session tool`,
+   as a claim in the cloud starts no worker session. You start each worker yourself, as below.
+
    Use `work_tickets.py ready` and `capacity` as helpers. Every work issue `ready` lists (labelled
-   `ready`, not waiting on a person, blockers closed, no branch yet, file ownership that does not
-   clash with running workers) gets a fresh worktree from the newest integration branch
-   (`work_tickets.py start`, see [Worktrees](../skills/work-model/SKILL.md#worktrees)).
+   `ready`, not waiting on a person, blockers closed, no branch yet or only an unused claim, file
+   ownership that does not clash with running workers) gets a fresh worktree from the newest
+   integration branch (`work_tickets.py start`, see
+   [Worktrees](../skills/work-model/SKILL.md#worktrees)).
 
    `ready` also names each claimed issue live or stale by its beat; put the stale ones it names
    into your report to SE, and release none
@@ -223,8 +232,11 @@ merge or a start.
    Where you start the worker with `create_session` rather than `start` (the cloud flow), claim
    the issue first with `work_tickets.py claim <issue>`
    ([the claim](../skills/work-model/SKILL.md#worktrees)); where it refuses, start nothing for
-   that issue. Then change the issue's labels in that same step as `start` does, and remove
-   `in-progress` when you close it, as the work model's
+   that issue.
+
+   Then run `work_tickets.py start <issue>` in the same checkout: it takes that claim as its own,
+   creates or reuses the worktree on the claimed branch, changes the labels and posts the
+   `Started:` comment. Remove `in-progress` when you close the issue, as the work model's
    [scheduling](../skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
 
    Do not judge a worker by its session status right after starting it: a new session reads as
@@ -233,8 +245,14 @@ merge or a start.
 
 ## Release
 
-SE asks for a release with a message that names it, `release`. Read your queued messages first,
-as before a merge, then:
+SE asks for a release with a message that names it, `release`; you run it on that message alone,
+never waiting for the person.
+
+The repository's `.claude/settings.json` allows the command (`<se>/scripts/claude_settings.py`),
+so a session's permission check passes it; where it refuses the release all the same, escalate
+the refusal to SE, naming that command.
+
+Read your queued messages first, as before a merge, then:
 
 1. Integrate what `queue` lists as delivered first, so the release takes it; a merge in progress
    finishes before the release starts.
@@ -245,8 +263,12 @@ as before a merge, then:
 3. Report the line it prints to SE: `Released v<version> in <commit> on <branch>`, or `Nothing to
    release`, and where the release workflow tags it, that the tag follows its run.
 
-A release refused on a landed merge without its kind is an escalation to SE: the person sets the
-version by hand in a pull request, which the next release tags as it is.
+A landed integration that states no kind has no default: the release refuses it, naming it.
+State the kind its field report declares, `release --kind <commit>=<kind> <reason>`, the reason
+naming that pull request.
+
+Where no report declares one, or the trailer names an unknown kind or two, escalate to SE: the
+person sets the version by hand in a pull request, which the next release tags as it is.
 
 ## Escalate and improve
 
