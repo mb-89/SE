@@ -73,6 +73,13 @@ group = "Issues"
 help = "link an issue to a native blocker"
 class = "batch"
 
+[commands."work_tickets.py stamp"]
+usage = "work_tickets.py stamp --worktree WORKTREE [--template NAME] [--issue-body FILE] [--repo REPO]\n                      issue"
+summary = "for SE: give an unmarked issue its template's marker, where it ..."
+group = "Issues"
+help = "for SE: give an unmarked issue its template's marker, where it passes that template's check"
+class = "batch"
+
 [commands."work_tickets.py unhold"]
 usage = "work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue"
 summary = "for SE: check an issue filed with --hold against its template again ..."
