@@ -2,7 +2,7 @@
 network, no process).
 
 - Named or left out: each authored note (`NOTES`) is a chapter, named by a `[[...]]` entry of
-  docs.md, the manifest README "Documentation" owns, or a key of `UNLISTED` with a one-line reason,
+  docs.md, the manifest docs/documentation.md "Documentation" owns, or a key of `UNLISTED` with a one-line reason,
   so a new note stays out of the documentation only by a stated decision. `UNLISTED` stays true: a
   key docs.md names, or one that is no scanned note, fails. `drafts/` (kept out of docs.md by
   `tests/test_skill_drafts.py`), the generated layouts, the template and story folders and the
@@ -36,12 +36,12 @@ UNLISTED = {
     "src/agents/retro.md": "the retro agent's role definition, as the reviewer's: whether it "
                            "joins the chapters is the owner's call",
     "src/skills/catch-up/references/integrator-prompt.md": "a prompt template the catch-up skill fills",
-    "docs/copilot.md": "the owner's guide to installing SE into Copilot, linked from README",
+    "docs/copilot.md": "the owner's guide to installing SE into Copilot, linked from docs/install.md",
     "docs/components.md": "the design of finding components, linked from docs/go-core.md",
-    "docs/go-core.md": "the Go core's design, linked from README and AGENTS.md",
+    "docs/go-core.md": "the Go core's design, linked from docs/start.md and AGENTS.md",
     "docs/method.md": "the design of SE's method staying in SE, linked from docs/components.md",
     "docs/guidance.md": "the guidance system's design, read by the workers of its packages",
-    "docs/templates.md": "the template system's design, linked from README \"Templates\"",
+    "docs/templates.md": "the template system's design, linked from docs/templating.md \"Templates\"",
     "docs/doors/copilot.md": "outside facts for whoever changes the Copilot layout",
     "docs/doors/mcp.md": "outside facts for whoever changes the MCP door",
     "docs/harvest-2026-11.md": "a dated record",

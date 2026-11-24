@@ -1,4 +1,4 @@
-# The launcher of SE's MCP door (`se mcp`, README "MCP door"), the PowerShell twin of se_mcp.sh,
+# The launcher of SE's MCP door (`se mcp`, docs/start.md "The MCP door"), the PowerShell twin of se_mcp.sh,
 # which owns what it does; the two answer alike.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File se_mcp.ps1 --root <project>

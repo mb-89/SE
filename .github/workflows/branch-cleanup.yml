@@ -1,4 +1,4 @@
-# Deletes a closed pull request's head branch, merged or not (README "Workflows"): the commits stay
+# Deletes a closed pull request's head branch, merged or not (docs/running.md "Workflows"): the commits stay
 # reachable through the closed pull request. Cloud sessions cannot delete a ref themselves (HTTP 403),
 # so the integrator's own delete (work_tickets.py delete_merged_branch) leaves the branch to this
 # workflow, which deletes it with the run's token.
@@ -13,7 +13,7 @@
 # (GitHub's own deletion after a merge) is a success with a note.
 #
 # Reusable: a project calls the copy SE writes into it at its pin (scripts/se_workflows.py) with the
-# short trigger file README "Workflows" shows; SE's own trigger is the `pull_request` one below,
+# short trigger file docs/running.md "Workflows" shows; SE's own trigger is the `pull_request` one below,
 # which the copy drops.
 name: branch-cleanup
 

@@ -162,6 +162,8 @@ every package, so work issues and session prompts never repeat it.
        against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
        deleted or weakened tests, and authored prose" does not name each test and authored
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
+     - A sentence that stands with the same words in another file the branch tracks, its link
+       targets aside, is no deletion: a section moved to another page needs no naming.
      - A folder the branch moves with its tests to another repository is named there once, as
        the work model's [Tests](../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
        <repository> at <commit>`), never test by test.
@@ -186,7 +188,7 @@ every package, so work issues and session prompts never repeat it.
    for any reason (blocked, out of ideas, unsure), deliver what you have and name the blocker in the
    field report's "Not delivered"; an idle session with no field report is a failure.
 
-   The plugin's Stop hook holds you to it ([README "Stop hook"](../../README.md#stop-hook)): it
+   The plugin's Stop hook holds you to it ([docs/fleet.md "Stop hook"](../../docs/fleet.md#stop-hook)): it
    refuses your turn's end until an open pull request carries a field report that passes the check
    at the branch tip, and its refusal names what is missing.
 7. **Notify the integrator**, as the last delivery step and only once: a worker whose prompt names

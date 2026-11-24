@@ -3,7 +3,7 @@
 Reader: the person who starts SE and decides when to update, and whoever changes SE's start. This
 page owns SE's start report, the boot that lists what is behind, and the one update the report
 names (work issue SE#1719, the person's decisions of 23 Nov 2026). Everything else of the start is
-README [Start and refresh](../README.md#start-and-refresh).
+[Start and refresh](start.md#start-and-refresh).
 
 ## The start report
 
@@ -27,8 +27,7 @@ To update: /se:update. The next SE release brings kern 2.2.0.
 ```
 
 - **Its shape is a template**, `templates/boot-report.md`: a snippet, a message of several lines
-  that the template engine writes and checks like any other filled template (README
-  [Templates](../README.md#templates)). `scripts/se_start.py` only fills its fields.
+  that the template engine writes and checks like any other filled template ([Templates](templating.md#templates)). `scripts/se_start.py` only fills its fields.
 - **The counts** are what the plugin's layout loads, as the documentation's pages list them:
   [Skills](skills.md), guidance notes aside; [Rules](rules.md), the rule book's and every guidance
   note; [Sub-agents](sub-agents.md), every agent but SE. `se_plugin.py build` writes the three pages
@@ -80,7 +79,7 @@ in SE's `se.lock`, apart from any project's tree.
     [docs/components.md](components.md#required-and-optional-at-start) places a project's.
   - **kern** is installed at its pin and running: `bootstrap.sh` fetches or builds the binary,
     starts the core and hands it the session's start, for the project where it lies inside a git
-    checkout, else for SE's root (README [Kern](../README.md#kern)).
+    checkout, else for SE's root ([Kern](start.md#kern)).
     - A first fetch or build runs in the background, and the start waits for it up to
       `SE_KERN_WAIT` seconds, 45 by default.
     - The core answers `status`; its row is the kern version the running binary is built on.

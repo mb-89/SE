@@ -126,7 +126,7 @@ item links the file that assumes it.
   non-empty `reason` on standard output, which forces another turn; after a run of consecutive
   blocks the CLI ends the turn anyway. Source:
   https://docs.github.com/en/copilot/reference/hooks-configuration, read 2026-11-14.
-  `documented`. SE acts on it in [README.md "Stop hook"](../../README.md#stop-hook).
+  `documented`. SE acts on it in [docs/fleet.md "Stop hook"](../fleet.md#stop-hook).
 - **A non-zero exit, per event.** In the CLI a hook's exit code 2 is a warning, except that it
   denies for `preToolUse` and `permissionRequest` and becomes context for `postToolUseFailure`;
   any other non-zero exit is logged and the run goes on, except for `preToolUse`, which fails

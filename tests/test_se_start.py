@@ -306,7 +306,7 @@ def test_a_plugin_older_than_the_se_checkout_it_works_on_is_named_in_one_line(se
     lines = se_start.session_lines(report(setup), setup["se"])
     assert lines == ["SE 1.2.0 runs, older than this checkout's SE 1.4.0: in the cloud, a container "
                          "restored from a cached snapshot, which the environment rebuilds only when its "
-                         "setup script changes (README \"Cloud sessions\")"]
+                         "setup script changes (docs/install.md \"Cloud sessions\")"]
     # Current, or a checkout of another plugin: no line.
     for version, name in (("1.2.0", "se"), ("1.4.0", "other")):
         write(setup["project"] / "se.toml", f'[project]\nversion = "{version}"\n')
@@ -491,7 +491,7 @@ def test_the_hook_context_names_ses_root_for_the_session_only(setup, capsys, mon
     assert "SE root" not in data["systemMessage"]
 
 
-# kern's state, as bootstrap.sh hands it over (README "Kern").
+# kern's state, as bootstrap.sh hands it over (docs/start.md "Kern").
 
 def bare_kern(se: Path) -> None:
     """The installed SE pins kern 0.2.0 by its go.mod (se.toml [components.kern]), its clone placed."""
@@ -1352,7 +1352,7 @@ def test_refresh_moves_only_what_is_due_and_twice_is_a_no_op(repos):
     assert (f"lib: 2.0.0 is outside ^1; not applied; to take it, set version = \"^2.0\" in [components.lib] of "
             f"{(repos['project'] / 'se.toml').as_posix()}, then run: uv run python {repos['se'].as_posix()}"
             "/scripts/se_modules.py update lib") in lines
-    assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as README "
+    assert ("SE: 2.0.0 is outside SE's major 1; not applied; to take it, install SE 2.0.0 again as docs/install.md "
             "\"Install\" says, then follow SE's docs/upgrading.md, section \"SE 2\"") in lines
     assert "mine: local, not touched" in lines
     assert not any(line.startswith("tool:") for line in lines)
@@ -1583,7 +1583,7 @@ def test_in_the_cloud_the_line_says_the_environment_provides_plugins(setup, clau
     with_roles(setup, f'[roles.worker]\nskills = ["{PLUGIN_DEV}"]\n')
     assert skill_line(setup) == [
         "Missing for SE's agents: plugin-dev:plugin-structure (worker). This cloud session lacks them; "
-        "the cloud environment provides plugins (README \"Claude Code cloud\")"]
+        "the cloud environment provides plugins (docs/install.md \"Claude Code cloud\")"]
 
 
 def test_a_bad_roles_list_is_named_and_the_greeting_still_appears(setup, claude_home):

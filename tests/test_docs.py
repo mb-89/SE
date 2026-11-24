@@ -1,4 +1,4 @@
-"""The documentation builds from docs.md with obs, and any obs warning fails it (README "Documentation")."""
+"""The documentation builds from docs.md with obs, and any obs warning fails it (docs/documentation.md "Documentation")."""
 
 from __future__ import annotations
 

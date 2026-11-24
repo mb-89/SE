@@ -44,7 +44,7 @@ shows it, and the item links the file that assumes it.
   output that is not a valid MCP message; it may log to standard error, which the client should not
   read as an error. Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,
   read 2026-11-14. `documented`. SE acts on it in
-  [README.md "The MCP door"](../../README.md#the-mcp-door): the launcher sends everything else to
+  [docs/start.md "The MCP door"](../start.md#the-mcp-door): the launcher sends everything else to
   its log.
 
 ## When a host loads a project's MCP config
@@ -71,7 +71,7 @@ shows it, and the item links the file that assumes it.
   config` and `user MCP config` rows of `registrations.copilot-vscode` in
   [scripts/host-limits.toml](../../scripts/host-limits.toml). Source:
   https://code.visualstudio.com/docs/agents/reference/mcp-configuration, read 2026-11-14.
-  `documented`. SE acts on it in [README.md "The MCP door"](../../README.md#the-mcp-door).
+  `documented`. SE acts on it in [docs/start.md "The MCP door"](../start.md#the-mcp-door).
 - **VS Code: Copilot's project file.** No VS Code page says that its Copilot harness reads
   `.github/mcp.json`. Pages read, each read 2026-11-14:
   https://code.visualstudio.com/docs/agents/reference/mcp-configuration and
@@ -87,12 +87,12 @@ shows it, and the item links the file that assumes it.
   harness starts a configured stdio server as the session starts or at its first tool call. Pages
   read, each read 2026-11-14: https://docs.github.com/en/copilot/reference/cli-command-reference and
   https://code.visualstudio.com/docs/agents/reference/mcp-configuration. `silent`. SE acts on it
-  in [README.md "The MCP door"](../../README.md#the-mcp-door), which starts the core whenever the
+  in [docs/start.md "The MCP door"](../start.md#the-mcp-door), which starts the core whenever the
   door is spawned.
 - **Claude Code: project servers need approval.** A server of a project's committed MCP file stays
   pending until the person approves it in a trusted workspace; a cloned repository cannot approve
   its own servers. Source: https://code.claude.com/docs/en/mcp, read 2026-11-14. `documented`. SE
-  acts on it in [README.md "The MCP door"](../../README.md#the-mcp-door): no root file is
+  acts on it in [docs/start.md "The MCP door"](../start.md#the-mcp-door): no root file is
   committed while its build setting is off.
 
 ## Time
