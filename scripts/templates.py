@@ -121,8 +121,10 @@ fills it), `says` (what belongs there, the fix's wording and the draft's comment
 (only `## <heading>`, at the template's level, counts) and `verbatim` (the text is kept and written
 back as it stands). Besides: `source: title` (the field is the issue's title, never in the body),
 `label` (a `<label>: <value>` line before the first section), `choices` (kind `choice`),
-`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`
-and `fence` (Nesting, below), `max_words`,
+`numbered`, `continue_numbers` and `markers` (kind `list`), `lang` (kind `code`), `node`, `entries`,
+`items`, `since`, `carried` and `fence` (Nesting, below), `checkable` (rule `checkable`: each of the
+field's texts is one checkable statement, `uncheckable`: one sentence, and none of VAGUE's words
+outside code), `max_words`,
 `first_sentence_chars` (rule `first-sentence`: the most characters the field's first sentence
 should have, 0 for none), `actor`, `one_sentence`, `not_picked`, `shape`, a title's (rule
 `title-shape`), and `quote` (rule `quote`: the value quotes the raw input word for word).
@@ -153,14 +155,31 @@ another template checks, which the field pins at its version, `<template>@<versi
 - `entries: <template>@<version>` (kind `register`): the field's section is a register, each of its
   headings at the shallowest level it holds an entry (`entries`), its text up to the next one a
   document of that template, an entry. A register without an entry refuses.
+- `items: <template>@<version>` (kind `list`, with `numbered`, `continue_numbers` and `markers` as
+  any list): each item of the list, but a kept marker, is one document of that entry template. Its
+  lines up to the first that starts with one of the template's labels are its title, joined, where
+  the template has a title field, and the rest its body (`_item_parts`); `parse` reads its further
+  lines without the indentation they share (`_item_text`) and `render` indents them under the
+  item's marker. `carried: [<field>, ...]` names the item's fields the document carries elsewhere,
+  so an item is not refused for lacking one (the work issue's Acceptance carries the acceptance of
+  each of its requirement items).
+- `since: <version>`, beside any of the three: the field's nested parts are checked only in a
+  document that records that version of its own template or a later one, or none (`_before`), so a
+  minor version that nests a part leaves the documents filed before it as they were read.
+
+A template manifest's node names its slot's template in its own front matter (Template manifests).
 
 `load` refuses a node that names no template, pins another version than the template's, names a
-template of another kind (an entry for a register, a block for a fence, a block or a document for
-any other node; never a file's or a scoped template), or nests in a cycle; each node field then
-holds its template as `nested`. `check` checks each node by its template, by that template's rules,
-and gives each finding under the node's field, its fix naming the template, and for a register
-the entry by its heading (`nested_findings`). A node records no provenance of its own: the
-document's template digest covers its nodes' (Writing).
+template of another kind (an entry for a register or a list's items, a block for a fence, a block or
+a document for any other node; never a file's or a scoped template), carries a field its template
+lacks, or nests in a cycle; each node field then holds its template as `nested`. `check` checks each
+node by its template, by that template's rules, so a document passes only where every nested part
+passes, and gives each finding under the node's field, its fix led by its path from the document
+down to the part, `<document> > <section> > <part>: <fix>` (`nested_findings`): the part is the
+template's name for a node, `<template> '<heading>'` for a register's entry and `<template> <n>` for
+a list's nth item, and a part nested in a part extends the path, `<document> > <section> > <part> >
+<section> > <part>: <fix>`. A node records no provenance of its own: the document's template digest
+covers its nodes' (Writing).
 
 **Reading.** `parse` skips front matter and accepts a field's heading at `#` to `####`, in any case
 and with a trailing colon, and `_No response_` as empty, except where a field sets `exact_heading`.
@@ -195,6 +214,9 @@ overlays, `fill`, `check` and the digest are one path for both forms:
   turn `contents`, `Why: <motivation>`, `Form: <form>` and `Sources: <sources>`, which the fill
   hands the agent; its body is its fill slot alone, a paragraph of `{{slot}}` (SLOT). Any other
   chapter is an ordinary one, such as a note on how to use the template, and no field;
+- a template node whose front matter carries `template: <name>@<version>` (NODE_PIN) names the
+  template its slot is filled by, resolved as a note's `node:` is (Nesting): an entry template makes
+  the slot a numbered list of its items (`items:`), a block or a document one node of it (`_nest`);
 - the template is a `document` shaping no action of its own (fill it by name), `reader: owner`, no
   tags, the rule `required` refusing; its document is a file, written as a `file.write` template's
   (`Template.writes_file`): the front matter and the `##` sections, no marker and none of the guidance;
@@ -282,8 +304,11 @@ cannot change the document's meaning, and nothing else, so a trivial deviation c
 - `none` and `not-in-input`: a whole text that spells None (`none`, `NONE.`) or NOT_IN_INPUT in
   another case or spacing becomes `None` or `Not in input`, its closing period or colon kept.
 
-Lines inside a fence are code and stay; so do a title, a `verbatim` field, a code field, a node and
-a snippet's rows and cases (`_correctable`), and a text holding a comment keeps its spelling.
+Lines inside a fence are code and stay; so do a title, a `verbatim` field, a code field, a fence node
+and a snippet's rows and cases (`_correctable`), and a text holding a comment keeps its spelling.
+A node's, a register's and a list's items' text is corrected as any text, so the corrections apply
+inside a nested part as at the top; a heading inside one is its parent's place, at its parent's
+level, and the `heading` correction leaves it as written.
 `correct` corrects field values; `correct_body` a whole document a fill takes instead of fields
 (`fill(body=)`, `fill --body-file`), its headings and each correctable section's lines, before
 `parse` reads it into the values `correct` then takes. Each change is a `Correction`: its field, its
@@ -1971,6 +1996,10 @@ def _nest(templates: dict[str, Template], digests: dict[str, str]) -> dict[str, 
                                     + f"{' fence' if item.fence else ''} names "
                                     + _a(" or ".join(wanted)) + " template, part of a document")
             nested = resolved(item.node, (*seen, name))
+            unknown = [part for part in item.carried if nested.field(part) is None]
+            if unknown:
+                raise TemplateError(f"{where} carried: {', '.join(unknown)} is no field of {item.node}; "
+                                    f"name its fields, {', '.join(field.name for field in nested.fields)}")
             chain.update(nested.digest.encode("utf-8") + b"\0")
             fields.append(replace(item, nested=nested))
         nodes = [item for item in fields if item.node]
