@@ -144,6 +144,12 @@ def pull(number: int, head: str, body: str, merged: str | None = None, sha: str 
             "merge_commit_sha": sha or None}
 
 
+def run(conclusion: str, completed: str | None, name: str = "check") -> dict:
+    """A check run as the host's tools answer it, completed at `completed` (None: still running)."""
+    return {"name": name, "status": "completed" if completed else "in_progress",
+            "conclusion": conclusion if completed else None, "completed_at": completed}
+
+
 def answers(checkout: Path) -> dict[str, object]:
     """A window after retro #5 closed: #11 landed after one refused delivery, #12 landed but
     escalated and its landing's check failed, #13 a duplicate, #14 closed without a field report;
@@ -190,11 +196,9 @@ def answers(checkout: Path) -> dict[str, object]:
         "comments-3.json": [], "comments-13.json": [], "comments-14.json": [],
         "open-issues.json": [],
         "checks-21.json": {"total_count": 1, "check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
-        "checks-23.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "failure"}]},
-        "checks-25.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
+            run("success", "2026-11-02T09:50:00Z")]},
+        "checks-23.json": {"check_runs": [run("failure", "2026-11-03T09:50:00Z")]},
+        "checks-25.json": {"check_runs": [run("success", "2026-11-03T10:50:00Z")]},
     }
 
 
@@ -281,6 +285,27 @@ def test_each_rule_check_names_what_broke_it_and_keeps_the_rest(checkout):
     assert not checks["outside-pr"].kept and not checks["field-report"].kept
 
 
+def test_the_check_rule_judges_a_landing_by_the_run_that_gated_its_merge(checkout):
+    """The `check` rule reads the last `check` run that completed before the landing merged: a
+    scheduled run on the same commit that failed after the merge, a run still going or another
+    check's run does not count; a landing with no run completed before its merge breaks it."""
+    given = answers(checkout)
+    given["checks-21.json"] = {"check_runs": [
+        run("failure", "2026-11-03T02:00:00Z"),  # the nightly run, a day after the merge
+        run("success", "2026-11-02T09:50:00Z"),
+        run("failure", "2026-11-02T09:40:00Z"),  # an earlier push's run, rerun green
+        run("failure", "2026-11-02T09:55:00Z", name="kern-platforms (windows-2025)"),
+        run("failure", None)]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    assert broken == [{"item": "#23", "what": "check failure"}]
+
+    given["checks-21.json"] = {"check_runs": [run("success", "2026-11-02T10:05:00Z")]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    head = f"{21:040d}"[:12]
+    assert broken[0] == {"item": "#21", "what": f"no check run on {head} completed before it "
+                                                 "merged at 2026-11-02T10:00:00Z"}
+
+
 def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(checkout):
     given = answers(checkout)
     commit = shas(checkout)["Tidy up (#25)"]
@@ -292,33 +317,27 @@ def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(
     assert broken == [{"item": "#25", "what": "names #15, which is not labelled work"}]
 
 
-def test_without_a_closed_retro_the_window_starts_at_the_oldest_open_retro(checkout):
-    """No retro issue has closed: the window starts when the oldest open one was created, and the
-    rule checks judge that window alone; with no retro issue at all, it is the whole history."""
+def test_without_a_closed_retro_the_window_is_the_whole_history(checkout):
+    """No retro issue has closed: the window starts at the project's first issue, whatever retro
+    issue is open, this one among them, so a first retro collects every landed issue."""
     given = answers(checkout)
     given["issues.json"] = [item for item in given["issues.json"] if item["number"] != 5]
     given["open-issues.json"] = [
-        {**issue(31, "docs/retro-20261105", None), "state": "open",
+        {**issue(30, "docs/retro-20261105", None), "state": "open",
          "created_at": "2026-11-05T00:00:00Z"},
-        {**issue(30, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
+        {**issue(31, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
          "createdAt": "2026-11-02T13:00:00Z"},
         {**issue(29, "feat/open", None), "state": "open", "created_at": "2026-10-01T00:00:00Z"}]
     found = collected(checkout, given)
 
-    assert found.window == retro.Window(30, "2026-11-02T13:00:00Z", 30, "2026-11-12T12:00:00Z",
-                                        retro.OPEN_RETRO)
-    assert [item.number for item in found.issues] == [12, 13, 14]
+    assert found.window == retro.Window(30, None, None, "2026-11-12T12:00:00Z", retro.HISTORY)
+    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
+    assert [item.number for item in found.issues if item.landed] == [11, 12]
     assert found.previous is None
     checks = {check.name: check for check in found.checks}
-    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (2, 3)
-    assert "when retro #30, the oldest open retro issue, was created" in retro.draft(found)
-
-    given["open-issues.json"] = given["open-issues.json"][2:]
-    found = collected(checkout, given)
-    assert found.window.since is None and found.window.start == retro.HISTORY
-    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
-    assert {check.name: check for check in found.checks}["outside-pr"].checked == 5
-    assert "the whole history up to" in retro.draft(found)
+    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (3, 5)
+    assert "the whole history up to 2026-11-12T12:00:00Z; no retro issue has closed" in (
+        retro.draft(found))
 
 
 def test_since_narrows_the_window_and_the_rule_checks(checkout):

@@ -3,9 +3,9 @@
 """Retro commands: the mechanical half of a retro, the facts the judging agent starts from.
 
 `retro.py collect <retro issue>` reads the window from GitHub: every work issue closed since the
-last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed;
-where none has, since the oldest open retro issue was created, and the whole history only where no
-retro issue exists. `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
+last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed,
+and the whole history, from the project's first issue, where none has (docs/fleet.md "Retro due":
+a retro covers everything up to its start). `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
 issue closed (whose findings it then scores); the rule checks judge that window alone. Each issue
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
@@ -21,7 +21,8 @@ template's. Step 2, collect, holds
 - the field reports' answers to the standing questions (their Retro section, the block
   work_tickets.py `standing_questions` nests; `retro_entries`) by question, and their "Not
   delivered" items, the planning misses;
-- the rule checks (RULE_CHECKS), each broken one with what broke it;
+- the rule checks (RULE_CHECKS), each broken one with what broke it; the `check` rule judges a
+  landing by its last `check` run completed before it merged (`gating_run`), not by a later one;
 - the metrics of the window: the line each landing pull request's description ends in and the
   local metrics file's lines that started in the window, each run once (docs/running.md "Metrics");
 - the previous retro's sizes, where its block is found;
@@ -203,7 +204,8 @@ REFERENCE = re.compile(
 # The rule checks, by name: what each holds.
 RULE_CHECKS = {
     "work-issue": "every landing pull request names a work issue that was open when it merged",
-    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head",
+    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head "
+             "in its last run before the merge",
     "outside-pr": "no commit reached the integration branch outside a pull request",
     "field-report": "every closed work issue has a field report",
 }
@@ -577,9 +579,9 @@ def not_delivered(report: str) -> list[str]:
 
 
 # Where a window starts (Window.start): the close of the last closed retro issue (or of the one
-# --retro names), the time --since gives, the creation of the oldest open retro issue where none
-# has closed, or nowhere: the whole history, where no retro issue exists.
-CLOSED_RETRO, GIVEN, OPEN_RETRO, HISTORY = "closed-retro", "given", "open-retro", "history"
+# --retro names), the time --since gives, or nowhere: the whole history, where no retro issue has
+# closed.
+CLOSED_RETRO, GIVEN, HISTORY = "closed-retro", "given", "history"
 
 
 @dataclass
@@ -728,22 +730,15 @@ class Read:
         return moment is not None and (since is None or moment > since)
 
 
-def window_start(door, last: Issue | None, since: str | None) -> tuple[str | None, int | None, str] | None:
+def window_start(last: Issue | None, since: str | None) -> tuple[str | None, int | None, str]:
     """Where the window starts, as (since, since_retro, start): the time `since` gives, else the
-    close of `last`, else the creation of the oldest open retro issue (read through `door`), else
-    the whole history; None where the door is still missing answers."""
+    close of `last`, else the whole history, from the project's first issue: a first retro
+    covers everything up to its start (docs/fleet.md "Retro due"), an open retro issue included."""
     if since is not None:
         return since, None, GIVEN
     if last is not None:
         return last.closed_at, last.number, CLOSED_RETRO
-    opened = [issue_of(item) for item in door.open_issues()]
-    if door.missing:
-        return None
-    oldest = min((issue for issue in opened if is_retro(issue) and when(issue.created_at)),
-                 key=lambda issue: when(issue.created_at), default=None)
-    if oldest is None:
-        return None, None, HISTORY
-    return oldest.created_at, oldest.number, OPEN_RETRO
+    return None, None, HISTORY
 
 
 def read_window(door, number: int, since: str | None = None,
@@ -777,9 +772,7 @@ def read_window(door, number: int, since: str | None = None,
                              f"{RETRO_TITLE}... or labelled {RETRO_LABEL}) other than #{number}")
     else:
         last = max(retros, key=lambda issue: when(issue.closed_at), default=None)
-    start = window_start(door, last, since)
-    if start is None:
-        return None
+    start = window_start(last, since)
     moment = when(start[0])
     # An issue closed in the window was updated in it: only those are read one by one.
     if not completed([issue for issue in issues if WORK_LABEL in issue.labels
@@ -791,6 +784,17 @@ def read_window(door, number: int, since: str | None = None,
                            and not is_retro(issue) and found.in_window(issue.closed_at)),
                           key=lambda issue: issue.number)
     return found
+
+
+def gating_run(runs: list[dict], merged_at: str) -> dict | None:
+    """The `check` run of `runs` (the check runs on a landing's head) that gated its merge at
+    `merged_at`: the last to complete before it. A later run on the same commit, a nightly one
+    say, judges the commit, not the landing; one still running gated nothing."""
+    merged = when(merged_at)
+    gating = [(moment, run) for run in runs if run.get("name") == work_tickets.CHECK_NAME
+              and (moment := when(first(run, "completed_at", "completedAt"))) is not None
+              and merged is not None and moment <= merged]
+    return max(gating, key=lambda item: item[0])[1] if gating else None
 
 
 def landing_of(issue: Issue, naming: list[Pull], branch: str) -> Pull | None:
@@ -1122,13 +1126,14 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         if problem:
             checks["work-issue"].broken.append({"item": f"#{pull.number}", "what": problem})
         checks["check"].checked += 1
-        runs = [run for run in door.checks(pull) if run.get("name") == work_tickets.CHECK_NAME]
-        conclusion = str(runs[0].get("conclusion") or runs[0].get("status") or "") if runs else ""
+        gate = gating_run(door.checks(pull), pull.merged_at)
+        conclusion = str(gate.get("conclusion") or gate.get("status") or "") if gate else ""
         if conclusion != "success":
             checks["check"].broken.append({
                 "item": f"#{pull.number}",
-                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if conclusion
-                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]}"})
+                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if gate
+                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]} completed before "
+                     f"it merged at {pull.merged_at}"})
     merge_shas = {pull.merge_sha for pull in merged if pull.merge_sha}
     # The host's tools name no merge commit: a squash merge's commit carries the pull request's
     # title as its subject (or GitHub's ` (#<n>)`) and its merge time as its committer time.
@@ -1604,14 +1609,12 @@ def collect_lines(found: Collected) -> list[str]:
     window = found.window
     starts = {
         CLOSED_RETRO: f"when retro #{window.since_retro} closed",
-        GIVEN: "as --since gives",
-        OPEN_RETRO: f"when retro #{window.since_retro}, the oldest open retro issue, was created; "
-                    "no retro issue has closed"}
+        GIVEN: "as --since gives"}
     if window.since:
         lines = [f"Window: work issues closed after {window.since}, {starts[window.start]}, "
                  f"up to {window.until}."]
     else:
-        lines = [f"Window: the whole history up to {window.until}; no retro issue exists."]
+        lines = [f"Window: the whole history up to {window.until}; no retro issue has closed."]
     previous = (found.previous or {}).get("sizes") or {}
     lines += ["", "### Sizes", ""]
     if previous:
