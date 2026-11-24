@@ -578,8 +578,8 @@ Pull requests built on an old `main` cause most integration trouble.
   - The label change follows the [claim](#worktrees) and is no lock: two starters can both read
     `ready`, and only the claim refuses the second.
 - After each integration the integrator starts every startable work issue that has no branch yet
-  and whose file ownership does not clash with running workers, starts its session itself and
-  comments on the landed issue what it started.
+  (or only an [unused claim](#worktrees)) and whose file ownership does not clash with running
+  workers, starts its session itself and comments on the landed issue what it started.
 - A startable issue also waits on no person: none labelled `se-person` or `escalated`, none
   assigned to someone (`work_tickets.py ready`).
 - **Dispatcher**: where no integrator runs, a four-hourly workflow with no model fires the
@@ -610,10 +610,19 @@ Pull requests built on an old `main` cause most integration trouble.
   - The branch is created at the newest `main` with a push that holds only while the branch does
     not exist there, so the host lets the first starter create it and refuses every other.
   - A refused claim names the branch and the remote and changes nothing.
+  - An unused claim is no claim: a branch there with no commit beyond `main` and behind it, of an
+    issue not labelled `in-progress`. `ready` lists its issue, and `claim` and `start` take it,
+    moving it to the newest `main` with a lease on its tip, so only the first of two starts does.
+    A branch at the newest `main` is a start's claim in flight and stays refused.
+  - A claim no worker took, such as one a landing made before it started nothing in the cloud,
+    is undone with `work_tickets.py unclaim`, for one or more issues: the beat line removed,
+    `ready` set where `in-progress` is, and the `Started:` comment answered with one line. It
+    refuses an issue whose branch holds commits beyond `main`, a worker's; the branch stays, an
+    unused claim.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
-  - it refuses an issue that is not startable (including open blockers, an existing branch, a
-    file-ownership clash or exhausted capacity, the worker limit among it);
+  - it refuses an issue that is not startable (including open blockers, an existing branch that
+    is no unused claim, a file-ownership clash or exhausted capacity, the worker limit among it);
   - it fetches and claims the issue's branch, then runs
     `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> <claimed branch>`,
     from the issue's remote even where `origin` is another, changes the issue's `ready` label

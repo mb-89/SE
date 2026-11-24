@@ -1868,6 +1868,15 @@ def beat_edit(catalog, monkeypatch) -> list[Case]:
             for body in (beaten, work_tickets.without_beat(beaten))]
 
 
+def unclaimed(catalog, monkeypatch) -> list[Case]:
+    """What `unclaim` sends: the work issue's own body without its beat line, and its one-line
+    answer to the Started comment."""
+    beaten = work_tickets.with_beat(WORK_BODY, datetime(2026, 11, 24, 14, 50, tzinfo=timezone.utc))
+    return [Case("issue.edit", "work", work_tickets.without_beat(beaten), labels=WORK_LABELS),
+            Case("comment.create", FREE, work_tickets.UNCLAIMED_COMMENT.format(
+                started=f"{ISSUE_URL}#issuecomment-1", branch="feature/example"))]
+
+
 def without_beats(plan):
     """`plan` without its beat steps, whose body stands for the issue's own (`beat_edit`)."""
     return work_tickets.Plan(plan.title, tuple(step for step in plan.steps
@@ -1897,6 +1906,7 @@ CONTRACT = {
     "work_tickets:beat_action_door.run": ("start and integrate", beat_edit),
     "work_tickets:beat": ("beat", beat_edit),
     "work_tickets:start_handed_off.assign": ("start", no_body()),
+    "work_tickets:unclaim": ("unclaim", unclaimed),
     "work_tickets:post_started": ("start", comment(
         work_tickets.STARTED_COMMENT.format(branch="feature/example"))),
     "work_tickets:escalate": ("escalate", comment("Which of the two templates wins here?\n")),

@@ -1065,6 +1065,9 @@ def test_integrator_starts_the_next_startable_issue_after_each_landing_and_recor
     assert "**Start what is unblocked**, after each landing, before the next delivered pull request." in integrator
     assert "write what you did into the issue you landed" in integrator
     assert "`Started: none startable`" in integrator
+    assert ("A landing in the cloud starts nothing on its own: `integrate`'s close-out claims no "
+            "issue there and prints `Started: none here; start what is unblocked with the host's "
+            "session tool`") in integrator
 
 
 # What the work of 22 Nov showed, as the built layout carries it: each role reads it where it runs.
