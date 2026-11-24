@@ -289,7 +289,8 @@ the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved),
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
 (`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. Each command resolves its template names by `catalog` for the project
+adapter, its checker; `list --owned` names each owned glob, `<glob>: <template>`
+(`owned`). Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
 the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
@@ -2341,6 +2342,11 @@ def _checked_by(template: Template) -> str:
     return ", ".join(parts) + ("" if len(parts) > 1 or template.checker else " (no field required)")
 
 
+def owned(templates: dict[str, Template]) -> list[tuple[str, str]]:
+    """Each (glob, template) a `file.write` template owns, sorted."""
+    return sorted((glob, item.name) for item in templates.values() if item.is_file for glob in item.paths)
+
+
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
@@ -3618,6 +3624,7 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
+    listing.add_argument("--owned", action="store_true", help="the paths the templates own")
     interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
                                       "interface template beside the code that uses it "
                                       "(scripts/interfaces/), from the working tree's templates/")
@@ -3674,7 +3681,8 @@ def main(arguments: list[str] | None = None) -> int:
                      if options.templates is not None
                      else catalog(_project(options), tree=tree))
         if options.command == "list":
-            print("\n".join(list_templates(templates)))
+            print("\n".join(f"{glob}: {name}" for glob, name in owned(templates)) if options.owned
+                  else "\n".join(list_templates(templates)))
             return 0
         if options.command == "fill":
             return _fill(templates, options)

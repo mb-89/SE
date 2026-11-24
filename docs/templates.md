@@ -138,10 +138,11 @@ Fields stay honest about their source:
 - A field may declare `quote = true`: its value then carries at least one quote of the raw input,
   and the fill refuses a quote the raw input does not hold word for word.
 
-The gate refuses free writes. A template that claims paths owns them: a write, an edit or a
-write through the tracker's tools of a claimed path that does not come from the fill is refused before it runs,
-naming the template and the fill to use. The gate is on wherever a template claims a path, with
-no se.toml switch to keep it off.
+The gate refuses writes that break a template. A template that claims paths owns them: a write, an
+edit or a write through the tracker's tools of a claimed path is judged by the file it leaves,
+never by its edit text, parsed as the fill parses it. One that parses passes; one that does not is
+refused before it runs, naming every finding and the fill to use. The gate is on wherever a
+template claims a path, with no se.toml switch to keep it off.
 
 ## The filled template is a type
 
@@ -218,6 +219,11 @@ note: headings to sections, the source's instructions to comments, its fields to
 Each source tool gets one adapter; a source with headings only gives sections without
 instructions, which the overlay supplies.
 
+A template owns the paths its `applies.paths` globs claim, in whichever repository it resolves
+from; `templates.py list --owned` is the one listing of them, each glob with its template, and
+SE's start publishes those globs for its hook, which refuses a write that leaves an owned file off
+its template before it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
+
 The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
 refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
 adapters' interface and the first adapter, which reads a Markdown template note.
@@ -233,17 +239,18 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twenty template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's nineteen templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
 | `templates/ticket.md` | `ticket` | document | SE |
 | `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/work-file.md` | `work-file`, `extends` work: a work issue's body file, `.se/issues/<name>.md` | document | SE |
 | `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
 | `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
 | `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
