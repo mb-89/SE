@@ -760,6 +760,143 @@ CHILD = MINIMAL.format(name="subplan", extra=f"extends: plan\n{ISSUE_CREATE}").r
     "## Goal\n\n<!-- goal: The goal. -->\n", "## Note\n\n<!-- note: A note. -->\n")
 
 
+# Template manifests (templates.py "Template manifests"): obs's worked example of three template nodes
+# (obs spec/capabilities/templates.md), an ordinary chapter beside them, and an overlay.
+
+MANIFEST = """---
+title: Requirements
+obs:
+  template: {name: requirements, version: "2", source: an exported requirements template}
+---
+
+- [[purpose|Purpose]]
+- [[scope|Scope]]
+- [[how-to-use|How to use it]]
+- [[risks|Risks]]
+
+Fill one document per product from this template.
+"""
+NODES = {
+    "purpose": """---
+obs:
+  guidance:
+    contents: The problem the product solves, and for whom.
+    motivation: Every later section is judged against it.
+    form: One paragraph of at most five sentences.
+    sources: The product brief.
+    gate: mandatory
+---
+
+{{slot}}
+""",
+    "scope": """---
+obs:
+  guidance:
+    contents: What the product does and what it leaves to others.
+    form: Two lists, in scope and out of scope.
+    gate: mandatory
+---
+
+{{slot}}
+""",
+    "risks": """---
+obs:
+  guidance:
+    contents: The risks that could stop the product, each with its owner.
+    motivation: A risk without an owner is not handled.
+    gate: judgment
+---
+
+{{slot}}
+""",
+    "how-to-use": "Copy the folder, then fill each section.\n",
+}
+MANIFEST_OVERLAY = """---
+extends: requirements
+says: "Agents quote the brief."
+tags: ["requirements"]
+fields:
+  - name: risks
+    required: true
+example:
+  fields:
+    purpose: "The pump controller keeps the tank level between its limits for the plant operators."
+    scope: "- In scope: the level loop and its alarms.\\n- Out of scope: the pump drives."
+    risks: "The level sensor may drift; the instrument team owns its calibration."
+---
+
+## Risks
+
+<!-- risks: Name each owner by role. -->
+"""
+CHECKS = """---
+obs:
+  template: {name: checks, version: "1.4"}
+---
+
+- [[done]]
+"""
+DONE = "---\nobs:\n  guidance: {contents: What is done., gate: judgment}\n---\n{{slot}}\n"
+
+
+def _manifest_files(**changed: str | None) -> dict[str, str]:
+    """The fixture's files, `templates/<name>` relative, each of `changed` (`__` for `/`, `_dot_`
+    for `.`) replaced or, where None, left out."""
+    files = {"requirements/manifest.md": MANIFEST, "requirements.overlay.md": MANIFEST_OVERLAY,
+             **{f"requirements/{name}.md": text for name, text in NODES.items()}}
+    for key, text in changed.items():
+        name = key.replace("__", "/").replace("_dot_", ".")
+        if text is None:
+            files.pop(name, None)
+        else:
+            files[name] = text
+    return files
+
+
+def _manifest_broken() -> list[tuple[str, dict[str, str]]]:
+    """Template manifests that do not load."""
+    purpose = NODES["purpose"]
+    return [
+        ("manifest-no-template", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            "obs:\n  template", "obs:\n  other"))),
+        ("manifest-no-front-matter", _manifest_files(requirements__manifest_dot_md="- [[purpose]]\n")),
+        ("manifest-name", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            "name: requirements", "name: needs"))),
+        ("manifest-version", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            'version: "2"', 'version: "v2"'))),
+        ("manifest-version-missing", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            'version: "2", ', ""))),
+        ("manifest-template-key", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            "source:", "colour: red, source:"))),
+        ("manifest-flow-broken", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            'version: "2", ', 'version: "2" '))),
+        ("manifest-chapter-missing", _manifest_files(requirements__scope_dot_md=None)),
+        ("manifest-chapter-twice", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            "- [[risks|Risks]]", "- [[risks|Risks]]\n- [[scope|Scope again]]"))),
+        ("manifest-no-nodes", {"requirements/manifest.md": MANIFEST, "requirements/purpose.md": "x\n",
+                               "requirements/scope.md": "x\n", "requirements/how-to-use.md": "x\n",
+                               "requirements/risks.md": "---\ntitle: Risks\n---\nx\n"}),
+        ("manifest-and-note", {**_manifest_files(), "requirements.md": MINIMAL.format(
+            name="requirements", extra=ISSUE_CREATE)}),
+        ("node-no-slot", _manifest_files(requirements__purpose_dot_md=purpose.replace("{{slot}}", "Text."))),
+        ("node-slot-twice", _manifest_files(requirements__purpose_dot_md=purpose + "\n{{slot}}\n")),
+        ("node-slot-in-text", _manifest_files(requirements__purpose_dot_md=purpose.replace(
+            "{{slot}}", "Write {{slot}} here."))),
+        ("node-guidance-key", _manifest_files(requirements__purpose_dot_md=purpose.replace(
+            "    gate:", "    colour: red\n    gate:"))),
+        ("node-no-contents", _manifest_files(requirements__purpose_dot_md=purpose.replace(
+            "    contents: The problem the product solves, and for whom.\n", ""))),
+        ("node-gate", _manifest_files(requirements__purpose_dot_md=purpose.replace(
+            "gate: mandatory", "gate: always"))),
+        ("node-guidance-list", _manifest_files(requirements__purpose_dot_md="---\nobs:\n  guidance: [1]\n---\n{{slot}}\n")),
+        ("node-name", _manifest_files(requirements__manifest_dot_md=MANIFEST.replace(
+            "[[scope|Scope]]", "[[Scope 2!|Scope]]"), **{"requirements/Scope 2!.md": NODES["scope"]})),
+        ("manifest-overlay-loosens", _manifest_files(requirements_dot_overlay_dot_md=MANIFEST_OVERLAY.replace(
+            "  - name: risks\n    required: true\n", "  - name: purpose\n    required: false\n"))),
+        ("manifest-key-in-note", {"one.md": MINIMAL.format(name="one", extra=f"{ISSUE_CREATE}manifest: true\n")}),
+    ]
+
+
 def _overlay_broken() -> list[tuple[str, dict[str, str]]]:
     """Overlays that do not load, each with the template it extends."""
     def overlay(front: str, body: str = "") -> dict[str, str]:
@@ -800,6 +937,12 @@ OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
 
 def _note(name: str) -> str:
     return MINIMAL.format(name=name, extra=ISSUE_CREATE)
+
+
+def _manifest_note(name: str) -> dict[str, str]:
+    """A template manifest of one node, `templates/<name>/` relative."""
+    return {f"{name}/manifest.md": f'---\nobs:\n  template: {{name: {name}, version: "1"}}\n---\n- [[goal]]\n',
+            f"{name}/goal.md": "---\nobs:\n  guidance: {contents: The goal., gate: mandatory}\n---\n{{slot}}\n"}
 
 
 def _repository_sets() -> list[dict]:
@@ -864,6 +1007,17 @@ def _repository_sets() -> list[dict]:
         {"name": "overlay-in-repository", "files": {
             **app(), **{f"app/{key}": value for key, value in pinned.items()},
             f"app/{clone}/templates/plan.md": OVERLAID, f"app/{clone}/templates/plan.overlay.md": OVERLAY}, "heads": heads},
+        {"name": "manifest-in-repository", "files": {
+            **app(), **{f"app/{key}": value for key, value in pinned.items()},
+            **{f"app/{clone}/templates/{key}": value for key, value in _manifest_note("req").items()},
+            f"app/{clone}/templates/loose/goal.md": "x\n"}, "heads": heads},
+        {"name": "project-manifest-wins", "files": {
+            **app(), **{f"app/{key}": value for key, value in pinned.items()},
+            **{f"app/templates/{key}": value for key, value in _manifest_note("shared").items()}}, "heads": heads},
+        {"name": "origin-manifest", "files": {"app/templates/own.md": _note("own")},
+         "origin": {"origin/main": {"templates/own.md": _note("own"),
+                                    **{f"templates/{key}": value for key, value in _manifest_note("req").items()},
+                                    "templates/loose/goal.md": "x\n", "templates/req/deep/x.md": "x\n"}}},
         {"name": "project-overlay-of-repository", "files": {
             **app(), **{f"app/{key}": value for key, value in pinned.items()},
             "app/templates/shared.overlay.md": "---\nextends: shared\n---\n"}, "heads": heads},
@@ -997,7 +1151,28 @@ def _broken() -> list[tuple[str, dict[str, str]]]:
         "one.md": minimal.replace("    kind: text\n", "    node: two@2.0.0\n"), "two.md": two}))
     sets.append(("node-entry-kind", {
         "one.md": minimal.replace("    kind: text\n", "    entries: two@1.0.0\n"), "two.md": two}))
-    return sets + _overlay_broken()
+    return sets + _overlay_broken() + _manifest_broken()
+
+
+#: obs's worked example's filled document as one note (templates.py "Template manifests").
+MANIFEST_DOCUMENT = """---
+title: Pump controller requirements
+derived_from: {template: requirements, version: "2"}
+---
+
+## Purpose
+
+The pump controller keeps the tank level between its limits for the plant operators.
+
+## Scope
+
+- In scope: the level loop and its alarms.
+- Out of scope: the pump drives, which the drive supplier owns.
+
+## Risks
+
+The level sensor may drift; the instrument team owns its calibration.
+"""
 
 
 def _fixture(name: str, files: dict[str, str], bodies: dict[str, list[str]] | None = None) -> dict:
@@ -1012,8 +1187,9 @@ def _file_cases(files: dict[str, str]) -> list[dict]:
                                  lambda file: f"{templates.TEMPLATES}/{file}")])
     cases = []
     for path in ("book/m1/steps/51-S5B.md", "book/m1/notes.md", "book\\m1\\steps\\x.md", "/book/a/steps/b.md"):
-        for body in (STEP, "---\ntemplate: other\n---\n", "---\ntemplate: project/risks\n---\n",
-                     "id: S5B\n"):
+        for body in (STEP, '---\nderived_from: {template: other, version: "1.0.0"}\n---\n',
+                     '---\nderived_from: {template: project/risks, version: "1.0.0"}\n---\n',
+                     "---\nderived_from: risks\n---\n", "id: S5B\n"):
             chosen = templates.select(loaded, templates.FILE_ACTION, body, None, path=path)
             cases.append({"action": templates.FILE_ACTION, "path": path, "body": body,
                           "selected": chosen.name, "findings": _findings(chosen.findings)})
@@ -1048,8 +1224,8 @@ def build() -> dict[str, str]:
     }
     step = _fixture("files", step_files, {"risks": [
         STEP, "---\nid: S5B\n---\n\n# Risks\n\n- The scan misses a tool.\n", "# Risks\n\n## Risks\n\nNone\n",
-        "---\ntemplate: project/risks\nversion: 1.1.0\n---\n\n## Risks\n\n- One.\n",
-        "---\ntemplate: risks\nversion: 2.0.0\n---\n\n## Risks\n\n- One.\n"]})
+        '---\nderived_from: {template: risks, version: "1.1.0"}\n---\n\n## Risks\n\n- One.\n',
+        '---\nderived_from:\n  template: risks\n  version: "2.0.0"\nid: S5B\n---\n\n## Risks\n\n- One.\n']})
     step["files_select"] = _file_cases(step_files)
     step["existing"] = _existing(step_files)
     made["files.json"] = step
@@ -1070,6 +1246,19 @@ def build() -> dict[str, str]:
                                                   "subplan.md": CHILD}, {"plan": [
         overlaid_body, overlaid_body.replace("Owner: bob\n\n", ""),
         overlaid_body.replace("We ship it.", " ".join(["word"] * 25))]})
+    manifest_files = {**_manifest_files(), "checks/manifest.md": CHECKS, "checks/done.md": DONE}
+    made["manifests.json"] = _fixture("manifests", manifest_files, {"requirements": [
+        MANIFEST_DOCUMENT, MANIFEST_DOCUMENT.replace("drift;", "drift; {{slot}}"),
+        MANIFEST_DOCUMENT.replace("drift;", "drift; `{{slot}}`"),
+        MANIFEST_DOCUMENT.replace('version: "2"', 'version: "1"'),
+        MANIFEST_DOCUMENT.replace('version: "2"', 'version: "2.0"'),
+        MANIFEST_DOCUMENT.replace('version: "2"', 'version: "3.1"'),
+        MANIFEST_DOCUMENT.replace('derived_from: {template: requirements, version: "2"}',
+                                  'derived_from:\n  template: requirements\n  version: "1"'),
+        MANIFEST_DOCUMENT.replace("## Scope\n\n- In scope: the level loop and its alarms.\n"
+                                  "- Out of scope: the pump drives, which the drive supplier owns.\n\n", ""),
+    ], "checks": ["---\nderived_from: {template: checks, version: 1.3}\n---\n\n## done\n\nAll.\n",
+                  "---\nderived_from: {template: checks}\n---\n\n## done\n\n```\n{{slot}}\n```\n"]})
     made["repositories.json"] = {"generated": GENERATED.format(source="the checkouts below"),
                                  "set": "repositories",
                                  "cases": [_resolved(case) for case in _repository_sets()]}

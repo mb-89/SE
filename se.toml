@@ -1,7 +1,7 @@
 [project]
 # The project's one semantic version, raised by work_tickets.py release when SE asks (README
 # "Project settings").
-version = "13.1.0"
+version = "14.0.0"
 # Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (README
 # "Release tags").
 release = "workflow"
@@ -130,7 +130,7 @@ go = "components/go.mod"
 # documentation (README "Documentation") with its adapter component obs-html, which obs installs at
 # the version locked here.
 [components.obs]
-version = "^10.3.2"
+version = "^10.4.0"
 
 [components.obs-html]
 version = "^0.5.2"

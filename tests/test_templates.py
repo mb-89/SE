@@ -15,11 +15,13 @@ from pathlib import Path
 
 import pytest
 
+import build_docs
 import deck
 import fake_git
 import git_door
 import code_templates
 import templates
+import template_cases
 import outside_text
 import overhaul
 import retro
@@ -1122,22 +1124,23 @@ def test_select_for_a_file_takes_the_front_matter_then_the_conditions(tmp_path):
                                                                  path=path)
     free = pick(STEP, "notes/x.md")
     assert free.template is None and not free.findings
-    assert pick("---\nid: S5B\ntemplate: goals\n---\n").name == "goals"
+    assert pick("---\nid: S5B\nderived_from: {template: goals, version: \"1.0.0\"}\n---\n").name == "goals"
+    assert pick("---\nid: S5B\nderived_from:\n  template: goals\n  version: \"1.0.0\"\n---\n").name == "goals"
     assert pick("---\nid: S5B\n---\n").name == "risks"
-    outside = pick("---\nid: S5B\ntemplate: work\n---\n")
+    outside = pick("---\nid: S5B\nderived_from: {template: work, version: \"1.0.0\"}\n---\n")
     assert outside.name == "risks" and rules(list(outside.findings), "refuse") == {"template"}
     none = pick("---\nid: S9\n---\n\n# Other\n")
     assert none.template is None
     assert [finding.fix for finding in none.findings] == [
         "book/m1/steps/x.md: no template takes this file; name its template in the front matter, "
-        "template: <name> (one of goals, risks)"]
+        "derived_from: {template: <name>, version: <version>} (one of goals, risks)"]
     with pytest.raises(templates.TemplateError, match="give path"):
         templates.select(catalog, "file.write", STEP)
 
 
 def recorded(template: templates.Template) -> str:
     """The front matter lines a claimed file records its template by."""
-    return (f"template: project/{template.name}\nversion: {template.version}\n"
+    return (f'derived_from: {{template: {template.name}, version: "{template.version}"}}\n'
             f"overlay: {template.digest}\n")
 
 
@@ -1157,12 +1160,14 @@ def test_a_step_file_keeps_its_front_matter_and_title_and_gains_only_its_templat
     assert templates.parse(template, fresh).fields == {"risks": ["One."]}
 
 
-def test_render_records_template_version_and_overlay_in_place_and_selection_reads_them(tmp_path):
+def test_render_records_derived_from_and_overlay_in_place_and_selection_reads_them(tmp_path):
     template = step_templates(tmp_path, risks="")["risks"]
-    old = "---\nversion: 0.1.0\nid: S5B\ntemplate: risks\n---\n\n# Risks\n\n## Risks\n\nNone\n"
+    old = ("---\nderived_from:\n  template: risks\n  version: \"0.1.0\"\nid: S5B\noverlay: x\n---\n\n"
+           "# Risks\n\n## Risks\n\nNone\n")
+    assert templates.parse(template, old).recorded == "0.1.0"
     rendered = templates.render(template, templates.parse(template, old))
-    assert rendered == ("---\nversion: 1.0.0\n"
-                        f"overlay: {template.digest}\nid: S5B\ntemplate: project/risks\n---\n\n"
+    assert rendered == ('---\nderived_from: {template: risks, version: "1.0.0"}\n'
+                        f"id: S5B\noverlay: {template.digest}\n---\n\n"
                         "# Risks\n\n## Risks\n\nNone\n")
     crlf = templates.render(template, templates.parse(template, "---\r\nid: S5B\r\n---\r\n\r\n"
                                                          "## Risks\r\n\r\nNone\r\n"))
@@ -1201,7 +1206,7 @@ def test_check_and_draft_take_a_file_against_templates_outside_se(tmp_path, caps
     code, out = run("check", "--path", str(steps / "51-S5B.md"), "--body", "# Risks\n")
     assert code == 1 and "[required]" in out.out
     code, out = run("check", "--path", str(steps / "90-S9.md"))
-    assert code == 1 and "template: <name>" in out.out
+    assert code == 1 and "derived_from: {template: <name>" in out.out
     assert run("check", "--path", str(tmp_path / "notes.md"))[1].out == \
         "free: no template claims notes.md\n"
     code, out = run("draft", "--path", str(steps / "51-S5B.md"), "--json")
@@ -1236,15 +1241,15 @@ def test_a_document_at_its_template_s_current_version_passes(catalog, tmp_path):
     assert not [f for f in templates.check(work, templates.parse(work, body)) if f.severity == "refuse"]
     risks = at_version(step_templates(tmp_path, risks="")["risks"], "2.3.0")
     page = templates.render(risks, templates.parse(risks, STEP))
-    assert "version: 2.3.0\n" in page and version_findings(risks, page) == []
+    assert 'version: "2.3.0"}\n' in page and version_findings(risks, page) == []
 
 
 def test_a_document_that_records_no_version_passes(catalog, tmp_path):
     work = at_version(catalog["work"], "2.3.0")
     assert templates.parse(work, WORK_BODY).recorded == "" and version_findings(work, WORK_BODY) == []
     risks = step_templates(tmp_path, risks="")["risks"]
-    assert version_findings(risks, STEP.replace("name: Risks\n", "template: risks\n")) == []
-    other = STEP.replace("name: Risks\n", "template: goals\nversion: 0.1.0\n")
+    assert version_findings(risks, STEP.replace("name: Risks\n", "derived_from: {template: risks}\n")) == []
+    other = STEP.replace("name: Risks\n", "derived_from: {template: goals, version: \"0.1.0\"}\n")
     assert templates.parse(risks, other).recorded == ""
 
 
@@ -1275,7 +1280,7 @@ def test_a_major_move_refuses_naming_both_versions_and_the_fill(catalog, tmp_pat
     assert "`templates.py check work --fields <fields> --render`" in found[0].fix
     risks = step_templates(tmp_path, risks="")["risks"]
     page = templates.render(risks, templates.parse(risks, STEP)).replace(
-        "version: 1.0.0", f"version: {recorded}")
+        'version: "1.0.0"', f'version: "{recorded}"')
     moved = at_version(risks, "2.3.0")
     assert [f.severity for f in version_findings(moved, page)] == ["refuse"]
     assert "`templates.py draft --path <file> --json`" in version_findings(moved, page)[0].fix
@@ -2841,3 +2846,169 @@ def test_an_overlay_applies_to_its_own_repository_s_template_only(tmp_path, fake
     assert templates.catalog(project, tree=True)["note"].tags == ("test", "shared")
     write_template(project, "note", OVERLAID)
     assert templates.catalog(project, tree=True)["note"].tags == ("test",)
+
+
+# Template manifests (templates.py "Template manifests"): obs's worked example, its three template
+# nodes and an ordinary chapter, as the shared cases hold it (tests/template_cases.py)
+
+#: Each guidance text of the fixture's nodes, which the fill hands the agent and the document never holds.
+GUIDANCE = ("The problem the product solves, and for whom.", "Every later section is judged against it.",
+            "One paragraph of at most five sentences.", "The product brief.",
+            "What the product does and what it leaves to others.", "Two lists, in scope and out of scope.",
+            "The risks that could stop the product, each with its owner.",
+            "A risk without an owner is not handled.")
+MANIFEST_FILLED = {"purpose": "The pump controller keeps the tank level between its limits for the plant operators.",
+          "scope": "- In scope: the level loop and its alarms.\n- Out of scope: the pump drives.",
+          "risks": "The level sensor may drift; the instrument team owns its calibration."}
+BRIEF = "The product brief: the pump controller keeps the tank level for the plant operators."
+OBS_BUILDS = ("tool: obs-document, in obs's own Python environment, builds the filled document, so only "
+              "the real obs proves it reads the document's derived_from; it runs only as a process")
+
+
+def manifest_folder(root: Path, **changed: str | None) -> Path:
+    """The fixture's `templates/` under `root`, each of `changed` as `_manifest_files` takes it."""
+    folder = root / "templates"
+    for name, text in template_cases._manifest_files(**changed).items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8", newline="\n")
+    return folder
+
+
+def filled_by_main(capsys, folder: Path, *arguments: str) -> tuple[int, str, str]:
+    code = templates.main(["fill", "requirements", "--templates", str(folder), *arguments])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_a_template_manifest_fills_a_document_that_derives_from_it_and_holds_none_of_its_guidance(
+        tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    code, out, _ = filled_by_main(capsys, folder)
+    told = json.loads(out)
+    assert code == 0 and told["version"] == "2"
+    assert told["field_says"] == {
+        "purpose": "The problem the product solves, and for whom. Why: Every later section is judged "
+                   "against it. Form: One paragraph of at most five sentences. Sources: The product brief.",
+        "scope": "What the product does and what it leaves to others. Form: Two lists, in scope and out "
+                 "of scope.",
+        "risks": "The risks that could stop the product, each with its owner. Why: A risk without an "
+                 "owner is not handled."}
+    assert all(text in told["draft"] for text in GUIDANCE)
+    assert told["schema"]["required"] == ["purpose", "scope"]  # the mandatory gates; risks is judgment
+    document = tmp_path / "documents" / "pump.md"
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert (code, out) == (0, f"wrote {document}: requirements 2\n")
+    text = document.read_text(encoding="utf-8")
+    template = templates.load(tmp_path, folder=folder)["requirements"]
+    assert text.startswith('---\nderived_from: {template: requirements, version: "2"}\n'
+                           f"overlay: {template.digest}\n---\n")
+    assert [line for line in text.splitlines() if line.startswith("#")] == ["## Purpose", "## Scope", "## Risks"]
+    assert not [part for part in (*GUIDANCE, templates.SLOT, "<!--", "Why:") if part in text]
+    parsed = templates.parse(template, text)
+    assert (parsed.fields, parsed.recorded) == (MANIFEST_FILLED, "2")
+    assert template.manifest and template.actions == () and template.kind == "document"
+
+
+def test_a_missing_mandatory_section_and_a_leftover_slot_each_refuse_naming_the_section(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    document = tmp_path / "pump.md"
+    missing = {key: value for key, value in MANIFEST_FILLED.items() if key != "scope"}
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(missing), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert code == 1 and "scope [required]: Scope is missing: write `## Scope`" in out
+    assert "nothing was written" in out and not document.exists()
+    left = {**MANIFEST_FILLED, "risks": "The sensor may drift.\n\n{{slot}}"}
+    code, out, _ = filled_by_main(capsys, folder, "--fields-json", json.dumps(left), "--input-text", BRIEF,
+                                  "--out", str(document))
+    assert code == 1 and "risks [slot]: section Risks still holds the fill slot {{slot}}" in out
+    assert not document.exists()
+    template = templates.load(tmp_path, folder=folder)["requirements"]
+    quoted = {**MANIFEST_FILLED, "risks": "Write `{{slot}}` literally:\n\n```\n{{slot}}\n```"}
+    assert templates.fill(template, quoted, BRIEF)[1] == []  # a slot in code is literal and no slot
+    judged = {key: value for key, value in MANIFEST_FILLED.items() if key != "risks"}
+    assert templates.fill(template, judged, BRIEF)[1] == []  # a judgment gate may stay empty
+
+
+def test_stale_lists_a_document_only_once_its_template_s_version_moved(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    documents = tmp_path / "documents"
+    assert filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                          "--out", str(documents / "pump.md"))[0] == 0
+    (documents / "notes.md").write_text("# Notes\n\nNo template.\n", encoding="utf-8")
+    (documents / ".hidden").mkdir()
+    (documents / ".hidden" / "old.md").write_text(
+        '---\nderived_from: {template: requirements, version: "1"}\n---\n', encoding="utf-8")
+    stale = lambda: (templates.main(["stale", "--path", str(documents), "--templates", str(folder)]),
+                     capsys.readouterr())
+    code, out = stale()
+    assert (code, out.out, out.err) == (0, "", "")
+    manifest = folder / "requirements" / "manifest.md"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('version: "2"', 'version: "2.1"'),
+                        encoding="utf-8")
+    (documents / "gone.md").write_text('---\nderived_from: {template: gone, version: "1"}\n---\n',
+                                       encoding="utf-8")
+    code, out = stale()
+    assert (code, out.out) == (0, "pump.md: derived from requirements 2; the template is at 2.1\n")
+    assert out.err == "warning: gone.md: derived from gone 1, which is no template here\n"
+    assert templates.main(["stale", "--path", str(tmp_path / "none"), "--templates", str(folder)]) == 2
+    assert "is no folder" in capsys.readouterr().err
+
+
+def test_an_overlay_adds_to_a_template_manifest_and_never_loosens_it(tmp_path):
+    template = templates.load(tmp_path, folder=manifest_folder(tmp_path))["requirements"]
+    risks = template.field("risks")
+    assert risks.required and risks.says.endswith("not handled. Name each owner by role.")
+    assert template.tags == ("requirements",) and template.says.endswith("Agents quote the brief.")
+    plain = templates.load(tmp_path, folder=manifest_folder(tmp_path / "plain",
+                                                            requirements_dot_overlay_dot_md=None))
+    assert template.digest != plain["requirements"].digest
+    loose = template_cases.MANIFEST_OVERLAY.replace("  - name: risks\n    required: true\n",
+                                                    "  - name: purpose\n    required: false\n")
+    with pytest.raises(templates.TemplateError, match="field purpose: required is turned off"):
+        templates.load(tmp_path, folder=manifest_folder(tmp_path / "loose",
+                                                        requirements_dot_overlay_dot_md=loose))
+
+
+def test_a_project_s_template_manifest_resolves_before_se_s_templates(tmp_path):
+    manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    resolved = templates.catalog(tmp_path, tree=True)
+    assert resolved["requirements"].repository == templates.PROJECT_REPOSITORY
+    assert resolved["requirements"].path == "templates/requirements/manifest.md"
+    assert resolved["work"].repository == templates.SE_REPOSITORY
+
+
+@pytest.mark.parametrize("front, named", [
+    ('---\nderived_from: {template: requirements, version: "2"}\n---\n', ("requirements", "2")),
+    ('---\ntitle: T\nderived_from:\n  template: se/work\n  version: "1.0.0"\nid: 1\n---\n', ("se/work", "1.0.0")),
+    ("---\nderived_from: {template: x, version: 3}\n---\n", ("x", "3")),
+    ("---\nderived_from: {template: x}\n---\n", ("", "")),
+    ("---\nderived_from: x\n---\n", ("", "")),
+    ("---\nderived_from: {template: x, version: 1.5}\n---\n", ("", "")),
+])
+def test_derived_from_reads_a_flow_mapping_or_an_indented_one(front, named):
+    found = templates.derived_from(front)
+    assert found is not None and found[2:] == named
+    assert front[found[0]:found[1]].startswith("derived_from:")
+    assert templates.derived_from("---\ntitle: T\n---\n") is None
+
+
+@pytest.mark.spawns(OBS_BUILDS)
+def test_obs_builds_the_document_se_fills_from_obs_s_worked_example(tmp_path, obs, capsys):
+    note = (obs / "spec" / "capabilities" / "templates.md").read_text(encoding="utf-8")
+    folder = tmp_path / "templates"
+    for match in re.finditer(r"^```text template/(\S+)\n(.*?)^```$", note, re.MULTILINE | re.DOTALL):
+        (folder / "requirements" / match.group(1)).parent.mkdir(parents=True, exist_ok=True)
+        (folder / "requirements" / match.group(1)).write_text(match.group(2), encoding="utf-8")
+    assert sorted(path.name for path in (folder / "requirements").iterdir()) == [
+        "manifest.md", "purpose.md", "risks.md", "scope.md"]
+    vault = tmp_path / "document"
+    assert filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                          "--out", str(vault / "manifest.md"))[0] == 0
+    parsed = tmp_path / "document.json"
+    code = build_docs.obs_document(obs, ["--source", str(vault / "manifest.md"), "--document", str(parsed)],
+                                   "templates", adapter=False)
+    assert code == 0, capsys.readouterr().err
+    built = parsed.read_text(encoding="utf-8")
+    assert '"derived-from"' in built and '"guidance"' not in built and "{{slot}}" not in built
+

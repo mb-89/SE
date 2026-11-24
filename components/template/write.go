@@ -128,11 +128,15 @@ func withTemplate(front string, t *Template) string {
 	for _, l := range lines {
 		closing := strings.LastIndex(strings.TrimRight(front, "\r\n"), "\n") + 1
 		line := l[0] + ": " + l[1]
-		pattern := frontTemplate
-		if l[0] != "template" {
-			pattern = frontKey(l[0])
+		var loc []int
+		if l[0] == "derived_from" {
+			if start, end, _, _, ok := derivedFrom(front[:closing]); ok {
+				loc = []int{start, end}
+			}
+		} else {
+			loc = frontKey(l[0]).FindStringIndex(front[:closing])
 		}
-		if loc := pattern.FindStringIndex(front[:closing]); loc != nil {
+		if loc != nil {
 			front = front[:loc[0]] + line + front[loc[1]:]
 			after = loc[0] + len(line) + len(newline)
 		} else {
@@ -239,7 +243,7 @@ func Render(t *Template, doc *Document) (string, error) {
 		parts = append(parts, Part{Kind: "prefix", Raw: after + "\n"}, Part{Kind: "gap"},
 			Part{Kind: "scope", Heading: "## " + str(t.Scope.Value("section"))}, Part{Kind: "preamble"}, Part{Kind: "suffix"})
 	} else if len(parts) == 0 {
-		if t.IsFile() {
+		if t.writesFile() {
 			parts = []Part{{Kind: "front"}, {Kind: "head"}, {Kind: "preamble"}}
 		} else {
 			parts = []Part{{Kind: "preamble"}}
@@ -305,7 +309,7 @@ func Render(t *Template, doc *Document) (string, error) {
 		case "preamble":
 			preamble := labels(t, doc, withoutMarkers(part.Raw))
 			switch {
-			case t.IsFile():
+			case t.writesFile():
 				out = append(out, preamble)
 			case len(t.Scope) == 0:
 				out = append(out, FleetMarker+"\n"+marker+"\n")
@@ -431,7 +435,7 @@ func Draft(t *Template) string {
 	}
 	var lines []string
 	switch {
-	case t.IsFile():
+	case t.writesFile():
 		lines = append(lines, "---")
 		for _, l := range t.frontLines() {
 			lines = append(lines, l[0]+": "+l[1])
