@@ -566,8 +566,8 @@ and the workflow `.github/workflows/docs.yml` builds and publishes it to GitHub 
 to `main`; a failed build publishes nothing, so the previous artifact stays.
 
 The Timeline, `timeline.html` beside the documentation, builds itself from the issues and
-releases of the repositories in `se.toml` `[timeline]`: SE, obs and kern (a bare name lies beside
-SE's home). The same workflow rebuilds it hourly and on each issue event.
+releases of the repositories in `se.toml` `[timeline]`: SE, obs, kern and obs-html (a bare name
+lies beside SE's home). The same workflow rebuilds it hourly and on each issue event.
 
 It is one obs table, a row per issue or release: its repository, place, date, number, title and
 status. It groups the rows by place (Today, Waiting for integrator, Needs you, Next, Backlog, Done),

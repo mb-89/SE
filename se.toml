@@ -143,7 +143,7 @@ version = "^0.6.0"
 local = 4
 
 [timeline]
-repositories = ["SE", "obs", "kern"]
+repositories = ["SE", "obs", "kern", "obs-html"]
 
 # The repositories SE watches for outside issues, each with the last issue number that existed
 # before the fleet marked its own (work model "Outside issues"); a bare name lies beside SE's home.
