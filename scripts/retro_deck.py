@@ -57,10 +57,9 @@ COMMENT = re.compile(r"<!--.*?-->[ \t]*\n?", re.DOTALL)
 
 
 #: An ISO time of day after a date (`2026-11-22T20:16:05Z`, `2026-11-22 20:16`), which obs-html's provenance
-#: check refuses in a page; the deck writes it as TIME_FORMAT says, in UTC (`times`).
+#: check refuses in a page; the deck writes it as the retro-deck template states it, `22 Nov 20:16` in UTC
+#: (`times`).
 ISO_TIME = re.compile(r"\b(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?(?![\d:])")
-#: How the deck writes a time of day, as the retro-deck template states it: `22 Nov 20:16`.
-TIME_FORMAT = "%-d %b %H:%M"
 
 
 class DeckError(ValueError):
@@ -128,8 +127,8 @@ def _label(heading: str) -> str:
 
 
 def times(text: str) -> str:
-    """`text` with each ISO time of day (ISO_TIME) written as `22 Nov 20:16` (TIME_FORMAT), in UTC where
-    it names an offset; a calendar date alone stays as it is."""
+    """`text` with each ISO time of day (ISO_TIME) written as `22 Nov 20:16`, the day without a leading
+    zero, in UTC where it names an offset; a calendar date alone stays as it is."""
     def written(match: re.Match) -> str:
         zone = match[4] or "Z"
         moment = datetime.fromisoformat(f"{match[1]}T{match[2]}{match[3] or ''}"
