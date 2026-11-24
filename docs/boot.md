@@ -19,11 +19,11 @@ SE 12.0.1 started
 | component | loaded | newest |
 |---|---|---|
 | SE | 12.0.1 | 13.0.0 |
-| kern | 2.1.0 | 2.1.0 |
+| kern | 2.1.0 | 2.2.0 |
 | obs | 10.3.2 | 10.3.2 |
 | obs-html | 0.5.2 | 0.5.2 |
 
-To update: /se:update
+To update: /se:update. The next SE release brings kern 2.2.0.
 ```
 
 - **Its shape is a template**, `templates/boot-report.md`: a snippet, a message of several lines
@@ -43,12 +43,22 @@ To update: /se:update
   - Where the project locks a required component at another version than the one SE loaded, the
     session is told in one line.
 
-The last line is one of three. `To update: /se:update` where a newer release than one loaded is
-known; `Everything is current.` where none is; `Newest versions not read yet; the next start shows
-them.` where a newest version is unknown, a required row's too.
+The last line is computed from the table's rows alone, so it never contradicts them
+(`update_line` in `scripts/se_start.py`). A row is behind where its newest release is newer than
+its loaded version, or where it loaded `none` from the project's lock; `local`, `unknown` and a
+core switched `off` never are. In order, the first that holds:
 
-A newer release of a required component makes the update due only where the project locks it, as
-the update moves SE and the project, never an installed SE's own lock. No path, no command line and
+- `Not loaded: <names>. SE cannot start.` where a required row did not load, as the stop above
+  the report says.
+- Where rows are behind: `To update: /se:update` for a row SE does not lock, SE's own or the
+  project's. For a required row, which SE locks so only the next SE release moves it, `The next
+  SE release brings kern 2.2.0 and obs 10.4.0.`, each such row with its newest release. Where
+  both hold, the line says both, the update first, as the example above.
+- `Newest versions not read yet; the next start shows them.` where a row's newest is `unknown`.
+- `Everything is current.` where every row is current.
+
+The project's own lock of a required component has no row, so it changes no last line; where it
+differs from the version SE loaded, the session is told in one line. No path, no command line and
 no per-component line appears in the report.
 
 - **What the session alone acts on** comes below the report in the start's hand-over, under `For
