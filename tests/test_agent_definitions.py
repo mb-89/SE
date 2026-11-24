@@ -1255,3 +1255,12 @@ def test_no_worker_step_times_the_suite():
         for asked in ("`work_tickets.py suite` before and after", "measures the suite", "**Suite time:**"):
             assert asked not in text, (path.relative_to(ROOT).as_posix(), asked)
 
+
+def test_the_decision_skill_asks_for_plain_english_and_names_no_stock_opening():
+    decision = normalized(BUILT["decision"])
+    assert "plain technical English" in decision
+    assert "no stock first sentence" in decision
+    for stock in ("This is one case of", "one case of …", "first sentence names the class"):
+        assert stock not in decision, stock
+    for path in [*(ROOT / "skills" / "decision").rglob("*.md"), ROOT / "templates" / "decision.md"]:
+        assert "one case of" not in normalized(path).lower(), path.relative_to(ROOT).as_posix()
