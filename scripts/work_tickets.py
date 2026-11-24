@@ -12316,7 +12316,7 @@ def turn_start_parts(root: Path, repo: str, all_repos: bool = False) -> dict[str
 def turn_start_lines(parts: dict[str, object], repo: str, timeout: timedelta,
                      now: datetime) -> list[str]:
     """The turn start's report: one heading line per part with its count or answer, each item
-    indented below it, in the order SE acts on them (README "Turn start check")."""
+    indented below it, in the order SE acts on them (src/agents/se.md "Turn-start check")."""
     lines: list[str] = []
 
     def section(title: str, value: object, items: Callable[[object], list[str]]) -> None:

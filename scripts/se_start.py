@@ -390,12 +390,12 @@ def countdown_part(found) -> dict:
 
 
 def work_check(root: Path | None) -> dict | None:
-    """What is due in the work of the project at `root`, where gh is signed in: the retro and the
+    """What is due in the work of the project at `root`, where gh reaches GitHub (signed in, or
+    over REST as in Claude Code's cloud, work_tickets.gh_backend): the retro and the
     overhaul countdowns (retro.py countdowns; the overhaul's only where its countdown is on,
     overhaul.py countdown_on), each with what it counted, whether it is due and why, and the runs
     of its kind still open; and the fleet check's findings, each part with its error instead where
-    its read failed. None without gh or without a project checkout: in the cloud no token reaches
-    SE's code."""
+    its read failed. None without gh or without a project checkout."""
     if root is None or not (root / ".git").exists():
         return None
     work_tickets = _load("work_tickets")

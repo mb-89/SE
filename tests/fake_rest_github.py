@@ -187,7 +187,7 @@ class RestGitHub:
             if method == "PATCH":
                 pull.update(body)
             return pull
-        if rest[:3] == ["git", "matching-refs", "heads"]:
+        if "/".join(rest).startswith("git/matching-refs/heads/"):
             return []
         if rest[0] == "commits" and rest[2:] == ["check-runs"]:
             return {"check_runs": self.check_runs.get(rest[1], [])}
