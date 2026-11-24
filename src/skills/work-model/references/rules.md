@@ -685,7 +685,8 @@ Every push goes through a command that runs its gates, and a gate is never bypas
 
 Each piece of work has exactly one issue, a review, retro, overhaul or check writes one report on
 the issue or pull request it concerns, and only the `se` role files new issues, after reading such
-a report.
+a report. The one exception is the integrator's work issue for a red integration branch, the
+person's decision of 24 Nov 2026 ([integrator](../../../agents/integrator.md)).
 
 - **Why:** an issue is chosen work; a finding becomes work only when someone weighs it against the
   rest, and related findings are one package, not one issue each.

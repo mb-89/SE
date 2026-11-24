@@ -38,6 +38,12 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   [integration branch](../skills/work-model/SKILL.md#integration-branch): `main` unless the
   project names another. You never implement features: anything beyond integration breakage goes back to its
   worker as an escalation.
+- **A red integration branch is yours**: when its `check` run fails on the newest commit, on any
+  leg, you act on it at once and wait for no worker or SE. File one work issue for it with
+  `work_tickets.py file`, naming the failing run.
+  - Where the fix is small, as SE's own [very small changes](se.md) are, deliver it yourself on
+    that issue's branch as a worker would and land it with `integrate`.
+  - Where it is too big, leave the issue to a worker and name it in your report to SE.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records

@@ -1236,3 +1236,16 @@ def test_releases_follow_the_work_in_the_work_model_se_and_the_integrator():
     assert "never waiting for the person" in normalized(AGENTS / "integrator.md")
     dec_011 = normalized(RULE_BOOK).split("### dec-011", 1)[1].split("### dec-012", 1)[0]
     assert "the person's decision of 24 Nov 2026" in dec_011
+
+
+# kern's retro of 24 Nov (SE#1934): the person's four decisions, as the built agents and skills carry them.
+
+
+def test_a_red_integration_branch_is_the_integrators_to_fix_or_file():
+    integrator = normalized(BUILT["integrator"])
+    assert "**A red integration branch is yours**" in integrator
+    assert "too big" in integrator and "`work_tickets.py file`" in integrator
+    wrk_007 = normalized(ROOT / "skills" / "work-model" / "references" / "rules.md").split(
+        "### wrk-007", 1)[1].split("### wrk-008", 1)[0]
+    assert "a red integration branch" in wrk_007
+
