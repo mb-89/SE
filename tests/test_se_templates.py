@@ -851,12 +851,13 @@ def test_check_files_usage_errors(capsys):
 
 
 def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys, tmp_path):
-    """No git checkout at all: where no template claims a path (SE's templates without work-file, the
-    one that claims), it answers before it reads one."""
+    """No git checkout at all: where no template claims a path outside .se/ (SE's templates without
+    work-file and the code templates that claim scripts and modules; python-component claims under
+    .se/ alone), it answers before it reads one."""
     folder = tmp_path / "templates"
     folder.mkdir()
     for note in (ROOT / "templates").iterdir():
-        if note.name != "work-file.md":
+        if note.name not in ("work-file.md", "python-script.md", "python-module.md", "go-module.md"):
             (folder / note.name).write_bytes(note.read_bytes())
     assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path),
                "--templates", str(folder))[:2] == (
@@ -864,12 +865,16 @@ def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys
 
 
 WORK_FILE_GLOB = ".se/issues/*.md"
+#: Every glob SE's own templates own: the work issue body file's and the code templates' (sorted).
+SE_OWNED = [("**/go.mod", "go-module"), (".se/components/*/__init__.py", "python-component"),
+            (WORK_FILE_GLOB, "work-file"), ("go.mod", "go-module"), ("scripts/*.py", "python-module"),
+            ("scripts/*.py", "python-script")]
 
 
-def test_ses_one_owned_path_is_the_work_issue_body_file_and_no_se_toml_switch_turns_the_file_gate():
-    """SE's own templates claim one glob, the work issue body file's (work-file), and no `files`
-    switch is left."""
-    assert templates.owned(CATALOG) == [(WORK_FILE_GLOB, "work-file")]
+def test_ses_owned_paths_are_the_work_issue_body_file_and_the_code_templates_and_no_switch_turns_the_file_gate():
+    """SE's own templates claim the work issue body file (work-file) and, through its code templates,
+    its scripts, its ad hoc components and every go.mod; no `files` switch is left."""
+    assert templates.owned(CATALOG) == SE_OWNED
     assert se_templates.claims_a_path(CATALOG)
     assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["templates"]
     assert not hasattr(templates.Enforcement(), "files") and not hasattr(templates, "FILES_VALUES")
@@ -1108,11 +1113,12 @@ def test_the_file_gate_needs_no_se_toml_switch_and_counts_its_refusals(capsys, m
 
 def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(capsys, monkeypatch, tmp_path):
     """The start publishes the owned globs after the line claimed: SE's own, the work issue body
-    file's, for a project without templates of its own; the project's where it has them; none and no
-    file where nothing is claimed."""
+    file's and the code templates', for a project without templates of its own; the project's where
+    it has them; none and no file where nothing is claimed."""
     line = tmp_path / ".se" / ".runtime" / "templates-files"
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
-    assert line.read_text(encoding="utf-8") == f"{se_templates.FILES_CLAIMED}\n{WORK_FILE_GLOB}\n"
+    assert line.read_text(encoding="utf-8") == "".join(
+        f"{text}\n" for text in (se_templates.FILES_CLAIMED, *sorted({glob for glob, _ in SE_OWNED})))
     step_book(tmp_path)
     (tmp_path / "se.toml").write_text('[templates]\nfiles = "off"\n', encoding="utf-8")
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
