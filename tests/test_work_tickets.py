@@ -2541,7 +2541,7 @@ def test_queue_refuses_while_paused(worktree, monkeypatch, capsys, paused):
 @pytest.mark.parametrize("paused", [True, False], ids=["paused", "unpaused"])
 def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
     calls = pause_door(monkeypatch, paused,
-                       lambda arguments: "" if arguments[:2] == ["issue", "edit"]
+                       lambda arguments: "" if arguments[:2] in (["issue", "edit"], ["issue", "comment"])
                        else '{"body": ""}' if arguments[:2] == ["issue", "view"] else None)
     read: list[int] = []
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:

@@ -2000,7 +2000,7 @@ class StartableFleet:
             return ""
         if args[:2] == ["issue", "view"] and "body" in args:
             return json.dumps({"body": ""})
-        if args[:2] == ["issue", "edit"] and "--body-file" in args:
+        if args[:2] in (["issue", "edit"], ["issue", "comment"]) and "--body-file" in args:
             return ""
         raise AssertionError(f"gh {args}")
 
@@ -2509,13 +2509,87 @@ def test_claim_creates_the_branch_on_the_issue_remote_for_a_session_tool_start_a
     fake = claim_fakes(monkeypatch)
 
     assert run(second, "claim", "5", "--repo", "git.example/owner/repo") == 0
-    assert capsys.readouterr().out.endswith(f"Claimed #5: branch {BRANCH} on upstream\n")
+    assert f"Claimed #5: branch {BRANCH} on upstream; start #5 here takes this claim\n" in \
+        capsys.readouterr().out
     assert git_run(host, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode == 0
     assert git_run(mirror, "rev-parse", "--verify", "--quiet", f"refs/heads/{BRANCH}").returncode != 0
 
     assert run(first, "claim", "5", "--repo", "git.example/owner/repo") == 1
     assert f"its branch {BRANCH} exists on origin" in capsys.readouterr().err
     assert not any(call[:2] == ["issue", "edit"] for call in fake.calls)  # the labels follow
+
+
+def test_start_after_its_own_claim_takes_it_creates_the_worktree_labels_and_comments(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    host, _, first, second = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False: (
+        [{"number": 5, "title": BRANCH}] if allow_existing_branch else []))
+    repo = ("--repo", "git.example/owner/repo")
+
+    assert run(second, "claim", "5", *repo) == 0
+    claimed = git_run(host, "rev-parse", f"refs/heads/{BRANCH}", check=True).stdout.strip()
+    assert run(first, "start", "5", *repo) == 1  # another checkout's claim is no claim of its own
+    assert "Issue #5 is not startable" in capsys.readouterr().err
+
+    assert run(second, "start", "5", *repo) == 0
+    out = capsys.readouterr().out
+    worktree = second.parent / "main.worktrees" / "feature-example-20261104"
+    assert f"worktree={worktree}" in out and "Started #5" in out
+    assert git_run(worktree, "rev-parse", "HEAD").stdout.strip() == claimed
+    assert ["issue", "edit", "5", "--remove-label", "ready", "--add-label", "in-progress",
+            *repo] in fake.calls
+    assert [call[:3] for call in fake.calls if call[:2] == ["issue", "comment"]] == [
+        ["issue", "comment", "5"]]
+    assert not work_tickets.claimed_here(second, 5)  # taken once: a second start claims anew
+    assert run(second, "start", "5", *repo) == 1
+
+
+def test_start_after_its_own_claim_reuses_the_worktree_on_the_claimed_branch(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+    existing = tmp_path / "existing-worker"
+    git_ok("-C", str(first), "fetch", "-q", "origin", BRANCH)
+    git_ok("-C", str(first), "worktree", "add", "-b", BRANCH, str(existing), "FETCH_HEAD")
+
+    assert run(first, "start", "5", *repo) == 0
+    assert f"worktree={existing.resolve()}" in capsys.readouterr().out
+    assert len([call for call in fake.calls if call[:2] == ["issue", "edit"]]) == 1
+
+
+def test_a_cloud_start_after_its_own_claim_takes_it_and_assigns_the_worker(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    fake = claim_fakes(monkeypatch)
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: None)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+
+    assert run(first, "start", "5", *repo, "--cloud-agent", "worker-login") == 0
+    assert "Launch worker:" not in capsys.readouterr().out
+    assert ["issue", "edit", "5", "--add-assignee", "worker-login", "--remove-label", "ready",
+            "--add-label", "in-progress", *repo] in fake.calls
+    assert any(call[:3] == ["issue", "comment", "5"] for call in fake.calls)
+
+
+def test_start_without_gh_after_its_own_claim_plans_the_label_change_and_the_comment(
+        tmp_path, fake_git_door, monkeypatch, capsys):
+    _, _, first, _ = two_checkouts(tmp_path, fake_git_door, monkeypatch)
+    claim_fakes(monkeypatch)
+    repo = ("--repo", "git.example/owner/repo")
+    assert run(first, "claim", "5", *repo) == 0
+    answer = started_without_gh(monkeypatch, tmp_path)
+
+    assert run(first, "start", "5", *repo, "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out
+    steps = [line.split(" ", 2)[1] for line in out.splitlines() if line[:1].isdigit()]
+    assert steps == ["list_issues", "issue_write", "issue_write", "issue_write", "add_issue_comment"]
+    assert f'"body": "Started: worker session on branch `{BRANCH}`\\n"' in out
+    worktree = first.parent / "main.worktrees" / "feature-example-20261104"
+    assert git_run(worktree, "branch", "--show-current").stdout.strip() == BRANCH
 
 
 def test_the_issue_remote_is_the_remote_naming_the_issue_repository_else_its_url(

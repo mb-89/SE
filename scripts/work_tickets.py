@@ -4307,6 +4307,57 @@ def claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
                      f"created on {remote}: {failure_detail(pushed)}; nothing was changed")
 
 
+CLAIMS = Path(".se") / "claims"  # .se/claims/<issue>: what this checkout's `claim` claimed
+
+
+def claim_record_path(root: Path, number: int) -> Path:
+    path = root / CLAIMS / str(number)
+    inside_root(root, path)
+    return path
+
+
+def record_claim_here(root: Path, number: int, remote: str, branch: str, commit: str) -> None:
+    """Record that this checkout's `claim` claimed work issue #`number`: its remote, its branch and
+    the commit the branch was created at, which this checkout's `start` takes as its own claim."""
+    path = claim_record_path(root, number)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{remote}\n{branch}\n{commit}\n", encoding="utf-8", newline="\n")
+
+
+def claimed_here(root: Path, number: int) -> bool:
+    """Whether this checkout's `claim` recorded a claim of work issue #`number`."""
+    return claim_record_path(root, number).is_file()
+
+
+def own_claim(root: Path, number: int, repo: str, branch: str) -> str | None:
+    """The remote of this checkout's own claim of work issue #`number`, which `start` takes instead
+    of claiming again: where `claim` recorded it here for `branch` on the issue's remote, and that
+    branch there still holds the claimed commit (its tip, or behind the worker's commits). None
+    where no record names it or the branch there is no longer that claim's."""
+    try:
+        remote, claimed, commit = claim_record_path(root, number).read_text(encoding="utf-8").split()
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if claimed != branch or remote != issue_remote(root, repo):
+        return None
+    fetched = run_git(root, "fetch", remote, f"refs/heads/{branch}")
+    if fetched.returncode != 0:
+        return None
+    held = run_git(root, "merge-base", "--is-ancestor", commit, "FETCH_HEAD")
+    return remote if held.returncode == 0 else None
+
+
+def take_claim(root: Path, number: int, repo: str, branch: str, commit: str) -> str:
+    """Claim work issue #`number` for `start` (`claim`), or take this checkout's own claim of it
+    where `claim` made one here (`own_claim`): the remote."""
+    return own_claim(root, number, repo, branch) or claim(root, number, repo, branch, commit)
+
+
+def forget_claim(root: Path, number: int) -> None:
+    """Remove the record of this checkout's claim of #`number`, once `start` has taken it."""
+    claim_record_path(root, number).unlink(missing_ok=True)
+
+
 def utc_now() -> datetime:
     """The time now, in UTC: the clock every beat reads, which tests replace (rule tst-002)."""
     return datetime.now(timezone.utc)
@@ -4580,7 +4631,7 @@ def start(
     refuse_while_paused("start", pause_issues(root, repo))
     candidates = (
         ready_issues(root, repo, allow_existing_branch=True)
-        if not create else ready_issues(root, repo)
+        if not create or claimed_here(root, number) else ready_issues(root, repo)
     )
     issue = next(
         (candidate for candidate in candidates if candidate["number"] == number),
@@ -4598,7 +4649,7 @@ def start(
     if cloud:
         if not agent:
             raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
-        claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
+        take_claim(root, number, repo, str(issue["title"]), newest_integration_commit(root))
         run_gh(
             root,
             [
@@ -4615,12 +4666,22 @@ def start(
             ],
         )
         beat_action_gh(root, repo)({"issue_number": number}, "set")
+        post_started(root, number, repo, str(issue["title"]))
+        forget_claim(root, number)
         return None
 
     path = start_worktree(root, number, repo, str(issue["title"]), worktree_root, create)
     mark_in_progress(root, number, repo)
     beat_action_gh(root, repo)({"issue_number": number}, "set")
+    post_started(root, number, repo, str(issue["title"]))
+    forget_claim(root, number)
     return path
+
+
+def post_started(root: Path, number: int, repo: str, branch: str) -> None:
+    """Post the Started comment on work issue #`number` through gh, as `start_plan`'s last step."""
+    run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)],
+                     STARTED_COMMENT.format(branch=branch))
 
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
@@ -4637,9 +4698,14 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
             if directory is not None else default_worktree_root(root)
         )
         path = directory_path / branch.replace("/", "-")
+        own = own_claim(root, number, repo, branch)
+        existing = branch_worktree(root, branch) if own else None
+        if existing is not None:
+            sync(existing)
+            return existing
         if path.exists():
             raise QueueError(f"Worktree path already exists: {path}")
-        remote = claim(root, number, repo, branch, newest_integration_commit(root))
+        remote = own or claim(root, number, repo, branch, newest_integration_commit(root))
         try:
             directory_path.mkdir(parents=True, exist_ok=True)
         except OSError as error:
@@ -4654,18 +4720,7 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
                              f"{failure_detail(added)}; #{number}'s branch {branch} is claimed on "
                              f"{remote}, its labels unchanged")
     else:
-        listed = run_git(root, "worktree", "list", "--porcelain")
-        if listed.returncode != 0:
-            detail = failure_detail(listed)
-            raise QueueError(f"Cannot list worktrees: {detail}")
-        worktree = ""
-        path = None
-        for line in listed.stdout.splitlines():
-            if line.startswith("worktree "):
-                worktree = line.removeprefix("worktree ")
-            elif line == f"branch refs/heads/{branch}" and worktree:
-                path = Path(worktree).resolve()
-                break
+        path = branch_worktree(root, branch)
         if path is None:
             raise QueueError(f"No worktree exists for branch {branch}")
         if current_branch(path) != branch:
@@ -4673,6 +4728,20 @@ def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_roo
         claim(root, number, repo, branch, checked_git(path, "rev-parse", "HEAD").strip())
         sync(path)
     return path
+
+
+def branch_worktree(root: Path, branch: str) -> Path | None:
+    """The linked worktree of `root`'s repository that has `branch` checked out, None where none has."""
+    listed = run_git(root, "worktree", "list", "--porcelain")
+    if listed.returncode != 0:
+        raise QueueError(f"Cannot list worktrees: {failure_detail(listed)}")
+    worktree = ""
+    for line in listed.stdout.splitlines():
+        if line.startswith("worktree "):
+            worktree = line.removeprefix("worktree ")
+        elif line == f"branch refs/heads/{branch}" and worktree:
+            return Path(worktree).resolve()
+    return None
 
 
 STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
@@ -4833,7 +4902,7 @@ def start_handed_off(
         raise QueueError("Cloud start requires --cloud-agent or SE_CLOUD_AGENT")
     branch = str(issue["title"])
     if cloud:
-        claim(root, number, repo, branch, newest_integration_commit(root))
+        take_claim(root, number, repo, branch, newest_integration_commit(root))
     path = None if cloud else start_worktree(root, number, repo, branch, worktree_root, create)
     plan = start_plan(repo, number, branch, agent if cloud else None, paused=door is None)
     if door is None:
@@ -4844,6 +4913,7 @@ def start_handed_off(
                                      if key not in ("owner", "repo")})
 
         run_plan(plan, {**workflow_actions(door), "assign": assign, "beat": beat_action_door(door)})
+    forget_claim(root, number)
     return path, web_url(issue) or issue_url(repo, number), branch
 
 
@@ -12063,7 +12133,8 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 
 @command("claim", "claim a ready work issue for a worker your session tool starts: create its "
                   "branch at the newest main on the remote that hosts the issue's repository; "
-                  "refused, changing nothing, where that branch exists there",
+                  "refused, changing nothing, where that branch exists there; start of the issue "
+                  "in this checkout then takes this claim and changes its labels",
          WORKTREE,
          arg("issue", type=int),
          REPO,
@@ -12073,8 +12144,11 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 def run_claim(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     branch = issue_branch(root, args.issue, repo, args.issue_body)
-    remote = claim(root, args.issue, repo, branch, newest_integration_commit(root))
-    print(f"Claimed #{args.issue}: branch {branch} on {remote}")
+    commit = newest_integration_commit(root)
+    remote = claim(root, args.issue, repo, branch, commit)
+    record_claim_here(root, args.issue, remote, branch, commit)
+    print(f"Claimed #{args.issue}: branch {branch} on {remote}; start #{args.issue} here takes "
+          "this claim")
     return 0
 
 

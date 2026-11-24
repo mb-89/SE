@@ -223,8 +223,11 @@ merge or a start.
    Where you start the worker with `create_session` rather than `start` (the cloud flow), claim
    the issue first with `work_tickets.py claim <issue>`
    ([the claim](../skills/work-model/SKILL.md#worktrees)); where it refuses, start nothing for
-   that issue. Then change the issue's labels in that same step as `start` does, and remove
-   `in-progress` when you close it, as the work model's
+   that issue.
+
+   Then run `work_tickets.py start <issue>` in the same checkout: it takes that claim as its own,
+   creates or reuses the worktree on the claimed branch, changes the labels and posts the
+   `Started:` comment. Remove `in-progress` when you close the issue, as the work model's
    [scheduling](../skills/work-model/SKILL.md#freshness-dependencies-and-scheduling) says.
 
    Do not judge a worker by its session status right after starting it: a new session reads as
