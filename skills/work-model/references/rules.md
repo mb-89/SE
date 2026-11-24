@@ -686,8 +686,7 @@ Every push goes through a command that runs its gates, and a gate is never bypas
 
 Each piece of work has exactly one issue, a review, retro, overhaul or check writes one report on
 the issue or pull request it concerns, and only the `se` role files new issues, after reading such
-a report. The one exception is the integrator's work issue for a red integration branch, the
-person's decision of 24 Nov 2026 ([integrator](../../../agents/integrator.md)).
+a report.
 
 - **Why:** an issue is chosen work; a finding becomes work only when someone weighs it against the
   rest, and related findings are one package, not one issue each.
@@ -697,6 +696,9 @@ person's decision of 24 Nov 2026 ([integrator](../../../agents/integrator.md)).
 - **Implementations:**
   - se: `work_tickets.py file`, `backlog file` and `route` are the only paths to the issue-create
     door, which `tests/test_issue_creation.py` checks.
+  - se: the one exception is the integrator's work issue for a red integration branch, filed with
+    `work_tickets.py file`, the person's decision of 24 Nov 2026
+    ([integrator](../../../agents/integrator.md)).
   - se: `review.py file` posts one comment on the reviewed pull request and files no issue
     ([Work commands](../../../docs/work-commands.md#work-commands)).
   - se: `retro.py file` and `overhaul.py file` post one report on their own issue and close it,
