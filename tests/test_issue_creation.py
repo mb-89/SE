@@ -14,6 +14,9 @@ DOOR = {"filed_once", "filing_plan", "work_issue_filing"}
 # The deliberate filing paths: `file`, `backlog file` and `route`, in work_tickets.py.
 FILING = {("work_tickets.py", "file_work_issue"), ("work_tickets.py", "backlog_file"),
           ("work_tickets.py", "route_outside_issue")}
+# The door's transport: gh_rest.py answers over REST the `gh issue create` a filing path above
+# already made through work_tickets.run_gh; it is a table of gh's verbs and files nothing itself.
+TRANSPORT = {("gh_rest.py", "<module>"), ("gh_rest.py", "issue_create")}
 CREATES_BY_API = re.compile(r"/issues['\"]?\Z")
 
 
@@ -56,7 +59,7 @@ def door_paths(name: str, source: str) -> list[str]:
     for top in ast.parse(source).body:
         owner = top.name if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef,
                                              ast.ClassDef)) else "<module>"
-        if owner in DOOR or (name, owner) in FILING:
+        if owner in DOOR or (name, owner) in FILING | TRANSPORT:
             continue
         for node in ast.walk(top):
             what = creates(node)
@@ -128,3 +131,14 @@ def test_the_template_check_runs_in_the_door_before_its_first_write_on_every_fil
         keywords = {keyword.arg: keyword.value for keyword in filings[0].keywords}
         assert isinstance(keywords.get("template"), ast.Constant) and keywords["template"].value == template
         assert {"hold", "given"} <= set(keywords), path
+
+
+def test_the_transport_is_reached_only_through_the_gh_door():
+    """gh_rest.py's exemption holds only while `work_tickets.run_gh`, whose callers the check
+    above reads, is the one function that loads it."""
+    users = []
+    for script in sorted(SCRIPTS.glob("*.py")):
+        for top in ast.parse(script.read_text(encoding="utf-8")).body:
+            if any(isinstance(node, ast.Constant) and node.value == "gh_rest" for node in ast.walk(top)):
+                users.append((script.name, getattr(top, "name", "<module>")))
+    assert users == [("work_tickets.py", "run_gh")]

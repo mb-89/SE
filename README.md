@@ -144,9 +144,11 @@ What a cloud session meets, whatever state its container comes up in.
   `se.toml` after its start, SessionStart ran before the clone existed. The first hook whose working
   directory is inside the clone starts its core in the background, as SessionStart would have, and
   the hooks there then post to it ([scripts/se_hook.sh](scripts/se_hook.sh)).
-  - A session whose folder is inside no git checkout, as one started without sources is, starts no
-    core and says nothing of one; a checkout with an se.toml cloned into it then gets its core from
-    its first hook there.
+  - A session whose folder is inside no git checkout, as one started without sources is, starts
+    the core for SE's root, as kern is one of SE's
+    [required components](docs/boot.md#required-components); its hooks find no binary named for that
+    folder and pass, and a checkout with an se.toml cloned into it gets its own core from its first
+    hook there.
 - **`setup.sh` in a spawned session.** Claude Code's auto-mode permission check judges `bash
   scripts/setup.sh` as one command, before any of its steps runs.
   - In a session another session started without sources, which then cloned SE by hand, it refused
@@ -208,7 +210,7 @@ uv run python <se>/scripts/se_start.py update
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh is signed in, `check` also counts what came back since the
+- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts what came back since the
   newest retro started ([Retro due](#retro-due)), the retros closed since the newest overhaul
   started where that countdown is on, runs the [fleet check](#fleet-check), and caches them.
   - The greeting then names a retro that is [due or open](#retro-due), an overhaul that is
@@ -217,7 +219,7 @@ uv run python <se>/scripts/se_start.py update
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
-  - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
+  - Without gh (neither signed in nor answered over REST) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
 - The project's components: where the project's `se.toml` sets `[project] components`, its
@@ -283,21 +285,25 @@ no Go components. The plugin's hooks start the binary and post every session eve
   - Before the core starts, the start syncs the installed SE's kern where that clone is missing
     or not at the commit `se.lock` locks, both read from the files alone, so an SE at its pin
     starts no process for it.
-  - Where that fails, the session goes on without it and the greeting names the cause. A project
+  - Where that fails, the start goes on to the binary and the greeting names the cause. A project
     that is SE's own checkout syncs it in the modules step.
 - **SessionStart**, [scripts/bootstrap.sh](scripts/bootstrap.sh) `--hook`: for a project inside a
   git checkout, where `~/.se/bin/<name>-<version>` is on the machine, it runs `<name> start` for the
   project, which returns at once, and hands the core the session's start, which takes the session's
   lease. It names the binary in `<project>/.se/.runtime/kern.path` for the later hooks.
-  - For a project inside no git checkout it runs none.
+  - For a project inside no git checkout it runs one for SE's root, named in SE's own
+    `.se/.runtime/kern.path` ([required components](docs/boot.md#required-components)).
   - `~/.se/bin/<name>` links to the version in place (a copy where the file system makes no link),
     and Claude Code's env file puts `~/.se/bin` on the session's PATH, so `se status` works there.
 - **The first start of a version** reads the release's `SHA256SUMS` (one small read). Where it names
   this platform's archive, the archive is fetched, checked against its line and unpacked in the
   background, and the core then starts.
   - Where no release matches, the binary is built from its folder (SE's `components/`, on kern's
-    clone at its pin; the bare kern in that clone) with `go` in the background, and the greeting
-    says so; without `go` it failed, and the greeting names both causes.
+    clone at its pin; the bare kern in that clone) with `go` in the background; without `go` it
+    failed, and the start stops naming both causes.
+  - The start waits for that background up to `SE_KERN_WAIT` seconds (45 by default); one that runs
+    longer goes on, and the start stops naming kern and the remedy, a new start once it is in place
+    ([required components](docs/boot.md#required-components)).
   - The background half runs in its own process (`setsid` where there is one), so the hook's end
     does not end it.
 - **RUNME** places the binary once, with `bootstrap.sh --binary` (RUNME.conf's `get se` line): it
@@ -596,7 +602,7 @@ go = "components/go.mod"                     # in place of ref: the version that
 | `ref` | the pin, a full commit SHA. Any commit on the component's `main` can be pinned, not only releases; `update` moves it. |
 | `version` | in place of `ref`, a semantic version range of the component's release tags `vMAJOR.MINOR.PATCH` ([Project settings](#project-settings) says how a component releases): `^1.4` (1.4.0 up to 2.0.0), `~1.4.2` (up to 1.5.0), `1.4` (any 1.4.x) or `1.4.2` (exactly). An entry pins one of `ref`, `version` and `go`. |
 | `go` | in place of `ref` and `version`, for a Go module: `true` (the root's `go.mod`) or a relative path to a `go.mod`. The pin is the exact version that `go.mod` requires of the module path `<name>` (`require kern v0.14.1`), resolved to the tag `v<version>` and locked in `se.lock` as a range is; a `go.mod` without that require, or a version no owner tags, is refused. `update <name>` refuses and names the `go.mod` line to change instead (`update --all` leaves it as it is). A local checkout's version is its `release.toml` `version`. |
-| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. |
+| `optional` | `true` marks a component the host works without: `sync` names one no owner offers in one line and goes on. An entry without it is required, and a required one missing fails, naming its path from the root, the remotes read and the remedy. SE's own `se.toml` declares kern, obs and obs-html so, which every start loads from SE's root ([required components](docs/boot.md#required-components)). |
 | `path` | optional relative directory inside the component; without it the whole component is used. |
 | `url` | refused: an entry names no address, since a component is found by its name. A machine that needs another place says so in the machine-local file below. |
 | `se.lock` | next to `se.toml`, it records, as `[components.<name>]`, the release each `version` range and `go` pin of the tree chose, with its version and commit; `sync` and `update` write it and the repository commits it. |
@@ -933,6 +939,11 @@ the refs through `git ls-remote` and prints the rest.
 
 #### Hand-offs through the relay
 
+Where `gh` reaches GitHub over REST (Claude Code's cloud: `gh api` answers though `gh auth
+status` fails), no command hands off and the relay is not used: each reads and writes GitHub itself
+in one call (the work model's [Without gh](src/skills/work-model/SKILL.md#without-gh) owns the
+order of the paths). The relay is the path where REST does not answer either.
+
 Where kern serves the checkout with its GitHub component on the relay backend (a cloud session,
 no token), the hand-off needs neither a retyped file nor a second run
 ([docs/go-core.md "GitHub in the cloud"](docs/go-core.md#github-in-the-cloud)):
@@ -1130,9 +1141,13 @@ everywhere else.
 A partial view is no verdict: where the core holds only some issues or pull requests, the check
 says how many it has seen and since when, and reads the fleet itself.
 
+Where `gh` reaches GitHub, signed in or over REST, it reads the fleet itself in one call.
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
+
+`work_tickets.py turn-start` prints the findings together with everything else SE reads at a
+turn's start ([se agent "Turn-start check"](src/agents/se.md)).
 
 With `--sessions <file>` it also reports each worker session stopped on a usage limit before it
 delivered: the session tools' answers, the sessions `list_sessions` lists, each with the
@@ -2157,6 +2172,7 @@ settings checks and the generated docs.
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
 | `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
+| `work_tickets.py turn-start` | `work_tickets.py turn-start [--worktree WORKTREE] [--repo REPO] [--all-repos]` | what SE reads at each turn's start, in one call: the pause state, the escalations, the delivered pull requests, the capacity, the startable and the claimed work, the outside issues and the fleet's findings, read at once while the checkout syncs; a part whose read fails names its cause. Exit code 1 while the fleet is paused. Without gh it prints the queue's and the fleet check's plans, exit code 2 |
 
 #### Review
 

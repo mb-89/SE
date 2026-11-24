@@ -1278,16 +1278,20 @@ def test_setup_names_the_own_hooks_ignores_the_local_list_once_and_sets_the_iden
 
 def se_as_a_local_module(repo: Path) -> None:
     """The machine's local list points the component se at this checkout, and se's own components
-    at local checkouts, kern at its clone here and obs at a folder of its locked version, so `sync
-    se` clones nothing (README "Modules", ~/.se/local.toml [paths]); the repo fixture's HOME holds it."""
-    obs = repo.parent / "obs"
-    obs.mkdir(exist_ok=True)
-    locked = tomllib.loads((SE_ROOT / "se.lock").read_text(encoding="utf-8"))["components"]["obs"]["version"]
-    (obs / "se.toml").write_text(f'[project]\nversion = "{locked}"\n', encoding="utf-8")
+    at local checkouts, kern at its clone here and each other (obs, obs-html) at a folder of its
+    locked version, so `sync se` clones nothing (README "Modules", ~/.se/local.toml [paths]); the
+    repo fixture's HOME holds it."""
+    paths = {"se": SE_ROOT, "kern": SE_ROOT / ".se" / "modules" / "kern"}
+    own = tomllib.loads((SE_ROOT / "se.toml").read_text(encoding="utf-8"))["components"]
+    locked = tomllib.loads((SE_ROOT / "se.lock").read_text(encoding="utf-8"))["components"]
+    for name in sorted(set(own) - {"kern"}):
+        folder = paths[name] = repo.parent / name
+        folder.mkdir(exist_ok=True)
+        (folder / "se.toml").write_text(f'[project]\nversion = "{locked[name]["version"]}"\n', encoding="utf-8")
     local = Path(os.environ["HOME"]) / ".se" / "local.toml"
     local.parent.mkdir(parents=True, exist_ok=True)
-    local.write_text(f"[paths]\nse = '{SE_ROOT.as_posix()}'\nkern = '{(SE_ROOT / '.se' / 'modules' / 'kern').as_posix()}'\n"
-                     f"obs = '{obs.as_posix()}'\n", encoding="utf-8")
+    local.write_text("[paths]\n" + "".join(f"{name} = '{path.as_posix()}'\n" for name, path in paths.items()),
+                     encoding="utf-8")
 
 
 @pytest.mark.spawns("shell: scripts/setup.sh --copilot (setup.ps1 -Copilot on Windows) hands copilot.py "

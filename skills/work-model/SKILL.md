@@ -852,8 +852,20 @@ is its reusable part, imported from the project's se module.
 
 ### Without gh
 
-Where the host offers no `gh` (Claude's cloud), a role still follows its procedure; this section
-owns what changes. A `gh` that is installed but fails `gh auth status` counts as no `gh`.
+Where the host offers no `gh`, a role still follows its procedure; this section owns what
+changes, and which path each GitHub step takes. SE's `gh` door decides once per command, in this
+order:
+
+1. **Signed in**: `gh auth status` passes; every command runs as with `gh` everywhere.
+2. **Over REST**: the sign-in fails but `gh api rate_limit` answers (Claude Code's cloud, whose
+   proxy signs REST calls and refuses GraphQL). This counts as `gh`: every command runs its `gh`
+   path and prints its result in one call, with no plan and no relay step.
+   - `<se>/scripts/gh_rest.py` answers the `gh issue`, `gh pr` and `gh label` calls with REST
+     calls, and `intake --outside` reads each repository over REST; GraphQL is never called.
+3. **Through kern's relay**, where neither answers and kern serves the checkout (below).
+4. **A plan or files**, where none of these does: the rest of this section.
+
+A `gh` that is installed but neither signed in nor answered over REST counts as no `gh`.
 
 - **GitHub through the host's tools**: issues, comments and pull requests (their descriptions
   carrying the field reports) are read and written with the host's GitHub tools (in Claude's cloud, its GitHub MCP tools), with the same
@@ -918,6 +930,8 @@ owns what changes. A `gh` that is installed but fails `gh auth status` counts as
     escalations, the open pull requests to the integration branch (delivered where `field-report
     --check` passes on the description) and the ready work issues; the cloud's capacity is
     unlimited unless `[workers] cloud` limits it, and then the plan also lists the workers running.
+  - `turn-start` syncs the checkout and prints the queue's plan and the fleet check's, and says
+    that the outside issues are read by hand.
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.

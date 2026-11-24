@@ -119,15 +119,21 @@ command = ["uv", "run", "python", "scripts/copilot.py", "self-test", "--build"]
 target_seconds = 30
 limit_seconds = 90
 
-# SE's components, found by name under the owners of the checkout's remotes (README "Modules"),
-# both required. obs builds the documentation (README "Documentation").
-[components.obs]
-version = "^10.4.0"
-
 # kern, the Go core SE's binary is built on (docs/go-core.md "Pinning it"): its pin is the version
 # components/go.mod requires, so a move of that line is a change of se's inputs (README "Modules").
 [components.kern]
 go = "components/go.mod"
+
+# SE's other components, found by name under the owners of the checkout's remotes (README
+# "Modules"). kern above, obs and obs-html are each required: every start loads all of them from SE's root, wherever the session starts, and
+# stops where one does not answer (docs/boot.md "Required components"). obs builds the
+# documentation (README "Documentation") with its adapter component obs-html, which obs installs at
+# the version locked here.
+[components.obs]
+version = "^10.4.0"
+
+[components.obs-html]
+version = "^0.5.2"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).

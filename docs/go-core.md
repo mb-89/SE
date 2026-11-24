@@ -376,11 +376,11 @@ darwin is built, not tested. The binary is fetched into
 
 - **Cloud:** as local: the environment's setup script only clones SE (README ["Claude Code
   cloud"](../README.md#claude-code-cloud)), so `bootstrap.sh` fetches the binary at the session
-  start that first meets a version, in the background, and the session works without the core
-  until it lands; a container snapshot the cloud keeps can carry an older one (README ["Cloud
-  sessions"](../README.md#cloud-sessions)).
-- **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background; that
-  session works without the core until it lands, and the greeting says so.
+  start that first meets a version; a container snapshot the cloud keeps can carry an older one
+  (README ["Cloud sessions"](../README.md#cloud-sessions)).
+- **Local:** `bootstrap.sh` fetches it on the first start of a new version, in the background, and
+  the start waits for it: kern is required, so one that does not land in time stops the start
+  ([boot.md "Required components"](boot.md#required-components)).
 - **RUNME:** `bootstrap.sh --binary` places SE's pinned binary in the foreground, from its release
   (built with `go` only where none matches), links it and starts nothing (README ["Kern"](../README.md#kern)).
 - **Which pins:** the installed SE's `release.toml`, after the refresh at start moved it to its
@@ -537,8 +537,10 @@ file (step 6):
 ## GitHub in the cloud
 
 No token reaches code in a cloud session; the session's GitHub tools reach GitHub, and `git`
-reaches it through the session's proxy. The GitHub component is one I/O component with two
-backends, chosen at start:
+and `gh api` reach it through the session's proxy, which signs REST calls and refuses GraphQL.
+SE's Python commands take that REST path first, so they need neither backend below (the work
+model's [Without gh](../src/skills/work-model/SKILL.md#without-gh)). The GitHub component is one
+I/O component with two backends, chosen at start:
 
 - **token**, where `gh auth token` or `GH_TOKEN` gives one: the Go line's REST client, in process,
   with ETags, a refresh every 2 minutes and the rate-limit pacing of SE#750.
