@@ -1,12 +1,12 @@
 ---
 # An ad hoc Python component over NATS, under the ignored .se/components/: what `se component add
 # <name>` scaffolds through this template (scripts/se_component.py), its component.toml and its
-# __init__.py. scripts/templates.py's docstring (Code templates) owns this note's format.
+# __init__.py. scripts/code_templates.py's docstring owns this note's format.
 name: python-component
 version: 1.0.0
 kind: code
 reader: fleet
-says: "An ad hoc Python component: its component.toml with one command, and its __init__.py answering it."
+says: "An ad hoc Python component."
 tags: ["code", "python"]
 applies:
   actions: ["file.write"]

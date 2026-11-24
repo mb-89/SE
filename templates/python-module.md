@@ -2,12 +2,12 @@
 # A Python module: a file under scripts/ that other scripts import and that runs as no command (a
 # command is a python-script). `templates.py scaffold python-module --path <file> --says <line>`
 # writes one, and SE's hook refuses a write that leaves a module without its marker or docstring.
-# scripts/templates.py's docstring (Code templates) owns this note's format.
+# scripts/code_templates.py's docstring owns this note's format.
 name: python-module
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Python module other scripts import: its template marker, its docstring, and a slot for its code."
+says: "A Python module scripts import."
 tags: ["code", "python"]
 applies:
   actions: ["file.write"]

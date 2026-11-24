@@ -59,6 +59,8 @@ BINARY_ALLOWED: dict[str, str] = {}
 LARGE_ALLOWED: dict[str, str] = {
     "scripts/work_tickets.py": "the work model's one command; its split is a package of its own",
     "tests/test_work_ticket_issues.py": "the issue tests of work_tickets.py, which follow its size",
+    "scripts/templates.py": "the one template engine; its split is a package of its own, begun with "
+                            "scripts/code_templates.py",
 }
 
 # Dated reports that only list what one run found, kept whole however large (the owner's decision,

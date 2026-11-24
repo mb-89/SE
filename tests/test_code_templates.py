@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import code_templates
 import se_component
 import se_script
 import se_templates
@@ -27,7 +28,7 @@ pytestmark = pytest.mark.usefixtures("fake_git_door")
 
 
 def scaffolded(name: str, path: Path, says: str = "Count the words it is given.") -> dict[Path, str]:
-    return templates.scaffold(CATALOG[name], path, says)
+    return code_templates.scaffold(CATALOG[name], path, says)
 
 
 def findings(text: str, relative: str) -> list[str]:
@@ -141,9 +142,9 @@ def test_scaffold_writes_new_files_only_and_checks_its_arguments(tmp_path, capsy
                               ("ok", "Echo `x`.", "--says is the one line"),
                               ("ok", "  ", "--says is the one line")):
         with pytest.raises(templates.TemplateError, match=error):
-            templates.scaffold(CATALOG["python-script"], tmp_path / "x.py", says, name)
+            code_templates.scaffold(CATALOG["python-script"], tmp_path / "x.py", says, name)
     with pytest.raises(templates.TemplateError, match="only a code template scaffolds"):
-        templates.scaffold(CATALOG["work"], tmp_path / "x.md", "Echo.")
+        code_templates.scaffold(CATALOG["work"], tmp_path / "x.md", "Echo.")
     with pytest.raises(templates.TemplateError, match="is a code template and has no fields to fill; its "
                                                       "scaffold writes the file"):
         templates.fill(CATALOG["python-script"], {}, "raw")
@@ -191,7 +192,7 @@ def test_a_code_template_keeps_a_longer_fence_and_its_inner_fences(tmp_path):
     body = "## {{name}}.txt\n\n````text\n# thing\n```\ninner\n```\n{{says}}\n````\n"
     [template] = templates._loaded([(templates.PROJECT_REPOSITORY, {"thing.md": CODE_NOTE.format(body=body)},
                                      lambda file: f"templates/{file}")]).values()
-    assert templates.scaffold(template, tmp_path / "probe.txt", "Says it.") == {
+    assert code_templates.scaffold(template, tmp_path / "probe.txt", "Says it.") == {
         tmp_path / "probe.txt": "# thing\n```\ninner\n```\nSays it.\n"}
 
 
@@ -247,7 +248,7 @@ def test_se_component_add_renders_its_files_through_the_python_component_templat
     the code template scaffolds, its marker first."""
     se_component.add(tmp_path, "my-probe")
     folder = tmp_path / ".se" / "components" / "my-probe"
-    made = templates.scaffold(CATALOG["python-component"], se_component.COMPONENTS / "my-probe",
+    made = code_templates.scaffold(CATALOG["python-component"], se_component.COMPONENTS / "my-probe",
                               "An ad hoc component: say what my-probe does.", "my-probe")
     assert {path.name: text for path, text in made.items()} == {
         name: (folder / name).read_text(encoding="utf-8") for name in ("component.toml", "__init__.py")}
@@ -279,3 +280,25 @@ def test_se_script_run_configures_logging_once_and_answers_the_exit_code(capsys,
     finally:
         root.handlers[:], root.level = handlers, level
     assert capsys.readouterr().err == ""
+
+
+def test_se_script_imports_the_standard_library_only():
+    """The scripts that may import nothing but the standard library (story_check.py, cold_run.py)
+    may import se_script, because it imports nothing else."""
+    import ast
+
+    tree = ast.parse(Path(se_script.__file__).read_text(encoding="utf-8"))
+    modules = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
+               for alias in node.names}
+    modules |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    assert modules <= set(sys.stdlib_module_names) | {"__future__"}, modules
+
+
+def test_stop_check_and_push_check_nothing_where_the_integration_branch_shares_no_merge_base(tmp_path):
+    """SE's code templates claim carried paths in every project, so stop-check and push read the
+    changes; a checkout with no origin/<integration branch> to compare with yet passes, and CI's
+    check job holds its pull request to its base."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "free.py").write_text("print(1)\n", encoding="utf-8")
+    assert se_templates.claims_a_carried_path(se_templates.claim_templates(tmp_path, None)[0])
+    assert se_templates.changed_refusal(tmp_path, "origin/main") is None

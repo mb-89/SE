@@ -18,6 +18,7 @@ import pytest
 import deck
 import fake_git
 import git_door
+import code_templates
 import templates
 import outside_text
 import overhaul
@@ -303,7 +304,7 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
 
 def code_example(name: str) -> str:
     """The file a code template claims, as its scaffold writes it."""
-    made = templates.scaffold(templates.own(name), Path("x") / "thing", "Do it.", "thing")
+    made = code_templates.scaffold(templates.own(name), Path("x") / "thing", "Do it.", "thing")
     return next(text for path, text in sorted(made.items())
                 if len(made) == 1 or path.name in ("go.mod", "__init__.py"))
 

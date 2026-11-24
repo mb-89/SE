@@ -172,8 +172,8 @@ everything, so code has templates of the same engine and no scaffolder of its ow
   `python-script-shape` and `go-module-shape` ([Tags and guidance](#tags-and-guidance)).
 
 The Go engine loads a code template and checks a claimed file by its lines as Python does, held to
-the same cases; it scaffolds nothing. The docstring of `scripts/templates.py` (Code templates) owns
-the format.
+the same cases; it scaffolds nothing. The docstring of `scripts/code_templates.py` owns the
+format.
 
 ## The filled template is a type
 

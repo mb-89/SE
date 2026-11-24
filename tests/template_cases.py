@@ -39,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import git_door  # noqa: E402
+import code_templates  # noqa: E402
 import templates  # noqa: E402
 
 OUT = ROOT / "components" / "template" / "testdata" / "cases"
@@ -405,8 +406,8 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
 def _code_bodies(template: templates.Template) -> list[str]:
     """A code template's bodies: each file it scaffolds as it writes it, then the claimed one
     without each line its shape needs in turn, with another major version, and a free text."""
-    made = [text for _, text in sorted(templates.scaffold(template, Path("x") / "thing", "Do the thing.",
-                                                           "thing").items())]
+    made = [text for _, text in sorted(code_templates.scaffold(template, Path("x") / "thing",
+                                                                "Do the thing.", "thing").items())]
     claimed = [text for text in made if any(re.fullmatch(template.marker_pattern, line.strip())
                                             for line in text.splitlines())]
     bodies = list(made)

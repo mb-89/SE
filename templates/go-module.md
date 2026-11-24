@@ -1,13 +1,13 @@
 ---
 # A Go module: its go.mod, one package with its entry and a test. `templates.py scaffold go-module
 # --path <folder> --says <line>` writes one, and SE's hook refuses a go.mod written without its
-# marker or its module and go lines. scripts/templates.py's docstring (Code templates) owns this
+# marker or its module and go lines. scripts/code_templates.py's docstring owns this
 # note's format.
 name: go-module
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content."
+says: "A Go module: go.mod, its package and a test."
 tags: ["code", "go"]
 applies:
   actions: ["file.write"]

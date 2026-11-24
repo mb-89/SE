@@ -41,10 +41,11 @@ TEMPLATE = "python-component"
 def scaffolded(name: str) -> dict[str, str]:
     """The component's files, by name, as the code template TEMPLATE scaffolds them for `name`:
     its component.toml, one command offered to the agent, and its __init__.py answering it."""
-    import templates  # the engine loads late: only a scaffold needs it
+    import code_templates  # the engine loads late: only a scaffold needs it
+    import templates
 
-    made = templates.scaffold(templates.own(TEMPLATE), COMPONENTS / name,
-                              f"An ad hoc component: say what {name} does.", name)
+    made = code_templates.scaffold(templates.own(TEMPLATE), COMPONENTS / name,
+                                   f"An ad hoc component: say what {name} does.", name)
     return {path.name: text for path, text in made.items()}
 
 

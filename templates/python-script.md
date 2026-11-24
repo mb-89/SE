@@ -2,13 +2,13 @@
 # A Python script: a file under scripts/ that runs as a command. Its shape is fixed (the uv entry,
 # argparse help, logging, all through the shared library scripts/se_script.py); the author fills
 # only the slots. `templates.py scaffold python-script --path <file> --says <line>` writes one, and
-# SE's hook refuses a write that leaves a script off this shape. scripts/templates.py's docstring
-# (Code templates) owns this note's format.
+# SE's hook refuses a write that leaves a script off this shape. scripts/code_templates.py's docstring
+# owns this note's format.
 name: python-script
 version: 1.0.0
 kind: code
 reader: fleet
-says: "A Python script: the uv entry, argparse help and logging through scripts/se_script.py, and slots for its own part."
+says: "A Python script: uv entry, help, logging."
 tags: ["code", "python", "script"]
 applies:
   actions: ["file.write"]
