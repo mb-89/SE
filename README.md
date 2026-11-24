@@ -570,13 +570,10 @@ releases of the repositories in `se.toml` `[timeline]`: SE, obs, kern and obs-ht
 lies beside SE's home). The same workflow rebuilds it hourly and on each issue event.
 
 It is one obs table, a row per issue or release: its repository, place, date, number, title and
-status. It groups the rows by place (Today, Waiting for integrator, Needs you, Next, Backlog, Done),
-puts the newest first in each, and pages them; a backlog idea shows as waiting for your input, and
-an issue whose open pull request carries its field report as waiting for the integrator. When the
-page opens, it asks GitHub for what changed since the hourly snapshot and shows that where GitHub
-answers.
+status, grouped by place, newest first, in pages. When the page opens, it asks GitHub for what
+changed since the hourly snapshot and shows that where GitHub answers.
 
-[scripts/timeline.py](scripts/timeline.py) owns what shows where, the live read, and how a
+[scripts/timeline.py](scripts/timeline.py) owns the places, the live read, and how a
 repository the workflow's token cannot read shows as a named gap instead of failing the build.
 
 ## Modules
