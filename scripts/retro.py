@@ -156,6 +156,12 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
 FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
+# The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
+# 9): step 2's per-issue table and its field reports' answers, which the matrix holds, and step 3's
+# per-step table, as the chapters table is the deck's one table of what happened.
+LANDED_SECTION = "Landed issues"
+ANSWERS_SECTION = "The field reports' answers to the standing questions"
+STEP_TABLE = "| step | chapter | what went well | what it cost | can a machine do it |"
 # A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
 # one of HOMES.
 CLASS_FIELDS = ("name", "cause", "fix", "home", "home_kind")
@@ -1562,8 +1568,7 @@ def timeline_lines(found: Collected) -> list[str]:
               f"{chapter['end'] or 'unknown'} | "
               + ", ".join(f"#{number}" for number in chapter["issues"]) + " |"
               for chapter in chapters]
-    lines += ["", "| step | chapter | what went well | what it cost | can a machine do it |",
-              "|---|---|---|---|---|"]
+    lines += ["", STEP_TABLE, "|---|---|---|---|---|"]
     for chapter in chapters:
         for number in chapter["issues"]:
             item = by_number[number]
@@ -1595,7 +1600,7 @@ def matrix_lines(found: Collected) -> list[str]:
 
 def answer_lines(found: Collected) -> list[str]:
     """Step 2's part of the field reports: each standing question with each work issue's answer."""
-    lines = ["### The field reports' answers to the standing questions"]
+    lines = [f"### {ANSWERS_SECTION}"]
     for question in questions().fields:
         entries = [(item.number, item.retro[question.name]) for item in found.issues
                    if question.name in item.retro]
@@ -1640,7 +1645,7 @@ def collect_lines(found: Collected) -> list[str]:
     elif found.previous:
         lines.append("None.")
     lines += class_lines(found)
-    lines += ["", "### Landed issues", ""]
+    lines += ["", f"### {LANDED_SECTION}", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
         lines += ["| issue | refused deliveries | escalations | suite time | field report |",
@@ -2010,16 +2015,11 @@ def judged_classes(block: dict, root: Path | None) -> list[dict]:
     return sorted(rows, key=lambda row: HOMES.index(row["home_kind"].strip()))
 
 
-def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
-           root: Path | None = None) -> str:
-    """The retro's report proper, its closing comment, a document of the retro template: the six
-    steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
-    with its home and its state against the tree at `root`, and its findings, each with its kind),
-    and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
-    facts and the block the next collect reads."""
-    template = retro_template()
-    drafted = steps_of(text).fields
-    classes = judged_classes(block, root)
+def judged_class_lines(classes: list[dict], block: dict, named_only: bool = False) -> list[str]:
+    """Step 5 as the report and the deck show it: each judged class (`judged_classes`) with its cause,
+    fix, home and state against the tree and its findings, each with its kind; then what went well.
+    `named_only` (the deck's, whose decision chapters hold each finding) names each finding by its
+    number and title alone."""
     lines = []
     for row in classes:
         lines += ["", f"#### {row['name']} ({len(row['findings'])})", "",
@@ -2027,6 +2027,10 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
                   f"Home: {row['home_kind'].strip()} (home {HOMES.index(row['home_kind'].strip()) + 1} "
                   f"of {len(HOMES)}), `{row['home'].strip()}`; tree: {row['tree']}",
                   *class_key_lines({key: row[key] for key in CLASS_KEYS if key in row}), ""]
+        if named_only:
+            lines += ["Findings, each a decision at the end: " + "; ".join(
+                f"{item['finding']}. {item['title'].strip()}" for item in row["findings"]) + "."]
+            continue
         for item in row["findings"]:
             kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                     if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
@@ -2038,6 +2042,20 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
         lines += ["", "None."]
     lines += ["", "#### What went well", ""]
     lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
+    return lines
+
+
+def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
+           root: Path | None = None) -> str:
+    """The retro's report proper, its closing comment, a document of the retro template: the six
+    steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
+    with its home and its state against the tree at `root`, and its findings, each with its kind),
+    and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
+    facts and the block the next collect reads."""
+    template = retro_template()
+    drafted = steps_of(text).fields
+    classes = judged_classes(block, root)
+    lines = judged_class_lines(classes, block)
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
     still = [row["name"] for row in classes if row["tree"] == OPEN]
@@ -2201,6 +2219,113 @@ def run_file(args: argparse.Namespace) -> int:
     return 0
 
 
+def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
+    """A judged finding as its decision chapter of the deck: it opens with the finding itself, its
+    current situation as the judge wrote it, then its class by name (Classes and homes holds its cause and fix),
+    its home, and last what the person decides (their go for `work`, their decision for `decision`)."""
+    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}, its cause and fix under Classes and homes."]
+    check = f"; check `{item['check']}`" if item.get("check") else ""
+    lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
+              f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
+              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
+    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+
+
+def without_sections(text: str, headings: tuple[str, ...]) -> str:
+    """`text` without its `## <heading>` sections of `headings`, each up to the next heading of its
+    level or higher."""
+    kept, skipping = [], False
+    for line in text.split("\n"):
+        heading = re.match(r"(#{1,2}) (.*)$", line)
+        if heading:
+            skipping = len(heading[1]) == 2 and heading[2].strip() in headings
+        if not skipping:
+            kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def without_table(text: str, header: str) -> str:
+    """`text` without the Markdown table whose header row is `header`."""
+    lines = text.split("\n")
+    if header not in lines:
+        return text
+    start = lines.index(header)
+    end = start
+    while end < len(lines) and lines[end].startswith("|"):
+        end += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines[:start] + lines[end:])).strip()
+
+
+def deck_parts(block: dict, text: str, root: Path | None = None
+               ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """The retro's deck from its judged draft `text` and its block: every step the retro ran as a
+    chapter, each thing once (SE#1826, requirements 8 and 9), then one decision chapter per finding,
+    each written as a chapter note's text.
+
+    - what was collected, without the per-issue table and the field reports' answers
+      (LANDED_SECTION, ANSWERS_SECTION);
+    - the table of what happened, its one table the chapters of the window (STEP_TABLE left out);
+    - the standing questions: the one matrix, then the retro's answer to each question, the field
+      feedback answering the first, so it has no chapter of its own;
+    - the classes with their causes, fixes and homes, each naming its findings, and what went well."""
+    template = retro_template()
+    drafted = steps_of(text).fields
+    classes = judged_classes(block, root)
+
+    def body(name: str) -> str:
+        return review.demoted(str(drafted.get(name) or "None."), -1).strip()
+
+    # The deck's chapters carry no step numbers: the field feedback is no chapter of its own.
+    heading = {name: re.sub(r"^\d+\.\s*", "", template.field(name).heading) for name in
+               ("collect", "timeline", "matrix", "answers", "classes")}
+    answers = re.sub(r"<!--.*?-->\s*", "", str(drafted.get("answers") or "None."), flags=re.DOTALL).strip()
+    first = questions().fields[0].heading
+    feedback = str(drafted.get("field_feedback") or "").strip()
+    if feedback:
+        marker = f"### {first}\n\n"
+        quoted = f"The person's field feedback:\n\n{review.demoted(feedback, 2)}\n\n"
+        answers = (answers.replace(marker, marker + quoted, 1) if marker in answers
+                   else f"{marker}{quoted}{answers}")
+    steps = [(heading["collect"], without_sections(body("collect"), (LANDED_SECTION, ANSWERS_SECTION))),
+             (heading["timeline"], without_table(body("timeline"), STEP_TABLE)),
+             (heading["matrix"], f"{body('matrix')}\n\n## {heading['answers']}\n\n{answers}"),
+             (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block, named_only=True)),
+                                                 -1).strip())]
+    return steps, [finding_chapter(item, classes) for item in block["findings"]]
+
+
+def window_line(block: dict) -> str:
+    """The title page's subtitle: the window's days and how many findings the retro brings."""
+    window = block.get("window") or {}
+    days = [str(window.get(key) or "")[:10] for key in ("since", "until")]
+    span = " to ".join(day for day in days if day) or "the whole history"
+    count = len(block["findings"])
+    return f"{span}: {count} finding{'' if count == 1 else 's'}"
+
+
+def run_deck(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    text = work_tickets.read_file(args.draft, "the retro draft")
+    block = judged(text, args.retro)
+    open_steps = steps_problems(text)
+    if open_steps:
+        raise QueueError(f"The draft of retro #{args.retro} leaves a step of the retro template "
+                         f"({retro_template().path or TEMPLATE_NAME}) open, so no deck was built: "
+                         + "; ".join(open_steps))
+    steps, decisions = deck_parts(block, text, root)
+    deck = sibling("retro_deck")
+    try:
+        written = deck.text(f"Retro #{args.retro}", window_line(block), steps, decisions)
+    except deck.DeckError as error:
+        raise QueueError(f"Retro #{args.retro}: {error}") from None
+    code = deck.build(written, args.destination, args.host, args.answers)
+    if code == 0:
+        print(f"Retro #{args.retro}: the report is the deck {args.destination}, its one file: a title "
+              f"page, {len(steps)} steps and {len(decisions)} decision chapter(s)"
+              + (", the person's answers recorded" if args.answers else ""))
+    return code
+
+
 def since_of(value: str | None) -> str | None:
     """`--since`, a date (YYYY-MM-DD, its midnight UTC) or an ISO time, as GitHub writes times."""
     if value is None:
@@ -2325,10 +2450,10 @@ def run_due(args: argparse.Namespace) -> int:
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
-    "A retro: collect writes its draft from the work since the last one, file checks the judged "
-    "draft and closes the retro issue with its report, due says whether a retro or an overhaul "
-    "is due or open.",
-    ("collect", "file", "due")),)
+    "A retro: collect writes its draft from the work since the last one, deck builds its one "
+    "report, a deck, from the judged draft, file checks the judged draft and closes the retro "
+    "issue with its report, due says whether a retro or an overhaul is due or open.",
+    ("collect", "deck", "file", "due")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as collect reads
 #: GitHub for minutes and writes the draft, and file writes.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
@@ -2376,6 +2501,28 @@ def make_parser() -> argparse.ArgumentParser:
     collect_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                                 "tracker or origin remote)")
     collect_command.set_defaults(run=run_collect)
+    deck_command = commands.add_parser(
+        "deck", help="build the retro's one report, a deck, from its judged draft",
+        description="Check the judged draft as file does, then build the retro's one report: a "
+                    "deck from the retro-deck template (templates/retro-deck.md) with a title page, "
+                    "every step the retro ran as a chapter (the field feedback, what was collected, "
+                    "the table of what happened, the standing questions with their matrix, the "
+                    "classes with their findings, causes, fixes and homes) and one decision chapter "
+                    "per finding, last, each asking the person for a bless. It writes the one HTML "
+                    "file DESTINATION and nothing beside it, and never waits for the answers.")
+    deck_command.add_argument("retro", type=int, help="the retro issue's number")
+    deck_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
+                              help="the draft retro.py collect wrote, its block judged")
+    deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
+                              help="the deck's HTML file")
+    deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
+                              help="the host the person's answers go back to (deck.py build "
+                                   "--host; default: the one this runs under)")
+    deck_command.add_argument("--answers", type=Path, metavar="FILE",
+                              help="the person's answers (answers.json): build the deck as their record")
+    deck_command.add_argument("--worktree", default=".",
+                              help="the checkout of the repository (default: .)")
+    deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
         "file", help="check a judged retro draft and close the retro issue with its report",
         description="Check the judgment the judge wrote into the draft's block, refusing an "

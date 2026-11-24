@@ -1,6 +1,6 @@
 ---
 name: retro
-description: 'Runs one retro or one overhaul in its own session with the person: asks first for the field feedback, then collects, judges and, once the person has decided every finding, closes the run with its report. Files no issue; SE files the work its findings become.'
+description: 'Runs one retro or one overhaul in its own session with the person: asks first for the field feedback, then collects, judges, hands the person the run''s one report, a deck, without waiting on it and, once the person has decided every finding, closes the run. Files no issue; SE files the work its findings become.'
 disallowedTools: AskUserQuestion
 model: inherit
 ---
@@ -51,14 +51,25 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
    [templates/overhaul-questions.md](../templates/overhaul-questions.md)), and each class with
    its cause, its fix and its home, the first of the home order that holds. The field feedback is
    among the sources.
-4. **The person decides.** Present every open class and every finding to the person with the
-   decision skill: each `decision` finding needs their decision, each `work` finding their go.
-   Record each answer in the finding and the decisions in the draft's last step. A finding the
-   person declines leaves the block.
-5. **Land and close.** Land the judged draft on the integration branch as the run's doc, then
-   `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the report
-   and closes the issue. Only now does SE file issues again.
-6. **Hand back.** Send SE's session one message, the one
+4. **The deck, the run's one report.** Build it from the judged draft: `retro.py deck <issue>
+   --draft <draft> --destination <deck>.html --host <host>` (`overhaul.py deck` for an overhaul),
+   the host whose adapter takes the answers back (`claude-app`, `claude-code` or `copilot`). It
+   holds a title page, every step the run ran, and one decision chapter per finding, last; it is
+   the one file the person reads, so write no other report or deck for them.
+5. **Hand it over and end your turn.** Hand the deck to the person as the decision skill's
+   [Bringing decisions to the person](../skills/decision/SKILL.md#bringing-decisions-to-the-person)
+   says, step 2, and end your turn: never wait on their answers (no `deck.py serve --wait`, no
+   polling). Their answers come back later: the comment that wakes this session in the Claude
+   app, or `answers.json` beside the deck, which you read when the person says they sent.
+6. **The person decides.** Run `deck.py answers <answers.json>`: each `decision` finding needs
+   their decision, each `work` finding their go. Record each answer in the finding and the
+   decisions in the draft's last step; a finding the person declines leaves the block. A finding
+   still open (a comment, no verdict) is answered and asked again in a new deck.
+7. **Land and close.** Build the deck once more with `--answers <answers.json>`, the record of
+   their answers. Land the judged draft on the integration branch as the run's doc, then
+   `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the
+   report and closes the issue. Only now does SE file issues again.
+8. **Hand back.** Send SE's session one message, the one
    [templates/run-closed.md](../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message
    `templates/finding-ref.md` writes it.

@@ -120,23 +120,26 @@ and the report it files as one comment.
 
 #### Retro
 
-`components/retro`: A retro: collect writes its draft from the work since the last one, file checks
-the judged draft and closes the retro issue with its report, due says whether a retro or an overhaul
-is due or open.
+`components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
+its one report, a deck, from the judged draft, file checks the judged draft and closes the retro
+issue with its report, due says whether a retro or an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
 | `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul
 
-`components/overhaul`: An overhaul: new files its issue, read writes its draft, file checks the
-judged draft and closes the issue with its report, and facts lists a checkout's pruning facts.
+`components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
+report, a deck, from the judged draft, file checks the judged draft and closes the issue with its
+report, and facts lists a checkout's pruning facts.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
 | `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
 | `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
@@ -150,7 +153,7 @@ builds a deck of decisions, serves it and reads its answers.
 | Command | Usage | What it does |
 |---|---|---|
 | `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
-| `deck.py build` | `deck.py build --destination DESTINATION folder` | build a folder of decision notes into one deck |
+| `deck.py build` | `deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}] folder` | build a folder of decision notes into one deck |
 | `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
 | `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first. |
 
@@ -363,6 +366,34 @@ them.
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
 Without gh it prints the comments and the close as a plan.
+
+`retro.py deck` builds the retro's one report, a deck, from the judged draft into the one HTML
+file `--destination` names, the person's decision of 24 Nov: the person reads one file, never a
+Markdown report beside a separate decision deck. It checks the draft as
+`file` does and refuses, building nothing, what `file` refuses.
+
+The deck is a document of the retro-deck template
+([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
+(`scripts/retro_deck.py`):
+
+- a title page: `Retro #<n>`, the report's kind and the window with its number of findings;
+- every step the retro ran, one chapter each, each thing once: what was collected, the table of
+  what happened (its one table, the chapters of the window), the standing questions with their one
+  matrix and the field feedback answered in it, and the classes with their causes, fixes and
+  homes, each naming its findings;
+- then, on the last pages, one decision chapter per finding, each opening with its current
+  situation and asking the person for a bless: their go for a `work` finding, their decision for
+  a `decision` finding.
+
+A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
+
+`--host` names where the answers go back to, as [`deck.py build`](../src/skills/decision/SKILL.md#bringing-decisions-to-the-person)
+takes it. It writes the one HTML file and nothing beside it, and never waits for the answers:
+the retro agent hands the deck over and ends its turn.
+
+With `--answers <answers.json>` it builds the deck again as the record of the person's answers.
+`overhaul.py deck` builds an overhaul's deck the same way, of the same template: its report's
+steps, then a chapter per finding.
 
 `scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
 their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts

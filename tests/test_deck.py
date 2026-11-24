@@ -107,8 +107,9 @@ DECKS = {
 
 
 def _deck(folder: Path, destination: Path) -> subprocess.CompletedProcess:
+    """The Claude app's deck, whatever host runs the tests: the browser tests drive its runtime."""
     return subprocess.run([sys.executable, str(SCRIPTS / "deck.py"), "build", str(folder),
-                           "--destination", str(destination)], capture_output=True, text=True)
+                           "--destination", str(destination), "--host", "claude-app"], capture_output=True, text=True)
 
 
 @pytest.fixture(scope="session")
@@ -173,6 +174,22 @@ def test_a_clean_built_deck_has_no_findings_and_writes_nothing(decks, capsys):
     assert (code, result.out) == (0, "look: no findings in deck.html, 1 chapter(s) at phone-light, "
                                      "phone-dark, desktop-light, desktop-dark\n"), result.err
     assert sorted(path.name for path in deck_page.parent.iterdir()) == before
+
+
+@pytest.mark.parametrize("opening", ["This is one case of how storage is chosen.", "this is a case of storage."])
+def test_a_chapter_that_asks_and_opens_with_a_stock_phrase_is_refused(opening):
+    """SE#1826, requirement 10: a decision opens with its current situation, never a stock phrase."""
+    def text(words: str) -> dict:
+        return {"type": "text", "text": words, "children": []}
+
+    chapter = {"id": "store", "bless": {"state": "pending"}, "content": [
+        {"type": "section", "attrs": {"level": 2}, "children": [text("Current situation")]},
+        {"type": "paragraph", "children": [text(opening)]}]}
+    refusal = deck._refusal([chapter], recorded=False)
+    assert refusal.startswith('chapter(s) store open with a stock phrase such as "This is one case of"')
+    plain = {**chapter, "content": [chapter["content"][0], {"type": "paragraph", "children": [
+        text("Storage is chosen by hand. This is one case of many.")]}]}
+    assert deck._refusal([plain], recorded=False) is None
 
 
 def test_build_warns_of_an_option_without_success_or_a_mark_without_its_reason(decks):
@@ -496,6 +513,78 @@ def test_a_refused_deck_leaves_no_document(decks):
     assert not deck.document_path(destination).exists()
 
 
+def _host(bundled: dict[str, dict], host: str, **where: object) -> dict:
+    return _bundle(bundled, files="ok", comment="ok", deck={"title": "Retro", "decisions": [], "host": host}, **where)
+
+
+@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
+def test_under_copilot_or_claude_code_send_reaches_the_session_through_obs_html_serve(bundled, host, name):
+    """The regression of retro #1810 finding 16: under Copilot the deck said its answers did not reach Claude.
+    Its sink is the host's own, named after it, and posts to the server that writes answers.json."""
+    calls = _host(bundled, host, served=True, late=True, never=True)
+    assert (calls["id"], calls["name"]) == (host, name)
+    assert calls["result"] == {"ways": ["server"], "written": "answers.json"}
+    assert [post["body"] for post in calls["posted"]] == [PAYLOAD]
+    assert (calls["published"], calls["comments"], calls["warnings"]) == ([], [], [])
+
+
+@pytest.mark.parametrize(("host", "name"), [("copilot", "Copilot"), ("claude-code", "Claude Code")])
+def test_an_unserved_copilot_or_claude_code_deck_names_its_own_host_never_claude(bundled, host, name):
+    calls = _host(bundled, host, late=True, never=True)
+    assert calls["result"] is None
+    message = calls["error"]["message"]
+    assert message.startswith("sending is not available here") and f"reached {name}." in message
+    assert "deck.py serve" in message and "reached Claude." not in message
+
+
+def test_a_copilot_deck_never_takes_the_claude_app_runtime(bundled):
+    calls = _host(bundled, "copilot")
+    assert calls["result"] is None and calls["published"] == [] and calls["comments"] == []
+
+
+def test_a_claude_code_deck_published_in_the_claude_app_after_all_takes_its_runtime(bundled):
+    calls = _host(bundled, "claude-code")
+    assert calls["name"] == "Claude Code" and calls["result"]["ways"] == ["answers.json", "comment"]
+    assert _host(bundled, "claude-code", served=True)["result"]["ways"] == ["server"]
+
+
+def test_the_claude_app_adapter_takes_its_runtime_first_and_the_server_after(bundled):
+    assert _host(bundled, "claude-app", served=True)["result"]["ways"] == ["answers.json", "comment"]
+    calls = _host(bundled, "claude-app", served=True, late=True, never=True)
+    assert calls["result"] == {"ways": ["server"], "written": "answers.json"} and calls["name"] is None
+
+
+@pytest.mark.parametrize("where", [{}, {"served": True}], ids=["file", "served"])
+def test_a_local_deck_registers_no_sink_so_obs_html_takes_the_answers(bundled, where):
+    calls = _host(bundled, "local", **where)
+    assert calls["registered"] is False and calls["application"] == [deck.BUNDLE_ID, []]
+    assert calls["warnings"] == [] and calls["posted"] == []
+
+
+def test_a_host_without_an_adapter_registers_no_sink_and_says_so(bundled):
+    calls = _host(bundled, "vscode")
+    assert calls["registered"] is False
+    [warning] = calls["warnings"]
+    assert warning.startswith('se-answers: this deck names the host "vscode", which has no adapter here')
+
+
+@pytest.mark.parametrize(("environment", "host"), [
+    ({"SE_HOOK_HOST": "copilot", "CLAUDECODE": "1"}, "copilot"),
+    ({"CLAUDECODE": "1", "CLAUDE_CODE_REMOTE": "true"}, "claude-app"),
+    ({"CLAUDECODE": "1"}, "claude-code"),
+    ({}, "local"),
+    ({"SE_HOOK_HOST": "claude"}, "local"),
+], ids=["copilot", "cloud", "claude-code", "none", "claude-hook-file"])
+def test_the_default_host_is_the_one_the_build_runs_under(environment, host):
+    assert deck.default_host(environment) == host
+
+
+def test_a_host_the_deck_does_not_know_is_refused_before_obs_runs(tmp_path, capsys):
+    folder = _folder(tmp_path, {"one": NOTE % ("One", "one")})
+    assert deck.build(folder, tmp_path / "deck.html", host="vscode") == 2
+    assert "--host vscode is none of claude-app, claude-code, copilot, local" in capsys.readouterr().err
+
+
 def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_script():
     document = {"manifest": {"title": "A </script><!-- deck"}, "chapters": [
         {"id": "pick", "content": [{"type": "pugh", "children": []}], "children": []},
@@ -505,7 +594,9 @@ def test_the_bundle_data_is_the_decks_title_and_decisions_and_cannot_end_its_scr
     assert rest == deck.BUNDLE.read_text(encoding="utf-8")
     assert "<" not in head
     data = json.loads(head.removeprefix("globalThis.seDeck = Object.freeze(").removesuffix(");"))
-    assert data == {"title": "A </script><!-- deck", "decisions": ["pick"]}
+    assert data == {"title": "A </script><!-- deck", "decisions": ["pick"], "host": "claude-app"}
+    assert json.loads(deck._bundle(document, "copilot").split("\n", 1)[0].removeprefix(
+        "globalThis.seDeck = Object.freeze(").removesuffix(");"))["host"] == "copilot"
 
 
 @pytest.mark.spawns("tool: `deck.py answers --record` builds the record with the real obs, obs-document in "
@@ -548,7 +639,8 @@ function page() {
         return node;
     };
     const body = element();
-    const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0};
+    const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0,
+                   posted: [], order: []};
     globalThis.console = {...console, warn: message => calls.warnings.push(message)};
     if (mode.deck) globalThis.seDeck = mode.deck;
     globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
@@ -557,6 +649,11 @@ function page() {
                                                   reveal: id => calls.notices.push(["reveal", id]),
                                                   remove: id => calls.notices.push(["remove", id])};
     if (mode.served) globalThis.ObsHtmlAnswers = {server: () => "http://127.0.0.1:1/answers"};
+    // obs-html serve's answer to the page's post: it writes answers.json beside the deck.
+    globalThis.fetch = async (url, init) => {
+        calls.posted.push({url, body: JSON.parse(init.body)});
+        return {ok: true, status: 200, json: async () => ({written: "answers.json"})};
+    };
     globalThis.obsArtifact = {
         registerApplication: application => { calls.application = [application.id, application.actions]; },
         trustedExtension: namespace => ({register: sink => { calls.sink = {namespace, ...sink}; }}),
@@ -564,15 +661,20 @@ function page() {
     const refusal = code => Object.assign(new Error(`refused: ${code}`), {code});
     const claude = {use: async name => {
         if (name === "artifact") return {publish: async files => {
+            calls.order.push("publish");
             if (mode.files !== "ok") throw refusal(mode.files);
             calls.published.push(files);
             return {version: "v2"};
         }};
         if (name === "comments") return {
             anchorFor: async node => ({element: node === body ? "body" : "other"}),
+            canSendToClaude: async () => mode.canSend ?? "available",
             sendToClaude: async target => {
+                calls.order.push("comment");
+                await new Promise(resolve => setTimeout(resolve, 5));  // the shell's round trip
                 if (mode.comment !== "ok") throw refusal(mode.comment);
                 calls.comments.push(target);
+                calls.order.push("comment sent");
                 return {threadId: "t1", commentId: "c1"};
             },
         };
@@ -582,6 +684,10 @@ function page() {
     eval(bundle);
     (async () => {
         const registered = calls.sink !== null;  // Registered at the first run, with or without claude.
+        if (!registered) {  // No sink of its own: obs-html's own sinks take the answers.
+            report({registered, application: calls.application, warnings: calls.warnings, posted: calls.posted});
+            return;
+        }
         if (mode.late && !mode.never) globalThis.claude = claude;
         let result = null, error = null;
         try { result = await calls.sink.send(payload); }
@@ -589,14 +695,15 @@ function page() {
         report({registered, application: calls.application, namespace: calls.sink.namespace,
                 id: calls.sink.id, name: calls.sink.name ?? null, result, error,
                 elements: calls.created + body.children.length, notices: calls.notices,
-                published: calls.published, comments: calls.comments, warnings: calls.warnings});
+                published: calls.published, comments: calls.comments, warnings: calls.warnings,
+                posted: calls.posted, order: calls.order});
     })();
 }
 (async () => {
     const results = [];
     for (const mode of modes) {
         results.push(await new Promise(report => vm.runInNewContext(`(${page})()`,
-            {bundle, payload, mode, report, console, TextEncoder})));
+            {bundle, payload, mode, report, console, TextEncoder, setTimeout})));
     }
     console.log(JSON.stringify(results));
 })();
@@ -615,6 +722,10 @@ BUNDLE_MODES = [
     {"files": "capability_disabled", "comment": "claude_unavailable"},
     {"files": "ok", "comment": "ok", "late": True},
     {"files": "ok", "comment": "ok", "late": True, "never": True},
+    *({"files": "ok", "comment": "ok", "canSend": state} for state in ("no_session", "writers_only", "off")),
+    *({"files": "ok", "comment": "ok", "deck": {"title": "Retro", "decisions": [], "host": host}, **where}
+      for host in ("claude-app", "claude-code", "copilot", "local", "vscode")
+      for where in ({}, {"served": True}, {"late": True, "never": True}, {"served": True, "late": True, "never": True})),
 ]
 
 
@@ -688,10 +799,15 @@ def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(bund
     assert "no answer" not in comment["text"]
 
 
+def partly_comment(reason: str = "") -> dict:
+    return {"id": "se-answers-partly", "severity": "warning", "title": "No message to Claude",
+            "details": ["Your answers are saved with this page, where Claude reads them, but the message to "
+                        f"Claude did not go through. {reason + ' ' if reason else ''}If Claude does not answer, say "
+                        "in the chat that you sent them."]}
+
+
 PARTLY = {
-    "comment": {"id": "se-answers-partly", "severity": "warning", "title": "No message to Claude",
-                "details": ["Your answers are saved with this page, where Claude reads them, but the message to "
-                            "Claude did not go through. If Claude does not answer, say in the chat that you sent them."]},
+    "comment": partly_comment("Claude could not take the message just now."),
     "answers.json": {"id": "se-answers-partly", "severity": "warning", "title": "Not saved with the page",
                      "details": ["Claude got your answers as a message, but they could not be saved with this page."]},
 }
@@ -712,6 +828,27 @@ def test_a_send_where_one_way_failed_posts_one_plain_warning(bundled, files, com
     [warning] = _send_warnings(calls)
     assert warning.startswith("se-answers: ") and code in warning
     assert calls["elements"] == 0
+
+
+def test_the_comment_to_claude_goes_first_and_alone_then_answers_json(bundled):
+    """The regression of 24 Nov: in the Claude app the answers were saved but the message to Claude did not
+    go through. The comment, which wakes the session, is sent first and finished before the publish starts."""
+    calls = _bundle(bundled, files="ok", comment="ok")
+    assert calls["order"] == ["comment", "comment sent", "publish"]
+    [comment] = calls["comments"]
+    assert "- swipe: bless" in comment["text"] and json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
+
+
+@pytest.mark.parametrize(("state", "reason"), [
+    ("no_session", "No Claude session is listening to this page right now."),
+    ("writers_only", "Only an editor of this page can send a message to Claude from it."),
+    ("off", "This view does not offer messages to Claude."),
+])
+def test_where_the_shell_cannot_send_to_claude_no_comment_is_tried_and_the_reason_is_named(bundled, state, reason):
+    calls = _bundle(bundled, files="ok", comment="ok", canSend=state)
+    assert calls["order"] == ["publish"] and calls["comments"] == []
+    assert calls["result"]["ways"] == ["answers.json"] and calls["result"]["failed"] == {"comment": state}
+    assert calls["notices"] == [["post", partly_comment(reason)], ["reveal", "se-answers-partly"]]
 
 
 def test_a_partial_send_without_a_notice_center_still_resolves(bundled):

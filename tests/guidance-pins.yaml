@@ -88,6 +88,9 @@ requirement:
 retro:
   - discover-cheap-load-late
   - guidance-comes-first
+retro-deck:
+  - discover-cheap-load-late
+  - guidance-comes-first
 retro-doc:
   - discover-cheap-load-late
   - guidance-comes-first
