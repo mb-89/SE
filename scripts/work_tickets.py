@@ -2729,6 +2729,16 @@ def authored_sentences(text: str) -> list[str]:
     return sentences
 
 
+#: A Markdown link's target: a sentence whose words stay and whose links only point elsewhere, as
+#: when its section moves to another page, removes no prose.
+LINK_TARGET = re.compile(r"\]\([^)\s]*\)")
+
+
+def prose_key(sentence: str) -> str:
+    """`sentence` with its link targets left out: what the guard compares."""
+    return LINK_TARGET.sub("]()", sentence)
+
+
 def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
     """Each authored sentence `branch` removes, as `<path>: <sentence>`."""
     return [f"{path}: {sentence}" for path, sentence in deleted_authored_places(root, branch)]
@@ -2736,7 +2746,8 @@ def deleted_authored_sentences(root: Path, branch: str) -> list[str]:
 
 def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
     """The (path, sentence) pairs of the authored sentences `branch` removes: a sentence of an
-    authored file where it forked that no authored file on the branch holds."""
+    authored file where it forked that no authored file on the branch holds, its link targets
+    aside (`prose_key`)."""
     globs = authored_content_globs(root)
     if not globs:
         return []
@@ -2786,7 +2797,7 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
         return result.stdout
 
     new_sentences = {
-        sentence
+        prose_key(sentence)
         for path, revision in new_files
         for sentence in authored_sentences(content(path, revision))
     }
@@ -2795,7 +2806,7 @@ def deleted_authored_places(root: Path, branch: str) -> list[tuple[str, str]]:
         if path is None:
             continue
         for sentence in authored_sentences(content(path, revision)):
-            if sentence not in new_sentences and (path, sentence) not in found:
+            if prose_key(sentence) not in new_sentences and (path, sentence) not in found:
                 found.append((path, sentence))
     return found
 

@@ -549,6 +549,27 @@ def test_guard_ignores_rewrapped_authored_sentences(worktree: Path) -> None:
     assert "No removed protected content found." in guarded.stdout
 
 
+def test_guard_ignores_a_sentence_whose_links_only_point_elsewhere(worktree: Path) -> None:
+    """A section moved to another page keeps its words; its links point from there (SE#1796)."""
+    repository, guide = authored_repository(
+        worktree.parent / "retargeted-content-case", "retarget-links",
+        "Read [the rule book](rules.md#use) before you start.\n",
+    )
+    guide.write_text("Read [the rule book](../rules.md#use) before you start.\n", encoding="utf-8")
+    assert git(repository, "commit", "-am", "retarget a link").returncode == 0
+    report = repository / "field-report.md"
+    report.write_text(
+        "<!-- se:field-report -->\n## Removed behaviour, deleted or weakened tests, and authored prose\n\nNone\n<!-- se:field-report:end -->\n",
+        encoding="utf-8",
+    )
+    guarded = run_helper(
+        "guard", "--branch", "retarget-links", "--pr-description", str(report),
+        "--worktree", str(repository),
+    )
+    assert guarded.returncode == 0, guarded.stderr
+    assert work_tickets.prose_key("See [it](a.md#x) and [that](<b c.md>).") == "See [it]() and [that](<b c.md>)."
+
+
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
