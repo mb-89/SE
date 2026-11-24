@@ -208,7 +208,7 @@ uv run python <se>/scripts/se_start.py update
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh is signed in, `check` also counts what came back since the
+- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts what came back since the
   newest retro started ([Retro due](#retro-due)), the retros closed since the newest overhaul
   started where that countdown is on, runs the [fleet check](#fleet-check), and caches them.
   - The greeting then names a retro that is [due or open](#retro-due), an overhaul that is
@@ -217,7 +217,7 @@ uv run python <se>/scripts/se_start.py update
   - `status` reads them from the cache, and each part from kern live where the core in the checkout
     carries SE's fleet and retro-due components and has read issues: its line then says `live from kern`
     ([components/README.md](components/README.md#who-reads-them)).
-  - Without gh (Claude's cloud, where no token reaches SE's code) the greeting names neither; the
+  - Without gh (neither signed in nor answered over REST) the greeting names neither; the
     [se agent](src/agents/se.md) runs the fleet check's plan at its first turn instead.
   - `refresh` reads no work: its checks keep the cached lines.
 - The project's components: where the project's `se.toml` sets `[project] components`, its
@@ -933,6 +933,11 @@ the refs through `git ls-remote` and prints the rest.
 
 #### Hand-offs through the relay
 
+Where `gh` reaches GitHub over REST (Claude Code's cloud: `gh api` answers though `gh auth
+status` fails), no command hands off and the relay is not used: each reads and writes GitHub itself
+in one call (the work model's [Without gh](src/skills/work-model/SKILL.md#without-gh) owns the
+order of the paths). The relay is the path where REST does not answer either.
+
 Where kern serves the checkout with its GitHub component on the relay backend (a cloud session,
 no token), the hand-off needs neither a retyped file nor a second run
 ([docs/go-core.md "GitHub in the cloud"](docs/go-core.md#github-in-the-cloud)):
@@ -1130,9 +1135,13 @@ everywhere else.
 A partial view is no verdict: where the core holds only some issues or pull requests, the check
 says how many it has seen and since when, and reads the fleet itself.
 
+Where `gh` reaches GitHub, signed in or over REST, it reads the fleet itself in one call.
 Without gh it prints its GitHub plan; the session runs it with its GitHub tools, saves the three
 lists as JSON (each in-progress issue with its comments) and passes them as `--open-issues`,
 `--closed-issues` and `--pulls`.
+
+`work_tickets.py turn-start` prints the findings together with everything else SE reads at a
+turn's start ([se agent "Turn-start check"](src/agents/se.md)).
 
 With `--sessions <file>` it also reports each worker session stopped on a usage limit before it
 delivered: the session tools' answers, the sessions `list_sessions` lists, each with the
@@ -2157,6 +2166,7 @@ settings checks and the generated docs.
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
 | `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
+| `work_tickets.py turn-start` | `work_tickets.py turn-start [--worktree WORKTREE] [--repo REPO] [--all-repos]` | what SE reads at each turn's start, in one call: the pause state, the escalations, the delivered pull requests, the capacity, the startable and the claimed work, the outside issues and the fleet's findings, read at once while the checkout syncs; a part whose read fails names its cause. Exit code 1 while the fleet is paused. Without gh it prints the queue's and the fleet check's plans, exit code 2 |
 
 #### Review
 

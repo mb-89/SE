@@ -146,6 +146,13 @@ group = "Integration"
 help = "list delivered pull requests (open, to the integration branch, with a complete field report), escalations and startable work issues. Without gh it syncs the checkout and prints its reads as a plan for the session's GitHub tools"
 class = "interactive"
 
+[commands."work_tickets.py turn-start"]
+usage = "work_tickets.py turn-start [--worktree WORKTREE] [--repo REPO] [--all-repos]"
+summary = "what SE reads at each turn's start, in one call: the pause state, ..."
+group = "Integration"
+help = "what SE reads at each turn's start, in one call: the pause state, the escalations, the delivered pull requests, the capacity, the startable and the claimed work, the outside issues and the fleet's findings, read at once while the checkout syncs; a part whose read fails names its cause. Exit code 1 while the fleet is paused. Without gh it prints the queue's and the fleet check's plans, exit code 2"
+class = "batch"
+
 [commands."work_tickets.py dispatch"]
 usage = "work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire | --dry-run]"
 summary = "the dispatcher (README \"Dispatcher\", scripts/dispatch.py): list the ..."

@@ -1231,8 +1231,9 @@ def test_se_at_a_local_path_is_never_touched(repos):
 def test_without_gh_the_se_agent_runs_the_fleet_checks_plan_at_its_first_turn():
     text = (ROOT / "src" / "agents" / "se.md").read_text(encoding="utf-8")
     greeting = text[text.index("- **Start report**"):text.index("- **Turn-start check**")]
-    assert "Without gh (the cloud) it names no retro or fleet: at your first turn run" in greeting
-    assert "`work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints" in greeting
+    assert ("Without gh (neither signed in nor answered over REST) it names no retro or fleet: the "
+            "turn-start check below prints the fleet check's plan") in " ".join(greeting.split())
+    assert "pass the lists back to `work_tickets.py fleet-check` as it says" in " ".join(greeting.split())
 
 
 def test_the_se_agent_updates_after_its_report_at_once_in_the_cloud_and_on_a_yes_locally():

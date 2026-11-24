@@ -537,8 +537,10 @@ file (step 6):
 ## GitHub in the cloud
 
 No token reaches code in a cloud session; the session's GitHub tools reach GitHub, and `git`
-reaches it through the session's proxy. The GitHub component is one I/O component with two
-backends, chosen at start:
+and `gh api` reach it through the session's proxy, which signs REST calls and refuses GraphQL.
+SE's Python commands take that REST path first, so they need neither backend below (the work
+model's [Without gh](../src/skills/work-model/SKILL.md#without-gh)). The GitHub component is one
+I/O component with two backends, chosen at start:
 
 - **token**, where `gh auth token` or `GH_TOKEN` gives one: the Go line's REST client, in process,
   with ETags, a refresh every 2 minutes and the rate-limit pacing of SE#750.

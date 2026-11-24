@@ -712,13 +712,18 @@ def status_report(
 GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
 # GitHub's refusal of a call for its primary or secondary rate limit, as gh reports it.
 RATE_LIMITED = re.compile(r"rate limit|HTTP 429|abuse detection", re.IGNORECASE)
-_signed_in_gh: set[str] = set()
+#: How each `gh` reaches GitHub, decided once per process (`gh_backend`): SIGNED_IN where `gh auth
+#: status` passes, REST where it fails but the REST API answers (Claude Code's cloud, whose proxy
+#: signs `gh api` and refuses GraphQL: porcelain calls are answered over REST by gh_rest.py).
+SIGNED_IN, REST = "signed-in", "rest"
+REST_PROBE = ["api", "rate_limit"]
+_gh_backend: dict[str, str] = {}
 _signing_in = threading.Lock()
 
 
 def gh_executable() -> str:
-    """The `gh` on PATH, refused where it is missing or `gh auth status` fails: a `gh` that is
-    installed but not signed in counts as no `gh`. A passed check holds for the process."""
+    """The `gh` on PATH, refused where it is missing or reaches GitHub neither signed in nor over
+    REST (`gh_backend`). A passed check holds for the process."""
     executable = shutil.which("gh")
     if executable is None:
         raise MissingGhError(
@@ -731,24 +736,42 @@ def gh_executable() -> str:
     return executable
 
 
+def gh_quietly(executable: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    return process_door.run(
+        [executable, *arguments],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
+    )
+
+
 def signed_in(executable: str) -> None:
-    """Refuse a `gh` that `gh auth status` finds not signed in; a passed check holds for the
-    process."""
-    if executable not in _signed_in_gh:
-        feedback.reading("GitHub", ["gh", "auth", "status"])
-        status = process_door.run(
-            [executable, "auth", "status"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
-        )
-        if status.returncode != 0:
-            raise MissingGhError(
-                "needs the GitHub CLI (gh), which is installed but not signed in "
-                f"(gh auth status: exit code {status.returncode}), so it counts as no gh. Sign in "
-                "with gh auth login, or, where the host gives gh no account (Claude's cloud), do "
-                f"this step by hand as the se checkout's {WITHOUT_GH} says"
-            )
-        _signed_in_gh.add(executable)
+    """Decide how `executable` reaches GitHub: signed in where `gh auth status` passes, else over
+    REST where `gh api rate_limit` answers (whatever the sign-in says); refused where neither does.
+    A decision holds for the process."""
+    if executable in _gh_backend:
+        return
+    feedback.reading("GitHub", ["gh", "auth", "status"])
+    status = gh_quietly(executable, ["auth", "status"])
+    if status.returncode == 0:
+        _gh_backend[executable] = SIGNED_IN
+        return
+    feedback.reading("GitHub", ["gh", *REST_PROBE])
+    probe = gh_quietly(executable, REST_PROBE)
+    if probe.returncode == 0:
+        _gh_backend[executable] = REST
+        return
+    raise MissingGhError(
+        "needs the GitHub CLI (gh), which is installed but neither signed in "
+        f"(gh auth status: exit code {status.returncode}) nor answered over REST (gh api "
+        f"rate_limit: exit code {probe.returncode}), so it counts as no gh. Sign in with gh auth "
+        "login, or, where the host gives gh no account (Claude's cloud), do this step by hand "
+        f"as the se checkout's {WITHOUT_GH} says"
+    )
+
+
+def gh_backend() -> str:
+    """How gh reaches GitHub: SIGNED_IN or REST; MissingGhError where it does not."""
+    return _gh_backend[gh_executable()]
 
 
 def gh_usable() -> bool:
@@ -760,8 +783,17 @@ def gh_usable() -> bool:
 
 
 def run_gh(root: Path, arguments: list[str]) -> str:
-    """One call to GitHub through gh, announced before it is made (feedback.reading)."""
+    """One call to GitHub through gh, announced before it is made (feedback.reading). Where gh
+    reaches GitHub over REST alone (`gh_backend`), a porcelain call that would reach GraphQL is
+    answered over REST by gh_rest.py, each REST call through here in turn."""
     executable = gh_executable()
+    rest = sibling("gh_rest")
+    if _gh_backend.get(executable) == REST and rest.translates(arguments):
+        try:
+            return rest.run(arguments, lambda method, path, data, host: rest_call(
+                root, method, path, data, host), default_rest_repo(root, arguments))
+        except rest.GhRestError as error:
+            raise QueueError(f"gh {' '.join(arguments[:2])} over REST: {error}") from None
     feedback.reading("GitHub", ["gh", *arguments])
     result = process_door.run(
         [executable, *arguments],
@@ -778,8 +810,51 @@ def run_gh(root: Path, arguments: list[str]) -> str:
     metrics.door_call(refused)
     if result.returncode != 0:
         detail = failure_detail(result)
-        raise QueueError(f"gh {' '.join(arguments[:2])} failed: {detail}")
+        raise QueueError(f"gh {call_name(arguments)} failed: {detail}")
     return result.stdout
+
+
+def call_name(arguments: list[str]) -> str:
+    """A gh call as a failure names it: its first two words, or for `gh api` its method and path."""
+    if arguments[:1] == ["api"]:
+        words = iter(arguments[1:])
+        method, path = "GET", ""
+        for word in words:
+            if word == "-X":
+                method = next(words, method)
+            elif word.startswith("-"):
+                next(words, None)
+            elif not path:
+                path = word
+        return f"api {method} {path.split('?', 1)[0]}"
+    return " ".join(arguments[:2])
+
+
+def rest_call(root: Path, method: str, path: str, data: dict[str, object] | None,
+              host: str | None) -> object:
+    """One REST call through `gh api`: `method` on `path` below the API root, `data` its JSON body
+    (in a file, as bodies always travel); the parsed answer, {} for an empty one."""
+    arguments = ["api", "-X", method, path, *(("--hostname", host) if host else ())]
+    if data is None:
+        output = run_gh(root, arguments)
+    else:
+        with tempfile.TemporaryDirectory() as directory:
+            body = Path(directory) / "body.json"
+            body.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+            output = run_gh(root, [*arguments, "--input", str(body)])
+    return json.loads(output) if output.strip() else {}
+
+
+def default_rest_repo(root: Path, arguments: list[str]) -> str:
+    """The repository a porcelain call without `--repo` means, as gh reads it from the checkout:
+    origin's; "" where the call names its own."""
+    if "--repo" in arguments or "-R" in arguments:
+        return ""
+    repo = remote_repo(root)
+    if repo is None:
+        raise QueueError(f"gh {' '.join(arguments[:2])} over REST: no --repo and {root} has no "
+                         "origin to read the repository from")
+    return repo
 
 
 def run_gh_with_body(root: Path, arguments: list[str], body: str) -> str:
@@ -964,15 +1039,20 @@ PUBLIC_CHECK_OPT_OUT = (
 )
 
 
+_loading = threading.RLock()
+
+
 def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+    """The script `<name>.py` beside this one, loaded once: a thread that asks while another
+    loads it waits for the whole module (concurrently's reads load their doors' modules too)."""
+    with _loading:
+        module = sys.modules.get(name)
+        if module is None:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        return module
 
 
 metrics = sibling("metrics")
@@ -2089,13 +2169,62 @@ def outside_issues(cutoffs: dict[str, int], data: dict[str, object],
 
 
 def intake_outside(root: Path) -> list[dict[str, object]]:
-    """The outside issues SE has not handled yet, read in one batched query."""
+    """The outside issues SE has not handled yet, read in one batched query; where gh reaches
+    GitHub over REST alone, in REST reads of the same shape (`outside_over_rest`)."""
     cutoffs = outside_cutoffs(root)
     inside = outside_switch(root)
+    if gh_backend() == REST:
+        return outside_issues(cutoffs, outside_over_rest(root, cutoffs), inside)
     host = next(iter(cutoffs)).split("/")[0]
     query = outside_query(list(cutoffs), inside is not None)
     return outside_issues(cutoffs, json.loads(
         run_gh(root, ["api", "graphql", "--hostname", host, "-f", f"query={query}"])), inside)
+
+
+def outside_over_rest(root: Path, cutoffs: dict[str, int]) -> dict[str, object]:
+    """What `outside_query` answers, read over REST: each repository's newest OUTSIDE_PAGE open
+    issues (pull requests left out), and the last 100 comments of each above its cut-off, all at
+    once. An issue at or below its cut-off is listed without comments, which it is not judged by."""
+    def listing(repo: str) -> list[dict[str, object]]:
+        listed = GitHub(root, repo).api(
+            f"issues?state=open&sort=created&direction=desc&per_page={OUTSIDE_PAGE}")
+        if not isinstance(listed, list):
+            raise QueueError(f"intake --outside: GitHub returned no issues of {repo}; check "
+                             "[outside] in se.toml")
+        return listed
+
+    repos = list(cutoffs)
+    listings = concurrently(*(lambda repo=repo: listing(repo) for repo in repos))
+    wanted = [(repo, int(item["number"]), int(item.get("comments") or 0))
+              for repo, listed in zip(repos, listings) for item in listed
+              if "pull_request" not in item and int(item["number"]) > cutoffs[repo]
+              and item.get("comments")]
+
+    def last_comments(repo: str, number: int, count: int) -> list[dict[str, object]]:
+        page = max(1, -(-count // 100))
+        read = GitHub(root, repo).api(f"issues/{number}/comments?per_page=100&page={page}")
+        if page > 1 and len(read) < 100:  # the last page is short: the 100 before it complete them
+            earlier = GitHub(root, repo).api(f"issues/{number}/comments?per_page=100&page={page - 1}")
+            read = [*earlier, *read][-100:]
+        return read
+
+    read = dict(zip(((repo, number) for repo, number, _ in wanted),
+                    concurrently(*(lambda w=w: last_comments(*w) for w in wanted))))
+    data: dict[str, object] = {}
+    for index, (repo, listed) in enumerate(zip(repos, listings)):
+        nodes = [{
+            "number": item["number"], "title": item.get("title") or "",
+            "url": item.get("html_url", ""), "body": item.get("body") or "",
+            "authorAssociation": item.get("author_association", ""),
+            "labels": {"nodes": [{"name": label["name"] if isinstance(label, dict) else str(label)}
+                                 for label in item.get("labels") or []]},
+            "comments": {"nodes": [{"body": comment.get("body") or "",
+                                    "authorAssociation": comment.get("author_association", "")}
+                                   for comment in read.get((repo, int(item["number"])), [])]},
+        } for item in listed if "pull_request" not in item]
+        data[f"r{index}"] = {"issues": {"pageInfo": {"hasNextPage": len(listed) >= OUTSIDE_PAGE},
+                                        "nodes": nodes}}
+    return {"data": data}
 
 
 def bare_cross_repository_references(body: str, repo: str) -> list[str]:
@@ -12149,6 +12278,124 @@ def run_paused(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def turn_start_parts(root: Path, repo: str, all_repos: bool = False) -> dict[str, object]:
+    """What SE reads at each turn's start, all at once while the checkout syncs: the pause search,
+    the escalations, the delivered pull requests, the capacity, the startable and the claimed work
+    (`ready_and_claimed`), the outside issues where se.toml sets `[outside]`, and the fleet's
+    findings. Each part is its answer, or the QueueError its read raised: a part not read is named
+    with its cause, never taken for empty (rule gen-003)."""
+    labels = repository_label_arguments(root, all_repos)
+    base = integration_branch(root)
+
+    def part(read: Callable[[], object]) -> Callable[[], object]:
+        def guarded() -> object:
+            try:
+                return read()
+            except QueueError as error:
+                return error
+        return guarded
+
+    names = ("paused", "sync", "escalations", "delivered", "work", "capacity", "outside", "fleet")
+    answers = concurrently(*(part(read) for read in (
+        lambda: pause_issues(root, repo),
+        lambda: sync(root),
+        lambda: json.loads(run_gh(root, [
+            "issue", "list", "--state", "open", "--label", "escalated",
+            "--json", "number,title,url", "--limit", "200", *labels, *repo_arguments(repo),
+        ])),
+        lambda: delivered_pull_requests(root, repo),
+        lambda: ready_and_claimed(root, repo, all_repos),
+        lambda: capacity(root, repo, all_repos),
+        lambda: intake_outside(root) if se_table(root, "outside") else None,
+        lambda: fleet_findings(Fleet(root, repo, base), datetime.now(timezone.utc), fleet_lease(root),
+                               repository_name(root), ages=fleet_ages(root)),
+    )))
+    return dict(zip(names, answers))
+
+
+def turn_start_lines(parts: dict[str, object], repo: str, timeout: timedelta,
+                     now: datetime) -> list[str]:
+    """The turn start's report: one heading line per part with its count or answer, each item
+    indented below it, in the order SE acts on them (src/agents/se.md "Turn-start check")."""
+    lines: list[str] = []
+
+    def section(title: str, value: object, items: Callable[[object], list[str]]) -> None:
+        if isinstance(value, QueueError):
+            lines.append(f"{title}: not read: {value}")
+            return
+        listed = items(value)
+        lines.append(f"{title}: {len(listed) if listed else 'none'}")
+        lines.extend(f"  {item}" for item in listed)
+
+    paused = parts["paused"]
+    if isinstance(paused, QueueError):
+        lines.append(f"Paused: not read: {paused}")
+    elif paused:
+        lines.append(f"Paused: yes, by {pause_names(paused)}: nothing starts, lands or is routed "
+                     "until the owner closes it")
+    else:
+        lines.append(f"Paused: no (no open issue labelled {PAUSE_LABEL} in {repo})")
+    if isinstance(parts["sync"], QueueError):
+        lines.append(f"Sync: not done: {parts['sync']}")
+    section("Escalations", parts["escalations"], lambda found: [
+        f"escalated #{item['number']} {item['title']} {item['url']}" for item in found])
+    section("Delivered pull requests", parts["delivered"], lambda found: [
+        f"delivered PR #{pull['number']} {pull['title']} {pull['url']}" for pull in found])
+    slots = parts["capacity"]
+    lines.append(f"Capacity: not read: {slots}" if isinstance(slots, QueueError) else
+                 "Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")
+    work = parts["work"]
+    startable, claimed = (work, work) if isinstance(work, QueueError) else work
+    section("Startable work", startable, lambda found: [
+        f"ready #{issue['number']} {issue['title']}" for issue in found])
+
+    def claims(found: object) -> list[str]:
+        listed = sorted((claim_of(issue, now, timeout) for issue in found), key=lambda c: c.number)
+        stale = stale_claims_line(listed)
+        return [*(claim_line(claim, timeout) for claim in listed), *([stale] if stale else [])]
+    section("Claimed work", claimed, claims)
+    outside = parts["outside"]
+    if outside is None:
+        lines.append("Outside issues: none watched (no [outside] in se.toml)")
+    else:
+        section("Outside issues", outside, lambda found: [
+            f"{issue['repo']}#{issue['number']} {issue['title']} {issue['url']}"
+            + (f" (author association: {issue['association']}, hidden parts: {issue['hidden']})"
+               if "association" in issue else "") for issue in found])
+    fleet = parts["fleet"]
+    if isinstance(fleet, QueueError):
+        lines.append(f"Fleet: not read: {fleet}")
+    else:
+        stuck = [finding for finding in fleet if finding.stuck]
+        lines.append(f"Fleet: {len(stuck)} stuck or stray" if stuck else "Fleet: healthy")
+        if fleet:
+            lines.extend(f"  {line}" for line in fleet_report(fleet, False).splitlines()
+                         if line != "healthy")
+    return lines
+
+
+@command("turn-start", "what SE reads at each turn's start, in one call: the pause state, the "
+                       "escalations, the delivered pull requests, the capacity, the startable and "
+                       "the claimed work, the outside issues and the fleet's findings, read at once "
+                       "while the checkout syncs; a part whose read fails names its cause. Exit "
+                       "code 1 while the fleet is paused. Without gh it prints the queue's and the "
+                       "fleet check's plans, exit code 2",
+         *TRACKER_QUERY)
+def run_turn_start(root: Path, args: argparse.Namespace) -> int:
+    repo = resolve_repo(root, args.repo)
+    if hand_off():
+        sync(root)
+        print(queue_plan(root, repo, args.all_repos).text())
+        print(fleet_plan(repo, integration_branch(root)).text())
+        print(f"Outside issues: read by hand, as the se checkout's {WITHOUT_GH} says")
+        return 2
+    parts = turn_start_parts(root, repo, args.all_repos)
+    for line in turn_start_lines(parts, repo, claim_timeout(root), utc_now()):
+        print(line)
+    paused = parts["paused"]
+    return 1 if paused and not isinstance(paused, QueueError) else 0
+
+
 @command("fleet-check", "list every stuck or stray piece of work, each with its issue, pull request "
                         "and remedy: in-progress work without a branch once the lease has passed "
                         "since its Started comment (listed as starting before) or without a push "
@@ -12438,7 +12685,7 @@ COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
      "its budget, metrics, settings, starting work, the queue, the fleet and settings checks and the "
      "generated docs.",
      ("integrate", "rehearse", "release", "release-trailer", "refs request", "refs apply", "suite", "suite-shard",
-      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "dispatch", "fleet-check",
+      "suite-time", "file-seconds", "test-seconds", "metrics", "config", "start", "claim", "session-title", "ready", "capacity", "queue", "turn-start", "dispatch", "fleet-check",
       "settings-check", "parity", "docs", "format")),
 ))
 #: The commands a person waits on that only read: these go through kern where it runs
