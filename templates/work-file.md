@@ -1,12 +1,13 @@
 ---
-# A work issue's body file, .se/issues/<name>.md: the work template's sections, which only its fill
-# writes (templates.py fill work-file --path <file>) and `work_tickets.py file --body-file` files
-# against the work template. scripts/templates.py's docstring owns this note's format.
+# A work issue's body file, .se/issues/<name>.md: the work template's sections, which its fill writes
+# (templates.py fill work-file --path <file>), SE's hook holds every other write of it to, and
+# `work_tickets.py file --body-file` files against the work template. scripts/templates.py's
+# docstring owns this note's format.
 name: work-file
 version: 1.0.0
 kind: document
 reader: fleet
-says: "A work issue's body file, `.se/issues/<name>.md`: only its fill writes it, then `work_tickets.py file --body-file` files it."
+says: "A work issue's body file, `.se/issues/<name>.md`, which `work_tickets.py file --body-file` files."
 tags: ["issue", "work"]
 extends: work
 applies:

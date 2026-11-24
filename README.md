@@ -2553,7 +2553,7 @@ both.
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
-| `templates/work-file.md` | A work issue's body file, `.se/issues/<name>.md`: only its fill writes it, then `work_tickets.py file --body-file` files it. |
+| `templates/work-file.md` | A work issue's body file, `.se/issues/<name>.md`, which `work_tickets.py file --body-file` files. |
 
 Templates nest ([docs/templates.md "Nesting"](docs/templates.md#nesting)):
 
@@ -2586,8 +2586,7 @@ that differs from its template.
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
-`templates.py list --owned` lists every glob the templates own, each with its template, whose fill
-alone writes such a file.
+`templates.py list --owned` lists every glob the templates own, each with its template.
 
 `templates.py check --path <file>` checks one against the template its front matter's `template:`
 line names or the conditions pick, refuses one none picks and leaves unclaimed files free.
@@ -2601,26 +2600,23 @@ that writes it again ([docs/templates.md "The document"](docs/templates.md#the-d
 
 `--templates <folder>` reads the templates from another folder.
 
-A claimed file is written only by its fill
-([docs/templates.md "Fill"](docs/templates.md#fill)), and one that breaks its template cannot end a
-turn, be pushed or pass CI; each refusal names the file, the template and each finding.
+A claimed file that breaks its template cannot be written by a file tool
+([docs/templates.md "Fill"](docs/templates.md#fill)), end a turn, be pushed or pass CI; each
+refusal names the file, the template and each finding.
 
 - `scripts/se_templates.py check-files` with `--changed` and a ref checks every claimed file changed
   since that ref's merge base, committed or not, untracked ones too; its docstring owns the answer.
 - `work_tickets.py stop-check` and `push` run it against `origin/<integration branch>`, CI's
-  `check` job against the pull request's base. Where no template claims a path outside `.se/`, SE's
-  local state that no project commits, it checks nothing.
+  `check` job against the pull request's base. Where no template claims a path outside `.se/`
+  (never committed), it checks nothing.
 - Under Copilot the Stop hook only advises.
-- SE's one claimed path is a work issue's body file, `.se/issues/<name>.md` (`work-file`): SE
-  writes it with `templates.py fill work-file --path .se/issues/<name>.md`, then files it with
-  `work_tickets.py file` and `--body-file`, which reads it against `work`, its front matter left out.
-- SE's template gate denies every Write, Edit or MultiEdit of a claimed file before it runs, and
-  each path of `push_files` and `create_or_update_file`, whatever it would leave. It names the
-  template and the fill, `templates.py fill <template> --path <file>`, which writes the file itself.
-  - SE's start writes `.se/.runtime/templates-files` where a template claims a path, the line
-    `claimed` and then each owned glob, so `scripts/se_hook.sh` picks with builtins only the file
-    tools' calls on a path a glob matches; a template added during a session is guarded from the
-    next session's start. `scripts/se_templates.py`'s docstring (The
+- SE claims one path, a work issue's body file (`work-file`).
+- SE's template gate parses the file a Write, Edit or MultiEdit leaves, and each file of
+  `push_files` and `create_or_update_file`, never the edit text. It denies one that breaks its
+  template, naming each finding and the fill, `templates.py fill <template> --path <file>`.
+  - SE's start writes `.se/.runtime/templates-files` where a template claims a path, `claimed`
+    and each owned glob, so `scripts/se_hook.sh` picks with builtins only calls on a path a glob
+    matches; a template added during a session is guarded from the next session's start. `scripts/se_templates.py`'s docstring (The
     file tools) owns the rest.
 
 An agent asks for a template through the MCP door's tool `templates`, `scripts/se_templates.py`: `list`

@@ -38,8 +38,8 @@
 # <project>/.se/.runtime/templates-files (scripts/bootstrap.sh), followed by each glob the templates
 # own (`templates.py list --owned`), the gate also runs for Claude Code's Write, Edit and MultiEdit of a
 # project file whose path matches one of those globs as a bash pattern, and for the GitHub tools that
-# write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a claimed
-# path's write, which only the fill makes; every other call costs what it did.
+# write files (FILE_TOOLS, GITHUB_FILE_TOOLS: its docstring, The file tools), and denies a write that
+# leaves a claimed file off its template; every other call costs what it did.
 #
 # Either host (scripts/hosts.sh, the host table): the payload may be Claude Code's (snake_case) or
 # Copilot's (camelCase); kern and stop-check get it in snake_case. The project is the host's project

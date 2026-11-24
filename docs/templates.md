@@ -138,10 +138,11 @@ Fields stay honest about their source:
 - A field may declare `quote = true`: its value then carries at least one quote of the raw input,
   and the fill refuses a quote the raw input does not hold word for word.
 
-The gate refuses free writes. A template that claims paths owns them: a write, an edit or a
-write through the tracker's tools of a claimed path that does not come from the fill is refused before it runs,
-naming the template and the fill to use. The gate is on wherever a template claims a path, with
-no se.toml switch to keep it off.
+The gate refuses writes that break a template. A template that claims paths owns them: a write, an
+edit or a write through the tracker's tools of a claimed path is judged by the file it leaves,
+never by its edit text, parsed as the fill parses it. One that parses passes; one that does not is
+refused before it runs, naming every finding and the fill to use. The gate is on wherever a
+template claims a path, with no se.toml switch to keep it off.
 
 ## The filled template is a type
 
@@ -220,8 +221,8 @@ instructions, which the overlay supplies.
 
 A template owns the paths its `applies.paths` globs claim, in whichever repository it resolves
 from; `templates.py list --owned` is the one listing of them, each glob with its template, and
-SE's start publishes those globs for its hook, which refuses a direct write of an owned path before
-it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
+SE's start publishes those globs for its hook, which refuses a write that leaves an owned file off
+its template before it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
 
 The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
 refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the

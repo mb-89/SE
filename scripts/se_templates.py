@@ -135,9 +135,10 @@ judged by their own rules (The file tools, below).
   GATE_SECONDS from the gate's start passes and logs, so a stuck git, uv or disk never holds a
   tool call for the host's own hook timeout.
 
-**The file tools.** A path a `file.write` template claims is written only by the fill
-(docs/templates.md "Fill"): the gate denies every other write of it, a file tool's call
-(FILE_TOOLS, GITHUB_FILE_TOOLS), whatever it would leave. `scripts/se_hook.sh` runs it for one only
+**The file tools.** A path a `file.write` template claims holds only a document of it
+(docs/templates.md "Fill"): the gate judges the file a file tool's call (FILE_TOOLS,
+GITHUB_FILE_TOOLS) leaves behind, never the edit text, and denies one that breaks its template.
+`scripts/se_hook.sh` runs it for one only
 where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) found a template that claims a
 path and left the line `claimed` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME), then
 each glob the templates own, one a line, as `templates.py list --owned` lists them: the hook starts the gate
@@ -149,12 +150,17 @@ bash pattern, a superset of the engine's match (a `*` there also crosses folders
 - The GitHub tools `push_files` (each of its `files`) and `create_or_update_file`: each path
   relative to the target repository's root, where the target is at home as for a GitHub write
   (Which se.toml decides).
+- The file left behind (`left_behind`): `Write`'s content; for `Edit` and `MultiEdit` the file as
+  it is with each `old_string` replaced in turn (every one where `replace_all`); for the GitHub
+  tools each file's content as committed. Where the tool itself would fail (an `old_string` the file
+  lacks, no file to edit) nothing is written and the call passes.
 - The templates: those check-files reads (Claimed files). A path no template claims passes; a
-  claimed one is denied, naming each claimed path, its template and the fill that writes it,
+  claimed one is parsed as the template that claims it, as the fill parses it, and checked as
+  check-files checks it (`refusals`). A result that refuses nothing passes, warnings unsaid; one
+  that refuses is denied, naming every refused finding and the fill that writes the file,
   `templates.py fill <template> --path <file>`, whose call without fields answers the template's
   instructions.
-  The fill writes the file itself, through no file tool, so the gate never sees it; a claimed file
-  goes to GitHub as a commit of the file the fill wrote. Each refusal is counted
+  The fill writes the file itself, through no file tool, so the gate never sees it. Each refusal is counted
   (`templates.count_refusal`, its target the template, the repository or project, `file.write` and the
   path); there is no hold for a file. `[templates] gate` does not change it; `SE_TEMPLATES_GATE=off`
   turns it off as it turns the gate off.
@@ -1419,13 +1425,15 @@ def judge_files(write: Write, project: Path | None, given: argparse.Namespace | 
                 return ""
             paths = [path.resolve().relative_to(root.resolve()).as_posix()]
             what, repo = f"{write.name} of {paths[0]}", str(root)
+            results = {paths[0]: left_behind(write, path)}
         else:
             if write.repo.startswith("/") or write.repo.endswith("/"):
                 return ""
             root = getattr(given, "root", None) or deciding(write, project)
             if root is None:
                 return ""
-            paths = [relative for relative, _ in github_files(write)]
+            results = dict(github_files(write))
+            paths = list(results)
             what, repo = f"{write.tool} in {write.repo}", write.repo
         catalog, source = claim_templates(root, folder)
         claims = [(relative, owners) for relative in paths
@@ -1437,29 +1445,66 @@ def judge_files(write: Write, project: Path | None, given: argparse.Namespace | 
         log_line(project, error)
         return ""
     try:
-        return free_write(write, what, repo, root, claims, source)
+        return judged_write(write, what, repo, root, catalog, claims, results, source)
     except Exception as error:
         raise Judged(error, write) from error
 
 
-def free_write(write: Write, what: str, repo: str, root: Path, claims: list[tuple[str, list[str]]],
-               source: Path | None) -> str:
-    """The deny for a free write of the claimed paths `claims` (path, the templates that claim
-    it), naming each one's template and the fill that writes it; each refusal counted for the cap."""
+def left_behind(write: Write, path: Path) -> str | None:
+    """The file a Write, Edit or MultiEdit of `path` leaves behind (the module docstring: The file
+    tools): Write's content; the file with each edit's replacement applied in turn. None where the
+    tool itself fails (an old_string the file lacks, no file to edit), so nothing is written."""
+    given = write.input
+    if write.name == "Write":
+        content = given.get("content")
+        return content if isinstance(content, str) else None
+    try:
+        text: str | None = path.read_text(encoding="utf-8")
+    except OSError:
+        text = None
+    edits = given.get("edits") if write.name == "MultiEdit" else [given]
+    for edit in edits if isinstance(edits, list) else ():
+        old, new = (edit.get("old_string"), edit.get("new_string")) if isinstance(edit, dict) else (None, None)
+        if not isinstance(old, str) or not isinstance(new, str):
+            return None
+        if text is None:
+            if old:
+                return None
+            text = new
+        elif not old or old not in text:
+            return None
+        else:
+            text = text.replace(old, new) if edit.get("replace_all") is True else text.replace(old, new, 1)
+    return text
+
+
+def judged_write(write: Write, what: str, repo: str, root: Path, catalog: dict,
+                 claims: list[tuple[str, list[str]]], results: dict, source: Path | None) -> str:
+    """The answer for a write of the claimed paths `claims` (path, the templates that claim it):
+    nothing where each file it leaves behind (`results`) parses as its template, as check-files
+    checks it (refusals); else a deny naming every refused finding and each file's fill, each
+    refusal counted for the cap."""
     templates = sibling("templates")
     environ = {"SE_SESSION": write.session} if write.session else None
     lines = []
     for relative, owners in claims:
+        text = results.get(relative)
+        found = [] if text is None else refusals(catalog, root, relative, text)[1]
+        if not found:
+            continue
         templates.count_refusal(templates.target(owners[0], repo, templates.FILE_ACTION, title=relative),
                                 environ)
         name = owners[0] if len(owners) == 1 else "<template>"
         fill = f"uv run python {HERE / 'templates.py'} fill {name} --path {root / relative} --root {root}"
         if source is not None:
             fill += f" --templates {source}"
-        lines += [f"  {relative} ({', '.join(owners)}): {fill}"]
-    return deny("\n".join([f"{what}: a template claims this path, so only its fill writes it:", *lines,
-                           "Without --fields the fill answers the template's instructions; with "
-                           "--fields and --input it writes the file"]))
+        lines += [f"  {line}" for line in found] + [f"  {relative}: its fill: {fill}"]
+    if not lines:
+        return ""
+    return deny("\n".join([f"{what}: the file it leaves breaks the template that claims its path:", *lines,
+                           "Fix the write so the file parses, or fill it: without --fields the fill "
+                           "answers the template's instructions; with --fields and --input it writes "
+                           "the file"]))
 
 
 def run_runtime(root: Path) -> int:
@@ -1607,28 +1652,31 @@ def file_lines(catalog: dict, root: Path, paths: list[Path], source: Path | None
     return text_lines(catalog, root, texts, source)
 
 
+def refusals(catalog: dict, root: Path, relative: str, text: str) -> tuple[bool, list[str]]:
+    """Whether a template claims the file at `relative` with the text `text`, and a line for each
+    finding that refuses it, `<path> (<template>): <finding>`: the file parsed as its template, as
+    the fill parses it."""
+    templates = sibling("templates")
+    chosen = templates.select(catalog, templates.FILE_ACTION, text, None, path=relative)
+    if chosen.template is None and not chosen.findings:
+        return False, []
+    found = list(chosen.findings)
+    if chosen.template is not None:
+        found += templates.check(chosen.template, templates.parse(chosen.template, text), root=root)
+    return True, [f"{relative} (no template): {item.field}: {item.fix}" if chosen.template is None
+                  else f"{relative} ({chosen.template.name}): {templates._line(chosen.template, item)}"
+                  for item in found if item.severity == templates.REFUSE]
+
+
 def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: Path | None
                ) -> tuple[list[str], int]:
     """file_lines' answer for `texts`, each file's path relative to `root` and its text."""
-    templates = sibling("templates")
     refusing: list[str] = []
     checked = 0
     for relative, text in texts:
-        chosen = templates.select(catalog, templates.FILE_ACTION, text, None, path=relative)
-        if chosen.template is None and not chosen.findings:
-            continue
-        checked += 1
-        found = list(chosen.findings)
-        if chosen.template is not None:
-            found += templates.check(chosen.template, templates.parse(chosen.template, text), root=root)
-        for item in found:
-            if item.severity != templates.REFUSE:
-                continue
-            if chosen.template is None:
-                refusing.append(f"{relative} (no template): {item.field}: {item.fix}")
-            else:
-                refusing.append(f"{relative} ({chosen.template.name}): "
-                                f"{templates._line(chosen.template, item)}")
+        claimed, lines = refusals(catalog, root, relative, text)
+        checked += claimed
+        refusing += lines
     if not refusing:
         if not checked:
             return [f"{CHECK_FILES}: no template claims a file checked"], 0
