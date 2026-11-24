@@ -39,6 +39,7 @@ both.
 | `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |

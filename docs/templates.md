@@ -441,12 +441,13 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | File | Template | Kind | Owner |
 |---|---|---|---|
 | `templates/ticket.md` | `ticket` | document | SE |
-| `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/work.md` | `work`, `extends` ticket, whose Requirements are `requirement` items | document | SE |
 | `templates/work-file.md` | `work-file`, `extends` work: a work issue's body file, `.se/issues/<name>.md` | document | SE |
 | `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
 | `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
 | `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
 | `templates/raid-entry.md` | `raid-entry` | entry | SE |
+| `templates/requirement.md` | `requirement`: one checkable statement, its acceptance and its source | entry | SE |
 | `templates/field-report.md` | `field-report` | document | SE |
 | `templates/landing.md` | `landing` | document | SE |
 | `templates/housekeeping.md` | `housekeeping` | document | SE |

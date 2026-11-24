@@ -102,8 +102,8 @@ docs/design.md "Templates".
 
 ## Requirements
 
-1. `make install-tools`: installs every tool.
-   Continued line of the first requirement.
+1. `make install-tools`: installs every tool
+   that the checks run, on a continued line.
 2. Issue tooling in `scripts/work_tickets.py`.
 
 ## Acceptance
@@ -125,7 +125,7 @@ uv run pytest
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
 ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
-NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
+NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
@@ -322,7 +322,8 @@ def test_each_template_renders_and_parses_its_example_back(catalog, name):
         assert templates.render(template, document) == body
     else:
         example = dict(template.example["fields"])
-        document = templates.parse(template, templates.render(template, example), example.get("title"))
+        title = next((item.name for item in template.fields if item.source == "title"), "title")
+        document = templates.parse(template, templates.render(template, example), example.get(title))
         assert document.fields == example
     assert [finding for finding in templates.check(template, document)
             if finding.severity == templates.REFUSE] == []
@@ -2167,20 +2168,22 @@ def test_a_register_with_one_bad_entry_fails_naming_the_entry(catalog, tmp_path,
     found = templates.check(register, templates.parse(register, body))
     assert [(finding.field, finding.rule, finding.severity) for finding in found] == [
         ("entries", "choice", templates.REFUSE)]
-    assert found[0].fix.startswith("entry 'The mirror stays up' (raid-entry): Type is 'hazard': write one of risk")
+    assert found[0].fix.startswith("raid-register > Entries > raid-entry 'The mirror stays up': Type is "
+                                   "'hazard': write one of risk")
     path = tmp_path / "raid.md"
     path.write_text(body, encoding="utf-8")
     assert templates.main(["check", "raid-register", "--tree", "--body-file", str(path)]) == 1
     out = capsys.readouterr().out
-    assert "entry 'The mirror stays up'" in out and "The release slips" not in out
+    assert "raid-entry 'The mirror stays up'" in out and "The release slips" not in out
 
 
 def test_each_bad_entry_is_named_by_its_own_heading_and_its_owner_line_by_its_label(catalog):
     register = catalog["raid-register"]
     body = raid_register(catalog).replace("Owner: alice\n", "").replace("Status: watched", "Status: gone")
     fixes = [finding.fix for finding in templates.check(register, templates.parse(register, body))]
-    assert fixes[0].startswith("entry 'The release slips' (raid-entry): Owner is missing: write a `Owner:` line")
-    assert fixes[1].startswith("entry 'The mirror stays up' (raid-entry): Status is 'gone'")
+    assert fixes[0].startswith("raid-register > Entries > raid-entry 'The release slips': Owner is missing: "
+                               "write a `Owner:` line")
+    assert fixes[1].startswith("raid-register > Entries > raid-entry 'The mirror stays up': Status is 'gone'")
     assert len(fixes) == 2
 
 
@@ -2205,7 +2208,7 @@ def test_a_decision_s_pugh_fence_is_checked_by_the_pugh_block(catalog):
     one = re.sub(r"\n  - \{key: deck.*", "", body)
     found = templates.check(decision, templates.parse(decision, one))
     assert [(finding.field, finding.rule) for finding in found] == [("options", "checker")]
-    assert found[0].fix == "pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
+    assert found[0].fix == "decision > options > pugh: the `pugh` fence's `candidates` lists 1; write at least 2"
     without = re.sub(r"```pugh.*```\n", "", body, flags=re.DOTALL)
     assert [finding.rule for finding in templates.check(decision, templates.parse(decision, without))] == [
         "required"]
@@ -2292,7 +2295,7 @@ def test_a_section_node_is_checked_by_its_template_under_its_field(tmp_path):
     assert templates.check(whole, templates.parse(whole, good)) == []
     bad = templates.render(whole, {"intro": "Why.", "part": "Nobody."})
     assert [str(finding) for finding in templates.check(whole, templates.parse(whole, bad))] == [
-        "refuse: part [required]: part: Owner is missing: write a `Owner:` line: Who owns it. "
+        "refuse: part [required]: whole > Part > part: Owner is missing: write a `Owner:` line: Who owns it. "
         f"(or `Not in input` where the input does not say) (why: {templates.REASONS['required']})"]
 
 
@@ -2322,7 +2325,7 @@ def test_a_node_that_does_not_resolve_does_not_load(tmp_path, node, kind, error)
 
 
 @pytest.mark.parametrize("entry, kind, error", [
-    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "is a node or a register, not both"),
+    ("    node: part@1.2.0\n    entries: part@1.2.0\n", "block", "names one nested template; keep one of `node:`, `entries:`"),
     ("    entries: part@1.2.0\n", "block", "part is a block; a register names an entry template"),
     ("    node: part@1.2.0\n    fence: pugh\n    says: It.\n", "document",
      "part is a document; a node fence names a block template"),
