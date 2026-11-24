@@ -3339,3 +3339,97 @@ def test_a_folder_of_material_is_the_raw_input_each_text_file_named_and_hidden_o
     (tmp_path / "empty").mkdir()
     with pytest.raises(templates.TemplateError, match="holds no text file"):
         templates.raw_input(tmp_path / "empty")
+
+
+# Nesting in both source forms (docs/templates.md "Nesting"): a manifest node and a list name the
+# requirement template, and each nested finding names its path, as the shared cases hold it
+
+def nested_folder(root: Path, **changed: str) -> Path:
+    """The nesting fixture's `templates/` under `root` (tests/template_cases.py), `changed` written over it."""
+    folder = root / "templates"
+    for name, text in {**template_cases._nested_files(), **changed}.items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8", newline="\n")
+    return folder
+
+
+def test_a_manifest_node_that_names_the_requirement_template_holds_requirement_items(tmp_path):
+    loaded = templates.load(tmp_path, folder=nested_folder(tmp_path))
+    spec, requirement = loaded["spec"], loaded["requirement"]
+    needs = spec.field("needs")
+    assert (needs.kind, needs.numbered, needs.node, needs.pin) == ("list", True, "requirement", "1.0.0")
+    assert needs.nested is requirement and spec.field("purpose").kind == "text"
+    document, found, _ = templates.fill(spec, dict(spec.example["fields"]), "x")
+    assert found == [] and "1. The pump stops at the high limit.\n   Acceptance: A test drives" in document
+    without = template_cases.SPEC_DOCUMENT.replace("   Acceptance: A test drains the tank.\n", "")
+    assert [str(finding) for finding in templates.check(spec, templates.parse(spec, without))] == [
+        "refuse: needs [required]: spec > Requirements > requirement 2: Acceptance is missing: write a "
+        "`Acceptance:` line: How it is checked: the test, the command or what a reader sees. (or `Not in "
+        f"input` where the input does not say) (why: {templates.REASONS['required']})"]
+
+
+def test_a_requirement_s_continued_statement_is_its_title_and_its_labels_its_fields(tmp_path):
+    spec = templates.load(tmp_path, folder=nested_folder(tmp_path))["spec"]
+    items = templates.parse(spec, template_cases.SPEC_DOCUMENT).fields["needs"]
+    assert items[1] == ("The pump starts at the low limit\nonce the level falls below it.\n"
+                        "Acceptance: A test drains the tank.\nSource: The brief.")
+    requirement = spec.field("needs").nested
+    assert templates._item_parts(requirement, items[1]) == (
+        "The pump starts at the low limit once the level falls below it.",
+        "Acceptance: A test drains the tank.\nSource: The brief.")
+
+
+@pytest.mark.parametrize("statement, problem", [
+    ("The pump stops. It also beeps.", "holds more than one sentence"),
+    ("The pump stops as needed.", "says 'as needed', which nobody can check"),
+    ("The pump stops and/or beeps.", "says 'and/or', which nobody can check"),
+    ("The pump stops at `etc.` in code.", ""),
+    ("The pump stops at the high limit; it beeps once.", ""),
+])
+def test_one_checkable_statement_has_one_sentence_and_no_word_nobody_can_check(statement, problem):
+    assert templates.uncheckable(statement).startswith(problem) and bool(problem) == bool(
+        templates.uncheckable(statement))
+
+
+def test_a_nested_finding_names_its_path_from_the_document_down_through_each_part(tmp_path):
+    middle = template_cases.PLAN.replace("name: plan\nversion: 1.2.0", "name: mid\nversion: 1.0.0").replace(
+        "se:plan", "se:mid")
+    write_template(tmp_path, "mid", middle)
+    write_template(tmp_path, "requirement", (ROOT / "templates" / "requirement.md").read_text(encoding="utf-8"))
+    write_template(tmp_path, "whole", WHOLE.format(node="mid@1.0.0"))
+    whole = templates.load(tmp_path, tree=True)["whole"]
+    body = templates.render(whole, {"intro": "Why.", "part": "### Steps\n\n1. The plan names its owner."})
+    assert [finding.fix for finding in templates.check(whole, templates.parse(whole, body))] == [
+        "whole > Part > mid > Steps > requirement 1: Acceptance is missing: write a `Acceptance:` line: How "
+        "it is checked: the test, the command or what a reader sees. (or `Not in input` where the input "
+        "does not say)"]
+
+
+def test_a_list_of_items_leaves_carried_fields_and_documents_filed_before_since_alone(tmp_path):
+    plan = templates.load(tmp_path, folder=nested_folder(tmp_path))["plan"]
+    body = template_cases.PLAN_BODY
+    rules_of = lambda text: [(finding.rule, finding.fix.split(":")[0])  # noqa: E731
+                             for finding in templates.check(plan, templates.parse(plan, text))]
+    assert rules_of(body) == [("checkable", "plan > Steps > requirement 2"),
+                              ("required", "plan > Steps > requirement 2")]  # its Source is carried
+    older = body.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.0.0 sha256:00 -->")
+    assert rules_of(older) == [("version", "the document records plan 1.0.0; the template is at 1.2.0, "
+                                           "another minor or patch version")]
+    at_since = body.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.1.0 sha256:00 -->")
+    assert [rule for rule, _ in rules_of(at_since)] == ["checkable", "required", "version"]
+
+
+def test_the_correction_pass_reaches_inside_nested_items_as_at_the_top(tmp_path):
+    spec = templates.load(tmp_path, folder=nested_folder(tmp_path))["spec"]
+    trivial = template_cases.SPEC_DOCUMENT.replace("1. The pump stops", "1) The pump stops").replace(
+        "Source: The brief.\n2.", "Source: The brief.  \n2.")
+    document, found, corrections = templates.fill(spec, {}, "x", body=trivial)
+    assert found == [] and [(fix.field, fix.kinds) for fix in corrections] == [
+        ("needs", ("list-marker",)), ("needs", ("whitespace",))]
+    assert "1. The pump stops at the high limit.\n" in document and "Source: The brief.\n2." in document
+    values, fixes = templates.correct(spec, {"needs": ["The pump stops.  \n   Acceptance: A test.\n   "
+                                                       "Source: The brief.  "]})
+    assert values["needs"] == ["The pump stops.\n   Acceptance: A test.\n   Source: The brief."]
+    assert [fix.kinds for fix in fixes] == [("whitespace",)]
+    rendered = templates.render(spec, {"purpose": "It pumps.", **values})
+    assert "1. The pump stops.\n   Acceptance: A test.\n   Source: The brief.\n" in rendered
