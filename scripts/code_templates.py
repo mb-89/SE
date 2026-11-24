@@ -58,7 +58,7 @@ def code_data(data: dict[str, object], body: str, where: str, first: int) -> dic
         heading = re.match(r"^## +(\S.*?)[ \t]*$", lines[index].rstrip("\r\n"))
         if heading is None:
             raise templates.TemplateError(f"{where}:{number}: a code template's body holds only `## <path>` "
-                                "headings, each followed by one fenced block, the file's text")
+                                          "headings, each followed by one fenced block, the file's text")
         path = heading.group(1).strip("`")
         index += 1
         while index < len(lines) and not lines[index].strip():
@@ -78,16 +78,16 @@ def code_data(data: dict[str, object], body: str, where: str, first: int) -> dic
         index += 1
     if not files:
         raise templates.TemplateError(f"{where}: a code template's body holds the files it scaffolds, each a "
-                            "`## <path>` heading followed by one fenced block")
+                                      "`## <path>` heading followed by one fenced block")
     paths = [path for path, _ in files]
     if len(set(paths)) != len(paths):
         raise templates.TemplateError(f"{where}: a code template names each file once; it names "
-                            f"{', '.join(sorted({path for path in paths if paths.count(path) > 1}))} twice")
+                                      f"{', '.join(sorted({path for path in paths if paths.count(path) > 1}))} twice")
     for path, text in files:
         for name in PLACEHOLDER.findall(path + text):
             if name not in CODE_PLACEHOLDERS:
                 raise templates.TemplateError(f"{where}: {{{{{name}}}}} in {path} is no placeholder; the "
-                                    f"placeholders are {', '.join(CODE_PLACEHOLDERS)}")
+                                              f"placeholders are {', '.join(CODE_PLACEHOLDERS)}")
     data[templates.CODE_FILES] = files
     return data
 
@@ -111,16 +111,16 @@ def scaffold(template: templates.Template, path: Path, says: str, name: str | No
     it; `name` names either otherwise. Writes nothing."""
     if template.kind != templates.CODE:
         raise templates.TemplateError(f"{SCAFFOLD}: {template.name} is a {template.kind} template; only a code "
-                            "template scaffolds, a document is filled (templates.py fill)")
+                                      "template scaffolds, a document is filled (templates.py fill)")
     single = len(template.code) == 1
     name = name or (path.stem if single else path.name)
     if not CODE_NAME.match(name):
         raise templates.TemplateError(f"{SCAFFOLD}: {name!r} is no name for a scaffolded file: lower-case "
-                            "letters, digits, dashes and underscores, a letter first")
+                                      "letters, digits, dashes and underscores, a letter first")
     says = " ".join(says.split())
     if not says or '"""' in says or "`" in says:
         raise templates.TemplateError(f"{SCAFFOLD}: --says is the one line the file opens with, what it does; "
-                            'give it, without """ or backticks')
+                                      'give it, without """ or backticks')
     values = code_values(template, name, says)
 
     def filled(text: str) -> str:
@@ -140,7 +140,7 @@ def run(catalog: dict[str, templates.Template], options: argparse.Namespace) -> 
     for path, text in made.items():
         if path.exists():
             raise templates.TemplateError(f"{SCAFFOLD}: {path} exists; a scaffold writes new files only, so "
-                                "edit the one there")
+                                          "edit the one there")
         try:
             relative = path.resolve().relative_to(root.resolve()).as_posix()
         except ValueError:
@@ -151,8 +151,8 @@ def run(catalog: dict[str, templates.Template], options: argparse.Namespace) -> 
         refused = [item for item in found if item.severity == templates.REFUSE]
         if refused:
             raise templates.TemplateError("\n".join([f"{SCAFFOLD}: {template.name} scaffolds {relative}, which "
-                                            "breaks the template that claims it; fix the template:",
-                                            *templates._capped(refused)]))
+                                                     "breaks the template that claims it; fix the template:",
+                                                     *templates._capped(refused)]))
     for path, text in made.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
