@@ -49,6 +49,7 @@ both.
 | `templates/retro-part.md` | The label a part of a split retro report ends in: which part of how many, of which retro's report. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
+| `templates/review-declined.md` | A declined review's comment on the work issue: the pull request the review declined and its link. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
 | `templates/rules-page.md` | The page `docs/rules.md`. |
 | `templates/skills-page.md` | The page `docs/skills.md`. |
@@ -84,7 +85,7 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 
 The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `escalation`,
 `finding-ref`, `generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`,
-`rules-page`, `skills-page`, `started-comment`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
+`review-declined`, `rules-page`, `skills-page`, `started-comment`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
 other.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
@@ -97,6 +98,7 @@ Through `scripts/interfaces.py`:
 - `se_start.py` its start report, a snippet of several lines with a table and a line of three
   cases;
 - `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;
+- `review.py file` the decline comment on a declined pull request's work issue;
 - `retro.py due` its two countdown lines, `retro.py file` its report's link to the retro doc and the
   label of each part of a split report, and both reports the finding reference work issues name.
 

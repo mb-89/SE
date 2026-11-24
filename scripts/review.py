@@ -578,9 +578,8 @@ def what_follows(number: int, found: Report, landed: bool) -> str:
 
 
 def escalation(number: int, url: str) -> str:
-    return (f"Declined by the review of pull request #{number} ({url}): the change is "
-            "fundamentally wrong and does not land. The review comment there holds the findings; "
-            "SE re-scopes this issue or takes it to the owner.\n")
+    """The decline comment on the work issue (templates/review-declined.md)."""
+    return work_tickets.interface_message("review-declined", number=str(number), url=url) + "\n"
 
 
 def file_plan(remote: str, number: int, then: str) -> Plan:

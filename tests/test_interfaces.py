@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
-              "started-comment", "claim-undone")
+              "started-comment", "claim-undone", "review-declined")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
-            "finding-ref", "started-comment", "claim-undone")
+            "finding-ref", "started-comment", "claim-undone", "review-declined")
 
 
 @pytest.fixture(scope="module")
@@ -237,3 +237,15 @@ def test_the_started_and_claim_undone_comments_are_the_lines_start_and_unclaim_w
     assert work_tickets.started_comment(branch).startswith(work_tickets.STARTED_PREFIX)
     assert interfaces.write("claim-undone", {"started": started, "branch": branch}).startswith(
         work_tickets.UNCLAIMED_MARK)
+
+
+def test_the_decline_comment_is_the_line_review_wrote_by_hand_and_the_retro_reads_it():
+    import retro
+    import review
+
+    number, url = 5, "https://example.com/pull/5"
+    comment = review.escalation(number, url)
+    assert comment == (f"Declined by the review of pull request #{number} ({url}): the change is "
+                       "fundamentally wrong and does not land. The review comment there holds the findings; "
+                       "SE re-scopes this issue or takes it to the owner.\n")
+    assert retro.DECLINED.match(comment).groups() == ("5", url)

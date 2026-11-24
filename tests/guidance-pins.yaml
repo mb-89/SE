@@ -97,6 +97,9 @@ retro-part:
 review:
   - discover-cheap-load-late
   - guidance-comes-first
+review-declined:
+  - discover-cheap-load-late
+  - guidance-comes-first
 routed:
   - discover-cheap-load-late
   - guidance-comes-first
