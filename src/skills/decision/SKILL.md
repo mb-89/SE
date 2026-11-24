@@ -135,8 +135,8 @@ and decide the instance.
 
 ## Tasks for the person
 
-An open point that is not a choice, something only the person can do (grant access, approve a
-release, sign in), is a task, never an option in a decision. Tasks are listed separately, numbered
+An open point that is not a choice, something only the person can do (grant access, change a
+setting, sign in), is a task, never an option in a decision. Tasks are listed separately, numbered
 against their own total ("Task 1 of 2"), each with what to do, where, and what it unblocks.
 
 ## Bringing decisions to the person

@@ -68,8 +68,10 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   `Integrated in …`, an escalation) is followed by that footer, unchanged. Nothing else repeats
   this rule.
 - Issues are read and written with `gh`, bodies through `--body-file`; where the host offers no
-  `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed; a release
-  needs the human's approval, obtained by SE.
+  `gh`, see [Without gh](#without-gh). Branches and the integration branch are pushed.
+- **Releases follow the work**: a release is SE's call to the integrator, the message `release`,
+  made whenever landed work is needed in a released version; it is never a question to the
+  person ([dec-011](references/rules.md#dec-011-persons-decide-agents-execute)).
 - Retros use `retro.md` and read the field reports in the pull request descriptions of the
   window's closed work issues; each improvement names the agent definition, template, skill or
   script it changes.
@@ -209,9 +211,9 @@ no procedure but SE's sends the person to a session.
   Without a signed-in `gh` both commands hand their GitHub steps to the session as a plan and
   read the refs back with `--read-back` ([Without gh](#without-gh)).
 - **Every other step only the person may approve** (a setting, an environment, a permission, a
-  push to a protected branch) is escalated the same way: the escalation names the step and its
-  exact command or setting. SE runs it on the person's yes, or names the one setting the person
-  changes.
+  push to a protected branch; never a release, which [follows the work](#roles-and-flow)) is
+  escalated the same way: the escalation names the step and its exact command or setting. SE runs
+  it on the person's yes, or names the one setting the person changes.
 
 ## Pause
 

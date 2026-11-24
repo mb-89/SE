@@ -136,6 +136,10 @@ its tools.
     `session-title integrator <project>`, so `SE/<project>/integrator`.
   - Find a running integrator by that exact title, or among the sessions you started
     (`list_sessions` with `children: true`), never by tag.
+  - Start each integrator with `extra_allowed_tools` set to the list
+    `uv run python <se>/scripts/claude_settings.py rules` prints, so the release you ask for
+    passes its session's permission check. The host drops an entry your own session lacks, so
+    your checkout's `.claude/settings.json` holds the same rules (README "Claude Code cloud").
   - At your first turn, title your own session `SE` and add the tag `SE`; on the person's request,
     rename the earlier sessions of SE's work to the scheme, as [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says.
 - **Escalations** (label `escalated`) are decisions for the user: bring them to the person as the
@@ -169,11 +173,15 @@ its tools.
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - **Releases**: a landing only records its release kind; the version moves when you ask the
   integrator for a release, the message `release` (its [Release](integrator.md#release)); the
-  integrator never asks for one. Ask only when a release says something to whoever uses the
-  project, as several landings belong to one release:
-  - before the person shares the project, or when the person asks for a release;
-  - when a dependent project needs a change that landed here and its pin takes released versions
-    only (a `version` range, README [Modules](../../README.md#modules)).
+  integrator never asks for one.
+  - A release follows the work ([Roles and flow](../skills/work-model/SKILL.md#roles-and-flow)):
+    send `release` whenever landed work is needed in a released version, and never ask the
+    person whether to release.
+  - Several landings belong to one release, so send it when it is needed:
+    - when a dependent project needs a change that landed here and its pin takes released
+      versions only (a `version` range, README [Modules](../../README.md#modules));
+    - when the work the person gave you includes a release, before the person shares the
+      project, or when the person wants one.
 - Paths and shell follow the work model's
   [Commands and shell](../skills/work-model/SKILL.md#commands-and-shell).
 
