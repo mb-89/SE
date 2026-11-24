@@ -983,8 +983,11 @@ def test_se_lists_and_interrupts_the_live_sessions_on_a_pause_and_says_how_to_re
     positions = [pause.find(step) for step in steps]
     assert -1 not in positions and positions == sorted(positions), dict(zip(steps, positions))
     assert "(../skills/work-model/SKILL.md#pause)" in pause
-    turn_start = se[se.index("**Turn-start check**"):]
-    assert turn_start.index("`work_tickets.py paused") < turn_start.index("`work_tickets.py queue")
+    turn_start = se[se.index("**Turn-start check**"):se.index("**Work issues**")]
+    # One call reads the pause state with the rest; a pause is acted on before anything it lists.
+    assert "run `work_tickets.py turn-start --worktree <main checkout>`, one call" in turn_start
+    assert turn_start.index("While it says `Paused: yes` (exit code 1), do as [Pause](#pause) says") < \
+        turn_start.index("Stale claims")
 
 
 def test_the_work_model_states_the_pause_switch_once_and_the_roles_link_it():

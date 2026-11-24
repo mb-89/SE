@@ -8,3 +8,11 @@ ref = "5cc4a0103cea5d96a2e4634f77bd6c53b02bd31a"
 [components.obs]
 version = "10.3.2"
 ref = "a6fb0f1a4cba7a8163e747eb03178ab1b90a3436"
+
+[components.obs-html]
+version = "0.5.2"
+ref = "c7e08986501bf2f7136566e832283d1b2b7c1e58"
+
+[components.obs-html-style-generic]
+version = "1.0.0"
+ref = "441f48cd482e7e610aba2484303ff99760f1a893"
