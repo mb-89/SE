@@ -2620,7 +2620,8 @@ def test_queue_refuses_while_paused(worktree, monkeypatch, capsys, paused):
 def test_start_refuses_while_paused(worktree, monkeypatch, capsys, paused):
     calls = pause_door(monkeypatch, paused,
                        lambda arguments: "" if arguments[:2] in (["issue", "edit"], ["issue", "comment"])
-                       else '{"body": ""}' if arguments[:2] == ["issue", "view"] else None)
+                       else '{"body": ""}' if arguments[:2] == ["issue", "view"]
+                       else "[]" if arguments[:2] == ["pr", "list"] else None)
     read: list[int] = []
     monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo, allow_existing_branch=False:
                         read.append(1) or [{"number": 5, "title": "feat/five"}])

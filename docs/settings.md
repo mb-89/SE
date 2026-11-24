@@ -127,6 +127,7 @@ never makes the branch stale, and the suite's verdict is recorded on the merge's
 local = 4
 cloud = 8
 claim_timeout_hours = 12
+queue_limit = 10
 ```
 
 `[workers]` limits how many working agents run at once. `local` holds a local device's limit,
@@ -142,6 +143,14 @@ below, a positive number of hours, default 12; other keys are refused.
   starts no more, and after each landing starts the next startable issue, so a worker that
   finished frees its place. The [dispatcher](fleet.md#dispatcher) fires nothing while the limit is
   reached.
+- **The landing queue.** No worker starts while more than `queue_limit` delivered pull requests
+  wait for the integrator: one started then branches from a `main` several landings old and
+  merges them all again. `queue_limit` is a whole number of at least 0, default 10.
+  - `start` and `claim` refuse, naming the count and the limit. Without gh they read the open
+    pull requests through kern's relay, or from `--delivered <file>`, their `list_pull_requests`
+    answer.
+  - `queue` prints the count against the limit, and after a landing `integrate` starts none
+    while the queue is over it.
 - **Not limited.** Integrators, reviewers and SE's own session.
 - **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
   one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
@@ -291,8 +300,8 @@ status` fails), no command hands off and the relay is not used: each reads and w
 in one call (the work model's [Without gh](../src/skills/work-model/SKILL.md#without-gh) owns the
 order of the paths). The relay is the path where REST does not answer either.
 
-Where kern serves the checkout with its GitHub component on the relay backend (a cloud session,
-no token), the hand-off needs neither a retyped file nor a second run
+Where kern serves the checkout with its GitHub component on the relay backend (a cloud session
+whose proxy does not answer REST), the hand-off needs neither a retyped file nor a second run
 ([docs/go-core.md "GitHub in the cloud"](go-core.md#github-in-the-cloud)):
 
 - **Reads.** `intake`, `field-report --check`, `deliver` and `integrate` read the issue, its
@@ -334,9 +343,14 @@ no token), the hand-off needs neither a retyped file nor a second run
     process's answer no time limit, where NATS's default of two minutes refused the answer of any
     longer step, such as a landing's suite, release and push. An answer the bus refuses all the
     same fails the step at once, naming why, instead of waiting out `StepWait`.
-- **The fallback.** Without kern, on a token backend or with `SE_KERN=off`, each command keeps its
-  file-based hand-off above. A call kern refuses before it says anything runs directly; one that
-  fails on the way is reported and never run twice, as it writes.
+- **On the token or the proxy.** Where kern's GitHub component runs on the token or the proxy
+  backend (kern 2.2.0 takes the proxy in a cloud session where REST answers through it), no step
+  goes through the relay: a streamed command runs directly and reaches GitHub itself.
+  - It says so first, on stderr: `se: <command> reaches GitHub itself: kern's GitHub component
+    serves <checkout> on the <backend> backend, which runs no relay step`.
+- **The fallback.** Without kern or with `SE_KERN=off`, each command keeps its file-based hand-off
+  above. A call kern refuses before it says anything runs directly; one that fails on the way is
+  reported and never run twice, as it writes.
   - A command that falls back says so first, on stderr, and why: `se: <command> fell back to the
     file-based hand-off: <why>`.
 - **Rehearsing a relay landing.** `work_tickets.py rehearse` runs a whole landing through the

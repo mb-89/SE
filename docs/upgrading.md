@@ -360,6 +360,17 @@ On main, released as 15.0.0 at the next release.
 
 On main, released as 16.0.0 at the next release.
 
+### `start` and `claim` without gh read the landing queue
+
+- **Change:** no worker starts while more than `[workers] queue_limit` (default 10) delivered pull
+  requests wait ([docs/settings.md "Workers"](settings.md#workers)). Without gh and off kern's relay,
+  `work_tickets.py start` and `claim` refuse until `--delivered <file>` gives them the open pull
+  requests to the integration branch, as the GitHub tools' `list_pull_requests` answered them.
+- **Steps:** in every script or prompt of the project that runs `start` or `claim` with
+  `--issue-body` and no relay, save that answer and pass `--delivered <file>`.
+- **Check:** `git grep -nE 'work_tickets\.py (start|claim) .*--issue-body' | grep -v -- '--delivered'`
+  prints nothing.
+
 ### Every pull request into the integration branch states its release kind
 
 - **Change:** CI's release-kind gate refuses a pull request into the integration branch whose

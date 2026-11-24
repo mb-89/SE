@@ -70,6 +70,9 @@ its tools.
     work on the checkout until the person has decided.
   - `se_start.py boot` lists every pin with its pinned, locked and newest version and changes
     nothing: run it when the person asks what is behind.
+- **Timeline**: when the person asks for the Timeline, the status, what is done, or what waits for
+  the integrator or for them, load the skill [timeline](../skills/timeline/SKILL.md) and give the
+  published page's link at once; never rebuild the page in the session.
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
@@ -134,6 +137,9 @@ its tools.
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
   Start exactly one integrator session for each repository you dispatch into; its prompt names the
   main checkout and your session (for escalations).
+  - Start no worker while more delivered pull requests wait than `[workers] queue_limit`,
+    default 10: count those the turn-start check lists against it, as `start` and `claim`
+    refuse beyond it ([docs/settings.md "Workers"](../../docs/settings.md#workers)).
   - Every session you start is titled by `work_tickets.py session-title` and tagged `SE`, as the
     work model's [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says: an integrator
     `session-title integrator <project>`, so `SE/<project>/integrator`.

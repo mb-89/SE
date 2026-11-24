@@ -44,7 +44,7 @@ None.
    we can learn from it among them, and fills its block: a verdict per rule, every `looked_at`
    part, the `findings` (each naming its rule, its place and its body) and `went_well`.
 3. `uv run python <se>/scripts/overhaul.py file <this issue> --draft <draft>` checks the
-   judgment and the answers, posts the report as this issue's closing comment and closes it. It files no issue:
+   judgment and the answers, posts the report as this issue's closing comment and closes it, filing no issue:
    SE reads the report, bundles the `work` findings into work issues (each naming
    `overhaul #<n> finding <k>`) and puts the `decision` findings, every rule change among them,
    on the owner's decision list.
