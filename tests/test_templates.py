@@ -128,6 +128,8 @@ ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review"
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
+#: The documents a deck is built from (deck.build): the retro's and the overhaul's one report.
+DECKS = ("retro-deck",)
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
@@ -136,7 +138,7 @@ FILES = ("work-file",)
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
 #: scaffold writes, each claiming the scripts or modules it shapes.
 CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES, *CODE_TEMPLATES)
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *DECKS, *INTERFACES, *FILES, *CODE_TEMPLATES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):

@@ -307,15 +307,15 @@ def fenced(text: str, language: str = "") -> str:
 
 
 def demoted(text: str, levels: int = 2) -> str:
-    """`text`'s Markdown headings `levels` deeper (at most six), outside code fences, so a
-    document set inside the brief stays under the brief's heading."""
+    """`text`'s Markdown headings `levels` deeper (at most six; negative `levels` higher, at least
+    one), outside code fences, so a document set inside the brief stays under the brief's heading."""
     lines, fence = [], ""
     for line in text.splitlines():
         opening = re.match(r"\s*(`{3,}|~{3,})", line)
         if opening and (not fence or opening[1].startswith(fence)):
             fence = "" if fence else opening[1]
         heading = None if fence or opening else re.match(r"(#{1,6})(\s.*|)$", line)
-        lines.append("#" * min(6, len(heading[1]) + levels) + heading[2] if heading else line)
+        lines.append("#" * max(1, min(6, len(heading[1]) + levels)) + heading[2] if heading else line)
     return "\n".join(lines)
 
 

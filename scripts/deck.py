@@ -65,7 +65,7 @@ import hosts  # noqa: E402
 import process_door  # noqa: E402
 import se_components  # noqa: E402
 import templates  # noqa: E402
-from build_docs import child_environment, obs_dir, obs_document, ready_adapter  # noqa: E402
+from build_docs import QUOTED, child_environment, obs_dir, obs_document, ready_adapter  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().with_name("deck_answers.js")
 BUNDLE_ID = "se-answers"  # The id deck_answers.js registers with.
@@ -95,14 +95,17 @@ def document_path(destination: Path) -> Path:
 
 
 def build(folder: Path, destination: Path, answers: Path | None = None, host: str | None = None,
-          asks: bool = True) -> int:
+          asks: bool = True, quoted: bool = False) -> int:
     """Build ``folder`` into ``destination`` with the answers bundle for ``host`` (HOSTS; None, the host
     this runs under, ``default_host``); with ``answers``, the record.
 
     obs parses the notes into a Document first; its chapters decide the refusals and give the bundle its
     data (``_bundle``). The deck's build writes its own Document beside it (``document_path``), so tests
     and agents read its chapters and versions there, never from the built page. Without ``asks`` a deck
-    where no chapter asks for a bless is built all the same: a retro's deck with no finding to decide."""
+    where no chapter asks for a bless is built all the same: a retro's deck with no finding to decide.
+    A ``quoted`` deck holds text it quotes rather than authors (a retro's facts and findings), so the
+    warnings build_docs.py ``QUOTED`` names (obs's long-paragraph lint, obs-html's provenance findings of
+    a timestamp or an absolute path) refuse nothing there."""
     host = host or default_host(dict(os.environ))
     if host not in HOSTS:
         print(f"deck: --host {host} is none of {', '.join(HOSTS)}", file=sys.stderr)
@@ -122,8 +125,9 @@ def build(folder: Path, destination: Path, answers: Path | None = None, host: st
         _screens(vault)
         _settings(vault)
         parsed = Path(scratch) / "document.json"
+        allowed = QUOTED if quoted else ()
         code = obs_document(obs, ["--source", str(vault), "--document", str(parsed), *recorded], "deck",
-                            adapter=False)
+                            adapter=False, allowed=allowed)
         if code:
             return code
         document = json.loads(parsed.read_text(encoding="utf-8"))
@@ -140,7 +144,7 @@ def build(folder: Path, destination: Path, answers: Path | None = None, host: st
         code = obs_document(obs, [
             "--source", str(vault), "--document", str(parsed), "--destination", str(destination.resolve()),
             "--adapter-option", f"trusted-runtime-bundle={BUNDLE_ID}={BUNDLE_FILE}", *recorded,
-        ], "deck")
+        ], "deck", allowed=allowed)
         if code:
             return code
         shutil.copyfile(parsed, written)

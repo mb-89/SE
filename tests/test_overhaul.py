@@ -596,6 +596,40 @@ def test_file_refuses_another_overhauls_draft_and_a_draft_without_its_block(chec
         overhaul.judged("# Overhaul draft for #50\n", THIS)
 
 
+def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_per_finding(
+        checkout, tmp_path, monkeypatch, capsys):
+    """SE#1826: the overhaul's one output is a deck of the same template as the retro's."""
+    import retro_deck
+    asked = {}
+
+    def build(written, destination, host=None, answers=None):
+        asked.update(written=written, host=host)
+        return 0
+
+    monkeypatch.setattr(retro_deck, "build", build)
+    text = judged_draft(checkout)
+    steps, decisions = overhaul.deck_parts(text, overhaul.judged(text, THIS), THIS)
+    assert [heading for heading, _ in steps] == [item.heading for item in overhaul.overhaul_template().fields]
+    body = dict(steps)
+    assert "| gen-001 Mechanize first | none | Holds. |" in body["Verdicts"]
+    assert overhaul.BLOCK_MARKER not in body["The facts"] and body["The facts"].strip()
+    assert body[
+        "The standing questions"].startswith("## What came back from real use since the last retro?\n\nThe suite stays fast.")
+    assert [heading for heading, _ in decisions] == [
+        "1. Prune the three functions only tests reach", "2. Name the speed of the suite as a rule",
+        "3. Add a rule that every overhaul compares itself"]
+    assert decisions[1][1].startswith("**Decision, for your decision**: it changes a rule")
+    assert "Rule: tst-002 (a rule change)." in decisions[1][1]
+    assert "- Source: https://example.com/practice" in decisions[2][1]
+    draft = tmp_path / "draft.md"
+    draft.write_text(text, encoding="utf-8")
+    assert overhaul.main(["deck", str(THIS), "--draft", str(draft), "--destination", str(tmp_path / "o.html"),
+                          "--host", "claude-app"]) == 0
+    fields = templates.parse(templates.own("retro-deck"), asked["written"]).fields
+    assert fields["title"] == "Overhaul #50" and asked["host"] == "claude-app"
+    assert "a title page, 7 steps and 3 decision chapter(s)" in capsys.readouterr().out
+
+
 class FakeTracker:
     """The issue writes of the gh door, recorded."""
 
