@@ -592,6 +592,9 @@ Pull requests built on an old `main` cause most integration trouble.
   cloud only, the scheduled task of the [dispatcher](../../README.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its template); `queue` lists them.
+- **The landing queue**: no worker starts while more than `[workers] queue_limit` (default 10)
+  delivered pull requests wait, as one started then works on a `main` several landings old;
+  `start` and `claim` refuse ([README "Workers"](../../README.md#workers)).
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
   pieces left ([integrator](../../agents/integrator.md)), the issue stays open and the comment names

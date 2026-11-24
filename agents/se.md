@@ -135,6 +135,9 @@ its tools.
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
   Start exactly one integrator session for each repository you dispatch into; its prompt names the
   main checkout and your session (for escalations).
+  - Start no worker while more delivered pull requests wait than `[workers] queue_limit`,
+    default 10: count those the turn-start check lists against it, as `start` and `claim`
+    refuse beyond it ([README "Workers"](../README.md#workers)).
   - Every session you start is titled by `work_tickets.py session-title` and tagged `SE`, as the
     work model's [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says: an integrator
     `session-title integrator <project>`, so `SE/<project>/integrator`.
