@@ -790,6 +790,33 @@ def _reload_demo(tmp_path, monkeypatch, word: str):
     return scripts, Fake(se_components.attach("demo", "reloaddemo", folder))
 
 
+def test_a_component_that_loaded_version_a_answers_the_next_call_with_version_b(
+        tmp_path, monkeypatch) -> None:
+    """Fresh: the component imported A of its script's helper; with B on disk, its next call,
+    plain and streamed alike, answers with B's behaviour and says in one line that it reloaded;
+    SE's version moving reloads too."""
+    scripts, fake = _reload_demo(tmp_path, monkeypatch, "A")
+    assert fake.run("reloaddemo.py plain") == "plain A"
+    assert fake.run("reloaddemo.py streamed") == "streamed A"
+    assert not [line for line in fake.lines if "reloaded" in line]
+
+    (scripts / "reloadhelp.py").write_text("WORD = 'B'\n", encoding="utf-8")  # same size, as git may
+    assert fake.run("reloaddemo.py plain") == "plain B"
+    assert fake.lines[-1] == ("se: component demo reloaded SE's code before answering: "
+                              "reloadhelp.py")
+    (scripts / "reloaddemo.py").write_text(RELOAD_SCRIPT.replace('f"{argv[0]} ', 'f"{argv[0]}: '),
+                                           encoding="utf-8")
+    assert fake.run("reloaddemo.py streamed") == "streamed: B"
+    assert fake.lines[-1].endswith("reloaded SE's code before answering: reloaddemo.py")
+    count = len(fake.lines)
+    assert fake.run("reloaddemo.py plain") == "plain: B"  # nothing changed: no reload, no line
+    assert len(fake.lines) == count
+
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.1.0"\n', encoding="utf-8")
+    assert fake.run("reloaddemo.py plain") == "plain: B"
+    assert fake.lines[-1].endswith("reloaded SE's code before answering: SE 1.0.0 -> 1.1.0")
+
+
 def test_a_component_that_cannot_reload_refuses_and_the_command_runs_directly(
         tmp_path, monkeypatch, capsys) -> None:
     """Fresh: a change while another call of the component runs on the old code, or a change of
