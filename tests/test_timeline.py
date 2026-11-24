@@ -29,11 +29,19 @@ def issue(number: int, *labels: str, state: str = "open", reason: str | None = N
             "labels": sorted(labels), "body": body}
 
 
-def snapshot(*issues: dict, releases: tuple[dict, ...] = (), other: tuple[dict, ...] = ()) -> dict:
+def snapshot(*issues: dict, releases: tuple[dict, ...] = (), other: tuple[dict, ...] = (),
+             pulls: tuple[dict, ...] = (), branch: str = "main") -> dict:
     return {"read_at": NOW.isoformat(), "repositories": {
-        "o/a": {"issues": list(issues), "releases": list(releases)},
+        "o/a": {"issues": list(issues), "releases": list(releases), "integration_branch": branch,
+                "pull_requests": list(pulls)},
         "o/b": {"issues": list(other), "releases": []},
     }}
+
+
+def pull(number: int, names: int | None, base: str = "main", report: bool = True) -> dict:
+    """An open pull request of lane `a` as the snapshot keeps it."""
+    return {"number": number, "url": f"https://github.com/o/a/pull/{number}", "base": base,
+            "work_issue": names, "field_report": report}
 
 
 def placed(snap: dict, ages: bool = False) -> dict[object, str]:
@@ -140,7 +148,7 @@ def test_the_timeline_is_one_obs_table_with_a_note_per_row():
     view = table(files)["views"][0]
     assert view["order"] == ["repository", "place", "date", "number", "subject", "status", "mark"]
     assert view["groupBy"] == {"property": "place", "direction": "ASC"}
-    assert view["obsHtml"]["groupOrder"] == ["Today", "Needs you", "Next", "Backlog", "Done"]
+    assert view["obsHtml"]["groupOrder"] == ["Today", "Waiting for integrator", "Needs you", "Next", "Backlog", "Done"]
     assert view["sort"][0] == {"property": "date", "direction": "DESC"}
     assert front(files["entries/a-1.md"]) == {
         "repository": "a", "place": "Today", "date": "2026-11-01", "number": 1, "subject": "issue 1",
@@ -157,6 +165,55 @@ def test_a_backlog_row_is_marked_as_waiting_for_your_input():
     assert front(files["entries/a-1.md"])["status"] == "waiting for your input"
     assert front(files["entries/a-2.md"])["status"] == "ready"
     assert "A backlog idea waits for your input before it is work." in files["manifest.md"]
+
+
+# --- What waits for the integrator ---
+
+
+def test_an_in_progress_issue_named_by_a_delivered_pull_request_waits_for_the_integrator():
+    snap = snapshot(issue(1, "work", "in-progress"), issue(2, "work", "in-progress"), pulls=(pull(9, 1),))
+    assert placed(snap) == {1: "Waiting for integrator", 2: "Today"}
+    assert order(snap) == [("Today", "a", 2), ("Waiting for integrator", "a", 1)]
+    files = notes(snap)
+    assert front(files["entries/a-1.md"]) == {
+        "repository": "a", "place": "Waiting for integrator", "date": "2026-11-01", "number": 1,
+        "subject": "issue 1", "status": "delivered, waiting for the integrator", "mark": "pull request #9",
+        "state": "open", "labels": ["in-progress", "work"], "delivery": "https://github.com/o/a/pull/9", "rank": 1}
+    assert "delivery" not in front(files["entries/a-2.md"])
+    assert "waits for the integrator under Waiting for integrator." in files["manifest.md"]
+
+
+@pytest.mark.parametrize("delivered", [pull(9, 1, base="next"), pull(9, 1, report=False), pull(9, None), pull(9, 3)])
+def test_only_a_field_report_to_the_integration_branch_naming_the_issue_delivers_it(delivered):
+    assert placed(snapshot(issue(1, "in-progress"), pulls=(delivered,))) == {1: "Today"}
+
+
+def test_a_pull_request_delivers_to_the_integration_branch_its_repository_names():
+    assert placed(snapshot(issue(1, "in-progress"), pulls=(pull(9, 1, base="next"),), branch="next")) == {
+        1: "Waiting for integrator"}
+    assert placed(snapshot(issue(1, "in-progress"), pulls=(pull(9, 1),), branch="next")) == {1: "Today"}
+
+
+def test_a_closed_backlogged_or_person_issue_keeps_its_place_or_status_beside_a_delivery():
+    snap = snapshot(issue(1, "in-progress", state="closed", reason="completed", closed="2026-11-09T10:00:00Z"),
+                    issue(2, "backlogged", "se-person"), issue(3, "in-progress", "se-person"),
+                    pulls=(pull(7, 1), pull(8, 2), pull(9, 3)))
+    rows = {row["number"]: row for row in timeline.rows(snap)}
+    assert [(rows[n]["place"], rows[n]["status"]) for n in (1, 2, 3)] == [
+        ("Done", "done"), ("Backlog", "waiting for your input"), ("Waiting for integrator", "needs you")]
+    assert rows[1]["delivery"] is None and rows[1]["mark"] == ""
+
+
+def test_the_lowest_pull_request_naming_an_issue_is_its_delivery():
+    snap = snapshot(issue(1, "in-progress"), pulls=(pull(12, 1), pull(9, 1)))
+    assert timeline.rows(snap)[0]["mark"] == "pull request #9"
+
+
+def test_a_snapshot_saved_before_pull_requests_were_read_has_no_delivery():
+    snap = snapshot(issue(1, "in-progress"))
+    del snap["repositories"]["o/a"]["pull_requests"], snap["repositories"]["o/a"]["integration_branch"]
+    assert placed(snap) == {1: "Today"}
+    assert "Waiting for integrator under" not in notes(snap)["manifest.md"]
 
 
 def test_a_row_opens_on_the_first_paragraph_of_its_goal_and_its_link():
@@ -206,6 +263,7 @@ def test_the_live_source_reads_each_repository_with_a_row_from_githubs_public_is
         {"set": {"repository": "a"},
          "url": "https://api.github.com/repos/o/a/issues?state=all&since={since}&sort=updated&direction=asc&per_page=100"}]}]
     assert live["exclude"] == [{"field": "pullRequest", "exists": True}]
+    assert live["fields"]["delivery"] == "delivery"  # a path no issue of GitHub's list has: the build's alone
     assert "the line under the table says it shows current data" in files["manifest.md"]
 
 
@@ -218,6 +276,8 @@ def derived(cases: list[dict], fields: dict):
     """The value obs's derive gives ``fields``: the first case whose conditions all match (equals ignores case)."""
     def matches(condition):
         value = fields.get(condition["field"])
+        if condition.get("exists"):
+            return value not in (None, "", [])
         values = value if isinstance(value, list) else [value]
         return any(item is not None and str(item).casefold() == condition["equals"].casefold() for item in values)
     for case in cases:
@@ -230,11 +290,13 @@ def derived(cases: list[dict], fields: dict):
                                     ("in-progress", "se-person"), ("field-report",), ("ready", "backlogged")])
 @pytest.mark.parametrize(("state", "reason"), [("open", None), ("closed", "completed"), ("closed", "not_planned"),
                                                ("closed", "duplicate"), ("open", "reopened")])
-def test_the_live_derive_gives_every_issue_the_place_and_status_the_build_gives(labels, state, reason):
+@pytest.mark.parametrize("delivered", [False, True])
+def test_the_live_derive_gives_every_issue_the_place_and_status_the_build_gives(labels, state, reason, delivered):
     live = timeline.live_source(["o/a"])
     entry = issue(1, *labels, state=state, reason=reason, closed="2026-11-09T10:00:00Z" if state == "closed" else None)
-    fields = {"state": state, "state_reason": reason, "labels": list(labels)}
-    rows = timeline.rows(snapshot(entry))
+    rows = timeline.rows(snapshot(entry, pulls=(pull(9, 1),) if delivered else ()))
+    fields = {"state": state, "state_reason": reason, "labels": list(labels),
+              "delivery": rows[0]["delivery"] if rows else None}
     assert derived(live["derive"]["place"], fields) == (rows[0]["place"] if rows else "hidden")
     if rows:
         assert derived(live["derive"]["status"], fields) == rows[0]["status"]
@@ -267,10 +329,14 @@ class FakeGitHub:
         self.calls.append(variables)
         data = self.repositories[f"{variables['owner']}/{variables['name']}"]
         repository = {}
+        if variables["withConfig"]:
+            repository["config"] = {"text": data["config"]} if "config" in data else None
         if variables["withIssues"]:
             repository["issues"] = self.page(data["issues"], variables["issues"])
         if variables["withTags"]:
             repository["refs"] = self.page(data["tags"], variables["tags"])
+        if variables["withPulls"]:
+            repository["pullRequests"] = self.page(data.get("pulls", []), variables["pulls"])
         return {"repository": repository}
 
 
@@ -291,7 +357,8 @@ def test_the_read_is_one_batched_request_per_repository():
     })
     snap = timeline.read(["o/a", "o/b"], github, NOW)
     assert [call["owner"] + "/" + call["name"] for call in github.calls] == ["o/a", "o/b"]
-    assert all(call["withIssues"] and call["withTags"] for call in github.calls)
+    assert all(call["withIssues"] and call["withTags"] and call["withPulls"] and call["withConfig"]
+               for call in github.calls)
     assert len(snap["repositories"]["o/a"]["issues"]) == 60
     assert [release["tag"] for release in snap["repositories"]["o/a"]["releases"]] == ["v1.0.0"]
     assert snap["repositories"]["o/b"]["releases"][0]["published_at"] == "2026-11-03T10:00:00Z"
@@ -303,15 +370,58 @@ def test_the_read_is_one_batched_request_per_repository():
 def test_more_issues_than_a_page_continue_the_same_pass_without_the_tags_read():
     github = FakeGitHub({"o/a": {"issues": [node(n) for n in range(1, 251)], "tags": []}}, page_size=100)
     snap = timeline.read(["o/a"], github, NOW)
-    assert [(call["issues"], call["withIssues"], call["withTags"]) for call in github.calls] == [
-        (None, True, True), ("100", True, False), ("200", True, False)]
+    assert [(call["issues"], call["withIssues"], call["withTags"], call["withPulls"], call["withConfig"])
+            for call in github.calls] == [
+        (None, True, True, True, True), ("100", True, False, False, False), ("200", True, False, False, False)]
     assert [entry["number"] for entry in snap["repositories"]["o/a"]["issues"]] == list(range(1, 251))
 
 
 def test_the_query_names_every_field_the_snapshot_reads():
     for field in ("issues(first: 100", "refs(refPrefix: \"refs/tags/\", first: 100", "stateReason", "createdAt", "closedAt",
-                  "labels(first: 30)", "tagger { date }", "committedDate"):
+                  "labels(first: 30)", "tagger { date }", "committedDate", "pullRequests(states: OPEN, first: 100",
+                  "baseRefName", 'object(expression: "HEAD:se.toml")'):
         assert field in timeline.QUERY
+
+
+REPORT = "<!-- se:field-report -->\nThe report.\n<!-- se:field-report:end -->\n"
+
+
+def pull_node(number: int, body: str, base: str = "main") -> dict:
+    return {"number": number, "url": f"https://github.com/o/a/pull/{number}", "baseRefName": base, "body": body}
+
+
+def test_the_read_keeps_each_open_pull_request_with_the_issue_it_names_and_its_field_report():
+    github = FakeGitHub({"o/a": {"issues": [], "tags": [], "config": '[project]\nintegration_branch = "next"\n',
+                                 "pulls": [pull_node(5, "Refs https://github.com/o/a/issues/1\n\n" + REPORT, "next"),
+                                           pull_node(6, "Refs #2\n\nNo report."),
+                                           pull_node(7, "A body naming no issue.\n" + REPORT),
+                                           pull_node(8, "Refs #3\n<!-- se:field-report -->\nunfinished")]},
+                         "o/b": {"issues": [], "tags": []}})
+    snap = timeline.read(["o/a", "o/b"], github, NOW)
+    assert snap["repositories"]["o/a"]["integration_branch"] == "next"
+    assert snap["repositories"]["o/a"]["pull_requests"] == [
+        {"number": 5, "url": "https://github.com/o/a/pull/5", "base": "next", "work_issue": 1, "field_report": True},
+        {"number": 6, "url": "https://github.com/o/a/pull/6", "base": "main", "work_issue": 2, "field_report": False},
+        {"number": 7, "url": "https://github.com/o/a/pull/7", "base": "main", "work_issue": None, "field_report": True},
+        {"number": 8, "url": "https://github.com/o/a/pull/8", "base": "main", "work_issue": 3, "field_report": False}]
+    assert snap["repositories"]["o/b"]["integration_branch"] == "main"  # no se.toml
+    assert snap["repositories"]["o/b"]["pull_requests"] == []
+
+
+@pytest.mark.parametrize(("config", "branch"), [(None, "main"), ("", "main"), ("[project]\nname = 'x'\n", "main"),
+                                                ("[project]\nintegration_branch = 'next'\n", "next"),
+                                                ("[project]\nintegration_branch = ''\n", "main"), ("not = [toml", "main")])
+def test_the_integration_branch_comes_from_the_repositorys_se_toml(config, branch):
+    assert timeline.integration_branch(config) == branch
+
+
+def test_more_pull_requests_than_a_page_continue_the_same_pass():
+    pulls = [pull_node(n, f"Refs #{n}\n" + REPORT) for n in range(1, 151)]
+    github = FakeGitHub({"o/a": {"issues": [], "tags": [], "pulls": pulls}}, page_size=100)
+    snap = timeline.read(["o/a"], github, NOW)
+    assert [(call["pulls"], call["withPulls"], call["withIssues"]) for call in github.calls] == [
+        (None, True, True), ("100", True, False)]
+    assert len(snap["repositories"]["o/a"]["pull_requests"]) == 150
 
 
 def test_the_repositories_come_from_se_toml_beside_the_home():
@@ -498,12 +608,15 @@ const {chromium} = require("playwright");
 
 
 def large_snapshot() -> dict:
-    """25 ready issues of lane a, a backlog idea in each lane, an issue in progress and a closed one."""
+    """25 ready issues of lane a, a backlog idea in each lane, an issue in progress, one delivered in
+    pull request 60 and a closed one."""
     done = dict(state="closed", reason="completed")
     ready = [issue(n, "ready", created=f"2026-10-{n:02d}T09:00:00Z") for n in range(1, 26)]
     return snapshot(*ready, issue(40, "backlogged", "se-person", created="2026-11-02T09:00:00Z"),
                     issue(41, "in-progress"), issue(42, closed="2026-11-10T08:00:00Z", **done),
-                    other=(issue(50, "backlogged", "se-person", created="2026-11-05T09:00:00Z"),))
+                    issue(43, "in-progress", created="2026-11-03T09:00:00Z"),
+                    other=(issue(50, "backlogged", "se-person", created="2026-11-05T09:00:00Z"),),
+                    pulls=(pull(60, 43),))
 
 
 @pytest.mark.spawns("tool: obs-document, in obs's own Python environment, builds the page through obs-html; "
@@ -574,7 +687,7 @@ def test_the_page_opens_on_the_newest_row_of_each_place_and_pages_the_rest(page)
     seen = opened(page)
     rows = seen["rows"]
     captions = [cells[0] for cells in rows if cells[0].startswith("Place:")]
-    assert captions == ["Place: Today (1)", "Place: Next (25)"]
+    assert captions == ["Place: Today (1)", "Place: Waiting for integrator (1)", "Place: Next (25)"]
     first = rows[rows.index(["Place: Next (25)"]) + 1]
     assert first[:5] == ["a", "Next", "2026-10-25", "25", "issue 25"]
     assert "Page 1 of 2" in seen["text"]
@@ -609,6 +722,35 @@ def test_the_page_shows_what_github_answers_when_it_opens(page):
     assert "Place: Next (24)" in [cells[0] for cells in rows]
     assert "Showing current data" in seen["text"]
     assert "from the snapshot read on 11 Nov 2026" in seen["text"]
+
+
+@pytest.mark.spawns("tool: node's Playwright opens the built Timeline at phone width; a browser runs only "
+                    "as a process")
+def test_a_delivered_issue_shows_under_waiting_for_integrator_through_the_live_read(page):
+    """obs proves the saved delivered row (`test_obs_proves_the_live_declaration_against_every_saved_row`);
+    a read that does not return its issue, the open pull request among the answers, keeps it there."""
+    delivering = {"number": 60, "title": "delivered", "state": "open", "state_reason": None, "labels": [],
+                  "created_at": "2026-11-10T09:00:00Z", "closed_at": None, "body": "Refs #43\n" + REPORT,
+                  "pull_request": {"url": "https://api.github.com/repos/o/a/pulls/60"}}
+    seen = opened(page, {"o/a": [delivering]})
+    rows = seen["rows"]
+    at = rows.index(["Place: Waiting for integrator (1)"])
+    assert rows[at + 1][:6] == ["a", "Waiting for integrator", "2026-11-03", "43", "issue 43",
+                                "delivered, waiting for the integrator"]
+    assert rows[at + 1][6] == "pull request #60"
+    assert "Showing current data" in seen["text"]
+
+
+@pytest.mark.spawns("tool: node's Playwright opens the built Timeline at phone width; a browser runs only "
+                    "as a process")
+def test_a_delivered_issue_the_read_returns_changed_takes_the_place_its_labels_give(page):
+    """The delivery is the build's alone (timeline.py, Live): GitHub's issue list cannot say it."""
+    changed = {"number": 43, "title": "issue 43", "state": "open", "state_reason": None,
+               "labels": [{"name": "in-progress"}], "created_at": "2026-11-03T09:00:00Z", "closed_at": None,
+               "body": "Commented."}
+    rows = opened(page, {"o/a": [changed]})["rows"]
+    captions = [cells[0] for cells in rows if cells[0].startswith("Place:")]
+    assert captions[:2] == ["Place: Today (2)", "Place: Next (25)"]
 
 
 # --- How long "needs you" has waited, [timeline] ages ---
