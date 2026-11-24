@@ -559,6 +559,11 @@ one I/O component with three backends, chosen at start; its output `backend` nam
 (`CLAUDE_CODE_REMOTE=true`) it looks for no token, since the session's `GH_TOKEN` is the proxy's
 stand-in, and takes the proxy where REST answers through it, else the relay.
 
+The `se` binary carries kern's GitHub, clock and session components as kern's packages register
+them, each built from its `Environment()` (kern 3): the zero `Options` reach no token, proxy,
+cloud session or wall clock, so a component SE built itself would take the relay and stand still.
+`components/cmd/se/environment_test.go` holds the binary to kern's.
+
 SE's callers ask the backend (`se_relay.py` `backend`): only on `relay` does a streamed command run
 as one call through kern with its GitHub steps relayed. On `token` and `proxy` it runs directly,
 reaches GitHub itself and says so on stderr

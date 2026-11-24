@@ -82,9 +82,9 @@ func TestSEsWiringFilesOnlyAFilledTemplate(t *testing.T) {
 	}
 	w.Instances, w.Wires, w.Hooks = instances, wires, nil
 	rest := &fakeREST{}
-	g := github.New(github.Options{Clock: still{}, Token: func() (string, error) { return "t", nil },
+	g := github.New(github.Options{Token: func() (string, error) { return "t", nil },
 		Client: &http.Client{Transport: rest}})
-	ix, err := index.Start(w, clock.New(clock.Options{Clock: still{}}).Component, g.Component, template.Component)
+	ix, err := index.Start(w, clock.New(clock.Options{}).Component, g.Component, template.Component)
 	if err != nil {
 		t.Fatal(err)
 	}
