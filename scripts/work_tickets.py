@@ -712,13 +712,18 @@ def status_report(
 GH_ENVIRONMENT = {"GH_PROMPT_DISABLED": "1"}
 # GitHub's refusal of a call for its primary or secondary rate limit, as gh reports it.
 RATE_LIMITED = re.compile(r"rate limit|HTTP 429|abuse detection", re.IGNORECASE)
-_signed_in_gh: set[str] = set()
+#: How each `gh` reaches GitHub, decided once per process (`gh_backend`): SIGNED_IN where `gh auth
+#: status` passes, REST where it fails but the REST API answers (Claude Code's cloud, whose proxy
+#: signs `gh api` and refuses GraphQL: porcelain calls are answered over REST by gh_rest.py).
+SIGNED_IN, REST = "signed-in", "rest"
+REST_PROBE = ["api", "rate_limit"]
+_gh_backend: dict[str, str] = {}
 _signing_in = threading.Lock()
 
 
 def gh_executable() -> str:
-    """The `gh` on PATH, refused where it is missing or `gh auth status` fails: a `gh` that is
-    installed but not signed in counts as no `gh`. A passed check holds for the process."""
+    """The `gh` on PATH, refused where it is missing or reaches GitHub neither signed in nor over
+    REST (`gh_backend`). A passed check holds for the process."""
     executable = shutil.which("gh")
     if executable is None:
         raise MissingGhError(
@@ -731,24 +736,42 @@ def gh_executable() -> str:
     return executable
 
 
+def gh_quietly(executable: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    return process_door.run(
+        [executable, *arguments],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
+    )
+
+
 def signed_in(executable: str) -> None:
-    """Refuse a `gh` that `gh auth status` finds not signed in; a passed check holds for the
-    process."""
-    if executable not in _signed_in_gh:
-        feedback.reading("GitHub", ["gh", "auth", "status"])
-        status = process_door.run(
-            [executable, "auth", "status"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, env={**os.environ, **GH_ENVIRONMENT}, check=False,
-        )
-        if status.returncode != 0:
-            raise MissingGhError(
-                "needs the GitHub CLI (gh), which is installed but not signed in "
-                f"(gh auth status: exit code {status.returncode}), so it counts as no gh. Sign in "
-                "with gh auth login, or, where the host gives gh no account (Claude's cloud), do "
-                f"this step by hand as the se checkout's {WITHOUT_GH} says"
-            )
-        _signed_in_gh.add(executable)
+    """Decide how `executable` reaches GitHub: signed in where `gh auth status` passes, else over
+    REST where `gh api rate_limit` answers (whatever the sign-in says); refused where neither does.
+    A decision holds for the process."""
+    if executable in _gh_backend:
+        return
+    feedback.reading("GitHub", ["gh", "auth", "status"])
+    status = gh_quietly(executable, ["auth", "status"])
+    if status.returncode == 0:
+        _gh_backend[executable] = SIGNED_IN
+        return
+    feedback.reading("GitHub", ["gh", *REST_PROBE])
+    probe = gh_quietly(executable, REST_PROBE)
+    if probe.returncode == 0:
+        _gh_backend[executable] = REST
+        return
+    raise MissingGhError(
+        "needs the GitHub CLI (gh), which is installed but neither signed in "
+        f"(gh auth status: exit code {status.returncode}) nor answered over REST (gh api "
+        f"rate_limit: exit code {probe.returncode}), so it counts as no gh. Sign in with gh auth "
+        "login, or, where the host gives gh no account (Claude's cloud), do this step by hand "
+        f"as the se checkout's {WITHOUT_GH} says"
+    )
+
+
+def gh_backend() -> str:
+    """How gh reaches GitHub: SIGNED_IN or REST; MissingGhError where it does not."""
+    return _gh_backend[gh_executable()]
 
 
 def gh_usable() -> bool:
@@ -760,8 +783,17 @@ def gh_usable() -> bool:
 
 
 def run_gh(root: Path, arguments: list[str]) -> str:
-    """One call to GitHub through gh, announced before it is made (feedback.reading)."""
+    """One call to GitHub through gh, announced before it is made (feedback.reading). Where gh
+    reaches GitHub over REST alone (`gh_backend`), a porcelain call that would reach GraphQL is
+    answered over REST by gh_rest.py, each REST call through here in turn."""
     executable = gh_executable()
+    rest = sibling("gh_rest")
+    if _gh_backend.get(executable) == REST and rest.translates(arguments):
+        try:
+            return rest.run(arguments, lambda method, path, data, host: rest_call(
+                root, method, path, data, host), default_rest_repo(root, arguments))
+        except rest.GhRestError as error:
+            raise QueueError(f"gh {' '.join(arguments[:2])} over REST: {error}") from None
     feedback.reading("GitHub", ["gh", *arguments])
     result = process_door.run(
         [executable, *arguments],
@@ -778,8 +810,51 @@ def run_gh(root: Path, arguments: list[str]) -> str:
     metrics.door_call(refused)
     if result.returncode != 0:
         detail = failure_detail(result)
-        raise QueueError(f"gh {' '.join(arguments[:2])} failed: {detail}")
+        raise QueueError(f"gh {call_name(arguments)} failed: {detail}")
     return result.stdout
+
+
+def call_name(arguments: list[str]) -> str:
+    """A gh call as a failure names it: its first two words, or for `gh api` its method and path."""
+    if arguments[:1] == ["api"]:
+        words = iter(arguments[1:])
+        method, path = "GET", ""
+        for word in words:
+            if word == "-X":
+                method = next(words, method)
+            elif word.startswith("-"):
+                next(words, None)
+            elif not path:
+                path = word
+        return f"api {method} {path.split('?', 1)[0]}"
+    return " ".join(arguments[:2])
+
+
+def rest_call(root: Path, method: str, path: str, data: dict[str, object] | None,
+              host: str | None) -> object:
+    """One REST call through `gh api`: `method` on `path` below the API root, `data` its JSON body
+    (in a file, as bodies always travel); the parsed answer, {} for an empty one."""
+    arguments = ["api", "-X", method, path, *(("--hostname", host) if host else ())]
+    if data is None:
+        output = run_gh(root, arguments)
+    else:
+        with tempfile.TemporaryDirectory() as directory:
+            body = Path(directory) / "body.json"
+            body.write_text(json.dumps(data), encoding="utf-8", newline="\n")
+            output = run_gh(root, [*arguments, "--input", str(body)])
+    return json.loads(output) if output.strip() else {}
+
+
+def default_rest_repo(root: Path, arguments: list[str]) -> str:
+    """The repository a porcelain call without `--repo` means, as gh reads it from the checkout:
+    origin's; "" where the call names its own."""
+    if "--repo" in arguments or "-R" in arguments:
+        return ""
+    repo = remote_repo(root)
+    if repo is None:
+        raise QueueError(f"gh {' '.join(arguments[:2])} over REST: no --repo and {root} has no "
+                         "origin to read the repository from")
+    return repo
 
 
 def run_gh_with_body(root: Path, arguments: list[str], body: str) -> str:
@@ -964,15 +1039,20 @@ PUBLIC_CHECK_OPT_OUT = (
 )
 
 
+_loading = threading.RLock()
+
+
 def sibling(name: str):
-    """The script `<name>.py` beside this one, loaded once."""
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+    """The script `<name>.py` beside this one, loaded once: a thread that asks while another
+    loads it waits for the whole module (concurrently's reads load their doors' modules too)."""
+    with _loading:
+        module = sys.modules.get(name)
+        if module is None:
+            spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+        return module
 
 
 metrics = sibling("metrics")
