@@ -624,7 +624,7 @@ function page() {
     };
     const body = element();
     const calls = {application: null, sink: null, published: [], comments: [], warnings: [], notices: [], created: 0,
-                   posted: []};
+                   posted: [], order: []};
     globalThis.console = {...console, warn: message => calls.warnings.push(message)};
     if (mode.deck) globalThis.seDeck = mode.deck;
     globalThis.document = {body, title: "Deck", querySelector: () => null, addEventListener() {},
@@ -645,15 +645,20 @@ function page() {
     const refusal = code => Object.assign(new Error(`refused: ${code}`), {code});
     const claude = {use: async name => {
         if (name === "artifact") return {publish: async files => {
+            calls.order.push("publish");
             if (mode.files !== "ok") throw refusal(mode.files);
             calls.published.push(files);
             return {version: "v2"};
         }};
         if (name === "comments") return {
             anchorFor: async node => ({element: node === body ? "body" : "other"}),
+            canSendToClaude: async () => mode.canSend ?? "available",
             sendToClaude: async target => {
+                calls.order.push("comment");
+                await new Promise(resolve => setTimeout(resolve, 5));  // the shell's round trip
                 if (mode.comment !== "ok") throw refusal(mode.comment);
                 calls.comments.push(target);
+                calls.order.push("comment sent");
                 return {threadId: "t1", commentId: "c1"};
             },
         };
@@ -675,14 +680,14 @@ function page() {
                 id: calls.sink.id, name: calls.sink.name ?? null, result, error,
                 elements: calls.created + body.children.length, notices: calls.notices,
                 published: calls.published, comments: calls.comments, warnings: calls.warnings,
-                posted: calls.posted});
+                posted: calls.posted, order: calls.order});
     })();
 }
 (async () => {
     const results = [];
     for (const mode of modes) {
         results.push(await new Promise(report => vm.runInNewContext(`(${page})()`,
-            {bundle, payload, mode, report, console, TextEncoder})));
+            {bundle, payload, mode, report, console, TextEncoder, setTimeout})));
     }
     console.log(JSON.stringify(results));
 })();
@@ -701,6 +706,7 @@ BUNDLE_MODES = [
     {"files": "capability_disabled", "comment": "claude_unavailable"},
     {"files": "ok", "comment": "ok", "late": True},
     {"files": "ok", "comment": "ok", "late": True, "never": True},
+    *({"files": "ok", "comment": "ok", "canSend": state} for state in ("no_session", "writers_only", "off")),
     *({"files": "ok", "comment": "ok", "deck": {"title": "Retro", "decisions": [], "host": host}, **where}
       for host in ("claude-app", "claude-code", "copilot", "local", "vscode")
       for where in ({}, {"served": True}, {"late": True, "never": True}, {"served": True, "late": True, "never": True})),
@@ -777,10 +783,15 @@ def test_without_readable_deck_data_the_bundle_says_so_once_and_still_sends(bund
     assert "no answer" not in comment["text"]
 
 
+def partly_comment(reason: str = "") -> dict:
+    return {"id": "se-answers-partly", "severity": "warning", "title": "No message to Claude",
+            "details": ["Your answers are saved with this page, where Claude reads them, but the message to "
+                        f"Claude did not go through. {reason + ' ' if reason else ''}If Claude does not answer, say "
+                        "in the chat that you sent them."]}
+
+
 PARTLY = {
-    "comment": {"id": "se-answers-partly", "severity": "warning", "title": "No message to Claude",
-                "details": ["Your answers are saved with this page, where Claude reads them, but the message to "
-                            "Claude did not go through. If Claude does not answer, say in the chat that you sent them."]},
+    "comment": partly_comment("Claude could not take the message just now."),
     "answers.json": {"id": "se-answers-partly", "severity": "warning", "title": "Not saved with the page",
                      "details": ["Claude got your answers as a message, but they could not be saved with this page."]},
 }
@@ -801,6 +812,27 @@ def test_a_send_where_one_way_failed_posts_one_plain_warning(bundled, files, com
     [warning] = _send_warnings(calls)
     assert warning.startswith("se-answers: ") and code in warning
     assert calls["elements"] == 0
+
+
+def test_the_comment_to_claude_goes_first_and_alone_then_answers_json(bundled):
+    """The regression of 24 Nov: in the Claude app the answers were saved but the message to Claude did not
+    go through. The comment, which wakes the session, is sent first and finished before the publish starts."""
+    calls = _bundle(bundled, files="ok", comment="ok")
+    assert calls["order"] == ["comment", "comment sent", "publish"]
+    [comment] = calls["comments"]
+    assert "- swipe: bless" in comment["text"] and json.loads(comment["text"].split("answers.json:\n", 1)[1]) == PAYLOAD
+
+
+@pytest.mark.parametrize(("state", "reason"), [
+    ("no_session", "No Claude session is listening to this page right now."),
+    ("writers_only", "Only an editor of this page can send a message to Claude from it."),
+    ("off", "This view does not offer messages to Claude."),
+])
+def test_where_the_shell_cannot_send_to_claude_no_comment_is_tried_and_the_reason_is_named(bundled, state, reason):
+    calls = _bundle(bundled, files="ok", comment="ok", canSend=state)
+    assert calls["order"] == ["publish"] and calls["comments"] == []
+    assert calls["result"]["ways"] == ["answers.json"] and calls["result"]["failed"] == {"comment": state}
+    assert calls["notices"] == [["post", partly_comment(reason)], ["reveal", "se-answers-partly"]]
 
 
 def test_a_partial_send_without_a_notice_center_still_resolves(bundled):

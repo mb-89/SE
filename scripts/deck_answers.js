@@ -19,13 +19,16 @@
 // scripts/deck.py's docstring owns the capabilities a deck is published with, the decision skill
 // (src/skills/decision/SKILL.md) how the session reads what arrives.
 //
-// Through the Claude app's runtime the answers leave two ways, started in this order and both awaited:
-//   (a) `answers.json` through the `artifact` capability's files form: the record the session reads;
-//   (b) a comment to Claude through the `comments` capability's `sendToClaude`, anchored to the page:
+// Through the Claude app's runtime the answers leave two ways, one after the other:
+//   (b) first, a comment to Claude through the `comments` capability's `sendToClaude`, anchored to the page:
 //       each decision's verdict (or "comment" where it has none) and comment, which wakes the watching
-//       session even where (a) is refused.
-// (b) starts without waiting for (a), since sendToClaude needs the person's recent gesture. Send succeeds
-// when either way does; the result names each way and the error code of each that failed. Where neither the
+//       session. It is sent only where `canSendToClaude()` answers "available"; another answer is its
+//       failure's code. It goes first and alone, since it needs the person's recent gesture, and its
+//       consent prompt must not compete with the publish's (on 24 Nov, started together, the comment
+//       failed while answers.json was saved, and its code reached the console alone);
+//   (a) then `answers.json` through the `artifact` capability's files form: the record the session reads,
+//       saved even where (b) failed.
+// Send succeeds when either way does; the result names each way and the error code of each that failed. Where neither the
 // runtime nor obs-html serve is there, the adapter rejects with a message naming its host ("sending is not
 // available here") and obs-html shows the text to copy.
 //
@@ -108,9 +111,17 @@
         const result = await files.publish({"answers.json": `${JSON.stringify(payload, null, 2)}\n`});
         return {version: result?.version};
     };
+    // The comment to Claude: only where the shell says a session can take it (`canSendToClaude`), whose
+    // answer other than "available" is the failure's code (writers_only, no_session, off).
     const viaComment = async (runtime, payload) => {
         const comments = await runtime.use("comments");
         if (!comments) throw Object.assign(new Error("the comments capability is not granted to this view"), {code: "not_granted"});
+        if (typeof comments.canSendToClaude === "function") {
+            const state = await comments.canSendToClaude();
+            if (state !== "available") {
+                throw Object.assign(new Error(`the shell cannot send to Claude here (${state})`), {code: String(state)});
+            }
+        }
         const target = document.querySelector("[data-bless]") || document.body;
         const anchor = await comments.anchorFor(target);
         const result = await comments.sendToClaude({anchor, text: commentText(payload)});
@@ -134,11 +145,20 @@
     // The partial send's entry in obs-html's notice center, in plain words (no file, command, code or id).
     const PARTLY = "se-answers-partly";
     const notices = () => root.obsNotices;
-    const partly = failedWay => {
+    // Why the message to Claude did not go through, by its code, in the reader's words; none for another code.
+    const REASONS = {
+        no_session: "No Claude session is listening to this page right now.",
+        writers_only: "Only an editor of this page can send a message to Claude from it.",
+        off: "This view does not offer messages to Claude.",
+        consent_required: "This page was not allowed to comment as you.",
+        claude_unavailable: "Claude could not take the message just now.",
+    };
+    const partly = (failedWay, reason) => {
         if (failedWay === "comment") {
+            const why = REASONS[reason] ? `${REASONS[reason]} ` : "";
             notices()?.post({id: PARTLY, severity: "warning", title: "No message to Claude",
-                details: ["Your answers are saved with this page, where Claude reads them, but the message to " +
-                    "Claude did not go through. If Claude does not answer, say in the chat that you sent them."]});
+                details: [`Your answers are saved with this page, where Claude reads them, but the message to ` +
+                    `Claude did not go through. ${why}If Claude does not answer, say in the chat that you sent them.`]});
             notices()?.reveal(PARTLY);
         } else {
             notices()?.post({id: PARTLY, severity: "warning", title: "Not saved with the page",
@@ -146,11 +166,12 @@
         }
     };
 
-    // Through the Claude app's runtime: answers.json and the comment to Claude (the header's (a) and (b)).
+    // Through the Claude app's runtime: the comment to Claude first, alone, while the person's gesture is fresh
+    // and no other consent prompt competes with its own; then answers.json (the header's (b), then (a)).
+    const settled = promise => promise.then(value => ({status: "fulfilled", value}), reason => ({status: "rejected", reason}));
     const viaClaude = async (runtime, payload) => {
-        const files = viaFiles(runtime, payload);
-        const comment = viaComment(runtime, payload);
-        const [saved, sent] = await Promise.allSettled([files, comment]);
+        const sent = await settled(viaComment(runtime, payload));
+        const saved = await settled(viaFiles(runtime, payload));
         const ways = [...(saved.status === "fulfilled" ? ["answers.json"] : []),
             ...(sent.status === "fulfilled" ? ["comment"] : [])];
         const failed = {...(saved.status === "rejected" ? {"answers.json": code(saved.reason)} : {}),
@@ -166,7 +187,7 @@
         if (failedWay) {
             root.console?.warn(`se-answers: sent, but ${failedWay === "comment" ? "the comment to Claude" : "saving answers.json"} ` +
                 `failed with ${describe(failedWay === "comment" ? sent.reason : saved.reason)}`);
-            partly(failedWay);
+            partly(failedWay, failed[failedWay]);
         } else {
             notices()?.remove(PARTLY);
         }

@@ -159,8 +159,11 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
    - **The Claude app** (cloud and mobile), `--host claude-app`: publish `<deck>.html` with the
      Artifact tool and the capabilities `deck.py --help` names, `artifact` and full-form
      `comments`, and send the person its link.
-     - Their Send saves `answers.json` into the artifact and sends the answers to Claude as a
-       comment; either wakes this session.
+     - The publish's result says whether this session watches the artifact; where it does not,
+       watch it with the `ArtifactComments` tool before sending the link, or no session can take
+       the person's message (the deck tells them "No Claude session is listening").
+     - Their Send sends the answers to Claude as a comment first, then saves `answers.json` into
+       the artifact; either wakes this session.
      - Read `answers.json` with the Artifact tool's `read` and `path: "answers.json"`. Where it is
        missing or older than the comment, take the payload from the comment's `answers.json:` part,
        or from its lines where the payload did not fit.
