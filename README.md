@@ -2656,10 +2656,10 @@ against `work`, `backlog file` against `ticket` and `route` against `routed`. Ea
 `--body-file` (for `route`, `--routing-file`) or `--fields <file>`, the JSON `draft --json` prints,
 always rendered through the template.
 
-- `enforce` is `off` (the default: a `--body-file` body is filed byte for byte as before), `warn`
-  (the findings go to stderr and the issue is filed) or `refuse` (nothing is printed, asked or
-  written; the refusal lists every finding in at most ten lines). With `warn` or `refuse` a
-  `--body-file` body is parsed and rendered again, its unknown sections kept.
+- `enforce` is `off` (the default: a `--body-file` body is filed as given, with its template's
+  marker), `warn` (the findings go to stderr and the issue is filed) or `refuse` (nothing is
+  printed, asked or written; the refusal lists every finding in at most ten lines). With `warn` or
+  `refuse` a `--body-file` body is parsed and rendered again, its unknown sections kept.
 - They read `[templates]` from `se.toml` at `origin/<integration branch>`, the working tree's only
   where that ref does not exist, so a branch cannot switch its own check off.
 - `refusals` (default 2) caps the retries: refusals are counted per session, template and issue in
@@ -2690,8 +2690,10 @@ denied, naming the template, every finding and the templates tool).
     naming `--body-file`.
   - It does not see `gh api graphql`, `curl` or another program that calls GitHub's API.
 - It reads `[templates] gate` as `enforce` is read, from the se.toml of the project whose home holds
-  the target, else of SE itself; a write elsewhere, without a body or that no template covers runs as
-  before. `SE_TEMPLATES_GATE=off` turns it off for a machine.
+  the target, else of SE itself; a write elsewhere or that no template covers runs as before.
+  `SE_TEMPLATES_GATE=off` turns it off for a machine.
+- An edit is judged as the document it leaves, by the template that document names
+  ([docs/templates.md](docs/templates.md#which-template-a-write-is-judged-by)).
 - From `refusals` on, a refused issue write may be sent again labelled `off-template` and without
   `ready`, the hold `--hold` files; a private term is never held.
 - It fails open, logged, where it is slow or cannot judge; it fails closed only on a crash once it

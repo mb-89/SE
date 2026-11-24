@@ -80,7 +80,9 @@ judged by their own rules (The file tools, below).
   (VS Code) or `-` (Copilot CLI); the server part, or the payload's `mcp_server.name` where it
   carries one, holds `github`. Each tool maps to an action and to the arguments that hold its
   body, title, labels and base; `issue_write` is `issue.create` with method `create` and
-  `issue.edit` otherwise. A call without a body passes. The repository is `owner`/`repo`.
+  `issue.edit` otherwise, its `issue_number` the issue edited, `update_issue_comment`'s
+  `comment_id` the comment. A create without a body passes, and an edit that changes none of
+  body, title and labels. The repository is `owner`/`repo`.
 - The shell reader (SHELL_KEYS to shell_writes): a call of any other tool whose input holds a
   string `command`, `input` or `script` naming `gh` as a word followed by a space (GH_WORD, the
   filter se_hook.sh runs in builtins) is split with shlex at `&&`, `||`, `;`, `|`, `&` and line
@@ -91,15 +93,17 @@ judged by their own rules (The file tools, below).
     `issue.edit`, `comment.create`; `gh pr` with `create`, `edit`, `comment` or `review`:
     `pr.create`, `pr.edit`, `comment.create` (GH_WRITES). Their parts: `--title`/`-t`,
     `--body`/`-b`, `--body-file`/`-F` (`-` reads the part's stdin: a heredoc, a here-string or
-    `< <file>`), `--label`/`-l` (repeated or comma-separated), `--base`/`-B`, `-R`/`--repo` or an
-    issue's URL; without them the repository is the project's origin, and `gh pr create`'s base
+    `< <file>`), `--label`/`-l` (repeated or comma-separated), `gh issue edit`'s `--add-label` and
+    `--remove-label`, `--base`/`-B`, `-R`/`--repo` or an issue's URL, the number at its end the
+    issue edited; without them the repository is the project's origin, and `gh pr create`'s base
     is the integration branch, as gh takes the default branch.
   - `gh api` on GH_API_PATHS (`repos/<owner>/<repo>/issues`, `.../issues/<n>`,
     `.../issues/<n>/comments`, `.../issues/comments/<id>`, `.../pulls`, `.../pulls/<n>`, `{owner}`
     and `{repo}` as origin's) with POST or PATCH, by `-X`/`--method` or, without one, a field:
     `-f`/`-F`/`--field`/`--raw-field` `title=`, `body=`, `labels[]=`, `base=`, `-F body=@<file>`
-    read from the file, `--input <file>` read as JSON. A GET, another endpoint, `gh api graphql`
-    and every other command pass.
+    read from the file, `--input <file>` read as JSON; `issues/<n>` names the issue edited,
+    `issues/comments/<id>` the comment. A GET, another endpoint (`issues/<n>/labels` among them),
+    `gh api graphql` and every other command pass.
   - A body it cannot read (UNREAD): from `$(...)`, backticks or a variable, a pipe into
     `--body-file -`, an unquoted heredoc holding `$` or a backtick, a file that does not exist yet,
     or one gh writes itself (GH_OWN_BODY: `--fill`, `--fill-first`, `--fill-verbose`, `--template`,
@@ -115,10 +119,27 @@ judged by their own rules (The file tools, below).
   read at `origin/<integration branch>`) is `off` (the default), `warn` or `refuse`;
   `SE_TEMPLATES_GATE=off` in the environment turns it off for the machine whatever se.toml says, and
   `--gate`, for tests only, sets it for the run. The templates are SE's (`templates.load`).
-- Selection: `templates.select` for the action, with the call's labels and base. Where the call
-  carries no labels or no base, the body's own template marker picks among the action's
-  templates without that filter; an unmarked body is selected as if the call had no labels. It never
-  reads GitHub.
+- Which template (docs/templates.md "Which template a write is judged by"): a write's template is
+  the one its document names, never a guess from the call.
+  - An edit (DOCUMENT_EDITS: `issue.edit`, `comment.edit`) is judged as the document it leaves
+    behind (`edited`): the issue or comment as it stands (`current_document`: kern's snapshot of
+    the issue where one younger than se_relay's MAX_AGE_SECONDS stands, else one REST read through
+    gh, `work_tickets.issue_api`), with the call's body, title and labels in its place and gh's
+    `--add-label` and `--remove-label` applied.
+  - Its template is the one the new body names (`templates.named_template`: a template marker of a
+    template of the action, else a template's own marker), else the one the current document
+    names. Where the new body drops the current marker, or the labels left lack the template's,
+    each is a refused finding beside the template's own.
+  - Where neither names one and a template would take the document as new (`templates.select`'s
+    guess), the edit is refused (`unmarked_refusal`), naming `work_tickets.py stamp` with that
+    template and the fill; it is judged against none. Where none would, as for an unmarked
+    comment, it is free.
+  - Where the document cannot be read (no number, gh fails), the new body's marker alone decides
+    and an edit without one passes; GATE_LOG names why.
+  - A new document, and a pull request's edit, is selected from the call: `templates.select` with
+    the call's labels and base; where the call carries no labels or no base, the body's own
+    template marker picks among the action's templates without that filter, and an unmarked body
+    is selected as if the call had no labels.
 - The check is `check`'s: the same `filed` and `findings`, the private terms read from the
   project's local list.
 - The answers: with `refuse` and a refused finding, a `deny` whose reason is `templates.report`'s, its
