@@ -754,3 +754,94 @@ def test_a_call_naming_no_directory_runs_in_the_checkout_kern_serves(tmp_path, m
     code, _, _ = se_components.run_main(lambda argv: seen.append(Path.cwd()) or 0, [], None)
     assert code == 0 and seen == [project.resolve()]
     assert Path.cwd() == home
+
+
+RELOAD_SCRIPT = '''
+import sys
+
+STREAMED_COMMANDS = frozenset({"streamed"})
+
+
+def main(argv):
+    import reloadhelp
+    print(f"{argv[0]} {reloadhelp.WORD}")
+    return 0
+'''
+
+
+def _reload_demo(tmp_path, monkeypatch, word: str):
+    """A component whose script, scripts/reloaddemo.py, answers with the word its helper
+    scripts/reloadhelp.py holds, imported inside main, under SE version 1.0.0."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (tmp_path / "se.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+    (scripts / "reloaddemo.py").write_text(RELOAD_SCRIPT, encoding="utf-8")
+    (scripts / "reloadhelp.py").write_text(f"WORD = {word!r}\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(scripts))
+    for name in ("reloaddemo", "reloadhelp"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    folder = tmp_path / "demo"
+    folder.mkdir()
+    (folder / "component.toml").write_text(se_components.declaration(
+        "demo", "A demo.", "Demo",
+        [se_components.Declared("reloaddemo.py plain", "reloaddemo.py plain", "plain", True),
+         se_components.Declared("reloaddemo.py streamed", "reloaddemo.py streamed", "streamed",
+                                False)], "a test", steps=True), encoding="utf-8")
+    return scripts, Fake(se_components.attach("demo", "reloaddemo", folder))
+
+
+def test_a_component_that_cannot_reload_refuses_and_the_command_runs_directly(
+        tmp_path, monkeypatch, capsys) -> None:
+    """Fresh: a change while another call of the component runs on the old code, or a change of
+    the run loop itself, is refused with STALE, never answered with the old code; routed says so
+    and runs the command directly."""
+    import types
+
+    import kern.nats
+
+    scripts, fake = _reload_demo(tmp_path, monkeypatch, "A")
+    assert fake.run("reloaddemo.py plain") == "plain A"  # its helper loaded
+    code = se_components.Code("demo", [sys.modules["reloaddemo"]])
+    code.enter("reloaddemo", lambda line: None)  # a call that still runs
+    (scripts / "reloadhelp.py").write_text("WORD = 'B'\n", encoding="utf-8")
+    with pytest.raises(KernError, match=r"\ASE's code changed under component demo "
+                                        r"\(reloadhelp\.py\) while 1 of its calls still run"):
+        code.enter("reloaddemo", lambda line: None)
+    code.leave()
+    assert code.enter("reloaddemo", lambda line: None).main  # the call ended: it reloads
+    code.leave()
+
+    loop = scripts / "se_components.py"  # this run loop's own file, as the process loaded it
+    loop.write_text("# A\n", encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "demo_loop", types.ModuleType("demo_loop"))
+    sys.modules["demo_loop"].__file__ = str(loop)
+    code.note()
+    loop.write_text("# B\n", encoding="utf-8")
+    with pytest.raises(KernError, match=r"its run loop cannot reload itself: the command runs "
+                                        r"directly; se_start.py update restarts the core") as refused:
+        code.enter("reloaddemo", lambda line: None)
+
+    class Refusing:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request(self, subject, data, timeout, give_up=False):
+            return type("Msg", (), {"json": lambda self: {"error": str(refused.value)}})()
+
+        def close(self) -> None:
+            pass
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "scripts").mkdir()
+    (checkout / "scripts" / "work_tickets.py").write_text("", encoding="utf-8")
+    standing = checkout / se_components.STANDING
+    standing.parent.mkdir(parents=True)
+    standing.write_text(json.dumps({"bus": "nats://127.0.0.1:9", "users": {"client": "x"}}),
+                        encoding="utf-8")
+    monkeypatch.setattr(kern.nats, "Peer", Refusing)
+    monkeypatch.chdir(checkout)
+    capsys.readouterr()
+    monkeypatch.delenv(se_components.SWITCH)
+    assert se_components.routed(checkout / "scripts" / "work_tickets.py", ["status"], [], True) is None
+    assert capsys.readouterr().err == f"se: work_tickets.py status runs directly: {refused.value}\n"
