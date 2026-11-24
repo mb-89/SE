@@ -497,6 +497,25 @@ def test_due_prints_each_countdown_and_without_gh_its_plan(checkout, tmp_path, m
     assert lines[1].startswith("overhaul: 1 retros closed in the whole history")
 
 
+def test_the_countdown_lines_are_the_retro_due_snippet_as_due_printed_them():
+    """templates/retro-due.md shapes `retro due`: each state of a countdown keeps its line."""
+    def countdown(kind, **changes):
+        return retro.Countdown(**{"kind": kind, "since": "2026-11-01", "since_run": 30, "landed": 10,
+                                  "failed": 2, "count": 12, "due_after": 10, "days": 14,
+                                  "elapsed_days": 23, "due": False, "reason": "", "open": [],
+                                  **changes})
+    assert retro.countdown_lines({"retro": countdown("retro", due=True, reason="12 came back"),
+                                  "overhaul": countdown("overhaul", count=2, since=None, since_run=None)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; due: 12 came back",
+        "overhaul: 2 retros closed in the whole history, 23 days; not due"]
+    assert retro.countdown_lines({"retro": countdown("retro", open=[31, 32]),
+                                  "overhaul": countdown("overhaul", count=0)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; open: #31, #32",
+        "overhaul: 0 retros closed since #30 started 2026-11-01, 23 days; not due"]
+    lines = retro.countdown_lines({"retro": countdown("retro"), "overhaul": countdown("overhaul")})
+    assert retro.sibling("interfaces").read(retro.DUE_TEMPLATE, "\n".join(lines))["overhaul_days"] == "23"
+
+
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
     found = collected(checkout)
     text = retro.draft(found)
@@ -800,6 +819,26 @@ def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout
     assert "/blob/" in comments[0] and "docs/retro-30.md" in comments[0]
     assert "a landed issue's row" not in comments[0]
     assert [name for name, _ in calls][-1] == "close_issue"
+
+
+def test_the_doc_marker_is_the_retro_doc_message_and_reads_back():
+    """templates/retro-doc.md writes the line the report links its retro doc with, as before; the
+    reading stays DOC_PATTERN, which takes a full commit only."""
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    line = retro.doc_marker(sha, "docs/retro-30.md")
+    assert line == f"<!-- se:retro-doc {sha} docs/retro-30.md -->"
+    assert retro.DOC_PATTERN.fullmatch(line).groups() == (sha, "docs/retro-30.md")
+    assert retro.DOC_PATTERN.fullmatch(retro.doc_marker("abc123", "docs/retro-30.md")) is None
+
+
+def test_the_finding_reference_is_the_finding_ref_message_that_collect_finds():
+    """templates/finding-ref.md writes the reference a work issue names a finding by, which
+    FINDING_REFERENCE finds in free text, the retro's and the overhaul's alike."""
+    assert retro.finding_reference("retro", 30) == "retro #30 finding <k>"
+    assert retro.FINDING_REFERENCE.search(f"Takes {retro.finding_reference('retro', 30, 2)}.").groups() == (
+        "30", "2")
+    assert retro.sibling("overhaul").FINDING_REFERENCE.search(
+        retro.finding_reference("overhaul", 50, 1)).groups() == ("50", "1")
 
 
 def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
@@ -1204,6 +1243,35 @@ def test_a_class_s_optional_keys_are_checked(checkout, keys, refusal):
     classes = [{**LOST_REPORTS, **keys}]
     with pytest.raises(work_tickets.QueueError, match=re.escape(refusal)):
         retro.judged(judged_draft(checkout, classes=classes), 30)
+
+
+def cases_of(test) -> list[dict]:
+    """The judgment changes of a parametrized test's cases, as the test states them."""
+    return [case[0] for mark in test.pytestmark if mark.name == "parametrize" for case in mark.args[1]]
+
+
+def recurred_draft(checkout: Path) -> str:
+    """The judged draft whose first finding names a check that recurred after the previous retro."""
+    draft = judged_draft(checkout)
+    block = retro.read_block(draft)
+    block["previous"]["findings"] = [{"finding": 1, "check": "field-report", "recurred": True}]
+    return draft[:draft.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n```yaml\n" + \
+        json.dumps(block) + "\n```\n"
+
+
+def test_the_judged_block_s_adapter_finds_what_judgment_problems_finds(checkout):
+    """templates/retro-judgment.md checks the block through judgment_problems: on the drafts of
+    the refusal tests, the complete judgment among them, its problems are the same."""
+    drafts = [judged_draft(checkout, **changes)
+              for changes in cases_of(test_file_refuses_an_incomplete_judgment_and_writes_nothing)]
+    drafts += [judged_draft(checkout, classes=[{**LOST_REPORTS, **keys}])
+               for keys in cases_of(test_a_class_s_optional_keys_are_checked)]
+    drafts += [judged_draft(checkout), recurred_draft(checkout)]
+    for draft in drafts:
+        assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, draft) == retro.judgment_problems(
+            retro.read_block(draft))
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-2]) == []
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-1]) != []
 
 
 def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_measures_it_again(
