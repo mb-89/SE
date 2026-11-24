@@ -498,6 +498,7 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/started-comment.md` | `started-comment`: the Started comment `start` posts on a work issue | interface | SE |
 | `templates/claim-undone.md` | `claim-undone`: `unclaim`'s answer to a Started comment | interface | SE |
 | `templates/review-declined.md` | `review-declined`: the comment a declined review writes on the work issue | interface | SE |
+| `templates/limit-restart.md` | `limit-restart`: the comment that says a worker session was resumed after a usage limit | interface | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already

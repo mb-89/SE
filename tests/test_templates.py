@@ -131,7 +131,7 @@ NESTING = ("decision", "raid-register", "raid-entry", "requirement", "retro", "o
 #: The interface templates with fields: the texts SE's sessions pass to each other.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover",
               "rules-page", "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc",
-              "finding-ref", "started-comment", "claim-undone", "review-declined")
+              "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
 #: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their

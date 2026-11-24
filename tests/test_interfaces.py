@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
-              "started-comment", "claim-undone", "review-declined")
+              "started-comment", "claim-undone", "review-declined", "limit-restart")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
-            "finding-ref", "started-comment", "claim-undone", "review-declined")
+            "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart")
 
 
 @pytest.fixture(scope="module")
@@ -249,3 +249,11 @@ def test_the_decline_comment_is_the_line_review_wrote_by_hand_and_the_retro_read
                        "fundamentally wrong and does not land. The review comment there holds the findings; "
                        "SE re-scopes this issue or takes it to the owner.\n")
     assert retro.DECLINED.match(comment).groups() == ("5", url)
+
+
+def test_the_limit_restart_comment_is_the_line_the_remedy_named_by_hand_and_its_reader_finds_it():
+    import limit_restart
+
+    comment = limit_restart.restarted_comment("session_a")
+    assert comment == f"{limit_restart.RESTARTED} session session_a"
+    assert limit_restart.restarted([{"body": comment}])

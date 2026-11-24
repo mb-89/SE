@@ -43,6 +43,9 @@ housekeeping:
 landing:
   - discover-cheap-load-late
   - guidance-comes-first
+limit-restart:
+  - discover-cheap-load-late
+  - guidance-comes-first
 merge-message:
   - discover-cheap-load-late
   - guidance-comes-first

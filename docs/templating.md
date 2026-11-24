@@ -32,6 +32,7 @@ both.
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
+| `templates/limit-restart.md` | A restart after a usage limit: the worker session the integrator resumed. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
 | `templates/overhaul-judgment.md` | An overhaul's judged block: a verdict on every rule, what it looked at, the findings and what went well, as JSON under its marker. |
@@ -84,9 +85,9 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
 The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `escalation`,
-`finding-ref`, `generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`,
-`review-declined`, `rules-page`, `skills-page`, `started-comment`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
-other.
+`finding-ref`, `generated-marker`, `handover`, `limit-restart`, `retro-doc`, `retro-due`,
+`retro-part`, `review-declined`, `rules-page`, `skills-page`, `started-comment`,
+`sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each other.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
 `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
@@ -99,6 +100,8 @@ Through `scripts/interfaces.py`:
   cases;
 - `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;
 - `review.py file` the decline comment on a declined pull request's work issue;
+- `work_tickets.py fleet-check` the restart comment its remedy names for a session stopped on a
+  usage limit (`limit_restart.py`);
 - `retro.py due` its two countdown lines, `retro.py file` its report's link to the retro doc and the
   label of each part of a split report, and both reports the finding reference work issues name.
 
