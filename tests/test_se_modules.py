@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import fake_git
+import manual
 
 # Its git is the fake in memory; a test whose scripts or binaries run git as child processes takes
 # the fake behind one state file, `shared_fake_git` (tests/conftest.py `door_fake`).
@@ -564,8 +565,7 @@ def spelled_one_way(commands: list[str]) -> bool:
 
 
 def test_readme_spells_the_module_command_one_way():
-    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
-    commands = module_commands(readme)
+    commands = module_commands(manual.text())
     assert spelled_one_way(commands), commands
 
 
@@ -794,7 +794,7 @@ def test_update_of_another_module_leaves_the_workflows_alone(world, capsys):
     assert calls.read_text() == "jobs: {}\n" and "generated" not in out
 
 
-# The core switch of SE's session hooks (README "Machine-local `~/.se/local.toml`"): `[hooks] core`
+# The core switch of SE's session hooks (docs/running.md "Machine-local `~/.se/local.toml`"): `[hooks] core`
 # in the local file, read by hooks_core after SE_HOOK_CORE.
 def local_hooks(tmp_path: Path, text: str) -> se_modules.LocalConfig:
     return se_modules.load_local(write(tmp_path / "local.toml", text))
@@ -889,7 +889,7 @@ def test_the_switch_table_shows_hook_core_by_its_answering_layer(tmp_path, monke
     assert (effect["state"], effect["layer"]) == ("off", "environment")
 
 
-# A `go` pin: the version a go.mod requires of the module is the pin (README "Modules").
+# A `go` pin: the version a go.mod requires of the module is the pin (docs/modules.md "Modules").
 
 GO_MOD = "module example.com/app\n\ngo 1.25.0\n\nrequire (\n\tgithub.com/x/y v1.0.0\n\tlib v{version}\n)\n"
 

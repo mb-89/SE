@@ -30,7 +30,7 @@ on = ["on"]
 off = ["off"]
 other = "on"
 fold = true
-help = "README.md#commands-as-components"
+help = "docs/start.md#commands-as-components"
 note = "on: interactive commands go through kern where it serves, else run directly; SE_KERN=on refuses that fallback"
 
 [[switch]]
@@ -77,7 +77,7 @@ reader = "scripts/work_tickets.py"
 default = "on"
 layers = ["se.toml"]
 key = "project.public_check"
-help = "README.md#project-settings"
+help = "docs/settings.md#project-settings"
 
 [[switch]]
 name = "[overhaul] due_after"
@@ -88,7 +88,7 @@ layers = ["se.toml"]
 key = "overhaul.due_after"
 off = [0]
 other = "on"
-help = "README.md#retro-due"
+help = "docs/fleet.md#retro-due"
 note = "on (3): an overhaul falls due after that many retros; 0 turns that rule off, and the countdown is off where [overhaul] days is 0 too"
 
 [[switch]]
@@ -98,7 +98,7 @@ reader = "scripts/ci_trust.py"
 default = "off"
 layers = ["se.toml"]
 key = "tests.trust_integrator"
-help = "README.md#trusted-landings"
+help = "docs/tests.md#trusted-landings"
 
 [[not_switch]]
 name = "SE_ROOT"

@@ -21,7 +21,7 @@ template's. Step 2, collect, holds
   delivered" items, the planning misses;
 - the rule checks (RULE_CHECKS), each broken one with what broke it;
 - the metrics of the window: the line each landing pull request's description ends in and the
-  local metrics file's lines that started in the window, each run once (README "Metrics");
+  local metrics file's lines that started in the window, each run once (docs/running.md "Metrics");
 - the previous retro's sizes, where its block is found;
 - the breaking-release check over the project's component tree (se_modules.py `breaking`), which
   every collect runs once its answers are all there;
@@ -74,12 +74,13 @@ as the retro issue's closing comment, and closes the issue. The facts and the bl
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
 reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
 
-`retro.py due` prints the retro and overhaul countdowns (`countdowns`, README "Retro due"), which
-the filing check runs before every filing. It reads the closed issues and pull requests newest
-update first and only as far back as they can count: the runs by their label, then back to the
-start of the newest counted retro (and of the newest overhaul, where its countdown is on and one
-exists), the pull requests on until each work issue closed since then has its landing; with no
-retro yet, everything (`recent_reads`). The answer files are read whole, with the same countdowns.
+`retro.py due` prints the retro and overhaul countdowns (`countdowns`,
+docs/fleet.md "Retro due"), which the filing check runs before every filing. It reads the closed
+issues and pull requests newest update first and only as far back as they can count: the runs by
+their label, then back to the start of the newest counted retro (and of the newest overhaul, where
+its countdown is on and one exists), the pull requests on until each work issue closed since then
+has its landing; with no retro yet, everything (`recent_reads`). The answer files are read whole,
+with the same countdowns.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -802,7 +803,7 @@ def counted_run(issue: Issue) -> bool:
 
 @dataclass
 class Countdown:
-    """When a retro or an overhaul falls due (README "Retro due"): what came back since the newest
+    """When a retro or an overhaul falls due (docs/fleet.md "Retro due"): what came back since the newest
     run of that kind started (`since`, from run `since_run`; None: the whole history), weighted
     into `count`, and whether that, or `days` days since the start with anything come back, makes
     one due; with the runs of that kind still open."""
@@ -999,7 +1000,7 @@ def countdowns(door, tracker: str, branch: str, root: Path,
                                                     now)}
 
 
-# The countdowns' settings (se.toml [retro] and [overhaul], README "Retro due"), each with its
+# The countdowns' settings (se.toml [retro] and [overhaul], docs/fleet.md "Retro due"), each with its
 # built-in: how much makes a run due, what a failure weighs, and after how many days one with
 # anything to look at is due. 0 switches a rule off, except a retro's due_after.
 SETTINGS = {"retro": {"due_after": DUE_AFTER, "failure_weight": 5, "days": 7},
@@ -1146,7 +1147,7 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         return None
     # The window's metrics: the local file's lines that started in it, and the line each landing
     # pull request's description ends in, which outlives a cloud integrator's container; a run in
-    # both counts once, by its local line (README "Metrics").
+    # both counts once, by its local line (docs/running.md "Metrics").
     local = [line for line in metrics.read(metrics.path())[0] if in_window(str(line["start"]))]
     landed_runs = [line for pull in landings if (line := metrics.of_text(pull.body)) is not None]
     runs = metrics.merged(local, landed_runs)
@@ -2261,7 +2262,7 @@ def run_due(args: argparse.Namespace) -> int:
     return 0
 
 
-#: retro.py's commands as one kern component (README "Commands as components"), retro; each
+#: retro.py's commands as one kern component (docs/start.md "Commands as components"), retro; each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
@@ -2339,7 +2340,7 @@ def make_parser() -> argparse.ArgumentParser:
         description="Count what came back since the newest retro started (a landing 1, an "
                     "escalated work issue its failure_weight) and the retros closed since the "
                     "newest overhaul started, and say whether either is due by se.toml [retro] "
-                    "and [overhaul] (README \"Retro due\") or a run of its kind is open; "
+                    "and [overhaul] (docs/fleet.md \"Retro due\") or a run of its kind is open; "
                     "work_tickets.py file runs the same check first.")
     due_command.add_argument("--json", action="store_true", help="the countdowns as JSON")
     due_command.add_argument("--answers", type=Path, metavar="DIR",

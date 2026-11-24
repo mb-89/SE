@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CI's trust in the integrator's run of the complete suite (README "Trusted landings").
+"""CI's trust in the integrator's run of the complete suite (docs/tests.md "Trusted landings").
 
 `work_tickets.py integrate` runs the complete suite on the tree it lands. Where se.toml `[tests]`
 sets `trust_integrator = true`, its landing plan dispatches the workflow `se-pass-record.yml`, whose
@@ -15,7 +15,7 @@ Who may write the record: a dispatch of `se-pass-record.yml` by the integrator's
 other record is not trusted.
 
 Where the host gives the repository no runners, `[tests] ci = false` makes the integrator's commit
-status `se integrator verdict` the verdict instead (README "Landing without CI"): `judge_status`
+status `se integrator verdict` the verdict instead (docs/tests.md "Landing without CI"): `judge_status`
 accepts one only for exactly the commit's tree and suite hash, written by the integrator. Standard
 library only: it runs with the runner's `python3` (3.11 or
 later) and the Actions token; exit code 0 done, 2 a setup error (se.toml, git, the API)."""
@@ -63,7 +63,7 @@ class TrustError(Exception):
 
 @dataclass(frozen=True)
 class Trust:
-    """se.toml `[tests]`'s trust settings (README "Trusted landings")."""
+    """se.toml `[tests]`'s trust settings (docs/tests.md "Trusted landings")."""
 
     on: bool  # trust_integrator, default false
     full_every: int  # full_every: every N-th landing runs the full suite anyway
@@ -108,7 +108,7 @@ def trust_settings(root: Path, rev: str | None = None) -> Trust:
     ci = tests.get("ci", True)
     if not isinstance(ci, bool):
         raise TrustError(f"{where}: ci must be true or false (default true; false where the host "
-                         "gives the repository no runners, README \"Landing without CI\")")
+                         "gives the repository no runners, docs/tests.md \"Landing without CI\")")
     if not ci and on:
         raise TrustError(f"{where}: trust_integrator = true needs a runner for its record, and "
                          "ci = false says there is none; turn one of them off")
@@ -216,7 +216,7 @@ def judge(check_run: dict, run: dict | None, *, tree_hash: str, suite: str,
 
 def status_description(tree_hash: str, suite: str) -> str:
     """The description of the status `se integrator verdict` for a pass on `tree_hash` whose
-    suite hashes to `suite` (README "Landing without CI"): the tree, and the suite hash's first
+    suite hashes to `suite` (docs/tests.md "Landing without CI"): the tree, and the suite hash's first
     SUITE_DIGITS digits, so a sha256 repository's tree fits the host's 140 characters too."""
     return f"passed tree {tree_hash} suite {suite[:SUITE_DIGITS]}"
 
@@ -452,7 +452,7 @@ def run_record(root: Path, run: Run, api: Api) -> int:
                    "summary": (f"The integrator's suite {inputs['result']} on tree "
                                f"{inputs['tested']} at {inputs['time']} in {inputs['seconds']} s, "
                                f"session {inputs['session']}: `{inputs['command']}`; recorded for "
-                               f"tree {checks['tree']} (README \"Trusted landings\")."),
+                               f"tree {checks['tree']} (docs/tests.md \"Trusted landings\")."),
                    "text": json.dumps(record, indent=1, sort_keys=True)}})
     print(f"::notice title=se trusted landing::recorded {inputs['result']} for tree "
           f"{checks['tree'][:12]} on {head[:12]}: {created.get('html_url', '')}")

@@ -69,9 +69,11 @@ work:
   - generated-files-are-marked
   - parse-dont-validate
   - python-ad-hoc-go-system
+  - readme-is-one-page
 work-file:
   - discover-cheap-load-late
   - guidance-comes-first
   - generated-files-are-marked
   - parse-dont-validate
   - python-ad-hoc-go-system
+  - readme-is-one-page

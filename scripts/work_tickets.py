@@ -143,7 +143,7 @@ CLAIM_TIMEOUT_HOURS = 12  # [workers] claim_timeout_hours, unset; a beat is due 
 BEAT_RECORD = "beat.yaml"
 BEAT_CLAIM = "beat.claim"  # the hook's claim on a beat it started, which `beat` removes
 BEAT_RETRY = timedelta(minutes=15)  # after a beat that failed, the next is due this much later
-# An issue filed with --hold past its template's refusals (README "Templates"): never started until fixed.
+# An issue filed with --hold past its template's refusals (docs/templating.md "Templates"): never started until fixed.
 OFF_TEMPLATE_LABEL = "off-template"
 NOT_STARTABLE_LABELS = frozenset({BACKLOG_LABEL, FLEET_LABEL, IN_PROGRESS_LABEL, OFF_TEMPLATE_LABEL})
 LABEL_DESCRIPTIONS = {
@@ -1108,7 +1108,7 @@ def refuse_push(root: Path, commit: str, refusals: list[str]) -> NoReturn:
 
 def guard_integration_push(root: Path, commit: str) -> str | None:
     """guard_pushed_tree for a push of the integration branch itself. Where se.toml on the
-    commit's first parent sets `[tests] ci = false` (README "Landing without CI"), the
+    commit's first parent sets `[tests] ci = false` (docs/tests.md "Landing without CI"), the
     integrator's status, accepted on the commit or on the head of the pull request that landed it,
     stands in for missing local verdicts: the line naming it. None where the local verdicts
     passed; with the setting off no status is read."""
@@ -1316,7 +1316,7 @@ def sync(root: Path) -> str:
     return commit.stdout.strip()
 
 
-#: The module name of se itself, in a repository that pins it (README "Modules").
+#: The module name of se itself, in a repository that pins it (docs/modules.md "Modules").
 SE_MODULE = "se"
 
 
@@ -3317,7 +3317,7 @@ def integrated_packages(root: Path, tip: str, released: str,
                         stated: tuple[StatedKind, ...] = ()) -> list[tuple[str, str]]:
     """(branch, release kind) of each integration on `tip`'s first-parent history since the
     commit `released`, the last release's, oldest first: what the next release raises the version
-    by (README "Project settings").
+    by (docs/settings.md "Project settings").
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
     integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
@@ -3510,7 +3510,7 @@ def origin_repository_name(root: Path) -> str | None:
 
 def intended_repository(root: Path, issue: dict[str, object]) -> str:
     """The name of the repository the recorded work issue `issue` is for, where its work branch is
-    published (README "Work publication"): its one `repo:<name>` label, as work_labels writes it;
+    published (docs/fleet.md "Work publication"): its one `repo:<name>` label, as work_labels writes it;
     without one, the repository holding the issue, or this checkout's own where that repository is
     the tracker it routes its issues to (tracker_repo). Raises QueueError where that is unknown."""
     names = sorted(label[len("repo:"):] for label in issue_labels(issue)
@@ -3535,7 +3535,7 @@ def intended_repository(root: Path, issue: dict[str, object]) -> str:
 def guard_work_publication(root: Path, branch: str) -> None:
     """Refuse to push the work branch `branch` to origin unless origin is the repository its
     recorded work issue is for (intended_repository), compared by name, case-insensitively, so the
-    rule holds on any host; nothing is pushed on a refusal (README "Work publication")."""
+    rule holds on any host; nothing is pushed on a refusal (docs/fleet.md "Work publication")."""
     issue = load_snapshot(root)
     refused = f"nothing was pushed to origin; {branch} is a work branch, published only to the " \
               "repository its work issue is for"
@@ -3568,8 +3568,8 @@ def guard_work_publication(root: Path, branch: str) -> None:
 
 def push(root: Path, branch: str | None = None) -> None:
     """Gate `branch` (default: the current one), then push it to origin with its upstream set. It
-    releases nothing: only `work_tickets.py release` raises the version (README "Project
-    settings"). The integration branch and a landing branch `land/<branch>` (README "Landing on
+    releases nothing: only `work_tickets.py release` raises the version (docs/settings.md "Project
+    settings"). The integration branch and a landing branch `land/<branch>` (docs/settings.md "Landing on
     main") need the verdicts on their tree. A changed file a template claims that breaks it
     refuses the push before anything else runs (claimed_files_problem). Any other branch is a work
     branch, pushed only where origin is the repository its recorded work issue is for
@@ -3910,7 +3910,7 @@ def delivered_pull_request(root: Path, remote: str, branch: str, body: str) -> i
     return pr
 
 
-# The Stop hook: a worker's turn ends only with its work issue delivered (README "Stop hook").
+# The Stop hook: a worker's turn ends only with its work issue delivered (docs/fleet.md "Stop hook").
 STOP_REFUSALS = 5
 STOP_COUNT = "stop-refusals.json"
 DELIVERED_PULL = "pull-request.json"
@@ -4038,7 +4038,7 @@ def delivered_pull_path(root: Path) -> Path:
 
 
 def late_push_mode(root: Path) -> str:
-    """se.toml `[deliver] late_push`: what a push after the delivery does (README "Late push")."""
+    """se.toml `[deliver] late_push`: what a push after the delivery does (docs/fleet.md "Late push")."""
     try:
         return sibling("late_push").mode(se_table(root, "deliver"))
     except ValueError as error:
@@ -4065,7 +4065,7 @@ def record_delivered_pull(root: Path, number: int, description: Path) -> None:
 
 
 #: How long a stop-check trusts a gh it found unusable, in a process that judges many stops (kern's
-#: delivery component, README "Stop hook"): `gh auth status` costs 0.25 s of each judgement.
+#: delivery component, docs/fleet.md "Stop hook"): `gh auth status` costs 0.25 s of each judgement.
 STOP_GH_UNUSABLE_FOR = 60.0
 _stop_gh_unusable_at: list[float] = []
 
@@ -4716,7 +4716,7 @@ def write_beat_record(root: Path, number: int, repo: str, beat: datetime | None,
     (`due`, Unix seconds, the line the hook reads with builtins) and why the last one failed."""
     initialize(root)
     lines = [
-        "# The claim's heartbeat (work_tickets.py beat, README \"Workers\"): scripts/se_hook.sh",
+        "# The claim's heartbeat (work_tickets.py beat, docs/settings.md \"Workers\"): scripts/se_hook.sh",
         "# starts a beat on a tool call once the Unix time `due` has passed.",
         f"issue: {number}",
         f"repo: {json.dumps(repo)}",
@@ -5237,7 +5237,7 @@ def in_cloud() -> bool:
 
 
 def worker_limit(root: Path, cloud: bool) -> int | None:
-    """At most this many working agents run at once (README "Workers"): `se.toml` `[workers]`
+    """At most this many working agents run at once (docs/settings.md "Workers"): `se.toml` `[workers]`
     `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
     table = se_table(root, "workers")
     unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours"})
@@ -6017,7 +6017,7 @@ class Filed:
 
 
 def unhold_hint(number: int | None) -> str:
-    """The way back of a held issue (README "Templates"): its text fixed on the issue itself, since
+    """The way back of a held issue (docs/templating.md "Templates"): its text fixed on the issue itself, since
     filing it again only comments on it, then `unhold`."""
     return ("fix its title or body on the issue itself, then run work_tickets.py unhold "
             + (str(number) if number is not None else "<its number>"))
@@ -6077,7 +6077,7 @@ def template_body(root: Path, template: str, command: str, file: Path | None, fi
               read: Callable[[Path], str]) -> tuple[str, str]:
     """The body a filing command files and the body as given (what `--hold` files): from
     `fields` always rendered through the template; from `file` (`read` reads it) as it stands with
-    `[templates] enforce` off, else parsed and rendered again (README "Templates")."""
+    `[templates] enforce` off, else parsed and rendered again (docs/templating.md "Templates")."""
     templates = sibling("templates")
     if (file is None) == (fields is None):
         raise QueueError(f"{command} takes exactly one of --body-file and --fields")
@@ -6101,7 +6101,7 @@ def held_labels(labels: list[str]) -> list[str]:
 
 def template_findings(root: Path, repo: str, chosen, title: str, body: str,
                   given: str | None = None, recorded: str | None = None) -> tuple[list, list]:
-    """The checks a filing runs against the template `chosen` (README "Templates"), one owner for
+    """The checks a filing runs against the template `chosen` (docs/templating.md "Templates"), one owner for
     `template_check` and `unhold`: the private terms of the title and the body (and of the text as
     `given`, where it is another), then the template's own checks of the body, and the version the
     text as `recorded` was filled from, where it is another than the body that `render` marked
@@ -6198,7 +6198,7 @@ def unhold(root: Path, number: int, repo: str | None, issue_file: Path | None) -
 
 def template_check(root: Path, repo: str, command: str, title: str, body: str, template: str,
                existing: int | None = None, hold: bool = False, given: str | None = None) -> bool:
-    """The template check of a filing (README "Templates"), before anything is written: with `[templates]
+    """The template check of a filing (docs/templating.md "Templates"), before anything is written: with `[templates]
     enforce` off nothing; `warn` prints the findings on stderr; `refuse` raises the refusal and
     counts it for this session. Gives whether the issue is filed held: `hold` past the count of
     refusals, never with a private term in the title, the body or the text as `given`."""
@@ -6393,7 +6393,7 @@ def file_work_issue(
     """File a work issue with its labels and the `extra` ones, once (dedupe: work model, Issues);
     with blockers, link them first and add `ready` last, so the issue is never startable before its
     blockers are linked. The body is `file`, or `fields` rendered through the work template, checked
-    against it (README "Templates"). The filing check runs first (`filing_check`), unless `gate` is
+    against it (docs/templating.md "Templates"). The filing check runs first (`filing_check`), unless `gate` is
     off: a run it files itself. Without `ready` the issue carries no `ready` label, as a run its
     own agent runs. Returns the filed issue's URL, or the line naming the twin it answered."""
     if not title.strip():
@@ -6427,10 +6427,10 @@ def file_work_issue(
 
 class ReviewDueError(QueueError):
     """A retro or an overhaul is due or open: SE files no other issue until the person has decided
-    its findings (README "Retro due")."""
+    its findings (docs/fleet.md "Retro due")."""
 
 
-REVIEW_HELP = 'README "Retro due"'
+REVIEW_HELP = 'docs/fleet.md "Retro due"'
 
 
 def filing_door(root: Path, repo: str):
@@ -6445,7 +6445,7 @@ def filing_door(root: Path, repo: str):
 
 def filing_check(root: Path, repo: str, command: str, door=None,
                  now: datetime | None = None) -> None:
-    """The filing check (README "Retro due"), which every issue SE files passes first: while a
+    """The filing check (docs/fleet.md "Retro due"), which every issue SE files passes first: while a
     retro or an overhaul is open, refuse, naming it; where one is due, file it first (the retro
     first where both are, as an overhaul reads the closed retros) and refuse, naming it. Running
     work goes on: only filing is held. Where `command` only prints its plan (no gh, no relay),
@@ -6543,7 +6543,7 @@ def route_outside_issue(
     With the `[outside-text]` switch on, an outside author's body (one whose association is not
     inside, or not known) goes into the routed issue inside the envelope instead of unchanged.
     The routing is `file`, or `fields` rendered through the routed template, checked against it
-    (README "Templates")."""
+    (docs/templating.md "Templates")."""
     if (file is None) == (fields is None):
         raise QueueError("route takes exactly one of --routing-file and --fields")
     routing = read_text_file(file, "routing sections") if file is not None else ""
@@ -6611,7 +6611,7 @@ def backlog_file(root: Path, title: str, file: Path | None, repo: str | None,
                  fields: Path | None = None, hold: bool = False) -> str:
     """File a far-out idea as a backlog issue for the person, once
     (dedupe: work model, Issues), creating its label where missing; its body is `file`, or
-    `fields` rendered through the ticket template, checked against it (README "Templates")."""
+    `fields` rendered through the ticket template, checked against it (docs/templating.md "Templates")."""
     repo = resolve_repo(root, repo)
 
     def read(path: Path) -> str:
@@ -6712,14 +6712,14 @@ def run_project_command(root: Path, command: str, description: str) -> str:
 
 @dataclass(frozen=True)
 class SuiteBudget:
-    """se.toml `[tests]`: the complete suite and its time budget (README "Test budget")."""
+    """se.toml `[tests]`: the complete suite and its time budget (docs/tests.md "Test budget")."""
 
     command: list[str]
     target_seconds: float
     limit_seconds: float
     setup: list[str] | None = None
     tier: str | None = None  # `<module>:<function>`, the project's tier function
-    over_limit: str = "fail"  # "warn": an overrun only warns (README "Test budget")
+    over_limit: str = "fail"  # "warn": an overrun only warns (docs/tests.md "Test budget")
     beside: tuple["BesideSuite", ...] = ()  # `[tests.beside.<name>]`, run after the suite
     # `[tests] shards`: CI runs the suite in this many shards side by side, and the target and the
     # limit are each shard's; a whole-suite run is judged against `shards` times each.
@@ -6747,7 +6747,7 @@ class SuiteBudget:
 @dataclass(frozen=True)
 class BesideSuite:
     """se.toml `[tests.beside.<name>]`: a suite in another toolchain (kern's Go tests), run after
-    the complete suite in `directory` with its own time and budget (README "Test budget")."""
+    the complete suite in `directory` with its own time and budget (docs/tests.md "Test budget")."""
 
     name: str
     command: list[str]
@@ -7361,7 +7361,7 @@ def record_suite_verdict(root: Path, commit: str | None, passed: bool, seconds: 
           f"(commit {commit[:12]})")
 
 
-# The reference run of the budget (README "Test budget"): the CI `check` job on GitHub's runner.
+# The reference run of the budget (docs/tests.md "Test budget"): the CI `check` job on GitHub's runner.
 CI_VARIABLE = "GITHUB_ACTIONS"
 CI_SUITE_TITLE = "se suite time"
 CI_SUITE_MESSAGE = re.compile(r"Suite time: (\d+(?:\.\d+)?) s")
@@ -7462,7 +7462,7 @@ def suite_notice(seconds: float, limit: float, detail: str = "") -> str:
             f"(limit {limit:g} s{detail})")
 
 
-# A sharded suite (README "Test budget"): each shard records its time, `check` judges the slowest.
+# A sharded suite (docs/tests.md "Test budget"): each shard records its time, `check` judges the slowest.
 SHARD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -7594,7 +7594,7 @@ CI_SKIPPED_ON_RELAY = ("skipped on the relay path, as it reads GitHub outside ke
 def run_suite(root: Path, slowest_count: int = SLOWEST_TESTS, read_ci: bool = False,
               full: bool = False, ci_skipped: str = "", record_file_seconds: Path | None = None,
               keep_reports: Path | None = None) -> str:
-    """Run se.toml's complete suite, measure it and hold it to its budget (README "Test budget").
+    """Run se.toml's complete suite, measure it and hold it to its budget (docs/tests.md "Test budget").
 
     The suite command may write JUnit XML reports into the directory named by $SE_TEST_REPORTS.
     Runs `[tests]` setup first, outside the budget. Prints the last result lines of the suite's
@@ -8015,7 +8015,7 @@ def delete_merged_branch(root: Path, branch: str, head: str, landed: str | None 
 
 def release_line(pull_url: str, kind: str, component_tags: list[str] | None = None) -> str:
     """The closing comment's release: the release kind the landing recorded, which the release SE
-    asks for counts (README "Project settings"), and the release page of each of
+    asks for counts (docs/settings.md "Project settings"), and the release page of each of
     `component_tags`, the component releases the landing cut (a kern release), beside the pull
     request at `pull_url`; each tag alone without its URL."""
     line = f"Release kind: {kind}, recorded; the version moves when SE asks for a release"
@@ -8186,7 +8186,7 @@ def landing_description(work_pull_url: str, work_pull_number: int, issue_url: st
     work issue and the work pull request whose description is the field report, and the marker
     CI's field-report step reads that report by (.github/workflows/check.yml); it ends in the
     integration's metrics line, which outlives a cloud integrator's container for `retro.py
-    collect` (README "Metrics")."""
+    collect` (docs/running.md "Metrics")."""
     return (f"Refs {issue_url}\n\n"
             f"Lands {work_pull_url}, whose description is the field report.\n\n"
             + FIELD_REPORT_IN.format(number=work_pull_number) + "\n"
@@ -8222,7 +8222,7 @@ def required_identity(root: Path, command: str) -> tuple[str, str]:
     if identity is None:
         raise QueueError(
             f"work_tickets.py {command}: no commit identity; set identity = \"Name <email>\" in "
-            f"[project] of {root / 'se.toml'} (README \"Project settings\"), run "
+            f"[project] of {root / 'se.toml'} (docs/settings.md \"Project settings\"), run "
             "work_tickets.py sync and try again"
         )
     return identity[0], identity[1]
@@ -8263,7 +8263,7 @@ def guard_public_push(root: Path, mirror: Mirror) -> None:
     expected_name, expected_email = configured_public_identity(root)
     public_check = sibling("public_check")
     # While GitHub squash-merges the landings, its squash commit for the owning account passes;
-    # with a fast-forward landing every commit is the project identity's (README "Landing on main").
+    # with a fast-forward landing every commit is the project identity's (docs/settings.md "Landing on main").
     strict = landing_mode(root) == FAST_FORWARD
     host, _, path = (remote_repo(root) or "").partition("/")
     owner = path.split("/", 1)[0].lower() if host.lower() == "github.com" and not strict else None
@@ -8297,7 +8297,7 @@ CHECK_POLLS = 120  # an hour: the suite's limit is minutes, a queued runner may 
 LANDING_PREFIX = "land/"
 RELEASE_LANDING = f"{LANDING_PREFIX}release-"  # land/release-v<version>, pr_issues.py's exemption
 HANDOFF_DIRECTORY = "handoff"
-# se.toml [integrate] landing (README "Landing on main"): how a landing reaches the integration
+# se.toml [integrate] landing (docs/settings.md "Landing on main"): how a landing reaches the integration
 # branch. "squash", built in: GitHub squash-merges the landing pull request and writes its own
 # commit. "fast-forward": the integrator writes the one landing commit as the project identity,
 # with no e-mail address in its message, and origin's integration branch moves to exactly it.
@@ -8324,14 +8324,14 @@ def landing_mode(root: Path) -> str:
     if value not in LANDINGS:
         raise QueueError(
             f"{LANDING_SETTING} in {root / 'se.toml'} is {value!r}; it is one of "
-            f"{', '.join(repr(mode) for mode in LANDINGS)} (README \"Landing on main\"); nothing "
+            f"{', '.join(repr(mode) for mode in LANDINGS)} (docs/settings.md \"Landing on main\"); nothing "
             "was merged")
     return str(value)
 
 
 def landing_for_run(root: Path, choice: str | None) -> str:
     """This run's landing mode: `choice`, integrate's --landing, over se.toml [integrate] landing
-    for that one run (README "Landing on main"); without it, landing_mode's."""
+    for that one run (docs/settings.md "Landing on main"); without it, landing_mode's."""
     if choice is None:
         return landing_mode(root)
     if choice not in LANDINGS:
@@ -8668,7 +8668,7 @@ class GitHub:
         return str(merged.get("sha") or "")
 
     def statuses(self, sha: str) -> list[dict[str, object]]:
-        """The commit statuses on `sha`, as the host lists them (README "Landing without CI")."""
+        """The commit statuses on `sha`, as the host lists them (docs/tests.md "Landing without CI")."""
         found = self.api(f"commits/{sha}/statuses?per_page=100")
         return found if isinstance(found, list) else []
 
@@ -8760,7 +8760,7 @@ def abandon_landing(root: Path, target: str, landing: str) -> None:
 
 def record_steps(remote: str, landing: str, record: dict[str, str] | None) -> tuple[Step, ...]:
     """Where se.toml [tests] trust_integrator is on, the integrator's record of its pass
-    (README "Trusted landings"): dispatch se-pass-record.yml on `landing` with `record`, wait for
+    (docs/tests.md "Trusted landings"): dispatch se-pass-record.yml on `landing` with `record`, wait for
     its run, so the record is on the landing head before check starts; none where trust is off."""
     if record is None:
         return ()
@@ -8783,7 +8783,7 @@ def record_steps(remote: str, landing: str, record: dict[str, str] | None) -> tu
 
 def landing_without_ci(root: Path, rev: str) -> bool:
     """Whether se.toml at `rev` (the integration branch a landing starts from) sets `[tests] ci =
-    false`: the integrator's status is the verdict, not CI's check (README "Landing without CI")."""
+    false`: the integrator's status is the verdict, not CI's check (docs/tests.md "Landing without CI")."""
     try:
         return not trust.trust_settings(root, rev).ci
     except trust.TrustError as error:
@@ -8831,7 +8831,7 @@ def accept_status(door: GitHub, verdict: dict[str, str]) -> str:
 
 def integrator_record(root: Path, landed: str, tested: str) -> dict[str, str] | None:
     """The record's inputs for the landing head `landed`, whose suite passed on `tested`, where
-    se.toml [tests] trust_integrator is on; None where it is off (README "Trusted landings")."""
+    se.toml [tests] trust_integrator is on; None where it is off (docs/tests.md "Trusted landings")."""
     try:
         if not trust.trust_settings(root, landed).on:
             return None
@@ -9220,7 +9220,7 @@ def integrate(
             f"work_tickets.py integrate: se.toml [tests] ci = false on {target} lands on the "
             f"integrator's commit status {trust.STATUS_CONTEXT}, which only gh writes (the host's "
             "GitHub tools write no commit status); nothing was merged. Sign gh in as the "
-            "integrator and integrate again (README \"Landing without CI\")")
+            "integrator and integrate again (docs/tests.md \"Landing without CI\")")
     head = str(pull.get("headRefOid", ""))
     late = check_branch_tip(root, report, branch, head or branch, included)
     landing = f"{LANDING_PREFIX}{branch}"
@@ -9384,7 +9384,7 @@ def integrate(
 def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, issue_body: str,
                 pull_number: int, remote: str, relay, handing_off: bool,
                 comments_file: Path | None) -> None:
-    """se.toml `[integrate] review_gate` (review_gate.py, README "Review gate"): refuse a risky
+    """se.toml `[integrate] review_gate` (review_gate.py, docs/fleet.md "Review gate"): refuse a risky
     change without a reviewer's pass of its head. Off, the built-in, it reads nothing; on, it reads
     the pull request's comments only for a risky change: through gh, kern's relay, or without
     either from `comments_file`, the GitHub tools' answer."""
@@ -9429,7 +9429,7 @@ def review_gate(root: Path, branch: str, base: str, head: str, trailer: str, iss
 def assign_component_versions(root: Path, target: str, landing: str, base: str, branch: str,
                               report: str) -> list[str]:
     """Write the next version of each component the merge on `landing` changes into it, of the
-    kind the field report states or the branch claims, and say so (README "Component versions");
+    kind the field report states or the branch claims, and say so (docs/settings.md "Component versions");
     refused, the landing abandoned, where a kind names no component. The release tags the push
     to the integration branch cuts, for the closing comment's release line."""
     try:
@@ -9469,7 +9469,7 @@ def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
     """Refuse a landing pull request whose `description` does not end in the metrics line the
     hand-off's plan gave it (step 2's body): the line `retro.py collect` reads the cloud
-    integration's costs back from (README "Metrics"). A footer the GitHub tool appended to the
+    integration's costs back from (docs/running.md "Metrics"). A footer the GitHub tool appended to the
     told body is no part of it (without_tool_footer)."""
     plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
     bodies = [str((step.get("arguments") or {}).get("body") or "") for step in plan.get("steps", [])
@@ -9551,7 +9551,7 @@ def read_back_integration(root: Path, branch: str, landing_pull: int, check_run:
 
 
 def record_fix(root: Path, branch: str) -> str:
-    """Record an integration-fix commit (README "Landing on main"): the commits the integrator
+    """Record an integration-fix commit (docs/settings.md "Landing on main"): the commits the integrator
     pushed onto `land/<branch>` after a handed-off `integrate`, such as a lock move. Each must have
     one parent and be the project identity's, author and committer, with no e-mail address in its
     message. The suite, the project checks and the public check run on the new head, which then
@@ -10652,7 +10652,7 @@ def fleet_plan(repo: str, base: str) -> Plan:
                   f"{CHECK_NAME} run, as one JSON list", gives=("pulls file",)),
     ), then="work_tickets.py fleet-check --open-issues <open issues file> --closed-issues "
             "<closed issues file> --pulls <pulls file> [--sessions <the session tools' answers "
-            "file, README \"Fleet check\">]")
+            "file, docs/fleet.md \"Fleet check\">]")
 
 
 def fleet_findings(door: object, now: datetime, lease: timedelta, repository: str,
@@ -11137,7 +11137,7 @@ PR_DESCRIPTION_HELP = ("file holding the pull request description, or the worker
          arg("--component-kinds-to", type=Path, metavar="FILE",
              help="with --check: append the release guard's $SE_COMPONENT_KINDS line, the "
                   "report's Component kinds, to FILE, as CI does to a work pull request's "
-                  "$GITHUB_ENV (README \"Component versions\")"))
+                  "$GITHUB_ENV (docs/settings.md \"Component versions\")"))
 def run_field_report(root: Path | None, args: argparse.Namespace) -> int:
     if args.check is not None:
         if (args.comment_count is None) != (args.newest_comment is None):
@@ -11188,7 +11188,7 @@ def run_escalate(root: Path, args: argparse.Namespace) -> int:
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
              help="after [templates] refusals of this issue in this session: file the text as given, "
-                  "labelled off-template and not ready (README \"Templates\")"),
+                  "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          arg("--blocked-by", type=int, action="append", default=[], metavar="N",
              help="a native blocker to link before it is ready, repeatable"),
          arg("--label", action="append", default=[], metavar="LABEL",
@@ -11219,7 +11219,7 @@ def run_file(root: Path, args: argparse.Namespace) -> int:
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
              help="after [templates] refusals of this issue in this session: file the text as given, "
-                  "labelled off-template and not ready (README \"Templates\")"),
+                  "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          arg("--issue-title", help="without gh: the issue's title as the GitHub tools read it"),
          arg("--issue-body", type=Path,
              help="without gh: a file with the issue's body as the GitHub tools read it"),
@@ -11254,7 +11254,7 @@ BACKLOG = command_group(
                       "rendered through it")), required=True),
          arg("--hold", action="store_true",
              help="after [templates] refusals of this issue in this session: file the text as given, "
-                  "labelled off-template and not ready (README \"Templates\")"),
+                  "labelled off-template and not ready (docs/templating.md \"Templates\")"),
          REPO, parent=BACKLOG)
 def run_backlog_file(root: Path, args: argparse.Namespace) -> int:
     print(backlog_file(root, args.title, args.body_file, args.repo, args.fields, args.hold))
@@ -11370,7 +11370,7 @@ def run_identity(root: Path, args: argparse.Namespace) -> int:
 
 
 def stated_component_kinds(root: Path) -> None:
-    """On a work branch, give the release guard the kinds its field report states (README
+    """On a work branch, give the release guard the kinds its field report states (docs/settings.md
     "Component versions"): $SE_COMPONENT_KINDS from `.se/work/field-report.md`, unless the
     environment sets it already (CI, from the pull request description). The integration
     branch and a landing set none: there the release commit carries the versions."""
@@ -11391,7 +11391,7 @@ def stated_component_kinds(root: Path) -> None:
 
 @command("suite", "run se.toml's complete suite against its [tests] time budget, as integrate "
                   "does; exit code 1 when tests fail, 3 when they pass over the limit and the "
-                  "budget refuses them (README \"Test budget\")",
+                  "budget refuses them (docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--slowest", type=positive_int, default=SLOWEST_TESTS, metavar="N",
              help=f"how many slowest tests to list, from the JUnit reports or pytest's --durations "
@@ -11553,7 +11553,7 @@ def run_file_seconds(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-# The test reports CI keeps (README "Test budget"): CI's suite step copies the suite's JUnit reports
+# The test reports CI keeps (docs/tests.md "Test budget"): CI's suite step copies the suite's JUnit reports
 # (`suite --keep-test-reports`) into its run's artifact test-reports, with the runner's cpu and each
 # test's `started` (tests/conftest.py), and `test-seconds` prints each run's workers and the median
 # seconds of the slowest tests over CI's recent runs. It writes nothing.
@@ -11730,7 +11730,7 @@ def run_test_seconds(root: Path, args: argparse.Namespace) -> int:
 
 @command("suite-shard", "on CI, run one shard of a sharded suite, the COMMAND after --, show its "
                         "output, time it and write its record DIR/NAME.json for suite-time; exit "
-                        "code the command's (README \"Test budget\")",
+                        "code the command's (docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--name", required=True, help="the shard's name, unique among the shards"),
          arg("--record", required=True, type=Path, metavar="DIR",
@@ -11747,7 +11747,7 @@ def run_suite_shard(root: Path, args: argparse.Namespace) -> int:
                        "suite time is read from, and no time when a shard failed; refusals and "
                        "warnings are workflow annotations; exit code 1 when a shard failed or is "
                        "missing, 3 when the time is over the limit and the budget refuses it "
-                       "(README \"Test budget\")",
+                       "(docs/tests.md \"Test budget\")",
          WORKTREE,
          arg("--shards", required=True, type=Path, metavar="DIR",
              help="directory holding the shards' records"),
@@ -11777,7 +11777,7 @@ def iso_day(text: str) -> str:
 
 
 @command("metrics", "print what the commands cost, from the line every run of a command "
-                    "appends (README Metrics): top spenders by total wall time and by GitHub "
+                    "appends (docs/running.md \"Metrics\"): top spenders by total wall time and by GitHub "
                     "calls, and each overrun of a declared budget (the suite's [tests] "
                     "limit_seconds in se.toml)",
          arg("--since", type=iso_day, metavar="DATE",
@@ -11827,14 +11827,14 @@ def run_deliver(root: Path, args: argparse.Namespace) -> int:
 
 @command("push", "se_templates.py check-files --changed origin/<integration branch> first; "
                  "public check's push gate; a work branch only where origin is the repository "
-                 "its recorded work issue is for (README \"Work publication\"); then git push -u origin <branch>; retries a "
+                 "its recorded work issue is for (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a "
                  "transient refusal once a minute, ten attempts; the integration branch needs a "
                  "passing suite and public check recorded on the tree pushed",
          OPTIONAL_WORKTREE,
          arg("branch", nargs="?", help="branch to push; default: the current one"),
          arg("--redeliver", action="store_true",
              help="this push starts a new delivery of the work branch: record its tip as "
-                  "delivered first, so the pre-push hook's late-push line stays quiet (README "
+                  "delivered first, so the pre-push hook's late-push line stays quiet (docs/fleet.md "
                   "\"Late push\"); deliver does this itself"))
 def run_push(root: Path, args: argparse.Namespace) -> int:
     if not args.redeliver:
@@ -11855,7 +11855,7 @@ def run_push(root: Path, args: argparse.Namespace) -> int:
                      "the ref is the integration branch and no passing suite and public check are "
                      "recorded on its tree; push runs the same check. A push of the delivered "
                      "work branch at another commit than its delivered tip prints the late-push "
-                     "line, or with se.toml [deliver] late_push = \"refuse\" is refused (README "
+                     "line, or with se.toml [deliver] late_push = \"refuse\" is refused (docs/fleet.md "
                      "\"Late push\")",
          OPTIONAL_WORKTREE,
          arg("remote_ref", help="the pushed remote ref, for example refs/heads/main"),
@@ -11938,7 +11938,7 @@ def run_release_trailer(root: Path, args: argparse.Namespace) -> int:
          arg("--pr-comments", type=Path, metavar="FILE",
              help="where gh is not signed in and se.toml [integrate] review_gate is on: the pull "
                   "request's comments (issue_read get_comments), saved to a file; read only for a "
-                  "risky change (README \"Review gate\")"),
+                  "risky change (docs/fleet.md \"Review gate\")"),
          arg("--read-back", metavar="BRANCH",
              help="after the plan's steps: for a fast-forward landing push origin's "
                   "integration branch to land/BRANCH's commit; check that it is the one landed "
@@ -12007,7 +12007,7 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     integration branch: a relay read, a local phase made `gap` seconds slow, the push of
     `rehearse/<base>`, then the landing plan (the pause search, the landing pull request into
     `base`, its `check`, the squash merge) and the read-back. It releases and tags nothing,
-    touches no issue, and nothing calls it on its own (README "Hand-offs through the relay").
+    touches no issue, and nothing calls it on its own (docs/settings.md "Hand-offs through the relay").
     Each rehearsal starts `base` at the integration branch's tip, resetting what an earlier one
     left there; a checkout detached at origin's integration branch fast-forwards it first
     (onto_integration_branch)."""
@@ -12024,7 +12024,7 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
     if door is None:
         raise QueueError(
             "work_tickets.py rehearse runs only as one call through kern's GitHub relay, where kern "
-            "serves this checkout with the relay backend and gh is not signed in (README "
+            "serves this checkout with the relay backend and gh is not signed in (docs/settings.md "
             "\"Hand-offs through the relay\"); it rehearses nothing else")
     if checked_git(root, "status", "--porcelain", "--untracked-files=no").strip():
         raise QueueError(f"work_tickets.py rehearse: {root} has uncommitted changes; commit or "
@@ -12093,15 +12093,15 @@ RELEASE_HANDOFF = "release"  # the hand-off's state, handoff_path's name for a r
 def release_description(tag: str, packages: str) -> str:
     """The release landing pull request's description: what the release raises the version by,
     the integrations since the last release with their kinds. It names no work issue: pr_issues.py
-    exempts the owner's `land/release-v<version>` (README "Project settings")."""
+    exempts the owner's `land/release-v<version>` (docs/settings.md "Project settings")."""
     return (f"Release {tag}: `work_tickets.py release` raises the version by the highest "
-            "Release-kind recorded since the last release, as SE asked (README \"Project "
+            "Release-kind recorded since the last release, as SE asked (docs/settings.md \"Project "
             f"settings\").\n\nIntegrated since the last release:\n\n"
             + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
 
 
 def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = ()) -> str | None:
-    """Release what was integrated since the last release, when SE asks (README "Project
+    """Release what was integrated since the last release, when SE asks (docs/settings.md "Project
     settings"): on `land/release-v<version>` at origin's newest integration branch, the release
     commit release() writes, with its suite verdict (carried from its parent's tree, else the
     complete suite) and the public check; push it and land it through a landing pull request as
@@ -12141,7 +12141,7 @@ def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = 
         raise QueueError(
             f"work_tickets.py release: se.toml [tests] ci = false on {target} lands on the "
             f"integrator's commit status {trust.STATUS_CONTEXT}, which only gh writes; nothing was "
-            "released. Sign gh in as the integrator and release again (README \"Landing without "
+            "released. Sign gh in as the integrator and release again (docs/tests.md \"Landing without "
             "CI\")")
     feedback.phase(f"release what was integrated on {target}")
     checked_git(root, "checkout", "-q", "--detach", base)
@@ -12259,7 +12259,7 @@ def finish_release(root: Path, state: dict[str, object], commit: str) -> str:
 
 @command("release", "release when SE asks: raise project.version by the highest Release-kind "
                     "integrated since the last release, land the release commit through a landing "
-                    "pull request and tag it, or leave the tag to the release workflow (README "
+                    "pull request and tag it, or leave the tag to the release workflow (docs/settings.md "
                     "\"Project settings\"); with nothing integrated since, it releases nothing",
          WORKTREE, REPO,
          arg("--read-back", metavar="TAG",
@@ -12479,7 +12479,7 @@ def run_ready(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("dispatch", "the dispatcher (README \"Dispatcher\", scripts/dispatch.py): list the startable "
+@command("dispatch", "the dispatcher (docs/fleet.md \"Dispatcher\", scripts/dispatch.py): list the startable "
                      "work issues (ready, not waiting on a person, no open blocker) and whether an "
                      "integrator runs (an open landing pull request, or in-progress work that moved "
                      "within the fleet lease), all read from GitHub with no model; with --fire it "
@@ -12732,7 +12732,7 @@ def run_turn_start(root: Path, args: argparse.Namespace) -> int:
          arg("--sessions", type=Path, metavar="FILE",
              help="the session tools' answers: the sessions list_sessions lists, each with its "
                   "list_events result and rate_limit_event events as \"events\"; adds the worker "
-                  "sessions stopped on a usage limit without delivering (README \"Fleet check\")"))
+                  "sessions stopped on a usage limit without delivering (docs/fleet.md \"Fleet check\")"))
 def run_fleet_check(root: Path, args: argparse.Namespace) -> int:
     sessions = None
     if args.sessions is not None:
@@ -12912,7 +12912,7 @@ def run_stop_check(root: Path | None, args: argparse.Namespace) -> int:
     return 0
 
 
-#: Source parity's one lockfile rule (README "Source parity"): a tracked file whose name, its last
+#: Source parity's one lockfile rule (docs/fleet.md "Source parity"): a tracked file whose name, its last
 #: path component, is one of these is a dependency lockfile at any depth (`se.lock`,
 #: `kern/template/uv.lock`), and parity leaves its content, its presence and its absence alone.
 #: Nothing else is excluded or normalized: every other path, generated outputs among them, compares
@@ -12978,11 +12978,13 @@ def run_parity(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-README = Path(__file__).resolve().parents[1] / "README.md"
+#: The page that holds the command reference, under the checkout (docs/work-commands.md "Work commands").
+REFERENCE_PAGE = Path("docs") / "work-commands.md"
+CHECKOUT = Path(__file__).resolve().parents[1]
 REFERENCE_BEGIN, REFERENCE_END = generated_markers("`work_tickets.py docs`")
 
-#: The kern component each command attaches as, by group, in the README's order
-#: (README "Commands as components"): its name, its heading, its help, and its commands by their
+#: The kern component each command attaches as, by group, in the reference's order
+#: (docs/start.md "Commands as components"): its name, its heading, its help, and its commands by their
 #: words. se_components.declarations reads each command's usage and help from make_parser.
 COMPONENTS = tuple(sibling("se_components").Group(*group) for group in (
     ("tickets", "Tickets",
@@ -13068,43 +13070,44 @@ def stale_declarations(root: Path) -> dict[Path, str]:
 
 
 def write_command_reference(root: Path) -> list[str]:
-    """Write the declarations and the README's command reference under root; what it wrote."""
+    """Write the declarations and the command reference under root; what it wrote."""
     written = []
     for path, text in stale_declarations(root).items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
         written.append(path.relative_to(root).as_posix())
-    readme = root / README.name
-    text = readme.read_text(encoding="utf-8")
+    page = root / REFERENCE_PAGE
+    text = page.read_text(encoding="utf-8")
     expected = with_command_reference(text, root)
     if text != expected:
-        readme.write_text(expected, encoding="utf-8", newline="\n")
-        written.append(README.name)
+        page.write_text(expected, encoding="utf-8", newline="\n")
+        written.append(REFERENCE_PAGE.as_posix())
     return written
 
 
 @command("docs", "write the command groups' component declarations (components/<group>/"
-                 "component.toml) from this registry and the README's command reference from "
-                 "them; with --check, only refuse a declaration or a README that differs",
+                 "component.toml) from this registry and the command reference in "
+                 "docs/work-commands.md from them; with --check, only refuse a declaration or a "
+                 "reference that differs",
          arg("--check", action="store_true",
-             help="exit code 1, writing nothing, when a declaration or README.md differs from "
+             help="exit code 1, writing nothing, when a declaration or the reference differs from "
                   "what docs writes"))
 def run_docs(root: None, args: argparse.Namespace) -> int:
-    checkout = README.parent
+    checkout, page = CHECKOUT, REFERENCE_PAGE.as_posix()
     if args.check:
         stale = [path.relative_to(checkout).as_posix() for path in stale_declarations(checkout)]
-        text = README.read_text(encoding="utf-8")
+        text = (checkout / REFERENCE_PAGE).read_text(encoding="utf-8")
         if not stale and text == with_command_reference(text, checkout):
-            print(f"{README.name}: the command reference is up to date")
+            print(f"{page}: the command reference is up to date")
             return 0
-        print(f"error: {', '.join(stale + [README.name])}: the command reference differs from "
+        print(f"error: {', '.join(stale + [page])}: the command reference differs from "
               "the registry; run work_tickets.py docs", file=sys.stderr)
         return 1
     written = write_command_reference(checkout)
     for path in written:
         print(f"wrote {path}")
     if not written:
-        print(f"{README.name}: the command reference is up to date")
+        print(f"{page}: the command reference is up to date")
     return 0
 
 
@@ -13113,7 +13116,7 @@ def run_docs(root: None, args: argparse.Namespace) -> int:
                    "the generated layout (se_plugin.py build), the interface templates' "
                    "generated schemas (templates.py interfaces) and the command reference with "
                    "its declarations (docs); a second run writes nothing",
-         arg("--root", type=Path, default=README.parent,
+         arg("--root", type=Path, default=CHECKOUT,
              help="the se checkout to write; default: the one this script runs from"))
 def run_format(root: None, args: argparse.Namespace) -> int:
     se_plugin = sibling("se_plugin")
@@ -13170,7 +13173,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def command_reference(root: Path) -> str:
-    """The README's command reference, rendered from the command groups' declarations under root
+    """The command reference, rendered from the command groups' declarations under root
     as kern reads them: kern's catalog of SE's commands."""
     se_components = sibling("se_components")
     return se_components.reference(se_components.catalog(root, se_components.component_names()))
@@ -13182,9 +13185,9 @@ def with_command_reference(text: str, root: Path | None = None) -> str:
     before, begin, rest = text.partition(REFERENCE_BEGIN)
     _, end, after = rest.partition(REFERENCE_END)
     if not begin or not end:
-        raise QueueError(f"{README.name}: no {REFERENCE_BEGIN} ... {REFERENCE_END} block; add the "
+        raise QueueError(f"{REFERENCE_PAGE.as_posix()}: no {REFERENCE_BEGIN} ... {REFERENCE_END} block; add the "
                          "markers where the command reference belongs")
-    return f"{before}{begin}\n{command_reference(root or README.parent)}\n{end}{after}"
+    return f"{before}{begin}\n{command_reference(root or CHECKOUT)}\n{end}{after}"
 
 
 def main(argv: list[str] | None = None) -> int:

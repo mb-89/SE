@@ -11,5 +11,5 @@ key = "hooks.core"
 off = ["off"]
 other = "on"
 fold = true
-help = "README.md#machine-local-selocaltoml"
+help = "docs/running.md#machine-local-selocaltoml"
 note = "off: the session start starts no core and leaves no kern.path, and the later hooks post to none; the refresh, the greeting and the Stop check still answer"
