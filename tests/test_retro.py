@@ -762,7 +762,7 @@ def test_the_cut_off_read_gives_the_countdowns_of_the_whole_read(tmp_path):
     retro's, read on past it for #6's landing, merged just before retro #4 started: the
     countdowns are those of the whole read. With the overhaul countdown off, the issues stop at
     the retro's start, and the retro countdown is the whole read's; the overhaul's, off, counts
-    the retros the label read finds (README "Retro due")."""
+    the retros the label read finds (docs/fleet.md "Retro due")."""
     whole, cut = WholeDoor(run_history()), CutOffDoor(run_history())
     expected = retro.countdowns(whole, REPO, "main", tmp_path, NOW)
     found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
