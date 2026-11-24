@@ -45,8 +45,8 @@ delivered: the session tools' answers, the sessions `list_sessions` lists, each 
 sessions, so the check then reads the fleet itself.
 
 `restart_after_limit` is off, built in: the report is all that happens. On, the remedy is to
-resume the session once the limit lifts and comment `Restarted after a usage limit:` on its issue,
-at most once per issue. [scripts/limit_restart.py](../scripts/limit_restart.py) owns what counts.
+resume the session once the limit lifts and comment on its issue the line it quotes, which
+`templates/limit-restart.md` writes, at most once per issue. [scripts/limit_restart.py](../scripts/limit_restart.py) owns what counts.
 
 ## Dispatcher
 
