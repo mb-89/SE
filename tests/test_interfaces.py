@@ -76,8 +76,8 @@ def test_a_snippet_writes_its_rows_and_its_case_and_reads_back_through_schema_an
     template = catalog["boot-report"]
     values = dict(template.example["fields"])
     text = interfaces.write("boot-report", values)
-    assert text.splitlines()[-4:] == ["| SE | 12.0.1 | 13.0.0 |", "| obs | 10.3.2 | 10.3.2 |", "",
-                                      "To update: /se:update"]
+    assert text.splitlines()[-6:] == ["| SE | 12.0.1 | 13.0.0 |", "| kern | 2.1.0 | 2.1.0 |", "| obs | 10.3.2 | 10.3.2 |",
+                                      "| obs-html | 0.5.2 | 0.5.2 |", "", "To update: /se:update"]
     assert text + "\n" == templates.render(template, values)
     assert interfaces.read("boot-report", text) == values
     assert templates.parse(template, text).fields == values

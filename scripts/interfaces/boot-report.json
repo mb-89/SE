@@ -71,7 +71,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "SE first, then every component of the project's tree, nested ones included: its name, the version loaded and the newest release."
+        "description": "SE first, then SE's required components with the version that answered at this start (none where one did not load), then every component of the project's tree, nested ones included, but one a required row shows: its name, the version loaded and the newest release."
       },
       "update": {
         "type": "string",

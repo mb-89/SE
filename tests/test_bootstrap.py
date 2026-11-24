@@ -26,7 +26,7 @@ NAME, APP_VERSION = APP["binary"], APP["version"]
 APP_BASE = "https://example.com/alice/project/" + APP["download"].replace("{version}", APP_VERSION)
 BUILD_DIR, PACKAGE = "components", APP["package"]
 TOOLS = ("bash", "sh", "dirname", "grep", "cat", "env", "chmod", "mkdir", "touch", "uname", "tail", "tar",
-         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find")
+         "gzip", "sha256sum", "shasum", "setsid", "unzip", "mv", "rm", "ln", "cp", "find", "sleep")
 pytestmark = pytest.mark.skipif(BASH is None, reason="bootstrap.sh runs in bash")
 
 # What these tests prove is bootstrap.sh's own shell logic, which runs only as a process: each runs
@@ -695,7 +695,9 @@ def test_a_failed_start_of_kern_is_named_with_its_cause(machine):
         WINDOWS, reason="macOS's tools; on Windows, without setsid, the background fetch did not finish")),
 ], ids=["every-tool", "shasum-no-setsid"])  # as on macOS: the checksum from shasum, no setsid
 @KERN_BACKGROUND
-def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then_starts_it(machine, missing):
+def test_the_first_start_of_a_version_fetches_its_release_waits_for_it_then_starts_it(machine, missing):
+    """kern is required (docs/boot.md "Required components"): the start waits for the fetch in its
+    background and hands the greeting the binary it placed."""
     home, project, base = machine
     path = fake_bin(base)
     for tool in missing:
@@ -706,8 +708,7 @@ def test_the_first_start_of_a_version_fetches_its_release_in_the_background_then
     release(home)
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
-    assert greeting_call(home).endswith(f"--kern-starting fetching the {NAME} {APP_VERSION} release for {PLATFORM} "
-                                        "in the background")
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     log = settled(home)
     assert f"curl -fsSL --max-time 2 -o {sh(home)}/.se/bin/{NAME}-{APP_VERSION}.SHA256SUMS {APP_BASE}/SHA256SUMS" in log
     assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log
@@ -732,7 +733,7 @@ def test_an_archive_that_fails_its_checksum_is_never_run(machine):
 
 
 @KERN_BACKGROUND
-def test_with_no_release_kern_is_built_from_ses_kern_in_the_background_and_the_greeting_says_so(machine):
+def test_with_no_release_kern_is_built_from_ses_kern_and_the_start_waits_for_it(machine):
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
@@ -745,11 +746,35 @@ chmod +x "$3"
 """, encoding="utf-8", newline="\n")
     (path / "go").chmod(0o755)
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert greeting_call(home).endswith(f"--kern-starting no {NAME} {APP_VERSION} release at {APP_BASE}; "
-                                        f"building it from {sh(ROOT)}/{BUILD_DIR} in the background")
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     log = settled(home)
     assert any(line.startswith("go build -o ") and line.endswith(f"{PACKAGE} in {sh(ROOT)}/{BUILD_DIR}") for line in log)
     assert f"kern start --root {sh(project)} --home {SE_ROOT}" in log and os.access(kern_bin(home), os.X_OK)
+
+
+@needs_platform
+@KERN_BACKGROUND
+def test_a_fetch_that_outlasts_the_wait_goes_on_and_the_start_names_kern_failed(machine):
+    """SE_KERN_WAIT bounds the wait within the host's hook budget: past it the fetch goes on in its
+    background, and the greeting is told kern failed, with the remedy, which stops the start."""
+    home, project, base = machine
+    path = fake_bin(base)
+    uv_in_place(home)
+    release(home)
+    (path / "sleep").unlink()
+    (path / "sleep").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
+    (path / "sleep").chmod(0o755)
+    # The fetch's archive read waits for the test's word, so it outlasts a wait of 0 s.
+    (path / "curl").write_text((path / "curl").read_text(encoding="utf-8").replace(
+        'case "$*" in */releases/download/*)', 'case "$*" in *.tar.gz*|*.zip*) while [ ! -f "$HOME/go-on" ]; do :; done ;; esac\n'
+        'case "$*" in */releases/download/*)', 1), encoding="utf-8", newline="\n")
+    result = run(home, path, project, "--hook", stdin=START, SE_KERN_WAIT="0")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert greeting_call(home).endswith(
+        f"--kern-failed fetching the {NAME} {APP_VERSION} release for {PLATFORM} took longer than 0 s and goes on "
+        f"in the background; start the session again once {sh(kern_bin(home))} is in place")
+    (home / "go-on").touch()
+    assert f"kern start --root {sh(project)} --home {SE_ROOT}" in settled(home), "the fetch went on"
 
 
 @KERN_STEP
@@ -778,20 +803,27 @@ def test_where_origin_names_no_home_the_start_fetches_nothing_and_builds_from_it
 
 
 @KERN_STEP
-def test_a_start_outside_a_git_checkout_starts_no_core(machine):
-    """A session started without sources (README "Cloud sessions"): no core, no read of the binary,
-    no fetch and nothing said of the core; the session's shells still find `se` for a late checkout."""
+def test_a_start_outside_a_git_checkout_starts_the_core_for_ses_root(machine):
+    """A session started without sources (README "Cloud sessions"), as the cloud's /home/user: kern is
+    required, so its core starts for SE's root (docs/boot.md "Required components") and is named
+    there; the project gets no binary named, so its later hooks fail open as before. It runs a copy
+    of SE's scripts, as the core's files go into SE's root."""
     (machine[1] / ".git").rmdir()
     home, project, path = kern_in_place(machine)
+    se = machine[2] / "se"
+    shutil.copytree(ROOT / "scripts", se / "scripts")
+    for name in ("se.toml", "se.lock"):
+        shutil.copy(ROOT / name, se / name)
     env_file = machine[2] / "claude-env"
-    result = run(home, path, project, "--hook", stdin=START, CLAUDE_ENV_FILE=sh(env_file))
+    env = {"HOME": sh(home), "PATH": tool_path(path), "CLAUDE_PROJECT_DIR": sh(project), "CLAUDE_ENV_FILE": sh(env_file)}
+    result = subprocess.run([BASH, sh(se / "scripts" / "bootstrap.sh"), "--hook"], env=env, capture_output=True,
+                            text=True, timeout=60, input=START)
     assert result.returncode == 0 and result.stdout == '{"greeting": 1}\n', result.stdout + result.stderr
-    assert not any(line.startswith(("kern ", "curl")) or " app-binary " in line for line in calls(home))
-    runtime = project / ".se" / ".runtime"
-    assert not (runtime / "kern.path").exists() and not (runtime / "kern-session-start.json").exists()
-    greeting = greeting_call(home)
-    assert "--kern-starting" not in greeting and "--kern-failed" not in greeting and "--kern-bin" not in greeting
-    assert greeting.endswith("--kern-none")
+    kern = [line for line in calls(home) if line.startswith("kern ")]
+    assert kern == [f"kern start --root {sh(se)} --home {sh(se)}", f"kern hook SessionStart --root {sh(se)} <<{START}"]
+    assert (se / ".se" / ".runtime" / "kern.path").read_text(encoding="utf-8") == f"{sh(kern_bin(home))}\n"
+    assert not (project / ".se" / ".runtime" / "kern.path").exists(), "the project's hooks fail open"
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
     assert f'export PATH="{sh(home)}/.se/bin:$PATH"' in env_file.read_text(encoding="utf-8").splitlines()
 
 
@@ -808,7 +840,7 @@ def test_a_start_in_a_subfolder_of_a_checkout_or_a_linked_worktree_starts_the_co
     result = run(home, path, project, "--hook", stdin=START)
     assert result.returncode == 0, result.stdout + result.stderr
     assert [line for line in calls(home) if line.startswith("kern ")][0] == f"kern start --root {sh(project)} --home {SE_ROOT}"
-    assert "--kern-none" not in greeting_call(home)
+    assert greeting_call(home).endswith(f"--kern-bin {sh(kern_bin(home))}")
 
 
 @KERN_STEP
@@ -821,13 +853,16 @@ def test_bootstrap_outside_a_session_leaves_kern_alone(machine):
 
 
 @KERN_STEP
-def test_without_a_pin_kern_is_left_alone(machine):
+def test_without_a_pin_kern_failed_names_it(machine):
+    """kern is required: where se_modules.py app-binary answers nothing, the greeting is told kern
+    failed, which stops the start; nothing is fetched or started."""
     home, project, base = machine
     path = fake_bin(base)
     uv_in_place(home)
     (home / "app-binary").unlink()  # se_modules.py app-binary answers nothing
     assert run(home, path, project, "--hook", stdin=START).returncode == 0
-    assert "--kern" not in greeting_call(home)
+    assert greeting_call(home).endswith(f"--kern-failed SE names no application binary for {sh(project)} "
+                                        "(se_modules.py app-binary)")
     assert not any(line.startswith(("curl", "kern ")) for line in calls(home))
 
 
@@ -923,7 +958,9 @@ def test_hook_core_off_starts_no_core_and_says_so(machine, variables, text, note
     assert not (runtime / "kern.path").exists() and not (runtime / "kern-session-start.json").exists()
     assert f"{sh(home)}/.se/bin" not in env_file.read_text(encoding="utf-8")
     greeting = greeting_call(home)
-    assert greeting.endswith(f"--note {note}") and "--kern" not in greeting
+    reason = note.removeprefix("SE: no core at this start: ").removesuffix("; the hooks answer without one")
+    assert greeting.endswith(f"--note {note} --kern-off {reason}"), greeting
+    assert "--kern-bin" not in greeting and "--kern-failed" not in greeting
     assert any("hooks-core" in line for line in calls(home)) == (not variables)
 
 
