@@ -265,7 +265,7 @@ def run_in_process(command: Command, environment: dict[str, str], monkeypatch,
     for name, value in environment.items():
         if os.environ.get(name) != value:
             monkeypatch.setenv(name, value)
-    monkeypatch.setattr(work_tickets, "_signed_in_gh", set())  # the sign-in check is the door's first call
+    monkeypatch.setattr(work_tickets, "_gh_backend", {})  # the sign-in check is the door's first call
     out, err = (sink, sink) if sink is not None else (io.StringIO(), io.StringIO())
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)

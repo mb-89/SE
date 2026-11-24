@@ -52,7 +52,7 @@ fields:
     kind: rows
     required: true
     row: "| {name} | {loaded} | {newest} |"
-    says: "SE first, then every component of the project's tree, nested ones included: its name, the version loaded and the newest release."
+    says: "SE first, then SE's required components with the version that answered at this start (none where one did not load), then every component of the project's tree, nested ones included, but one a required row shows: its name, the version loaded and the newest release."
   - name: update
     kind: case
     required: true
@@ -75,8 +75,14 @@ example:
       - name: SE
         loaded: "12.0.1"
         newest: "13.0.0"
+      - name: kern
+        loaded: "2.1.0"
+        newest: "2.1.0"
       - name: obs
         loaded: "10.3.2"
         newest: "10.3.2"
+      - name: obs-html
+        loaded: "0.5.2"
+        newest: "0.5.2"
     update: due
 ---

@@ -118,6 +118,17 @@ def start(home: Path, plugin: Path, project: Path, base: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def report(data: dict) -> list[str]:
+    """The start report the person sees, from its first line on. Above it stands the stop of SE's
+    required components (docs/boot.md "Required components"): this SE's origin offers no obs or
+    obs-html to place, so its start says it cannot start, and the refresh is what these test."""
+    shown = data["systemMessage"].splitlines()
+    first = next(index for index, line in enumerate(shown) if line.endswith(" started"))
+    assert all(line.startswith("SE cannot start: SE's required components (kern, obs, obs-html) cannot be placed")
+               for line in shown[:first]) and first == 1, shown[:first]
+    return shown[first:]
+
+
 def calls(home: Path) -> list[str]:
     """The core's start and the session's start handed to it, by binary (the greeting also asks
     its status)."""
@@ -135,7 +146,7 @@ def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the
     fake_git.init(project, "-b", "main")
     assert git_door.run("config", "--get", "core.hooksPath", root=project).returncode == 1
     data = start(home, plugin, project, base)
-    greeting = data["systemMessage"].splitlines()
+    greeting = report(data)
     assert git(project, "config", "--get", "core.hooksPath") == (plugin.resolve() / ".githooks").as_posix()
     assert tag_at_head(plugin) == "v5.0.1"
     assert greeting[0] == "SE 5.0.1 started"
@@ -146,7 +157,7 @@ def test_a_plugin_one_release_behind_moves_at_start_and_starts_the_core_from_the
     assert Path(named).name.startswith("se-0.2.0")
     # The next start has nothing to move and says nothing of it.
     (home / "calls").unlink()
-    again = start(home, plugin, project, base)["systemMessage"].splitlines()
+    again = report(start(home, plugin, project, base))
     assert again[0] == "SE 5.0.1 started"
     assert calls(home) == ["se-0.2.0 start", "se-0.2.0 hook SessionStart"]
 
@@ -157,7 +168,7 @@ def test_a_remote_that_cannot_be_read_starts_with_the_plugin_it_has_in_one_line(
     git(plugin, "remote", "set-url", "origin", (base / "gone").as_uri())
     data = start(home, plugin, project, base)
     assert tag_at_head(plugin) == "v5.0.0"
-    assert data["systemMessage"].splitlines()[0] == "SE 5.0.0 started"
+    assert report(data)[0] == "SE 5.0.0 started"
     assert "\nSE: no refresh at start, this session starts with SE 5.0.0: cannot reach " in (
         data["hookSpecificOutput"]["additionalContext"])
     assert calls(home) == ["se-0.1.0 start", "se-0.1.0 hook SessionStart"]

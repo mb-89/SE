@@ -54,9 +54,9 @@ its tools.
   - Below the report the hand-over names what the start found for you alone (`For the session`):
     a retro or an overhaul due or open, the fleet's findings, kern's state, a skill the session
     lacks. Act on it; tell the person only what needs their decision.
-  - Without gh (the cloud) it names no retro or fleet: at your first turn run
-    `work_tickets.py fleet-check --worktree <main checkout>`, run the plan it prints with your
-    GitHub tools, pass the lists back as it says, and present its findings
+  - Without gh (neither signed in nor answered over REST) it names no retro or fleet: the
+    turn-start check below prints the fleet check's plan; run it with your GitHub tools, pass the
+    lists back to `work_tickets.py fleet-check` as it says, and present its findings
     ([Fleet check](../../README.md#fleet-check)).
 - **Update**: the report's last line names the one update, `/se:update`, the skill
   [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
@@ -85,12 +85,16 @@ its tools.
     `failed`, say in your first message that SE runs without kern, and run every step through the
     scripts and `gh`.
 
-- **Turn-start check**: run `work_tickets.py paused --worktree <main checkout>` first; while the
-  fleet is paused, do as [Pause](#pause) says. Then run `work_tickets.py queue --worktree <main
-  checkout>` to surface field reports and startable ready work; local sessions have no scheduled
-  agent.
-  - Stale claims, which `work_tickets.py ready` names (without gh, `ready --claimed` on the
-    queue plan's read), go to the person. Releasing one is the person's step: prepare its
+- **Turn-start check**: run `work_tickets.py turn-start --worktree <main checkout>`, one call
+  that prints the pause state, the escalations, the delivered pull requests (field reports), the
+  capacity, the startable and the claimed work, the outside issues and the fleet's findings; local
+  sessions have no scheduled agent.
+  - While it says `Paused: yes` (exit code 1), do as [Pause](#pause) says.
+  - A part it could not read names its cause: read that part by hand, never take it for empty.
+  - Without gh (exit code 2) it prints the queue's and the fleet check's plans instead: run them
+    with your GitHub tools, and the outside issues by hand.
+  - Stale claims, which it names (without gh, `ready --claimed` on the queue plan's read), go to
+    the person. Releasing one is the person's step: prepare its
     branch's deletion and the removal of `in-progress` and the beat line, and run them on the
     person's yes ([README "Workers"](../../README.md#workers)).
 - **Work issues** from [work.md](../../.github/ISSUE_TEMPLATE/work.md), filed with
@@ -192,8 +196,9 @@ an open pause issue (exit code 1, or an issue its plan lists):
 
 ## Outside issues
 
-At the start and with every turn-start check, run `work_tickets.py intake --outside --worktree
-<main checkout>` (the work model's [Outside issues](../skills/work-model/SKILL.md#outside-issues)).
+At the start and with every turn-start check, read the outside issues: the turn-start check lists
+them, and `work_tickets.py intake --outside --worktree <main checkout>` lists them alone (the work
+model's [Outside issues](../skills/work-model/SKILL.md#outside-issues)).
 This routine is its one statement; for each issue it lists:
 
 1. Check the issue against SE's [rule book](../skills/work-model/references/rules.md),

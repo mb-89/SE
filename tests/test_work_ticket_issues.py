@@ -340,6 +340,7 @@ def gh(monkeypatch) -> FakeGh:
     fake = FakeGh()
     monkeypatch.setattr(work_tickets, "run_gh", fake)
     monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "gh_backend", lambda: work_tickets.SIGNED_IN)
     monkeypatch.setattr(work_tickets, "current_branch", lambda root: BRANCH)
     monkeypatch.setattr(work_tickets, "tested_main", lambda root: "abc1234")
     monkeypatch.setattr(work_tickets, "branch_tip", lambda root: TIP)
@@ -1339,9 +1340,11 @@ def test_deliver_refuses_comments_after_intake_before_pushing(worktree, gh, monk
     assert not any(call[:2] in (["pr", "create"], ["issue", "create"]) for call in gh.calls)
 
 
-def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, capsys):
+def test_a_gh_neither_signed_in_nor_answered_over_rest_takes_the_no_gh_path(
+        worktree, monkeypatch, capsys):
     calls: list[list[str]] = []
     monkeypatch.setattr(work_tickets.shutil, "which", lambda name: "/opt/unsigned/gh")
+    monkeypatch.setattr(work_tickets, "_gh_backend", {})
     monkeypatch.setattr(
         work_tickets.process_door, "run",
         lambda arguments, **kwargs: (
@@ -1350,12 +1353,13 @@ def test_a_gh_that_is_not_signed_in_takes_the_no_gh_path(worktree, monkeypatch, 
     )
     assert work_tickets.gh_usable() is False
     assert run(worktree, "intake", "--issue", "5", "--repo", "git.example/owner/repo") == 1
-    announced, _, error = capsys.readouterr().err.rpartition("Reading GitHub: gh auth status\n")
-    assert announced == "Reading GitHub: gh auth status\n"  # each check is announced first
+    checks = "Reading GitHub: gh auth status\nReading GitHub: gh api rate_limit\n"
+    announced, _, error = capsys.readouterr().err.rpartition(checks)
+    assert announced == checks  # each check is announced first
     assert error.startswith("error: work_tickets.py intake needs the GitHub CLI (gh), which is "
-                            "installed but not signed in")
+                            "installed but neither signed in")
     assert "counts as no gh" in error and "SKILL.md#without-gh" in error
-    assert all(call == ["/opt/unsigned/gh", "auth", "status"] for call in calls)
+    assert all(call[1:] in (["auth", "status"], ["api", "rate_limit"]) for call in calls)
 
 
 def test_sync_fetches_and_merges_main_or_reports_conflicts(worktree, monkeypatch, capsys, scripted_git):
@@ -7713,6 +7717,7 @@ def test_the_switch_reads_one_table_and_refuses_what_it_does_not_know(worktree):
 @pytest.mark.parametrize("table", OUTSIDE_TEXT_OFF, ids=["absent", "false"])
 def test_switched_off_intake_outside_route_and_refresh_are_mains(
         worktree, tmp_path, monkeypatch, capsys, no_outside_text, table):
+    monkeypatch.setattr(work_tickets, "gh_backend", lambda: work_tickets.SIGNED_IN)  # GraphQL answers
     with_outside_text(worktree, table, OUTSIDE_CONFIG)
     marker = work_tickets.HANDLED_MARKER
     nodes = [outside_issue(14, "Hi <!-- hidden -->"), outside_issue(11, comments=[marker])]
@@ -7764,6 +7769,7 @@ def test_switched_off_refresh_and_the_unread_refusal_are_mains(
 
 def test_switched_on_intake_outside_counts_markers_only_from_inside(
         worktree, monkeypatch, capsys):
+    monkeypatch.setattr(work_tickets, "gh_backend", lambda: work_tickets.SIGNED_IN)  # GraphQL answers
     with_outside_text(worktree, OUTSIDE_TEXT_ON, OUTSIDE_CONFIG)
     marker = work_tickets.HANDLED_MARKER
     nodes = [

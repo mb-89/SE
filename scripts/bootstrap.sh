@@ -138,21 +138,30 @@ kern_link() { # <bin>
   case "$base" in *.exe) ext=".exe" ;; esac
   ln -sf "$base" "$dir/${base%%-[0-9]*}$ext" 2>/dev/null || cp -f "$1" "$dir/${base%%-[0-9]*}$ext"
 }
-# Start the core for the project and hand it the session's start; the post waits for the core.
+# Start the core for its checkout (kern_root: the project, or SE's root where the project is inside
+# no git checkout) and hand it the session's start; the post waits for the core.
 # `--home`: a project that keeps no wiring of its own is served SE's (kern's cli.Source), as the MCP
 # door's launcher (se_mcp.sh) serves it.
 kern_run() { # <bin> <session start file>
   kern_link "$1"
-  "$1" start --root "$project" --home "$se_root" >/dev/null 2>"$project/.se/.runtime/kern-start.err" || return 1
-  "$1" hook SessionStart --root "$project" <"$2" >/dev/null 2>&1
+  "$1" start --root "$kern_root" --home "$se_root" >/dev/null 2>"$kern_root/.se/.runtime/kern-start.err" || return 1
+  "$1" hook SessionStart --root "$kern_root" <"$2" >/dev/null 2>&1
   return 0
 }
 # Put the binary in place in the background, from the release or built from its folder, then start it.
 # Its own process (setsid where there is one), so the hook's end does not end it.
+# kern is required (docs/boot.md "Required components"): the start waits for that background up to
+# SE_KERN_WAIT seconds (45 by default), within the host's hook budget; one that runs longer goes on,
+# and this start stops naming kern.
 kern_background() { # <mode> <bin> <args>...
-  local detach=()
+  local detach=() pid tenths=0
   command -v setsid >/dev/null 2>&1 && detach=(setsid)
   ${detach[@]+"${detach[@]}"} bash "$se_root/scripts/bootstrap.sh" "$@" </dev/null >/dev/null 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$tenths" -lt "$((${SE_KERN_WAIT:-45} * 10))" ]; do
+    sleep 0.1
+    tenths=$((tenths + 1))
+  done
 }
 # Whether the project is inside a git checkout: it or a folder above it holds a .git, the folder or
 # the file a linked worktree has; the same walk up as the late checkout's in scripts/se_hook.sh.
@@ -251,43 +260,49 @@ kern_place() {
   fi
 }
 kern_step() {
-  local start
-  # A project inside no git checkout, as a session started without sources is: no core starts and
-  # the greeting says nothing of one (README "Cloud sessions"); under Copilot it says SE runs
-  # without kern. The session's shells still find as `se` the core a late checkout's first hook
-  # starts (scripts/se_hook.sh).
-  if ! kern_checkout; then
-    [ -n "${CLAUDE_ENV_FILE:-}" ] && printf 'export PATH="%s:$PATH"\n' "$HOME/.se/bin" >>"$CLAUDE_ENV_FILE"
-    kern_args+=(--kern-none)
+  local start doing
+  # kern is one of SE's required components (docs/boot.md "Required components"): it starts at every
+  # session's start. For a project inside no git checkout, as a session started without sources
+  # is (README "Cloud sessions"), it starts for SE's root; the later hooks find no binary named for
+  # the project and fail open, and a late checkout's first hook starts that checkout's core
+  # (scripts/se_hook.sh). The session's shells find it as `se`.
+  kern_root="$project"
+  kern_checkout || kern_root="$se_root"
+  [ "$project" -ef "$se_root" ] || kern_place
+  if ! kern_locate; then
+    kern_args+=(--kern-failed "SE names no application binary for $kern_root (se_modules.py app-binary)")
     return 0
   fi
-  [ "$project" -ef "$se_root" ] || kern_place
-  kern_locate || return 0
-  mkdir -p "$project/.se/.runtime" 2>/dev/null
+  mkdir -p "$kern_root/.se/.runtime" 2>/dev/null
   # Where every later hook finds the binary (scripts/se_hook.sh), once it is in place; the
   # session's shells find it as `se` (kern_link).
-  printf '%s\n' "$bin" >"$project/.se/.runtime/kern.path"
+  printf '%s\n' "$bin" >"$kern_root/.se/.runtime/kern.path"
   [ -n "${CLAUDE_ENV_FILE:-}" ] && printf 'export PATH="%s:$PATH"\n' "$HOME/.se/bin" >>"$CLAUDE_ENV_FILE"
-  start="$project/.se/.runtime/kern-session-start.json"
+  start="$kern_root/.se/.runtime/kern-session-start.json"
   printf '%s' "$payload" >"$start"
   if [ -x "$bin" ]; then
     kern_run "$bin" "$start" ||
-      kern_args+=(--kern-failed "$name start: $(tail -n 1 "$project/.se/.runtime/kern-start.err" 2>/dev/null)")
+      kern_args+=(--kern-failed "$name start: $(tail -n 1 "$kern_root/.se/.runtime/kern-start.err" 2>/dev/null)")
     kern_args+=(--kern-bin "$bin")
     return 0
   fi
-  # The first start of this version: fetched where a release matches this platform, else built.
+  # The first start of this version: fetched where a release matches this platform, else built, in
+  # a background of its own that this start waits for (kern_background).
   kern_release
   if [ -z "$cause" ]; then
-    kern_background --kern-fetch "$bin" "$base/$asset" "$sums" "$exe" "$project" "$start"
-    kern_args+=(--kern-starting "fetching the $name $version release for $platform in the background")
-    return 0
-  fi
-  if command -v go >/dev/null 2>&1 && [ -f "$pins/$builddir/go.mod" ]; then
-    kern_background --kern-build "$bin" "$project" "$start" "$pins/$builddir" "$package"
-    kern_args+=(--kern-starting "$cause; building it from $pins/$builddir in the background")
+    doing="fetching the $name $version release for $platform"
+    kern_background --kern-fetch "$bin" "$base/$asset" "$sums" "$exe" "$kern_root" "$start"
+  elif command -v go >/dev/null 2>&1 && [ -f "$pins/$builddir/go.mod" ]; then
+    doing="$cause; building it from $pins/$builddir"
+    kern_background --kern-build "$bin" "$kern_root" "$start" "$pins/$builddir" "$package"
   else
     kern_args+=(--kern-failed "$cause, and no go to build it from $pins/$builddir")
+    return 0
+  fi
+  if [ -x "$bin" ]; then
+    kern_args+=(--kern-bin "$bin")
+  else
+    kern_args+=(--kern-failed "$doing took longer than ${SE_KERN_WAIT:-45} s and goes on in the background; start the session again once $bin is in place")
   fi
 }
 # --binary: the binary SE's own checkout pins, placed in the foreground and started never (RUNME's
@@ -320,11 +335,11 @@ if [ -n "$kern_mode" ]; then
   # it runs.
   bin="$2"
   if [ "$kern_mode" = --kern-fetch ]; then
-    project="$6"
+    kern_root="$6"
     kern_fetch "$bin" "$3" "$4" "$5"
     start="$7"
   else
-    project="$3"
+    kern_root="$3"
     kern_build "$bin" "$5" "$6"
     start="$4"
   fi
@@ -455,6 +470,7 @@ fi
 if [ -n "$hook_core" ]; then
   rm -f "$project/.se/.runtime/kern.path"
   notes+=("SE: no core at this start: $hook_core; the hooks answer without one")
+  kern_args+=(--kern-off "$hook_core")
 elif $hook; then
   kern_step
 fi
