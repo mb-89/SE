@@ -74,6 +74,13 @@ as the retro issue's closing comment, and closes the issue. The facts and the bl
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
 reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
 
+`retro.py due` prints the retro and overhaul countdowns (`countdowns`, README "Retro due"), which
+the filing check runs before every filing. It reads the closed issues and pull requests newest
+update first and only as far back as they can count: the runs by their label, then back to the
+start of the newest counted retro (and overhaul, where its countdown is on), the pull requests
+on until each work issue closed since then has its landing; where no run exists, everything
+(`recent_reads`). A door without the cut-off reads is read whole, with the same countdowns.
+
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
 from the files the session saved into `--answers <dir>`, as the work model's "Without gh" says for
@@ -278,7 +285,9 @@ def pull_of(item: dict) -> Pull:
 
 class GhDoor:
     """The collect's GitHub reads through work_tickets.py's door: issues in `tracker`, pull
-    requests and their check runs in `remote`."""
+    requests and their check runs in `remote`; for the countdowns also the closed issues and
+    pull requests newest update first, up to where they stop it, and the runs by their label
+    (`recent_reads`)."""
 
     PAGE = 100
 
@@ -356,7 +365,8 @@ class FileDoor:
     `issues.json`, `pulls.json`, `issue-<issue>.json` (where the list names no close time, as
     the host's `list_issues` does not), `comments-<issue>.json`, `checks-<pull>.json` and, for
     `--refusals`, `pull-comments-<pull>.json` of each declined pull request. A missing
-    answer reads as empty and is kept as the plan step that saves it (`missing`)."""
+    answer reads as empty and is kept as the plan step that saves it (`missing`). It has no
+    cut-off read: the saved lists are whole, so the countdowns read them whole."""
 
     def __init__(self, directory: Path, tracker: str, remote: str) -> None:
         self.directory, self.tracker, self.remote = directory, tracker, remote
@@ -836,12 +846,26 @@ def landed_issue(issue: Issue, naming: list[Pull], branch: str) -> bool:
     return landed(issue, landing_of(issue, naming, branch))
 
 
-def recent_reads(door, opened: list[Issue], overhauls: bool) -> tuple[list[Issue], list[Pull]]:
-    """The closed issues and pull requests the countdowns need, read newest update first and only
-    back to the start of the newest counted retro (and, with `overhauls`, overhaul): an older
-    item cannot count, as an item's update is never before its start or close."""
+#: The reads a door offers for the cut-off read of the countdowns (`recent_reads`); a door
+#: without all of them is read whole.
+CUT_OFF_READS = ("closed_issues_labelled", "closed_issues_until", "pulls_until")
+
+
+def recent_reads(door, opened: list[Issue], overhauls: bool, tracker: str,
+                 branch: str) -> tuple[list[Issue], list[Pull]]:
+    """The closed issues and pull requests the countdowns need, from a door that reads them newest
+    update first (`closed_issues_until`, `pulls_until`) and the runs by their label
+    (`closed_issues_labelled`): the runs first, then the closed issues back to the start of the
+    newest counted retro (and, with `overhauls`, overhaul), as an older one cannot count: an
+    issue's update is never before its creation or its close. Where a kind has no run yet, every
+    closed issue is read. The pull requests are read back to the newest retro's start and on
+    while a work issue closed since then has no landing read yet, down to that issue's creation:
+    a landing merged before the retro started counts for an issue closed after it. The countdowns
+    are those of the whole read; only with the overhaul countdown off does the overhaul's count,
+    which makes nothing due then, cover the retros the label read finds alone."""
     overhaul = sibling("overhaul")
     newest: dict[str, datetime | None] = {"retro": None, "overhaul": None}
+    kinds = ("retro", "overhaul") if overhauls else ("retro",)
 
     def note(issue: Issue) -> None:
         start = run_start(issue)
@@ -851,53 +875,63 @@ def recent_reads(door, opened: list[Issue], overhauls: bool) -> tuple[list[Issue
             if test(issue) and (newest[kind] is None or start > newest[kind]):
                 newest[kind] = start
 
-    def cutoff(kinds: tuple[str, ...]) -> datetime | None:
+    def cutoff() -> datetime | None:
         starts = [newest[kind] for kind in kinds]
         return None if None in starts else min(starts)
 
     for issue in opened:
         note(issue)
-    runs: list[Issue] = []
+    runs: dict[int, Issue] = {}
     for label in (RETRO_LABEL, overhaul.OVERHAUL_LABEL):
         for item in door.closed_issues_labelled(label):
             issue = issue_of(item)
             if "pull_request" not in item and (is_retro(issue) or overhaul.is_overhaul(issue)):
                 note(issue)
-                runs.append(issue)
-    kinds = ("retro",)
-    closed: list[Issue] = []
+                runs[issue.number] = issue
+    closed: dict[int, Issue] = {}
 
     def stop_issue(item: dict) -> bool:
         issue = issue_of(item)
-        limit, updated = cutoff(kinds), when(issue.updated_at)
+        limit, updated = cutoff(), when(issue.updated_at)
         if limit and updated and updated < limit:
             return True
         if "pull_request" not in item:
             note(issue)
-            closed.append(issue)
+            closed[issue.number] = issue
         return False
 
     door.closed_issues_until(stop_issue)
-    seen = {issue.number for issue in closed}
-    closed += [issue for issue in runs if issue.number not in seen and not seen.add(issue.number)]
-    limit = cutoff(("retro",))
+    closed = {**runs, **closed}
+    since = newest["retro"]
+    waiting = {issue.number: when(issue.created_at) for issue in closed.values()
+               if WORK_LABEL in issue.labels and not is_retro(issue) and counted_run(issue)
+               and (since is None or not issue.closed_at or when(issue.closed_at) > since)}
 
     def stop_pull(item: dict) -> bool:
-        updated = when(str(item.get("updated_at") or item.get("updatedAt") or ""))
-        return bool(limit and updated and updated < limit)
+        updated = when(first(item, "updated_at", "updatedAt"))
+        if since and updated and updated < since and all(
+                created and updated < created for created in waiting.values()):
+            return True
+        found = pull_of(item)
+        if found.merged_at and found.base == branch:
+            waiting.pop(reference(found, tracker), None)
+        return False
 
-    return closed, [pull_of(item) for item in door.pulls_until(stop_pull)]
+    return list(closed.values()), [pull_of(item) for item in door.pulls_until(stop_pull)]
 
 
 def countdowns(door, tracker: str, branch: str, root: Path,
                now: datetime) -> dict[str, Countdown] | None:
-    """The retro and the overhaul countdowns over what `door` reads: the closed and the open
-    issues and the pull requests, each closed issue's close time read one by one where the list
-    names none (the host's `list_issues`), only for those updated since the newest run started;
-    None where the door is still missing answers."""
+    """The retro and the overhaul countdowns over what `door` reads: the open issues whole; the
+    closed issues and the pull requests only as far back as `recent_reads` says, where the door
+    has the cut-off reads (CUT_OFF_READS: GhDoor), else whole (FileDoor, ToolDoor), with the same
+    countdowns; each closed issue's close time read one by one where the list names none (the
+    host's `list_issues`), only for those updated since the newest run started; None where the
+    door is still missing answers."""
     opened = [issue_of(item) for item in door.open_issues()]
-    if hasattr(door, "closed_issues_until"):
-        closed, pulls = recent_reads(door, opened, sibling("overhaul").countdown_on(root))
+    if all(hasattr(door, name) for name in CUT_OFF_READS):
+        closed, pulls = recent_reads(door, opened, sibling("overhaul").countdown_on(root), tracker,
+                                     branch)
     else:
         closed = [issue_of(item) for item in door.closed_issues()]
         pulls = [pull_of(item) for item in door.pulls()]

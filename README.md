@@ -215,9 +215,9 @@ uv run python <se>/scripts/se_start.py update
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts what came back since the
-  newest retro started ([Retro due](#retro-due)), the retros closed since the newest overhaul
-  started where that countdown is on, runs the [fleet check](#fleet-check), and caches them.
+- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts
+  the [retro](#retro-due) and, where it is on, the [overhaul](#overhaul-due) countdown, runs the
+  [fleet check](#fleet-check), and caches them.
   - The greeting then names a retro that is [due or open](#retro-due), an overhaul that is
     [due or open](#overhaul-due) and the fleet's findings by kind and issue, one line each with the
     command to run, and a part whose read failed with its cause.
@@ -1242,9 +1242,10 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
 - **Own session.** A [retro agent](src/agents/retro.md) runs each retro and overhaul in its own
   session; its first step asks the person for the field feedback.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
-  `retro.py due` prints both countdowns. The [start greeting](#start-and-refresh) names a run due
-  or open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
-  read live ([components/README.md](components/README.md)).
+  `retro.py due` prints both countdowns. It reads back to the newest run's start, all where none
+  is (`recent_reads`). The [start greeting](#start-and-refresh) names a run due or open; SE's
+  retro-due component counts the same from kern's GitHub names, for the greeting to read live
+  ([components/README.md](components/README.md)).
 - **Not counted yet.** A red `main` and a worker stopped by the usage limit leave no mark on an
   issue, so they add nothing until one does.
 
