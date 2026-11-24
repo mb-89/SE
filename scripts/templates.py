@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
-where se.toml `[templates] enforce` is on (README "Templates"); this module owns that switch's reading
+where se.toml `[templates] enforce` is on (docs/templating.md); this module owns that switch's reading
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
@@ -18,7 +19,7 @@ another reader takes for something else (`off`, `yes`, `null`, `1.5`), or that h
 are refused until quoted. It declares:
 
 - `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
-  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
+  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry`, `interface` or `code`); `tags`, a list of
   words, the template's one link to guidance, which `scripts/se_guidance.py` reads
   (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
   shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
@@ -77,6 +78,9 @@ owns the field's `heading` and its `says`, the instruction, so the front matter 
 title or label field keeps its `says` in the front matter. An inherited field's section stays in
 the note it is declared in. Outside the sections the body holds nothing but blank lines; an
 adapter's body, and an interface's, is empty.
+
+**Code templates** (`kind: code`, CODE, docs/templates.md "Code templates"): adapters whose body is
+the files they scaffold; scripts/code_templates.py owns their body, `scaffold` and its command.
 
 **Interfaces** (`kind: interface`, docs/templates.md "Nesting"): a text code sends and reads, whose
 document is data. Its body is empty and its fields are the whole template: each field keeps its
@@ -240,7 +244,8 @@ For a file, `path` (relative to the project root) selects:
 3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
-   derived_from: {template: <name>, version: <version>}`.
+   derived_from: {template: <name>, version: <version>}`, or, where every template that claims it is a
+   code template, one naming the scaffold: the file carries no template marker.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -260,6 +265,33 @@ Warn-only rules, never refused: `words`, `first-sentence` (the first sentence, t
 becomes its landing title), `actor`, `one-sentence`, `bare-number`, `board` (Status, Labels,
 Priority, Assignee or Milestone lines), `terms` (`templates/terms.toml`), `unnamed-entry` (a blocker
 without a name) and `title-shape`.
+
+Each rule carries its reason, why it holds, stated once in REASONS: a finding gives it beside its
+fix (`Finding.why`), and every refusal line ends with it, `(why: <reason>)`.
+
+**Corrections** (CORRECTIONS, docs/templates.md "Fill"): before it checks, `fill` corrects what
+cannot change the document's meaning, and nothing else, so a trivial deviation costs no round:
+
+- `line-ending`: `\r\n` and `\r` become `\n`; `whitespace`: a line's trailing spaces and tabs,
+  and a text's leading and trailing blank lines, go, and around a line, a choice, an entry of a
+  list or an object's value all spaces;
+- `heading`: a section heading that names a field but for its case or level (or a trailing colon)
+  becomes the field's heading at the template's level, an `exact_heading` field's among them;
+- `list-marker`: a `*` or `+` bullet becomes `-` (a thematic break `* * *` stays), a `1)` number
+  `1.`; `quote-marker`: `>text` becomes `> text`;
+- `none` and `not-in-input`: a whole text that spells None (`none`, `NONE.`) or NOT_IN_INPUT in
+  another case or spacing becomes `None` or `Not in input`, its closing period or colon kept.
+
+Lines inside a fence are code and stay; so do a title, a `verbatim` field, a code field, a node and
+a snippet's rows and cases (`_correctable`), and a text holding a comment keeps its spelling.
+`correct` corrects field values; `correct_body` a whole document a fill takes instead of fields
+(`fill(body=)`, `fill --body-file`), its headings and each correctable section's lines, before
+`parse` reads it into the values `correct` then takes. Each change is a `Correction`: its field, its
+kinds, the text before and after. `fill` answers them beside the findings, and the document records
+the kinds made (`record_corrections`): a file in its front matter, `corrected: ["<kind>", ...]` after
+`overlay`, any other document in the line `<!-- se:corrected <kinds> -->` after its template marker;
+a fill that corrects nothing records none, and a refill drops an earlier record. `check` corrects
+nothing: it judges a text as written.
 
 **Not in input** (NOT_IN_INPUT, docs/templates.md "Fill"): every field takes the value `Not in input`
 where the raw input does not answer it, whatever its kind and rules (`not_in_input`): the text
@@ -339,7 +371,8 @@ the templates and `terms.toml` from that folder instead, for that run alone (`lo
 `fill` and `interfaces` (Interfaces, above) writes a file; none calls GitHub or starts a model.
 
 `templates.py fill (<template> | --path FILE) [--prompt TEXT | --prompt-file FILE] [--input FILE |
---input-text TEXT] [--fields FILE | --fields-json TEXT] [--title TEXT] [--out FILE] [--root DIR]` is
+--input-text TEXT] [--fields FILE | --fields-json TEXT | --body-file FILE] [--title TEXT] [--out FILE]
+[--root DIR]` is
 docs/templates.md "Fill": one command takes the template, the prompt, the raw input and the agent's
 fields.
 
@@ -356,8 +389,10 @@ fields.
 - With fields it needs the raw input, `--input` a file or a folder of material (`raw_input`: each
   text file under it, outside hidden folders, after a line naming it), and checks the document the
   fields render against the template and that input (`fill`: `check(raw=)`, so a `quote` field's quotes must be in it).
-  A refusal prints every finding, at most 10 lines, then `templates.py fill: nothing was written;
-  fix every finding and fill again`, exit 1, and writes nothing; warnings go to stderr.
+  `--body-file` gives the whole document in place of the fields (Corrections, above).
+  A refusal prints every finding, at most 10 lines, then each correction, then `templates.py fill:
+  nothing was written; fix every finding and fill again`, exit 1, and writes nothing; warnings and
+  corrections go to stderr.
 - Where nothing refuses, a file template (`file.write`) writes the file `--path` names, which its
   `paths` must claim; a file that exists keeps its head and its undeclared sections, its fields
   the values alone. `--path` without a template selects as `check --path` does, so a new file
@@ -386,6 +421,10 @@ import tomllib
 from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
 
+import se_script
+
+if __name__ == "__main__":  # run as a command: scripts/code_templates.py imports this module
+    sys.modules.setdefault("templates", sys.modules[__name__])
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
@@ -584,6 +623,8 @@ class Template:
     digest: str = ""
     #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
     message: str = ""
+    #: A code template's files, (path, text) each, as its note's body holds them (`scaffold`).
+    code: tuple[tuple[str, str], ...] = ()
     #: Whether the template is a template manifest with its nodes (Template manifests), not a note.
     manifest: bool = False
 
@@ -643,16 +684,90 @@ class Template:
         return int(self.scope.get("level", 2)) if self.scope else 2
 
 
+#: Why each rule holds, stated once per rule (the module docstring: Severities): every finding of
+#: the rule carries it beside its fix (`Finding.why`), so an agent refused learns the cause, not only
+#: the symptom. The Go engine holds the same table, held to this one by the shared cases.
+REASONS = {
+    "required": "a reader acts on every required section; an empty one or a placeholder leaves them "
+                "guessing, where `Not in input` shows the gap honestly",
+    "choice": "code and readers act on the value, so only a value it knows can be acted on",
+    "not-picked": "naming the alternative not taken shows the choice was weighed, so nobody proposes it "
+                  "again unaware",
+    "duplicate": "each section says what only it says; a copied text hides what is missing and doubles "
+                 "the reading",
+    "dangling": "a command or path that does not exist sends the reader nowhere; name what exists, or "
+                "say that this work adds it",
+    "words": "a long section is skimmed; the limit keeps it read whole",
+    "first-sentence": "the first sentence is taken alone as a title, so it must be short and complete",
+    "actor": "a step or a check that names nobody is done by nobody",
+    "one-sentence": "one sentence per step keeps each step one action that can be checked off",
+    "bare-number": "a number alone says nothing to a reader who does not open it; a link or a name does",
+    "board": "the tracker owns status, labels, priority, assignee and milestone; a copy in the text "
+             "goes stale",
+    "terms": "the reader does not know SE's inside words; the plain word is understood without them",
+    "unnamed-entry": "an entry that is a number alone says nothing until it is opened",
+    "title-shape": "the title is what a list shows; it says in plain words what changes, and only there",
+    "checker": "code that owns this text's format reads it; what that code refuses, it cannot read",
+    "line": "code finds and reads the text by this line; without it the text is not read",
+    "title": "code reads the title by its shape; a title of another shape is not read",
+    "template": "a template shapes only the writes it applies to; its marker elsewhere claims a shape "
+                "the text does not have",
+    "node": "a document's parts are found by their place and their entries; out of place they are "
+            "not read",
+    "version": "a document is read against the template version it records; across a major version "
+               "its shape no longer fits",
+    "quote": "a quote is evidence of what the raw input said; one the input does not hold word for "
+             "word is invented",
+    "slot": "the fill slot marks where the text goes; a section that still holds it was never written",
+    "private": "the repository is publishable at any time; a private term written there is published",
+    "name": "the name is the branch too; one outside the name rule breaks the branch and the list",
+}
+
+
 @dataclass(frozen=True)
 class Finding:
-    """One problem `check` found: the field, the rule, `refuse` or `warn`, and the fix."""
+    """One problem `check` found: the field, the rule, `refuse` or `warn`, the fix (what fails and
+    what to write instead), and why the rule holds (`why`, the rule's REASONS)."""
     field: str
     rule: str
     severity: str
     fix: str
 
+    @property
+    def why(self) -> str:
+        return REASONS.get(self.rule, "")
+
     def __str__(self) -> str:
-        return f"{self.severity}: {self.field} [{self.rule}]: {self.fix}"
+        return f"{self.severity}: {self.field} [{self.rule}]: {self.fix} (why: {self.why})"
+
+
+#: The kinds of correction the correction pass makes, in the order it applies them (the module
+#: docstring: Corrections); none changes a word of content.
+CORRECTIONS = ("line-ending", "whitespace", "heading", "list-marker", "quote-marker", "none",
+               "not-in-input")
+LIST_MARKER = re.compile(r"^([ \t]*)[*+]([ \t]+)")
+NUMBER_MARKER = re.compile(r"^([ \t]*)([0-9]+)\)([ \t]+)")
+QUOTE_MARKER = re.compile(r"^([ \t]*)>(?=[^ \t>])")
+THEMATIC_BREAK = re.compile(r"^[ \t]*\*(?:[ \t]*\*){2,}[ \t]*$")
+NONE_SPELLING = re.compile(r"^none\.?$", re.IGNORECASE)  # a closing period is kept
+#: The line a document records its corrections by, after its template marker (the module
+#: docstring: Corrections); a file records them in its front matter's `corrected` instead.
+CORRECTED_MARKER = "<!-- se:corrected {kinds} -->"
+CORRECTED_LINE = re.compile(r"^[ \t]*<!-- se:corrected [a-z -]+ -->[ \t]*$")
+CORRECTED_KEY = re.compile(r"^corrected[ \t]*:")
+
+
+@dataclass(frozen=True)
+class Correction:
+    """One text the correction pass changed: its field (`body` for the document's line endings), the
+    kinds of CORRECTIONS it made, and the text before and after."""
+    field: str
+    kinds: tuple[str, ...]
+    before: str
+    after: str
+
+    def __str__(self) -> str:
+        return f"corrected: {self.field} [{', '.join(self.kinds)}]: {self.before!r} -> {self.after!r}"
 
 
 @dataclass
@@ -771,11 +886,14 @@ YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
 INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*(.*?)[ \t\r\n]*-->[ \t\r\n]*\Z",
                          re.DOTALL)
 SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
-TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+TEMPLATE_KINDS = ("document", "block", "entry", "interface", "code")
 #: The kind whose document is data only: its body is empty, its fields the whole template.
 INTERFACE = "interface"
+#: A code template's kind and where note_data keeps its files (scripts/code_templates.py).
+CODE, CODE_FILES = "code", "_code"
 #: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
 PART_KINDS = ("block", "entry")
+
 
 
 def _yaml_lines(text: str, where: str, first: int) -> list[tuple[int, int, str]]:
@@ -945,6 +1063,8 @@ def note_data(text: str, where: str) -> dict[str, object]:
     level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
     if data.get("kind") == INTERFACE:
         return _interface_data(data, body, where, first)
+    if data.get("kind") == CODE:
+        return _sibling("code_templates").code_data(data, body, where, first)
     sections = _skeleton(body, where, first, level)
     in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
                and not entry.get("fence")]
@@ -1468,7 +1588,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
            seen: tuple[str, ...]) -> Template:
     data = raw[name]
     where = data["path"]
-    unknown = set(data) - TEMPLATE_KEYS - {"path", "manifest"}
+    unknown = set(data) - TEMPLATE_KEYS - {"path", "manifest", CODE_FILES}
     if unknown:
         raise TemplateError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the template file format "
                         "is scripts/templates.py's docstring")
@@ -1574,6 +1694,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         base=base_branch, fallback=bool(applies.get("fallback", False)),
         checker=str(data.get("checker", "")), adapter=adapter,
         paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message),
+        code=tuple((str(path), str(text)) for path, text in data.get(CODE_FILES, [])),
         manifest=bool(data.get("manifest")))
 
 
@@ -2168,6 +2289,54 @@ def front_version(template: Template, front: str) -> str:
     if found is None or found[2].rsplit("/", 1)[-1] != template.name:
         return ""
     return found[3]
+
+
+def stamped(template: Template, body: str) -> str:
+    """`body` recording that it derives from `template` (docs/templates.md "The filled template is
+    a type"): its marker line (`marker_line`) where `render` writes it, every other byte kept. That
+    is after the fleet marker, which goes first where the body has none, or for a scoped template
+    after its scope's `after` line, a TemplateError where the body lacks that line. A body whose
+    marker names `template` already, and the text of a template `render` never marks (an adapter,
+    a message, a file's), is given back unchanged."""
+    if template.is_adapter or template.message or template.writes_file:
+        return body
+    if any(match.group(1) == template.name for match in TEMPLATE_MARKER_PATTERN.finditer(body)):
+        return body
+    lines = body.splitlines(keepends=True)
+    after = template.scope.get("after", "") if template.scope else FLEET_MARKER
+    for index, line in enumerate(lines):
+        if line.strip() == after:
+            return "".join([*lines[:index], _end(line), template.marker_line + "\n", *lines[index + 1:]])
+    if template.scope:
+        raise TemplateError(f"templates: the body has no `{after}` line, which the {template.name} "
+                            "template's marker follows")
+    gap = "\n" if body and not body.startswith("\n") else ""
+    return f"{FLEET_MARKER}\n{template.marker_line}\n{gap}{body}"
+
+
+def named_template(templates: dict[str, Template], action: str, body: str) -> Template | None:
+    """The template a document's own text names for `action` (docs/templates.md "Which template a
+    write is judged by"): the first template marker naming a template that shapes `action`, else
+    the template of the lowest order that shapes `action` and whose own marker the body carries
+    (`marker`, `marker_pattern`); None where it names none. Labels and the order of the templates
+    without a marker never decide here: that is `select`'s guess for a new document."""
+    for name in TEMPLATE_MARKER_PATTERN.findall(body):
+        template = templates.get(name)
+        if template is not None and action in template.actions:
+            return template
+    lines = {line.strip() for line in body.splitlines()}
+    return next((template for template in sorted(templates.values(),
+                                                  key=lambda item: (item.order, item.name))
+                 if action in template.actions and (template.marker or template.marker_pattern)
+                 and _carries(template, lines)), None)
+
+
+def marker_of(template: Template, body: str) -> str:
+    """The line of `body` that names `template`: its template marker, else its own marker; ""."""
+    for match in TEMPLATE_MARKER_PATTERN.finditer(body):
+        if match.group(1) == template.name:
+            return match.group(0).strip()
+    return template.marker if template.marker and template.marker in body else ""
 
 
 def marked_version(template: Template, body: str) -> str:
@@ -2771,9 +2940,14 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
         if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
         return Selection(template, tuple(refused))
-    refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
-                           f"template in the front matter, derived_from: {{template: <name>, version: "
-                           f"<version>}} (one of {names})"))
+    if all(template.kind == CODE for template in candidates):
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; it "
+                               f"carries no template marker: scaffold it, templates.py scaffold <template> --path "
+                               f"{path} --says <one line> (one of {names})"))
+    else:
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
+                               f"template in the front matter, derived_from: {{template: <name>, version: "
+                               f"<version>}} (one of {names})"))
     return Selection(None, tuple(refused))
 
 
@@ -3390,11 +3564,11 @@ def enforcement(root: Path) -> Enforcement:
     enforce = table.get("enforce", OFF)
     if enforce not in ENFORCE_VALUES:
         raise TemplateError(f"templates: [templates] enforce = {enforce!r} in {where} is none of "
-                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(ENFORCE_VALUES)}; set one of them (docs/templating.md)")
     gate = table.get("gate", OFF)
     if gate not in GATE_VALUES:
         raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
-                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(GATE_VALUES)}; set one of them (docs/templating.md)")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "
@@ -3455,13 +3629,13 @@ def _heading(template: Template, name: str) -> str:
 
 
 def _line(template: Template, finding: Finding) -> str:
-    """A finding as `<field>: <what is wrong>: <the fix>`."""
+    """A finding as `<field>: <what is wrong>: <the fix> (why: <why the rule holds>)`."""
     heading = _heading(template, finding.field)
     fix = finding.fix
     if fix.startswith(f"{heading} "):
         fix = fix[len(heading) + 1:]
         fix = fix[3:] if fix.startswith("is ") else fix
-    return f"{heading}: {fix}"
+    return f"{heading}: {fix} (why: {finding.why})"
 
 
 def _fit(head: list[str], lines: list[str], tail: list[str]) -> list[str]:
@@ -3585,17 +3759,225 @@ def instructions(template: Template, prompt: str = "", root: Path = ROOT) -> dic
             **{key: data[key] for key in ("fields", "field_says", "field_shape", "schema")}}
 
 
+def _corrected_line(line: str, kinds: set[str]) -> str:
+    """One line outside a fence with its trailing whitespace, list marker and quote marker
+    corrected, each kind made added to `kinds`."""
+    new = line.rstrip(" \t")
+    if new != line:
+        kinds.add("whitespace")
+    if (match := LIST_MARKER.match(new)) and not THEMATIC_BREAK.match(new):
+        new = f"{match.group(1)}-{match.group(2)}{new[match.end():]}"
+        kinds.add("list-marker")
+    elif match := NUMBER_MARKER.match(new):
+        new = f"{match.group(1)}{match.group(2)}.{match.group(3)}{new[match.end():]}"
+        kinds.add("list-marker")
+    if match := QUOTE_MARKER.match(new):
+        new = f"{match.group(1)}> {new[match.end():]}"
+        kinds.add("quote-marker")
+    return new
+
+
+def _fence_state(fence: str | None, line: str) -> tuple[str | None, bool]:
+    """The fence state after `line`, and whether `line` is text outside a fence (not code, no fence
+    line), as `parse` tracks fences."""
+    marker = FENCE.match(line)
+    if fence is None and marker:
+        return marker.group(1), False
+    if fence is not None:
+        return (None if marker and marker.group(1).startswith(fence) else fence), False
+    return None, True
+
+
+def _prose_line(lines: list[str], start: int, wanted: str) -> int | None:
+    """The index of the first line from `start` that is `wanted` and outside a fence, else None."""
+    fence = None
+    for index in range(start, len(lines)):
+        fence, prose = _fence_state(fence, lines[index])
+        if prose and lines[index] == wanted:
+            return index
+    return None
+
+
+def _kinds(kinds: set[str]) -> tuple[str, ...]:
+    return tuple(kind for kind in CORRECTIONS if kind in kinds)
+
+
+def corrected_text(text: str, whole: bool = False) -> tuple[str, tuple[str, ...]]:
+    """`text` with the corrections that cannot change its meaning, and the kinds made, in CORRECTIONS
+    order (the module docstring: Corrections). Lines inside a fence are code and kept as they are.
+    With `whole` (a line, a choice, an entry of a list or an object's value) the spaces and tabs
+    before the text go too; a text's leading indentation stays, as Markdown reads it."""
+    kinds: set[str] = set()
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        kinds.add("line-ending")
+    lines = text.split("\n")
+    fence = None
+    for index, line in enumerate(lines):
+        fence, prose = _fence_state(fence, line)
+        if prose:
+            lines[index] = _corrected_line(line, kinds)
+    joined = "\n".join(lines)
+    text = joined.strip(" \t\n") if whole else joined.strip("\n")
+    if text != joined:
+        kinds.add("whitespace")
+    bare = text.strip()
+    closing = bare[len(bare.rstrip(".:")):]
+    spelled = None
+    if COMMENT.search(text) is None and NONE_SPELLING.match(bare):
+        spelled, kind = NONE.title() + closing, "none"
+    elif COMMENT.search(text) is None and not_in_input(bare):
+        spelled, kind = NOT_IN_INPUT + closing, "not-in-input"
+    if spelled is not None and spelled != text:
+        kinds.add(kind if spelled != bare else "whitespace")
+        text = spelled
+    return text, _kinds(kinds)
+
+
+def _correctable(item: Field) -> bool:
+    """Whether the correction pass touches `item`'s value: never a title, a verbatim field, code, a
+    node or a snippet's rows and cases, which are kept as they stand."""
+    return not (item.source == "title" or item.verbatim or item.node or item.fence
+                or item.kind in ("code", *NODE_KINDS, *SNIPPET_KINDS))
+
+
+def correct(template: Template, values: dict[str, object]) -> tuple[dict[str, object], list[Correction]]:
+    """`values` with each correctable field's texts corrected (`corrected_text`): a string, each
+    string of a list but a whole-line comment, each checklist entry's text and each object value;
+    and one Correction for each text that changed."""
+    given = dict(values)
+    found: list[Correction] = []
+    for item in template.fields:
+        if item.name not in given or not _correctable(item):
+            continue
+
+        def fixed(text: object, whole: bool = True) -> object:
+            if not isinstance(text, str) or WHOLE_COMMENT.match(text):
+                return text
+            after, kinds = corrected_text(text, whole)
+            if kinds:
+                found.append(Correction(item.name, kinds, text, after))
+            return after
+
+        value = given[item.name]
+        if isinstance(value, str):
+            given[item.name] = fixed(value, item.kind != "text")
+        elif isinstance(value, list):
+            given[item.name] = [{**entry, "text": fixed(entry["text"])}
+                                if isinstance(entry, dict) and "text" in entry else fixed(entry)
+                                for entry in value]
+        elif isinstance(value, dict):
+            given[item.name] = {key: fixed(text) for key, text in value.items()}
+    return given, found
+
+
+def correct_body(template: Template, body: str) -> tuple[str, list[Correction]]:
+    """A whole document `body` corrected, and a Correction for each change (the module docstring:
+    Corrections): its line endings made `\\n`; each section heading that names a field but for its
+    case or level written as the field's heading (`parse` reads such a heading already, one of a
+    field with `exact_heading` only once corrected; `render` writes the field's own); and each line of
+    a correctable field's section outside a fence as `corrected_text` corrects a line. The fields'
+    whole texts are `correct`'s."""
+    if template.is_adapter or template.message:
+        return body, []
+    found: list[Correction] = []
+    if "\r" in body:
+        body = body.replace("\r\n", "\n").replace("\r", "\n")
+        found.append(Correction("body", ("line-ending",), "\r\n", "\n"))
+    hashes = "#" * template.level
+    document = parse(template, body)
+    lines = body.split("\n")
+    front = FRONT_MATTER.match(body)
+    start = front.group(0).count("\n") if front else 0
+    for item in template.fields:
+        near = document.misses.get(item.name)
+        at = _prose_line(lines, start, near) if item.exact_heading and near is not None else None
+        if at is not None:
+            want = f"{hashes} {item.heading}"
+            lines[at] = want
+            found.append(Correction(item.name, ("heading",), near, want))
+    document = parse(template, "\n".join(lines))
+    for part in document.parts:
+        want = f"{hashes} {template.field(part.name).heading}" if part.kind == "field" else ""
+        if want and part.heading != want and not any(fix.field == part.name for fix in found):
+            found.append(Correction(part.name, ("heading",), part.heading, want))
+    heads = [(part.heading, part.name if part.kind == "field" else "") for part in document.parts
+             if part.kind in ("field", "unknown", "scope") and part.heading]
+    fence, current, at = None, "", 0
+    for index in range(start, len(lines)):
+        line = lines[index]
+        fence, prose = _fence_state(fence, line)
+        if not prose:
+            continue
+        if at < len(heads) and line == heads[at][0]:
+            current, at = heads[at][1], at + 1
+            continue
+        item = template.field(current) if current else None
+        if item is None or not _correctable(item):
+            continue
+        kinds: set[str] = set()
+        new = _corrected_line(line, kinds)
+        if kinds:
+            found.append(Correction(item.name, _kinds(kinds), line, new))
+            lines[index] = new
+    return "\n".join(lines), found
+
+
+def record_corrections(template: Template, text: str, corrections: list[Correction]) -> str:
+    """The document `text` recording the kinds of `corrections` made (the module docstring:
+    Corrections), and no earlier record: a file in its front matter, `corrected: [<kinds>]` after
+    `overlay`, any other document in CORRECTED_MARKER after its template marker. A message and an
+    adapter record none."""
+    kinds = [kind for kind in CORRECTIONS if any(kind in fix.kinds for fix in corrections)]
+    if template.is_adapter or template.message:
+        return text
+    if template.writes_file:
+        front = FRONT_MATTER.match(text)
+        if front is None:
+            return text
+        head = front.group(0)
+        newline = "\r\n" if "\r\n" in head else "\n"
+        lines = [line for line in head.split(newline) if not CORRECTED_KEY.match(line)]
+        if kinds:
+            at = next((index + 1 for index, line in enumerate(lines) if line.startswith("overlay:")),
+                      len(lines) - 2)
+            lines.insert(at, "corrected: [" + ", ".join(f'"{kind}"' for kind in kinds) + "]")
+        return newline.join(lines) + text[len(head):]
+    lines = [line for line in text.split("\n") if not CORRECTED_LINE.match(line)]
+    if kinds:
+        at = next((index + 1 for index, line in enumerate(lines)
+                   if line.strip() == template.marker_line), None)
+        if at is not None:
+            lines.insert(at, CORRECTED_MARKER.format(kinds=" ".join(kinds)))
+    return "\n".join(lines)
+
+
 def fill(template: Template, values: dict[str, object], raw: str, *, title: str | None = None,
-         existing: str | None = None) -> tuple[str, list[Finding]]:
-    """The document `values` fill `template` with, and every finding of it checked against the raw
-    input `raw` (`check(raw=)`). `title` fills the title field where the template has one.
-    `existing`, the text of the file a file template fills again, keeps its head (front matter and
-    page title) and the sections the template does not declare; its fields are the values alone."""
+         existing: str | None = None, body: str | None = None
+         ) -> tuple[str, list[Finding], list[Correction]]:
+    """The document `values` fill `template` with, every finding of it checked against the raw
+    input `raw` (`check(raw=)`), and every correction the correction pass made (`correct`). `title`
+    fills the title field where the template has one. `existing`, the text of the file a file
+    template fills again, keeps its head (front matter and page title) and the sections the template
+    does not declare; its fields are the values alone. `body`, the whole document an agent wrote,
+    takes the place of `values`: corrected (`correct_body`), its fields are its parse's and it is
+    filled as `existing`. The document records the corrections (`record_corrections`)."""
+    if template.kind == CODE:
+        raise TemplateError(f"templates: {template.name} is a code template and has no fields to fill; "
+                            f"its scaffold writes the file: {_sibling('code_templates').call(template, '<path>')}")
     if template.is_adapter:
         raise TemplateError(f"templates: {template.name} is an adapter and has no fields to fill; the "
                             "command that writes it writes its body")
-    values = answer(template, values)
     title_field = next((item.name for item in template.fields if item.source == "title"), None)
+    corrections: list[Correction] = []
+    if body is not None:
+        if values:
+            raise TemplateError(f"templates: fill {template.name} from its fields or from a body, not both")
+        body, corrections = correct_body(template, body)
+        values = {name: value for name, value in parse(template, body).read.items()}
+        existing = body
+    values, more = correct(template, answer(template, values))
+    corrections += more
     if title is not None and title_field:
         values[title_field] = title
     if existing:
@@ -3604,9 +3986,10 @@ def fill(template: Template, values: dict[str, object], raw: str, *, title: str 
         rendered = render(template, document)
     else:
         rendered = render(template, values)
+    rendered = record_corrections(template, rendered, corrections)
     named = values.get(title_field) if title_field else None
     document = parse(template, rendered, named if isinstance(named, str) else None)
-    return rendered, check(template, document, raw=raw)
+    return rendered, check(template, document, raw=raw), corrections
 
 
 # Command
@@ -3943,6 +4326,7 @@ def _filed(options: argparse.Namespace) -> int:
              *(["--input-text", options.input_text] if options.input_text is not None else []),
              *(["--fields", str(options.fields)] if options.fields is not None else []),
              *(["--fields-json", options.fields_json] if options.fields_json is not None else []),
+             *(["--body-file", str(options.body_file)] if options.body_file is not None else []),
              *(["--title", options.title] if options.title is not None else []),
              *(["--templates", str(options.templates)] if options.templates is not None else []),
              *(["--tree"] if options.tree else []),
@@ -3981,7 +4365,7 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
     else:
         template = _template(templates, options.template)
     prompt = _text_option(options, "prompt", "prompt_file", "prompt-file") or ""
-    if options.fields is None and options.fields_json is None:
+    if options.fields is None and options.fields_json is None and options.body_file is None:
         print(json.dumps(instructions(template, prompt, root), indent=2))
         return 0
     raw = raw_input(options.input) if options.input is not None else options.input_text
@@ -3991,17 +4375,19 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
     if template.is_file and options.path is None:
         raise TemplateError(f"{FILL}: {template.name} writes its file: give --path, a file its paths "
                             f"match ({', '.join(template.paths)})")
-    values = (fields_data(options.fields_json, "--fields-json", FILL) if options.fields is None
-              else fields_file(options.fields, FILL))
+    body = _text_option(options, "body_file", "body_file", "body-file") if options.body_file else None
+    values = ({} if body is not None else fields_data(options.fields_json, "--fields-json", FILL)
+              if options.fields is None else fields_file(options.fields, FILL))
     kept = options.path if options.path is not None else options.out if template.manifest else None
     existing = _file_text(kept, FILL, missing_ok=True) if kept is not None else None
-    rendered, found = fill(template, values, raw, title=options.title, existing=existing)
+    rendered, found, corrections = fill(template, values, raw, title=options.title, existing=existing,
+                                        body=body)
     if any(item.severity == REFUSE for item in found):
-        print("\n".join([*_capped(found), f"{FILL}: nothing was written; fix every finding and fill "
-                                         "again"]))
+        print("\n".join([*_capped(found), *map(str, corrections),
+                         f"{FILL}: nothing was written; fix every finding and fill again"]))
         return 1
-    if found:
-        print("\n".join(_capped(found)), file=sys.stderr)
+    if found or corrections:
+        print("\n".join([*_capped(found), *map(str, corrections)]), file=sys.stderr)
     target = options.path if options.path is not None else options.out
     if target is None:
         print(rendered, end="")
@@ -4034,9 +4420,9 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill, "
-                                     "interfaces, stale, documents")
+    parser = se_script.parser(prog="templates.py",
+                              description="SE's templates: check, draft, schema, list, fill, scaffold, "
+                              "interfaces, stale, documents")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -4063,6 +4449,18 @@ def main(arguments: list[str] | None = None) -> int:
     listing.add_argument("--owned", action="store_true", help="the paths the templates own")
     listing.add_argument("--root", type=Path, help="the project whose templates/ and template "
                          "repositories resolve a name before SE's (default: SE's own checkout)")
+    scaffolding = commands.add_parser("scaffold", help="write a new script or module from a code template",
+                                      description="Write the files a code template makes, its "
+                                      "placeholders filled and its marker recording the template and "
+                                      "version, each checked against the template that claims it; "
+                                      "an existing file is refused.")
+    scaffolding.add_argument("template", help="the code template, such as python-script")
+    scaffolding.add_argument("--path", type=Path, required=True,
+                             help="the file, or for a template of several files their folder")
+    scaffolding.add_argument("--says", required=True, help="one line: what the script or module does")
+    scaffolding.add_argument("--name", help="its name (default: the file's stem, or the folder's name)")
+    scaffolding.add_argument("--root", type=Path, help="the project: the root of the templates' globs "
+                             "(default: the git checkout holding --path, else the working directory)")
     staling = commands.add_parser("stale", help="list the documents under a folder whose template has a "
                                   "newer version than the one they derive from")
     staling.add_argument("--path", type=Path, required=True, help="the folder of the documents")
@@ -4097,6 +4495,8 @@ def main(arguments: list[str] | None = None) -> int:
     values.add_argument("--fields", type=Path, help="the field values as a JSON file; without them "
                         "the answer is the instructions and the empty draft")
     values.add_argument("--fields-json", help="the field values as JSON text, as --fields holds")
+    values.add_argument("--body-file", type=Path, help="the whole document as a file, in place of "
+                        "the fields: corrected, then read into them")
     filling.add_argument("--title", help="the title, where the template has a title field")
     filling.add_argument("--out", type=Path, help="write the document of a template that claims no "
                          "file here (default: stdout)")
@@ -4112,7 +4512,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling, staling, documenting):
+    for command in (checking, drafting, schemas, listing, filling, scaffolding, staling, documenting):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -4155,6 +4555,8 @@ def main(arguments: list[str] | None = None) -> int:
             return 1 if refused else 0
         if options.command == "fill":
             return _fill(templates, options)
+        if options.command == "scaffold":
+            return _sibling("code_templates").run(templates, options)
         if options.command in ("draft", "schema"):
             command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
@@ -4207,4 +4609,4 @@ def main(arguments: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

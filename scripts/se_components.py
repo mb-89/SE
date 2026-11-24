@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
-"""SE's script commands as kern components (README "Commands as components").
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
+"""SE's script commands as kern components (docs/start.md "Commands as components").
 
 A script's command group is one component, `components/<name>/`: its `component.toml`, which
 `work_tickets.py docs` writes from the script's argparse parser, and an `__init__.py` that calls
@@ -18,8 +19,8 @@ routes there, the plugin's as much as the checkout's own (`serves`).
   that argparse parser (a parser without subcommands is one command, the script itself, `""` in its
   group); `components` merges a group two scripts name into one component (render: timeline.py and
   deck.py), and `declaration` writes one group's `component.toml` text; `reference`
-  renders the README's command reference from the declarations as kern's own reader
-  (`kern.declaration`) reads them, so the README shows the catalog kern checks at its start.
+  renders the command reference (docs/work-commands.md) from the declarations as kern's own reader
+  (`kern.declaration`) reads them, so the reference shows the catalog kern checks at its start.
 - **Attached:** `attach` answers each command by running the main of the script its first word
   names, one of the component's scripts, with the command's words and arguments in this process. A call's first argument may be `--se-cwd=<dir>`, the
   directory the command runs in; without it, kern's root. What it answers:
@@ -76,6 +77,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 #: Where SE's components live, under the checkout kern serves (kern's README "The host").
@@ -105,7 +107,7 @@ STEP_HELP = ("One GitHub step of a streamed command through kern's relay: the to
 #: How long routed waits to connect: kern stands on loopback.
 CONNECT_WAIT = 0.5
 REFERENCE_WIDTH = 100
-#: The scripts whose commands are components, in the README's order: each defines make_parser,
+#: The scripts whose commands are components, in the reference's order: each defines make_parser,
 #: COMPONENTS and INTERACTIVE_COMMANDS.
 SCRIPTS = ("work_tickets", "review", "retro", "overhaul", "timeline", "deck", "se", "se_templates",
            "se_guidance")
@@ -360,7 +362,7 @@ def relay_module():
 
 
 def components(root: Path) -> dict[Path, str]:
-    """The component.toml of every component of SE's SCRIPTS under root, in the README's order. A
+    """The component.toml of every component of SE's SCRIPTS under root, in the reference's order. A
     component two scripts share (render: timeline.py and deck.py) holds both scripts' commands, in
     SCRIPTS' order, under the group the first one names: each later script names that same group,
     its title and help included."""
@@ -395,7 +397,7 @@ def components(root: Path) -> dict[Path, str]:
 
 
 def component_names() -> list[str]:
-    """The names of every component of SE's SCRIPTS, in the README's order, each once."""
+    """The names of every component of SE's SCRIPTS, in the reference's order, each once."""
     return list(dict.fromkeys(group.name for name in SCRIPTS for group in script(name).COMPONENTS))
 
 
@@ -408,7 +410,7 @@ def catalog(root: Path, names: Iterable[str]):
 
 
 def reference(declarations) -> str:
-    """The README's command reference: per component, its help and a table of its commands, each
+    """The command reference: per component, its help and a table of its commands, each
     with its usage in a code span and its help (a `|` in a cell escaped as `\\|`)."""
     def cell(text: str) -> str:
         return " ".join(text.split()).replace("|", "\\|")
@@ -1029,7 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
     overlay places it (se_component.py); `commands` lists every declared command (Discovered)."""
     args = sys.argv[1:] if argv is None else argv
     if args[:1] == ["commands"]:
-        parser = argparse.ArgumentParser(prog="se_components.py commands",
+        parser = se_script.parser(prog="se_components.py commands",
                                          description="List every command the checkout's components "
                                                      "declare, from their declarations alone.")
         parser.add_argument("--json", action="store_true", help="print the list as JSON")
@@ -1052,4 +1054,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))

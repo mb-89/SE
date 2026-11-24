@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's own checkout's hygiene: the checks of the repository, not of its code (AGENTS.md "Tests").
 
 They read SE's checkout through git's real door, so they are a step of CI's `check` job, not tests;
@@ -25,6 +26,10 @@ each named with its check.
   generator's fresh run reproduces it (`scripts/generated.py`, the guidance note
   generated-files-are-marked); the commit hook runs it without the fresh runs (se.toml
   `[commit_checks]`).
+- sections: every tracked text file's `<page>.md "<section>"` and `README "<section>"` name a section
+  of that page (`scripts/references.py` `dangling_sections`), outside SECTIONS_SKIPPED;
+- readme: README.md is one page with its one command first (`scripts/readme.py`, the guidance note
+  readme-is-one-page); the commit hook runs the same check (se.toml `[commit_checks]`).
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -41,8 +46,10 @@ from pathlib import Path
 import generated
 import git_door
 import process_door
+import readme
 import references
 import se_home
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,6 +94,14 @@ GIT_ALLOWED: dict[str, tuple[int, str]] = {}
 HOME_ALLOWED: dict[str, str] = {}
 # Workflows and actions, which no allowed folder covers: they name no home (scripts/se_workflows.py).
 WORKFLOWS = re.compile(r"(?:^|/)\.github/(?:workflows|actions)/")
+
+# Tracked files the sections check reads no reference in, each with why. An entry that names no
+# tracked file is refused.
+SECTIONS_SKIPPED: dict[str, str] = {
+    "docs/retro-2026-11-13-to-24.md": "a dated record: it quotes sections as they stood in its window",
+    "tests/test_references.py": "plants dangling section references, the cases the check must find",
+    "tests/test_repository.py": "plants dangling section references in fixture checkouts",
+}
 
 # The file whose presence in a commit's tree marks SE's own line (`se_line`).
 SE_LINE_MARKER = "scripts/public_check.py"
@@ -303,6 +318,30 @@ def generated_findings(root: Path) -> list[str]:
         raise HygieneError(str(error)) from error
 
 
+def section_findings(root: Path, skipped: dict[str, str]) -> list[str]:
+    """Each section reference of a tracked text file that names no section of its page."""
+    files = tracked(root)
+    found = [f"SECTIONS_SKIPPED {name}: no such tracked file" for name in skipped if name not in files]
+    for name in files:
+        path = root / name
+        if name in skipped or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        found += [f"{name} {finding}" for finding in references.dangling_sections(text, root, path)]
+    return found
+
+
+def readme_findings(root: Path) -> list[str]:
+    """What keeps `root`'s README.md from the one-page shape (`scripts/readme.py`)."""
+    path = root / "README.md"
+    if not path.is_file():
+        return ["README.md: missing; every project opens with its one-page README"]
+    return [f"README.md: {finding}" for finding in readme.findings(path.read_text(encoding="utf-8"))]
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -315,11 +354,13 @@ def checks(root: Path) -> dict[str, list[str]]:
         "neutral-home": ([] if (home := se_home.find(root)) is None
                          else home_findings(root, HOME_ALLOWED, home)),
         "generated": generated_findings(root),
+        "sections": section_findings(root, SECTIONS_SKIPPED),
+        "readme": readme_findings(root),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         prog="hygiene.py", description="SE's own checkout's hygiene: the checks of the repository, "
         "not of its code, through git's real door. Exit code 0 passed, 1 findings, 2 a check could not run.")
     parser.add_argument("--repo", type=Path, default=ROOT, help="the checkout checked (default: SE's own)")
@@ -344,4 +385,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

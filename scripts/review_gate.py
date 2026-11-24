@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The review gate: whether `work_tickets.py integrate` lands a risky change that no reviewer passed.
 
 se.toml `[integrate] review_gate` switches it on (`true`); absent or `false`, the built-in, it
@@ -12,7 +13,7 @@ of change count as risky, RISKS by default:
 
 A risky change lands only with a reviewer's verdict `pass` or `pass with open points` on its work
 pull request (`review.py file`'s comment) for the head that lands; otherwise `integrate` refuses it
-before anything is pushed, naming the risks, the setting and the remedy (README "Review gate").
+before anything is pushed, naming the risks, the setting and the remedy (docs/fleet.md "Review gate").
 
 Everything here is pure: `settings` reads the table it is handed, `facts` the change's facts,
 `reviews` the pull request's comments, and `decide` takes the facts, the reviews and the settings
@@ -176,5 +177,5 @@ def decide(change: Facts, found: list[Review], head: str, gate: Settings) -> Dec
         False,
         f"the change is risky ({named}) and {why}; se.toml {SETTING} = true lands a risky change "
         f"only with a reviewer's {' or '.join(LANDING_VERDICTS)} of the head that lands: review "
-        f"it (review.py brief, then review.py file) and integrate again (README \"Review gate\")",
+        f"it (review.py brief, then review.py file) and integrate again (docs/fleet.md \"Review gate\")",
         carried)

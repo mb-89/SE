@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Generate the se plugin's agents and skills for Claude Code and Copilot from its one source in `src/`.
 
 Every agent (`src/agents/<name>.md`) and every skill (`src/skills/<name>/...`) is written once.
@@ -16,7 +18,7 @@ hooks files call a bare `bash` or the Git-bash hand-off `scripts/bash.ps1` is th
 `se.toml` `[plugin] powershell_hooks` (`powershell_hooks`); unset, a bare `bash`. `check` refuses when any generated file
 differs from what `build` would write, so a hand edit to a generated file fails. Both refuse an
 agent Copilot would reject or a skill either host would skip, as the standalone validators of
-`scripts/agent_lint.py` find them. Where the plugin is installed from is the README section
+`scripts/agent_lint.py` find them. Where the plugin is installed from is docs/install.md
 "Install".
 
 Source front matter is one `key: value` per line. An agent's keys all go into its one file; a key
@@ -53,9 +55,10 @@ and its modules, so a note it refuses, an orphan among them, fails where a stale
 checkout without one (a copy of the generator alone) has no note of its own to check.
 
 `build` also writes the documentation's three pages of what the layout loads, `docs/skills.md`,
-`docs/rules.md` and `docs/sub-agents.md` (PAGES), from the layout it builds: one table each of the
-skills (guidance notes aside), the rules in force (the rule book's and every guidance note) and the
-sub-agents (every agent but SE). `inventory` reads them from a layout, the one it builds or the
+`docs/rules.md` and `docs/sub-agents.md` (PAGES), from the layout it builds, each through its
+interface template (`templates/skills-page.md`, `rules-page.md`, `sub-agents-page.md`, filled by
+scripts/interfaces.py): one table each of the skills (guidance notes aside), the rules in force (the
+rule book's and every guidance note) and the sub-agents (every agent but SE). `inventory` reads them from a layout, the one it builds or the
 one an installed SE holds, so SE's start report counts exactly what these pages list
 (docs/boot.md "The start report").
 """
@@ -71,6 +74,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 _lint_spec = importlib.util.spec_from_file_location("agent_lint", Path(__file__).with_name("agent_lint.py"))
@@ -83,6 +87,11 @@ generated_files = sys.modules.get("generated") or importlib.util.module_from_spe
 if "generated" not in sys.modules:
     sys.modules["generated"] = generated_files
     _marker_spec.loader.exec_module(generated_files)
+_interfaces_spec = importlib.util.spec_from_file_location("interfaces", Path(__file__).with_name("interfaces.py"))
+interfaces = sys.modules.get("interfaces") or importlib.util.module_from_spec(_interfaces_spec)
+if "interfaces" not in sys.modules:
+    sys.modules["interfaces"] = interfaces
+    _interfaces_spec.loader.exec_module(interfaces)
 SOURCE = PurePosixPath("src")
 DRAFTS = PurePosixPath("drafts/skills")
 GUIDANCE = PurePosixPath("guidance")  # se_guidance.py TREE
@@ -92,9 +101,9 @@ DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
 # `--hook`: it ends with SE's greeting (scripts/se_start.py status --hook).
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
-# Every other session event goes to kern, the core SE pins (README "Kern"), through SE's hook
+# Every other session event goes to kern, the core SE pins (docs/start.md "Kern"), through SE's hook
 # command; it fails open, and `|| true` holds a hook that cannot run to the same. The Stop hooks
-# (README "Stop hook") are answered by kern's delivery component, else by stop-check directly.
+# (docs/fleet.md "Stop hook") are answered by kern's delivery component, else by stop-check directly.
 KERN_EVENTS = ("SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
                "SubagentStop")
 
@@ -114,7 +123,7 @@ COPILOT_HOOKS = {
     # The greeting and kern's start, once per session; a first start installing uv and Python may
     # take longer, and the core starts detached.
     "SessionStart": ("scripts/bootstrap.sh --hook", 120),
-    # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
+    # The delivery check (docs/fleet.md "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
     # It also fires for the se agent; stop-check lets any checkout without a work issue end.
     "Stop": ("scripts/se_hook.sh Stop", 60),
 }
@@ -177,7 +186,7 @@ PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 COPILOT_MANIFEST_PLACES = {"github": PurePosixPath(".github/plugin/plugin.json"),
                            "root": PurePosixPath("plugin.json")}
 COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
-# The MCP door (README "MCP door"), declared per host: Copilot's project file, the root file
+# The MCP door (docs/start.md "The MCP door"), declared per host: Copilot's project file, the root file
 # Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`), and the
 # Claude Code manifest's mcpServers, written only where [plugin] claude_mcp is on (`claude_mcp`).
 COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
@@ -670,9 +679,10 @@ def expected(root: Path = ROOT) -> dict[PurePosixPath, bytes]:
     return files
 
 
-#: The documentation's pages of what the layout loads, each its path and its title.
-PAGES = {PurePosixPath("docs/skills.md"): "Skills", PurePosixPath("docs/rules.md"): "Rules",
-         PurePosixPath("docs/sub-agents.md"): "Sub-agents"}
+#: The documentation's pages of what the layout loads, each its path and the interface template
+#: that writes it (`templates/<name>.md`, its schema in scripts/interfaces/).
+PAGES = {PurePosixPath("docs/skills.md"): "skills-page", PurePosixPath("docs/rules.md"): "rules-page",
+         PurePosixPath("docs/sub-agents.md"): "sub-agents-page"}
 #: The rule book in the layout, whose `### <id> <name>` headings are its rules.
 LAYOUT_BOOK = SKILLS / "work-model" / "references" / "rules.md"
 BOOK_RULE = re.compile(r"^### (?P<id>[a-z][a-z0-9-]*-\d{3,}) (?P<name>.+?)\s*$", re.M)
@@ -731,24 +741,20 @@ def _cell(text: str) -> str:
 
 
 def pages(found: Inventory) -> dict[PurePosixPath, bytes]:
-    """The documentation's pages of `found`, each opened by its generated notice."""
-    def page(path: PurePosixPath, intro: str, head: tuple[str, str], rows) -> bytes:
-        lines = [notice("the layout se_plugin.py build writes").rstrip("\n"), "", f"# {PAGES[path]}", "",
-                 intro, "", f"| {head[0]} | {head[1]} |", "|---|---|",
-                 *(f"| `{_cell(name)}` | {_cell(text)} |" for name, text in rows)]
-        return ("\n".join(lines) + "\n").encode("utf-8")
+    """The documentation's pages of `found`, each its interface template (PAGES) filled through
+    scripts/interfaces.py and opened by its generated notice, the marker's words in its comment."""
+    def page(path: PurePosixPath, counts: dict[str, int], rows) -> bytes:
+        values = {"notice": generated_files.words(GENERATOR, "the layout se_plugin.py build writes"),
+                  **{name: str(count) for name, count in counts.items()},
+                  "rows": [{"name": _cell(name), "text": _cell(text)} for name, text in rows]}
+        return (interfaces.write(PAGES[path], values) + "\n").encode("utf-8")
 
     skills, rules, agents = PAGES
     return {
-        skills: page(skills, f"The {len(found.skills)} skills SE loads, each by its name and when it is "
-                     "used; each guidance note is a skill too, listed with the rules.",
-                     ("Skill", "When it is used"), found.skills),
-        rules: page(rules, f"The {found.rules} rules in force: the rule book's {len(found.book)} and "
-                    f"{len(found.notes)} guidance notes, the notes after the book.",
-                    ("Rule", "What it says"), [*found.book, *found.notes]),
-        agents: page(agents, f"The {len(found.subagents)} sub-agents SE starts, every agent but SE "
-                     "itself, each by its name and what it does.", ("Sub-agent", "What it does"),
-                     found.subagents),
+        skills: page(skills, {"count": len(found.skills)}, found.skills),
+        rules: page(rules, {"count": found.rules, "book": len(found.book), "notes": len(found.notes)},
+                    [*found.book, *found.notes]),
+        agents: page(agents, {"count": len(found.subagents)}, found.subagents),
     }
 
 
@@ -808,7 +814,7 @@ def build(root: Path = ROOT) -> list[PurePosixPath]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="se_plugin.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="se_plugin.py", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("build", "check"),
                         help="build: write the layout from src/ and guidance/; check: refuse when they "
                         "differ or the guidance check refuses a note")
@@ -839,4 +845,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

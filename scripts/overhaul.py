@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
-"""An overhaul: is the design still right? (README "Work commands").
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
+"""An overhaul: is the design still right? (docs/work-commands.md "Work commands").
 
 `overhaul.py new` files the overhaul issue, `overhaul-<yyyymmdd>` labelled `discovery`, with
 the body of `.github/ISSUE_TEMPLATE/overhaul.md`, through `work_tickets.py file`'s filing path:
@@ -54,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import git_door
+import se_script
 # A duplicate block is at least WINDOW lines alike, MEANINGFUL of them with MIN_CHARS characters
 # or more; a block written more than COMMON times is an idiom, not a copy. Near-duplicate
 # functions have MIN_TOKENS tokens or more and share NEAR_ALIKE percent of their SHINGLE-token
@@ -595,7 +597,7 @@ def template_body(template: Path = TEMPLATE) -> tuple[str, str]:
 def file_run(root: Path, repo: str | None, template: Path, label: str, scope: str = "") -> str:
     """File a run (an overhaul, a retro) from its issue template through `work_tickets.py file`'s
     filing path, once, labelled `label` and not ready, as its own agent runs it, not a worker
-    (README "Retro due"); its title the template's with today's date (and `scope`). The filing
+    (docs/fleet.md "Retro due"); its title the template's with today's date (and `scope`). The filing
     check does not hold it back: it is what that check files first. Returns file's line."""
     work_tickets = sibling("work_tickets")
     pattern, body = template_body(template)
@@ -1167,7 +1169,7 @@ def run_facts(args: argparse.Namespace) -> int:
     return 0
 
 
-#: overhaul.py's commands as one kern component (README "Commands as components"); each command's
+#: overhaul.py's commands as one kern component (docs/start.md "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
@@ -1185,7 +1187,7 @@ READ_ONLY_COMMANDS = {
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="overhaul.py", description=__doc__.splitlines()[0])
+    top = se_script.parser(prog="overhaul.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
 
     def github(command: argparse.ArgumentParser) -> None:
@@ -1252,4 +1254,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,6 +1,8 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Build se's documentation, one HTML file, from `docs.md` with the obs module.
 
-The README section "Documentation" owns what this builds and where it is published. Exit code 0:
+docs/documentation.md "Documentation" owns what this builds and where it is published. Exit code 0:
 built without a warning; 1: the build failed or obs warned (each warning is printed); 2: setup error.
 """
 
@@ -19,6 +21,7 @@ from pathlib import Path
 import process_door
 import rule_book
 import shell_door
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "docs.md"
@@ -256,7 +259,7 @@ def runme(vault: Path, folder: Path) -> int:
     if result.returncode:
         print(f"build_docs: sh RUNME.sh --help in the build's copy of {folder} failed with exit code "
               f"{result.returncode}; the pinned se must be in ~/.se/bin: run bash scripts/bootstrap.sh "
-              "--binary in the checkout first (README \"Documentation\")", file=sys.stderr)
+              "--binary in the checkout first (docs/documentation.md \"Documentation\")", file=sys.stderr)
         return 1
     return 0
 
@@ -395,7 +398,7 @@ def _flow_entries(value: str) -> list[str] | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = se_script.parser(description=__doc__.splitlines()[0])
     parser.add_argument("--source", type=Path, default=MANIFEST,
                         help="the manifest note to build (default: docs.md); its folder is the vault")
     parser.add_argument("--destination", type=Path,
@@ -414,4 +417,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

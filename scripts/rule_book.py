@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Check se's rule book: every rule's id and shape.
 
 The book's own header owns the id scheme and the shape of a rule
@@ -8,7 +10,7 @@ Exit code 0: the book passed; 1: it has problems (each printed as `<book>:<line>
 2: setup error (the book is missing).
 
 `documentation` makes the documentation's page of the book from the same parse: one table of its
-rules and one note per rule (README "Documentation").
+rules and one note per rule (docs/documentation.md "Documentation").
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOK = ROOT / "src" / "skills" / "work-model" / "references" / "rules.md"
@@ -310,7 +313,7 @@ def documentation(text: str) -> Documentation:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--book", type=Path, default=BOOK, help="the rule book (default: se's)")
     args = parser.parse_args(argv)
     try:
@@ -329,4 +332,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

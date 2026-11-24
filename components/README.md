@@ -5,7 +5,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
-  script commands (README ["Commands as components"](../README.md#commands-as-components)).
+  script commands (["Commands as components"](../docs/start.md#commands-as-components)).
 - **Go, compiled into the `se` binary**: fleet, retro-due, origin and template, SE's Go module
   `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[components.kern]` pins
   and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
@@ -29,7 +29,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   each output names how many issues it read, and a reader takes it only where that is above 0.
 - **No comments.** The names carry no issue comments, so the lease of in-progress work without a
   branch is never counted from its `Started:` comment: it is `no branch` at once, as the Python check
-  answers where it read no comments ([README "Fleet check"](../README.md#fleet-check)).
+  answers where it read no comments ([docs/fleet.md "Fleet check"](../docs/fleet.md#fleet-check)).
 - **The binary.** `cmd/se` is the `se` binary: kern's command line carrying kern's GitHub
   component and these three, and SE's start, `se agent`: it starts the SE agent in the caller's
   folder with SE loaded from its clone, Claude Code's directory marketplace `se` (`--host copilot`:
@@ -47,11 +47,15 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 manifests (`manifest.go`), checks and answers as [scripts/templates.py](../scripts/templates.py),
 whose docstring owns the format.
 `Load` reads the notes, `Parse`, `Render`, `Check`, `Select`, `Draft`, `Schema` and `FillDocument`
-answer as the Python functions of their names do.
+answer as the Python functions of their names do; `Reasons` (`reasons.go`) is its `REASONS`, each
+rule's why, and `corrections.go` its correction pass (`Correct`, `CorrectBody`, `RecordCorrections`).
+`Fill` and `FillBody`, by the fields or by the whole document, are the one constructor of a filled
+template, which carries the fill's corrections; the verb `fill` takes either.
 
 - **One set of cases.** [tests/template_cases.py](../tests/template_cases.py) writes
-  `template/testdata/cases/`: every SE template and five fixture sets, filled, read, checked,
-  selected and broken, each with the Python engine's answer. `cases_test.go` holds Go to every
+  `template/testdata/cases/`: every SE template and its fixture sets, filled, read, checked,
+  selected, corrected and broken, each with the Python engine's answer, and the rules' reasons
+  (`reasons.json`). `cases_test.go` holds Go to every
   answer, word for word; `tests/test_template_cases.py` fails where the committed cases lag the
   Python engine, so a change to either engine or to `templates/` refreshes them with
   `uv run python tests/template_cases.py`.

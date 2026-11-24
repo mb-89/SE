@@ -29,7 +29,7 @@ func TestFillMakesAFilledTemplateOnlyWhereNothingRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the work template's example does not fill: %v", err)
 	}
-	document, found, _ := FillDocument(work, fields, raw, title, "")
+	document, found, _, _ := FillDocument(work, fields, raw, title, "")
 	if !filled.Valid() || filled.Template() != "work" || filled.Version() != work.Version || filled.Digest() != work.Digest {
 		t.Fatalf("the filled template is %+v", filled)
 	}
@@ -235,7 +235,7 @@ func TestTheComponentsVerbAcceptRefusesFreeTextAndTakesAFilledTemplate(t *testin
 	if err := index.Recode(answer, &got); err != nil || got.Template != "work" || got.Version != work.Version || got.Title == nil || *got.Title != *title || got.Free {
 		t.Fatalf("accept answered %+v, %v", got, err)
 	}
-	document, _, _ := FillDocument(work, fields, raw, title, "")
+	document, _, _, _ := FillDocument(work, fields, raw, title, "")
 	if got.Document != document {
 		t.Fatal("accept answered another document than the fill rendered")
 	}
@@ -282,5 +282,64 @@ func TestTheVerbAcceptRequiresTheTemplateThatClaimsAPathAndLeavesOtherPathsFree(
 	answer, err = Component.Serve(ctx, "accept", map[string]any{"target": "files write", "path": "notes.md", "filled": "anything"})
 	if err != nil || index.Recode(answer, &got) != nil || !got.Free {
 		t.Fatalf("a path no template claims is not free: %+v, %v", got, err)
+	}
+}
+
+// The verb fill takes the whole document in place of the fields: it corrects it, and its answer
+// carries the corrections and the corrected document.
+func TestTheComponentsVerbFillTakesAWholeDocumentAndAnswersItsCorrections(t *testing.T) {
+	startComponent(t)
+	work, fields, title := workFields(t)
+	document, _, _, err := FillDocument(work, fields, raw, title, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Replace(strings.Replace(document, "## Goal\n", "## goal\n", 1), "## Blocked by\n", "### blocked by\n", 1)
+	answer, err := Component.Serve(context.Background(), "fill", map[string]any{"template": "work", "body": body, "raw": raw, "title": *title})
+	if err != nil {
+		t.Fatalf("the verb refused a body that differs only in its headings: %v", err)
+	}
+	data, _ := json.Marshal(answer)
+	got, err := Accept("a target", "work", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := [][2]string{}
+	for _, c := range got.Corrections() {
+		kinds = append(kinds, [2]string{c.Field, strings.Join(c.Kinds, " ")})
+	}
+	if asJSON(kinds) != `[["blocked_by","heading"],["goal","heading"]]` || !strings.Contains(got.Document(), "<!-- se:corrected heading -->\n") ||
+		!strings.Contains(got.Document(), "\n## Goal\n") || !strings.Contains(got.Document(), "\n## Blocked by\n") {
+		t.Fatalf("the verb answered %s and the document\n%s", asJSON(kinds), got.Document())
+	}
+	if _, err := Component.Serve(context.Background(), "fill", map[string]any{"template": "work", "body": body, "fields": fields, "raw": raw}); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("the verb took a body and fields: %v", err)
+	}
+}
+
+// A template manifest (SE#1841) is filled on the same path: a fill something refuses makes no
+// filled template, by its fields or by its whole document, and each refusing line says why.
+func TestARefusedFillOfATemplateManifestMakesNothing(t *testing.T) {
+	catalog, err := loadFixture(fixtureFiles(readCases(t)["manifests.json"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirements := catalog["requirements"]
+	values := Object{{"purpose", "The pump controller keeps the tank level between its limits."},
+		{"scope", "- In scope: the level loop and its alarms."}, {"risks", "The sensor may drift; the instrument team owns it."}}
+	made, err := Fill(requirements, values, raw, nil, "")
+	if err != nil || !made.Valid() {
+		t.Fatalf("the manifest does not fill: %v", err)
+	}
+	values.Delete("purpose")
+	refused, err := Fill(requirements, values, raw, nil, "")
+	var refusal *Refusal
+	if !asRefusal(err, &refusal) || refused.Valid() || !strings.Contains(err.Error(), "(why: "+Reasons["required"]+")") {
+		t.Fatalf("a manifest fill without its mandatory purpose made %+v: %v", refused, err)
+	}
+	body := strings.Replace(made.Document(), "The pump controller keeps the tank level between its limits.", "TBD", 1)
+	refused, err = FillBody(requirements, body, raw, nil)
+	if !asRefusal(err, &refusal) || refused.Valid() {
+		t.Fatalf("a manifest's whole document with a placeholder purpose made %+v: %v", refused, err)
 	}
 }

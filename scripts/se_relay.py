@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
-"""SE's GitHub reads through kern's GitHub relay (README "Hand-offs through the relay").
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
+"""SE's GitHub reads through kern's GitHub relay (docs/settings.md "Hand-offs through the relay").
 
 Without gh (Claude's cloud) SE's commands hand their GitHub steps to the session. Where kern serves
 the checkout with its GitHub component on the relay backend, a command reads GitHub through kern
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import se_components
+import se_script
 
 #: The GitHub component's instance in the wiring.
 GITHUB = "github"
@@ -294,7 +296,7 @@ def main(argv: list[str] | None = None, now: Callable[[], datetime] | None = Non
     where `--step` names a step it no longer waits for (stale_step)."""
     import argparse
 
-    parser = argparse.ArgumentParser(prog="se_relay.py", description=(
+    parser = se_script.parser(prog="se_relay.py", description=(
         "SE's reads and steps through kern's GitHub relay."))
     commands = parser.add_subparsers(dest="command", required=True)
     nxt = commands.add_parser("next", help="print the GitHub tool calls kern's relay waits for")
@@ -325,4 +327,4 @@ def main(argv: list[str] | None = None, now: Callable[[], datetime] | None = Non
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))

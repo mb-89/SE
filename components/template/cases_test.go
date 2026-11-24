@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -96,6 +98,22 @@ func findingsJSON(found []Finding) string {
 	return asJSON(rows)
 }
 
+func correctionsJSON(found []Correction) string {
+	rows := []any{}
+	for _, c := range found {
+		rows = append(rows, []any{c.Field, toAny(c.Kinds), c.Before, c.After})
+	}
+	return asJSON(rows)
+}
+
+// wantedCorrections are a case's corrections, none where it names none.
+func wantedCorrections(cs Object) string {
+	if want, ok := cs.Get("corrections"); ok {
+		return asJSON(want)
+	}
+	return "[]"
+}
+
 func digest(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -136,7 +154,7 @@ func TestTheGoEngineGivesThePythonEnginesAnswers(t *testing.T) {
 	})
 	for _, file := range files {
 		set := sets[file]
-		if set.Value("set") == "load-errors" {
+		if in(str(set.Value("set")), []string{"load-errors", "corrections", "reasons"}) {
 			continue
 		}
 		catalog := se
@@ -188,13 +206,14 @@ func TestTheGoEngineGivesThePythonEnginesAnswers(t *testing.T) {
 				cs := e.(Object)
 				where := file + " existing " + itoa(i)
 				fields := cs.Value("fields").(Object)
-				document, found, err := FillDocument(catalog["risks"], fields, "The person asked: keep the raw text, please. Ship it \"standard\".", nil, cs.Value("existing").(string))
+				document, found, corrections, err := FillDocument(catalog["risks"], fields, "The person asked: keep the raw text, please. Ship it \"standard\".", nil, cs.Value("existing").(string))
 				if err != nil {
 					c.same(where, "error", err.Error(), "")
 					continue
 				}
 				c.same(where, "document", document, cs.Value("document").(string))
 				c.same(where, "findings", findingsJSON(found), asJSON(cs.Value("findings")))
+				c.same(where, "corrections", correctionsJSON(corrections), wantedCorrections(cs))
 			}
 		}
 	}
@@ -247,7 +266,7 @@ func checkTemplate(c *checker, file string, tmpl *Template, entry Object, bases 
 			values.Set(pair.Key, copyValue(pair.Value))
 		}
 		at += " (change " + asJSON(cs.Value("change")) + " drop " + drop + " title " + asJSON(cs.Value("title")) + ")"
-		document, found, err := FillDocument(tmpl, values, cs.Value("raw").(string), optional(cs.Value("title")), "")
+		document, found, corrections, err := FillDocument(tmpl, values, cs.Value("raw").(string), optional(cs.Value("title")), "")
 		if want, ok := cs.Get("error"); ok {
 			got := ""
 			if err != nil {
@@ -268,6 +287,7 @@ func checkTemplate(c *checker, file string, tmpl *Template, entry Object, bases 
 		}
 		c.same(at, "document digest", digest(document), cs.Value("digest").(string))
 		c.same(at, "findings", findingsJSON(found), asJSON(cs.Value("findings")))
+		c.same(at, "corrections", correctionsJSON(corrections), wantedCorrections(cs))
 	}
 	return ran + checkBodies(c, where, tmpl, entry)
 }
@@ -372,5 +392,138 @@ func TestEveryOneOfSEsTemplatesLoadsInGo(t *testing.T) {
 	sort.Strings(names)
 	if len(names) < 17 {
 		t.Fatalf("Go loads %d of SE's templates: %v", len(names), names)
+	}
+}
+
+func TestEveryRuleCarriesThePythonEnginesReasonAndEveryFindingNamesIt(t *testing.T) {
+	set, ok := readCases(t)["reasons.json"]
+	if !ok {
+		t.Fatal("no reasons.json among the shared cases")
+	}
+	want := map[string]string{}
+	for _, pair := range set.Value("reasons").(Object) {
+		want[pair.Key] = pair.Value.(string)
+	}
+	if asJSON(want) != asJSON(Reasons) {
+		t.Errorf("the reasons differ from the Python engine's\n go:     %s\n python: %s", asJSON(Reasons), asJSON(want))
+	}
+	if got := asJSON(toAny(Corrections)); got != asJSON(set.Value("corrections")) {
+		t.Errorf("the correction kinds differ from the Python engine's: %s, %s", got, asJSON(set.Value("corrections")))
+	}
+	for _, rule := range append(append([]string{nodeRule, versionRule, quoteRule, slotRule, "checker", "line", "title", "template"}, refuseRules...), warnRules...) {
+		if Reasons[rule] == "" {
+			t.Errorf("the rule %s carries no reason", rule)
+		}
+	}
+	f := Finding{"goal", "required", Refuse, "Goal is empty: write `## Goal`"}
+	if got, want := f.String(), "refuse: goal [required]: Goal is empty: write `## Goal` (why: "+Reasons["required"]+")"; got != want {
+		t.Errorf("a finding reads %q, not %q", got, want)
+	}
+	data, _ := json.Marshal(f)
+	if !strings.Contains(string(data), `"why":"a reader acts on every required section`) {
+		t.Errorf("a finding's JSON carries no reason: %s", data)
+	}
+}
+
+// The correction pass's shared cases: each fill by its fields or by a whole body gives the Python
+// engine's document, corrections and findings, and makes a filled template exactly where that
+// engine's fill refuses nothing.
+func TestTheGoEngineCorrectsAndFillsAsThePythonEngineDoes(t *testing.T) {
+	set, ok := readCases(t)["corrections.json"]
+	if !ok {
+		t.Fatal("no corrections.json among the shared cases")
+	}
+	catalog, err := loadFixture(fixtureFiles(set))
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := catalog["brief"]
+	c := &checker{t: t}
+	cases := set.Value("cases").([]any)
+	for _, e := range cases {
+		cs := e.(Object)
+		at := "corrections: " + cs.Value("name").(string)
+		fields, _ := cs.Value("fields").(Object)
+		var body *string
+		if b, ok := cs.Get("body"); ok {
+			text := b.(string)
+			body = &text
+		}
+		raw, title := cs.Value("raw").(string), optional(cs.Value("title"))
+		f, err := fill(brief, fields.Copy(), raw, title, "", body)
+		if want, ok := cs.Get("error"); ok {
+			got := "<no error>"
+			if err != nil {
+				got = err.Error()
+			}
+			c.same(at, "error", got, want.(string))
+			continue
+		}
+		if err != nil {
+			c.same(at, "error", err.Error(), "")
+			continue
+		}
+		c.same(at, "document", f.document, cs.Value("document").(string))
+		c.same(at, "corrections", correctionsJSON(f.corrections), asJSON(cs.Value("corrections")))
+		c.same(at, "findings", findingsJSON(f.found), asJSON(cs.Value("findings")))
+		var v Filled
+		if body != nil {
+			v, err = FillBody(brief, *body, raw, title)
+		} else {
+			v, err = Fill(brief, fields.Copy(), raw, title, "")
+		}
+		if cs.Value("made").(bool) {
+			if err != nil || !v.Valid() || v.Document() != f.document || correctionsJSON(v.Corrections()) != correctionsJSON(f.corrections) {
+				c.same(at, "filled", "<none: "+errText(err)+">", "a filled template of the corrected document")
+			}
+			continue
+		}
+		var refusal *Refusal
+		if v.Valid() || !errors.As(err, &refusal) {
+			c.same(at, "filled", "<made>", "a refusal, nothing made")
+			continue
+		}
+		for _, line := range strings.Split(refusal.Error(), "\n")[1:] {
+			if strings.HasPrefix(line, "refuse: ") && !strings.Contains(line, " (why: ") {
+				c.same(at, "refusal line", line, "the field, what fails, the fix and why")
+			}
+		}
+	}
+	if c.failed > 0 {
+		t.Errorf("%d answers of %d cases differ from the Python engine's", c.failed, len(cases))
+	}
+}
+
+func errText(err error) string {
+	if err == nil {
+		return "no error"
+	}
+	return err.Error()
+}
+
+// No correction changes a word of content: every kind is made by a shared case, and each
+// correction's text holds the same words before and after, case aside.
+func TestNoCorrectionChangesAWordOfContent(t *testing.T) {
+	set := readCases(t)["corrections.json"]
+	word := regexp.MustCompile(`[\pL\pN_]+`)
+	words := func(text string) string { return asJSON(toAny(word.FindAllString(strings.ToLower(text), -1))) }
+	made := map[string]bool{}
+	for _, e := range set.Value("cases").([]any) {
+		corrections, _ := e.(Object).Value("corrections").([]any)
+		for _, row := range corrections {
+			r := row.([]any)
+			for _, kind := range r[1].([]any) {
+				made[kind.(string)] = true
+			}
+			before, after := r[2].(string), r[3].(string)
+			if words(before) != words(after) {
+				t.Errorf("the correction %v changes a word: %s, %s", r, words(before), words(after))
+			}
+		}
+	}
+	for _, kind := range Corrections {
+		if !made[kind] {
+			t.Errorf("no shared case makes the correction %s", kind)
+		}
 	}
 }

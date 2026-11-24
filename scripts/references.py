@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """Dangling references: text that names a file or a command that does not exist.
 
 One function, `dangling`, finds the references in a Markdown text and checks them; both places that
@@ -13,6 +13,11 @@ skills, README.md, AGENTS.md and the rule book) and the issue-filing commands `w
 - Commands: `<x>.py <subcommand> [<subcommand>]` in a code span or a fenced block, where
   `scripts/<x>.py` is one of the repository's scripts whose argument parser defines subcommands.
   That parser is the command registry while SE is Python: read in process, never run.
+- Sections: `<page>.md "<section>"` and `README "<section>"`, in prose, code and comments alike
+  (`dangling_sections`): the section a reference quotes is a heading of the Markdown page it names,
+  or a bold label opening one of its paragraphs or list items (`**Pinning it.**`), resolved from the repository root and then from the text's own folder. `README` alone is the
+  repository's README.md, except after another owner's name (`kern's README "Release"`); a page
+  that is not in the repository is another's and is not checked.
 - Options: `command_options` gives the option names of the parser a script's leading subcommand
   words reach, from the same capture as `command_tree`. `tests/test_remedy_strings.py` holds the
   messages in `scripts/*.py` (docstrings aside) to the same parsers, subcommands and options alike.
@@ -83,6 +88,57 @@ def dangling(text: str, root: Path = ROOT, source: Path | None = None, *,
         made = requirements(text)
         found = [finding for finding in found if not creates(made, finding.item)]
     return sorted(found, key=lambda finding: finding.line)
+
+
+# `<page>.md "<section>"` or `README "<section>"`: the name may wrap onto a comment's next line
+# (`#`, `#:`, `//`) and sit in a Python string, its quotes escaped.
+SECTION_REFERENCE = re.compile(
+    r"(?<![\w/.<>-])((?:[\w.-]+/)*[\w.-]+\.md|README)(?:[ \t]+|[ \t]*\n[ \t]*(?:#:?|//)?[ \t]*)\\?\""
+    r"([A-Za-z`][^\"\\\n]*(?:(?:\n[ \t]*(?:#:?|//)?|\"[ \t]*\n[ \t]*f?\")[ \t]*[^\"\\\n]+)?)\\?\"")
+# The words before `README` that make it another's: kern's README, obs's README, its README.
+OTHER_README = re.compile(r"(?:\b\w[\w-]*'s|\bits|\bgithub|\bkern|\bobs(?:-html)?)[ \t]*(?:\n[ \t]*(?:#:?|//)?[ \t]*)?$",
+                          re.IGNORECASE)
+WRAP = re.compile(r"[ \t]*(?:\"[ \t]*\n[ \t]*f?\"|\n[ \t]*(?:#:?|//)?)[ \t]*")
+# A bold label that opens a paragraph or a list item names a section too: `**Pinning it.**`.
+LABEL = re.compile(r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?\*\*([^*]+?)[.:]?\*\*")
+
+
+def section_anchor(heading: str) -> str:
+    """GitHub's anchor of a heading: lower case, punctuation dropped, spaces become hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().casefold()).replace(" ", "-")
+
+
+@cache
+def page_headings(page: Path) -> frozenset[str]:
+    """The anchors of the headings of the Markdown file `page`, fenced blocks left out."""
+    anchors, fence = set(), None
+    for line in page.read_text(encoding="utf-8").splitlines():
+        if opened := FENCE.match(line):
+            fence = None if fence and opened.group(1)[0] == fence else fence or opened.group(1)[0]
+        elif fence is None and (match := HEADING.match(line)):
+            anchors.add(section_anchor(match.group(2)))
+        elif fence is None and (match := LABEL.match(line)):
+            anchors.add(section_anchor(match.group(1)))
+    return frozenset(anchors)
+
+
+def dangling_sections(text: str, root: Path = ROOT, source: Path | None = None) -> list[Finding]:
+    """The section references in `text` whose page is the repository's and holds no such heading."""
+    found = []
+    for match in SECTION_REFERENCE.finditer(text):
+        page, name = match.group(1), WRAP.sub(" ", match.group(2)).strip()
+        if page == "README":
+            if OTHER_README.search(text[max(0, match.start() - 40):match.start()]):
+                continue
+            page = "README.md"
+        targets = [root / page, *([source.parent / page] if source is not None else [])]
+        target = next((path for path in targets if path.is_file()), None)
+        if target is None or not name:
+            continue
+        if section_anchor(name) not in page_headings(target.resolve()):
+            found.append(Finding(line_of(text, match.start()), f"{match.group(1)} \"{name}\"",
+                                 f"names no section of {relative(target.resolve(), root)}"))
+    return found
 
 
 CREATING = re.compile(r"\b(new|adds?|added|creates?|created|introduces?)\b", re.IGNORECASE)

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """The verdicts of se's checks on a tree, recorded in the checkout's git directory.
 
 `work_tickets.py suite` and `public_check.py --rev` record theirs. Before the integration branch is

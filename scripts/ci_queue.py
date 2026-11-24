@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
-"""The queue bound of CI's platform legs (README "Platform legs and their queue").
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
+"""The queue bound of CI's platform legs (docs/tests.md "Platform legs and their queue").
 
 A job's `timeout-minutes` counts from the moment a runner takes it: the time a leg waits in the
 queue for a runner counts against nothing but GitHub's own limit (a job without a runner for 24
@@ -28,6 +29,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -132,7 +134,7 @@ def rerun(api: Api, run: int, prefix: str) -> int:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ci_queue.py", description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(prog="ci_queue.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     w = sub.add_parser("watch", help="bound the queue wait of this run's platform legs")
     w.add_argument("--jobs", required=True, help="the matrix job's name, e.g. kern-platforms")
@@ -165,4 +167,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

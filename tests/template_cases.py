@@ -28,6 +28,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import git_door  # noqa: E402
+import code_templates  # noqa: E402
 import templates  # noqa: E402
 
 OUT = ROOT / "components" / "template" / "testdata" / "cases"
@@ -74,6 +76,10 @@ def _findings(found) -> list[list[str]]:
     return [[item.field, item.rule, item.severity, item.fix] for item in found]
 
 
+def _corrections(corrections) -> list[list[object]]:
+    return [[item.field, list(item.kinds), item.before, item.after] for item in corrections]
+
+
 def _as_kind(item: templates.Field, text: str) -> object:
     """`text` as a value of `item`'s kind, as an agent's fields give it."""
     if item.kind in ("list", "issue"):
@@ -107,9 +113,11 @@ def _fill(template: templates.Template, example: dict, title: str | None, raw: s
     values.update(copy.deepcopy(change or {}))
     case = {"change": change or {}, "drop": drop, "title": title, "raw": raw}
     try:
-        document, found = templates.fill(template, values, raw, title=title)
+        document, found, corrections = templates.fill(template, values, raw, title=title)
     except templates.TemplateError as error:
         return {**case, "error": str(error)}
+    if corrections:
+        case["corrections"] = _corrections(corrections)
     title_field = next((item.name for item in template.fields if item.source == "title"), None)
     named = (title if title is not None else values.get(title_field)) if title_field else None
     parsed = templates.parse(template, document, named if isinstance(named, str) else None)
@@ -396,7 +404,26 @@ def _adapter_bodies(template: templates.Template) -> list[tuple[str, str | None]
                        '{"verdict": "pass", "verdict": 1}', "\ufeff{}"):
             bodies.append(f"{review}\n```json\n{broken}\n```\n")
         return [(body, None) for body in bodies]
+    if template.kind == templates.CODE:
+        return [(body, None) for body in _code_bodies(template)]
     return []
+
+
+def _code_bodies(template: templates.Template) -> list[str]:
+    """A code template's bodies: each file it scaffolds as it writes it, then the claimed one
+    without each line its shape needs in turn, with another major version, and a free text."""
+    made = [text for _, text in sorted(code_templates.scaffold(template, Path("x") / "thing",
+                                                                "Do the thing.", "thing").items())]
+    claimed = [text for text in made if any(re.fullmatch(template.marker_pattern, line.strip())
+                                            for line in text.splitlines())]
+    bodies = list(made)
+    for text in claimed[:1]:
+        lines = text.splitlines(keepends=True)
+        for line in template.adapter.get("lines", []):
+            kept = [item for item in lines if re.fullmatch(line["pattern"], item.strip()) is None]
+            bodies.append("".join(kept))
+        bodies.append(text.replace(f" {template.version}", " 2.0.0", 1))
+    return [*bodies, "Free text.\n", ""]
 
 
 def _set(name: str, loaded: dict[str, templates.Template], source: str, files: dict | None = None,
@@ -1154,6 +1181,156 @@ The level sensor may drift; the instrument team owns its calibration.
 """
 
 
+#: The correction pass's fixture (templates.py "Corrections"): a brief whose fields take every
+#: correction kind, a verbatim and a code field the pass keeps, and an exact heading.
+BRIEF_TEMPLATE = """---
+name: brief
+version: 1.0.0
+kind: document
+tags: ["test"]
+reader: fleet
+says: "A brief: its goal, what blocks it, its steps."
+applies:
+  actions: ["comment.create"]
+  marker: "<!-- se:brief -->"
+rules:
+  required: refuse
+  first-sentence: warn
+fields:
+  - name: goal
+    kind: text
+    required: true
+    first_sentence_chars: 60
+  - name: blocked_by
+    kind: issue
+    exact_heading: true
+    required: true
+    none_ok: true
+  - name: steps
+    kind: list
+    numbered: true
+    required: true
+  - name: risks
+    kind: list
+  - name: done
+    kind: checklist
+  - name: meta
+    kind: object
+  - name: notes
+    kind: text
+  - name: said
+    kind: text
+    verbatim: true
+  - name: run
+    kind: code
+    lang: sh
+example:
+  fields:
+    goal: "Every brief says what it is for."
+    blocked_by: ["None"]
+    steps: ["Write it.", "Check it."]
+    risks: ["It runs long."]
+    done: [{"done": false, "text": "Read."}]
+    meta: {"Size": "small"}
+    notes: "Kept short."
+    said: "> keep it short"
+    run: "echo ok"
+---
+
+## Goal
+
+<!-- goal: What is true once this is done. -->
+
+## Blocked by
+
+<!-- blocked_by: The issues that come first, or None. -->
+
+## Steps
+
+<!-- steps: The steps in order. -->
+
+## Risks
+
+<!-- risks: What could go wrong. -->
+
+## Done
+
+<!-- done: What is done. -->
+
+## Meta
+
+<!-- meta: Key: value lines. -->
+
+## Notes
+
+<!-- notes: Anything else. -->
+
+## Said
+
+<!-- said: What the person said, as they said it. -->
+
+## Run
+
+<!-- run: The command. -->
+"""
+LONG_GOAL = "Every brief says what it is for, whom it serves and when it is done, in one go. Then more."
+
+
+def _corrections_set() -> dict:
+    """The correction pass's shared cases: fills of the brief by its fields and by a whole body, each
+    with the document, the corrections, the findings and whether the fill makes a filled template."""
+    files = {"brief.md": BRIEF_TEMPLATE}
+    loaded = templates._loaded([(templates.PROJECT_REPOSITORY, files,
+                                 lambda file: f"{templates.TEMPLATES}/{file}")])
+    template = loaded["brief"]
+    example = template.example["fields"]
+    base, _, _ = templates.fill(template, copy.deepcopy(example), RAW)
+    trivial = (base.replace("## Goal\n", "## goal\n").replace("## Blocked by\n\nNone", "### blocked by:\n\nnone.")
+               .replace("Every brief says what it is for.", "Every brief says what it is for.   ")
+               .replace("- It runs long.", "* It runs long.\n+ It costs time.  ")
+               .replace("1. Write it.", "1) Write it.").replace("Kept short.", ">Kept short.\n\nnot  in input")
+               .replace("> keep it short", "> keep it short  ").replace("echo ok", "echo ok   ")
+               .replace("- [ ] Read.", "- [ ] Read.  ").replace("Size: small", "Size: small  "))
+    given: list[tuple[str, dict, str | None]] = [
+        ("the example", {"fields": example}, None),
+        ("trailing whitespace and line endings", {"fields": {**example, "goal": "Every brief says what "
+                                                  "it is for.  \r\nIt stays short.   \n\n"}}, None),
+        ("list and quote markers in a text", {"fields": {**example, "notes": "* One.\n+ Two.\n1) Three.\n"
+                                              ">Quoted.\n>> Nested.\n* * *\n**Bold.**"}}, None),
+        ("the spellings of None and Not in input", {"fields": {
+            **example, "blocked_by": ["none."], "risks": ["  It runs long.  ", "<!-- kept -->"],
+            "notes": "not in input.", "done": [{"done": True, "text": "NONE"}], "meta": {"Size": " small "}}},
+         None),
+        ("kept: verbatim, code, a fence and a comment", {"fields": {
+            **example, "said": "> keep it short  \n*  as said", "run": "echo ok  \n* x",
+            "notes": "```\n* code  \n```\nnone <!-- a comment -->"}}, None),
+        ("a substantive error", {"fields": {key: value for key, value in {**example, "goal": LONG_GOAL}.items()
+                                            if key != "steps"}}, None),
+        ("the canonical body", {"body": base}, None),
+        ("a body with only trivial deviations", {"body": trivial}, None),
+        ("the same body with Windows line endings", {"body": trivial.replace("\n", "\r\n")}, None),
+        ("a body with a substantive error", {"body": base.replace("Every brief says what it is for.", LONG_GOAL)
+                                             .replace("## Steps\n\n1. Write it.\n2. Check it.\n\n", "")}, None),
+        ("a body that records an earlier correction", {"body": base.replace(
+            template.marker_line, template.marker_line + "\n<!-- se:corrected heading -->")}, None),
+        ("a body and fields", {"body": base, "fields": example}, None),
+    ]
+    cases = []
+    for name, data, title in given:
+        case: dict[str, object] = {"name": name, **copy.deepcopy(data), "title": title, "raw": RAW}
+        try:
+            document, found, corrections = templates.fill(
+                template, copy.deepcopy(data.get("fields", {})), RAW, title=title, body=data.get("body"))
+        except templates.TemplateError as error:
+            cases.append({**case, "error": str(error)})
+            continue
+        cases.append({**case, "document": document, "corrections": _corrections(corrections),
+                      "findings": _findings(found),
+                      "made": not any(item.severity == templates.REFUSE for item in found)})
+    return {"generated": GENERATED.format(source="its files below"), "set": "corrections",
+            "files": files, "repository": templates.PROJECT_REPOSITORY, "cases": cases}
+
+
 def _fixture(name: str, files: dict[str, str], bodies: dict[str, list[str]] | None = None) -> dict:
     loaded = templates._loaded([(templates.PROJECT_REPOSITORY, files,
                                  lambda file: f"{templates.TEMPLATES}/{file}")])
@@ -1182,9 +1359,9 @@ def _existing(files: dict[str, str]) -> list[dict]:
     cases = []
     for existing in (STEP, "# Risks\n\nIntro.\n\n## Other\n\nKept.\n", ""):
         for values in ({"risks": ["One."]}, {"risks": "None"}):
-            document, found = templates.fill(template, values, RAW, existing=existing or None)
+            document, found, corrections = templates.fill(template, values, RAW, existing=existing or None)
             cases.append({"existing": existing, "fields": values, "document": document,
-                          "findings": _findings(found)})
+                          "findings": _findings(found), "corrections": _corrections(corrections)})
     return cases
 
 
@@ -1238,6 +1415,9 @@ def build() -> dict[str, str]:
                                   "- Out of scope: the pump drives, which the drive supplier owns.\n\n", ""),
     ], "checks": ["---\nderived_from: {template: checks, version: 1.3}\n---\n\n## done\n\nAll.\n",
                   "---\nderived_from: {template: checks}\n---\n\n## done\n\n```\n{{slot}}\n```\n"]})
+    made["corrections.json"] = _corrections_set()
+    made["reasons.json"] = {"generated": GENERATED.format(source="its REASONS"), "set": "reasons",
+                            "reasons": templates.REASONS, "corrections": list(templates.CORRECTIONS)}
     made["repositories.json"] = {"generated": GENERATED.format(source="the checkouts below"),
                                  "set": "repositories",
                                  "cases": [_resolved(case) for case in _repository_sets()]}

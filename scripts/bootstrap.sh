@@ -3,7 +3,7 @@
 #
 # Run at every session start by the Claude Code plugin and by Copilot's hooks (.github/hooks/se.json),
 # by SE on its first start elsewhere, and with --binary by RUNME (RUNME.conf), which places `se` once.
-# Quiet when nothing is missing. What it does, per dependency, is the README section "Install".
+# Quiet when nothing is missing. What it does, per dependency, is docs/install.md "Install".
 #   git      required; cannot be installed without admin rights, so it names the one line to run
 #   uv       installed into the user's home (~/.local/bin) from astral.sh when missing
 #   Python   3.11 or newer, installed by uv into the user's home when missing
@@ -115,7 +115,7 @@ need() {
   finish 1
 }
 
-# kern (README "Kern"): only for a session, in --hook mode.
+# kern (docs/start.md "Kern"): only for a session, in --hook mode.
 kern_platform() { # <os>-<arch> as kern's release names them, or nothing
   local os arch
   case "$(uname -s 2>/dev/null)" in
@@ -175,7 +175,7 @@ kern_checkout() {
   done
   return 1
 }
-# The application binary this start places (README "Kern"): one reader, se_modules.py app-binary,
+# The application binary this start places (docs/start.md "Kern"): one reader, se_modules.py app-binary,
 # which answers kern's core plus the application's Go components where it has any, else the bare
 # kern (SE's docs/go-core.md "How the binary arrives"), from the project where it is SE's own
 # checkout. One line: "<name> <version> <download base> <build folder> <package> <the checkout it
@@ -234,7 +234,7 @@ kern_build() { # <bin> <build folder> <package>
   local part="$1.part$$"
   (cd "$2" && go build -o "$part" "$3") && mv -f "$part" "$1"
 }
-# kern for the installed SE (its se.toml [components.kern], README "Modules"), which a build of its
+# kern for the installed SE (its se.toml [components.kern], docs/modules.md "Modules"), which a build of its
 # binary builds on: synced where its clone in .se/modules/kern is missing or not at the commit
 # se.lock locks, both read from the files alone, so an SE at its pin starts no process here. Where
 # that fails, the start goes on without it and the greeting names the cause. A project that is SE's
@@ -263,7 +263,7 @@ kern_step() {
   local start doing
   # kern is one of SE's required components (docs/boot.md "Required components"): it starts at every
   # session's start. For a project inside no git checkout, as a session started without sources
-  # is (README "Cloud sessions"), it starts for SE's root; the later hooks find no binary named for
+  # is (docs/install.md "Cloud sessions"), it starts for SE's root; the later hooks find no binary named for
   # the project and fail open, and a late checkout's first hook starts that checkout's core
   # (scripts/se_hook.sh). The session's shells find it as `se`.
   kern_root="$project"
@@ -390,7 +390,7 @@ if ! uv python find ">=$python_version" >/dev/null 2>&1; then
     need "installing Python with uv failed (offline?). Run this again when online: uv python install $python_version"
 fi
 
-# SE itself (README "Start and refresh"): where the installed SE moved to a newer release, the start
+# SE itself (docs/start.md "Start and refresh"): where the installed SE moved to a newer release, the start
 # runs again from the moved tree, once, carrying what this one said. It fails open: a refresh that
 # cannot reach the remote or fails says so in one line and the start goes on with the SE in place.
 if $hook && ! $compact && [ -z "${SE_START_REFRESHED:-}" ]; then
@@ -424,7 +424,7 @@ if ! $compact && [ -f "$project/se.toml" ] && grep -q '^\[components\.' "$projec
     need "SE cannot start: checking the components of $project/se.toml failed; run: uv run python $se_root/scripts/se_start.py --root $project start-components"
   fi
 fi
-# The commit identity (README "Install"): at a session's start the project's checkout gets its
+# The commit identity (docs/install.md "Install"): at a session's start the project's checkout gets its
 # commit identity as setup.sh sets it, so a fresh clone's first commit already carries it, never the
 # host's default; work_tickets.py identity owns which one, and leaves git's own where none is set.
 if $hook && ! $compact && [ -f "$project/se.toml" ]; then
@@ -440,7 +440,7 @@ if $hook && ! $compact && [ -f "$project/se.toml" ]; then
     --root "$project" start-hooks 2>/dev/null)"
   [ -n "$line" ] && notes+=("$line")
 fi
-# The file gate's line (README "Templates"): where a template claims a path, the line claimed in
+# The file gate's line (docs/templating.md "Templates"): where a template claims a path, the line claimed in
 # <project>/.se/.runtime/templates-files, as kern.path is written, so se_hook.sh guards the file
 # tools with builtins alone; removed otherwise. A template added during a session is guarded from
 # the next session's start.
@@ -452,7 +452,7 @@ if $hook && ! $compact; then
     rm -f "$project/.se/.runtime/templates-files"
   fi
 fi
-# The core switch (README "Machine-local `~/.se/local.toml`"): SE_HOOK_CORE in the environment
+# The core switch (docs/running.md "Machine-local `~/.se/local.toml`"): SE_HOOK_CORE in the environment
 # answers first wherever it is set, else [hooks] core of the machine's local file, read through
 # se_modules.py hooks-core only where that file mentions hooks, so a machine without the setting
 # starts no new process. Off, this start runs no kern step and leaves no kern.path, so the later

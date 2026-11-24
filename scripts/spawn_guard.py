@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The spawn guard: a pytest plugin that counts the processes each test starts and refuses a start outside a contract or entry test.
 
 Reader: whoever writes a test, loads the plugin into a Python project's suite, or converts a test

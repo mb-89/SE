@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Review commands: what a cold reviewer of a delivered pull request starts from.
 
 `review.py brief <pull request>` prints the brief: the work issue the pull request names (its body
@@ -42,6 +44,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import se_script
 
 
 def sibling(name: str):
@@ -683,7 +686,7 @@ def outcome_line(number: int, url: str, found: Report, landed: bool, issue_numbe
     return f"#{number} passes: it lands as is"
 
 
-#: review.py's commands as one kern component (README "Commands as components"); each command's
+#: review.py's commands as one kern component (docs/start.md "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "review", "Review",
@@ -696,7 +699,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="review.py", description=__doc__.split("\n\n")[0])
+    top = se_script.parser(prog="review.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     brief_command = commands.add_parser(
         "brief", help="what a cold reviewer of a delivered pull request starts from",
@@ -754,4 +757,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

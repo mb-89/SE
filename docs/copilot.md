@@ -2,8 +2,7 @@
 
 Reader: the owner, installing SE into GitHub Copilot and calling it for the first time. This note
 owns the opt-in install into another repository, the self-test and smoke test, the checklist for
-the first run with Copilot, and the cloud agent's notes. The install line of each host is README
-[Install](../README.md#install); the MCP door is README [The MCP door](../README.md#the-mcp-door).
+the first run with Copilot, and the cloud agent's notes. The install line of each host is [Install](install.md#install); the MCP door is [The MCP door](start.md#the-mcp-door).
 
 `<owner>/<repository>` below is the owner and repository of the SE you install from: the
 repository its checkout's origin names (`uv run python scripts/se_home.py tracker` prints it).
@@ -98,7 +97,7 @@ sign-in before it starts any MCP server.
 **Open point, for a Copilot run to decide:** a plugin's server starts in the plugin's folder, so
 its `--root .` names that folder. The launcher then picks the session's repository: from
 `SE_SESSION_CWD` or `COPILOT_SESSION_CWD`, else, on Linux and macOS, its parent's working
-directory (README [The MCP door](../README.md#the-mcp-door)). No signed-in session has shown which
+directory ([The MCP door](start.md#the-mcp-door)). No signed-in session has shown which
 it gets. If `se-status` answers about the plugin's folder (or `no-checkout`), that is this.
 
 ## The door by hand
@@ -177,7 +176,7 @@ agent shows once in every picker. (Until 23 Nov SE also wrote Copilot's own copi
 manifest, the plugin brings an `se` server there only where `se.toml`
 `[plugin] claude_mcp` writes one into that manifest, which is not measured in VS Code, and its
 hooks use `${CLAUDE_PLUGIN_ROOT}`. Always add the user-level door, README's `code --add-mcp` line
-with `${workspaceFolder}` ([The MCP door](../README.md#the-mcp-door)).
+with `${workspaceFolder}` ([The MCP door](start.md#the-mcp-door)).
 
 - That expansion in a user profile is unverified. The fallback is `<repo>/.vscode/mcp.json` with
   the same entry: `{"servers": {"se": {"type": "stdio", "command": "bash", "args":
@@ -285,7 +284,7 @@ the filled file is pasted as the comment on #1172, "Monday: the owner's first Co
      and no turn to load it unasked; note the result in step 1's record.
 2. **VS Code, SE's checkout.** Open the checkout, install the plugin from it (**Chat: Install
    Plugin from Source** with the checkout's folder), trust it ([trust](#remedies)),
-   add the door with the user-level line of README [The MCP door](../README.md#the-mcp-door)
+   add the door with the user-level line of [The MCP door](start.md#the-mcp-door)
    (`code --add-mcp ...`), pick the session target Copilot and the agent `se`, say `status`.
    - Expect the agent list to hold `se`, `integrator`, `retro`, `reviewer`, `worker`, each once in
      every picker ([VS Code](#vs-code)), the greeting once, and
@@ -362,7 +361,7 @@ Each is an expected result with its one-line remedy.
 
 Where the environment sets `SE_DEFAULT_AGENT=se`, Copilot's session start hands over the same
 sentence as Claude Code's, in `additionalContext`: the session acts as the se agent
-([README "Claude Code cloud"](../README.md#claude-code-cloud)). A session that picks its agent
+([docs/install.md "Claude Code cloud"](install.md#claude-code-cloud)). A session that picks its agent
 with `--agent` or its agent list keeps that agent, as does one whose first message names another.
 
 ## Cloud agent, optional and untested

@@ -20,9 +20,9 @@ An SE that has the update (`se_start.py update`, from SE 13.1 on) runs steps 1 t
 `/se:update` ([docs/boot.md "The update"](boot.md#the-update)). An older one follows them by hand.
 
 1. **Install the newest SE.** The start's refresh moves SE only within its major, so a newer major
-   is an install again, as README [Install](../README.md#install) says: for a clone,
+   is an install again, as [Install](install.md#install) says: for a clone,
    `git -C <se> fetch --tags` and `git -C <se> checkout v<newest>`; for the cloud, the
-   environment's setup script ([README "Cloud sessions"](../README.md#cloud-sessions)).
+   environment's setup script ([docs/install.md "Cloud sessions"](install.md#cloud-sessions)).
    - Then run `bash <se>/scripts/setup.sh <project>` once, so the project's hooks are the new SE's.
    - Check: `grep -m1 '^version' <se>/se.toml` prints the newest version, and
      `git -C <project> config core.hooksPath` names `<se>/.githooks`.
@@ -225,7 +225,7 @@ Components are found by name under the owners of the checkout's remotes
 
 - **Change:** `work_tickets.py push` and `integrate` no longer raise `[project] version` or push a
   tag; `integrate` records the release kind, and `work_tickets.py release` raises the version when
-  SE asks ([README "Project settings"](../README.md#project-settings)).
+  SE asks ([docs/settings.md "Project settings"](settings.md#project-settings)).
 - **Steps:** remove any project automation or instruction that expects a tag per landing.
 - **Check:** `git grep -nE 'tag (per|each) landing|push(es)? (the|a) tag'` prints nothing.
 
@@ -266,7 +266,7 @@ Components are found by name under the owners of the checkout's remotes
   read `agents/<name>.md` and `skills/`.
 - **Steps:** rewrite every prompt that names `<se>/.github/agents/<name>.agent.md`, in the project's
   files, its scheduled tasks and its cloud environments, to `<se>/agents/<name>.md`; update each
-  host's install as README [Install](../README.md#install) says.
+  host's install as [Install](install.md#install) says.
 - **Check:** `git grep -nE '\.github/agents/[a-z-]+\.agent\.md|\.github/skills/'` prints nothing.
 
 ### The guidance comes first; `fill` is a writing tool
@@ -333,6 +333,28 @@ On main, released as 14.0.0 at the next release.
   `version: <version>` by the one line `derived_from: {template: <name>, version: "<version>"}`, or
   fill the file again with `templates.py fill --path <file>`.
 - **Check:** `git grep -nE '^template: ' -- '*.md'` prints no file a project template claims.
+
+## SE 15
+
+On main, released as 15.0.0 at the next release.
+
+### Scripts and Go modules carry their code template
+
+- **Change:** SE's code templates claim every project's `scripts/*.py` and `go.mod`
+  ([docs/templates.md "Code templates"](templates.md#code-templates)); a changed one without its
+  template's marker and shape is refused by SE's gate, stop-check, push and CI's check.
+  - A script opens `#!/usr/bin/env -S uv run python` and `# se:template se/python-script 1.0.0`,
+    imports `se_script`, builds its parser with `se_script.parser(...)` and ends
+    `raise SystemExit(se_script.run(main))`.
+  - A module other scripts import opens `# se:template se/python-module 1.0.0` and its docstring;
+    a `go.mod` opens `// se:template se/go-module 1.0.0`.
+- **Steps:** bring each script and `go.mod` onto its template before it next changes.
+  - Add the marker line; for a script also the uv first line, `import se_script` (on the script's
+    path), the parser from `se_script.parser` and the entry through `se_script.run`.
+  - Write a new one with `uv run python <se>/scripts/templates.py scaffold <template> --path
+    <file> --says "<what it does>"`.
+- **Check:** `uv run python <se>/scripts/se_templates.py check-files $(git ls-files 'scripts/*.py' go.mod '**/go.mod')`
+  passes.
 
 ## obs 6
 

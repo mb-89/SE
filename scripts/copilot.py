@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE under GitHub Copilot (docs/copilot.md): the opt-in install into another repository, the
 self-test that needs no Copilot, and the verdict over a Copilot smoke run's JSON lines.
 
@@ -40,6 +42,7 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -124,7 +127,7 @@ def version_range(root: Path = ROOT) -> str:
 
 def pin_se(repo: Path, wanted: str, found: se_home.Home | None = None) -> str:
     """`[components.se]` in the repository's se.toml at `wanted`, an existing pin kept; it names no
-    address, as se_modules.py finds SE by its name (README "Modules")."""
+    address, as se_modules.py finds SE by its name (docs/modules.md "Modules")."""
     path = repo / "se.toml"
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
@@ -652,7 +655,7 @@ def smoke_verdict(lines: list[str], exit_code: int = 0) -> tuple[bool, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="copilot.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="copilot.py", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     install_parser = commands.add_parser("install", help="install SE into another repository for Copilot")
     install_parser.add_argument("--repo", type=Path, required=True, help="the repository")
@@ -676,4 +679,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

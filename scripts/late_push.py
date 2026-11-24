@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """A push of a work branch after its delivery, named at the push instead of at the landing.
 
 `work_tickets.py deliver` (and, without gh, `stop-check --pull`) records the tip it delivered in
@@ -10,7 +10,7 @@ would refuse it, so it prints one line saying so and that `deliver` must run aga
 se.toml `[deliver] late_push` says what that line does: `"warn"` (built in) lets the push through,
 `"refuse"` refuses it. `work_tickets.py push --redeliver` records the tip it pushes first, the
 redelivery's own push without gh. Everything here is pure but `load` and `record`, which read and
-write the record (README "Late push").
+write the record (docs/fleet.md "Late push").
 """
 
 from __future__ import annotations

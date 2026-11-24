@@ -1,6 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Whether a run of `check` on a pull request's edit or label change takes the suite's result from
-an earlier run of the same tree instead of running it again (README "Edits reuse the suite").
+an earlier run of the same tree instead of running it again (docs/tests.md "Edits reuse the suite").
 
 A pull request's description and labels change many times without a new commit: the worker
 corrects its field report, the integrator moves labels. Such a run (`edited`, `labeled`,
@@ -33,6 +34,7 @@ from typing import Callable
 
 import ci_trust
 import component_versions
+import se_script
 
 REUSE_ACTIONS = ("edited", "labeled", "unlabeled")  # pull_request actions that change no tree
 DECIDE_STEP = "Reuse an earlier result of this tree"  # the trust job's step, named with the key
@@ -235,7 +237,7 @@ def run_decide(root: Path, event: Event, trusted: bool, api: Api | None,
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None,
          api: Api | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="ci_reuse.py", description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(prog="ci_reuse.py", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     key = commands.add_parser("key", help="write this run's reuse key (output key)")
     decision = commands.add_parser("decide", help="decide whether this run takes an earlier "
@@ -270,4 +272,4 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None,
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

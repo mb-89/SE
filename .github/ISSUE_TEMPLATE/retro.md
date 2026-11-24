@@ -46,7 +46,7 @@ None.
 3. **Table of what happened**: step 3 holds the timeline in chapters of about six hours and, per
    step, what went well, what it cost and whether a machine could do it; the judge fills what the
    record leaves open, reading `uv run python <se>/scripts/work_tickets.py metrics --since <window
-   start>` on the machine the integrations ran on (README "Metrics"): its top spenders and overruns
+   start>` on the machine the integrations ran on (docs/running.md "Metrics"): its top spenders and overruns
    are findings where a command should be made cheaper.
 4. **The standing questions**: the judge fills the matrix of the questions against the chapters
    and answers every standing question.

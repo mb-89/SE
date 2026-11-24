@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Measure generated agent layouts against the limits agent hosts document: a report, never a check.
 
 The host facts live in scripts/host-limits.toml. The core (`parse`, `measure`, `totals`, `order`)
@@ -19,6 +21,7 @@ import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent_lint import fields, scalar  # noqa: E402
@@ -256,7 +259,7 @@ def gather(root: Path, facts: Facts) -> dict[str, bytes]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="host_size.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="host_size.py", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     report = commands.add_parser("report", help="print every row, the largest overrun first; always exits 0")
     report.add_argument("--root", type=Path, default=Path.cwd(), help="the repository to measure (default: here)")
@@ -281,4 +284,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

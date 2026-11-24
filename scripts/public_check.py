@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Public-safety check: refuse content that identifies an employer, work project, person,
 machine, account or internal host. The rule is owned by AGENTS.md, section "Public safety".
 
@@ -92,6 +93,7 @@ from html.parser import HTMLParser
 from typing import Callable, Iterable, Iterator
 
 import git_door
+import se_script
 ALLOW_FILE = ".public-check-allow"
 SE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "se.toml"
@@ -103,7 +105,7 @@ MACHINE_DEFAULT = "~/.se/private-terms.txt"
 
 # GitHub's web-flow identity: the committer of a commit made on GitHub itself. It names no person.
 # The identity gate passes it as committer only while landings are GitHub's squash merges; with
-# se.toml [integrate] landing = "fast-forward" it is foreign (README "Landing on main").
+# se.toml [integrate] landing = "fast-forward" it is foreign (docs/settings.md "Landing on main").
 WEB_FLOW = "GitHub <" + "noreply" + "@github.com>"
 # The author of a commit made on GitHub (a squash merge): the account that made it, by the GitHub
 # noreply address of its login, `<id>+<login>` or `<login>`.
@@ -193,7 +195,7 @@ MESSAGE_ADDRESS = re.compile(
 # Where a co-author line comes from, named with its hit: an editor adds it on commit.
 CO_AUTHOR_SOURCE = (
     "an editor's AI co-author setting writes this line: turn it off (VS Code: "
-    "git.addAICoAuthor off, README 'Install')"
+    "git.addAICoAuthor off, docs/install.md 'Install')"
 )
 # The rules the check enforces, one label each: SE's start counts them (scripts/se_start.py).
 MESSAGE_RULES = ("tracker-reference", "attribution-trailer", "message-address")
@@ -1069,7 +1071,7 @@ def check_se_version(root: Path, commit: str | None) -> None:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         description="Refuse work-specific or personal content (rule: AGENTS.md 'Public safety')."
     )
     parser.add_argument("--repo", default=".",
@@ -1288,4 +1290,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,6 +1,8 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Pull a repository's components in, found by name and pinned to commits or semantic version ranges.
 
-The format and the commands are described once in the README section "Modules"; how a component is
+The format and the commands are described once in docs/modules.md "Modules"; how a component is
 found on the checkout's remotes is docs/components.md "Finding a component", which this script owns.
 """
 
@@ -24,14 +26,15 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import generated
 import git_door
 import se_home
+import se_script
 MANIFEST = "se.toml"
 LOCK = "se.lock"
 # The generator se.lock's marker names (scripts/generated.py); `update` writes it the same way.
 LOCK_GENERATOR = "se_modules.py sync"
 MODULES_DIR = Path(".se") / "modules"
-#: The se.toml table of a host's components (README "Modules"); se 6 renamed it from [modules].
+#: The se.toml table of a host's components (docs/modules.md "Modules"); se 6 renamed it from [modules].
 COMPONENTS = "components"
-#: kern, the Go core, as se.toml [components.kern] pins it (README "Modules").
+#: kern, the Go core, as se.toml [components.kern] pins it (docs/modules.md "Modules").
 KERN = "kern"
 #: The repository topic that marks a component (docs/components.md "A component").
 TOPIC = "component"
@@ -55,7 +58,7 @@ COMPONENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,31}$")
 COMPONENT_KEYS = {"ref", "version", "path", "go", "optional"}
 VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 RANGE_RE = re.compile(r"^([\^~=]?)(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?$")
-VERSION_REMEDY = 'set version = "MAJOR.MINOR.PATCH" under [project] (README "Project settings")'
+VERSION_REMEDY = 'set version = "MAJOR.MINOR.PATCH" under [project] (docs/settings.md "Project settings")'
 Version = tuple[int, int, int]
 LOCAL_CONFIG_KEYS = {
     "paths",
@@ -240,7 +243,7 @@ def go_version(version: str) -> str:
 
 def go_require(root: Path, name: str, value: object) -> tuple[str, str]:
     """(go.mod path relative to root, version) of a `go` pin: the exact version the `go.mod` that
-    `value` names (`true`, the root's) requires of the module path `name` (README "Modules")."""
+    `value` names (`true`, the root's) requires of the module path `name` (docs/modules.md "Modules")."""
     return go_require_in(lambda relative: _read_file(root / relative), str(root), name, value)
 
 
@@ -276,7 +279,7 @@ def go_require_in(read: Callable[[str], str | None], where: str, name: str, valu
 
 
 RENAMED = (f"[modules] is [{COMPONENTS}] since se 8: rename each [modules.<name>] to "
-           f"[{COMPONENTS}.<name>] and drop its url, as a component is found by its name (README \"Modules\")")
+           f"[{COMPONENTS}.<name>] and drop its url, as a component is found by its name (docs/modules.md \"Modules\")")
 
 
 def load_manifest(root: Path) -> list[Module]:
@@ -495,7 +498,7 @@ def template_repositories(root: Path, local: LocalConfig | None = None) -> list[
         if module is None:
             raise ModuleError(f"template repository {name}: {where} lists it, but se.toml declares no "
                               f"[{COMPONENTS}.{name}]; pin it there with ref or version as any "
-                              "component (README \"Modules\")")
+                              "component (docs/modules.md \"Modules\")")
         source = resolve(root, module, local)
         sync = f"run `se_modules.py sync {module.name}`"
         if source.kind == "pinned":
@@ -531,7 +534,7 @@ KERN_RELEASE = "release.toml"
 
 def kern_pin(root: Path) -> tuple[str, str]:
     """(version, tag) of the kern `root` pins: the version `[components.kern]` reads from the go.mod
-    its `go` names (README "Modules"), and the tag the pinned clone's `release.toml` names for it,
+    its `go` names (docs/modules.md "Modules"), and the tag the pinned clone's `release.toml` names for it,
     the last part of its `download` (kern's README "Release")."""
     manifest = root / MANIFEST
     table = (_read_toml(manifest).get(COMPONENTS, {}) if manifest.is_file() else {}).get(KERN)
@@ -1563,7 +1566,7 @@ def select(modules: list[Module], names: list[str]) -> list[Module]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = se_script.parser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, help=f"repository with {MANIFEST}; default: nearest ancestor of the current directory")
     parser.add_argument("--local", type=Path, help="machine-local configuration; default: ~/.se/local.toml")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1658,4 +1661,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

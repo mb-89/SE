@@ -89,3 +89,48 @@ def test_a_script_without_argparse_is_never_run_and_a_parsers_output_is_swallowe
                      "    sys.stderr.write('noise')\n    raise SystemExit(2)\n", encoding="utf-8")
     assert references.command_tree(noisy) == {}
     assert capfd.readouterr() == ("", "")
+
+
+# Section references (`dangling_sections`): `<page>.md "<section>"` and `README "<section>"` name a
+# heading or a bold label of their page, wherever they are written.
+PAGE = "# Guide\n\n## Install\n\n**Pinning it.** Pin it.\n\n```sh\n# Not a heading\n```\n"
+
+
+@pytest.fixture
+def documented(tmp_path: Path) -> Path:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text(PAGE, encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Tool\n\n## What it is\n", encoding="utf-8")
+    return tmp_path
+
+
+def items(found: list[references.Finding]) -> list[str]:
+    return [finding.item for finding in found]
+
+
+def test_a_section_reference_names_a_heading_or_a_bold_label(documented: Path) -> None:
+    text = ('See docs/guide.md "Install", docs/guide.md "Pinning it" and README "What it is".\n'
+            'Not docs/guide.md "Remove", README "Gone" or docs/guide.md "Not a heading".\n')
+    assert items(references.dangling_sections(text, documented)) == [
+        'docs/guide.md "Remove"', 'README "Gone"', 'docs/guide.md "Not a heading"']
+
+
+def test_a_section_reference_wraps_in_comments_and_python_strings(documented: Path) -> None:
+    text = ('# the guide (docs/guide.md\n# "Install"), then (docs/guide.md "Pin"\n'
+            'raise Error("... (docs/guide.md \\"Pinning "\n            "it\\")")\n'
+            'help = "docs/guide.md \\"Gone\\""\n')
+    found = references.dangling_sections(text, documented)
+    assert [(finding.line, finding.item) for finding in found] == [
+        (2, 'docs/guide.md "Pin"'), (5, 'docs/guide.md "Gone"')]
+
+
+def test_another_owners_readme_and_a_page_elsewhere_are_not_checked(documented: Path) -> None:
+    text = ('kern\'s README "Release", its README "Types", obs\'s\n# README "Forms" and '
+            'docs/other.md "Anything".\n')
+    assert references.dangling_sections(text, documented) == []
+
+
+def test_a_page_resolves_from_the_root_then_from_the_texts_folder(documented: Path) -> None:
+    source = documented / "docs" / "note.md"
+    text = 'guide.md "Install" and guide.md "Gone"\n'
+    assert items(references.dangling_sections(text, documented, source)) == ['guide.md "Gone"']

@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Guidance: SE reads the guidance trees of a project and of its modules, resolves them for a
 template or a set of tags, generates the tool files they implement, and checks them, as
 docs/guidance.md designs ("Notes in folders", "Resolution", "Guidance without a template",
@@ -112,6 +113,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+import se_script
 
 HERE = Path(__file__).resolve().parent
 SE_ROOT = HERE.parent
@@ -217,7 +219,7 @@ def sources(root: Path) -> list[Source]:
     try:
         found = modules.module_dirs(root, modules.load_local(modules.default_local_config()))
     except modules.ModuleError as error:
-        raise Usage(f"se_guidance.py: {error}; fix se.toml (README \"Modules\")") from error
+        raise Usage(f"se_guidance.py: {error}; fix se.toml (docs/modules.md \"Modules\")") from error
     listed, seen = [], {root.resolve()}
     for name, folder in found:
         if folder.resolve() not in seen:
@@ -850,7 +852,7 @@ def run_project(options: argparse.Namespace) -> int:
     return 0
 
 
-#: se_guidance.py's commands as one kern component (README "Commands as components"); each
+#: se_guidance.py's commands as one kern component (docs/start.md "Commands as components"); each
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "guidance", "Guidance",
@@ -875,7 +877,7 @@ READ_ONLY_COMMANDS = {
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se_guidance.py", description=__doc__.splitlines()[0])
+    top = se_script.parser(prog="se_guidance.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
     root = {"type": Path, "help": "the project (default: the folder holding se.toml at or above "
                                   "the working directory)"}
@@ -932,4 +934,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

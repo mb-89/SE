@@ -1,5 +1,6 @@
+# se:template se/python-module 1.0.0
 """What each command costs: one JSON line per run of a `work_tickets.py` or `se_start.py`
-subcommand, and the report of its top spenders and overruns (README "Metrics").
+subcommand, and the report of its top spenders and overruns (docs/running.md "Metrics").
 
 A run's line holds its command, start, wall seconds, its GitHub calls through the door (count,
 refusals, wait seconds) and its exit code, plus what the command notes itself (`integrate`: the
@@ -147,7 +148,7 @@ def recorded(command: str, body: Callable[[], int]) -> tuple[int, dict[str, obje
 
 
 # A line in a text: the integration's line that `integrate` prints last and that ends the landing
-# pull request's description, read back by `retro.py collect` (README "Metrics").
+# pull request's description, read back by `retro.py collect` (docs/running.md "Metrics").
 
 TEXT_PREFIX = "Metrics: "
 

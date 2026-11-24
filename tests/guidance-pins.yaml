@@ -21,6 +21,13 @@ field-report:
   - platform-code-legs
   - test-paths-on-windows
   - tests-spawn-no-processes
+generated-marker:
+  - discover-cheap-load-late
+  - guidance-comes-first
+go-module:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - go-module-shape
 handover:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -42,6 +49,18 @@ overhaul-questions:
 pugh:
   - discover-cheap-load-late
   - guidance-comes-first
+python-component:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
+python-module:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
+python-script:
+  - discover-cheap-load-late
+  - guidance-comes-first
+  - python-script-shape
 raid-entry:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -57,7 +76,16 @@ review:
 routed:
   - discover-cheap-load-late
   - guidance-comes-first
+rules-page:
+  - discover-cheap-load-late
+  - guidance-comes-first
+skills-page:
+  - discover-cheap-load-late
+  - guidance-comes-first
 standing-questions:
+  - discover-cheap-load-late
+  - guidance-comes-first
+sub-agents-page:
   - discover-cheap-load-late
   - guidance-comes-first
 ticket:
@@ -69,9 +97,11 @@ work:
   - generated-files-are-marked
   - parse-dont-validate
   - python-ad-hoc-go-system
+  - readme-is-one-page
 work-file:
   - discover-cheap-load-late
   - guidance-comes-first
   - generated-files-are-marked
   - parse-dont-validate
   - python-ad-hoc-go-system
+  - readme-is-one-page
