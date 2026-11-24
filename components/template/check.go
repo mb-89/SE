@@ -28,16 +28,13 @@ var (
 
 const noneWord = "none"
 
-// Finding is one problem a check found: the field, the rule, refuse or warn, and the fix.
+// Finding is one problem a check found: the field, the rule, refuse or warn, and the fix (what
+// fails and what to write instead); Why gives the rule's reason (reasons.go).
 type Finding struct {
 	Field    string `json:"field"`
 	Rule     string `json:"rule"`
 	Severity string `json:"severity"`
 	Fix      string `json:"fix"`
-}
-
-func (f Finding) String() string {
-	return fmt.Sprintf("%s: %s [%s]: %s", f.Severity, f.Field, f.Rule, f.Fix)
 }
 
 // Refused reports whether a finding of found refuses.

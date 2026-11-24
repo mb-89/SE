@@ -24,11 +24,13 @@ const (
 	AcceptedShape = "template.accepted"
 )
 
-// FillRequest is what the verb fill asks: the template, the agent's field values, the raw input
-// they come from and, where the template has one, the title.
+// FillRequest is what the verb fill asks: the template, the agent's field values or, in their place,
+// the whole document it wrote (Body), the raw input they come from and, where the template has one,
+// the title.
 type FillRequest struct {
 	Template string  `json:"template"`
 	Fields   Object  `json:"fields"`
+	Body     *string `json:"body,omitempty"`
 	Raw      string  `json:"raw"`
 	Title    *string `json:"title,omitempty"`
 }
@@ -191,6 +193,12 @@ func fillVerb(_ context.Context, req FillRequest) (Filled, error) {
 	if err != nil {
 		return Filled{}, err
 	}
+	if req.Body != nil {
+		if len(req.Fields) > 0 {
+			return Filled{}, fail("templates: fill %s from its fields or from a body, not both", t.Name)
+		}
+		return FillBody(t, *req.Body, req.Raw, req.Title)
+	}
 	fields := req.Fields
 	if fields == nil {
 		fields = Object{}
@@ -239,7 +247,7 @@ var Component = index.Declare(Name, "SE's template engine in Go: fill makes a fi
 	index.Config("root", ".", "The checkout whose templates/ the engine reads; a detached core runs in its root."),
 	index.Config("repository", SERepository, "The repository its templates' marker names: se for SE's own, project for an application's."),
 	index.Config("se", "", "SE's checkout, whose scripts name SE's commands and whose templates an application's resolve last; empty: the root for SE's own, else the se component's folder."),
-	index.JSONVerb("fill", "Fills a template from the agent's fields and the raw input, checks the document, and answers the filled template, the one value a templated target takes; a fill something refuses answers every finding and makes nothing.", FillShape, FilledShape, fillVerb),
+	index.JSONVerb("fill", "Fills a template from the agent's fields (or the whole document it wrote) and the raw input, corrects what cannot change its meaning, checks the document, and answers the filled template, the one value a templated target takes; a fill something refuses answers every finding and makes nothing.", FillShape, FilledShape, fillVerb),
 	index.JSONVerb("accept", "The gate of a templated target in another component or language: answers the document and title of the filled template it was handed, of the template required or of the one that claims the path, and refuses free text, a body or fields, naming the template to fill; a path no template claims is free.", AcceptShape, AcceptedShape, acceptVerb),
 	index.JSONVerb("check", "Checks a text against its template, named or selected by its action, as SE's filing commands would: every finding, and whether one refuses.", CheckShape, CheckedShape, checkVerb),
 	index.Inlet(func(_ string, read index.Reader, _ index.Commit) error {
