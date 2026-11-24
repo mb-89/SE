@@ -2591,12 +2591,11 @@ that differs from its template.
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
-`templates.py check --path <file>` checks one against the template its front matter's
-`derived_from` names or the conditions pick, refuses one none picks and leaves unclaimed files free.
+`templates.py check --path <file>` checks one against the template its `derived_from` names or
+the conditions pick, refuses one none picks and leaves unclaimed files free.
 
-The front matter and `#` title stay as they are, but for its `derived_from` and `overlay` lines.
-
-Template manifests and `templates.py stale`: [docs/templates.md](docs/templates.md#template-manifests).
+Its front matter and `#` title stay, but for `derived_from` and `overlay`. Manifests, `stale`:
+[docs/templates.md](docs/templates.md#template-manifests).
 
 A document is checked against the template version its marker or front matter records: another
 minor or patch version warns, another major version refuses, naming both versions and the fill
