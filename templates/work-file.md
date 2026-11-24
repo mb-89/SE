@@ -7,7 +7,7 @@ name: work-file
 version: 1.0.0
 kind: document
 reader: fleet
-says: "A work issue's body file, `.se/issues/<name>.md`, which `work_tickets.py file --body-file` files."
+says: "A work issue's body file, `.se/issues/<name>.md`."
 tags: ["issue", "work"]
 extends: work
 applies:
