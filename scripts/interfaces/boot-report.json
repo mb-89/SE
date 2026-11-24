@@ -1,6 +1,6 @@
 {
   "template": "se/boot-report",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "says": "SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command.",
   "message": "SE {version} started\n[{skills} skills]({skills_page})\n[{rules} rules]({rules_page})\n[{subagents} sub-agents]({subagents_page})\n[Documentation]({docs})\n\n| component | loaded | newest |\n|---|---|---|\n{components}\n\n{update}",
   "rows": {
@@ -9,6 +9,9 @@
   "cases": {
     "update": {
       "due": "To update: /se:update",
+      "next": "The next SE release brings {names}.",
+      "due_next": "To update: /se:update. The next SE release brings {names}.",
+      "stopped": "Not loaded: {names}. SE cannot start.",
       "current": "Everything is current.",
       "unknown": "Newest versions not read yet; the next start shows them."
     }
@@ -77,10 +80,17 @@
         "type": "string",
         "enum": [
           "due",
+          "next",
+          "due_next",
+          "stopped",
           "current",
           "unknown"
         ],
-        "description": "due where a newer release than one loaded exists, current where none does, unknown where a newest version is not read."
+        "description": "From the table's rows alone (docs/boot.md \"The start report\"): stopped where a required row did not load; else next where a row SE locks is behind its newest release, due where another row is, due_next where both are; else unknown where a newest version is not read; else current."
+      },
+      "names": {
+        "type": "string",
+        "description": "What the case names: the required components that did not load, or each row SE locks that is behind, with its newest release (`kern 2.2.0 and obs 10.4.0`); empty for the other cases."
       }
     },
     "required": [

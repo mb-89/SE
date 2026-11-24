@@ -59,9 +59,10 @@ its tools.
     turn-start check below prints the fleet check's plan; run it with your GitHub tools, pass the
     lists back to `work_tickets.py fleet-check` as it says, and present its findings
     ([Fleet check](../docs/fleet.md#fleet-check)).
-- **Update**: the report's last line names the one update, `/se:update`, the skill
-  [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
-  follows the upgrade guide's sections between ([docs/boot.md](../docs/boot.md#the-update)).
+- **Update**: where one is due, the report's last line names the one update, `/se:update`, the
+  skill [update](../skills/update/SKILL.md), which takes every newer release, across a major too,
+  and follows the upgrade guide's sections between ([docs/boot.md](../docs/boot.md#the-update)).
+  A newer release of a component SE locks arrives with the next SE release; no update moves it.
   - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) follow the update skill as your first
     action, before any other work, right after the report, and wait for it; then report once what
     moved and what is left.
