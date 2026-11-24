@@ -592,6 +592,9 @@ Pull requests built on an old `main` cause most integration trouble.
   cloud only, the scheduled task of the [dispatcher](../../../docs/fleet.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its template); `queue` lists them.
+- **The landing queue**: no worker starts while more than `[workers] queue_limit` (default 10)
+  delivered pull requests wait, as one started then works on a `main` several landings old;
+  `start` and `claim` refuse ([docs/settings.md "Workers"](../../../docs/settings.md#workers)).
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
   the release, and names the landing pull request with its `check` run. Where acceptance can only be seen after the merge, or a planned split has
   pieces left ([integrator](../../agents/integrator.md)), the issue stays open and the comment names
@@ -949,6 +952,9 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
   - Where a [worker limit](../../../docs/settings.md#workers) holds, it refuses once that many run. It
     reads them through kern's relay, else from `--running <file>`, their `list_issues` answer.
+  - It refuses, as `claim` does, while more delivered pull requests wait than `[workers]
+    queue_limit`. It reads the open pull requests through kern's relay, else from `--delivered
+    <file>`, their `list_pull_requests` answer, and refuses until it has them.
   - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
     Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
     `issue_read` (method `get`) answers saved as one JSON list, and refuses until it knows them.
