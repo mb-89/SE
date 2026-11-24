@@ -18,7 +18,7 @@ help = "rehearse a whole landing through kern's relay against a scratch branch, 
 class = "batch"
 
 [commands."work_tickets.py release"]
-usage = "work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]"
+usage = "work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]\n                        [--kind COMMIT=KIND REASON]"
 summary = "release when SE asks: raise project.version by the highest Release- ..."
 group = "Integration"
 help = "release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README \"Project settings\"); with nothing integrated since, it releases nothing"

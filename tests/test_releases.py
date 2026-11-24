@@ -145,7 +145,7 @@ def as_integrator(patch: pytest.MonkeyPatch, root: Path, signed_in: bool = True)
     return landing
 
 
-def release(root: Path) -> int:
+def release(root: Path, *options: str) -> int:
     """SE asks for a release: main's integrations land (push, which releases nothing), then
     work_tickets.py release lands the release commit through its landing pull request."""
     code = push(root)
@@ -153,7 +153,7 @@ def release(root: Path) -> int:
         return code
     with pytest.MonkeyPatch.context() as patch:
         as_integrator(patch, root)
-        return work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(root)])
+        return work_tickets.main(["release", "--repo", REMOTE, "--worktree", str(root), *options])
 
 
 def released(root: Path) -> tuple[str, str]:
@@ -448,23 +448,44 @@ def test_a_major_below_1_0_releases_a_minor_and_1_0_0_is_set_by_hand(checkout):
 
 
 @pytest.mark.parametrize("trailer", ["", "Breaking-change: yes"])
-def test_an_integration_that_states_no_kind_is_named_and_counts_as_patch(checkout, capsys, trailer):
-    """The person's ruling of 24 Nov: a release never stops on an integration already on the
-    integration branch that states no Release-kind; with a minor landing beside it, the minor wins."""
+def test_an_integration_that_states_no_kind_is_refused_until_its_kind_is_stated(checkout, capsys, trailer):
+    """There is no default kind (the person's decision of 24 Nov 2026): a release refuses an
+    integration on main that states none, naming it, until --kind states it with a reason, which
+    the release commit records; with a minor landing beside it, the minor wins."""
     integrate(checkout, "fix/topic-20261106", trailer=trailer)
     unkinded = git(checkout, "rev-parse", "HEAD")
-    assert work_tickets.integrated_packages(checkout, "main", "v1.2.3") == [("fix/topic-20261106", "patch")]
     integrate(checkout, "feature/other-20261106")
-    assert release(checkout) == 0
+    assert release(checkout) == 1
+    assert released(checkout) == ("1.2.3", "v1.2.3")
+    error = capsys.readouterr().err
+    assert (f"Cannot release: 1 integration(s) since {git(checkout, 'rev-parse', 'v1.2.3^{commit}')[:7]} "
+            f"state no Release-kind: {unkinded[:7]} (Integrate fix/topic-20261106: work). There is no "
+            "default kind: state each with --kind <commit>=major|minor|patch <reason>") in error
+    assert release(checkout, "--kind", f"{unkinded[:7]}=patch", "its field report declares patch") == 0
     assert released(checkout) == ("1.3.0", "v1.3.0")
-    assert (f"Release: integration {unkinded[:7]} (Integrate fix/topic-20261106: work) states no "
-            "Release-kind; it counts as patch") in capsys.readouterr().out
+    message = git(checkout.parent / "origin.git", "log", "-1", "--format=%B", "main")
+    assert f"Kind stated for {unkinded[:7]}: patch, its field report declares patch" in message
+    assert "fix/topic-20261106: patch" in message and "feature/other-20261106: minor" in message
 
 
-def test_an_integration_alone_that_states_no_kind_releases_a_patch(checkout):
-    integrate(checkout, "feature/topic-20261106", trailer="")
-    assert release(checkout) == 0
-    assert released(checkout) == ("1.2.4", "v1.2.4")
+def test_a_kind_stated_for_no_unkinded_integration_is_refused(checkout, capsys):
+    integrate(checkout, "feature/topic-20261106")
+    kinded = git(checkout, "rev-parse", "HEAD")
+    assert release(checkout, "--kind", f"{kinded[:7]}=patch", "a guess") == 1
+    assert released(checkout) == ("1.2.3", "v1.2.3")
+    assert (f"--kind names {kinded[:7]}, which is no integration since") in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("statement", "reason", "refusal"), [
+    ("abc1234", "why", "write --kind <commit>=major|minor|patch <reason>"),
+    ("abc1234=huge", "why", "write --kind <commit>=major|minor|patch <reason>"),
+    ("abc1234=patch", " ", "give its reason"),
+])
+def test_a_kind_statement_is_parsed_once_and_refused_when_malformed(statement, reason, refusal):
+    with pytest.raises(work_tickets.QueueError, match=re.escape(refusal)):
+        work_tickets.StatedKind.parse(statement, reason)
+    assert work_tickets.StatedKind.parse("abc1234=minor", "  the  report  ") == work_tickets.StatedKind(
+        "abc1234", "minor", "the report")
 
 
 @pytest.mark.parametrize(("trailer", "stated"), [
@@ -725,10 +746,10 @@ def test_another_release_setting_is_an_error_naming_the_file(checkout, capsys):
             in capsys.readouterr().err)
 
 
-def test_a_landed_merge_whose_kind_cannot_be_told_is_released_by_hand_and_never_read_again(checkout, capsys):
-    """A merge whose kind cannot be told already on main stays: the version set by hand is released
-    as it is, and the next release reads only what landed after it."""
-    integrate(checkout, "fix/old-20261106", trailer="Release-kind: breaking")
+def test_a_landed_merge_without_a_kind_is_released_by_hand_and_never_read_again(checkout, capsys):
+    """A merge without its kind already on main stays: the version set by hand is released as it
+    is, and the next release reads only what landed after it."""
+    integrate(checkout, "fix/old-20261106", trailer="")
     assert release(checkout) == 1
     (checkout / "se.toml").write_text(settings("1.2.4"), encoding="utf-8", newline="\n")
     git(checkout, "commit", "-q", "-am", "Release v1.2.4 by hand")

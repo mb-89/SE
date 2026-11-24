@@ -3258,20 +3258,53 @@ def remote_tags(root: Path) -> dict[str, str]:
     return tags | peeled
 
 
-def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, str]]:
+@dataclass(frozen=True)
+class StatedKind:
+    """One `release --kind <commit>=<kind> <reason>`: the release kind stated, at the release, for
+    an integration on the integration branch that states none in its trailer, with the reason.
+    Parsed once (`parse`); there is no default kind (the person's decision of 24 Nov 2026)."""
+
+    commit: str
+    kind: str
+    reason: str
+
+    @classmethod
+    def parse(cls, statement: str, reason: str) -> "StatedKind":
+        commit, equals, kind = statement.partition("=")
+        form = f"--kind <commit>={'|'.join(reversed(RELEASE_ORDER))} <reason>"
+        if not equals or not commit.strip() or kind not in RELEASE_ORDER:
+            raise QueueError(f"--kind {statement!r}: write {form}; nothing was written")
+        if not reason.strip():
+            raise QueueError(f"--kind {statement}: give its reason, {form}; nothing was written")
+        return cls(commit.strip(), kind, " ".join(reason.split()))
+
+    def line(self) -> str:
+        """How the release commit's message records the statement."""
+        return f"Kind stated for {self.commit}: {self.kind}, {self.reason}"
+
+
+def integrated_packages(root: Path, tip: str, released: str,
+                        stated: tuple[StatedKind, ...] = ()) -> list[tuple[str, str]]:
     """(branch, release kind) of each integration on `tip`'s first-parent history since the
     commit `released`, the last release's, oldest first: what the next release raises the version
     by (README "Project settings").
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
     integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
-    Release-kind trailer. One that states none is already on the integration branch, so it is
-    named and counts as patch, never stopping the release (the person's ruling of 24 Nov 2026);
-    one that states an unknown kind or two is refused. Other merges release nothing and are
-    named."""
+    Release-kind trailer, and one that states an unknown kind or two is refused. One that states
+    none takes the kind `stated` names for it; without a statement for each such commit the
+    release is refused, naming each, as is a statement for a commit that is none of them. Other
+    merges release nothing and are named."""
+    by_commit: dict[str, StatedKind] = {}
+    for statement in stated:
+        found = run_git(root, "rev-parse", "--verify", "--quiet", f"{statement.commit}^{{commit}}")
+        if found.returncode != 0:
+            raise QueueError(f"--kind {statement.commit}={statement.kind}: no commit "
+                             f"{statement.commit} in {root}; nothing was written")
+        by_commit[found.stdout.strip()] = statement
     log = checked_git(root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e", tip,
                       f"^{released}")
-    packages = []
+    packages, unkinded, used = [], [], set()
     for record in filter(str.strip, log.split("\x1e")):
         commit, _, rest = record.strip().partition("\x00")
         parents, _, message = rest.partition("\x00")
@@ -3281,12 +3314,27 @@ def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, 
             if len(parents.split()) > 1:
                 print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
             continue
-        if not RELEASE_TRAILER_PATTERN.findall(message):
+        if RELEASE_TRAILER_PATTERN.findall(message):
+            packages.append((match[1], merge_release_kind(commit, subject, message)))
+        elif commit in by_commit:
+            used.add(commit)
             print(f"Release: integration {commit[:7]} ({one_line(subject)}) states no "
-                  f"{RELEASE_TRAILER}; it counts as patch")
-            packages.append((match[1], "patch"))
-            continue
-        packages.append((match[1], merge_release_kind(commit, subject, message)))
+                  f"{RELEASE_TRAILER}; {by_commit[commit].line()}")
+            packages.append((match[1], by_commit[commit].kind))
+        else:
+            unkinded.append(f"{commit[:7]} ({one_line(subject)})")
+    if unkinded:
+        raise QueueError(
+            f"Cannot release: {len(unkinded)} integration(s) since {released[:7]} state no "
+            f"{RELEASE_TRAILER}: {'; '.join(unkinded)}. There is no default kind: state each with "
+            f"--kind <commit>={'|'.join(reversed(RELEASE_ORDER))} <reason> (the kind its field "
+            "report declares), or set project.version by hand in a pull request, which the release "
+            "then tags as it is; nothing was written")
+    unused = [statement for full, statement in by_commit.items() if full not in used]
+    if unused:
+        raise QueueError(
+            f"--kind names {', '.join(statement.commit for statement in unused)}, which is no "
+            f"integration since {released[:7]} that states no {RELEASE_TRAILER}; nothing was written")
     return list(reversed(packages))
 
 
@@ -3369,14 +3417,16 @@ def release_tags(root: Path) -> dict[str, str]:
     return tags
 
 
-def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None:
+def release(root: Path, branch: str,
+            stated: tuple[StatedKind, ...] = ()) -> tuple[str, list[tuple[str, str]]] | None:
     """Release `branch`, checked out in `root`: raise project.version by the highest Release-kind
     of the integrations on its first-parent history since the last release, the commit the tag of
     the current version names, and commit `Release v<version>` with what `project.release_build`
     regenerates, carrying its parent's suite verdict. Returns the release's tag and the
     (branch, kind) of each integration it releases, none where no release commit was written: an
     untagged version is released as it is, the first tag of a project. None where nothing was
-    integrated since the last release, or no version is set."""
+    integrated since the last release, or no version is set. `stated` gives the kinds of
+    integrations that state none (integrated_packages); the commit's message records each."""
     version = project_version(root)
     if version is None:
         print(f"Release off: no project.version in {root / 'se.toml'}; {VERSION_REMEDY} to release")
@@ -3388,7 +3438,7 @@ def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None
         print(f"Release: {current} carries no tag yet; it is released as it is, the first tag of "
               "project.version")
         return current, []
-    packages = integrated_packages(root, branch, released)
+    packages = integrated_packages(root, branch, released, stated)
     if not packages:
         print(f"Release: nothing was integrated since {current}; the version stays")
         return None
@@ -3410,6 +3460,7 @@ def release(root: Path, branch: str) -> tuple[str, list[tuple[str, str]]] | None
     checked_git(root, "add", "--", *paths)
     checked_git(root, "commit", "-q", "-m", f"Release {tag}",
                 "-m", "\n".join(f"{name}: {kind}" for name, kind in packages),
+                *(("-m", "\n".join(statement.line() for statement in stated)) if stated else ()),
                 *(("-m", trailer) if trailer else ()), env=environment)
     sibling("verdicts").carry(root, SUITE_VERDICT, "HEAD~1", "HEAD")
     print(f"Release: {tag} ({kind}: {', '.join(name for name, _ in packages)})")
@@ -11819,7 +11870,7 @@ def release_description(tag: str, packages: str) -> str:
             + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
 
 
-def land_release(root: Path, repo: str | None) -> str | None:
+def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = ()) -> str | None:
     """Release what was integrated since the last release, when SE asks (README "Project
     settings"): on `land/release-v<version>` at origin's newest integration branch, the release
     commit release() writes, with its suite verdict (carried from its parent's tree, else the
@@ -11865,7 +11916,7 @@ def land_release(root: Path, repo: str | None) -> str | None:
     feedback.phase(f"release what was integrated on {target}")
     checked_git(root, "checkout", "-q", "--detach", base)
     try:
-        released = release(root, "HEAD")
+        released = release(root, "HEAD", stated)
     except Exception:
         checked_git(root, "switch", "-q", "--discard-changes", target)
         raise
@@ -11900,7 +11951,8 @@ def land_release(root: Path, repo: str | None) -> str | None:
         abandon_landing(root, target, landing)
         raise
     title = f"Release {tag}"
-    packages = "\n".join(f"{name}: {kind}" for name, kind in released[1])
+    packages = "\n".join([*(f"{name}: {kind}" for name, kind in released[1]),
+                          *(statement.line() for statement in stated)])
     verdict = status_verdict(root, remote, base, landed) if without_ci else None
     state = {"tag": tag, "landing": landing, "target": target, "base": base, "landed": landed,
              "remote": remote, "landing_mode": mode}
@@ -11982,10 +12034,19 @@ def finish_release(root: Path, state: dict[str, object], commit: str) -> str:
          WORKTREE, REPO,
          arg("--read-back", metavar="TAG",
              help="without gh: once the plan's steps ran, read the landed release TAG back and "
-                  "finish"))
+                  "finish"),
+         arg("--kind", nargs=2, action="append", default=[], metavar=("COMMIT=KIND", "REASON"),
+             help="the release kind (major, minor or patch) of an integration on the integration "
+                  "branch that states none, with its reason, such as the kind its field report "
+                  "declares; one per such commit, which the release commit records; there is no "
+                  "default kind"))
 def run_release(root: Path, args: argparse.Namespace) -> int:
+    stated = tuple(StatedKind.parse(statement, reason) for statement, reason in args.kind)
+    if stated and args.read_back:
+        raise QueueError("--kind states kinds for the release commit, which --read-back only reads "
+                         "back; give --kind to the release itself")
     result = (read_back_release(root, args.read_back) if args.read_back
-              else land_release(root, args.repo))
+              else land_release(root, args.repo, stated))
     if result:
         print(result)
     return 0
