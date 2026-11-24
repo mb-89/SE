@@ -1,0 +1,36 @@
+{
+  "template": "se/review-done",
+  "version": "1.0.0",
+  "says": "A cold review's end: the reviewed pull request, the verdict and the review comment's link.",
+  "message": "review of PR #{pr}: {verdict}, {url}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "pr": {
+        "type": "string",
+        "description": "The number of the reviewed pull request, digits alone."
+      },
+      "verdict": {
+        "type": "string",
+        "enum": [
+          "pass",
+          "pass with open points",
+          "decline",
+          "Not in input"
+        ],
+        "description": "The review's verdict: pass, pass with open points or decline."
+      },
+      "url": {
+        "type": "string",
+        "description": "The link of the review comment `review.py file` posted."
+      }
+    },
+    "required": [
+      "pr",
+      "verdict",
+      "url"
+    ],
+    "additionalProperties": false
+  }
+}

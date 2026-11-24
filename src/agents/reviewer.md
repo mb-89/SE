@@ -77,6 +77,7 @@ check and write is owned by the README's
    the "checked and clean" list, which is never empty: it is what makes a rubber stamp visible.
 9. **File it**: `review.py file <n> --report <file>`. It refuses a report that breaks the rules,
    writing nothing: fix the report, never the rules, and run it again.
-10. **End**: send SE's session one message (`send_message`, delivery `queue`): `review of PR #<n>:
-    <verdict>, <comment URL>`, followed by the line `review.py file` printed. No questions, no other
-    messages. SE reads the comment and decides what becomes work.
+10. **End**: send SE's session one message (`send_message`, delivery `queue`), the one
+    [templates/review-done.md](../../templates/review-done.md) writes, followed by the line
+    `review.py file` printed. No questions, no other messages. SE reads the comment and decides what
+    becomes work.

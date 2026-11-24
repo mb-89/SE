@@ -58,6 +58,7 @@ README's [Work commands](../docs/work-commands.md#work-commands) and the run's i
 5. **Land and close.** Land the judged draft on the integration branch as the run's doc, then
    `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the report
    and closes the issue. Only now does SE file issues again.
-6. **Hand back.** Send SE's session one message: `<retro|overhaul> #<n> closed: <report link>`.
+6. **Hand back.** Send SE's session one message, the one
+   [templates/run-closed.md](../templates/run-closed.md) writes.
    SE files the work findings as work issues, each naming every finding it takes as the message
    `templates/finding-ref.md` writes it.
