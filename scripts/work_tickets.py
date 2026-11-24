@@ -5303,6 +5303,13 @@ def queue_limit(root: Path) -> int:
     return value
 
 
+def queue_line(delivered: int, limit: int) -> str:
+    """`queue`'s count of the delivered pull requests against the queue limit (`queue_limit`)."""
+    return (f"Landing queue: {delivered} delivered of at most {limit} ([workers] queue_limit in "
+            "se.toml)" + ("; no worker starts until the integrator lands "
+                          f"{delivered - limit}" if delivered > limit else ""))
+
+
 def refuse_long_queue(root: Path, number: int, delivered: int) -> None:
     """Refuse to start or claim work issue #`number` while more delivered pull requests wait for
     the integrator than the queue limit (`queue_limit`), naming the count and the limit."""
@@ -5322,7 +5329,8 @@ def delivered_step(root: Path, repo: str) -> Step:
                                                     "perPage": 100},
                 note="a pull request is delivered where its description carries a complete field "
                      "report: save the description to a file and run work_tickets.py field-report "
-                     "--check <file> on it")
+                     f"--check <file> on it; more than {queue_limit(root)} delivered ([workers] "
+                     "queue_limit in se.toml): start no worker")
 
 
 def delivered_count(root: Path, number: int, repo: str, door: object | None,
@@ -12621,6 +12629,7 @@ def run_queue(root: Path, args: argparse.Namespace) -> int:
     delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")
+    print(queue_line(len(delivered), queue_limit(root)))
     for escalation in escalations:
         print(f"escalated #{escalation['number']} {escalation['title']} {escalation['url']}")
     print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")

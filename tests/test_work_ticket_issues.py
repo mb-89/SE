@@ -2076,7 +2076,7 @@ def test_start_refuses_while_more_than_ten_delivered_pull_requests_wait_and_star
     assert work_tickets.start_startable(worktree, "git.example/owner/repo") == (2, 0)
 
 
-def test_a_queue_limit_of_three_is_read_and_applied_by_start_and_claim(
+def test_a_queue_limit_of_three_is_read_and_applied_by_start_claim_and_queue(
         worktree, monkeypatch, capsys):
     fleet = startable_fleet(worktree, monkeypatch, delivered=4, table="queue_limit = 3\n")
     assert work_tickets.queue_limit(worktree) == 3
@@ -2091,9 +2091,19 @@ def test_a_queue_limit_of_three_is_read_and_applied_by_start_and_claim(
                               "--repo", "git.example/owner/repo"]) == 1
     assert "4 delivered pull requests wait" in capsys.readouterr().err
 
+    monkeypatch.setattr(work_tickets, "sync", lambda root: "abc1234")
+    assert work_tickets.main(["queue", "--worktree", str(worktree),
+                              "--repo", "git.example/owner/repo"]) == 0
+    assert ("Landing queue: 4 delivered of at most 3 ([workers] queue_limit in se.toml); no worker "
+            "starts until the integrator lands 1\n") in capsys.readouterr().out
+
     fleet.delivered = 3
     assert work_tickets.start(worktree, 1, "git.example/owner/repo", None, True) == worktree / "feature-1"
     assert fleet.running() == [1]
+    assert work_tickets.main(["queue", "--worktree", str(worktree),
+                              "--repo", "git.example/owner/repo"]) == 0
+    assert "Landing queue: 3 delivered of at most 3 ([workers] queue_limit in se.toml)\n" in \
+        capsys.readouterr().out
 
 
 @pytest.mark.parametrize("value", ["-1", "true", '"ten"', "2.5"])
