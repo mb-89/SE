@@ -252,8 +252,9 @@ Read your queued messages first, as before a merge, then:
 3. Report the line it prints to SE: `Released v<version> in <commit> on <branch>`, or `Nothing to
    release`, and where the release workflow tags it, that the tag follows its run.
 
-A release refused on a landed merge without its kind is an escalation to SE: the person sets the
-version by hand in a pull request, which the next release tags as it is.
+A landed integration that states no kind counts as patch, and the release names it. A release
+refused on a landed merge whose kind cannot be told (an unknown kind, or two) is an escalation to
+SE: the person sets the version by hand in a pull request, which the next release tags as it is.
 
 ## Escalate and improve
 

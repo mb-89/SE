@@ -3265,7 +3265,9 @@ def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, 
 
     An integration is a first-parent commit whose subject starts `Integrate <branch>`, the message
     integrate writes: the merge it builds, or the one commit that merge landed as; its kind is its
-    Release-kind trailer, and one without it is refused. Other merges release nothing and are
+    Release-kind trailer. One that states none is already on the integration branch, so it is
+    named and counts as patch, never stopping the release (the person's ruling of 24 Nov 2026);
+    one that states an unknown kind or two is refused. Other merges release nothing and are
     named."""
     log = checked_git(root, "log", "--first-parent", "--format=%H%x00%P%x00%B%x1e", tip,
                       f"^{released}")
@@ -3278,6 +3280,11 @@ def integrated_packages(root: Path, tip: str, released: str) -> list[tuple[str, 
         if match is None:
             if len(parents.split()) > 1:
                 print(f"Release: merge {commit[:7]} ({one_line(subject)}) is no integration; it bumps nothing")
+            continue
+        if not RELEASE_TRAILER_PATTERN.findall(message):
+            print(f"Release: integration {commit[:7]} ({one_line(subject)}) states no "
+                  f"{RELEASE_TRAILER}; it counts as patch")
+            packages.append((match[1], "patch"))
             continue
         packages.append((match[1], merge_release_kind(commit, subject, message)))
     return list(reversed(packages))

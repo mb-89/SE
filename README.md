@@ -757,9 +757,9 @@ highest kind recorded since the last release, whose commit the tag of the curren
 Two landings of kind patch, then one release, raise the version by one patch. With nothing
 integrated since the last release, the release releases nothing and says so.
 
-An integration without the trailer is refused, naming the merge and the remedy; the release never
-guesses. One already on the integration branch cannot be reworded there: the person sets
-`version` by hand in a pull request, which the next release tags as it is.
+A landed integration that states no `Release-kind` counts as patch, named. One stating an
+unknown kind, or two, is refused, naming the merge: the person sets `version` by hand in a pull
+request, which the next release tags as it is.
 
 Below 1.0.0 a major bumps the minor part (0.3.1 to 0.4.0), so no kind reaches 1.0.0: the person
 sets `version = "1.0.0"` by hand, as the statement that the interface is stable, and the release
