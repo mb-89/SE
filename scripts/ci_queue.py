@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The queue bound of CI's platform legs (README "Platform legs and their queue").
+"""The queue bound of CI's platform legs (docs/tests.md "Platform legs and their queue").
 
 A job's `timeout-minutes` counts from the moment a runner takes it: the time a leg waits in the
 queue for a runner counts against nothing but GitHub's own limit (a job without a runner for 24

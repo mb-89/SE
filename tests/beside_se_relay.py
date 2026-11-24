@@ -1,4 +1,4 @@
-"""SE's relay read against the real core, beside se.toml `[tests.beside.se-relay]` (README
+"""SE's relay read against the real core, beside se.toml `[tests.beside.se-relay]` (docs/settings.md
 "Hand-offs through the relay"): where kern serves a checkout with the github component on the relay
 backend, a PostToolUse hook lands a GitHub tool's answer in kern's snapshot, and `se_relay`'s read
 writes it to a file the command reads, with no answer retyped. It builds kern's binary, so it runs
@@ -51,7 +51,7 @@ config = { backend = "relay" }
 """
 
 # A PostToolUse payload shaped as a Claude Code cloud session's hook hands it (docs/go-core.md
-# "What the hooks carry"): the tool's answer as MCP content.
+# "What the hooks carry, probed in a cloud session"): the tool's answer as MCP content.
 PAYLOAD = json.dumps({
     "session_id": "s1", "hook_event_name": "PostToolUse",
     "tool_name": "mcp__github__issue_read",

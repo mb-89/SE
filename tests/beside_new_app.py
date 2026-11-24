@@ -8,7 +8,7 @@ tagged v<version> in the fake, so the template checked is the one SE's pin names
 is found is tests/test_se_new.py's.
 
 It builds the application's Go, so it runs beside the suite, after SE's Go components' tests have
-warmed Go's build cache, not in it (its file name keeps the suite from collecting it): README "Test
+warmed Go's build cache, not in it (its file name keeps the suite from collecting it): docs/tests.md "Test
 budget".
 """
 
