@@ -318,7 +318,12 @@ the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved),
 `first_sentence_chars`, `numbered`, `label` and `source` (`field_shape`), and `schema`, a JSON Schema 2020-12 of the
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
 (`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
-alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
+alone, the generated one: no template writes its schema by hand. `templates.py stale --path DIR`
+lists each file document under DIR, outside hidden folders, whose `derived_from` names a template at
+an older version than the template's now, `<file>: derived from <template> <version>; the template
+is at <version>`, and warns on stderr of one whose template does not resolve; a version that is
+none of its template's form cannot be ordered and counts as older where it differs (`stale`). Exit
+0. `templates.py list` names every template with its actions, then the paths it claims and, for an
 adapter, its checker. Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
 the working tree's `templates/`; `--templates DIR`, on each of them, reads
@@ -3630,10 +3635,43 @@ def _root(path: Path, root: Path | None) -> Path:
     the path, else the working directory."""
     if root is not None:
         return root
-    for folder in path.resolve().parents:
+    for folder in (path.resolve(), *path.resolve().parents):
         if (folder / ".git").exists():
             return folder
     return Path.cwd()
+
+
+def stale(templates: dict[str, Template], folder: Path) -> tuple[list[str], list[str]]:
+    """The file documents under `folder` (each `*.md`, outside hidden folders) whose `derived_from`
+    names a template at an older version than the template's now, one line each with both versions;
+    and one line per document whose template does not resolve. A version that is none of its
+    template's form cannot be ordered and counts as older where it differs."""
+    if not folder.is_dir():
+        raise TemplateError(f"templates.py stale: --path {folder} is no folder; name the folder that "
+                            "holds the documents")
+    older, unresolved = [], []
+    for path in sorted(folder.rglob(f"*{TEMPLATE_SUFFIX}")):
+        relative = path.relative_to(folder)
+        if not path.is_file() or any(part.startswith(".") for part in relative.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        front = FRONT_MATTER.match(text)
+        found = derived_from(front.group(0)) if front else None
+        if found is None or not found[2]:
+            continue
+        name, recorded = found[2].rsplit("/", 1)[-1], found[3]
+        where = relative.as_posix()
+        template = templates.get(name)
+        if template is None:
+            unresolved.append(f"{where}: derived from {name} {recorded}, which is no template here")
+            continue
+        parts, now = version_parts(template, recorded), version_parts(template, template.version)
+        if (parts < now) if parts and now else recorded != template.version:
+            older.append(f"{where}: derived from {name} {recorded}; the template is at {template.version}")
+    return older, unresolved
 
 
 def refresh(root: Path = ROOT, *, folder: Path | None = None) -> tuple[list[str], bool]:
@@ -3894,7 +3932,8 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill, interfaces")
+                                     description="SE's templates: check, draft, schema, list, fill, "
+                                     "interfaces, stale")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -3918,6 +3957,12 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
+    staling = commands.add_parser("stale", help="list the documents under a folder whose template has a "
+                                  "newer version than the one they derive from")
+    staling.add_argument("--path", type=Path, required=True, help="the folder of the documents")
+    staling.add_argument("--root", type=Path, help="the project whose templates/ and template "
+                         "repositories resolve a name before SE's (default: the git checkout holding "
+                         "--path, else the working directory)")
     interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
                                       "interface template beside the code that uses it "
                                       "(scripts/interfaces/), from the working tree's templates/")
@@ -3951,7 +3996,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling):
+    for command in (checking, drafting, schemas, listing, filling, staling):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -3975,6 +4020,13 @@ def main(arguments: list[str] | None = None) -> int:
                      else catalog(_project(options), tree=tree))
         if options.command == "list":
             print("\n".join(list_templates(templates)))
+            return 0
+        if options.command == "stale":
+            older, unresolved = stale(templates, options.path)
+            for line in unresolved:
+                print(f"warning: {line}", file=sys.stderr)
+            if older:
+                print("\n".join(older))
             return 0
         if options.command == "fill":
             return _fill(templates, options)

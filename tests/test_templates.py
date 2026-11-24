@@ -2898,6 +2898,31 @@ def test_a_missing_mandatory_section_and_a_leftover_slot_each_refuse_naming_the_
     assert templates.fill(template, judged, BRIEF)[1] == []  # a judgment gate may stay empty
 
 
+def test_stale_lists_a_document_only_once_its_template_s_version_moved(tmp_path, capsys):
+    folder = manifest_folder(tmp_path, requirements_dot_overlay_dot_md=None)
+    documents = tmp_path / "documents"
+    assert filled_by_main(capsys, folder, "--fields-json", json.dumps(MANIFEST_FILLED), "--input-text", BRIEF,
+                          "--out", str(documents / "pump.md"))[0] == 0
+    (documents / "notes.md").write_text("# Notes\n\nNo template.\n", encoding="utf-8")
+    (documents / ".hidden").mkdir()
+    (documents / ".hidden" / "old.md").write_text(
+        '---\nderived_from: {template: requirements, version: "1"}\n---\n', encoding="utf-8")
+    stale = lambda: (templates.main(["stale", "--path", str(documents), "--templates", str(folder)]),
+                     capsys.readouterr())
+    code, out = stale()
+    assert (code, out.out, out.err) == (0, "", "")
+    manifest = folder / "requirements" / "manifest.md"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('version: "2"', 'version: "2.1"'),
+                        encoding="utf-8")
+    (documents / "gone.md").write_text('---\nderived_from: {template: gone, version: "1"}\n---\n',
+                                       encoding="utf-8")
+    code, out = stale()
+    assert (code, out.out) == (0, "pump.md: derived from requirements 2; the template is at 2.1\n")
+    assert out.err == "warning: gone.md: derived from gone 1, which is no template here\n"
+    assert templates.main(["stale", "--path", str(tmp_path / "none"), "--templates", str(folder)]) == 2
+    assert "is no folder" in capsys.readouterr().err
+
+
 def test_an_overlay_adds_to_a_template_manifest_and_never_loosens_it(tmp_path):
     template = templates.load(tmp_path, folder=manifest_folder(tmp_path))["requirements"]
     risks = template.field("risks")
