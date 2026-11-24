@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's doctor: one read-only report of the box SE runs in, to paste whole when something half-works.
 
     uv run python <se>/scripts/se_doctor.py [--root <dir>] [--json] [--strict] [--offline] [--probe] [--write]
@@ -59,6 +61,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import se_script
 
 
 def _load(name: str):
@@ -908,7 +911,7 @@ def render_json(findings: list[Finding], facts: dict) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="se_doctor.py", description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(prog="se_doctor.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", type=Path, default=None, help="the project (default: the working directory)")
     parser.add_argument("--json", action="store_true", help="the same report as data")
     parser.add_argument("--strict", action="store_true", help="exit 1 where a finding is a problem")
@@ -942,4 +945,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

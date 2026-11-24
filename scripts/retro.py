@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Retro commands: the mechanical half of a retro, the facts the judging agent starts from.
 
 `retro.py collect <retro issue>` reads the window from GitHub: every work issue closed since the
@@ -98,6 +100,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import se_script
 
 
 def sibling(name: str):
@@ -2118,7 +2121,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="retro.py", description=__doc__.split("\n\n")[0])
+    top = se_script.parser(prog="retro.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     collect_command = commands.add_parser(
         "collect", help="read a retro's window from GitHub and write its draft",
@@ -2212,4 +2215,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

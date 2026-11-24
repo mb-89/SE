@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Bring decisions to the person as one deck: build it with obs, serve it locally and read its answers.
 
 Reader: the agent that asks the person for decisions, and whoever changes this command. The decision
@@ -50,6 +52,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import process_door  # noqa: E402
@@ -441,7 +444,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="deck.py", description=__doc__.splitlines()[0],
+    parser = se_script.parser(prog="deck.py", description=__doc__.splitlines()[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
                                      epilog="\n".join(__doc__.splitlines()[5:]))
     commands = parser.add_subparsers(dest="command", required=True)
@@ -478,4 +481,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

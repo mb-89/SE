@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Whether a suite beside ran a test, read from its output alone (README "Test budget").
 
 `ran(output)` takes a suite's stdout and stderr, stripped, and answers `Ran(verdict, reason)`:

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """The one door to other programs: every program SE runs as a child process, git aside, starts through `run`.
 
 The rule is the rule book's des-004, one door per outside thing, and tst-001, fakes that behave:

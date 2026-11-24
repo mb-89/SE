@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The review gate: whether `work_tickets.py integrate` lands a risky change that no reviewer passed.
 
 se.toml `[integrate] review_gate` switches it on (`true`); absent or `false`, the built-in, it

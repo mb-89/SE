@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The runtimes a component tree needs on the machine, collected and checked before any component runs.
 
 docs/components.md "Runtimes" owns the rule: each component's `se.toml` lists the runtimes it needs

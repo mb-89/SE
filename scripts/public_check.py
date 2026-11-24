@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Public-safety check: refuse content that identifies an employer, work project, person,
 machine, account or internal host. The rule is owned by AGENTS.md, section "Public safety".
 
@@ -92,6 +93,7 @@ from html.parser import HTMLParser
 from typing import Callable, Iterable, Iterator
 
 import git_door
+import se_script
 ALLOW_FILE = ".public-check-allow"
 SE_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "se.toml"
@@ -1069,7 +1071,7 @@ def check_se_version(root: Path, commit: str | None) -> None:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         description="Refuse work-specific or personal content (rule: AGENTS.md 'Public safety')."
     )
     parser.add_argument("--repo", default=".",
@@ -1288,4 +1290,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

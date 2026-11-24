@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """The dispatcher (README "Dispatcher"): a check with no model that fires the scheduled task whose
 session is a fresh integrator, where startable work waits, no integrator runs and the worker
 limit leaves room.

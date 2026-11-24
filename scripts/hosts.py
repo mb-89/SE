@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The host table, `scripts/hosts.sh`, as a pure module: an environment (and a hook payload) in;
 the host, the clouds, the project and the payload in snake_case out.
 

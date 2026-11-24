@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Manage the Markdown-backed worker ticket queue, its work issues and the field reports in pull requests."""
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ import git_door
 import process_door
 import shell_door
 import se_home
+import se_script
 
 STATES = ("todo", "held", "done")
 DIRECTORIES = (*STATES, "notes")
@@ -13002,7 +13004,7 @@ def build_parser(parser: argparse.ArgumentParser, command_: Command) -> argparse
 
 
 def make_parser() -> argparse.ArgumentParser:
-    return build_parser(argparse.ArgumentParser(prog=COMMANDS.name, description=COMMANDS.help),
+    return build_parser(se_script.parser(prog=COMMANDS.name, description=COMMANDS.help),
                         COMMANDS)
 
 
@@ -13084,4 +13086,4 @@ def said(error: BaseException) -> str:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(se_script.run(main))

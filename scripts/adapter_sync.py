@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The adapter sync contract's helper: a verb guard, one logged write path, secrets and artifacts.
 
 The contract itself is owned by the work model's "Adapter sync contract"

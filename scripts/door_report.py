@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Every reach outside a declared door, counted per file against a baseline that may only shrink.
 
 Each door declares in a data file (`scripts/doors/<door>.toml`) what it guards: `door` (its name),
@@ -42,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import ratchet
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 DOORS = ROOT / "scripts" / "doors"
@@ -291,7 +293,7 @@ def read(root: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", type=Path, default=ROOT, help="the checkout to scan (default: SE's)")
     parser.add_argument("--doors", type=Path, default=DOORS, help="the declarations' folder (default: SE's)")
     args = parser.parse_args(argv)
@@ -310,4 +312,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

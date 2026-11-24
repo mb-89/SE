@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's own checkout's hygiene: the checks of the repository, not of its code (AGENTS.md "Tests").
 
 They read SE's checkout through git's real door, so they are a step of CI's `check` job, not tests;
@@ -43,6 +44,7 @@ import git_door
 import process_door
 import references
 import se_home
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -317,7 +319,7 @@ def checks(root: Path) -> dict[str, list[str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         prog="hygiene.py", description="SE's own checkout's hygiene: the checks of the repository, "
         "not of its code, through git's real door. Exit code 0 passed, 1 findings, 2 a check could not run.")
     parser.add_argument("--repo", type=Path, default=ROOT, help="the checkout checked (default: SE's own)")
@@ -342,4 +344,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

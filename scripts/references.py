@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """Dangling references: text that names a file or a command that does not exist.
 
 One function, `dangling`, finds the references in a Markdown text and checks them; both places that

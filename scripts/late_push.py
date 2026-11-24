@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """A push of a work branch after its delivery, named at the push instead of at the landing.
 
 `work_tickets.py deliver` (and, without gh, `stop-check --pull`) records the tip it delivered in

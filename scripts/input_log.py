@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Input log: the person's own words from session transcripts, word for word, kept on this machine.
 
 It reads transcript files given by hand (or directories searched for `*.jsonl` files) and writes
@@ -39,6 +41,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import se_script
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -258,7 +261,7 @@ def plan(turns: Iterable[Turn], index: str, images: bool = False) -> Plan:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         prog="input_log.py",
         description="Keep the person's own words from session transcripts: each of their turns as "
                     "one new numbered file with one index line, under <repo>/.se/input/ (ignored "
@@ -314,4 +317,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

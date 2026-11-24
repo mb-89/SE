@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """An overhaul: is the design still right? (README "Work commands").
 
 `overhaul.py new` files the overhaul issue, `overhaul-<yyyymmdd>` labelled `discovery`, with
@@ -54,6 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import git_door
+import se_script
 # A duplicate block is at least WINDOW lines alike, MEANINGFUL of them with MIN_CHARS characters
 # or more; a block written more than COMMON times is an idiom, not a copy. Near-duplicate
 # functions have MIN_TOKENS tokens or more and share NEAR_ALIKE percent of their SHINGLE-token
@@ -1185,7 +1187,7 @@ READ_ONLY_COMMANDS = {
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="overhaul.py", description=__doc__.splitlines()[0])
+    top = se_script.parser(prog="overhaul.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
 
     def github(command: argparse.ArgumentParser) -> None:
@@ -1252,4 +1254,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

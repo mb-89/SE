@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """Worker sessions that stopped on a usage limit without delivering, as the fleet check reports them.
 
 `work_tickets.py fleet-check --sessions <file>` takes the session tools' answers (claude-code-remote):

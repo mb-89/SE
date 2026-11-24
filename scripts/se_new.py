@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """`se new app <name> --path <dir>`: a new application on kern, from kern's template at SE's kern pin.
 
 The design is docs/go-core.md "A bare application, and `se new app`"; README "New application" owns
