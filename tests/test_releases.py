@@ -218,7 +218,8 @@ def test_without_gh_the_release_prints_its_landing_plan_and_the_read_back_finish
         assert landing.plans == []
         assert "Pushed land/release-v1.2.4 at " in out
         assert '"head": "land/release-v1.2.4"' in out and '"title": "Release v1.2.4"' in out
-        assert '"commit_message": "fix/one-20261106: patch"' in out
+        assert '"commit_message": "fix/one-20261106: patch\\n\\nRelease-kind: patch"' in out
+        assert "Release-kind: patch\\n" in out.split('"body": ', 1)[1].split('", "', 1)[0]
         assert f"work_tickets.py release --read-back v1.2.4 --worktree {checkout}" in out
         assert released(checkout) == ("1.2.3", "v1.2.3")
         plan = work_tickets.handoff_path(checkout, work_tickets.RELEASE_HANDOFF)

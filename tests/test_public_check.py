@@ -1869,7 +1869,7 @@ def work_tickets_landing_description() -> str:
     """The landing description integrate writes, for work pull request 7 of work issue 5."""
     import work_tickets  # scripts/ is on the path (tests/conftest.py)
     return work_tickets.landing_description("https://github.com/alice/example/pull/7", 7,
-                                      "https://github.com/alice/example/issues/5")
+                                      "https://github.com/alice/example/issues/5", "minor")
 
 
 @FIELD_REPORT_SHELL

@@ -5,7 +5,7 @@ name: landing
 version: 1.0.0
 kind: document
 reader: fleet
-says: "A landing pull request: it names the work issue, the work pull request and its report."
+says: "A landing pull request: it names the work issue, the work pull request and its report, and states its release kind."
 tags: ["pull-request", "landing"]
 applies:
   actions: ["pr.create", "pr.edit"]
@@ -21,4 +21,6 @@ adapter:
       says: a line `Lands <work pull request url>, whose description is the field report.`
     - pattern: <!-- se:field-report-in \d+ -->
       says: the line `<!-- se:field-report-in <work pull request number> -->`, CI's field-report step reads it
+    - pattern: "Release-kind: (?:patch|minor|major)"
+      says: "the line `Release-kind: <patch|minor|major>`, the landing's kind, which CI's release-kind gate reads"
 ---

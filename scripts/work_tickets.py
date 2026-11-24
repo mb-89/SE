@@ -8281,16 +8281,18 @@ def without_tool_footer(body: str) -> str:
     return body
 
 
-def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str,
+def landing_description(work_pull_url: str, work_pull_number: int, issue_url: str, kind: str,
                         metrics_line: dict[str, object] | None = None) -> str:
     """The landing pull request's description: short enough for any tool argument, it names the
-    work issue and the work pull request whose description is the field report, and the marker
-    CI's field-report step reads that report by (.github/workflows/check.yml); it ends in the
-    integration's metrics line, which outlives a cloud integrator's container for `retro.py
-    collect` (docs/running.md "Metrics")."""
+    work issue and the work pull request whose description is the field report, the marker CI's
+    field-report step reads that report by (.github/workflows/check.yml) and the landing's
+    `Release-kind: <kind>` line, the kind its squash commit's trailer carries, so CI's release-kind
+    gate passes it (pr_issues.py --release-kind); it ends in the integration's metrics line, which
+    outlives a cloud integrator's container for `retro.py collect` (docs/running.md "Metrics")."""
     return (f"Refs {issue_url}\n\n"
             f"Lands {work_pull_url}, whose description is the field report.\n\n"
-            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n"
+            + FIELD_REPORT_IN.format(number=work_pull_number) + "\n\n"
+            + release_kind_line(kind) + "\n"
             + (f"\n{metrics.text(metrics_line)}\n" if metrics_line is not None else ""))
 
 
@@ -9424,7 +9426,7 @@ def integrate(
                 f"{landing_desc}--worktree {root}")
         description = landing_description(
             str(pull.get("url") or pull_url(remote, pull_number)), pull_number,
-            issue_url(tracker, work_number), metrics.snapshot())
+            issue_url(tracker, work_number), state["release_kind"], metrics.snapshot())
         plan = landing_plan(remote, landing, target, base, landed, title, message, description,
                             then, tracker, record, mode, verdict=verdict)
         door = relay_door(root, remote) if handing_off else None
@@ -12191,14 +12193,24 @@ def rehearse(root: Path, base: str, gap: float, repo: str | None) -> str:
 RELEASE_HANDOFF = "release"  # the hand-off's state, handoff_path's name for a release landing
 
 
-def release_description(tag: str, packages: str) -> str:
+def release_description(tag: str, packages: str, kind: str) -> str:
     """The release landing pull request's description: what the release raises the version by,
-    the integrations since the last release with their kinds. It names no work issue: pr_issues.py
-    exempts the owner's `land/release-v<version>` (docs/settings.md "Project settings")."""
+    the integrations since the last release with their kinds, and the release's
+    `Release-kind: <kind>` line, the highest of them, so CI's release-kind gate passes it
+    (pr_issues.py --release-kind). It names no work issue: pr_issues.py exempts the owner's
+    `land/release-v<version>` (docs/settings.md "Project settings")."""
     return (f"Release {tag}: `work_tickets.py release` raises the version by the highest "
             "Release-kind recorded since the last release, as SE asked (docs/settings.md \"Project "
             f"settings\").\n\nIntegrated since the last release:\n\n"
-            + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip()) + "\n")
+            + "\n".join(f"- {line}" for line in packages.splitlines() if line.strip())
+            + f"\n\n{release_kind_line(kind)}\n")
+
+
+def release_kind_line(kind: str) -> str:
+    """The `Release-kind: <kind>` line a landing or a release states; refused for any other kind."""
+    if kind not in RELEASE_ORDER:
+        raise QueueError(f"release kind {kind!r} is none of {', '.join(RELEASE_ORDER)}")
+    return f"{RELEASE_TRAILER}: {kind}"
 
 
 def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = ()) -> str | None:
@@ -12284,12 +12296,14 @@ def land_release(root: Path, repo: str | None, stated: tuple[StatedKind, ...] = 
     title = f"Release {tag}"
     packages = "\n".join([*(f"{name}: {kind}" for name, kind in released[1]),
                           *(statement.line() for statement in stated)])
+    kind = max((kind for _, kind in released[1]), key=RELEASE_ORDER.index)
+    message = f"{packages}\n\n{release_kind_line(kind)}"
     verdict = status_verdict(root, remote, base, landed) if without_ci else None
     state = {"tag": tag, "landing": landing, "target": target, "base": base, "landed": landed,
              "remote": remote, "landing_mode": mode}
     then = (f"work_tickets.py release --read-back {tag} --worktree {root}")
-    plan = landing_plan(remote, landing, target, base, landed, title, packages,
-                        release_description(tag, packages), then, tracker, None, mode,
+    plan = landing_plan(remote, landing, target, base, landed, title, message,
+                        release_description(tag, packages, kind), then, tracker, None, mode,
                         verdict=verdict)
     door = relay_door(root, remote) if handing_off else None
     if handing_off and door is None:

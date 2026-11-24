@@ -3571,11 +3571,12 @@ def delivered_worker(main_checkout: Path, monkeypatch,
     return head, integration_fakes(monkeypatch, head, branch=branch)
 
 
-# The landing pull request's description for PR #7 of work issue #5: it names both and carries the
-# marker by which CI's field-report step reads the report from PR #7 (docs/settings.md "Landing on main").
+# The landing pull request's description for PR #7 of work issue #5: it names both, carries the
+# marker by which CI's field-report step reads the report from PR #7 (docs/settings.md "Landing on main")
+# and states the landing's kind, the one its squash commit's trailer carries, for CI's release-kind gate.
 LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
                 "Lands https://git.example/owner/repo/pull/7, whose description is the field report."
-                "\n\n<!-- se:field-report-in 7 -->\n")
+                "\n\n<!-- se:field-report-in 7 -->\n\nRelease-kind: minor\n")
 
 
 def landing_body_and_metrics(body: str) -> tuple[str, dict | None]:
@@ -7821,7 +7822,7 @@ def test_a_rehearsal_runs_only_through_kerns_relay(main_checkout, monkeypatch, c
 
 #: The landing description a plan tells, ending in its metrics line.
 TOLD_LANDING = work_tickets.landing_description(
-    "https://git.example/owner/repo/pull/7", 7, "https://git.example/owner/tracker/issues/5",
+    "https://git.example/owner/repo/pull/7", 7, "https://git.example/owner/tracker/issues/5", "minor",
     {"command": "integrate", "start": "2026-11-14T10:00:00Z", "seconds": 12.5})
 #: The footers a host's GitHub tool appends to the body it was told to write.
 TOOL_FOOTERS = [
