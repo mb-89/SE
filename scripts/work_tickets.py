@@ -3158,9 +3158,10 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
     report's Release kind on a first integration, and on a re-integration (an earlier merge of
     `branch` is on the integration branch) its Re-integration kind, patch without a report."""
     if integrated_before(root, branch):
-        return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
-    return (f"{RELEASE_TRAILER}: "
-            f"{declared_release_kind(branch, report_body, issue_body, project_version(root))}")
+        kind = reintegration_kind(report_body)
+    else:
+        kind = declared_release_kind(branch, report_body, issue_body, project_version(root))
+    return interface_message("release-trailer", kind=kind)
 
 
 def branch_head(root: Path, branch: str) -> str:

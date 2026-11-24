@@ -79,6 +79,9 @@ raid-entry:
 raid-register:
   - discover-cheap-load-late
   - guidance-comes-first
+release-trailer:
+  - discover-cheap-load-late
+  - guidance-comes-first
 requirement:
   - discover-cheap-load-late
   - guidance-comes-first

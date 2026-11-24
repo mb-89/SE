@@ -43,6 +43,7 @@ both.
 | `templates/python-script.md` | A Python script: the uv entry, argparse help and logging through se_script, and slots for its own part. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/release-trailer.md` | An integration merge's release kind, its one trailer. |
 | `templates/requirement.md` | One requirement: one checkable statement, how it is checked and where it comes from. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |
@@ -85,8 +86,8 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
 The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `escalation`,
-`finding-ref`, `generated-marker`, `handover`, `limit-restart`, `retro-doc`, `retro-due`,
-`retro-part`, `review-declined`, `rules-page`, `skills-page`, `started-comment`,
+`finding-ref`, `generated-marker`, `handover`, `limit-restart`, `release-trailer`, `retro-doc`,
+`retro-due`, `retro-part`, `review-declined`, `rules-page`, `skills-page`, `started-comment`,
 `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each other.
 
 `templates.py interfaces` writes each one's schema beside the code that uses it,
@@ -94,8 +95,8 @@ The interface templates (`boot-report`, `claim-undone`, `delivery-notice`, `esca
 
 Through `scripts/interfaces.py`:
 
-- `work_tickets.py deliver` and `escalate` write their messages, `start` its Started comment and
-  `unclaim` its answer to it;
+- `work_tickets.py deliver` and `escalate` write their messages, `start` its Started comment,
+  `unclaim` its answer to it and `release-trailer` every merge's Release-kind trailer;
 - `se_start.py` its start report, a snippet of several lines with a table and a line of three
   cases;
 - `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;

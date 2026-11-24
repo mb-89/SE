@@ -16,9 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
               "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref",
-              "started-comment", "claim-undone", "review-declined", "limit-restart")
+              "started-comment", "claim-undone", "review-declined", "limit-restart",
+              "release-trailer")
 MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
-            "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart")
+            "finding-ref", "started-comment", "claim-undone", "review-declined", "limit-restart",
+            "release-trailer")
 
 
 @pytest.fixture(scope="module")
@@ -257,3 +259,15 @@ def test_the_limit_restart_comment_is_the_line_the_remedy_named_by_hand_and_its_
     comment = limit_restart.restarted_comment("session_a")
     assert comment == f"{limit_restart.RESTARTED} session session_a"
     assert limit_restart.restarted([{"body": comment}])
+
+
+def test_the_release_trailer_is_the_line_written_by_hand_its_pattern_reads_and_refuses_other_kinds():
+    import work_tickets
+
+    for kind in work_tickets.RELEASE_ORDER:
+        trailer = interfaces.write("release-trailer", {"kind": kind})
+        assert trailer == f"{work_tickets.RELEASE_TRAILER}: {kind}"
+        assert work_tickets.RELEASE_TRAILER_PATTERN.search(f"Integrate x\n\n{trailer}\n")[1] == kind
+    with pytest.raises(interfaces.InterfaceError, match="se/release-trailer") as refused:
+        interfaces.write("release-trailer", {"kind": "huge"})
+    assert "kind" in str(refused.value)
