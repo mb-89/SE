@@ -31,6 +31,7 @@ import test_retro
 import test_review
 import test_work_ticket_issues as issue_tests
 import work_tickets
+from manual import page
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "work.md"
@@ -2053,9 +2054,10 @@ def test_refusals_are_counted_per_session_and_target_under_home(tmp_path, monkey
 
 
 def missing_from_readme(readme: str) -> list[str]:
-    """The files under `templates/` that README's "Templates" section does not name with their `says`."""
-    start = readme.index("\n### Templates\n")
-    after = re.search(r"\n#{1,3} ", readme[start + 1:])
+    """The files under `templates/` that docs/templating.md's "Templates" section does not name
+    with their `says`."""
+    start = readme.index("\n## Templates\n")
+    after = re.search(r"\n#{1,2} ", readme[start + 1:])
     section = " ".join(readme[start:start + 1 + after.start() if after else None].split())
     missing = []
     for path in sorted((ROOT / "templates").iterdir()):
@@ -2068,13 +2070,13 @@ def missing_from_readme(readme: str) -> list[str]:
 
 
 def test_readme_templates_names_every_file_under_templates_with_its_says():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     assert missing_from_readme(readme) == []
     assert "No command checks with them yet" not in readme
 
 
 def test_the_readme_check_fails_when_a_file_is_removed_from_the_section():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("templating")
     start = readme.index("| `templates/retro.md` |")
     end = readme.index("\n| `templates/review.md` |", start)
     assert missing_from_readme(readme[:start] + readme[end + 1:]) == ["retro.md"]

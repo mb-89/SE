@@ -9,6 +9,7 @@ import sys
 import tomllib
 
 import pytest
+from manual import page
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("se_plugin", ROOT / "scripts" / "se_plugin.py")
@@ -237,7 +238,7 @@ WARNS = {"SessionStart": (" || true", ""),
 
 
 def test_copilot_starts_and_stops_through_the_same_scripts_and_both_fail_open(checkout):
-    """SessionStart greets and starts kern, Stop holds a worker to its delivery (README "Stop
+    """SessionStart greets and starts kern, Stop holds a worker to its delivery (docs/fleet.md "Stop
     hook"); PascalCase events, so Copilot sends Claude-shaped payloads with their `session_id`, and
     each hook names its host; each fails open within its timeout, in bash and in PowerShell."""
     hooks = copilot_hooks(checkout)
@@ -285,7 +286,7 @@ def test_the_repository_hooks_and_the_claude_plugin_stay_as_they_were(checkout):
 
 
 def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
-    """README "Stop hook": one hook per stop, se_hook.sh, which kern's delivery component answers
+    """docs/fleet.md "Stop hook": one hook per stop, se_hook.sh, which kern's delivery component answers
     and else stop-check as its own process."""
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     for event in ("Stop", "SubagentStop"):
@@ -298,7 +299,7 @@ def test_the_plugin_holds_every_stop_to_the_worker_stop_check(checkout):
 
 
 def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout):
-    """README "Kern": SessionStart starts kern through bootstrap.sh; every other event posts to it."""
+    """docs/start.md "Kern": SessionStart starts kern through bootstrap.sh; every other event posts to it."""
     plugin = json.loads((checkout / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     events = ["SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]
     assert sorted(plugin["hooks"]) == sorted(["SessionStart", *events])
@@ -312,9 +313,9 @@ def test_every_session_event_but_the_start_posts_to_kern_and_fails_open(checkout
 
 def test_the_readme_installs_the_plugin_the_marketplace_declares():
     marketplace = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-    readme = (ROOT / "README.md").read_text(encoding="utf-8").split("## Install", 1)[1].split("\n## ", 1)[0]
+    readme = page("install").split("## Install", 1)[1].split("\n## ", 1)[0]
     plugin = marketplace["plugins"][0]["name"]
-    # Claude Code installs from the clone, through RUNME's agent start (README "Getting it running").
+    # Claude Code installs from the clone, through RUNME's agent start (docs/install.md "Getting it running").
     row = next(line for line in readme.splitlines() if line.startswith("| Claude Code |"))
     assert "[RUNME](#getting-it-running)" in row
     assert f"`claude plugin install {plugin} --marketplace <clone>`" in row
@@ -324,7 +325,7 @@ def test_the_readme_installs_the_plugin_the_marketplace_declares():
 
 
 def test_the_cloud_install_clones_the_plugin_and_each_role_prompt_names_a_built_file(checkout):
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = page("install")
     cloud = readme.split("### Claude Code cloud\n", 1)[1].split("\n## ", 1)[0]
     script = cloud.split("```bash\n", 1)[1].split("```", 1)[0]
     assert "git clone --depth 1 https://github.com/<owner>/<repository> ~/.claude/skills/se ||" in script
@@ -512,7 +513,7 @@ def test_copilots_door_gets_the_sessions_folder_in_both_its_files(checkout):
 
 @pytest.mark.parametrize("name", (".github/mcp.json", ".github/plugin/plugin.json", ".mcp.json"))
 def test_the_door_runs_the_launcher_and_a_plugin_root_only_in_its_arguments(checkout, tmp_path, name):
-    """README "MCP door": every declaration runs the standalone launcher with bash; a host's plugin
+    """docs/start.md "The MCP door": every declaration runs the standalone launcher with bash; a host's plugin
     root variable stands in an argument, never in the command."""
     root = checkout
     if name == ".mcp.json":

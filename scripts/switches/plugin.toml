@@ -9,7 +9,7 @@ reader = "scripts/se_plugin.py"
 default = "off"
 layers = ["se.toml"]
 key = "plugin.root_mcp"
-help = "README.md#the-mcp-door"
+help = "docs/start.md#the-mcp-door"
 note = "off: the build writes no root .mcp.json; on: it writes one, which Claude Code reads too"
 
 [[switch]]
@@ -19,7 +19,7 @@ reader = "scripts/se_plugin.py"
 default = "off"
 layers = ["se.toml"]
 key = "plugin.claude_mcp"
-help = "README.md#the-mcp-door"
+help = "docs/start.md#the-mcp-door"
 note = "off: the Claude Code manifest .claude-plugin/plugin.json declares no MCP server; on: it declares the door, run from ${CLAUDE_PLUGIN_ROOT}, so every Claude Code session with the plugin starts it"
 
 [[switch]]

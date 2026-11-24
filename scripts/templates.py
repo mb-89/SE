@@ -2,7 +2,7 @@
 """Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
-where se.toml `[templates] enforce` is on (README "Templates"); this module owns that switch's reading
+where se.toml `[templates] enforce` is on (docs/templating.md); this module owns that switch's reading
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
@@ -3390,11 +3390,11 @@ def enforcement(root: Path) -> Enforcement:
     enforce = table.get("enforce", OFF)
     if enforce not in ENFORCE_VALUES:
         raise TemplateError(f"templates: [templates] enforce = {enforce!r} in {where} is none of "
-                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(ENFORCE_VALUES)}; set one of them (docs/templating.md)")
     gate = table.get("gate", OFF)
     if gate not in GATE_VALUES:
         raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
-                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(GATE_VALUES)}; set one of them (docs/templating.md)")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "

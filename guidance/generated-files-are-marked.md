@@ -46,7 +46,7 @@ that reruns it; or `unchecked`, why no fresh run can be compared.
   of `generated.py` `LOCKS`) are on a fixed list with the tool that writes them, and exempt.
 - **A line is no file.** A single line a program edits inside a hand-written file, such as the
   version line `work_tickets.py release` moves in `se.toml`, does not make it a generated file, and
-  neither does a marked region inside one, such as the README's command reference.
+  neither does a marked region inside one, such as the command reference in `docs/work-commands.md`.
 
 ## The check
 

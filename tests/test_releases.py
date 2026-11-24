@@ -16,6 +16,7 @@ import pytest
 import fake_git
 import fake_processes as fakes
 import git_door
+import manual
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -1064,7 +1065,7 @@ def test_se_runs_the_release_workflow_on_pushes_to_its_integration_branch_only()
 
 def test_the_release_workflow_is_one_copy_whose_only_se_line_is_its_branch():
     """Consumers copy se's own release-tag.yml and change its branch: its uses calls the copy of
-    release.yml that se writes into them (README "Workflows"), as se's calls its own, so no other
+    release.yml that se writes into them (docs/running.md "Workflows"), as se's calls its own, so no other
     line is se's."""
     branch = tomllib.loads((PROJECT / "se.toml").read_text(encoding="utf-8"))["project"].get("integration_branch", "main")
     caller = (PROJECT / ".github" / "workflows" / "release-tag.yml").read_text(encoding="utf-8")
@@ -1076,15 +1077,15 @@ def test_the_release_workflow_is_one_copy_whose_only_se_line_is_its_branch():
         assert f"[{branch}]" not in line and "uses:" not in line, line
         assert not line.lstrip().startswith("#") or "set branches to your integration branch" in line \
             or "release.yml that se writes" in line, line
-    readme = (PROJECT / "README.md").read_text(encoding="utf-8")
+    readme = manual.page("settings")
     assert "name: release-tag" not in readme
-    assert "](.github/workflows/release-tag.yml)" in readme
+    assert "](../.github/workflows/release-tag.yml)" in readme
     assert "`se_workflows.py write .github/workflows/release.yml`" in readme
 
 
 def test_nothing_calls_an_se_workflow_at_a_branch():
-    """se's workflows are called as local copies at a pin (README "Workflows"), never at a branch."""
-    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
+    """se's workflows are called as local copies at a pin (docs/running.md "Workflows"), never at a branch."""
+    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), *manual.PAGES]:
         for line in path.read_text(encoding="utf-8").splitlines():
             assert not re.search(r"/\.github/(?:workflows|actions)/\S+@(se|main)\b", line), f"{path.name}: {line}"
 
@@ -1092,7 +1093,7 @@ def test_nothing_calls_an_se_workflow_at_a_branch():
 def test_every_runner_image_is_pinned():
     """se's jobs, and the README's example jobs, name their runner image's version, never a
     `-latest` label, so a new image arrives by a deliberate edit, not by GitHub moving the label."""
-    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), PROJECT / "README.md"]:
+    for path in [*(PROJECT / ".github" / "workflows").glob("*.yml"), *manual.PAGES]:
         for line in path.read_text(encoding="utf-8").splitlines():
             assert not re.search(r"runs-on:.*-latest\b", line), f"{path.name}: {line}"
 

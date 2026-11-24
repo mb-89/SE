@@ -1,4 +1,4 @@
-"""Source parity, `work_tickets.py parity` (README "Source parity"): two commits' trees compare
+"""Source parity, `work_tickets.py parity` (docs/fleet.md "Source parity"): two commits' trees compare
 path by path, dependency lockfiles excluded by one rule, every other difference named by path."""
 
 from __future__ import annotations

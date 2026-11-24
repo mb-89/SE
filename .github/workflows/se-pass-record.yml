@@ -1,4 +1,4 @@
-# The integrator's record of its pass (README "Trusted landings"): work_tickets.py integrate's landing
+# The integrator's record of its pass (docs/tests.md "Trusted landings"): work_tickets.py integrate's landing
 # plan dispatches this workflow on land/<branch> where se.toml [tests] trust_integrator is on, with
 # what its suite run found. Its one job checks the inputs against the commit it checked out and writes
 # them as the check run `se integrator pass` on it, which CI's check trusts for exactly that tree.

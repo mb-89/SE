@@ -16,7 +16,7 @@ hooks files call a bare `bash` or the Git-bash hand-off `scripts/bash.ps1` is th
 `se.toml` `[plugin] powershell_hooks` (`powershell_hooks`); unset, a bare `bash`. `check` refuses when any generated file
 differs from what `build` would write, so a hand edit to a generated file fails. Both refuse an
 agent Copilot would reject or a skill either host would skip, as the standalone validators of
-`scripts/agent_lint.py` find them. Where the plugin is installed from is the README section
+`scripts/agent_lint.py` find them. Where the plugin is installed from is docs/install.md
 "Install".
 
 Source front matter is one `key: value` per line. An agent's keys all go into its one file; a key
@@ -98,9 +98,9 @@ DESCRIPTION = ("SE, the agent a person talks to, with its integrator, worker and
 # `|| true`: a step that needs the person is advice for the session, never a failed start.
 # `--hook`: it ends with SE's greeting (scripts/se_start.py status --hook).
 BOOTSTRAP = 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.sh" --hook || true'
-# Every other session event goes to kern, the core SE pins (README "Kern"), through SE's hook
+# Every other session event goes to kern, the core SE pins (docs/start.md "Kern"), through SE's hook
 # command; it fails open, and `|| true` holds a hook that cannot run to the same. The Stop hooks
-# (README "Stop hook") are answered by kern's delivery component, else by stop-check directly.
+# (docs/fleet.md "Stop hook") are answered by kern's delivery component, else by stop-check directly.
 KERN_EVENTS = ("SessionEnd", "SubagentStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
                "SubagentStop")
 
@@ -120,7 +120,7 @@ COPILOT_HOOKS = {
     # The greeting and kern's start, once per session; a first start installing uv and Python may
     # take longer, and the core starts detached.
     "SessionStart": ("scripts/bootstrap.sh --hook", 120),
-    # The delivery check (README "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
+    # The delivery check (docs/fleet.md "Stop hook"): kern's answer within 10 s, else stop-check reading gh.
     # It also fires for the se agent; stop-check lets any checkout without a work issue end.
     "Stop": ("scripts/se_hook.sh Stop", 60),
 }
@@ -183,7 +183,7 @@ PLUGIN_HOOKS_FILE = PurePosixPath(".github/plugin/hooks.json")
 COPILOT_MANIFEST_PLACES = {"github": PurePosixPath(".github/plugin/plugin.json"),
                            "root": PurePosixPath("plugin.json")}
 COPILOT_MANIFEST = COPILOT_MANIFEST_PLACES["github"]
-# The MCP door (README "MCP door"), declared per host: Copilot's project file, the root file
+# The MCP door (docs/start.md "The MCP door"), declared per host: Copilot's project file, the root file
 # Claude Code reads too, written only where se.toml [plugin] root_mcp is on (`root_mcp`), and the
 # Claude Code manifest's mcpServers, written only where [plugin] claude_mcp is on (`claude_mcp`).
 COPILOT_MCP_FILE = PurePosixPath(".github/mcp.json")
