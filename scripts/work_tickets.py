@@ -9892,8 +9892,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(f"escalated #{work_number}: stays open for what its partial delivery left; re-scope "
-              f"the issue or take it to the owner: {'; '.join(left)}")
+        print(interface_message("escalation", issue=str(work_number),
+                                question="stays open for what its partial delivery left; re-scope the "
+                                         f"issue or take it to the owner: {'; '.join(left)}"))
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -10406,8 +10407,10 @@ def refs_request_read_back(root: Path, number: int, triples: list[tuple[str, str
             "(git ls-remote); nothing was escalated. Write the triples from origin's refs, then "
             "run refs request again")
     after = "after these steps, " if door is None else ""
-    return (f"{after}escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run "
-            f"passed)? On yes: work_tickets.py refs apply {number}")
+    return after + interface_message(
+        "escalation", issue=str(number),
+        question=f"apply the ref change ({len(triples)} ref(s), dry run passed)? On yes: "
+                 f"work_tickets.py refs apply {number}")
 
 
 def posted_request(comments: list[dict[str, object]], number: int

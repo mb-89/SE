@@ -681,8 +681,10 @@ def outcome_line(number: int, url: str, found: Report, landed: bool, issue_numbe
         return (f"#{issue_number} has {len(found.findings)} open point(s) under \"Changes after "
                 "filing\" and stays open after the landing")
     if found.verdict == DECLINE:
-        return (f"escalated #{issue_number}: the review declined pull request #{number} ({url}); "
-                "re-scope the issue or take it to the owner")
+        return work_tickets.interface_message(
+            "escalation", issue=str(issue_number),
+            question=f"the review declined pull request #{number} ({url}); re-scope the issue or take "
+                     "it to the owner")
     return f"#{number} passes: it lands as is"
 
 
