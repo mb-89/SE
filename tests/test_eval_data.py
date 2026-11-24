@@ -72,6 +72,7 @@ CASE_SKILL = {
     "decision-note-has-matrix": "decision",
     "work-model-field-report": "work-model",
     "update-follows-the-guide": "update",
+    "fill-templates-names-the-gap": "fill-templates",
 }
 
 # For each case, the text its result grader reads: one a correct run writes, one it must refuse.
@@ -104,6 +105,14 @@ SAMPLES = {
             "SE moved 12.0.1 -> 13.0.0 and obs 10.3.2 -> 11.0.0. I followed SE 13, then obs 11; "
             "neither needed a step here.",
             "obs moved to 11.0.0 and SE to 13.0.0. I followed obs 11 first, then SE 13.",
+        ),
+    },
+    "fill-templates-names-the-gap": {
+        "gap-named": (
+            "## Product\n\nPump X, a 230 V garden pump for home owners.\n\n## Languages\n\nNot in "
+            "input\n\nThe notes name no language, so Languages is not in the material.",
+            "## Product\n\nPump X, a 230 V garden pump for home owners.\n\n## Languages\n\nEnglish and "
+            "German.",
         ),
     },
     "work-model-field-report": {
