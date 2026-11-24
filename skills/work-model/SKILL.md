@@ -571,11 +571,11 @@ Pull requests built on an old `main` cause most integration trouble.
   only through a native link. `ready` is only [SE's approval](#issues); startable = `ready` and
   zero open blockers.
 - Labels change only in these steps: SE's `file` and `route` ([Issues](#issues)); `start` changes
-  `ready` to `in-progress`, and so does the integrator in the step where it starts a worker with
-  `create_session` instead of `start`; the integrator removes `in-progress` when it closes the
-  issue.
+  `ready` to `in-progress`, also after `claim` where the integrator starts a worker with
+  `create_session`; the integrator removes `in-progress` when it closes the issue.
   - `start` writes the first beat line with the label, and the close-out removes it with the
-    label. A worker started after `claim` beats on its first tool call, as intake finds no beat.
+    label. A worker started after `claim` alone beats on its first tool call, as intake finds no
+    beat.
   - The label change follows the [claim](#worktrees) and is no lock: two starters can both read
     `ready`, and only the claim refuses the second.
 - After each integration the integrator starts every startable work issue that has no branch yet
@@ -617,13 +617,17 @@ Pull requests built on an old `main` cause most integration trouble.
     file-ownership clash or exhausted capacity, the worker limit among it);
   - it fetches and claims the issue's branch, then runs
     `git worktree add -b <branch> <worktree-root>/<branch-with-slashes-replaced> <claimed branch>`,
-    from the issue's remote even where `origin` is another, and changes the issue's `ready` label
-    to `in-progress`;
+    from the issue's remote even where `origin` is another, changes the issue's `ready` label
+    to `in-progress` and posts its `Started:` comment;
   - it prints the worker launch line with the exact created path.
   - In a cloud runner, pass `--cloud-agent <login>` (or set `SE_CLOUD_AGENT`) to claim, assign the
     worker and change the labels without creating a local worktree.
   - A worker started with the session tool (`create_session`) is claimed first with
-    `work_tickets.py claim <issue>`.
+    `work_tickets.py claim <issue>`, which records the claim in the checkout
+    (`.se/claims/<issue>`).
+    - `start` of that issue in the same checkout takes it as its own claim while the branch there
+      still holds the claimed commit, and runs its worktree, label and `Started:` comment steps.
+    - A start in another checkout is refused, as the claim is not its own.
 - Copilot CLI offers a platform-enforced alternative, not the local-worker launch path:
   `copilot --agent worker --no-ask-user --allow-all-tools --prompt "<worker prompt>"`. Keep
   agent-host `create_session` workers as the default until a separate decision changes that path.
