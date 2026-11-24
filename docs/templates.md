@@ -99,6 +99,10 @@ path for both.
   section required. Any other chapter, such as a note on how to use the template, is no section.
 - **The slot.** A node's body is its fill slot, `{{slot}}`, alone: where the agent writes. A filled
   section that still holds it outside code is refused, naming the section, as obs refuses it.
+- **A slot filled by a template.** A node whose front matter carries `template: <name>@<version>`
+  is filled by that template, resolved as a note's `node:` is ([Nesting](#nesting)). An entry
+  template makes the section a numbered list of its entries, such as a requirements specification's
+  requirements; a block or a document makes it one part of that template.
 - **The document.** One note: its front matter `derived_from` and the digest, then one `##`
   section per node in the template's order, and none of the guidance. obs builds it as a filled
   document.
@@ -134,8 +138,23 @@ The check of a document checks each node by its own template, so a document is v
 every node in it is. A node records no provenance of its own: the document's names the template,
 which names its nodes' templates at their versions.
 
-A field names its node `node: <template>@<version>`, and a register its entries `entries:
-<template>@<version>`; a block that is a fence, such as the Pugh block, takes the fence's word
+- **Both source forms.** A note's field names its part's template; a template manifest's node
+  names it in its own front matter ([Template manifests](#template-manifests)). Both load into the
+  same nested field, so the fill, the check and the gate are one code path for both.
+- **The path of a finding.** A finding inside a part names its path from the document down to
+  the part, `work > Requirements > requirement 2: …`, and a part nested in a part extends it. The
+  agent so finds the part to fix without reading the whole document.
+- **Corrections inside.** The fill's trivial corrections ([Fill](#fill)) apply inside a part as at
+  the top, but for its headings, whose level is its parent's place.
+- **Parts filed before.** A field may say from which version of its template its part is checked
+  (`since`), so a minor version that nests a part leaves the documents filed before it as they were.
+
+A list's items may each be a part: the work issue's Requirements are `requirement` items. A
+requirement is one checkable statement, its acceptance and its source; in a work issue its first
+line is the statement, and the issue's Acceptance and User requirement carry the other two.
+
+A field names its node `node: <template>@<version>`, a register its entries `entries:
+<template>@<version>`, and a list its items `items: <template>@<version>`; a block that is a fence, such as the Pugh block, takes the fence's word
 too. The docstring of `scripts/templates.py` (Nesting) owns the rest. SE ships the RAID register
 and its entry as `templates/raid-register.md` and `templates/raid-entry.md`.
 
@@ -441,12 +460,13 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | File | Template | Kind | Owner |
 |---|---|---|---|
 | `templates/ticket.md` | `ticket` | document | SE |
-| `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/work.md` | `work`, `extends` ticket, whose Requirements are `requirement` items | document | SE |
 | `templates/work-file.md` | `work-file`, `extends` work: a work issue's body file, `.se/issues/<name>.md` | document | SE |
 | `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
 | `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
 | `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
 | `templates/raid-entry.md` | `raid-entry` | entry | SE |
+| `templates/requirement.md` | `requirement`: one checkable statement, its acceptance and its source | entry | SE |
 | `templates/field-report.md` | `field-report` | document | SE |
 | `templates/landing.md` | `landing` | document | SE |
 | `templates/housekeeping.md` | `housekeeping` | document | SE |
@@ -465,10 +485,24 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/python-component.md` | `python-component`: an ad hoc component, what `se component add` writes | code | SE |
 | `templates/go-module.md` | `go-module`: a Go module, its `go.mod`, package and test | code | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
+| `templates/retro-judgment.md` | `retro-judgment`: the retro draft's judged block, checked by `judgment_problems` | block | SE |
+| `templates/retro-deck.md` | `retro-deck`: a retro's or an overhaul's one report, a deck: the title page's lines, the steps, then the decisions | document | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
+| `templates/overhaul-judgment.md` | `overhaul-judgment`: the overhaul draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |
 | `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |
+| `templates/retro-due.md` | `retro-due`: what `retro.py due` prints, a snippet | interface | SE |
+| `templates/retro-part.md` | `retro-part`: the label of each part of a split retro report | interface | SE |
+| `templates/retro-doc.md` | `retro-doc`: a retro report's link to its committed retro doc | interface | SE |
+| `templates/finding-ref.md` | `finding-ref`: how a work issue names a retro's or an overhaul's finding | interface | SE |
+| `templates/started-comment.md` | `started-comment`: the Started comment `start` posts on a work issue | interface | SE |
+| `templates/claim-undone.md` | `claim-undone`: `unclaim`'s answer to a Started comment | interface | SE |
+| `templates/review-declined.md` | `review-declined`: the comment a declined review writes on the work issue | interface | SE |
+| `templates/limit-restart.md` | `limit-restart`: the comment that says a worker session was resumed after a usage limit | interface | SE |
+| `templates/release-trailer.md` | `release-trailer`: the one trailer of an integration merge, its release kind | interface | SE |
+| `templates/review-done.md` | `review-done`: a cold reviewer's end message to SE | interface | SE |
+| `templates/run-closed.md` | `run-closed`: a retro's or an overhaul's hand-back to SE | interface | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
@@ -478,6 +512,10 @@ SE's free texts are interface templates: the worker's delivery notice, an escala
 handover, the start report, the three pages of what the layout loads (`scripts/se_plugin.py`
 `pages`) and the generated-file marker's words (`scripts/generated.py` `line`); a design note's
 outline is still to come.
+
+The fleet's fixed lines are too: the Started comment and its Claim-undone answer, a declined
+review's comment, the comment of a restart after a usage limit, every merge's `Release-kind:`
+trailer, and the reviewer's and the retro's end messages.
 
 Fixed text SE shows the person comes from a template, short snippets included (the person's
 decision of 23 Nov 2026). A snippet is a message of several lines: a `rows` field writes one line

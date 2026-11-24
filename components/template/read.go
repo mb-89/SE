@@ -222,7 +222,7 @@ func ValueOf(item *Field, raw string) any {
 		}
 		return strings.Trim(raw, "\n")
 	}
-	if item.Verbatim || item.Node != "" {
+	if item.Verbatim || (item.Node != "" && item.Kind != "list") {
 		return strings.Trim(raw, "\n")
 	}
 	text := uncomment(raw, item.Markers)
@@ -249,7 +249,11 @@ func ValueOf(item *Field, raw string) any {
 		}
 		list := []any{}
 		for _, it := range items(text, pattern, item.Markers) {
-			list = append(list, it[1])
+			if item.Node != "" {
+				list = append(list, itemText(it[1]))
+			} else {
+				list = append(list, it[1])
+			}
 		}
 		return list
 	case "checklist":
@@ -641,4 +645,33 @@ func fieldsOf(message, text string) Object {
 		found.Set(name, strip(m[i+1]))
 	}
 	return found
+}
+
+// itemText is templates.py `_item_text`: a nested list item's text, its first line, then its further
+// lines without the indentation they share, which only places them under the item's marker.
+func itemText(body string) string {
+	first, rest, found := strings.Cut(body, "\n")
+	if !found || rest == "" {
+		return first
+	}
+	lines := strings.Split(rest, "\n")
+	shared := -1
+	for _, line := range lines {
+		if strip(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if shared < 0 || indent < shared {
+			shared = indent
+		}
+	}
+	out := []string{first}
+	for _, line := range lines {
+		if strip(line) == "" {
+			out = append(out, "")
+		} else {
+			out = append(out, line[shared:])
+		}
+	}
+	return strings.Join(out, "\n")
 }

@@ -8,7 +8,7 @@
         "readOnlyHint": false,
         "title": "se github (writes)"
       },
-      "description": "Reaches GitHub, with a token or through the session's GitHub tools, and keeps what it reads as snapshots. Runs one of its writing commands, named in `command`, with `args` as its usage shows: it writes, each write a request the core delivers to the I/O verb the wiring binds, as se's every outside write goes. Use it:\n- `github issue-comment`: Comments on a GitHub issue or pull request from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is posted. Usage: `github issue-comment --repo OWNER/REPO --number N --filled JSON`\n- `github issue-create`: Files a GitHub issue from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is filed. Usage: `github issue-create --repo OWNER/REPO --filled JSON [--label LABEL]...`",
+      "description": "Reaches GitHub, with a token, through the environment's proxy or through the session's GitHub tools, and keeps what it reads as snapshots. Runs one of its writing commands, named in `command`, with `args` as its usage shows: it writes, each write a request the core delivers to the I/O verb the wiring binds, as se's every outside write goes. Use it:\n- `github issue-comment`: Comments on a GitHub issue or pull request from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is posted. Usage: `github issue-comment --repo OWNER/REPO --number N --filled JSON`\n- `github issue-create`: Files a GitHub issue from a filled template, never free text: fill the template with the application's template component and pass its answer, as it stands, as --filled; a value it refuses answers its refusal, and nothing is filed. Usage: `github issue-create --repo OWNER/REPO --filled JSON [--label LABEL]...`",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -160,7 +160,7 @@
         "readOnlyHint": true,
         "title": "se overhaul"
       },
-      "description": "An overhaul: new files its issue, read writes its draft, file checks the judged draft and closes the issue with its report, and facts lists a checkout's pruning facts. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `overhaul.py facts`: Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul. Usage: `overhaul.py facts [--repo REPO] [--json]`",
+      "description": "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, from the judged draft, file checks the judged draft and closes the issue with its report, and facts lists a checkout's pruning facts. Runs one of its read-only commands, named in `command`, with `args` as its usage shows; it changes nothing. Use it:\n- `overhaul.py facts`: Lists the pruning facts of a checkout, what an overhaul weighs. Use it when drafting or judging an overhaul. Usage: `overhaul.py facts [--repo REPO] [--json]`",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

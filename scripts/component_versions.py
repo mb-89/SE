@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -222,32 +223,41 @@ def changed(root: Path, base: str, component: Component) -> bool:
 
 
 def merge_past_claims(root: Path, conflicted: list[str], base: str, head: str, landing: str,
-                      message: str) -> bool:
+                      message: str, regenerated: Callable[[str], bool] = lambda path: False) -> bool:
     """Merge `head` onto `base` on `landing` where the only conflicts are component release.tomls,
     and the files that pin them (`PINS`), as where the branch claimed another number than the
-    integration branch moved to: the failed merge is aborted, `head` gets a commit on `landing`
-    that takes the integration branch's version in each such file (`assign` replaces it next),
-    and that commit is merged. False, the failed merge aborted, where a conflict remains or
-    another file conflicts."""
+    integration branch moved to, and generated files the merge regenerates (`regenerated`, those
+    generated.yaml gives a `regenerate`): the failed merge is aborted, `head` gets a commit on
+    `landing` that takes the integration branch's version in each such file (`assign` replaces a
+    version next, the merge's regeneration a generated file), and that commit is merged. False,
+    the failed merge aborted, where a conflict remains or another file conflicts."""
     owners = {path: component for component in components(root, base)
               for path in (component.path, *PINS.get(component.name, ()))}
-    if not conflicted or not set(conflicted) <= set(owners):
+    generated = [path for path in conflicted if path not in owners and regenerated(path)]
+    if not conflicted or not set(conflicted) <= set(owners) | set(generated):
         return False
     git_door.run("merge", "--abort", root=root)
     if git_door.run("switch", "-q", "-C", landing, head, root=root).returncode != 0:
         return False
     for path in conflicted:
-        component = owners[path]
-        version = read_version(show(root, base, component.path), f"{component.path} at {base[:12]}")
-        theirs = show(root, head, path)
-        if version is None or theirs is None:
-            return False
-        taken = (with_version(theirs, version) if path == component.path
-                 else moved_pins(component, {path: theirs}, version).get(path, theirs))
+        if path in generated:
+            taken = show(root, base, path)
+            if taken is None:
+                return False
+        else:
+            component = owners[path]
+            version = read_version(show(root, base, component.path), f"{component.path} at {base[:12]}")
+            theirs = show(root, head, path)
+            if version is None or theirs is None:
+                return False
+            taken = (with_version(theirs, version) if path == component.path
+                     else moved_pins(component, {path: theirs}, version).get(path, theirs))
         (root / path).write_bytes(taken.encode("utf-8"))
         git_door.run("add", "--", path, root=root)
-    taken = git_door.run("commit", "-q", "-m", "Take the integration branch's component versions; "
-                         "the landing assigns the next", root=root)
+    what = [*(["component versions; the landing assigns the next"] if set(conflicted) - set(generated) else []),
+            *(["generated files; the merge regenerates them"] if generated else [])]
+    taken = git_door.run("commit", "-q", "-m", "Take the integration branch's " + ", and its ".join(what),
+                         root=root)
     adjusted = git_door.run("rev-parse", "HEAD", root=root).stdout.strip()
     git_door.run("switch", "-q", "-C", landing, base, root=root)
     if taken.returncode != 0:

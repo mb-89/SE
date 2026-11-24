@@ -3,9 +3,9 @@
 """Retro commands: the mechanical half of a retro, the facts the judging agent starts from.
 
 `retro.py collect <retro issue>` reads the window from GitHub: every work issue closed since the
-last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed;
-where none has, since the oldest open retro issue was created, and the whole history only where no
-retro issue exists. `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
+last closed retro issue (titled `docs/retro-...` or labelled `retro`, other than this one) closed,
+and the whole history, from the project's first issue, where none has (docs/fleet.md "Retro due":
+a retro covers everything up to its start). `--since <date>` starts it at a date, `--retro <issue>` where that closed retro
 issue closed (whose findings it then scores); the rule checks judge that window alone. Each issue
 comes with the field report of the pull request that landed
 it, found through the landing pull request's `<!-- se:field-report-in <n> -->` marker. It writes a
@@ -21,7 +21,8 @@ template's. Step 2, collect, holds
 - the field reports' answers to the standing questions (their Retro section, the block
   work_tickets.py `standing_questions` nests; `retro_entries`) by question, and their "Not
   delivered" items, the planning misses;
-- the rule checks (RULE_CHECKS), each broken one with what broke it;
+- the rule checks (RULE_CHECKS), each broken one with what broke it; the `check` rule judges a
+  landing by its last `check` run completed before it merged (`gating_run`), not by a later one;
 - the metrics of the window: the line each landing pull request's description ends in and the
   local metrics file's lines that started in the window, each run once (docs/running.md "Metrics");
 - the previous retro's sizes, where its block is found;
@@ -65,8 +66,9 @@ Off by default, three additions leave that draft as it is without them:
   the classes that carry one (`class_patterns`). A block without them is scored and filed as
   before.
 
-`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, a
-draft whose steps break the retro template (a step or a standing question left open;
+`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment (`judgment_problems`,
+called through the adapter template `templates/retro-judgment.md`, JUDGMENT_TEMPLATE), writing
+nothing, a draft whose steps break the retro template (a step or a standing question left open;
 `steps_problems`) and a draft the integration branch does not hold as it stands; it files no issue
 (wrk-007). It posts the report proper, a document of the retro template (`report`): the draft's
 steps, the judgment in step 5, each class with its home and its state against the tree and each
@@ -74,7 +76,19 @@ finding with its proposed fix and its kind (`work`, which SE bundles into work i
 `decision`, for the owner's decision list), and the person's decisions and what follows in step 6,
 as the retro issue's closing comment, and closes the issue. The facts and the block stay in the committed
 draft, the retro doc, which the comment links at its commit (DOC_MARKER) and the next collect
-reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut.
+reads. A report over GitHub's COMMENT_LIMIT is posted in numbered parts, never cut, each ending
+in its label, the message `templates/retro-part.md` (PART_TEMPLATE).
+
+`retro.py due` prints the retro's and the overhaul's countdowns, one line each, the snippet
+`templates/retro-due.md` (DUE_TEMPLATE, `countdown_lines`), or with `--json` their data.
+
+`retro.py due` prints the retro and overhaul countdowns (`countdowns`,
+docs/fleet.md "Retro due"), which the filing check runs before every filing. It reads the closed
+issues and pull requests newest update first and only as far back as they can count: the runs by
+their label, then back to the start of the newest counted retro (and of the newest overhaul, where
+its countdown is on and one exists), the pull requests on until each work issue closed since then
+has its landing; with no retro yet, everything (`recent_reads`). The answer files are read whole,
+with the same countdowns.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -123,17 +137,31 @@ metrics = work_tickets.metrics
 
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
 REPORT_MARKER = "<!-- se:retro-report -->"
-# The report's link to the committed retro doc that holds its facts and block, at a commit.
-DOC_MARKER = "<!-- se:retro-doc {sha} {path} -->"
+# The report's link to the committed retro doc that holds its facts and block, at a commit: the
+# message DOC_TEMPLATE (templates/retro-doc.md), written through its generated schema (`doc_marker`).
+# DOC_PATTERN reads it back, stricter than the message: a full commit.
+DOC_TEMPLATE = "retro-doc"
+DOC_MARKER = sibling("interfaces").generated(DOC_TEMPLATE)["message"]
 DOC_PATTERN = re.compile(r"<!-- se:retro-doc ([0-9a-f]{40}) (\S+) -->")
 # GitHub's limit on an issue comment's body, in characters; a part's label needs at most
 # PART_ROOM of them.
 COMMENT_LIMIT = 65536
 PART_ROOM = 100
+# The label each part ends in (templates/retro-part.md).
+PART_TEMPLATE = "retro-part"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
-# A work issue names each retro finding it takes as `retro #<n> finding <k>`.
+# A work issue names each retro finding it takes as `retro #<n> finding <k>`, the message
+# FINDING_TEMPLATE (templates/finding-ref.md) the reports write (`finding_reference`); finding one
+# stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
+# The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
+# 9): step 2's per-issue table and its field reports' answers, which the matrix holds, and step 3's
+# per-step table, as the chapters table is the deck's one table of what happened.
+LANDED_SECTION = "Landed issues"
+ANSWERS_SECTION = "The field reports' answers to the standing questions"
+STEP_TABLE = "| step | chapter | what went well | what it cost | can a machine do it |"
 # A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
 # one of HOMES.
 CLASS_FIELDS = ("name", "cause", "fix", "home", "home_kind")
@@ -150,6 +178,9 @@ FIXED, PAST, OPEN = "fixed", "past", "open"
 CHAPTER_HOURS = 6
 # The retro document template: the six steps, the standing questions nested in step 4.
 TEMPLATE_NAME = "retro"
+# The adapter template the judged block is checked through (templates/retro-judgment.md), whose
+# checker is judgment_problems.
+JUDGMENT_TEMPLATE = "retro-judgment"
 # The field report's answers that say whether a machine could do a step (step 3).
 MECHANIZE = ("machine_scripts", "shell_command")
 # The author associations `--refusals` counts as inside the fleet (outside_text.inside).
@@ -179,7 +210,8 @@ REFERENCE = re.compile(
 # The rule checks, by name: what each holds.
 RULE_CHECKS = {
     "work-issue": "every landing pull request names a work issue that was open when it merged",
-    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head",
+    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head "
+             "in its last run before the merge",
     "outside-pr": "no commit reached the integration branch outside a pull request",
     "field-report": "every closed work issue has a field report",
 }
@@ -281,7 +313,9 @@ def pull_of(item: dict) -> Pull:
 
 class GhDoor:
     """The collect's GitHub reads through work_tickets.py's door: issues in `tracker`, pull
-    requests and their check runs in `remote`."""
+    requests and their check runs in `remote`; for the countdowns also the closed issues and
+    pull requests newest update first, up to where they stop it, and the runs by their label
+    (`recent_reads`)."""
 
     PAGE = 100
 
@@ -301,6 +335,32 @@ class GhDoor:
             if len(items) < self.PAGE:
                 return found
             page += 1
+
+    def pages_until(self, door, path: str, stop) -> list[dict]:
+        """`pages` of `path` sorted newest update first, up to the first item `stop` refuses."""
+        found: list[dict] = []
+        page = 1
+        while True:
+            answer = door.api(f"{path}&sort=updated&direction=desc&per_page={self.PAGE}&page={page}")
+            items = [item for item in (answer if isinstance(answer, list) else [])
+                     if isinstance(item, dict)]
+            for item in items:
+                if stop(item):
+                    return found
+                found.append(item)
+            if len(items) < self.PAGE:
+                return found
+            page += 1
+
+    def closed_issues_until(self, stop) -> list[dict]:
+        return [item for item in self.pages_until(self.issues_door, "issues?state=closed", stop)
+                if "pull_request" not in item]
+
+    def closed_issues_labelled(self, label: str) -> list[dict]:
+        return self.pages(self.issues_door, f"issues?state=closed&labels={label}")
+
+    def pulls_until(self, stop) -> list[dict]:
+        return self.pages_until(self.pulls_door, "pulls?state=closed", stop)
 
     def closed_issues(self) -> list[dict]:
         return [item for item in self.pages(self.issues_door, "issues?state=closed")
@@ -333,7 +393,8 @@ class FileDoor:
     `issues.json`, `pulls.json`, `issue-<issue>.json` (where the list names no close time, as
     the host's `list_issues` does not), `comments-<issue>.json`, `checks-<pull>.json` and, for
     `--refusals`, `pull-comments-<pull>.json` of each declined pull request. A missing
-    answer reads as empty and is kept as the plan step that saves it (`missing`)."""
+    answer reads as empty and is kept as the plan step that saves it (`missing`). It has no
+    cut-off read: the saved lists are whole, so the countdowns read them whole."""
 
     def __init__(self, directory: Path, tracker: str, remote: str) -> None:
         self.directory, self.tracker, self.remote = directory, tracker, remote
@@ -399,7 +460,9 @@ class FileDoor:
 
 class ToolDoor:
     """The countdowns' reads through kern's relay door (work_tickets.RelayDoor), where a command
-    runs as one call: each list page by page, as the host's GitHub tools answer it."""
+    runs as one call: each list page by page, as the host's GitHub tools answer it; the closed
+    issues and pull requests newest update first, up to where the countdowns stop it, and the
+    runs by their label (`recent_reads`)."""
 
     def __init__(self, door) -> None:
         self.door = door
@@ -411,16 +474,49 @@ class ToolDoor:
     def open_issues(self) -> list[dict]:
         return self.door.issues("OPEN")
 
-    def pulls(self) -> list[dict]:
+    def closed_until(self, arguments: dict[str, object], stop=None) -> list[dict]:
+        """The closed issues list_issues answers for `arguments`, page by page (with `after`),
+        up to the first item `stop` refuses."""
+        found: list[dict] = []
+        after = ""
+        while True:
+            data = self.door.ask("list_issues", {"state": "CLOSED", "perPage": 100, **arguments,
+                                                 **({"after": after} if after else {})})
+            for item in work_tickets.tool_items(data, "issues"):
+                item = {"state": "closed", **item}
+                if stop is not None and stop(item):
+                    return found
+                found.append(item)
+            page = data.get("pageInfo") if isinstance(data, dict) else None
+            after = str((page or {}).get("endCursor") or "") if (page or {}).get("hasNextPage") else ""
+            if not after:
+                return found
+
+    def closed_issues_until(self, stop) -> list[dict]:
+        return self.closed_until({"orderBy": "UPDATED_AT", "direction": "DESC"}, stop)
+
+    def closed_issues_labelled(self, label: str) -> list[dict]:
+        return self.closed_until({"labels": [label]})
+
+    def pulls_until(self, stop=None) -> list[dict]:
+        """The closed pull requests, newest update first, page by page, up to the first item
+        `stop` refuses."""
         found: list[dict] = []
         page = 1
         while True:
             items = work_tickets.tool_items(self.door.ask("list_pull_requests", {
-                "state": "closed", "perPage": 100, "page": page}), "pull_requests")
-            found += items
+                "state": "closed", "sort": "updated", "direction": "desc", "perPage": 100,
+                "page": page}), "pull_requests")
+            for item in items:
+                if stop is not None and stop(item):
+                    return found
+                found.append(item)
             if len(items) < 100:
                 return found
             page += 1
+
+    def pulls(self) -> list[dict]:
+        return self.pulls_until()
 
     def issue(self, number: int) -> dict:
         answer = self.door.ask("issue_read", {"method": "get", "issue_number": number})
@@ -489,9 +585,9 @@ def not_delivered(report: str) -> list[str]:
 
 
 # Where a window starts (Window.start): the close of the last closed retro issue (or of the one
-# --retro names), the time --since gives, the creation of the oldest open retro issue where none
-# has closed, or nowhere: the whole history, where no retro issue exists.
-CLOSED_RETRO, GIVEN, OPEN_RETRO, HISTORY = "closed-retro", "given", "open-retro", "history"
+# --retro names), the time --since gives, or nowhere: the whole history, where no retro issue has
+# closed.
+CLOSED_RETRO, GIVEN, HISTORY = "closed-retro", "given", "history"
 
 
 @dataclass
@@ -640,22 +736,15 @@ class Read:
         return moment is not None and (since is None or moment > since)
 
 
-def window_start(door, last: Issue | None, since: str | None) -> tuple[str | None, int | None, str] | None:
+def window_start(last: Issue | None, since: str | None) -> tuple[str | None, int | None, str]:
     """Where the window starts, as (since, since_retro, start): the time `since` gives, else the
-    close of `last`, else the creation of the oldest open retro issue (read through `door`), else
-    the whole history; None where the door is still missing answers."""
+    close of `last`, else the whole history, from the project's first issue: a first retro
+    covers everything up to its start (docs/fleet.md "Retro due"), an open retro issue included."""
     if since is not None:
         return since, None, GIVEN
     if last is not None:
         return last.closed_at, last.number, CLOSED_RETRO
-    opened = [issue_of(item) for item in door.open_issues()]
-    if door.missing:
-        return None
-    oldest = min((issue for issue in opened if is_retro(issue) and when(issue.created_at)),
-                 key=lambda issue: when(issue.created_at), default=None)
-    if oldest is None:
-        return None, None, HISTORY
-    return oldest.created_at, oldest.number, OPEN_RETRO
+    return None, None, HISTORY
 
 
 def read_window(door, number: int, since: str | None = None,
@@ -689,9 +778,7 @@ def read_window(door, number: int, since: str | None = None,
                              f"{RETRO_TITLE}... or labelled {RETRO_LABEL}) other than #{number}")
     else:
         last = max(retros, key=lambda issue: when(issue.closed_at), default=None)
-    start = window_start(door, last, since)
-    if start is None:
-        return None
+    start = window_start(last, since)
     moment = when(start[0])
     # An issue closed in the window was updated in it: only those are read one by one.
     if not completed([issue for issue in issues if WORK_LABEL in issue.labels
@@ -703,6 +790,17 @@ def read_window(door, number: int, since: str | None = None,
                            and not is_retro(issue) and found.in_window(issue.closed_at)),
                           key=lambda issue: issue.number)
     return found
+
+
+def gating_run(runs: list[dict], merged_at: str) -> dict | None:
+    """The `check` run of `runs` (the check runs on a landing's head) that gated its merge at
+    `merged_at`: the last to complete before it. A later run on the same commit, a nightly one
+    say, judges the commit, not the landing; one still running gated nothing."""
+    merged = when(merged_at)
+    gating = [(moment, run) for run in runs if run.get("name") == work_tickets.CHECK_NAME
+              and (moment := when(first(run, "completed_at", "completedAt"))) is not None
+              and merged is not None and moment <= merged]
+    return max(gating, key=lambda item: item[0])[1] if gating else None
 
 
 def landing_of(issue: Issue, naming: list[Pull], branch: str) -> Pull | None:
@@ -813,15 +911,101 @@ def landed_issue(issue: Issue, naming: list[Pull], branch: str) -> bool:
     return landed(issue, landing_of(issue, naming, branch))
 
 
+#: The reads a door offers for the cut-off read of the countdowns (`recent_reads`); a door
+#: without all of them is read whole.
+CUT_OFF_READS = ("closed_issues_labelled", "closed_issues_until", "pulls_until")
+
+
+def recent_reads(door, opened: list[Issue], overhauls: bool, tracker: str,
+                 branch: str) -> tuple[list[Issue], list[Pull]]:
+    """The closed issues and pull requests the countdowns need, from a door that reads them newest
+    update first (`closed_issues_until`, `pulls_until`) and the runs by their label
+    (`closed_issues_labelled`, RETRO_LABEL and the overhaul's): the runs first, then the closed
+    issues back to the start of the newest counted retro and, with `overhauls` and an overhaul
+    found, the newest overhaul, whichever is older; an older issue cannot count, as its update is
+    never before its creation or its close. With no retro yet, every closed issue is read.
+
+    The pull requests are read back to the newest retro's start and on while a work issue closed
+    since then has no landing read yet, down to that issue's creation: a landing merged before
+    the retro started counts for an issue closed after it.
+
+    The countdowns are those of the whole read wherever every run older than the cut-off carries
+    its label, as the filing labels them (overhaul.py file_run): the overhaul countdown counts
+    the retros the label reads find, and those the closed issues read find by their title."""
+    overhaul = sibling("overhaul")
+    newest: dict[str, datetime | None] = {"retro": None, "overhaul": None}
+    kinds = ("retro", "overhaul") if overhauls else ("retro",)
+
+    def note(issue: Issue) -> None:
+        start = run_start(issue)
+        if not start or not counted_run(issue):
+            return
+        for kind, test in (("retro", is_retro), ("overhaul", overhaul.is_overhaul)):
+            if test(issue) and (newest[kind] is None or start > newest[kind]):
+                newest[kind] = start
+
+    def cutoff() -> datetime | None:
+        """The older of the newest retro's start and, where that countdown is on and one was
+        found, the newest overhaul's; None with no retro yet (read everything)."""
+        starts = [newest[kind] for kind in kinds if kind == "retro" or newest[kind]]
+        return None if None in starts else min(starts)
+
+    for issue in opened:
+        note(issue)
+    runs: dict[int, Issue] = {}
+    for label in (RETRO_LABEL, overhaul.OVERHAUL_LABEL):
+        for item in door.closed_issues_labelled(label):
+            issue = issue_of(item)
+            if "pull_request" not in item and (is_retro(issue) or overhaul.is_overhaul(issue)):
+                note(issue)
+                runs[issue.number] = issue
+    closed: dict[int, Issue] = {}
+
+    def stop_issue(item: dict) -> bool:
+        issue = issue_of(item)
+        limit, updated = cutoff(), when(issue.updated_at)
+        if limit and updated and updated < limit:
+            return True
+        if "pull_request" not in item:
+            note(issue)
+            closed[issue.number] = issue
+        return False
+
+    door.closed_issues_until(stop_issue)
+    closed = {**runs, **closed}
+    since = newest["retro"]
+    waiting = {issue.number: when(issue.created_at) for issue in closed.values()
+               if WORK_LABEL in issue.labels and not is_retro(issue) and counted_run(issue)
+               and (since is None or not issue.closed_at or when(issue.closed_at) > since)}
+
+    def stop_pull(item: dict) -> bool:
+        updated = when(first(item, "updated_at", "updatedAt"))
+        if since and updated and updated < since and all(
+                created and updated < created for created in waiting.values()):
+            return True
+        found = pull_of(item)
+        if found.merged_at and found.base == branch:
+            waiting.pop(reference(found, tracker), None)
+        return False
+
+    return list(closed.values()), [pull_of(item) for item in door.pulls_until(stop_pull)]
+
+
 def countdowns(door, tracker: str, branch: str, root: Path,
                now: datetime) -> dict[str, Countdown] | None:
-    """The retro and the overhaul countdowns over what `door` reads: the closed and the open
-    issues and the pull requests, each closed issue's close time read one by one where the list
-    names none (the host's `list_issues`), only for those updated since the newest run started;
-    None where the door is still missing answers."""
-    closed = [issue_of(item) for item in door.closed_issues()]
+    """The retro and the overhaul countdowns over what `door` reads: the open issues whole; the
+    closed issues and the pull requests only as far back as `recent_reads` says, where the door
+    has the cut-off reads (CUT_OFF_READS: GhDoor, ToolDoor), else whole (FileDoor), with the same
+    countdowns; each closed issue's close time read one by one where the list names none (the
+    host's `list_issues`), only for those updated since the newest run started; None where the
+    door is still missing answers."""
     opened = [issue_of(item) for item in door.open_issues()]
-    pulls = [pull_of(item) for item in door.pulls()]
+    if all(hasattr(door, name) for name in CUT_OFF_READS):
+        closed, pulls = recent_reads(door, opened, sibling("overhaul").countdown_on(root), tracker,
+                                     branch)
+    else:
+        closed = [issue_of(item) for item in door.closed_issues()]
+        pulls = [pull_of(item) for item in door.pulls()]
     if door.missing:
         return None
     overhaul = sibling("overhaul")
@@ -948,13 +1132,14 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         if problem:
             checks["work-issue"].broken.append({"item": f"#{pull.number}", "what": problem})
         checks["check"].checked += 1
-        runs = [run for run in door.checks(pull) if run.get("name") == work_tickets.CHECK_NAME]
-        conclusion = str(runs[0].get("conclusion") or runs[0].get("status") or "") if runs else ""
+        gate = gating_run(door.checks(pull), pull.merged_at)
+        conclusion = str(gate.get("conclusion") or gate.get("status") or "") if gate else ""
         if conclusion != "success":
             checks["check"].broken.append({
                 "item": f"#{pull.number}",
-                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if conclusion
-                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]}"})
+                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if gate
+                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]} completed before "
+                     f"it merged at {pull.merged_at}"})
     merge_shas = {pull.merge_sha for pull in merged if pull.merge_sha}
     # The host's tools name no merge commit: a squash merge's commit carries the pull request's
     # title as its subject (or GitHub's ` (#<n>)`) and its merge time as its committer time.
@@ -1383,8 +1568,7 @@ def timeline_lines(found: Collected) -> list[str]:
               f"{chapter['end'] or 'unknown'} | "
               + ", ".join(f"#{number}" for number in chapter["issues"]) + " |"
               for chapter in chapters]
-    lines += ["", "| step | chapter | what went well | what it cost | can a machine do it |",
-              "|---|---|---|---|---|"]
+    lines += ["", STEP_TABLE, "|---|---|---|---|---|"]
     for chapter in chapters:
         for number in chapter["issues"]:
             item = by_number[number]
@@ -1416,7 +1600,7 @@ def matrix_lines(found: Collected) -> list[str]:
 
 def answer_lines(found: Collected) -> list[str]:
     """Step 2's part of the field reports: each standing question with each work issue's answer."""
-    lines = ["### The field reports' answers to the standing questions"]
+    lines = [f"### {ANSWERS_SECTION}"]
     for question in questions().fields:
         entries = [(item.number, item.retro[question.name]) for item in found.issues
                    if question.name in item.retro]
@@ -1430,14 +1614,12 @@ def collect_lines(found: Collected) -> list[str]:
     window = found.window
     starts = {
         CLOSED_RETRO: f"when retro #{window.since_retro} closed",
-        GIVEN: "as --since gives",
-        OPEN_RETRO: f"when retro #{window.since_retro}, the oldest open retro issue, was created; "
-                    "no retro issue has closed"}
+        GIVEN: "as --since gives"}
     if window.since:
         lines = [f"Window: work issues closed after {window.since}, {starts[window.start]}, "
                  f"up to {window.until}."]
     else:
-        lines = [f"Window: the whole history up to {window.until}; no retro issue exists."]
+        lines = [f"Window: the whole history up to {window.until}; no retro issue has closed."]
     previous = (found.previous or {}).get("sizes") or {}
     lines += ["", "### Sizes", ""]
     if previous:
@@ -1463,7 +1645,7 @@ def collect_lines(found: Collected) -> list[str]:
     elif found.previous:
         lines.append("None.")
     lines += class_lines(found)
-    lines += ["", "### Landed issues", ""]
+    lines += ["", f"### {LANDED_SECTION}", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
         lines += ["| issue | refused deliveries | escalations | suite time | field report |",
@@ -1733,6 +1915,22 @@ def judgment_problems(block: dict) -> list[str]:
     return problems
 
 
+def is_object(value: object) -> bool:
+    """Whether a judged block's data is an object, the only data the judgment adapters check
+    (templates/retro-judgment.md, templates/overhaul-judgment.md)."""
+    return isinstance(value, dict)
+
+
+def adapter_problems(name: str, text: str) -> list[str]:
+    """What SE's adapter template `name` refuses in `text`, each without the `<name>: ` every
+    adapter's finding opens with."""
+    engine = templates()
+    template = engine.own(name)
+    return [finding.fix.removeprefix(f"{template.name}: ")
+            for finding in engine.check(template, engine.parse(template, text))
+            if finding.severity == engine.REFUSE]
+
+
 def judged(text: str, number: int, filed: bool = False) -> dict:
     """The block of the draft `text`, its judgment checked, unless `filed` (a retro doc already
     filed, whose judgment was checked when it was, read back by the next collect); every refusal
@@ -1744,7 +1942,7 @@ def judged(text: str, number: int, filed: bool = False) -> dict:
     retro = (block.get("window") or {}).get("retro")
     if retro != number:
         raise QueueError(f"The draft is retro #{retro}'s, not #{number}'s")
-    problems = [] if filed else judgment_problems(block)
+    problems = [] if filed else adapter_problems(JUDGMENT_TEMPLATE, text)
     if problems:
         raise QueueError(f"The judgment of retro #{number} is not complete, so nothing was "
                          "written: " + "; ".join(problems))
@@ -1817,16 +2015,11 @@ def judged_classes(block: dict, root: Path | None) -> list[dict]:
     return sorted(rows, key=lambda row: HOMES.index(row["home_kind"].strip()))
 
 
-def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
-           root: Path | None = None) -> str:
-    """The retro's report proper, its closing comment, a document of the retro template: the six
-    steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
-    with its home and its state against the tree at `root`, and its findings, each with its kind),
-    and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
-    facts and the block the next collect reads."""
-    template = retro_template()
-    drafted = steps_of(text).fields
-    classes = judged_classes(block, root)
+def judged_class_lines(classes: list[dict], block: dict, named_only: bool = False) -> list[str]:
+    """Step 5 as the report and the deck show it: each judged class (`judged_classes`) with its cause,
+    fix, home and state against the tree and its findings, each with its kind; then what went well.
+    `named_only` (the deck's, whose decision chapters hold each finding) names each finding by its
+    number and title alone."""
     lines = []
     for row in classes:
         lines += ["", f"#### {row['name']} ({len(row['findings'])})", "",
@@ -1834,6 +2027,10 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
                   f"Home: {row['home_kind'].strip()} (home {HOMES.index(row['home_kind'].strip()) + 1} "
                   f"of {len(HOMES)}), `{row['home'].strip()}`; tree: {row['tree']}",
                   *class_key_lines({key: row[key] for key in CLASS_KEYS if key in row}), ""]
+        if named_only:
+            lines += ["Findings, each a decision at the end: " + "; ".join(
+                f"{item['finding']}. {item['title'].strip()}" for item in row["findings"]) + "."]
+            continue
         for item in row["findings"]:
             kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                     if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
@@ -1845,14 +2042,29 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
         lines += ["", "None."]
     lines += ["", "#### What went well", ""]
     lines += [f"- {entry.strip()}" for entry in block["went_well"] if review.words(entry)]
+    return lines
+
+
+def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
+           root: Path | None = None) -> str:
+    """The retro's report proper, its closing comment, a document of the retro template: the six
+    steps, the draft `text`'s for steps 1, 3 and 4, the judgment's for steps 5 and 6 (each class
+    with its home and its state against the tree at `root`, and its findings, each with its kind),
+    and step 2 linking the committed retro doc `doc` at commit `sha` (`url`), which holds the
+    facts and the block the next collect reads."""
+    template = retro_template()
+    drafted = steps_of(text).fields
+    classes = judged_classes(block, root)
+    lines = judged_class_lines(classes, block)
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
     still = [row["name"] for row in classes if row["tree"] == OPEN]
+    reference = finding_reference("retro", number)
     decided = [str(drafted.get("decisions") or "").strip(),
                "Open classes: " + (", ".join(still) or "none") + ".",
                f"This retro filed no issue. SE files what the person accepted: it bundles the "
                f"{WORK} findings ({', '.join(map(str, work)) or 'none'}) into as few work issues "
-               f"as the work needs, each naming `retro #{number} finding <k>` for every finding "
+               f"as the work needs, each naming `{reference}` for every finding "
                f"it takes, so the next retro scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list."]
     fields = {
@@ -1869,7 +2081,19 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     }
     body = templates().render(template, fields)
     return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
-            f"{DOC_MARKER.format(sha=sha, path=doc)}\n")
+            f"{doc_marker(sha, doc)}\n")
+
+
+def finding_reference(kind: str, number: int, finding: str = "<k>") -> str:
+    """How a work issue names finding `finding` of retro or overhaul `number` (`kind`), the message
+    FINDING_TEMPLATE; the reports give `<k>` for the finding SE fills in."""
+    return sibling("interfaces").write(FINDING_TEMPLATE, {"kind": kind, "number": str(number),
+                                                          "finding": str(finding)})
+
+
+def doc_marker(sha: str, path: str) -> str:
+    """The line that links the retro doc at `path` in commit `sha`, the message DOC_TEMPLATE."""
+    return sibling("interfaces").write(DOC_TEMPLATE, {"sha": sha, "path": path})
 
 
 def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
@@ -1892,8 +2116,10 @@ def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:
             room = size - len(chunks[-1])
             chunks[-1], line = chunks[-1] + line[:room], line[room:]
     total = len(chunks)
-    return [f"{chunk.rstrip(chr(10))}\n\n_Part {index} of {total} of the report of retro "
-            f"#{number}._\n" for index, chunk in enumerate(chunks, 1)]
+    labels = [sibling("interfaces").write(PART_TEMPLATE, {"index": str(index), "total": str(total),
+                                                          "number": str(number)})
+              for index in range(1, total + 1)]
+    return [f"{chunk.rstrip(chr(10))}\n\n{label}\n" for chunk, label in zip(chunks, labels)]
 
 
 def committed_doc(root: Path, draft: Path, text: str, ref: str) -> tuple[str, str]:
@@ -1993,6 +2219,113 @@ def run_file(args: argparse.Namespace) -> int:
     return 0
 
 
+def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
+    """A judged finding as its decision chapter of the deck: it opens with the finding itself, its
+    current situation as the judge wrote it, then its class by name (Classes and homes holds its cause and fix),
+    its home, and last what the person decides (their go for `work`, their decision for `decision`)."""
+    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}, its cause and fix under Classes and homes."]
+    check = f"; check `{item['check']}`" if item.get("check") else ""
+    lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
+              f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
+              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
+    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+
+
+def without_sections(text: str, headings: tuple[str, ...]) -> str:
+    """`text` without its `## <heading>` sections of `headings`, each up to the next heading of its
+    level or higher."""
+    kept, skipping = [], False
+    for line in text.split("\n"):
+        heading = re.match(r"(#{1,2}) (.*)$", line)
+        if heading:
+            skipping = len(heading[1]) == 2 and heading[2].strip() in headings
+        if not skipping:
+            kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def without_table(text: str, header: str) -> str:
+    """`text` without the Markdown table whose header row is `header`."""
+    lines = text.split("\n")
+    if header not in lines:
+        return text
+    start = lines.index(header)
+    end = start
+    while end < len(lines) and lines[end].startswith("|"):
+        end += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines[:start] + lines[end:])).strip()
+
+
+def deck_parts(block: dict, text: str, root: Path | None = None
+               ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """The retro's deck from its judged draft `text` and its block: every step the retro ran as a
+    chapter, each thing once (SE#1826, requirements 8 and 9), then one decision chapter per finding,
+    each written as a chapter note's text.
+
+    - what was collected, without the per-issue table and the field reports' answers
+      (LANDED_SECTION, ANSWERS_SECTION);
+    - the table of what happened, its one table the chapters of the window (STEP_TABLE left out);
+    - the standing questions: the one matrix, then the retro's answer to each question, the field
+      feedback answering the first, so it has no chapter of its own;
+    - the classes with their causes, fixes and homes, each naming its findings, and what went well."""
+    template = retro_template()
+    drafted = steps_of(text).fields
+    classes = judged_classes(block, root)
+
+    def body(name: str) -> str:
+        return review.demoted(str(drafted.get(name) or "None."), -1).strip()
+
+    # The deck's chapters carry no step numbers: the field feedback is no chapter of its own.
+    heading = {name: re.sub(r"^\d+\.\s*", "", template.field(name).heading) for name in
+               ("collect", "timeline", "matrix", "answers", "classes")}
+    answers = re.sub(r"<!--.*?-->\s*", "", str(drafted.get("answers") or "None."), flags=re.DOTALL).strip()
+    first = questions().fields[0].heading
+    feedback = str(drafted.get("field_feedback") or "").strip()
+    if feedback:
+        marker = f"### {first}\n\n"
+        quoted = f"The person's field feedback:\n\n{review.demoted(feedback, 2)}\n\n"
+        answers = (answers.replace(marker, marker + quoted, 1) if marker in answers
+                   else f"{marker}{quoted}{answers}")
+    steps = [(heading["collect"], without_sections(body("collect"), (LANDED_SECTION, ANSWERS_SECTION))),
+             (heading["timeline"], without_table(body("timeline"), STEP_TABLE)),
+             (heading["matrix"], f"{body('matrix')}\n\n## {heading['answers']}\n\n{answers}"),
+             (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block, named_only=True)),
+                                                 -1).strip())]
+    return steps, [finding_chapter(item, classes) for item in block["findings"]]
+
+
+def window_line(block: dict) -> str:
+    """The title page's subtitle: the window's days and how many findings the retro brings."""
+    window = block.get("window") or {}
+    days = [str(window.get(key) or "")[:10] for key in ("since", "until")]
+    span = " to ".join(day for day in days if day) or "the whole history"
+    count = len(block["findings"])
+    return f"{span}: {count} finding{'' if count == 1 else 's'}"
+
+
+def run_deck(args: argparse.Namespace) -> int:
+    root = work_tickets.worktree_root(args.worktree)
+    text = work_tickets.read_file(args.draft, "the retro draft")
+    block = judged(text, args.retro)
+    open_steps = steps_problems(text)
+    if open_steps:
+        raise QueueError(f"The draft of retro #{args.retro} leaves a step of the retro template "
+                         f"({retro_template().path or TEMPLATE_NAME}) open, so no deck was built: "
+                         + "; ".join(open_steps))
+    steps, decisions = deck_parts(block, text, root)
+    deck = sibling("retro_deck")
+    try:
+        written = deck.text(f"Retro #{args.retro}", window_line(block), steps, decisions)
+    except deck.DeckError as error:
+        raise QueueError(f"Retro #{args.retro}: {error}") from None
+    code = deck.build(written, args.destination, args.host, args.answers)
+    if code == 0:
+        print(f"Retro #{args.retro}: the report is the deck {args.destination}, its one file: a title "
+              f"page, {len(steps)} steps and {len(decisions)} decision chapter(s)"
+              + (", the person's answers recorded" if args.answers else ""))
+    return code
+
+
 def since_of(value: str | None) -> str | None:
     """`--since`, a date (YYYY-MM-DD, its midnight UTC) or an ISO time, as GitHub writes times."""
     if value is None:
@@ -2065,19 +2398,25 @@ def file_new(root: Path, repo: str | None) -> str:
     return sibling("overhaul").file_run(root, repo, TEMPLATE, RETRO_LABEL, DUE_SCOPE)
 
 
+# The snippet `retro due` prints, one line per countdown (templates/retro-due.md).
+DUE_TEMPLATE = "retro-due"
+
+
 def countdown_lines(found: dict[str, Countdown]) -> list[str]:
-    """One line per countdown: what it counted since where it starts, and whether it is due or a
-    run of its kind is open."""
-    lines = []
+    """One line per countdown, the snippet DUE_TEMPLATE: what it counted since where it starts,
+    and whether it is due or a run of its kind is open."""
+    retro_item = found["retro"]
+    values = {"retro_landed": str(retro_item.landed), "retro_failed": str(retro_item.failed)}
     for kind in ("retro", "overhaul"):
         item = found[kind]
-        start = f"since #{item.since_run} started {item.since}" if item.since_run else "in the whole history"
-        counted = (f"{item.count} ({item.landed} landed, {item.failed} failed)"
-                   if kind == "retro" else f"{item.count} retros closed")
-        state = (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
-                 else f"due: {item.reason}" if item.due else "not due")
-        lines.append(f"{kind}: {counted} {start}, {item.elapsed_days} days; {state}")
-    return lines
+        values |= {
+            f"{kind}_count": str(item.count),
+            f"{kind}_start": (f"since #{item.since_run} started {item.since}" if item.since_run
+                              else "in the whole history"),
+            f"{kind}_days": str(item.elapsed_days),
+            f"{kind}_state": (f"open: {', '.join(f'#{n}' for n in item.open)}" if item.open
+                              else f"due: {item.reason}" if item.due else "not due")}
+    return sibling("interfaces").write(DUE_TEMPLATE, values).split("\n")
 
 
 def run_due(args: argparse.Namespace) -> int:
@@ -2111,10 +2450,10 @@ def run_due(args: argparse.Namespace) -> int:
 #: command's usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "retro", "Retro",
-    "A retro: collect writes its draft from the work since the last one, file checks the judged "
-    "draft and closes the retro issue with its report, due says whether a retro or an overhaul "
-    "is due or open.",
-    ("collect", "file", "due")),)
+    "A retro: collect writes its draft from the work since the last one, deck builds its one "
+    "report, a deck, from the judged draft, file checks the judged draft and closes the retro "
+    "issue with its report, due says whether a retro or an overhaul is due or open.",
+    ("collect", "deck", "file", "due")),)
 #: The commands that go through kern where it runs (se_components.routed): none, as collect reads
 #: GitHub for minutes and writes the draft, and file writes.
 INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
@@ -2162,6 +2501,28 @@ def make_parser() -> argparse.ArgumentParser:
     collect_command.add_argument("--repo", help="[HOST/]OWNER/REPO of the issues (default: the "
                                                 "tracker or origin remote)")
     collect_command.set_defaults(run=run_collect)
+    deck_command = commands.add_parser(
+        "deck", help="build the retro's one report, a deck, from its judged draft",
+        description="Check the judged draft as file does, then build the retro's one report: a "
+                    "deck from the retro-deck template (templates/retro-deck.md) with a title page, "
+                    "every step the retro ran as a chapter (the field feedback, what was collected, "
+                    "the table of what happened, the standing questions with their matrix, the "
+                    "classes with their findings, causes, fixes and homes) and one decision chapter "
+                    "per finding, last, each asking the person for a bless. It writes the one HTML "
+                    "file DESTINATION and nothing beside it, and never waits for the answers.")
+    deck_command.add_argument("retro", type=int, help="the retro issue's number")
+    deck_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
+                              help="the draft retro.py collect wrote, its block judged")
+    deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
+                              help="the deck's HTML file")
+    deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
+                              help="the host the person's answers go back to (deck.py build "
+                                   "--host; default: the one this runs under)")
+    deck_command.add_argument("--answers", type=Path, metavar="FILE",
+                              help="the person's answers (answers.json): build the deck as their record")
+    deck_command.add_argument("--worktree", default=".",
+                              help="the checkout of the repository (default: .)")
+    deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
         "file", help="check a judged retro draft and close the retro issue with its report",
         description="Check the judgment the judge wrote into the draft's block, refusing an "

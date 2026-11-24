@@ -45,8 +45,8 @@ delivered: the session tools' answers, the sessions `list_sessions` lists, each 
 sessions, so the check then reads the fleet itself.
 
 `restart_after_limit` is off, built in: the report is all that happens. On, the remedy is to
-resume the session once the limit lifts and comment `Restarted after a usage limit:` on its issue,
-at most once per issue. [scripts/limit_restart.py](../scripts/limit_restart.py) owns what counts.
+resume the session once the limit lifts and comment on its issue the line it quotes, which
+`templates/limit-restart.md` writes, at most once per issue. [scripts/limit_restart.py](../scripts/limit_restart.py) owns what counts.
 
 ## Dispatcher
 
@@ -121,13 +121,15 @@ work issue labelled `escalated` (an escalation, a refused landing) updated since
   reason and its number, until the person has decided its findings in an SE session and it is
   closed. Running work goes on, and issues keep coming back; they count towards the next run.
 - **Scope and reset.** A retro covers everything up to its start, what came back after it fell
-  due included; its counters reset when it starts (its issue's creation), so a late retro never
+  due included, and a first retro, where none has closed, the whole history from the project's
+  first issue; its counters reset when it starts (its issue's creation), so a late retro never
   makes the next one due at once.
 - **Own session.** A [retro agent](../src/agents/retro.md) runs each retro and overhaul in its own
   session; its first step asks the person for the field feedback.
 - **One owner.** `scripts/retro.py` owns the count (`retro_countdown`) and the settings;
-  `retro.py due` prints both countdowns. The [start greeting](start.md#start-and-refresh) names a run due
-  or open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
+  `retro.py due` prints both countdowns. It reads back to the newest run's start, all with no
+  retro yet (`recent_reads`). The [start greeting](start.md#start-and-refresh) names a run due or
+  open; SE's retro-due component counts the same from kern's GitHub names, for the greeting to
   read live ([components/README.md](../components/README.md)).
 - **Not counted yet.** A red `main` and a worker stopped by the usage limit leave no mark on an
   issue, so they add nothing until one does.

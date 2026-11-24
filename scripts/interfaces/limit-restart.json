@@ -1,0 +1,20 @@
+{
+  "template": "se/limit-restart",
+  "version": "1.0.0",
+  "says": "A restart after a usage limit: the worker session the integrator resumed.",
+  "message": "Restarted after a usage limit: session {session}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "session": {
+        "type": "string",
+        "description": "The id of the resumed worker session."
+      }
+    },
+    "required": [
+      "session"
+    ],
+    "additionalProperties": false
+  }
+}

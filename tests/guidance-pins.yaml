@@ -5,6 +5,9 @@
 boot-report:
   - discover-cheap-load-late
   - guidance-comes-first
+claim-undone:
+  - discover-cheap-load-late
+  - guidance-comes-first
 decision:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -21,6 +24,9 @@ field-report:
   - platform-code-legs
   - test-paths-on-windows
   - tests-spawn-no-processes
+finding-ref:
+  - discover-cheap-load-late
+  - guidance-comes-first
 generated-marker:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -37,10 +43,16 @@ housekeeping:
 landing:
   - discover-cheap-load-late
   - guidance-comes-first
+limit-restart:
+  - discover-cheap-load-late
+  - guidance-comes-first
 merge-message:
   - discover-cheap-load-late
   - guidance-comes-first
 overhaul:
+  - discover-cheap-load-late
+  - guidance-comes-first
+overhaul-judgment:
   - discover-cheap-load-late
   - guidance-comes-first
 overhaul-questions:
@@ -67,10 +79,37 @@ raid-entry:
 raid-register:
   - discover-cheap-load-late
   - guidance-comes-first
+release-trailer:
+  - discover-cheap-load-late
+  - guidance-comes-first
+requirement:
+  - discover-cheap-load-late
+  - guidance-comes-first
 retro:
   - discover-cheap-load-late
   - guidance-comes-first
+retro-deck:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-doc:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-due:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-judgment:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-part:
+  - discover-cheap-load-late
+  - guidance-comes-first
 review:
+  - discover-cheap-load-late
+  - guidance-comes-first
+review-declined:
+  - discover-cheap-load-late
+  - guidance-comes-first
+review-done:
   - discover-cheap-load-late
   - guidance-comes-first
 routed:
@@ -79,10 +118,16 @@ routed:
 rules-page:
   - discover-cheap-load-late
   - guidance-comes-first
+run-closed:
+  - discover-cheap-load-late
+  - guidance-comes-first
 skills-page:
   - discover-cheap-load-late
   - guidance-comes-first
 standing-questions:
+  - discover-cheap-load-late
+  - guidance-comes-first
+started-comment:
   - discover-cheap-load-late
   - guidance-comes-first
 sub-agents-page:

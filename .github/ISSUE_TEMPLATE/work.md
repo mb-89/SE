@@ -21,7 +21,10 @@ labels: work
 
 ## Approach
 
-<!-- How it is done, then a closing line `Not picked:` naming the alternative and why not. -->
+<!-- How it is done. Each premise it states about the code stands on a line of its own,
+     `Premise: <what holds> (checked: <file>:<line> read)`, or with the command run, as a code
+     span, in place of the file and line. Then a closing line `Not picked:` naming the
+     alternative and why not. -->
 
 ## Reproduction
 
@@ -44,6 +47,8 @@ kind declares it, never the branch name. -->
      (scripts/work_tickets.py block <this> --by <n>). Blocked state is computed from those links
      and from this section, never a label; nobody edits labels by hand. Label `ready` = approved;
      startable = ready and no open blockers. The worktree and branch are created when work starts, from the newest main.
+     Another repository's issue blocks only through its release, at a version the pin admits:
+     `<owner>/<repository>#<n>, released in v<x.y.z>`.
      "None" otherwise. -->
 
 None
@@ -62,7 +67,8 @@ None
 
 ## Requirements
 
-<!-- Numbered, checkable, in the order to do them; commits follow the
+<!-- Numbered, in the order to do them, each one checkable statement of one sentence
+     (templates/requirement.md); commits follow the
      [worker's procedure](../../agents/worker.md#procedure). Keep a package worker-sized:
      one reviewable change, roughly one to five requirements. Split larger work
      (e.g. a scheduler with several commands) into separate issues linked by "Blocked by",

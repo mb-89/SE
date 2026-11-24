@@ -71,6 +71,7 @@ The issues and releases of a and b, newest first in each place, from the snapsho
     "pageSize": 20,
     "groupOrder": [
      "Today",
+     "Waiting for integrator",
      "Needs you",
      "Next",
      "Backlog",
@@ -96,7 +97,8 @@ The issues and releases of a and b, newest first in each place, from the snapsho
     },
     "state_reason": "state_reason",
     "labels": "labels[].name",
-    "pullRequest": "pull_request.url"
+    "pullRequest": "pull_request.url",
+    "delivery": "delivery"
    },
    "derive": {
     "place": [
@@ -144,6 +146,15 @@ The issues and releases of a and b, newest first in each place, from the snapsho
        }
       ],
       "value": "Backlog"
+     },
+     {
+      "where": [
+       {
+        "field": "delivery",
+        "exists": true
+       }
+      ],
+      "value": "Waiting for integrator"
      },
      {
       "where": [
@@ -203,6 +214,15 @@ The issues and releases of a and b, newest first in each place, from the snapsho
        }
       ],
       "value": "needs you"
+     },
+     {
+      "where": [
+       {
+        "field": "delivery",
+        "exists": true
+       }
+      ],
+      "value": "delivered, waiting for the integrator"
      },
      {
       "where": [

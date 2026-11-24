@@ -1,7 +1,11 @@
 # Every generator of this checkout, the source it reads and the tracked paths it writes, and how a
 # fresh run is compared (`check`, `held_by` or `unchecked`). scripts/generated.py reads it; the
 # guidance note generated-files-are-marked owns the rule. A program that writes a tracked file is
-# a generator and is declared here, with the marker it writes.
+# a generator and is declared here, with the marker it writes. `regenerate`, where a merge can rerun
+# it offline, is the command that writes its outputs afresh: integrate's merge and the merge's commit
+# hooks run it, so a merge never stops on its outputs (.gitattributes gives them merge=se-generated).
+# The others are left out: se_modules.py sync moves pins over the network, file-seconds measures CI,
+# tests/recorded.py writes only inside its test with SE_RECORD set, and the Go golden needs a build.
 generators:
   - generator: se_plugin.py build
     source: src/ and guidance/
@@ -16,16 +20,19 @@ generators:
       - docs/rules.md
       - docs/sub-agents.md
     check: ["uv", "run", "python", "scripts/se_plugin.py", "check"]
+    regenerate: ["uv", "run", "python", "scripts/se_plugin.py", "build"]
   - generator: work_tickets.py docs
     source: the scripts' parsers
     outputs:
       - components/*/component.toml
     check: ["uv", "run", "python", "scripts/work_tickets.py", "docs", "--check"]
+    regenerate: ["uv", "run", "python", "scripts/work_tickets.py", "docs"]
   - generator: templates.py interfaces
     source: templates/
     outputs:
       - scripts/interfaces/*.json
     check: ["uv", "run", "python", "scripts/templates.py", "interfaces", "--check"]
+    regenerate: ["uv", "run", "python", "scripts/templates.py", "interfaces"]
   - generator: se_modules.py sync
     source: se.toml
     outputs:
@@ -36,6 +43,7 @@ generators:
     outputs:
       - tests/guidance-pins.yaml
     held_by: tests/test_guidance.py
+    regenerate: ["uv", "run", "python", "scripts/se_guidance.py", "pin"]
   - generator: work_tickets.py file-seconds
     source: CI's check run
     outputs:
@@ -51,6 +59,7 @@ generators:
     outputs:
       - components/template/testdata/cases/*.json
     held_by: tests/test_template_cases.py
+    regenerate: ["uv", "run", "python", "tests/template_cases.py"]
   - generator: mcp_surface_test.go -golden
     source: SE's live tool list
     outputs:

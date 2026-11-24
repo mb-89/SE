@@ -59,9 +59,10 @@ its tools.
     turn-start check below prints the fleet check's plan; run it with your GitHub tools, pass the
     lists back to `work_tickets.py fleet-check` as it says, and present its findings
     ([Fleet check](../docs/fleet.md#fleet-check)).
-- **Update**: the report's last line names the one update, `/se:update`, the skill
-  [update](../skills/update/SKILL.md), which takes every newer release, across a major too, and
-  follows the upgrade guide's sections between ([docs/boot.md](../docs/boot.md#the-update)).
+- **Update**: where one is due, the report's last line names the one update, `/se:update`, the
+  skill [update](../skills/update/SKILL.md), which takes every newer release, across a major too,
+  and follows the upgrade guide's sections between ([docs/boot.md](../docs/boot.md#the-update)).
+  A newer release of a component SE locks arrives with the next SE release; no update moves it.
   - In a cloud session (`CLAUDE_CODE_REMOTE` is `true`) follow the update skill as your first
     action, before any other work, right after the report, and wait for it; then report once what
     moved and what is left.
@@ -71,6 +72,9 @@ its tools.
     work on the checkout until the person has decided.
   - `se_start.py boot` lists every pin with its pinned, locked and newest version and changes
     nothing: run it when the person asks what is behind.
+- **Timeline**: when the person asks for the Timeline, the status, what is done, or what waits for
+  the integrator or for them, load the skill [timeline](../skills/timeline/SKILL.md) and give the
+  published page's link at once; never rebuild the page in the session.
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
@@ -105,6 +109,15 @@ its tools.
   - Write its body file, `.se/issues/<name>.md`, with `templates.py fill work-file --path <file>`
     and file it with `--body-file <file>`; the hook refuses a write that leaves it off its template
     ([docs/templating.md "Templates"](../docs/templating.md#templates)).
+  - Split its requirements by the repository that owns them: a work issue holds only what its
+    own repository can meet. A part another repository's code owns becomes that repository's
+    issue.
+    - The work issue that needs that part is blocked by its release at a version its pin admits,
+      its Blocked by line `<owner>/<repository>#<n>, released in v<x.y.z>`.
+    - `work_tickets.py file` refuses another repository's issue there that names no release.
+  - Each premise its Approach states about the code (a term, a capability, a cause) names how it
+    was checked, the file and line read or the command run, as the
+    [work template](../templates/work.md)'s Approach says; `file` refuses one that names none.
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) says.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with
@@ -122,19 +135,22 @@ its tools.
     session. It asks the person for the field feedback first, runs the template's `retro.py
     collect` and `retro.py file`, has the person decide every finding, and closes the issue.
   - When it reports the issue closed, file its work findings: a work issue names each finding it
-    takes as `retro #<n> finding <k>`, so the next retro scores it.
+    takes as the message `templates/finding-ref.md` writes it, so the next retro scores it.
 - **Overhaul issues**, to ask whether the design is still right, fall due after enough retros or
   days ([docs/fleet.md "Retro due"](../docs/fleet.md#retro-due)) and are filed the same way, from
   [overhaul.md](../.github/ISSUE_TEMPLATE/overhaul.md) (`overhaul.py new` files one by hand).
   - A retro agent runs it, `overhaul.py read` then `overhaul.py file`, which closes it with its
     report ([README](../docs/work-commands.md#work-commands)).
-  - A work issue you file from it names each finding it takes as `overhaul #<n> finding <k>`, so
-    the next overhaul scores it.
+  - A work issue you file from it names each finding it takes the same way, so the next overhaul
+    scores it.
 - **Sessions**: one worker per work issue in its own fresh worktree from the newest `main` (the work
   model's [Worktrees](../skills/work-model/SKILL.md#worktrees)), started as an independent session
   whose prompt names only the worker agent, the issue, the worktree and the integrator session.
   Start exactly one integrator session for each repository you dispatch into; its prompt names the
   main checkout and your session (for escalations).
+  - Start no worker while more delivered pull requests wait than `[workers] queue_limit`,
+    default 10: count those the turn-start check lists against it, as `start` and `claim`
+    refuse beyond it ([docs/settings.md "Workers"](../docs/settings.md#workers)).
   - Every session you start is titled by `work_tickets.py session-title` and tagged `SE`, as the
     work model's [Visible sessions](../skills/work-model/SKILL.md#visible-sessions) says: an integrator
     `session-title integrator <project>`, so `SE/<project>/integrator`.

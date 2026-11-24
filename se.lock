@@ -2,16 +2,16 @@
 # The commits scripts/se_modules.py resolved for the version ranges and go.mod pins of the components se.toml lists, and of theirs; sync and update write it, commit it.
 
 [components.kern]
-version = "2.1.0"
-ref = "5cc4a0103cea5d96a2e4634f77bd6c53b02bd31a"
+version = "3.0.0"
+ref = "f08764df9ca3d50098906955b2df3e892e8b881c"
 
 [components.obs]
 version = "10.4.0"
 ref = "d6358a1c09548f77f9b67bfdb5bb16a4b484e81c"
 
 [components.obs-html]
-version = "0.5.2"
-ref = "c7e08986501bf2f7136566e832283d1b2b7c1e58"
+version = "0.6.1"
+ref = "020b43519a6c9b40c4ea60bf848b81cd75a31cd2"
 
 [components.obs-html-style-generic]
 version = "1.0.0"

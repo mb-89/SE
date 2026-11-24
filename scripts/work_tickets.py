@@ -1063,6 +1063,7 @@ metrics = sibling("metrics")
 trust = sibling("ci_trust")
 feedback = sibling("feedback")
 component_versions = sibling("component_versions")
+generated_files = sibling("generated")
 
 
 def tracker_references(text: str) -> list[tuple[int, str]]:
@@ -3158,9 +3159,10 @@ def release_trailer(root: Path, branch: str, issue_body: str, report_body: str |
     report's Release kind on a first integration, and on a re-integration (an earlier merge of
     `branch` is on the integration branch) its Re-integration kind, patch without a report."""
     if integrated_before(root, branch):
-        return f"{RELEASE_TRAILER}: {reintegration_kind(report_body)}"
-    return (f"{RELEASE_TRAILER}: "
-            f"{declared_release_kind(branch, report_body, issue_body, project_version(root))}")
+        kind = reintegration_kind(report_body)
+    else:
+        kind = declared_release_kind(branch, report_body, issue_body, project_version(root))
+    return interface_message("release-trailer", kind=kind)
 
 
 def branch_head(root: Path, branch: str) -> str:
@@ -4513,9 +4515,7 @@ def forget_claim(root: Path, number: int) -> None:
     claim_record_path(root, number).unlink(missing_ok=True)
 
 
-UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment
-UNCLAIMED_COMMENT = (UNCLAIMED_MARK + " {started} started no worker; `ready`, `claim` and `start` "
-                     "take its branch `{branch}` again.\n")
+UNCLAIMED_MARK = "Claim undone:"  # opens unclaim's answer to a Started comment (templates/claim-undone.md)
 
 
 def unclaim(root: Path, number: int, repo: str) -> str:
@@ -4548,7 +4548,7 @@ def unclaim(root: Path, number: int, repo: str) -> str:
                           for comment in comments[starts[-1] + 1:]):
         started = str(comments[starts[-1]].get("url") or "") or "its Started comment"
         run_gh_with_body(root, ["issue", "comment", str(number), *where],
-                         UNCLAIMED_COMMENT.format(started=started, branch=branch))
+                         interface_message("claim-undone", started=started, branch=branch) + "\n")
         done.append("Started comment answered")
     return f"Unclaimed #{number}: {', '.join(done) if done else 'nothing left to undo'}"
 
@@ -4834,6 +4834,7 @@ def start(
     )
     if issue is None:
         raise QueueError(f"Issue #{number} is not startable")
+    refuse_long_queue(root, number, len(delivered_pull_requests(root, repo)))
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     slots = capacity(root, repo, cloud=in_cloud() or cloud)
     if slots is not None and slots <= 0:
@@ -4876,7 +4877,7 @@ def start(
 def post_started(root: Path, number: int, repo: str, branch: str) -> None:
     """Post the Started comment on work issue #`number` through gh, as `start_plan`'s last step."""
     run_gh_with_body(root, ["issue", "comment", str(number), *repo_arguments(repo)],
-                     STARTED_COMMENT.format(branch=branch))
+                     started_comment(branch))
 
 
 def start_worktree(root: Path, number: int, repo: str, branch: str, worktree_root: str | None,
@@ -4942,7 +4943,9 @@ def branch_worktree(root: Path, branch: str) -> Path | None:
     return None
 
 
-STARTED_COMMENT = "Started: worker session on branch `{branch}`\n"
+def started_comment(branch: str) -> str:
+    """The Started comment of a worker on `branch` (templates/started-comment.md)."""
+    return interface_message("started-comment", branch=branch) + "\n"
 
 
 def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: bool) -> Plan:
@@ -4960,7 +4963,7 @@ def start_plan(repo: str, number: int, branch: str, agent: str | None, paused: b
             "assignees": [agent]}),) if agent else ()),
         Step("comment_issue", "add_issue_comment", {
             **owner_repo(repo), "issue_number": number,
-            "body": STARTED_COMMENT.format(branch=branch)},
+            "body": started_comment(branch)},
             note="followed by the host's footer where it requires one on every comment"),
     ), f"#{number} is started: in-progress, with its Started comment")
 
@@ -5062,15 +5065,16 @@ def refuse_full_start(root: Path, number: int, repo: str, cloud: bool, door: obj
 def start_handed_off(
     root: Path, number: int, repo: str, worktree_root: str | None, create: bool,
     cloud_agent: str | None, issue_file: Path | None, blockers_file: Path | None = None,
-    running_file: Path | None = None,
+    running_file: Path | None = None, delivered_file: Path | None = None,
 ) -> tuple[Path | None, str, str]:
     """`start` where gh cannot reach GitHub: the issue as the relay reads it, else as the session's
     GitHub tools answered it (`issue_file`); held while a blocker holds it (`refuse_held_start`,
     its states from `blockers_file` off the relay); the worktree as with gh; then the label change
     and the Started comment sent through kern's relay where it serves the checkout, else printed as
     steps for the session's GitHub tools; refused where the worker limit is reached
-    (`refuse_full_start`, the workers running from `running_file` off the relay). The worktree
-    (None for a cloud worker), the issue's URL and its branch."""
+    (`refuse_full_start`, the workers running from `running_file` off the relay), or while more
+    delivered pull requests wait than the queue limit (`refuse_long_queue`, from `delivered_file`
+    off the relay). The worktree (None for a cloud worker), the issue's URL and its branch."""
     door = relay_door(root, repo)
     if door is not None:
         refuse_while_paused("start", door.paused(repo))
@@ -5093,6 +5097,8 @@ def start_handed_off(
         raise QueueError(f"Issue #{number} is not startable: it is labelled "
                          f"{', '.join(sorted(labels & NOT_STARTABLE_LABELS))}")
     refuse_held_start(number, issue, door, blockers_file)
+    refuse_long_queue(root, number, delivered_count(root, number, repo, door, delivered_file,
+                                                    "start"))
     cloud = os.environ.get("GITHUB_ACTIONS", "").lower() == "true" or cloud_agent is not None
     refuse_full_start(root, number, repo, in_cloud() or cloud, door, running_file)
     agent = cloud_agent or os.environ.get("SE_CLOUD_AGENT", "")
@@ -5242,10 +5248,10 @@ def worker_limit(root: Path, cloud: bool) -> int | None:
     """At most this many working agents run at once (docs/settings.md "Workers"): `se.toml` `[workers]`
     `local` on a local device, default LOCAL_WORKERS; `cloud` in the cloud, unset no limit (None)."""
     table = se_table(root, "workers")
-    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours"})
+    unknown = sorted(set(table) - {"local", "cloud", "claim_timeout_hours", "queue_limit"})
     if unknown:
         raise QueueError(f"[workers] in {root / 'se.toml'} holds unknown keys {', '.join(unknown)}; "
-                         "it holds local, cloud and claim_timeout_hours")
+                         "it holds local, cloud, claim_timeout_hours and queue_limit")
     key = "cloud" if cloud else "local"
     value = table.get(key, None if cloud else LOCAL_WORKERS)
     if value is None:
@@ -5295,10 +5301,15 @@ def capacity(root: Path, repo: str | None, all_repos: bool = False,
 def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
     """Delivered, waiting for integration: the open pull requests to the integration branch whose
     description carries a complete field report, one that follows its template."""
-    pulls = json.loads(run_gh(root, [
+    return delivered_in(root, json.loads(run_gh(root, [
         "pr", "list", "--state", "open", "--base", integration_branch(root),
         "--json", "number,title,url,body", "--limit", "200", *repo_arguments(remote_repo(root) or repo),
-    ]))
+    ]) or "[]"))
+
+
+def delivered_in(root: Path, pulls: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The delivered pull requests among `pulls` (gh's or the GitHub tools' open pull requests to
+    the integration branch): those whose description carries a complete field report."""
     delivered = []
     for pull in pulls:
         try:
@@ -5308,6 +5319,71 @@ def delivered_pull_requests(root: Path, repo: str) -> list[dict[str, object]]:
         if not field_report_problems(report, None, project_version(root)):
             delivered.append(pull)
     return delivered
+
+
+QUEUE_LIMIT = 10  # [workers] queue_limit, unset: no worker starts while more delivered wait
+
+
+def queue_limit(root: Path) -> int:
+    """At most this many delivered pull requests wait for the integrator while a worker starts
+    (docs/settings.md "Workers"): `se.toml` `[workers]` `queue_limit`, default QUEUE_LIMIT. A worker started
+    behind a longer queue branches from a main several landings old and merges them all again."""
+    value = se_table(root, "workers").get("queue_limit", QUEUE_LIMIT)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise QueueError(f"[workers] queue_limit in {root / 'se.toml'} must be a whole number of at "
+                         f"least 0, not {value!r}")
+    return value
+
+
+def queue_line(delivered: int, limit: int) -> str:
+    """`queue`'s count of the delivered pull requests against the queue limit (`queue_limit`)."""
+    return (f"Landing queue: {delivered} delivered of at most {limit} ([workers] queue_limit in "
+            "se.toml)" + ("; no worker starts until the integrator lands "
+                          f"{delivered - limit}" if delivered > limit else ""))
+
+
+def refuse_long_queue(root: Path, number: int, delivered: int) -> None:
+    """Refuse to start or claim work issue #`number` while more delivered pull requests wait for
+    the integrator than the queue limit (`queue_limit`), naming the count and the limit."""
+    limit = queue_limit(root)
+    if delivered > limit:
+        raise QueueError(f"Issue #{number} is not startable: {delivered} delivered pull requests "
+                         f"wait for the integrator, more than the queue limit of {limit} "
+                         "([workers] queue_limit in se.toml); start it once the integrator has "
+                         f"landed {delivered - limit}")
+
+
+def delivered_step(root: Path, repo: str) -> Step:
+    """The read of the open pull requests to the integration branch, for the session's GitHub
+    tools; those whose description carries a complete field report are delivered."""
+    return Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
+                                                    "state": "open", "base": integration_branch(root),
+                                                    "perPage": 100},
+                note="a pull request is delivered where its description carries a complete field "
+                     "report: save the description to a file and run work_tickets.py field-report "
+                     f"--check <file> on it; more than {queue_limit(root)} delivered ([workers] "
+                     "queue_limit in se.toml): start no worker")
+
+
+def delivered_count(root: Path, number: int, repo: str, door: object | None,
+                    delivered_file: Path | None, command: str) -> int:
+    """How many delivered pull requests wait, for `start` or `claim` of #`number`: read with gh,
+    else through kern's relay (`delivered_step`), else from `delivered_file`, the GitHub tools'
+    `list_pull_requests` answer saved unchanged. Not read is no empty queue (rule gen-003)."""
+    if not hand_off():
+        return len(delivered_pull_requests(root, repo))
+    step = delivered_step(root, repo)
+    if door is not None:
+        answer = door.ask(step.tool, step.arguments)
+    elif delivered_file is not None:
+        answer = json_answer(delivered_file, "delivered pull requests")
+    else:
+        raise QueueError(
+            f"{command}: no worker starts while more than {queue_limit(root)} delivered pull "
+            f"requests wait ([workers] queue_limit in se.toml), so {command} counts them: list them "
+            f"with your GitHub tools ({step.tool}, {json.dumps(step.arguments)}), save the answer "
+            f"unchanged and pass --delivered <file> ({WITHOUT_GH})")
+    return len(delivered_in(root, tool_items(answer, "pull_requests")))
 
 
 def queue(
@@ -6059,6 +6135,61 @@ def refuse_dangling(repo: str, command: str, body: str) -> None:
             + "\n".join(f"  {finding}" for finding in found))
 
 
+#: Another repository's issue in a work issue's Blocked by: `<owner>/<repository>#<n>`, or a link
+#: to it, `.../<owner>/<repository>/issues/<n>`.
+FOREIGN_ISSUE = re.compile(
+    r"(?:(?<![\w./-])(?P<short>[\w.-]+/[\w.-]+)#\d+\b)"
+    r"|(?:/(?P<linked>[\w.-]+/[\w.-]+)/(?:issues|pull)/\d+\b)")
+#: The release a line names: a semantic version, `v2.3.0` or `2.3.0`.
+RELEASE_VERSION = re.compile(r"(?<![\w.])v?\d+\.\d+\.\d+\b")
+#: A premise the Approach states about the code: a line `Premise: <what holds> (checked: <how>)`,
+#: the work template's Approach says (templates/work.md).
+PREMISE_LINE = re.compile(r"^\s*(?:[-*]\s+)?\**premise\**\s*:", re.IGNORECASE)
+#: How a premise was checked: `checked:` and then the file and line read (`<file>:<line>`) or the
+#: command run, as a code span.
+PREMISE_CHECK = re.compile(r"\bchecked\s*:\s*.*?(?:[\w./-]+:\d+|`[^`]+`)", re.IGNORECASE)
+
+
+def unreleased_blockers(repo: str, body: str) -> list[str]:
+    """The lines of the body's Blocked by that name another repository's issue and no release:
+    a part another repository owns blocks the work only through its release, at a version the
+    work's pin admits (agents/se.md, Work issues)."""
+    own = api_repo(repo).casefold()
+    found = []
+    for line in section(markdown_sections(body), "blocked by").splitlines():
+        foreign = [match.group("short") or match.group("linked")
+                   for match in FOREIGN_ISSUE.finditer(line)]
+        if any(name.casefold() != own for name in foreign) and not RELEASE_VERSION.search(line):
+            found.append(line.strip())
+    return found
+
+
+def unchecked_premises(body: str) -> list[str]:
+    """The `Premise:` lines of the body's Approach that name no check: neither the file and line
+    read nor the command run (templates/work.md, Approach)."""
+    found, fenced = [], False
+    for line in section(markdown_sections(body), "approach").splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and PREMISE_LINE.match(line) and not PREMISE_CHECK.search(line):
+            found.append(line.strip())
+    return found
+
+
+def refuse_unchecked_filing(repo: str, command: str, body: str) -> None:
+    """Refuse a work issue whose Blocked by names another repository's issue without its release
+    (`unreleased_blockers`), or whose Approach states a premise about the code without its check
+    (`unchecked_premises`), naming each line."""
+    problems = [f"  Blocked by: {line}: another repository's issue blocks only through its "
+                "release; name the release at a version the pin admits, `<owner>/<repository>#<n>, "
+                "released in v<x.y.z>`, or split the requirement off as that repository's issue"
+                for line in unreleased_blockers(repo, body)]
+    problems += [f"  Approach: {line}: name how the premise was checked, `(checked: <file>:<line> "
+                 "read)` or `(checked: `<command>` run)`" for line in unchecked_premises(body)]
+    if problems:
+        raise QueueError(f"{command}: the work issue is not ready to file:\n" + "\n".join(problems))
+
+
 def template_of(name: str):
     """The template `name` of SE's templates (`templates.load`), a QueueError where they do not load."""
     templates = sibling("templates")
@@ -6473,6 +6604,7 @@ def file_work_issue(
     labels = [*(label for label in work_labels(root, repo) if ready or label != "ready"),
               *(label for label in extra if label.strip())]
     repo = resolve_repo(root, repo)
+    refuse_unchecked_filing(repo, "file", body)
     if gate:
         filing_check(root, repo, "file")
     first = [label for label in labels if not blockers or label != "ready"]
@@ -9299,10 +9431,16 @@ def integrate(
     if merged.returncode != 0:
         conflicts = run_git(root, "diff", "--name-only", "--diff-filter=U")
         conflicted = [line for line in conflicts.stdout.splitlines() if line.strip()]
+        regenerable = generated_files.regenerable(root)
+        def regenerated(path: str) -> bool:
+            return generated_files.regenerated_by(regenerable, path) is not None
         if not component_versions.merge_past_claims(root, conflicted, base, branch_head(root, branch),
-                                                    landing, f"Integrate {branch}"):
+                                                    landing, f"Integrate {branch}", regenerated):
             abandon_landing(root, target, landing)
             raise QueueError(f"Cannot merge {branch}; conflicts: {', '.join(conflicted) or 'unknown files'}")
+        taken = [path for path in conflicted if regenerated(path)]
+        if taken:
+            print(f"Merge: {', '.join(taken)} conflicted; took {target}'s, which the merge regenerates")
     component_tags = assign_component_versions(root, target, landing, base, branch, report)
     regenerate_merge(root, target, landing, branch)
     if work_issue is None:  # through the relay: read once the branch has passed the local guards
@@ -9514,25 +9652,25 @@ def assign_component_versions(root: Path, target: str, landing: str, base: str, 
 
 
 def regenerate_merge(root: Path, target: str, landing: str, branch: str) -> None:
-    """Run `project.release_build` on the merge on `landing` and stage what it rewrites, so the
-    merge already holds the generated files the suite's build writes (a plugin manifest carrying
-    the project version): a branch never goes stale by them, and the suite's verdict is recorded
-    on the merge's tree. A failing build abandons the landing with its output."""
+    """Run `project.release_build` and every generator `generated.yaml` gives a `regenerate` on
+    the merge on `landing`, and stage what each rewrites, so the merge already holds the generated
+    files the suite's build writes (a plugin manifest carrying the project version) and fresh
+    generated files where both sides changed their source (scripts/generated.py "The merge"): a
+    branch never goes stale by them, and the suite's verdict is recorded on the merge's tree. A
+    failing run abandons the landing with its output."""
     command = release_build(root)
-    if command is None:
-        return
-    before = changed_paths(root)
-    result = process_door.run(command, cwd=root, shell=False, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", check=False)
-    if result.returncode != 0:
+    commands = [("project.release_build", tuple(command))] if command is not None else []
+    commands += [(name, regenerate) for name, regenerate in generated_files.declared_commands(root)
+                 if list(regenerate) != command]
+    try:
+        done = generated_files.regenerate(root, commands)
+    except generated_files.RegenerateError as error:
         abandon_landing(root, target, landing)
-        output = (result.stdout + result.stderr).strip() or f"exit code {result.returncode}"
-        raise QueueError(f"Cannot merge {branch}: project.release_build ({' '.join(command)}) "
-                         f"failed on the merge; nothing was merged:\n{output}")
-    paths = sorted(changed_paths(root) - before)
-    if paths:
-        checked_git(root, "add", "--", *paths)
-        print(f"Merge: release_build regenerated {', '.join(paths)}")
+        raise QueueError(f"Cannot merge {branch}: {error.what} failed on the merge; nothing was "
+                         f"merged:\n{error.output}") from None
+    for label, paths in done:
+        if paths:
+            print(f"Merge: {label.removeprefix('project.')} regenerated {', '.join(paths)}")
 
 
 def landed_metrics(state: dict[str, object], landing_pull: int, description: str) -> None:
@@ -9818,8 +9956,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(f"#{work_number} stays open for its planned pieces left; its last piece closes it: "
               f"{'; '.join(pieces)}")
     if left:
-        print(f"escalated #{work_number}: stays open for what its partial delivery left; re-scope "
-              f"the issue or take it to the owner: {'; '.join(left)}")
+        print(interface_message("escalation", issue=str(work_number),
+                                question="stays open for what its partial delivery left; re-scope the "
+                                         f"issue or take it to the owner: {'; '.join(left)}"))
     try:
         remove_worker_worktree(root, branch, took)
         print("Cleanup: worker worktree removed")
@@ -9837,8 +9976,9 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
         print(STARTED_NONE_HERE)
         return short
     started, waiting = start_startable(root, tracker)
-    print(f"Started: {started}" + (f"; {waiting} startable wait for capacity, the next landing "
-                                   "starts them" if waiting else ""))
+    print(f"Started: {started}" + (f"; {waiting} startable wait for capacity or for the landing "
+                                   "queue ([workers] queue_limit), the next landing starts them"
+                                   if waiting else ""))
     return short
 
 
@@ -9850,8 +9990,11 @@ STARTED_NONE_HERE = "Started: none here; start what is unblocked with the host's
 def start_startable(root: Path, repo: str) -> tuple[int, int]:
     """Start every startable work issue while capacity is left (`capacity`: the worker limit, on a
     local device also its cores and memory), as `integrate` does after each landing, so a worker
-    that finished frees its place for the next. How many started, and how many wait."""
+    that finished frees its place for the next; none while more delivered pull requests wait
+    than the queue limit (`queue_limit`). How many started, and how many wait."""
     startable = ready_issues(root, repo)
+    if startable and len(delivered_pull_requests(root, repo)) > queue_limit(root):
+        return 0, len(startable)
     for index, candidate in enumerate(startable):
         slots = capacity(root, repo)
         if slots is not None and slots <= 0:
@@ -10328,8 +10471,10 @@ def refs_request_read_back(root: Path, number: int, triples: list[tuple[str, str
             "(git ls-remote); nothing was escalated. Write the triples from origin's refs, then "
             "run refs request again")
     after = "after these steps, " if door is None else ""
-    return (f"{after}escalated #{number}: apply the ref change ({len(triples)} ref(s), dry run "
-            f"passed)? On yes: work_tickets.py refs apply {number}")
+    return after + interface_message(
+        "escalation", issue=str(number),
+        question=f"apply the ref change ({len(triples)} ref(s), dry run passed)? On yes: "
+                 f"work_tickets.py refs apply {number}")
 
 
 def posted_request(comments: list[dict[str, object]], number: int
@@ -12383,6 +12528,13 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+DELIVERED = arg("--delivered", type=Path, metavar="FILE",
+                help="without gh, off kern's relay: the open pull requests to the integration "
+                     "branch as your GitHub tools' list_pull_requests answered them, saved "
+                     "unchanged; refused while more than [workers] queue_limit in se.toml "
+                     "(default 10) of them carry a complete field report")
+
+
 @command("start", "start a ready work issue: claim its branch on the issue's remote, worktree "
                   "from it, label in-progress; "
                   "without gh, the label change and the Started comment as GitHub steps, or "
@@ -12406,13 +12558,14 @@ def run_config(root: Path, args: argparse.Namespace) -> int:
              help="without gh, off kern's relay, where a worker limit holds ([workers] in "
                   "se.toml): the open issues labelled in-progress as your GitHub tools' "
                   "list_issues answered it, saved unchanged; start refuses while as many workers "
-                  "run as the limit"))
+                  "run as the limit"),
+         DELIVERED)
 def run_start(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     if hand_off():
         path, url, branch = start_handed_off(root, args.issue, repo, args.worktree_root,
                                              args.create, args.cloud_agent, args.issue_body,
-                                             args.blockers, args.running)
+                                             args.blockers, args.running, args.delivered)
         sent = relay_door(root, repo) is not None
     else:
         path = start(root, args.issue, args.repo, args.worktree_root, args.create, args.cloud_agent)
@@ -12430,16 +12583,20 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
 
 @command("claim", "claim a ready issue for a session-tool start: its branch at the newest main "
                   "on the issue's remote, or an unused claim there; refused where another start "
-                  "holds it",
+                  "holds it or the landing queue is full",
          WORKTREE,
          arg("issue", type=int),
          REPO,
          arg("--issue-body", type=Path, metavar="FILE",
              help="without gh, off kern's relay: the issue as your GitHub tools' issue_read "
-                  "(method get) answered it, for its branch name and its labels"))
+                  "(method get) answered it, for its branch name and its labels"),
+         DELIVERED)
 def run_claim(root: Path, args: argparse.Namespace) -> int:
     repo = resolve_repo(root, args.repo)
     issue = claimed_issue(root, args.issue, repo, args.issue_body)
+    door = relay_door(root, repo) if hand_off() else None
+    refuse_long_queue(root, args.issue, delivered_count(root, args.issue, repo, door,
+                                                        args.delivered, "claim"))
     branch, commit = str(issue["title"]), newest_integration_commit(root)
     remote = claim(root, args.issue, repo, branch, commit,
                    reuse=IN_PROGRESS_LABEL not in issue_labels(issue))
@@ -12609,17 +12766,12 @@ def queue_plan(root: Path, repo: str, all_repos: bool = False) -> Plan:
     limit = worker_limit(root, cloud=True)
     where = owner_repo(repo)
     labels = [] if all_repos else [repository_label(root)]
-    base = integration_branch(root)
     return Plan(f"queue of {repo}", (
         pause_step(repo),
         Step("escalations", "list_issues", {**where, "state": "OPEN",
                                             "labels": ["escalated", *labels], "perPage": 100},
              note="each issue listed is an escalation"),
-        Step("delivered", "list_pull_requests", {**owner_repo(remote_repo(root) or repo),
-                                                 "state": "open", "base": base, "perPage": 100},
-             note="a pull request is delivered where its description carries a complete field "
-                  "report: save the description to a file and run work_tickets.py field-report "
-                  "--check <file> on it"),
+        delivered_step(root, repo),
         Step("ready", "list_issues", {**where, "state": "OPEN", "labels": ["work", "ready", *labels],
                                       "perPage": 100},
              note="startable: none of the labels " + ", ".join(sorted(NOT_STARTABLE_LABELS
@@ -12654,6 +12806,7 @@ def run_queue(root: Path, args: argparse.Namespace) -> int:
     delivered, escalations, ready, slots = queue(root, repo, args.all_repos)
     for pull in delivered:
         print(f"delivered PR #{pull['number']} {pull['title']} {pull['url']}")
+    print(queue_line(len(delivered), queue_limit(root)))
     for escalation in escalations:
         print(f"escalated #{escalation['number']} {escalation['title']} {escalation['url']}")
     print("Capacity: unlimited (cloud)" if slots is None else f"Capacity: {slots}")

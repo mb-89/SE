@@ -81,7 +81,7 @@ settings checks and the generated docs.
 | Command | Usage | What it does |
 |---|---|---|
 | `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running |
-| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue` | claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it |
+| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] [--delivered FILE] issue` | claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it or the landing queue is full |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
 | `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (docs/fleet.md "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the command reference in docs/work-commands.md from them; with --check, only refuse a declaration or a reference that differs |
@@ -100,7 +100,7 @@ settings checks and the generated docs.
 | `work_tickets.py release-trailer` | `work_tickets.py release-trailer [--worktree WORKTREE] --issue-body ISSUE_BODY [--pr-description FILE] [--include-late REASON] branch` | print the Release-kind trailer an integration merge of <branch> carries, from its field report's Release kind (a re-integration's from its Re-integration kind); push requires it |
 | `work_tickets.py session-title` | `work_tickets.py session-title {se,integrator,worker,reviewer,retro,researcher,spike} [project] [topic]` | print the title of a session a role starts: `SE`, `SE/<project>/integrator[/<area>]` or `SE/<project>/<role>/<topic>` (work model, Visible sessions) |
 | `work_tickets.py settings-check` | `work_tickets.py settings-check [--worktree WORKTREE] [--repo REPO] [--ruleset FILE] [--scheduled-tasks FILE] [--environment FILE] [--strict]` | compare the fleet's settings the repository records (fleet/settings.toml) with the live ones, each difference in one line: main's ruleset through gh where it is signed in or from --ruleset, the scheduled tasks and the cloud environment from the answers of the session's list_triggers and get_environment tools; a part whose door is missing and a value recorded as unchecked are reported unchecked, never as a difference. Advisory: exit code 0 whatever it finds, 1 for a difference only with --strict. It only reads |
-| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
+| `work_tickets.py start` | `work_tickets.py start --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--no-create] [--cloud-agent CLOUD_AGENT] [--issue-body FILE] [--blockers FILE] [--running FILE] [--delivered FILE] issue` | start a ready work issue: claim its branch on the issue's remote, worktree from it, label in-progress; without gh, the label change and the Started comment as GitHub steps, or through kern's relay where it serves the checkout |
 | `work_tickets.py suite` | `work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full] [--record-file-seconds PATH] [--keep-test-reports DIR]` | run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (docs/tests.md "Test budget") |
 | `work_tickets.py suite-shard` | `work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ...` | on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (docs/tests.md "Test budget") |
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (docs/tests.md "Test budget") |
@@ -120,23 +120,26 @@ and the report it files as one comment.
 
 #### Retro
 
-`components/retro`: A retro: collect writes its draft from the work since the last one, file checks
-the judged draft and closes the retro issue with its report, due says whether a retro or an overhaul
-is due or open.
+`components/retro`: A retro: collect writes its draft from the work since the last one, deck builds
+its one report, a deck, from the judged draft, file checks the judged draft and closes the retro
+issue with its report, due says whether a retro or an overhaul is due or open.
 
 | Command | Usage | What it does |
 |---|---|---|
 | `retro.py collect` | `retro.py collect [--since DATE \| --retro ISSUE] [--out FILE] [--json] [--signals FILE [FILE ...]] [--refusals] [--sessions FILE] [--answers DIR] [--worktree WORKTREE] [--repo REPO] retro` | read a retro's window from GitHub and write its draft |
+| `retro.py deck` | `retro.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] [--worktree WORKTREE] retro` | build the retro's one report, a deck, from its judged draft |
 | `retro.py due` | `retro.py due [--json] [--answers DIR] [--worktree WORKTREE] [--repo REPO]` | say whether a retro or an overhaul is due or open |
 | `retro.py file` | `retro.py file --draft FILE [--worktree WORKTREE] [--repo REPO] retro` | check a judged retro draft and close the retro issue with its report |
 
 #### Overhaul
 
-`components/overhaul`: An overhaul: new files its issue, read writes its draft, file checks the
-judged draft and closes the issue with its report, and facts lists a checkout's pruning facts.
+`components/overhaul`: An overhaul: new files its issue, read writes its draft, deck builds its one
+report, a deck, from the judged draft, file checks the judged draft and closes the issue with its
+report, and facts lists a checkout's pruning facts.
 
 | Command | Usage | What it does |
 |---|---|---|
+| `overhaul.py deck` | `overhaul.py deck --draft FILE --destination HTML [--host {claude-app,claude-code,copilot,local}] [--answers FILE] overhaul` | build the overhaul's one report, a deck, from its judged draft |
 | `overhaul.py facts` | `overhaul.py facts [--repo REPO] [--json]` | list the pruning facts of a checkout |
 | `overhaul.py file` | `overhaul.py file --draft FILE [--worktree WORKTREE] [--repo REPO] overhaul` | check a judged overhaul draft and close the overhaul issue with its report |
 | `overhaul.py new` | `overhaul.py new [--worktree WORKTREE] [--repo REPO]` | file the overhaul issue through work_tickets.py file |
@@ -150,7 +153,7 @@ builds a deck of decisions, serves it and reads its answers.
 | Command | Usage | What it does |
 |---|---|---|
 | `deck.py answers` | `deck.py answers [--record FOLDER] [--destination DESTINATION] answers` | print what the answers ask the agent to act on |
-| `deck.py build` | `deck.py build --destination DESTINATION folder` | build a folder of decision notes into one deck |
+| `deck.py build` | `deck.py build --destination DESTINATION [--host {claude-app,claude-code,copilot,local}] folder` | build a folder of decision notes into one deck |
 | `deck.py serve` | `deck.py serve [--wait] [--timeout S] artifact` | serve a deck locally and print the answers it is sent |
 | `timeline.py` | `timeline.py --destination DESTINATION [--snapshot SNAPSHOT] [--save-snapshot SAVE_SNAPSHOT] [--config CONFIG]` | Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first. |
 
@@ -253,8 +256,9 @@ writes.
 `retro.py collect` is a retro's mechanical half.
 
 Its window is every work issue closed since the last closed retro issue (titled
-`docs/retro-...` or labelled `retro`) closed. Where none has, it starts when the oldest open retro
-issue was created; only where no retro issue exists is it the whole history.
+`docs/retro-...` or labelled `retro`) closed. Where none has, it is the whole history, from the
+project's first issue, whatever retro issue is open ([Retro due](fleet.md#retro-due): a retro
+covers everything up to its start).
 
 `--since` starts the window at a date (`YYYY-MM-DD`) or time, `--retro` where that closed retro
 issue closed, whose findings it then scores; the rule checks judge only the window.
@@ -277,9 +281,9 @@ field report's Retro section ask alike. Collect fills step 2 with what it read:
 - the field reports' answers to the standing questions, by question, and their "Not delivered"
   items, the planning misses;
 - the rule checks, each broken one with what broke it: every landing pull request names a work
-  issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
-  integration branch outside a pull request (`outside-pr`), every closed work issue has a field
-  report (`field-report`);
+  issue open when it merged (`work-issue`), its `check` passed in its last run before the merge,
+  not a later nightly one (`check`), no commit reached the integration branch outside a pull
+  request (`outside-pr`), every closed work issue has a field report (`field-report`);
 - the window's [metrics](running.md#metrics) report: the line each landing pull request's description ends
   in, merged with the lines of the local metrics file that started in the window, a run in both
   counted once (by its command and start, the local line winning);
@@ -356,12 +360,40 @@ numbered, each with its home and its kind:
 
 Then what went well, and in step 6 the person's decisions, the classes still open and what
 follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
 them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
 Without gh it prints the comments and the close as a plan.
+
+`retro.py deck` builds the retro's one report, a deck, from the judged draft into the one HTML
+file `--destination` names, the person's decision of 24 Nov: the person reads one file, never a
+Markdown report beside a separate decision deck. It checks the draft as
+`file` does and refuses, building nothing, what `file` refuses.
+
+The deck is a document of the retro-deck template
+([templates/retro-deck.md](../templates/retro-deck.md)), built with obs
+(`scripts/retro_deck.py`):
+
+- a title page: `Retro #<n>`, the report's kind and the window with its number of findings;
+- every step the retro ran, one chapter each, each thing once: what was collected, the table of
+  what happened (its one table, the chapters of the window), the standing questions with their one
+  matrix and the field feedback answered in it, and the classes with their causes, fixes and
+  homes, each naming its findings;
+- then, on the last pages, one decision chapter per finding, each opening with its current
+  situation and asking the person for a bless: their go for a `work` finding, their decision for
+  a `decision` finding.
+
+A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
+
+`--host` names where the answers go back to, as [`deck.py build`](../src/skills/decision/SKILL.md#bringing-decisions-to-the-person)
+takes it. It writes the one HTML file and nothing beside it, and never waits for the answers:
+the retro agent hands the deck over and ends its turn.
+
+With `--answers <answers.json>` it builds the deck again as the record of the person's answers.
+`overhaul.py deck` builds an overhaul's deck the same way, of the same template: its report's
+steps, then a chapter per finding.
 
 `scripts/transcript_signals.py <transcripts or directories>` counts what sessions did, read from
 their transcripts (Claude Code's JSONL): corrections, retries, repeated command shapes, scripts

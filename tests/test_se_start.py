@@ -656,6 +656,63 @@ def test_the_update_line_counts_the_required_rows_whose_newest_is_not_read(setup
     assert report[-1] == "Newest versions not read yet; the next start shows them."
 
 
+REQUIRED_URLS = {name: f"https://git.example.org/team/{name}.git" for name in ("kern", "obs", "obs-html")}
+
+
+def newest_read(setup, se=(1, 2, 0), kern=(0, 2, 0), obs=(10, 3, 2), obs_html=(0, 5, 2)) -> None:
+    """The update check's cache: SE's and each required component's newest release."""
+    versions = {SE_URL: se, REQUIRED_URLS["kern"]: kern, REQUIRED_URLS["obs"]: obs, REQUIRED_URLS["obs-html"]: obs_html}
+    se_start.Cache(setup["clock"](), None, {url: {"versions": [list(v)]} for url, v in versions.items()}
+                   ).write(setup["cache"])
+
+
+def test_a_required_row_behind_its_newest_names_the_next_se_release_never_everything_current(
+        setup, monkeypatch, capsys):
+    """24 Nov: kern and obs behind their newest, both locked by SE, and the report still said
+    "Everything is current."; only a new SE release moves them, and the last line says so."""
+    newest_read(setup, kern=(0, 3, 0), obs=(10, 4, 0))
+    report, _, _ = required_start(setup, monkeypatch, capsys)
+    assert table(report) == ["| SE | 1.2.0 | 1.2.0 |", "| kern | 0.2.0 | 0.3.0 |", "| obs | 10.3.2 | 10.4.0 |",
+                             "| obs-html | 0.5.2 | 0.5.2 |"]
+    assert report[-1] == "The next SE release brings kern 0.3.0 and obs 10.4.0."
+
+
+def test_se_behind_and_a_required_row_behind_name_the_update_and_the_next_se_release(setup, monkeypatch, capsys):
+    newest_read(setup, se=(1, 3, 0), kern=(0, 3, 0))
+    report, _, _ = required_start(setup, monkeypatch, capsys)
+    assert report[-1] == "To update: /se:update. The next SE release brings kern 0.3.0."
+
+
+def test_a_report_whose_every_row_is_current_says_everything_is_current(setup, monkeypatch, capsys):
+    newest_read(setup)
+    report, _, _ = required_start(setup, monkeypatch, capsys)
+    assert all(row.split(" | ")[1] == row.split(" | ")[2].rstrip(" |") for row in table(report))
+    assert report[-1] == "Everything is current."
+
+
+def test_a_required_component_that_did_not_load_is_named_in_the_last_line(setup, monkeypatch, capsys):
+    newest_read(setup)
+    report, _, _ = required_start(setup, monkeypatch, capsys, loaders=Loaders(obs=None))
+    assert "| obs | none | 10.3.2 |" in table(report)
+    assert report[-1] == "Not loaded: obs and obs-html. SE cannot start."
+
+
+@pytest.mark.parametrize(("rows", "line"), [
+    ([("SE", "14.0.0", "14.0.0", False), ("kern", "2.1.0", "2.2.0", True), ("obs", "10.3.2", "10.4.0", True),
+      ("obs-html", "0.5.2", "0.5.2", True)], ("next", "kern 2.2.0 and obs 10.4.0")),
+    ([("SE", "14.0.0", "14.1.0", False), ("kern", "2.1.0", "2.1.0", True)], ("due", "")),
+    ([("SE", "14.0.0", "14.0.0", False), ("lib", "none", "1.0.0", False)], ("due", "")),
+    ([("SE", "14.0.0", "14.0.0", False), ("kern", "2.1.0", "unknown", True)], ("unknown", "")),
+    ([("SE", "14.0.0", "14.0.0", False), ("kern", "off", "2.2.0", True), ("mine", "3.1.0", "local", False)],
+     ("current", "")),
+    ([("SE", "14.0.0", "14.0.0", False), ("kern", "2.1.0", "2.1.0", True)], ("current", "")),
+], ids=["required-behind", "se-behind", "not-installed", "unread", "off-and-local", "current"])
+def test_the_last_line_is_computed_from_the_tables_rows_alone(rows, line):
+    """The 24 Nov report's rows, kern 2.1.0 with newest 2.2.0 locked by SE, and the other cases."""
+    assert se_start.update_line([({"name": name, "loaded": loaded, "newest": newest}, locked)
+                                 for name, loaded, newest, locked in rows]) == {"update": line[0], "names": line[1]}
+
+
 def test_the_loaded_column_is_the_version_that_answered_never_the_locked_one(setup, monkeypatch, capsys):
     """obs answers 10.4.0 from its clone while SE locks 10.3.2: the row says 10.4.0."""
     report, _, _ = required_start(setup, monkeypatch, capsys,
@@ -936,6 +993,11 @@ def test_a_failed_read_names_its_part_and_the_remedy(setup):
     assert work_lines(said(report(setup), setup["se"])) == [
         "Retro check not done: gh api failed: HTTP 502; run it by hand to see the cause: "
         f"uv run python {setup['se'].as_posix()}/scripts/se_start.py check"]
+
+
+def test_the_status_budget_is_ten_seconds():
+    # The person, kern's retro of 24 Nov (SE#1934): "I feel like 10 is okay."
+    assert se_start.feedback.budget("se_start.py status") == 10.0
 
 
 def test_status_reads_the_seeded_cache_within_its_budget(setup):

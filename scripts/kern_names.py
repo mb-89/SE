@@ -19,7 +19,7 @@ from pathlib import Path
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 STANDING = Path(".se") / ".runtime" / "standing.json"
-WAIT = 0.3  # seconds for the connection and for each name: the greeting keeps its 1 s budget
+WAIT = 0.3  # seconds for the connection and for each name: well within the greeting's 10 s budget
 FLEET = "fleet/findings"
 RETRO = "retro-due/due"
 

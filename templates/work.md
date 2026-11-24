@@ -2,7 +2,7 @@
 # A work issue: one package for one worker, its title a name under the name rule and its branch
 # that name. It extends the ticket template; scripts/templates.py's docstring owns this note's format.
 name: work
-version: 1.0.0
+version: 1.2.0
 kind: document
 reader: fleet
 says: "One package for one worker: the ticket's why, then numbered requirements and acceptance."
@@ -47,6 +47,11 @@ fields:
     required: true
     max_words: 120
     first_sentence_chars: 120
+  - name: approach
+    kind: text
+    required: true
+    max_words: 160
+    not_picked: true
   - name: base_branch
     kind: line
   - name: reproduction
@@ -72,7 +77,9 @@ fields:
   - name: design_owner
     kind: text
   - name: requirements
-    kind: list
+    items: requirement@1.0.0
+    carried: ["acceptance", "source"]
+    since: 1.1.0
     exact_heading: true
     numbered: true
     required: true
@@ -113,6 +120,10 @@ example:
 
 <!-- goal: What is true once this is done, the outcome a person sees. It should take two to four sentences and shall stay within 120 words. Its first sentence, one complete statement of at most 120 characters, becomes the landing title. -->
 
+## Approach
+
+<!-- approach: How it is done. Each premise it states about the code, a term, a capability or a cause, stands on a line of its own, `Premise: <what holds> (checked: <file>:<line> read)`, or with the command run, as a code span, in place of the file and line; `work_tickets.py file` refuses one that names no check. Then a line `Not picked:` naming the alternative and why not. -->
+
 ## Base branch
 
 <!-- base_branch: The branch the work starts from, where it is not the integration branch. -->
@@ -139,7 +150,7 @@ example:
 
 ## Requirements
 
-<!-- requirements: Numbered, checkable requirements, in the order to do them. -->
+<!-- requirements: Numbered requirements in the order to do them, each one checkable statement (the requirement template); the Acceptance section carries how each is checked. -->
 
 ## Changes after filing
 

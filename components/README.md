@@ -117,3 +117,8 @@ with the checkout's root `wiring.toml` (its Go instances), lands GitHub tool ans
 PostToolUse and reads both names as a client. `se.toml` `[tests.beside.go-components]` runs them
 after the suite; `[tests.beside.se-components]` (`tests/beside_se_components.py`) builds the `se`
 binary and serves SE's checkout, where `se status` lists these components beside the Python groups.
+
+The suite runs with the network cut, as kern's does (kern's README "Tests"): each folder with
+tests holds an `offline_test.go` that imports `kern/offline`, which drops the tokens and the
+cloud session's mark, points the proxy at a closed port and refuses every host name's lookup at
+the test binary's init. `offline_test.go` at this module's root refuses a folder that lacks it.

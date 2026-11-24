@@ -89,21 +89,30 @@ def obs_document_command(obs: Path) -> list[str]:
 KNOWN_WARNINGS = ("generation provenance: cannot resolve the generator commit",)
 
 
-def obs_warnings(output: str) -> list[str]:
-    """The lines of ``output`` that warn, except those ``KNOWN_WARNINGS`` names."""
+def obs_warnings(output: str, allowed: tuple[str, ...] = ()) -> list[str]:
+    """The lines of ``output`` that warn, except those ``KNOWN_WARNINGS`` or ``allowed`` names."""
     return [line for line in output.splitlines()
-            if "warning" in line.casefold() and not any(known in line for known in KNOWN_WARNINGS)]
+            if "warning" in line.casefold() and not any(known in line for known in (*KNOWN_WARNINGS, *allowed))]
+
+
+#: The warnings a build of text it quotes rather than authors passes as ``allowed``: a retro's deck,
+#: which quotes the committed retro doc that the public check already passed. obs's long-paragraph lint
+#: (its input-model, Long paragraphs), which never changes the Document, and obs-html's provenance
+#: finding of an absolute path (its architecture.md, Provenance check), there a path a field report
+#: names; a timestamp (the deck writes times as `22 Nov 20:16`), a session id or a local term still warns.
+QUOTED = (": long paragraph (", "carries provenance (absolute-path)")
 
 
 def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = True,
-                 renamed: tuple[Path, Path] | None = None) -> int:
+                 renamed: tuple[Path, Path] | None = None, allowed: tuple[str, ...] = ()) -> int:
     """Run obs-document with ``arguments`` through the adapter component ``ADAPTER``, installed first
     where it is missing (``ready_adapter``; without it, unless ``adapter``: a parse into ``--document``
     only); 1 on a failure or any warning, and where no ``ADAPTER`` can be installed, naming
     ``ADAPTER_REMEDY``.
 
     Each warning is printed to stderr under ``tool``'s name; scripts/deck.py shares this run. With
-    ``renamed`` (a copy's folder, its source's folder), obs's output names the source's files.
+    ``renamed`` (a copy's folder, its source's folder), obs's output names the source's files. A
+    warning ``allowed`` names (such as ``QUOTED``) fails nothing and is not printed.
     """
     if adapter:
         found, refusal = ready_adapter(obs)
@@ -117,7 +126,7 @@ def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = Tru
     output = result.stdout + result.stderr
     if renamed:
         output = output.replace(str(renamed[0]), str(renamed[1]))
-    warnings = obs_warnings(output)
+    warnings = obs_warnings(output, allowed)
     for line in warnings:
         print(line, file=sys.stderr)
     if result.returncode:

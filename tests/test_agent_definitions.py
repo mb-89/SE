@@ -773,7 +773,9 @@ def test_the_work_model_tells_issue_writers_what_renames_and_docs_issues_name():
     assert ("**Writing work issues**: - an issue that renames an identifier says whether the code emits it or "
             "only documents it; - a docs issue that asks to point instead of restating quotes the text to "
             "replace and names each note by its repository path; - a docs requirement names the test file "
-            "its regression test belongs in; - content a worker needs from another repository (a list, a "
+            "its regression test belongs in; - each requirement is one checkable statement, one sentence "
+            "without a word nobody can check (`templates/requirement.md`); filing refuses one that is not, "
+            "naming it; - content a worker needs from another repository (a list, a "
             "decision, a spec passage) is quoted inline with its source named, because a cloud worker reads "
             "only its own repository: a cross-repository link is never the only copy (`intake` warns on one "
             "with no quoted block next to it).") in rules
@@ -808,13 +810,11 @@ def test_the_work_model_states_the_test_rules_once_and_issues_point_to_it():
     assert "(../../skills/work-model/SKILL.md#tests)" in template
 
 
-def test_the_worker_reports_the_suite_time_before_and_after_and_slow_new_tests():
+def test_the_worker_names_slow_new_tests_without_timing_the_suite():
     worker = normalized(AGENTS / "worker.md")
     assert "(../skills/work-model/SKILL.md#tests)" in worker
-    assert "work_tickets.py suite" in worker
-    template = normalized(REPORT_TEMPLATE)
-    assert "**Suite time:**" in template
-
+    assert "never runs the suite to time it" in worker
+    assert "A new test over 2 s in the focused run gets its own row" in normalized(REPORT_TEMPLATE)
 
 
 def test_the_worker_delivery_measures_not_slower_with_one_command():
@@ -1234,3 +1234,33 @@ def test_releases_follow_the_work_in_the_work_model_se_and_the_integrator():
     assert "never waiting for the person" in normalized(AGENTS / "integrator.md")
     dec_011 = normalized(RULE_BOOK).split("### dec-011", 1)[1].split("### dec-012", 1)[0]
     assert "the person's decision of 24 Nov 2026" in dec_011
+
+
+# kern's retro of 24 Nov (SE#1934): the person's four decisions, as the built agents and skills carry them.
+
+
+def test_a_red_integration_branch_is_the_integrators_to_fix_or_file():
+    integrator = normalized(BUILT["integrator"])
+    assert "**A red integration branch is yours**" in integrator
+    assert "too big" in integrator and "`work_tickets.py file`" in integrator
+    wrk_007 = normalized(ROOT / "skills" / "work-model" / "references" / "rules.md").split(
+        "### wrk-007", 1)[1].split("### wrk-008", 1)[0]
+    assert "a red integration branch" in wrk_007
+
+
+def test_no_worker_step_times_the_suite():
+    built = [*BUILT_PROSE, REPORT_TEMPLATE]
+    for path in built:
+        text = normalized(path)
+        for asked in ("`work_tickets.py suite` before and after", "measures the suite", "**Suite time:**"):
+            assert asked not in text, (path.relative_to(ROOT).as_posix(), asked)
+
+
+def test_the_decision_skill_asks_for_plain_english_and_names_no_stock_opening():
+    decision = normalized(BUILT["decision"])
+    assert "plain technical English" in decision
+    assert "no stock first sentence" in decision
+    for stock in ("This is one case of", "one case of …", "first sentence names the class"):
+        assert stock not in decision, stock
+    for path in [*(ROOT / "skills" / "decision").rglob("*.md"), ROOT / "templates" / "decision.md"]:
+        assert "one case of" not in normalized(path).lower(), path.relative_to(ROOT).as_posix()

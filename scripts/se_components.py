@@ -863,14 +863,22 @@ def streamed_call(script: Path, words: list[str], argv: list[str], switch: str) 
     """Run a streamed batch command as one call through kern where kern's GitHub relay serves this
     checkout: each progress line prints on stderr as kern streams it, the call waits as long as
     kern says anything within CALL_IDLE, and the answer prints as the command would have. None,
-    and the command runs directly (its file-based hand-off), where no relay serves or kern refuses
-    the call before saying anything; a call that fails after it began is an error, never rerun.
-    Each None says why on stderr (`fell_back`)."""
+    and the command runs directly, where kern's GitHub component runs on the token or the proxy
+    backend (it reaches GitHub itself, no step to relay), where no relay serves (its file-based
+    hand-off) or where kern refuses the call before saying anything; a call that fails after it
+    began is an error, never rerun. Each None says why on stderr (`fell_back` for a hand-off)."""
     root = kern_root(Path.cwd())
     if root is None or not serves(root, script):
         fell_back(script, words, f"no kern serves {Path.cwd()} with SE's {script.name}")
         return None
-    if relay_module().relay(root) is None:
+    relays = relay_module()
+    backend = relays.backend(root)
+    if backend is not None and backend != relays.RELAY:  # token or proxy: no step to relay
+        print(f"se: {' '.join([script.name, *words])} reaches GitHub itself: kern's GitHub "
+              f"component serves {root} on the {backend} backend, which runs no relay step",
+              file=sys.stderr)
+        return None
+    if backend is None or relays.relay(root) is None:
         fell_back(script, words, f"no kern serves {root} with its GitHub component on the relay "
                                  "backend")
         return None

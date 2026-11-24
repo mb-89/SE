@@ -144,6 +144,12 @@ def pull(number: int, head: str, body: str, merged: str | None = None, sha: str 
             "merge_commit_sha": sha or None}
 
 
+def run(conclusion: str, completed: str | None, name: str = "check") -> dict:
+    """A check run as the host's tools answer it, completed at `completed` (None: still running)."""
+    return {"name": name, "status": "completed" if completed else "in_progress",
+            "conclusion": conclusion if completed else None, "completed_at": completed}
+
+
 def answers(checkout: Path) -> dict[str, object]:
     """A window after retro #5 closed: #11 landed after one refused delivery, #12 landed but
     escalated and its landing's check failed, #13 a duplicate, #14 closed without a field report;
@@ -190,11 +196,9 @@ def answers(checkout: Path) -> dict[str, object]:
         "comments-3.json": [], "comments-13.json": [], "comments-14.json": [],
         "open-issues.json": [],
         "checks-21.json": {"total_count": 1, "check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
-        "checks-23.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "failure"}]},
-        "checks-25.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
+            run("success", "2026-11-02T09:50:00Z")]},
+        "checks-23.json": {"check_runs": [run("failure", "2026-11-03T09:50:00Z")]},
+        "checks-25.json": {"check_runs": [run("success", "2026-11-03T10:50:00Z")]},
     }
 
 
@@ -281,6 +285,27 @@ def test_each_rule_check_names_what_broke_it_and_keeps_the_rest(checkout):
     assert not checks["outside-pr"].kept and not checks["field-report"].kept
 
 
+def test_the_check_rule_judges_a_landing_by_the_run_that_gated_its_merge(checkout):
+    """The `check` rule reads the last `check` run that completed before the landing merged: a
+    scheduled run on the same commit that failed after the merge, a run still going or another
+    check's run does not count; a landing with no run completed before its merge breaks it."""
+    given = answers(checkout)
+    given["checks-21.json"] = {"check_runs": [
+        run("failure", "2026-11-03T02:00:00Z"),  # the nightly run, a day after the merge
+        run("success", "2026-11-02T09:50:00Z"),
+        run("failure", "2026-11-02T09:40:00Z"),  # an earlier push's run, rerun green
+        run("failure", "2026-11-02T09:55:00Z", name="kern-platforms (windows-2025)"),
+        run("failure", None)]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    assert broken == [{"item": "#23", "what": "check failure"}]
+
+    given["checks-21.json"] = {"check_runs": [run("success", "2026-11-02T10:05:00Z")]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    head = f"{21:040d}"[:12]
+    assert broken[0] == {"item": "#21", "what": f"no check run on {head} completed before it "
+                                                 "merged at 2026-11-02T10:00:00Z"}
+
+
 def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(checkout):
     given = answers(checkout)
     commit = shas(checkout)["Tidy up (#25)"]
@@ -292,33 +317,27 @@ def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(
     assert broken == [{"item": "#25", "what": "names #15, which is not labelled work"}]
 
 
-def test_without_a_closed_retro_the_window_starts_at_the_oldest_open_retro(checkout):
-    """No retro issue has closed: the window starts when the oldest open one was created, and the
-    rule checks judge that window alone; with no retro issue at all, it is the whole history."""
+def test_without_a_closed_retro_the_window_is_the_whole_history(checkout):
+    """No retro issue has closed: the window starts at the project's first issue, whatever retro
+    issue is open, this one among them, so a first retro collects every landed issue."""
     given = answers(checkout)
     given["issues.json"] = [item for item in given["issues.json"] if item["number"] != 5]
     given["open-issues.json"] = [
-        {**issue(31, "docs/retro-20261105", None), "state": "open",
+        {**issue(30, "docs/retro-20261105", None), "state": "open",
          "created_at": "2026-11-05T00:00:00Z"},
-        {**issue(30, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
+        {**issue(31, "retro: fleet 20261102", None, labels=("retro",)), "state": "open",
          "createdAt": "2026-11-02T13:00:00Z"},
         {**issue(29, "feat/open", None), "state": "open", "created_at": "2026-10-01T00:00:00Z"}]
     found = collected(checkout, given)
 
-    assert found.window == retro.Window(30, "2026-11-02T13:00:00Z", 30, "2026-11-12T12:00:00Z",
-                                        retro.OPEN_RETRO)
-    assert [item.number for item in found.issues] == [12, 13, 14]
+    assert found.window == retro.Window(30, None, None, "2026-11-12T12:00:00Z", retro.HISTORY)
+    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
+    assert [item.number for item in found.issues if item.landed] == [11, 12]
     assert found.previous is None
     checks = {check.name: check for check in found.checks}
-    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (2, 3)
-    assert "when retro #30, the oldest open retro issue, was created" in retro.draft(found)
-
-    given["open-issues.json"] = given["open-issues.json"][2:]
-    found = collected(checkout, given)
-    assert found.window.since is None and found.window.start == retro.HISTORY
-    assert [item.number for item in found.issues] == [3, 11, 12, 13, 14]
-    assert {check.name: check for check in found.checks}["outside-pr"].checked == 5
-    assert "the whole history up to" in retro.draft(found)
+    assert (checks["work-issue"].checked, checks["outside-pr"].checked) == (3, 5)
+    assert "the whole history up to 2026-11-12T12:00:00Z; no retro issue has closed" in (
+        retro.draft(found))
 
 
 def test_since_narrows_the_window_and_the_rule_checks(checkout):
@@ -372,7 +391,7 @@ def test_the_countdown_counts_the_landings_as_collect_does_from_the_lists(checko
     assert found["retro"].landed == collected(checkout).sizes["landed"] == 2
     assert (found["retro"].since_run, found["retro"].count, found["retro"].due) == (5, 2, True)
     assert found["retro"].reason == "11 days since the last retro with 2 came back (due after 7 days)"
-    assert door.reads == ["issues.json", "open-issues.json", "pulls.json"]
+    assert door.reads == ["open-issues.json", "issues.json", "pulls.json"]
 
     given = answers(checkout)
     given["issues.json"].append(issue(31, "docs/retro-20261105", "2026-11-05T00:00:00Z",
@@ -495,6 +514,25 @@ def test_due_prints_each_countdown_and_without_gh_its_plan(checkout, tmp_path, m
     assert lines[0].startswith("retro: 2 (2 landed, 0 failed) since #5 started ")
     assert "days since the last retro with 2 came back (due after 7 days)" in lines[0]
     assert lines[1].startswith("overhaul: 1 retros closed in the whole history")
+
+
+def test_the_countdown_lines_are_the_retro_due_snippet_as_due_printed_them():
+    """templates/retro-due.md shapes `retro due`: each state of a countdown keeps its line."""
+    def countdown(kind, **changes):
+        return retro.Countdown(**{"kind": kind, "since": "2026-11-01", "since_run": 30, "landed": 10,
+                                  "failed": 2, "count": 12, "due_after": 10, "days": 14,
+                                  "elapsed_days": 23, "due": False, "reason": "", "open": [],
+                                  **changes})
+    assert retro.countdown_lines({"retro": countdown("retro", due=True, reason="12 came back"),
+                                  "overhaul": countdown("overhaul", count=2, since=None, since_run=None)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; due: 12 came back",
+        "overhaul: 2 retros closed in the whole history, 23 days; not due"]
+    assert retro.countdown_lines({"retro": countdown("retro", open=[31, 32]),
+                                  "overhaul": countdown("overhaul", count=0)}) == [
+        "retro: 12 (10 landed, 2 failed) since #30 started 2026-11-01, 23 days; open: #31, #32",
+        "overhaul: 0 retros closed since #30 started 2026-11-01, 23 days; not due"]
+    lines = retro.countdown_lines({"retro": countdown("retro"), "overhaul": countdown("overhaul")})
+    assert retro.sibling("interfaces").read(retro.DUE_TEMPLATE, "\n".join(lines))["overhaul_days"] == "23"
 
 
 def test_the_draft_ends_in_the_block_that_parses_back(checkout):
@@ -649,6 +687,257 @@ def test_the_gh_door_reads_every_page_and_leaves_out_pull_requests(monkeypatch):
                      "issues?state=closed&per_page=100&page=2"]
 
 
+def run_item(number: int, title: str, created: str, closed: str = "", updated: str = "",
+             labels: tuple[str, ...] = ("work",), reason: str = "completed") -> dict:
+    """An issue as the REST API lists it: closed at `closed`, else open."""
+    return {"number": number, "title": title, "state": "closed" if closed else "open",
+            "created_at": created, "closed_at": closed or None,
+            "updated_at": updated or closed or created, "state_reason": reason if closed else None,
+            "labels": [{"name": name} for name in labels], "body": ""}
+
+
+def run_pull(number: int, issue: int, merged: str, updated: str = "") -> dict:
+    return {"number": number, "title": f"feat/n{issue}", "body": f"Fixes #{issue}",
+            "base": {"ref": "main"}, "head": {"ref": f"feat/n{issue}", "sha": f"{number:040d}"},
+            "merged_at": merged or None, "updated_at": updated or merged, "merge_commit_sha": None}
+
+
+def run_history() -> dict[str, list[dict]]:
+    """Two retros (#1, #4) and an overhaul (#2) between them, and a retro named by its title
+    alone (#14) after the overhaul. #6 closed after retro #4 started but its landing merged just
+    before; #9 closed long ago and was commented on since; #8
+    escalated, #10 closed as not planned; #3, #5 and #11 lie before the cut-off."""
+    return {
+        "closed": [
+            run_item(1, "docs/retro-20261001", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z",
+                     labels=("retro",)),
+            run_item(2, "overhaul-20261010", "2026-10-10T00:00:00Z", "2026-10-12T00:00:00Z",
+                     labels=("discovery",)),
+            run_item(3, "feat/n3", "2026-10-03T00:00:00Z", "2026-10-05T00:00:00Z"),
+            run_item(4, "docs/retro-20261101", "2026-11-01T00:00:00Z", "2026-11-03T00:00:00Z",
+                     labels=("retro",)),
+            run_item(5, "feat/n5", "2026-10-15T00:00:00Z", "2026-10-20T00:00:00Z"),
+            run_item(6, "feat/n6", "2026-10-30T00:00:00Z", "2026-11-01T01:00:00Z"),
+            run_item(7, "feat/n7", "2026-11-04T00:00:00Z", "2026-11-05T00:00:00Z"),
+            run_item(8, "feat/n8", "2026-10-25T00:00:00Z", "2026-11-06T00:00:00Z",
+                     labels=("work", "escalated")),
+            run_item(9, "feat/n9", "2026-08-20T00:00:00Z", "2026-09-01T00:00:00Z",
+                     "2026-11-07T00:00:00Z"),
+            run_item(10, "feat/n10", "2026-11-02T00:00:00Z", "2026-11-08T00:00:00Z",
+                     reason="not_planned"),
+            run_item(11, "Not a work issue", "2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z",
+                     labels=()),
+            run_item(14, "docs/retro-20261018", "2026-10-18T00:00:00Z", "2026-10-19T00:00:00Z",
+                     labels=()),
+        ],
+        "open": [run_item(12, "feat/n12", "2026-11-02T00:00:00Z", updated="2026-11-09T00:00:00Z",
+                          labels=("work", "escalated")),
+                 run_item(13, "feat/n13", "2026-11-09T00:00:00Z")],
+        "pulls": [run_pull(103, 3, "2026-10-05T00:00:00Z"),
+                  run_pull(105, 5, "2026-10-20T00:00:00Z"),
+                  run_pull(106, 6, "2026-10-31T23:00:00Z"),
+                  run_pull(107, 7, "2026-11-05T00:00:00Z"),
+                  run_pull(108, 9, "2026-09-01T00:00:00Z"),
+                  run_pull(199, 11, "", "2026-07-01T00:00:00Z")],
+    }
+
+
+def newest_first(items: list[dict]) -> list[dict]:
+    return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
+
+class WholeDoor:
+    """A door with no cut-off read over `history`: every list whole, as FileDoor reads it."""
+
+    def __init__(self, history: dict[str, list[dict]]) -> None:
+        self.history, self.missing, self.read = history, [], {"issues": [], "pulls": []}
+
+    def closed_issues(self):
+        self.read["issues"] += [item["number"] for item in self.history["closed"]]
+        return list(self.history["closed"])
+
+    def open_issues(self):
+        return list(self.history["open"])
+
+    def pulls(self):
+        self.read["pulls"] += [item["number"] for item in self.history["pulls"]]
+        return list(self.history["pulls"])
+
+    def issue(self, number):
+        return next(item for item in self.history["closed"] if item["number"] == number)
+
+
+class CutOffDoor(WholeDoor):
+    """The same history with the cut-off reads (retro.CUT_OFF_READS), as GitHub answers them:
+    newest update first and by label; records what it handed over."""
+
+    def until(self, kind: str, items: list[dict], stop) -> list[dict]:
+        found = []
+        for item in newest_first(items):
+            if stop(item):
+                break
+            self.read[kind].append(item["number"])
+            found.append(item)
+        return found
+
+    def closed_issues_until(self, stop):
+        return self.until("issues", self.history["closed"], stop)
+
+    def closed_issues_labelled(self, label):
+        return [item for item in self.history["closed"] if label in retro.label_names(item)]
+
+    def pulls_until(self, stop):
+        return self.until("pulls", self.history["pulls"], stop)
+
+
+def overhaul_off(root: Path) -> None:
+    (root / "se.toml").write_text("[overhaul]\ndue_after = 0\ndays = 0\n", encoding="utf-8")
+
+
+def test_the_cut_off_read_gives_the_countdowns_of_the_whole_read(tmp_path):
+    """On one history with two retros and an overhaul, the cut-off read stops the closed issues
+    at the older of the newest retro's and overhaul's starts and the pull requests at the newest
+    retro's, read on past it for #6's landing, merged just before retro #4 started: the
+    countdowns are those of the whole read. With the overhaul countdown off, the issues stop at
+    the retro's start, and the retro countdown is the whole read's; the overhaul's, off, counts
+    the retros the label read finds (docs/fleet.md "Retro due")."""
+    whole, cut = WholeDoor(run_history()), CutOffDoor(run_history())
+    expected = retro.countdowns(whole, REPO, "main", tmp_path, NOW)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    assert found == expected
+    assert (found["retro"].since_run, found["retro"].landed, found["retro"].failed) == (4, 2, 2)
+    assert (found["overhaul"].since_run, found["overhaul"].count) == (2, 2)
+    assert cut.read == {"issues": [10, 9, 8, 7, 4, 6, 5, 14, 2], "pulls": [107, 106]}
+    assert len(whole.read["issues"]) == 12 and len(whole.read["pulls"]) == 6
+
+    overhaul_off(tmp_path)
+    cut = CutOffDoor(run_history())
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    expected = retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    assert found["retro"] == expected["retro"]
+    assert (found["overhaul"].due, expected["overhaul"].due) == (False, False)
+    assert (found["overhaul"].count, expected["overhaul"].count) == (1, 2)
+    assert cut.read == {"issues": [10, 9, 8, 7, 4, 6], "pulls": [107, 106]}
+
+
+def test_with_no_run_yet_the_cut_off_read_reads_the_whole_history(tmp_path):
+    """Where no retro exists, nothing bounds what can count: every closed issue and pull request
+    is read, with the countdowns of the whole read. Where retros exist but no overhaul, the read
+    stops at the newest retro's start and the overhaul countdown counts the retros found by their
+    label: the whole read's, as long as each older retro carries it."""
+    history = run_history()
+    history["closed"] = [item for item in history["closed"] if item["number"] not in (1, 2, 4, 14)]
+    cut = CutOffDoor(history)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["retro"].since_run is None and found["overhaul"].since_run is None
+    assert sorted(cut.read["issues"]) == [3, 5, 6, 7, 8, 9, 10, 11]
+    assert sorted(cut.read["pulls"]) == [103, 105, 106, 107, 108, 199]
+
+    history = run_history()
+    history["closed"] = [item for item in history["closed"] if item["number"] != 2]
+    cut = CutOffDoor(history)
+    found = retro.countdowns(cut, REPO, "main", tmp_path, NOW)
+    expected = retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["retro"] == expected["retro"]
+    assert cut.read["issues"] == [10, 9, 8, 7, 4, 6]
+    assert (found["overhaul"].count, expected["overhaul"].count) == (2, 3)
+
+    next(item for item in history["closed"] if item["number"] == 14)["labels"] = [{"name": "retro"}]
+    found = retro.countdowns(CutOffDoor(history), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(history), REPO, "main", tmp_path, NOW)
+    assert found["overhaul"].count == 3
+
+class FakeRelay:
+    """kern's relay door as the host's GitHub tools answer over `history`: list_issues in pages
+    of `size` with a cursor, newest update first with orderBy, by label, without close times
+    (the tools name none) and labels as names; list_pull_requests by page; issue_read whole."""
+
+    def __init__(self, history: dict[str, list[dict]], size: int = 100) -> None:
+        self.history, self.size, self.calls = history, size, []
+
+    def ask(self, tool, arguments, note="", wait=""):
+        self.calls.append((tool, dict(arguments)))
+        if tool == "issue_read":
+            return next(item for item in self.history["closed"]
+                        if item["number"] == arguments["issue_number"])
+        if tool == "list_pull_requests":
+            items = self.history["pulls"]
+            if arguments.get("sort") == "updated":
+                items = newest_first(items)
+            start = (arguments["page"] - 1) * arguments["perPage"]
+            return items[start:start + arguments["perPage"]]
+        items = self.history["closed" if arguments["state"] == "CLOSED" else "open"]
+        if arguments.get("orderBy") == "UPDATED_AT":
+            assert arguments["direction"] == "DESC"
+            items = newest_first(items)
+        if arguments.get("labels"):
+            items = [item for item in items if set(arguments["labels"]) <= set(retro.label_names(item))]
+        start = int(arguments.get("after") or 0)
+        page = [{**{key: value for key, value in item.items() if key != "closed_at"},
+                 "labels": retro.label_names(item)} for item in items[start:start + self.size]]
+        more = start + self.size < len(items)
+        return {"issues": page, "pageInfo": {"hasNextPage": more,
+                                             "endCursor": str(start + self.size) if more else ""}}
+
+    def issues(self, state):
+        found, after = [], ""
+        while True:
+            data = self.ask("list_issues", {"state": state, "perPage": 100,
+                                            **({"after": after} if after else {})})
+            found += data["issues"]
+            after = data["pageInfo"]["endCursor"]
+            if not after:
+                return found
+
+
+def test_the_relay_and_gh_doors_read_cut_off_and_the_answer_files_whole(tmp_path, monkeypatch):
+    """kern's relay door (ToolDoor) reads newest update first and by label, page by page up to
+    where the countdowns stop it, and reads each close time its list does not name: the
+    countdowns of the whole read. gh's door (GhDoor) asks the REST API sorted the same and
+    stops within a page. The answer files (FileDoor) have no cut-off read and are read whole."""
+    relay = FakeRelay(run_history(), size=3)
+    found = retro.countdowns(retro.ToolDoor(relay), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    lists = [arguments for tool, arguments in relay.calls if tool == "list_issues"
+             and arguments["state"] == "CLOSED"]
+    assert [item.get("labels") for item in lists if "labels" in item] == [["retro"], ["discovery"]]
+    ordered = [item for item in lists if item.get("orderBy") == "UPDATED_AT"]
+    assert [item.get("after") for item in ordered] == [None, "3", "6", "9"]
+    assert [arguments for tool, arguments in relay.calls if tool == "list_pull_requests"] == [
+        {"state": "closed", "sort": "updated", "direction": "desc", "perPage": 100, "page": 1}]
+
+    calls = []
+    history = run_history()
+
+    class FakeGitHub:
+        def __init__(self, root, repo):
+            pass
+
+        def api(self, path):
+            calls.append(path)
+            if path.startswith("pulls?"):
+                return newest_first(history["pulls"])
+            if "labels=" in path:
+                label = path.split("labels=")[1].split("&")[0]
+                return [item for item in history["closed"] if label in retro.label_names(item)]
+            if "state=open" in path:
+                return history["open"]
+            return newest_first(history["closed"]) + [{"number": 99, "pull_request": {},
+                                                       "updated_at": "2026-01-01T00:00:00Z"}]
+
+    monkeypatch.setattr(work_tickets, "GitHub", FakeGitHub)
+    found = retro.countdowns(retro.GhDoor(tmp_path, REPO, REPO), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    assert "issues?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "issues?state=closed&labels=retro&per_page=100&page=1" in calls
+
+    assert not any(hasattr(retro.FileDoor, name) for name in retro.CUT_OFF_READS)
+    assert all(hasattr(door, name) for door in (retro.GhDoor, retro.ToolDoor)
+               for name in retro.CUT_OFF_READS)
+
+
 LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
                 "fix": "`integrate` refuses a landing without one",
                 "home": "scripts/work_tickets.py", "home_kind": "refusal"}
@@ -716,6 +1005,99 @@ def test_file_refuses_an_incomplete_judgment_and_writes_nothing(checkout, tmp_pa
     assert "The judgment of retro #30 is not complete, so nothing was written" in str(raised.value)
     assert refusal in str(raised.value)
     assert writes == []
+
+
+def built_deck(checkout: Path, tmp_path: Path, monkeypatch, text: str, *extra: str) -> tuple[int, dict]:
+    """`retro.py deck 30` on the draft `text`, retro_deck's build replaced by a recorder (the real build
+    is tests/test_retro_deck.py's): its exit code and what it was asked to build."""
+    import retro_deck
+    asked: dict = {}
+
+    def build(written, destination, host=None, answers=None):
+        asked.update(written=written, destination=destination, host=host, answers=answers)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("<html></html>", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(retro_deck, "build", build)
+    draft = tmp_path / "draft.md"
+    draft.write_text(text, encoding="utf-8")
+    code = retro.main(["deck", "30", "--draft", str(draft), "--destination", str(tmp_path / "out" / "retro-30.html"),
+                       "--worktree", str(checkout), *extra])
+    return code, asked
+
+
+def test_the_deck_holds_every_step_the_retro_ran_then_one_decision_chapter_per_finding(checkout):
+    """The acceptance of SE#1826: the retro's one output is a deck of the retro-deck template, its title
+    page, every step (what was collected, the table, the standing questions with their full matrix and
+    answers, the field feedback among them, the classes with their causes, fixes and homes), then the
+    decisions; one table of what happened, one matrix, nothing twice (requirements 8 and 9)."""
+    text = judged_draft(checkout)
+    block = retro.judged(text, 30)
+    steps, decisions = retro.deck_parts(block, text)
+    assert [heading for heading, _ in steps] == ["Collect", "Table of what happened", "The standing questions",
+                                                 "Classes and homes"]
+    body = dict(steps)
+    collect = body["Collect"]
+    assert "## Sizes" in collect and "## Rule checks" in collect
+    assert retro.LANDED_SECTION not in collect and retro.ANSWERS_SECTION not in collect
+    table = body["Table of what happened"]
+    assert [line for line in table.split("\n") if line.startswith("|---")] == ["|---|---|---|---|"]
+    assert "| chapter | from | to | steps |" in table
+    assert retro.STEP_TABLE not in table
+    matrix = body["The standing questions"]
+    assert matrix.startswith("| question |") and matrix.count("| question |") == 1
+    assert ("\n## Answers to the standing questions\n\n### What came back from real use since the last retro?\n\n"
+            "The person's field feedback:\n\n> The integrator stalled twice.\n\nNone.") in matrix
+    classes = body["Classes and homes"]
+    assert "### Lost reports (2)\n\nCause: a landing need not name a field report" in classes
+    assert "Home: refusal (home 2 of 8), `scripts/work_tickets.py`" in classes and "### What went well" in classes
+    assert ("Findings, each a decision at the end: 1. Refuse a landing whose work issue has no field report; "
+            "2. Make the field report a rule of the rule book.") in classes
+    assert "#14 closed without one." not in classes and "A rule, not a habit." not in classes
+    assert [heading for heading, _ in decisions] == ["1. Refuse a landing whose work issue has no field report",
+                                                     "2. Make the field report a rule of the rule book"]
+    work, decision = (text for _, text in decisions)
+    # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
+    assert work.startswith("#14 closed without one.\n\nClass: Lost reports, its cause and fix under Classes and homes.")
+    assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
+                         "sends it to SE, which bundles it into a work issue.")
+    assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
+    assert "Cause:" not in decision
+
+
+def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, judged_draft(checkout), "--host", "copilot")
+    assert code == 0
+    assert asked["host"] == "copilot" and asked["answers"] is None
+    template = templates.own("retro-deck")
+    fields = templates.parse(template, asked["written"]).fields
+    assert fields["title"] == "Retro #30" and fields["subtitle"] == "2026-11-01 to 2026-11-12: 2 findings"
+    assert [finding.fix for finding in templates.check(template, templates.parse(template, asked["written"]))
+            if finding.severity == templates.REFUSE] == []
+    assert [path.name for path in (tmp_path / "out").iterdir()] == ["retro-30.html"]
+    out = capsys.readouterr().out
+    assert "the report is the deck" in out and "a title page, 4 steps and 2 decision chapter(s)" in out
+
+
+def test_deck_with_the_answers_builds_the_record(checkout, tmp_path, monkeypatch, capsys):
+    answers = tmp_path / "answers.json"
+    answers.write_text('{"verdicts": []}', encoding="utf-8")
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, judged_draft(checkout), "--answers", str(answers))
+    assert code == 0 and asked["answers"] == answers
+    assert "the person's answers recorded" in capsys.readouterr().out
+
+
+def test_deck_refuses_an_incomplete_judgment_or_an_open_step_and_builds_nothing(checkout, tmp_path, monkeypatch,
+                                                                               capsys):
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, judged_draft(checkout, went_well=[]))
+    assert (code, asked) == (1, {})
+    assert "The judgment of retro #30 is not complete" in capsys.readouterr().err
+    text = judged_draft(checkout).replace("> The integrator stalled twice.", "")
+    code, asked = built_deck(checkout, tmp_path, monkeypatch, text)
+    assert (code, asked) == (1, {})
+    assert "leaves a step of the retro template" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
 
 
 def test_file_refuses_another_retros_draft_and_a_draft_without_its_block(checkout):
@@ -800,6 +1182,26 @@ def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout
     assert "/blob/" in comments[0] and "docs/retro-30.md" in comments[0]
     assert "a landed issue's row" not in comments[0]
     assert [name for name, _ in calls][-1] == "close_issue"
+
+
+def test_the_doc_marker_is_the_retro_doc_message_and_reads_back():
+    """templates/retro-doc.md writes the line the report links its retro doc with, as before; the
+    reading stays DOC_PATTERN, which takes a full commit only."""
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    line = retro.doc_marker(sha, "docs/retro-30.md")
+    assert line == f"<!-- se:retro-doc {sha} docs/retro-30.md -->"
+    assert retro.DOC_PATTERN.fullmatch(line).groups() == (sha, "docs/retro-30.md")
+    assert retro.DOC_PATTERN.fullmatch(retro.doc_marker("abc123", "docs/retro-30.md")) is None
+
+
+def test_the_finding_reference_is_the_finding_ref_message_that_collect_finds():
+    """templates/finding-ref.md writes the reference a work issue names a finding by, which
+    FINDING_REFERENCE finds in free text, the retro's and the overhaul's alike."""
+    assert retro.finding_reference("retro", 30) == "retro #30 finding <k>"
+    assert retro.FINDING_REFERENCE.search(f"Takes {retro.finding_reference('retro', 30, 2)}.").groups() == (
+        "30", "2")
+    assert retro.sibling("overhaul").FINDING_REFERENCE.search(
+        retro.finding_reference("overhaul", 50, 1)).groups() == ("50", "1")
 
 
 def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
@@ -1204,6 +1606,35 @@ def test_a_class_s_optional_keys_are_checked(checkout, keys, refusal):
     classes = [{**LOST_REPORTS, **keys}]
     with pytest.raises(work_tickets.QueueError, match=re.escape(refusal)):
         retro.judged(judged_draft(checkout, classes=classes), 30)
+
+
+def cases_of(test) -> list[dict]:
+    """The judgment changes of a parametrized test's cases, as the test states them."""
+    return [case[0] for mark in test.pytestmark if mark.name == "parametrize" for case in mark.args[1]]
+
+
+def recurred_draft(checkout: Path) -> str:
+    """The judged draft whose first finding names a check that recurred after the previous retro."""
+    draft = judged_draft(checkout)
+    block = retro.read_block(draft)
+    block["previous"]["findings"] = [{"finding": 1, "check": "field-report", "recurred": True}]
+    return draft[:draft.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n```yaml\n" + \
+        json.dumps(block) + "\n```\n"
+
+
+def test_the_judged_block_s_adapter_finds_what_judgment_problems_finds(checkout):
+    """templates/retro-judgment.md checks the block through judgment_problems: on the drafts of
+    the refusal tests, the complete judgment among them, its problems are the same."""
+    drafts = [judged_draft(checkout, **changes)
+              for changes in cases_of(test_file_refuses_an_incomplete_judgment_and_writes_nothing)]
+    drafts += [judged_draft(checkout, classes=[{**LOST_REPORTS, **keys}])
+               for keys in cases_of(test_a_class_s_optional_keys_are_checked)]
+    drafts += [judged_draft(checkout), recurred_draft(checkout)]
+    for draft in drafts:
+        assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, draft) == retro.judgment_problems(
+            retro.read_block(draft))
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-2]) == []
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-1]) != []
 
 
 def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_measures_it_again(

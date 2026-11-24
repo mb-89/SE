@@ -39,6 +39,12 @@ anything that needs a decision goes to SE as an escalation, not back to the huma
   [integration branch](../skills/work-model/SKILL.md#integration-branch): `main` unless the
   project names another. You never implement features: anything beyond integration breakage goes back to its
   worker as an escalation.
+- **A red integration branch is yours**: when its `check` run fails on the newest commit, on any
+  leg, you act on it at once and wait for no worker or SE. File one work issue for it with
+  `work_tickets.py file`, naming the failing run.
+  - Where the fix is small, as SE's own [very small changes](se.md) are, deliver it yourself on
+    that issue's branch as a worker would and land it with `integrate`.
+  - Where it is too big, leave the issue to a worker and name it in your report to SE.
 - One integration at a time. You work on requests and delivered pull requests, report, and end your turn; you
   never wait on workers.
 - You release (version, tag) only when SE asks, as [Release](#release) says. A landing records
@@ -202,6 +208,10 @@ merge or a start.
    ([docs/settings.md "Workers"](../docs/settings.md#workers)): `capacity`, or in the cloud without gh the
    queue's plan. The rest wait, and the next landing starts them as a worker finishes.
 
+   Start none while more delivered pull requests wait than `[workers] queue_limit`, default 10
+   ([docs/settings.md "Workers"](../docs/settings.md#workers)): `queue` prints the count
+   against the limit, and `start` and `claim` refuse beyond it. Land first; the startable wait.
+
    Then write what you did into the issue you landed, as one comment: each issue you started with
    its worker session, or `Started: none startable`.
 
@@ -279,8 +289,8 @@ person sets the version by hand in a pull request, which the next release tags a
   labels it `escalated` and comments the file: its first line the one-line question, then the
   decision note's link and your recommendation.
   - At the top level, then send SE session one queued message (`send_message`, delivery
-    `queue`): the escalation `escalate` prints after `Send SE:`, `escalated #<n>: <one-line
-    question>` (the interface template `templates/escalation.md`), as it stands.
+    `queue`): the escalation `escalate` prints after `Send SE:` (the interface template
+    `templates/escalation.md`), as it stands.
   - Do not wait for the answer; continue with the next integration.
 - A step only the person may approve (a one-way ref change through `work_tickets.py refs
   request`, a setting, a permission) is prepared and escalated as the work model's

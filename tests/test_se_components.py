@@ -37,8 +37,9 @@ def test_every_command_is_declared_once_and_the_wiring_places_every_group() -> N
     declared = [name for d in se_components.catalog(ROOT, GROUPS) for name in d.commands]
     leaves = [" ".join(("work_tickets.py", *words)) for words, _ in work_tickets.leaf_commands()]
     assert sorted(declared) == sorted(leaves + [
-        "review.py brief", "review.py file", "retro.py collect", "retro.py file", "retro.py due",
-        "overhaul.py new", "overhaul.py read", "overhaul.py file", "overhaul.py facts", "timeline.py",
+        "review.py brief", "review.py file", "retro.py collect", "retro.py deck", "retro.py file",
+        "retro.py due", "overhaul.py new", "overhaul.py read", "overhaul.py deck", "overhaul.py file",
+        "overhaul.py facts", "timeline.py",
         "deck.py build", "deck.py serve", "deck.py answers", "se.py new app", "se.py component add",
         "se_templates.py list", "se_templates.py draft", "se_templates.py check", "se_templates.py fill",
         "se_templates.py gate",
@@ -412,6 +413,27 @@ def test_a_streamed_command_runs_directly_without_kerns_relay(tmp_path, monkeypa
         "SE_KERN=off"], said
     assert all(line.startswith("se: work_tickets.py integrate fell back to the file-based "
                                "hand-off: ") for line in said), said
+
+
+@pytest.mark.parametrize("backend", ["proxy", "token"])
+def test_a_streamed_command_reaches_github_itself_on_kerns_proxy_or_token(
+        tmp_path, monkeypatch, capsys, backend) -> None:
+    """kern serves the checkout with its GitHub component on the proxy or the token backend, where
+    no step goes through the relay: the streamed command runs directly and reaches GitHub itself,
+    and its one line names the backend, not a file-based hand-off."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(se_components.SWITCH, raising=False)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "scripts").mkdir()
+    copy = tmp_path / "scripts" / "work_tickets.py"
+    copy.write_text("", encoding="utf-8")
+    relays = se_components.relay_module()
+    monkeypatch.setattr(relays, "backend", lambda root: backend)
+    assert se_components.routed(copy, ["fleet-check"], [], False, True) is None
+    said = capsys.readouterr().err.splitlines()
+    assert said == [f"se: work_tickets.py fleet-check reaches GitHub itself: kern's GitHub "
+                    f"component serves {tmp_path} on the {backend} backend, which runs no relay "
+                    "step"], said
 
 
 MEET_SCRIPT = '''

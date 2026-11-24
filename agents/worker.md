@@ -112,9 +112,8 @@ every package, so work issues and session prompts never repeat it.
      check enforces fails in the focused step, not first in the complete suite.
    - A failing test is yours only once it passes at base, as the guidance note
      [`flake-at-base`](../guidance/pull-request/field-report/flake-at-base.md) says.
-   - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests); a change that
-     adds tests measures the suite with `work_tickets.py suite` before and after it, for the field
-     report.
+   - Tests follow the work model's [test rules](../skills/work-model/SKILL.md#tests). A worker
+     never runs the suite to time it: the integrator's landing measures it against its budget.
    - A new test that builds a path follows the guidance note
      [`test-paths-on-windows`](../guidance/pull-request/field-report/test-paths-on-windows.md).
    - Before delivery, run the suite once with an empty home and no system git config

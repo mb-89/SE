@@ -1,7 +1,7 @@
 [project]
 # The project's one semantic version, raised by work_tickets.py release when SE asks (docs/settings.md
 # "Project settings").
-version = "15.0.0"
+version = "16.0.0"
 # Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (docs/settings.md
 # "Release tags").
 release = "workflow"
@@ -146,7 +146,7 @@ go = "components/go.mod"
 version = "^10.4.0"
 
 [components.obs-html]
-version = "^0.5.2"
+version = "^0.6.0"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
@@ -156,7 +156,7 @@ version = "^0.5.2"
 local = 4
 
 [timeline]
-repositories = ["SE", "obs", "kern"]
+repositories = ["SE", "obs", "kern", "obs-html"]
 
 # The repositories SE watches for outside issues, each with the last issue number that existed
 # before the fleet marked its own (work model "Outside issues"); a bare name lies beside SE's home.

@@ -21,7 +21,8 @@ it (`question_problems`), writing nothing; it files no issue (wrk-007). It posts
 document of the overhaul template (`report`): the verdicts, what was looked at, the answers to both
 question blocks, each finding with its kind (`work`, which SE bundles, or `decision`, for the
 owner's decision list; a rule change is always a decision), then the facts and the block, which
-`judgment_problems` checks, as the overhaul issue's closing comment, and closes the issue.
+`judgment_problems` checks through the adapter template `templates/overhaul-judgment.md`
+(JUDGMENT_TEMPLATE), as the overhaul issue's closing comment, and closes the issue.
 
 GitHub is read and written through work_tickets.py's door (gh); without gh `read` prints its reads
 as a plan for the session's GitHub tools and takes their answers from `--answers DIR`, and `file`
@@ -560,10 +561,14 @@ REPORT_MARKER = "<!-- se:overhaul-report -->"
 # The overhaul's document template, and its fields the draft asks the judge to answer: the
 # standing questions, which the retro and every field report ask too, and the overhaul's own.
 TEMPLATE_NAME = "overhaul"
+# The adapter template the judged block is checked through (templates/overhaul-judgment.md),
+# whose checker is judgment_problems.
+JUDGMENT_TEMPLATE = "overhaul-judgment"
 QUESTION_FIELDS = ("questions", "overhaul_questions")
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
 BLOCK_VERSION = 1
-# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`.
+# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`, the message
+# retro.py's FINDING_TEMPLATE the report writes; finding one stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\boverhaul #(\d+) finding (\d+)\b", re.IGNORECASE)
 # What checks a rule, read from its live implementations.
 CHECKED_BY = ("test", "check", "judgment")
@@ -1036,7 +1041,8 @@ def judged(text: str, number: int) -> dict:
     if block.get("overhaul") != number:
         raise work_tickets.QueueError(f"The draft is overhaul #{block.get('overhaul')}'s, not "
                                       f"#{number}'s")
-    problems = judgment_problems(block) + question_problems(text)
+    problems = (sibling("retro").adapter_problems(JUDGMENT_TEMPLATE, text)
+                + question_problems(text))
     if problems:
         raise work_tickets.QueueError(f"The judgment of overhaul #{number} is not complete, so "
                                       "nothing was written: " + "; ".join(problems))
@@ -1085,9 +1091,10 @@ def report(text: str, block: dict, number: int) -> str:
         r"^## (?:" + "|".join(map(re.escape, headings)) + r")[ \t]*\n.*?(?=^## |^"
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
+    reference = sibling("retro").finding_reference("overhaul", number)
     follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
                f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-               f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+               f"needs, each naming `{reference}` for every finding it takes, "
                f"so the next overhaul scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
                "on the owner's decision list.")
@@ -1106,6 +1113,58 @@ def report(text: str, block: dict, number: int) -> str:
     }
     body = templates.render(overhaul_template(), fields)
     return f"{REPORT_MARKER}\n# Overhaul #{number}: the report\n\n{body.rstrip()}\n"
+
+
+def finding_chapter(item: dict) -> tuple[str, str]:
+    """A judged finding as its decision chapter of the deck: it opens with the finding itself, then its
+    rule, its place and its sources, and last what the person decides (their go for `work`, their
+    decision for `decision`, every rule change among them)."""
+    change = " (a rule change)" if item["rule_change"] else ""
+    lines = [item["body"].strip(), "", f"Rule: {item['rule'].strip()}{change}.", "",
+             f"Place: `{item['place'].strip()}`."]
+    lines += [f"- Source: {source.strip()}" for source in item.get("sources") or []]
+    lines += ["", f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
+              else "**Work, for your go**: Bless sends it to SE, which bundles it into a work issue."]
+    return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
+
+
+def deck_parts(text: str, block: dict, number: int
+               ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """The overhaul's deck from its judged draft `text` and its block: every step of its report as a
+    chapter (the verdicts, what was looked at, both question blocks, the findings by name, what went
+    well and the facts, without the block the next overhaul reads), then one decision chapter per
+    finding, which holds it in full."""
+    review, templates = sibling("review"), sibling("templates")
+    fields = templates.parse(overhaul_template(), report(text, block, number)).fields
+    fields["facts"] = str(fields["facts"]).split(BLOCK_MARKER)[0]
+    # Each finding is a decision chapter at the end, so the findings step names them alone (SE#1826,
+    # requirement 9: nothing twice).
+    fields["findings"] = "\n".join(f"- {item['finding']}. {item['title'].strip()} ({item['kind']})"
+                                   for item in block["findings"]) or "None."
+    steps = [(item.heading, review.demoted(str(fields.get(item.name) or "None.").strip(), -1).strip())
+             for item in overhaul_template().fields]
+    return steps, [finding_chapter(item) for item in block["findings"]]
+
+
+def run_deck(args: argparse.Namespace) -> int:
+    work_tickets = sibling("work_tickets")
+    text = work_tickets.read_file(args.draft, "the overhaul draft")
+    block = judged(text, args.overhaul)
+    steps, decisions = deck_parts(text, block, args.overhaul)
+    deck = sibling("retro_deck")
+    count = len(block["findings"])
+    try:
+        written = deck.text(f"Overhaul #{args.overhaul}",
+                            f"{len(block['verdicts'])} rules judged: {count} finding{'' if count == 1 else 's'}",
+                            steps, decisions)
+    except deck.DeckError as error:
+        raise work_tickets.QueueError(f"Overhaul #{args.overhaul}: {error}") from None
+    code = deck.build(written, args.destination, args.host, args.answers)
+    if code == 0:
+        print(f"Overhaul #{args.overhaul}: the report is the deck {args.destination}, its one file: a "
+              f"title page, {len(steps)} steps and {len(decisions)} decision chapter(s)"
+              + (", the person's answers recorded" if args.answers else ""))
+    return code
 
 
 def run_file(args: argparse.Namespace) -> int:
@@ -1173,9 +1232,10 @@ def run_facts(args: argparse.Namespace) -> int:
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "overhaul", "Overhaul",
-    "An overhaul: new files its issue, read writes its draft, file checks the judged draft and "
-    "closes the issue with its report, and facts lists a checkout's pruning facts.",
-    ("new", "read", "file", "facts")),)
+    "An overhaul: new files its issue, read writes its draft, deck builds its one report, a deck, "
+    "from the judged draft, file checks the judged draft and closes the issue with its report, and "
+    "facts lists a checkout's pruning facts.",
+    ("new", "read", "deck", "file", "facts")),)
 #: The commands that go through kern where it runs (se_components.routed): facts, which only reads
 #: the checkout while a person waits; new, read and file write or read GitHub at length.
 INTERACTIVE_COMMANDS = frozenset({"facts"})
@@ -1218,6 +1278,24 @@ def make_parser() -> argparse.ArgumentParser:
                                    "answers into")
     github(read_command)
     read_command.set_defaults(run=run_read)
+    deck_command = commands.add_parser(
+        "deck", help="build the overhaul's one report, a deck, from its judged draft",
+        description="Check the judged draft as file does, then build the overhaul's one report: a "
+                    "deck from the retro-deck template (templates/retro-deck.md) with a title page, "
+                    "every step of its report as a chapter and one decision chapter per finding, "
+                    "last, each asking the person for a bless. It writes the one HTML file "
+                    "DESTINATION and nothing beside it, and never waits for the answers.")
+    deck_command.add_argument("overhaul", type=int, help="the overhaul issue's number")
+    deck_command.add_argument("--draft", type=Path, required=True, metavar="FILE",
+                              help="the draft overhaul.py read wrote, its block judged")
+    deck_command.add_argument("--destination", type=Path, required=True, metavar="HTML",
+                              help="the deck's HTML file")
+    deck_command.add_argument("--host", choices=sibling("deck").HOSTS,
+                              help="the host the person's answers go back to (deck.py build "
+                                   "--host; default: the one this runs under)")
+    deck_command.add_argument("--answers", type=Path, metavar="FILE",
+                              help="the person's answers (answers.json): build the deck as their record")
+    deck_command.set_defaults(run=run_deck)
     file_command = commands.add_parser(
         "file", help="check a judged overhaul draft and close the overhaul issue with its report",
         description="Check the judgment in the draft's block, refusing an incomplete one and "
