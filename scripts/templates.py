@@ -289,7 +289,11 @@ the field sets them, its `heading`, `required`, `none_ok`, `choices` (resolved),
 fields written with SCHEMA_KEYWORDS alone, which strict tool use on the Claude API accepts
 (`schema`). `templates.py schema (<template> | --path FILE [--root DIR])` prints that schema
 alone, the generated one: no template writes its schema by hand. `templates.py list` names every template with its actions, then the paths it claims and, for an
-adapter, its checker. Each command resolves its template names by `catalog` for the project
+adapter, its checker. `templates.py owned [--root DIR] [--json]` is the one listing of the paths the
+templates own (`owned`): one line per glob, `<glob>: <template>: templates.py fill <template> --path
+<file>`, the fill that alone writes such a file; `--json` gives the same as a list of objects with
+`path`, `template` and `fill`. Nothing claimed prints nothing. SE's start writes the globs for its
+hook (scripts/se_templates.py, The file tools). Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
 the working tree's `templates/`; `--templates DIR`, on all four, reads
 the templates and `terms.toml` from that folder instead, for that run alone (`load(folder=)`). None but
@@ -2341,6 +2345,18 @@ def _checked_by(template: Template) -> str:
     return ", ".join(parts) + ("" if len(parts) > 1 or template.checker else " (no field required)")
 
 
+def owned(templates: dict[str, Template]) -> list[tuple[str, str]]:
+    """Every path glob a `file.write` template owns, with that template's name: (glob, name),
+    sorted by glob, then name."""
+    return sorted((glob, template.name) for template in templates.values() if template.is_file
+                  for glob in template.paths)
+
+
+def owned_fill(name: str) -> str:
+    """The fill that alone writes a file `name` owns, `<file>` its path."""
+    return f"templates.py fill {name} --path <file>"
+
+
 def list_templates(templates: dict[str, Template]) -> list[str]:
     """One line per template: its name, reader, actions, the paths it claims, an adapter's checker,
     and what it says."""
@@ -3594,7 +3610,7 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill, interfaces")
+                                     description="SE's templates: check, draft, schema, list, owned, fill, interfaces")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -3618,6 +3634,11 @@ def main(arguments: list[str] | None = None) -> int:
     schemas = commands.add_parser("schema", help="print the JSON Schema generated from a template")
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
+    owning = commands.add_parser("owned", help="list the paths the templates own, each with its template "
+                                 "and the fill that alone writes it")
+    owning.add_argument("--root", type=Path, help="the project whose templates/ and template repositories "
+                        "resolve before SE's (default: SE's own checkout)")
+    owning.add_argument("--json", action="store_true", help="the listing as JSON")
     interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
                                       "interface template beside the code that uses it "
                                       "(scripts/interfaces/), from the working tree's templates/")
@@ -3651,7 +3672,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling):
+    for command in (checking, drafting, schemas, listing, owning, filling):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -3675,6 +3696,14 @@ def main(arguments: list[str] | None = None) -> int:
                      else catalog(_project(options), tree=tree))
         if options.command == "list":
             print("\n".join(list_templates(templates)))
+            return 0
+        if options.command == "owned":
+            listed = [{"path": glob, "template": name, "fill": owned_fill(name)}
+                      for glob, name in owned(templates)]
+            if options.json:
+                print(json.dumps(listed, indent=2))
+            elif listed:
+                print("\n".join(f"{item['path']}: {item['template']}: {item['fill']}" for item in listed))
             return 0
         if options.command == "fill":
             return _fill(templates, options)

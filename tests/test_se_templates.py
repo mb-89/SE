@@ -851,17 +851,91 @@ def test_check_files_usage_errors(capsys):
 
 
 def test_check_files_changed_reads_no_git_where_no_template_claims_a_path(capsys, tmp_path):
-    """No git checkout at all: it answers before it reads one, as CI's check job runs it on SE's."""
-    assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path))[:2] == (
+    """No git checkout at all: where no template claims a path (SE's templates without work-file, the
+    one that claims), it answers before it reads one."""
+    folder = tmp_path / "templates"
+    folder.mkdir()
+    for note in (ROOT / "templates").iterdir():
+        if note.name != "work-file.md":
+            (folder / note.name).write_bytes(note.read_bytes())
+    assert run(capsys, "check-files", "--changed", "origin/main", "--root", str(tmp_path),
+               "--templates", str(folder))[:2] == (
         0, "se_templates.py check-files: no template claims a path; nothing checked\n")
 
 
-def test_no_template_of_ses_claims_a_path_and_no_se_toml_switch_turns_the_file_gate():
-    """SE's own check-files and file gate have nothing to judge yet, and no `files` switch is left."""
-    assert not any(template.paths for template in CATALOG.values())
-    assert not se_templates.claims_a_path(CATALOG)
+WORK_FILE_GLOB = ".se/issues/*.md"
+
+
+def test_ses_one_owned_path_is_the_work_issue_body_file_and_no_se_toml_switch_turns_the_file_gate():
+    """SE's own templates claim one glob, the work issue body file's (work-file), and no `files`
+    switch is left."""
+    assert templates.owned(CATALOG) == [(WORK_FILE_GLOB, "work-file")]
+    assert se_templates.claims_a_path(CATALOG)
     assert "files" not in tomllib.loads((ROOT / "se.toml").read_text(encoding="utf-8"))["templates"]
     assert not hasattr(templates.Enforcement(), "files") and not hasattr(templates, "FILES_VALUES")
+
+
+# The work issue body file (templates/work-file.md): only its fill writes it, and what it writes files
+# as the work issue it shapes.
+
+def test_editing_a_work_issue_body_file_directly_is_refused_with_the_command_that_fills_it(
+        capsys, monkeypatch, tmp_path):
+    """The acceptance, against SE's own templates: an Edit, a Write and a Write that would create one,
+    on template or off it, are denied, each naming `templates.py fill work-file --path <file>`."""
+    root = tmp_path / "project"
+    (root / ".git").mkdir(parents=True)
+    body = root / ".se" / "issues" / f"{TITLE}.md"
+    body.parent.mkdir(parents=True)
+    on_template = templates.render(CATALOG["work-file"], dict(FIELDS))
+    body.write_text(on_template, encoding="utf-8")
+    calls = {
+        "Edit": {"file_path": str(body), "old_string": FIELDS["goal"], "new_string": "Something else."},
+        "Write": {"file_path": str(body), "content": on_template},
+        "Write new": {"file_path": str(body.parent / "new-package.md"), "content": "## Goal\n\nx\n"},
+        "MultiEdit": {"file_path": str(body), "edits": [{"old_string": "a", "new_string": "b"}]},
+    }
+    for name, given in calls.items():
+        tool = name.split()[0]
+        reason = denial(gate(capsys, monkeypatch, file_payload(tool, root, **given), "--templates",
+                             str(ROOT / "templates"), "--root", str(root)))
+        relative = Path(given["file_path"]).relative_to(root).as_posix()
+        assert reason.startswith(f"{tool} of {relative}: a template claims this path, so only its fill "
+                                 "writes it:"), name
+        assert (f"  {relative} (work-file): uv run python {ROOT / 'scripts' / 'templates.py'} fill work-file "
+                f"--path {root / relative} --root {root}") in reason, name
+    assert body.read_text(encoding="utf-8") == on_template
+    assert not (body.parent / "new-package.md").exists()
+
+
+def test_a_fill_and_templates_write_pass_the_gate_and_the_fills_file_files_as_its_work_issue(
+        capsys, monkeypatch, tmp_path):
+    """Requirement 3: the fill's shell call and the door's templates_write reach no deny; the file the
+    fill writes holds its template in the front matter and files, through `work`, as the work issue."""
+    root = tmp_path / "project"
+    (root / ".git").mkdir(parents=True)
+    body = root / ".se" / "issues" / f"{TITLE}.md"
+    fill = ["fill", "work-file", "--path", str(body), "--root", str(root), "--templates", str(ROOT / "templates"),
+            "--input-text", FIELDS["user_requirement"], "--fields-json", json.dumps(FIELDS)]
+    passing = [
+        json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(root),
+                    "tool_name": "Bash", "tool_input": {"command": " ".join(
+                        ["uv", "run", "python", str(ROOT / "scripts" / "templates.py"), *fill[:5]])}}),
+        json.dumps({"hook_event_name": "PreToolUse", "session_id": SESSION, "cwd": str(root),
+                    "tool_name": "mcp__plugin_se_se__templates_write",
+                    "tool_input": {"action": "fill", "args": ["work", "--repo", f"{OWNER}/{REPO_NAME}"]}}),
+    ]
+    for text in passing:
+        assert gate(capsys, monkeypatch, text, "--gate", "refuse", "--templates", str(ROOT / "templates"),
+                    "--root", str(root)) == ""
+    monkeypatch.chdir(root)
+    assert templates.main(fill) == 0
+    assert capsys.readouterr().out == f"wrote .se/issues/{TITLE}.md: work-file 1.0.0\n"
+    written = body.read_text(encoding="utf-8")
+    assert templates.front_matter_template(written) == "work-file"
+    filed = templates.filled(WORK, body=written, enforce=templates.REFUSE)
+    assert filed == templates.render(WORK, dict(FIELDS)) and "template: se/work-file" not in filed
+    assert not [found for found in templates.check(WORK, templates.parse(WORK, filed, TITLE))
+                if found.severity == templates.REFUSE]
 
 
 def test_se_tomls_own_gate_on_its_integration_branch_decides_the_gate(capsys, monkeypatch, tmp_path):
@@ -998,15 +1072,21 @@ def test_the_file_gate_needs_no_se_toml_switch_and_counts_its_refusals(capsys, m
     assert templates.refusals(key, {"SE_SESSION": SESSION}) == 2
 
 
-def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(capsys, tmp_path):
+def test_the_starts_runtime_line_is_written_only_where_a_template_claims_a_path(capsys, monkeypatch, tmp_path):
+    """The start publishes the owned globs after the line claimed: SE's own, the work issue body
+    file's, for a project without templates of its own; the project's where it has them; none and no
+    file where nothing is claimed."""
     line = tmp_path / ".se" / ".runtime" / "templates-files"
-    assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
+    assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
+    assert line.read_text(encoding="utf-8") == f"{se_templates.FILES_CLAIMED}\n{WORK_FILE_GLOB}\n"
     step_book(tmp_path)
     (tmp_path / "se.toml").write_text('[templates]\nfiles = "off"\n', encoding="utf-8")
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0
-    assert line.read_text(encoding="utf-8") == f"{se_templates.FILES_CLAIMED}\n"
-    (tmp_path / "templates" / "step-risks.md").unlink()
-    (tmp_path / "templates").rmdir()
+    owned = sorted({glob for glob, _ in templates.owned(templates.load(tmp_path))})
+    assert "book/*/steps/*.md" in owned
+    assert line.read_text(encoding="utf-8") == "".join(f"{text}\n" for text in (se_templates.FILES_CLAIMED,
+                                                                                *owned))
+    monkeypatch.setattr(templates, "owned", lambda catalog: [])
     assert se_templates.main(["gate", "--runtime", str(tmp_path)]) == 0 and not line.exists()
     assert capsys.readouterr().out == ""
 

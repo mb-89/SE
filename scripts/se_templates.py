@@ -139,7 +139,10 @@ judged by their own rules (The file tools, below).
 (docs/templates.md "Fill"): the gate denies every other write of it, a file tool's call
 (FILE_TOOLS, GITHUB_FILE_TOOLS), whatever it would leave. `scripts/se_hook.sh` runs it for one only
 where SE's start (`gate --runtime <project>`, scripts/bootstrap.sh) found a template that claims a
-path and left the line `claimed` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME).
+path and left the line `claimed` in `<project>/.se/.runtime/templates-files` (FILES_RUNTIME), then
+each glob the templates own, one a line, as `templates.py owned` lists them: the hook starts the gate
+for Claude Code's file tools only where the path, relative to the project, matches one of them as a
+bash pattern, a superset of the engine's match (a `*` there also crosses folders), and the gate decides.
 
 - Claude Code's `Write`, `Edit` and `MultiEdit`, by their whole name: the project is the checkout
   holding `file_path`; a path outside it is free.
@@ -258,8 +261,8 @@ GATE_FAILED = "SE's template gate failed on this write ({kind}), so it was not s
 #: path: Claude Code's own, by their whole name, and the GitHub tools that write files.
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
 GITHUB_FILE_TOOLS = ("push_files", "create_or_update_file")
-#: The line SE's start writes for se_hook.sh (`gate --runtime`): there only where a template
-#: claims a path, its one line FILES_CLAIMED.
+#: The file SE's start writes for se_hook.sh (`gate --runtime`): there only where a template
+#: claims a path, its first line FILES_CLAIMED, then each glob a template owns (`templates.owned`).
 FILES_RUNTIME = Path(".se") / ".runtime" / "templates-files"
 FILES_CLAIMED = "claimed"
 #: The shell reader (the module docstring: The shell reader). The input keys of a shell tool.
@@ -804,8 +807,9 @@ def make_parser() -> argparse.ArgumentParser:
     gating.add_argument("--root", type=Path,
                         help="for tests only: the project root of a file tool's path")
     gating.add_argument("--runtime", type=Path, metavar="ROOT",
-                        help="SE's start: write ROOT/.se/.runtime/templates-files where a template "
-                             "claims a path, remove it otherwise; reads no payload")
+                        help="SE's start: write ROOT/.se/.runtime/templates-files, the line claimed and "
+                             "each owned glob, where a template claims a path, remove it otherwise; "
+                             "reads no payload")
     files = commands.add_parser(
         "check-files", help="check the files a template claims, given or changed since a ref",
         description="Check each claimed file as templates.py check --path does: the PATHs given, or "
@@ -1456,17 +1460,19 @@ def free_write(write: Write, what: str, repo: str, root: Path, claims: list[tupl
 
 def run_runtime(root: Path) -> int:
     """`gate --runtime`: write FILES_RUNTIME under `root` where a template the gate reads for it
-    (claim_templates) claims a path, remove it otherwise; exit 0, 1 where it fails."""
+    (claim_templates) claims a path, FILES_CLAIMED and then each owned glob, remove it otherwise;
+    exit 0, 1 where it fails."""
     templates = sibling("templates")
     path = root / FILES_RUNTIME
     try:
         try:
-            claimed = claims_a_path(claim_templates(root, None)[0])
+            globs = sorted({glob for glob, _ in templates.owned(claim_templates(root, None)[0])})
         except templates.TemplateError:
-            claimed = False
-        if claimed:
+            globs = []
+        if globs:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{FILES_CLAIMED}\n", encoding="utf-8", newline="\n")
+            path.write_text("".join(f"{line}\n" for line in (FILES_CLAIMED, *globs)), encoding="utf-8",
+                            newline="\n")
         else:
             path.unlink(missing_ok=True)
     except OSError as error:
@@ -1515,7 +1521,7 @@ def project_root(given: Path | None) -> Path:
 
 def claims_a_path(catalog: dict) -> bool:
     """Whether a `file.write` template of `catalog` claims a path."""
-    return any(template.is_file and template.paths for template in catalog.values())
+    return bool(sibling("templates").owned(catalog))
 
 
 def claim_templates(root: Path, folder: Path | None) -> tuple[dict, Path | None]:
