@@ -1,0 +1,25 @@
+{
+  "template": "se/retro-doc",
+  "version": "1.0.0",
+  "says": "A retro report's link to its committed retro doc: the commit and the doc's path in the checkout.",
+  "message": "<!-- se:retro-doc {sha} {path} -->",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "sha": {
+        "type": "string",
+        "description": "The integration branch's commit that holds the retro doc, its full 40 hex digits."
+      },
+      "path": {
+        "type": "string",
+        "description": "The retro doc's path in the checkout, with forward slashes and no space."
+      }
+    },
+    "required": [
+      "sha",
+      "path"
+    ],
+    "additionalProperties": false
+  }
+}

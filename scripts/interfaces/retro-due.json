@@ -1,0 +1,65 @@
+{
+  "template": "se/retro-due",
+  "version": "1.0.0",
+  "says": "The retro and overhaul countdowns: per kind what it counted since where it starts, the days, and whether it is due or open.",
+  "message": "retro: {retro_count} ({retro_landed} landed, {retro_failed} failed) {retro_start}, {retro_days} days; {retro_state}\noverhaul: {overhaul_count} retros closed {overhaul_start}, {overhaul_days} days; {overhaul_state}",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "retro_count": {
+        "type": "string",
+        "description": "The retro's weighted count of what came back, digits alone."
+      },
+      "retro_landed": {
+        "type": "string",
+        "description": "How many of those landed, digits alone."
+      },
+      "retro_failed": {
+        "type": "string",
+        "description": "How many of those failed, digits alone."
+      },
+      "retro_start": {
+        "type": "string",
+        "description": "Where it starts: since which retro started, and when, or in the whole history."
+      },
+      "retro_days": {
+        "type": "string",
+        "description": "The days since its start, digits alone."
+      },
+      "retro_state": {
+        "type": "string",
+        "description": "open with its open retros, due with its reason, or not due."
+      },
+      "overhaul_count": {
+        "type": "string",
+        "description": "How many retros closed since its start, digits alone."
+      },
+      "overhaul_start": {
+        "type": "string",
+        "description": "Where it starts: since which overhaul started, and when, or in the whole history."
+      },
+      "overhaul_days": {
+        "type": "string",
+        "description": "The days since its start, digits alone."
+      },
+      "overhaul_state": {
+        "type": "string",
+        "description": "open with its open overhauls, due with its reason, or not due."
+      }
+    },
+    "required": [
+      "retro_count",
+      "retro_landed",
+      "retro_failed",
+      "retro_start",
+      "retro_days",
+      "retro_state",
+      "overhaul_count",
+      "overhaul_start",
+      "overhaul_days",
+      "overhaul_state"
+    ],
+    "additionalProperties": false
+  }
+}

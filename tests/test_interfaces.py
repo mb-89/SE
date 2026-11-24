@@ -15,8 +15,9 @@ import templates
 ROOT = Path(__file__).resolve().parents[1]
 #: The interface templates with fields, and the messages among them.
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "generated-marker", "handover", "rules-page",
-              "skills-page", "sub-agents-page")
-MESSAGES = ("delivery-notice", "escalation", "generated-marker")
+              "skills-page", "sub-agents-page", "retro-due", "retro-part", "retro-doc", "finding-ref")
+MESSAGES = ("delivery-notice", "escalation", "generated-marker", "retro-part", "retro-doc",
+            "finding-ref")
 
 
 @pytest.fixture(scope="module")

@@ -21,6 +21,9 @@ field-report:
   - platform-code-legs
   - test-paths-on-windows
   - tests-spawn-no-processes
+finding-ref:
+  - discover-cheap-load-late
+  - guidance-comes-first
 generated-marker:
   - discover-cheap-load-late
   - guidance-comes-first
@@ -41,6 +44,9 @@ merge-message:
   - discover-cheap-load-late
   - guidance-comes-first
 overhaul:
+  - discover-cheap-load-late
+  - guidance-comes-first
+overhaul-judgment:
   - discover-cheap-load-late
   - guidance-comes-first
 overhaul-questions:
@@ -71,6 +77,18 @@ requirement:
   - discover-cheap-load-late
   - guidance-comes-first
 retro:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-doc:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-due:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-judgment:
+  - discover-cheap-load-late
+  - guidance-comes-first
+retro-part:
   - discover-cheap-load-late
   - guidance-comes-first
 review:

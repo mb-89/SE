@@ -485,10 +485,16 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/python-component.md` | `python-component`: an ad hoc component, what `se component add` writes | code | SE |
 | `templates/go-module.md` | `go-module`: a Go module, its `go.mod`, package and test | code | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
+| `templates/retro-judgment.md` | `retro-judgment`: the retro draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
+| `templates/overhaul-judgment.md` | `overhaul-judgment`: the overhaul draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |
 | `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |
+| `templates/retro-due.md` | `retro-due`: what `retro.py due` prints, a snippet | interface | SE |
+| `templates/retro-part.md` | `retro-part`: the label of each part of a split retro report | interface | SE |
+| `templates/retro-doc.md` | `retro-doc`: a retro report's link to its committed retro doc | interface | SE |
+| `templates/finding-ref.md` | `finding-ref`: how a work issue names a retro's or an overhaul's finding | interface | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already

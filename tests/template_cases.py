@@ -20,7 +20,8 @@ template, what it loaded to and how it answers:
   `check` finds, and the digest of `render` of that parse.
 
 A set's `select` cases name a body by the template whose base document it is, and give what
-`select` answers. A set's `error` is the load error its files give, where they do not load.
+`select` answers; SE's are written one file per action, `se-select-<action>.json`, as they grow
+with every template. A set's `error` is the load error its files give, where they do not load.
 """
 
 from __future__ import annotations
@@ -1500,8 +1501,11 @@ def build() -> dict[str, str]:
     se = _set("se", templates.load(ROOT, tree=True), "SE's templates/")
     for name, entry in se["templates"].items():
         made[f"se-{name}.json"] = {"generated": se["generated"], "set": "se", "templates": {name: entry}}
-    made["se-select.json"] = {"generated": se["generated"], "set": "se", "templates": {},
-                              "select": se["select"]}
+    # One file of select cases per action, as their count grows with every template's base.
+    for action in dict.fromkeys(case["action"] for case in se["select"]):
+        made[f"se-select-{action}.json"] = {
+            "generated": se["generated"], "set": "se", "templates": {},
+            "select": [case for case in se["select"] if case["action"] == action]}
     step_files = {
         "risks.md": STEP_TEMPLATE.format(name="risks", paths='"book/*/steps/*.md"',
                                          extra='  marker_pattern: "id: S5B"\n'),

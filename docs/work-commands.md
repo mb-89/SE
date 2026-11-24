@@ -356,7 +356,7 @@ numbered, each with its home and its kind:
 
 Then what went well, and in step 6 the person's decisions, the classes still open and what
 follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
 them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
