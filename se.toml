@@ -45,6 +45,8 @@ release = "components/release.toml"
 # which CI's hygiene step adds.
 [commit_checks]
 generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "check", "--no-rerun"]
+# The one-page README (scripts/readme.py, the guidance note readme-is-one-page).
+readme = ["uv", "run", "--no-project", "python", "scripts/readme.py", "check"]
 
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
 # integrator's own, so no commit on main carries an address (docs/settings.md "Landing on main").

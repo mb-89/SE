@@ -27,6 +27,8 @@ each named with its check.
   `[commit_checks]`).
 - sections: every tracked text file's `<page>.md "<section>"` and `README "<section>"` name a section
   of that page (`scripts/references.py` `dangling_sections`), outside SECTIONS_SKIPPED;
+- readme: README.md is one page with its one command first (`scripts/readme.py`, the guidance note
+  readme-is-one-page); the commit hook runs the same check (se.toml `[commit_checks]`).
 
 An allow list's entry that no longer names such a file is refused, so the lists stay true.
 """
@@ -43,6 +45,7 @@ from pathlib import Path
 import generated
 import git_door
 import process_door
+import readme
 import references
 import se_home
 
@@ -327,6 +330,14 @@ def section_findings(root: Path, skipped: dict[str, str]) -> list[str]:
     return found
 
 
+def readme_findings(root: Path) -> list[str]:
+    """What keeps `root`'s README.md from the one-page shape (`scripts/readme.py`)."""
+    path = root / "README.md"
+    if not path.is_file():
+        return ["README.md: missing; every project opens with its one-page README"]
+    return [f"README.md: {finding}" for finding in readme.findings(path.read_text(encoding="utf-8"))]
+
+
 def checks(root: Path) -> dict[str, list[str]]:
     """Each check's findings on `root`, in the order the module's docstring names them."""
     return {
@@ -340,6 +351,7 @@ def checks(root: Path) -> dict[str, list[str]]:
                          else home_findings(root, HOME_ALLOWED, home)),
         "generated": generated_findings(root),
         "sections": section_findings(root, SECTIONS_SKIPPED),
+        "readme": readme_findings(root),
     }
 
 

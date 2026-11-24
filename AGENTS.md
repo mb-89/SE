@@ -105,6 +105,9 @@
     `generated.yaml`, or a generator's fresh run differs (`scripts/generated.py`, the guidance
     note `generated-files-are-marked`); the commit hook runs the same check without the fresh runs
     (`se.toml` `[commit_checks]`).
+  - It also fails where README.md is not one page with its one command first (`scripts/readme.py`,
+    the guidance note [readme-is-one-page](guidance/readme-is-one-page.md)); the commit hook runs the
+    same check.
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:

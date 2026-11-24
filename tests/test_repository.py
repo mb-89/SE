@@ -100,6 +100,11 @@ def test_the_allow_lists_say_why() -> None:
 # the check, and passes a clean checkout; the public check, its child through the process door, is
 # answered in-process by its main (tests/fake_processes.py), on the fake in memory.
 
+# A README of the one-page shape (scripts/readme.py): its command, its documentation, its pitch.
+ONE_PAGE = ("# Clean\n\n```sh\n./run --demo\n```\n\nThe line installs and runs it. The [documentation]"
+            "(AGENTS.md) holds the rest.\n\n## What it is\n\nA clean tool.\n\n- [Agents](AGENTS.md)\n")
+
+
 @pytest.fixture
 def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fixture checkout has none of SE's allowed files, so SE's lists would be stale there."""
@@ -109,12 +114,11 @@ def no_allow_lists(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("fake_git_door")
 def test_hygiene_passes_a_clean_checkout(repo: Path, no_allow_lists: None, capsys) -> None:
-    commit(repo, {"README.md": "# Clean\n\n## What it is\n\nSee [agents](AGENTS.md).\n",
-                  "AGENTS.md": "# Agents\n\nSee README \"What it is\".\n",
+    commit(repo, {"README.md": ONE_PAGE, "AGENTS.md": "# Agents\n\nSee README \"What it is\".\n",
                   "scripts/tool.py": "import git_door\ngit_door.run('status')\n"})
     assert hygiene.main(["--repo", str(repo)]) == 0, capsys.readouterr().out
     out = capsys.readouterr().out.splitlines()
-    assert out[-1].startswith("hygiene: passed (9 checks) in ")
+    assert out[-1].startswith("hygiene: passed (10 checks) in ")
     assert out[0].startswith("hygiene: neutral-home: skipped: ") and "no origin remote" in out[0]
 
 
@@ -142,9 +146,10 @@ def test_hygiene_refuses_what_each_check_finds_naming_the_check(
     assert "bob" not in out, "the neutral-home check names locations, never the matched text"
     assert 'hygiene: sections: AGENTS.md line 3: `README "Gone"` names no section of README.md' in out
     assert 'hygiene: sections: AGENTS.md line 3: `docs/install.md "Gone"` names no section' in out
+    assert "hygiene: readme: README.md: no code block of one command within its first 10 lines" in out
     assert out.splitlines()[-1].startswith(
         "hygiene: refused by binary, large, marker, git-door, references, public, neutral-home, "
-        "sections (")
+        "sections, readme (")
 
 
 class Item:
@@ -335,3 +340,12 @@ def test_a_stale_sections_entry_fails_and_a_skipped_file_is_not_read(tmp_path: P
     assert hygiene.section_findings(repo, {"record.md": "a dated record", "lost.md": "gone"}) == [
         "SECTIONS_SKIPPED lost.md: no such tracked file",
         'notes.md line 1: `README "Gone"` names no section of README.md']
+
+
+def test_ses_readme_is_one_page_with_its_command_first() -> None:
+    assert hygiene.readme_findings(ROOT) == []
+
+
+def test_a_checkout_without_a_readme_fails_the_readme_check(tmp_path: Path) -> None:
+    assert hygiene.readme_findings(tmp_path) == [
+        "README.md: missing; every project opens with its one-page README"]
