@@ -21,14 +21,6 @@ import (
 	"se/components/template"
 )
 
-// still is a host clock that never moves: SE's wiring places kern's clock,
-// whose loop waits on it for good, so github.second stays unwritten and no
-// refresh runs while a case reads the snapshots its tool answers land.
-type still struct{}
-
-func (still) Now() time.Time                       { return time.Time{} }
-func (still) After(time.Duration) <-chan time.Time { return make(chan time.Time) }
-
 // toolUse is a PostToolUse payload as a cloud session's hook hands it, with
 // the GitHub tool's answer as its text.
 func toolUse(tool string, input map[string]any, answer any) []byte {
@@ -75,9 +67,13 @@ func TestSEsWiringDerivesTheFleetAndTheRetroFromTheNames(t *testing.T) {
 		return map[string]time.Time{"main": time.Now()}, nil
 	}
 	origin.Tracker = func(string) string { return "alice/SE" }
-	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
+	// kern's zero Options reach nothing (kern 3): no token, proxy or cloud
+	// session, so the GitHub component takes the relay; and no clock, so
+	// the clock runs no loop, github.second stays unwritten and no refresh
+	// runs while a case reads the snapshots its tool answers land.
+	g := github.New(github.Options{})
 	c, err := host.Serve(host.Options{Root: t.TempDir(), Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component}})
+		Components: []*index.Component{clock.New(clock.Options{}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +165,10 @@ func TestSEsTrackedWiringLeavesTheSessionRecordOff(t *testing.T) {
 	origin.Tracker = func(string) string { return "alice/SE" }
 	root := t.TempDir()
 	dir := filepath.Join(root, session.Dir)
-	g := github.New(github.Options{Token: func() (string, error) { return "", nil }})
+	g := github.New(github.Options{})
 	rec := session.New(session.Options{Dir: dir})
 	c, err := host.Serve(host.Options{Root: root, Wiring: w,
-		Components: []*index.Component{clock.New(clock.Options{Clock: still{}}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component, rec.Component}})
+		Components: []*index.Component{clock.New(clock.Options{}).Component, g.Component, origin.Component, fleet.Component, retrodue.Component, template.Component, rec.Component}})
 	if err != nil {
 		t.Fatal(err)
 	}
