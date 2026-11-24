@@ -821,6 +821,16 @@ def test_a_draft_of_130000_characters_posts_one_comment_under_the_limit(checkout
     assert [name for name, _ in calls][-1] == "close_issue"
 
 
+def test_the_doc_marker_is_the_retro_doc_message_and_reads_back():
+    """templates/retro-doc.md writes the line the report links its retro doc with, as before; the
+    reading stays DOC_PATTERN, which takes a full commit only."""
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    line = retro.doc_marker(sha, "docs/retro-30.md")
+    assert line == f"<!-- se:retro-doc {sha} docs/retro-30.md -->"
+    assert retro.DOC_PATTERN.fullmatch(line).groups() == (sha, "docs/retro-30.md")
+    assert retro.DOC_PATTERN.fullmatch(retro.doc_marker("abc123", "docs/retro-30.md")) is None
+
+
 def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
     long = "\n".join(f"Line {index} of a long finding body." for index in range(4000))
     long += "\n" + "x" * 70000  # a line longer than a comment is cut within it, never dropped

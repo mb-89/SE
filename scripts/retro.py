@@ -125,8 +125,11 @@ metrics = work_tickets.metrics
 
 BLOCK_MARKER = "<!-- se:retro-yaml -->"
 REPORT_MARKER = "<!-- se:retro-report -->"
-# The report's link to the committed retro doc that holds its facts and block, at a commit.
-DOC_MARKER = "<!-- se:retro-doc {sha} {path} -->"
+# The report's link to the committed retro doc that holds its facts and block, at a commit: the
+# message DOC_TEMPLATE (templates/retro-doc.md), written through its generated schema (`doc_marker`).
+# DOC_PATTERN reads it back, stricter than the message: a full commit.
+DOC_TEMPLATE = "retro-doc"
+DOC_MARKER = sibling("interfaces").generated(DOC_TEMPLATE)["message"]
 DOC_PATTERN = re.compile(r"<!-- se:retro-doc ([0-9a-f]{40}) (\S+) -->")
 # GitHub's limit on an issue comment's body, in characters; a part's label needs at most
 # PART_ROOM of them.
@@ -1892,7 +1895,12 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     }
     body = templates().render(template, fields)
     return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
-            f"{DOC_MARKER.format(sha=sha, path=doc)}\n")
+            f"{doc_marker(sha, doc)}\n")
+
+
+def doc_marker(sha: str, path: str) -> str:
+    """The line that links the retro doc at `path` in commit `sha`, the message DOC_TEMPLATE."""
+    return sibling("interfaces").write(DOC_TEMPLATE, {"sha": sha, "path": path})
 
 
 def parts(text: str, number: int, limit: int = COMMENT_LIMIT) -> list[str]:

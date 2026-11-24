@@ -2429,7 +2429,7 @@ numbered, each with its home and its kind:
 
 Then what went well, and in step 6 the person's decisions, the classes still open and what
 follows. The facts and the block stay in the retro doc, which the report links at the integration
-branch's commit (`<!-- se:retro-doc <sha> <path> -->`), where the next collect and overhaul read
+branch's commit (the message `templates/retro-doc.md`), where the next collect and overhaul read
 them.
 
 A report over GitHub's 65,536 characters is posted as numbered parts in order, never cut, and
@@ -2555,6 +2555,7 @@ both.
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
 | `templates/retro-part.md` | The label a part of a split retro report ends in: which part of how many, of which retro's report. |
+| `templates/retro-doc.md` | A retro report's link to its committed retro doc: the commit and the doc's path in the checkout. |
 | `templates/retro-due.md` | The retro and overhaul countdowns: per kind what it counted since where it starts, the days, and whether it is due or open. |
 | `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
@@ -2589,14 +2590,14 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
 The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`, `retro-due`,
-`retro-part`) shape the texts SE shows and its sessions pass to each other. `templates.py
-interfaces` writes each one's schema beside the code that uses it, `scripts/interfaces/<name>.json`,
-and `--check` names a file that differs from its template.
+`retro-part`, `retro-doc`) shape the texts SE shows and its sessions pass to each other.
+`templates.py interfaces` writes each one's schema beside the code that uses it,
+`scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
 
 `work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`,
 `se_start.py` its start report, a snippet of several lines with a table and a line of three cases,
-`retro.py due` its two countdown lines, and `retro.py file` the label of each part of a split
-report.
+`retro.py due` its two countdown lines, and `retro.py file` its report's link to the retro doc and
+the label of each part of a split report.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.

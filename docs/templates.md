@@ -367,6 +367,7 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |
 | `templates/retro-due.md` | `retro-due`: what `retro.py due` prints, a snippet | interface | SE |
 | `templates/retro-part.md` | `retro-part`: the label of each part of a split retro report | interface | SE |
+| `templates/retro-doc.md` | `retro-doc`: a retro report's link to its committed retro doc | interface | SE |
 | `templates/terms.toml` | the term list, no template: guidance notes tagged with the rule's tag | guidance | SE |
 
 An adapter (`checker` and `adapter`) stays one: its template names the check its code already
