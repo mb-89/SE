@@ -102,6 +102,9 @@ its tools.
   `work_tickets.py file`, labelled as the work model's [Issues](../skills/work-model/SKILL.md#issues)
   says: title = branch name, carrying only the task (goal, the user's requirement verbatim, design owner, numbered
   requirements, file ownership when packages share files, acceptance, verification).
+  - Its body file, `.se/issues/<name>.md`, is written only by `templates.py fill work-file --path
+    <file>` and filed with `--body-file <file>`; the hook refuses a direct write of it
+    ([README "Templates"](../README.md#templates)).
   - Generic rules live in [worker.md](worker.md) and are never repeated in issues.
   - Change a running package as the [catch-up skill](../skills/catch-up/SKILL.md#hard-rules) says.
 - **Backlog issues**: a far-out idea from the person that is not ready work is filed with

@@ -218,6 +218,11 @@ note: headings to sections, the source's instructions to comments, its fields to
 Each source tool gets one adapter; a source with headings only gives sections without
 instructions, which the overlay supplies.
 
+A template owns the paths its `applies.paths` globs claim, in whichever repository it resolves
+from; `templates.py owned` is the one listing of them, each glob with its template and fill, and
+SE's start publishes those globs for its hook, which refuses a direct write of an owned path before
+it runs ([Fill](#fill)). SE's own templates own one, a work issue's body file (`work-file`).
+
 The docstrings own the rest: `scripts/templates.py` (Overlays) what an overlay may say and what
 refuses as a loosening, `scripts/template_import.py` the declaration `templates/imports.yaml`, the
 adapters' interface and the first adapter, which reads a Markdown template note.
@@ -233,17 +238,18 @@ guidance note names a template.
 
 ## Map
 
-Each of SE's twenty template files, obs's note kinds and kern's contracts becomes a template, owned by the
+Each of SE's template files, obs's note kinds and kern's contracts becomes a template, owned by the
 repository named here.
 
 ### SE's templates
 
-SE's nineteen templates are notes; the term list stays a TOML list until the guidance packages land.
+SE's templates are notes; the term list stays a TOML list until the guidance packages land.
 
 | File | Template | Kind | Owner |
 |---|---|---|---|
 | `templates/ticket.md` | `ticket` | document | SE |
 | `templates/work.md` | `work`, `extends` ticket | document | SE |
+| `templates/work-file.md` | `work-file`, `extends` work: a work issue's body file, `.se/issues/<name>.md` | document | SE |
 | `templates/decision.md` | `decision`, whose options node is the `pugh` block | document | SE |
 | `templates/pugh.md` | `pugh`: what SE asks of obs's `pugh` fence | block | SE, until obs's block templates |
 | `templates/raid-register.md` | `raid-register`, whose entries node names `raid-entry` | document | SE |
