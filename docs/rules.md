@@ -2,7 +2,7 @@
 
 # Rules
 
-The 70 rules in force: the rule book's 61 and 9 guidance notes, the notes after the book.
+The 72 rules in force: the rule book's 61 and 11 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -70,9 +70,11 @@ The 70 rules in force: the rule book's 61 and 9 guidance notes, the notes after 
 | `discover-cheap-load-late` | Progressive disclosure and lazy loading: what a command or module is comes from its declaration alone, and its code loads on first use. Read it before you add, list or rewrite a command, a component or a module. |
 | `flake-at-base` | How to tell a flake from your own failure: rerun the one test at the integration branch with a high repeat count. Load it before treating a red test as yours. |
 | `generated-files-are-marked` | Every file a program writes says so in its first line, naming its generator and its source, and generated.yaml declares it. Read it before you write a generator, change what one writes, or edit a file that says DO NOT EDIT. |
+| `go-module-shape` | The one shape of a new Go module: scaffolded from the go-module template, its go.mod marked, one package with its entry Run and its test. Read it before you create or reshape a Go module. |
 | `guidance-comes-first` | How SE guidance reaches you and how to ask for it on a topic. Read it before any work SE guides. |
 | `parse-dont-validate` | Parse, do not validate: a value is checked once, when its type is made, and relied on afterwards. Read it before you add a type, a check of a value, or a target that takes one. |
 | `platform-code-legs` | How a branch that changes platform code is delivered: after its own kern-platforms legs pass, linked in the field report. Load it before delivering a branch that touches code Windows or macOS runs differently. |
 | `python-ad-hoc-go-system` | Python for ad hoc work, Go for what is part of the system: where new code goes, and when to port. Read it before you write a script, a component or a port. |
+| `python-script-shape` | The one shape of a Python script or module in a repository: scaffolded from its code template, run through uv, with full help and logging from the shared script library, se_script. Read it before you write, scaffold or reshape a Python script. |
 | `test-paths-on-windows` | How a new test builds and compares paths so the Windows leg of CI passes. Load it before writing a test that builds a path. |
 | `tests-spawn-no-processes` | Tests start no processes: code under test runs in-process, each door is real in one contract test only. Load it before writing or changing a test. |
