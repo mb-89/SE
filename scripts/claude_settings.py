@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Claude Code's project settings SE writes: the permission rules a repository's
 `.claude/settings.json` needs so that SE's steps that run without a person pass a session's
 permission check, auto mode's among them.
@@ -33,6 +35,7 @@ import argparse
 import json
 import sys
 from pathlib import Path, PurePosixPath
+import se_script
 
 SETTINGS = PurePosixPath(".claude/settings.json")
 #: The permission rules SE needs in every repository and integrator session, each a Claude Code
@@ -77,7 +80,7 @@ def allow(repo: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser = se_script.parser(description=__doc__.split("\n\n", 1)[0])
     commands = parser.add_subparsers(dest="command", required=True)
     allow_parser = commands.add_parser("allow", help="merge SE's permission rules into the repository's "
                                                      ".claude/settings.json")
@@ -97,4 +100,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

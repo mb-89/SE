@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Transcript signals: counts of what sessions actually did, read from their transcripts, for a
 retro to rate on request. It draws no conclusions, files nothing and is called by nothing.
 
@@ -52,6 +54,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+import se_script
 
 LOCATIONS = 5  # the locations shown per signal
 WAIT_SECONDS = 120.0  # a gap over it between a tool call and its result is a long wait
@@ -694,7 +697,7 @@ def repository_paths(repo: Path) -> Callable[[str], bool]:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         prog="transcript_signals.py",
         description="Count signals in session transcripts (JSONL files, or directories of them): "
                     "corrections, retries, repeated commands, scripts written twice, denials and "
@@ -762,4 +765,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

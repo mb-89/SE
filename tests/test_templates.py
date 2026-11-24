@@ -19,6 +19,7 @@ import build_docs
 import deck
 import fake_git
 import git_door
+import code_templates
 import templates
 import template_cases
 import outside_text
@@ -130,7 +131,10 @@ NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "stan
 INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
-EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES)
+#: The code templates (docs/templates.md "Code templates"): adapters whose body is the files their
+#: scaffold writes, each claiming the scripts or modules it shapes.
+CODE_TEMPLATES = ("python-script", "python-module", "python-component", "go-module")
+EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES, *CODE_TEMPLATES)
 
 
 def test_every_template_loads_with_its_actions_and_the_terms(catalog):
@@ -297,7 +301,15 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
+        **{name: (code_example(name), None) for name in CODE_TEMPLATES},
     }
+
+
+def code_example(name: str) -> str:
+    """The file a code template claims, as its scaffold writes it."""
+    made = code_templates.scaffold(templates.own(name), Path("x") / "thing", "Do it.", "thing")
+    return next(text for path, text in sorted(made.items())
+                if len(made) == 1 or path.name in ("go.mod", "__init__.py"))
 
 
 @pytest.mark.parametrize("name", EVERY)
@@ -1016,9 +1028,11 @@ def test_list_names_every_template_with_its_actions(capsys):
 
 def test_list_owned_names_each_glob_a_template_owns_with_its_template(capsys, tmp_path):
     """Requirement 1: the engine's one listing of the paths the templates own, SE's work issue body
-    file's among them, and another folder's own."""
+    file's and its code templates' scripts and modules among them, and another folder's own."""
     assert templates.main(["list", "--owned", "--tree"]) == 0
-    assert capsys.readouterr().out == ".se/issues/*.md: work-file\n"
+    assert capsys.readouterr().out == ("**/go.mod: go-module\n.se/components/*/__init__.py: python-component\n"
+                                       ".se/issues/*.md: work-file\ngo.mod: go-module\n"
+                                       "scripts/*.py: python-module\nscripts/*.py: python-script\n")
     write_template(tmp_path, "steps", MINIMAL.format(
         name="steps", extra='applies:\n  actions: ["file.write"]\n  paths: ["book/*/steps/*.md", "a/*.md"]\n'))
     assert templates.main(["list", "--owned", "--templates", str(tmp_path / "templates")]) == 0

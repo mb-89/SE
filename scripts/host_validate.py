@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The hosts' own validators over the layout SE generates: a report, run by hand, called by nothing.
 
 SE's own lint (scripts/agent_lint.py, run by the build) stays the first line; this holds the built
@@ -32,6 +33,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
+import se_script
 
 EXIT_PASSED, EXIT_REFUSED, EXIT_NOT_RUN = 0, 1, 2
 TIMEOUT_SECONDS = 120.0
@@ -206,7 +208,7 @@ def run_process(argv: Sequence[str], cwd: Path, timeout: float) -> Answer:
 
 def main(argv: Sequence[str] | None = None, runner: Runner = run_process,
          validators: Sequence[Validator] = VALIDATORS) -> int:
-    parser = argparse.ArgumentParser(
+    parser = se_script.parser(
         description="Run the hosts' own validators over SE's generated layout and report.",
         epilog="Off by default: nothing runs it. To put it into every integration, the owner adds "
                "[tests.beside.host-validators] to se.toml with command "
@@ -226,4 +228,4 @@ def main(argv: Sequence[str] | None = None, runner: Runner = run_process,
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

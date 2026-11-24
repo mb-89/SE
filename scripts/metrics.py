@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """What each command costs: one JSON line per run of a `work_tickets.py` or `se_start.py`
 subcommand, and the report of its top spenders and overruns (docs/running.md "Metrics").
 

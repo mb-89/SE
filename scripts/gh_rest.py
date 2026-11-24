@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """gh's porcelain over GitHub's REST API, for a `gh` that is not signed in but whose REST API answers.
 
 Reader: whoever changes how SE reads or writes GitHub where `gh auth status` fails but `gh api`
