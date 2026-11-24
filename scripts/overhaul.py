@@ -1131,11 +1131,16 @@ def finding_chapter(item: dict) -> tuple[str, str]:
 def deck_parts(text: str, block: dict, number: int
                ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """The overhaul's deck from its judged draft `text` and its block: every step of its report as a
-    chapter (the verdicts, what was looked at, both question blocks, the findings, what went well and
-    the facts, without the block the next overhaul reads), then one decision chapter per finding."""
+    chapter (the verdicts, what was looked at, both question blocks, the findings by name, what went
+    well and the facts, without the block the next overhaul reads), then one decision chapter per
+    finding, which holds it in full."""
     review, templates = sibling("review"), sibling("templates")
     fields = templates.parse(overhaul_template(), report(text, block, number)).fields
     fields["facts"] = str(fields["facts"]).split(BLOCK_MARKER)[0]
+    # Each finding is a decision chapter at the end, so the findings step names them alone (SE#1826,
+    # requirement 9: nothing twice).
+    fields["findings"] = "\n".join(f"- {item['finding']}. {item['title'].strip()} ({item['kind']})"
+                                   for item in block["findings"]) or "None."
     steps = [(item.heading, review.demoted(str(fields.get(item.name) or "None.").strip(), -1).strip())
              for item in overhaul_template().fields]
     return steps, [finding_chapter(item) for item in block["findings"]]

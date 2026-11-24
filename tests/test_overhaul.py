@@ -612,6 +612,9 @@ def test_the_overhauls_deck_uses_the_retros_template_its_steps_then_a_decision_p
     assert [heading for heading, _ in steps] == [item.heading for item in overhaul.overhaul_template().fields]
     body = dict(steps)
     assert "| gen-001 Mechanize first | none | Holds. |" in body["Verdicts"]
+    assert body["Findings"].split("\n") == ["- 1. Prune the three functions only tests reach (work)",
+                                            "- 2. Name the speed of the suite as a rule (decision)",
+                                            "- 3. Add a rule that every overhaul compares itself (decision)"]
     assert overhaul.BLOCK_MARKER not in body["The facts"] and body["The facts"].strip()
     assert body[
         "The standing questions"].startswith("## What came back from real use since the last retro?\n\nThe suite stays fast.")

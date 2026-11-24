@@ -13,13 +13,15 @@ the deck holds; this module owns how its text becomes an obs vault and one HTML 
   manifest, whose front matter makes the title page (obs's cover: the title, the subtitle and
   DOCUMENT_TYPE, `obsHtml.pages` with the cover), one note per step in order, then one note per
   decision, last, each asking the person for a bless (`obs: {bless: pending}`). The build machine's
-  home folder in the quoted text is written as `~`, as obs-html refuses to publish it (`homeless`).
+  home folder in the quoted text is written as `~`, as obs-html refuses to publish it (`homeless`), and
+  each ISO time of day as the template states it, `22 Nov 20:16` in UTC (`times`), as obs-html's
+  provenance check refuses an ISO timestamp.
 - `build(text, destination, host, answers)` builds that vault with scripts/deck.py's build (the answers
   bundle for `host`, whose adapter takes the answers back) into `destination`, the run's one report
   file: nothing else is written beside it. With `answers` it is the record of the person's answers.
   The deck quotes the draft's facts and the judge's findings as they stand, so it is built `quoted`:
-  obs's long-paragraph lint and obs-html's provenance findings of a timestamp or an absolute path
-  refuse nothing in it (deck.py build, build_docs.py QUOTED).
+  obs's long-paragraph lint and obs-html's provenance findings of an absolute path refuse nothing in
+  it (deck.py build, build_docs.py QUOTED).
 
 The engine has no title page, no table field and no data inside a fence (docs/what-should-be-templates.md,
 C2, C6 and C10); the deck needs none of them from it. The title page is the template's two label lines,
@@ -32,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import io
 import re
+from datetime import datetime, timezone
 import shutil
 import sys
 import tempfile
@@ -51,6 +54,13 @@ CHAPTER = 3
 NONE = "None."
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 COMMENT = re.compile(r"<!--.*?-->[ \t]*\n?", re.DOTALL)
+
+
+#: An ISO time of day after a date (`2026-11-22T20:16:05Z`, `2026-11-22 20:16`), which obs-html's provenance
+#: check refuses in a page; the deck writes it as TIME_FORMAT says, in UTC (`times`).
+ISO_TIME = re.compile(r"\b(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?(?![\d:])")
+#: How the deck writes a time of day, as the retro-deck template states it: `22 Nov 20:16`.
+TIME_FORMAT = "%-d %b %H:%M"
 
 
 class DeckError(ValueError):
@@ -117,6 +127,17 @@ def _label(heading: str) -> str:
     return re.sub(r"[|\[\]]", " ", heading).strip()
 
 
+def times(text: str) -> str:
+    """`text` with each ISO time of day (ISO_TIME) written as `22 Nov 20:16` (TIME_FORMAT), in UTC where
+    it names an offset; a calendar date alone stays as it is."""
+    def written(match: re.Match) -> str:
+        zone = match[4] or "Z"
+        moment = datetime.fromisoformat(f"{match[1]}T{match[2]}{match[3] or ''}"
+                                        f"{'+00:00' if zone == 'Z' else zone}").astimezone(timezone.utc)
+        return f"{moment.day} {moment:%b %H:%M}"
+    return ISO_TIME.sub(written, text)
+
+
 def homeless(text: str, home: str) -> str:
     """`text` with the build machine's home folder `home` written as `~`, as obs-html asks of a path it
     would otherwise refuse to publish (a field report that quotes a cloud container's `/root/...`)."""
@@ -130,7 +151,7 @@ def vault(written: str, folder: Path, home: str | None = None) -> list[str]:
     """Write the deck `written` (`text`) into `folder` as obs notes: the manifest with the title page,
     a note per step, then a note per decision asking for a bless; the ids of the decisions' notes. The
     build machine's home folder (`home`, by default this one's) is written as `~` (`homeless`)."""
-    written = homeless(written, str(Path.home()) if home is None else home)
+    written = times(homeless(written, str(Path.home()) if home is None else home))
     fields = templates.parse(template(), written).fields
     steps = chapters(fields["steps"])
     decisions = [] if fields["decisions"].strip() == NONE else chapters(fields["decisions"])

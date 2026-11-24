@@ -759,32 +759,41 @@ def built_deck(checkout: Path, tmp_path: Path, monkeypatch, text: str, *extra: s
 
 def test_the_deck_holds_every_step_the_retro_ran_then_one_decision_chapter_per_finding(checkout):
     """The acceptance of SE#1826: the retro's one output is a deck of the retro-deck template, its title
-    page, every step (the field feedback, what was collected, the table, the standing questions with their
-    full matrix and answers, the classes with their findings, causes, fixes and homes), then the decisions."""
+    page, every step (what was collected, the table, the standing questions with their full matrix and
+    answers, the field feedback among them, the classes with their causes, fixes and homes), then the
+    decisions; one table of what happened, one matrix, nothing twice (requirements 8 and 9)."""
     text = judged_draft(checkout)
     block = retro.judged(text, 30)
     steps, decisions = retro.deck_parts(block, text)
-    assert [heading for heading, _ in steps] == ["1. Field feedback", "2. Collect", "3. Table of what happened",
-                                                 "4. The standing questions", "5. Classes and homes"]
+    assert [heading for heading, _ in steps] == ["Collect", "Table of what happened", "The standing questions",
+                                                 "Classes and homes"]
     body = dict(steps)
-    assert body["1. Field feedback"] == "> The integrator stalled twice."
-    assert "## Sizes" in body["2. Collect"] and "###" not in body["2. Collect"].split("## Sizes")[0]
-    assert "| chapter | from | to | steps |" in body["3. Table of what happened"]
-    matrix = body["4. The standing questions"]
-    assert matrix.startswith("| question |") and "\n## Answers to the standing questions\n" in matrix
-    assert "\n### What came back from real use since the last retro?\n\nNone." in matrix
-    classes = body["5. Classes and homes"]
+    collect = body["Collect"]
+    assert "## Sizes" in collect and "## Rule checks" in collect
+    assert retro.LANDED_SECTION not in collect and retro.ANSWERS_SECTION not in collect
+    table = body["Table of what happened"]
+    assert [line for line in table.split("\n") if line.startswith("|---")] == ["|---|---|---|---|"]
+    assert "| chapter | from | to | steps |" in table
+    assert retro.STEP_TABLE not in table
+    matrix = body["The standing questions"]
+    assert matrix.startswith("| question |") and matrix.count("| question |") == 1
+    assert ("\n## Answers to the standing questions\n\n### What came back from real use since the last retro?\n\n"
+            "The person's field feedback:\n\n> The integrator stalled twice.\n\nNone.") in matrix
+    classes = body["Classes and homes"]
     assert "### Lost reports (2)\n\nCause: a landing need not name a field report" in classes
     assert "Home: refusal (home 2 of 8), `scripts/work_tickets.py`" in classes and "### What went well" in classes
+    assert ("Findings, each a decision at the end: 1. Refuse a landing whose work issue has no field report; "
+            "2. Make the field report a rule of the rule book.") in classes
+    assert "#14 closed without one." not in classes and "A rule, not a habit." not in classes
     assert [heading for heading, _ in decisions] == ["1. Refuse a landing whose work issue has no field report",
                                                      "2. Make the field report a rule of the rule book"]
     work, decision = (text for _, text in decisions)
     # Each opens with its current situation, the finding as the judge wrote it, and asks last (SE#1826, 10).
-    assert work.startswith("#14 closed without one.\n\nClass: Lost reports.")
+    assert work.startswith("#14 closed without one.\n\nClass: Lost reports, its cause and fix under Classes and homes.")
     assert work.endswith("Home: `scripts/work_tickets.py`; check `field-report`.\n\n**Work, for your go**: Bless "
                          "sends it to SE, which bundles it into a work issue.")
     assert decision.startswith("A rule, not a habit.") and decision.endswith("**Decision, for your decision**: it changes a rule")
-    assert "Cause: a landing need not name a field report" in decision
+    assert "Cause:" not in decision
 
 
 def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checkout, tmp_path, monkeypatch, capsys):
@@ -798,7 +807,7 @@ def test_deck_builds_the_one_report_from_the_judged_draft_and_never_waits(checko
             if finding.severity == templates.REFUSE] == []
     assert [path.name for path in (tmp_path / "out").iterdir()] == ["retro-30.html"]
     out = capsys.readouterr().out
-    assert "the report is the deck" in out and "a title page, 5 steps and 2 decision chapter(s)" in out
+    assert "the report is the deck" in out and "a title page, 4 steps and 2 decision chapter(s)" in out
 
 
 def test_deck_with_the_answers_builds_the_record(checkout, tmp_path, monkeypatch, capsys):

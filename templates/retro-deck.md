@@ -41,14 +41,14 @@ example:
   fields:
     title: "Retro #12"
     subtitle: "13 to 24 November: 1 finding"
-    steps: "### 1. Field feedback\n\n> The integrator stalled twice on a red suite.\n\n### 4. The standing questions\n\n| question | 1 |\n|---|---|\n| Has the process gone stale? | #11 |"
-    decisions: "### 1. Lost reports\n\nWork, for your go. Class: Lost reports. Fix: `integrate` refuses a landing without a field report. Home: `scripts/work_tickets.py`."
+    steps: "### Table of what happened\n\n| chapter | from | to | steps |\n|---|---|---|---|\n| 1 | 2 Nov 10:00 | 2 Nov 16:00 | #11 |\n\n### The standing questions\n\n| question | 1 |\n|---|---|\n| What came back from real use since the last retro? | #11 |\n\n#### What came back from real use since the last retro?\n\nThe person's field feedback:\n\n> The integrator stalled twice on a red suite."
+    decisions: "### 1. Refuse a landing without a field report\n\n#14 closed without a field report, and its landing went through.\n\nClass: Lost reports. Home: `scripts/work_tickets.py`.\n\n**Work, for your go**: Bless sends it to SE."
 ---
 
 ## Steps
 
-<!-- steps: Every step the run ran, in its order, one `### <step>` chapter each: a retro's field feedback, what was collected, the table of what happened, the standing questions with their full matrix, and the classes with their findings, causes, fixes and homes; an overhaul's verdicts, what it looked at, both question blocks, its findings, what went well and its facts. -->
+<!-- steps: Every step the run ran, in its order, one `### <step>` chapter each: a retro's collected facts, the table of what happened, the standing questions with their full matrix and the field feedback answered in it, and the classes with their causes, fixes and homes, each naming its findings; an overhaul's verdicts, what it looked at, both question blocks, its findings by name, what went well and its facts. Each thing once: one table of what happened, its chapters, and one matrix, the standing questions against the chapters. A time of day reads `22 Nov 20:16`, in UTC, never an ISO timestamp. -->
 
 ## Decisions
 
-<!-- decisions: One `### <n>. <finding>` chapter per finding the person decides, on the last pages: what it says, its class, its fix and home, and whether it is work for their go or a decision for theirs; "None" where the run brings none. -->
+<!-- decisions: One `### <n>. <finding>` chapter per finding the person decides, on the last pages: it opens with its current situation in plain technical English, never a stock phrase, then its class and home, and last whether it is work for their go or a decision for theirs; "None" where the run brings none. -->

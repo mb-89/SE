@@ -147,6 +147,12 @@ JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
 FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
+# The draft's parts the deck leaves out, as they repeat what it shows once (SE#1826, requirements 8 and
+# 9): step 2's per-issue table and its field reports' answers, which the matrix holds, and step 3's
+# per-step table, as the chapters table is the deck's one table of what happened.
+LANDED_SECTION = "Landed issues"
+ANSWERS_SECTION = "The field reports' answers to the standing questions"
+STEP_TABLE = "| step | chapter | what went well | what it cost | can a machine do it |"
 # A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
 # one of HOMES.
 CLASS_FIELDS = ("name", "cause", "fix", "home", "home_kind")
@@ -1399,8 +1405,7 @@ def timeline_lines(found: Collected) -> list[str]:
               f"{chapter['end'] or 'unknown'} | "
               + ", ".join(f"#{number}" for number in chapter["issues"]) + " |"
               for chapter in chapters]
-    lines += ["", "| step | chapter | what went well | what it cost | can a machine do it |",
-              "|---|---|---|---|---|"]
+    lines += ["", STEP_TABLE, "|---|---|---|---|---|"]
     for chapter in chapters:
         for number in chapter["issues"]:
             item = by_number[number]
@@ -1432,7 +1437,7 @@ def matrix_lines(found: Collected) -> list[str]:
 
 def answer_lines(found: Collected) -> list[str]:
     """Step 2's part of the field reports: each standing question with each work issue's answer."""
-    lines = ["### The field reports' answers to the standing questions"]
+    lines = [f"### {ANSWERS_SECTION}"]
     for question in questions().fields:
         entries = [(item.number, item.retro[question.name]) for item in found.issues
                    if question.name in item.retro]
@@ -1479,7 +1484,7 @@ def collect_lines(found: Collected) -> list[str]:
     elif found.previous:
         lines.append("None.")
     lines += class_lines(found)
-    lines += ["", "### Landed issues", ""]
+    lines += ["", f"### {LANDED_SECTION}", ""]
     landed = [item for item in found.issues if item.landed]
     if landed:
         lines += ["| issue | refused deliveries | escalations | suite time | field report |",
@@ -1849,9 +1854,11 @@ def judged_classes(block: dict, root: Path | None) -> list[dict]:
     return sorted(rows, key=lambda row: HOMES.index(row["home_kind"].strip()))
 
 
-def judged_class_lines(classes: list[dict], block: dict) -> list[str]:
+def judged_class_lines(classes: list[dict], block: dict, named_only: bool = False) -> list[str]:
     """Step 5 as the report and the deck show it: each judged class (`judged_classes`) with its cause,
-    fix, home and state against the tree and its findings, each with its kind; then what went well."""
+    fix, home and state against the tree and its findings, each with its kind; then what went well.
+    `named_only` (the deck's, whose decision chapters hold each finding) names each finding by its
+    number and title alone."""
     lines = []
     for row in classes:
         lines += ["", f"#### {row['name']} ({len(row['findings'])})", "",
@@ -1859,6 +1866,10 @@ def judged_class_lines(classes: list[dict], block: dict) -> list[str]:
                   f"Home: {row['home_kind'].strip()} (home {HOMES.index(row['home_kind'].strip()) + 1} "
                   f"of {len(HOMES)}), `{row['home'].strip()}`; tree: {row['tree']}",
                   *class_key_lines({key: row[key] for key in CLASS_KEYS if key in row}), ""]
+        if named_only:
+            lines += ["Findings, each a decision at the end: " + "; ".join(
+                f"{item['finding']}. {item['title'].strip()}" for item in row["findings"]) + "."]
+            continue
         for item in row["findings"]:
             kind = (f"{DECISION}, for the owner's decision list: {item['why'].strip()}"
                     if item["kind"] == DECISION else f"{WORK}, for SE to bundle")
@@ -2049,12 +2060,9 @@ def run_file(args: argparse.Namespace) -> int:
 
 def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
     """A judged finding as its decision chapter of the deck: it opens with the finding itself, its
-    current situation as the judge wrote it, then its class with its cause and fix, its home, and last
-    what the person decides (their go for `work`, their decision for `decision`)."""
-    row = next((row for row in classes if row["name"] == item["class"].strip()), None)
-    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}."]
-    if row is not None:
-        lines += ["", f"Cause: {one_line(row['cause'])}", "", f"Fix: {row['fix'].strip()}"]
+    current situation as the judge wrote it, then its class by name (Classes and homes holds its cause and fix),
+    its home, and last what the person decides (their go for `work`, their decision for `decision`)."""
+    lines = [item["body"].strip(), "", f"Class: {item['class'].strip()}, its cause and fix under Classes and homes."]
     check = f"; check `{item['check']}`" if item.get("check") else ""
     lines += ["", f"Home: `{item['home'].strip()}`{check}.", "",
               f"**Decision, for your decision**: {item['why'].strip()}" if item["kind"] == DECISION
@@ -2062,12 +2070,43 @@ def finding_chapter(item: dict, classes: list[dict]) -> tuple[str, str]:
     return f"{item['finding']}. {item['title'].strip()}", "\n".join(lines)
 
 
+def without_sections(text: str, headings: tuple[str, ...]) -> str:
+    """`text` without its `## <heading>` sections of `headings`, each up to the next heading of its
+    level or higher."""
+    kept, skipping = [], False
+    for line in text.split("\n"):
+        heading = re.match(r"(#{1,2}) (.*)$", line)
+        if heading:
+            skipping = len(heading[1]) == 2 and heading[2].strip() in headings
+        if not skipping:
+            kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def without_table(text: str, header: str) -> str:
+    """`text` without the Markdown table whose header row is `header`."""
+    lines = text.split("\n")
+    if header not in lines:
+        return text
+    start = lines.index(header)
+    end = start
+    while end < len(lines) and lines[end].startswith("|"):
+        end += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines[:start] + lines[end:])).strip()
+
+
 def deck_parts(block: dict, text: str, root: Path | None = None
                ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """The retro's deck from its judged draft `text` and its block: every step the retro ran as a
-    chapter (the field feedback, what was collected, the table of what happened, the standing
-    questions with their matrix and answers, the classes with their findings, causes, fixes and
-    homes), then one decision chapter per finding, each written as a chapter note's text."""
+    chapter, each thing once (SE#1826, requirements 8 and 9), then one decision chapter per finding,
+    each written as a chapter note's text.
+
+    - what was collected, without the per-issue table and the field reports' answers
+      (LANDED_SECTION, ANSWERS_SECTION);
+    - the table of what happened, its one table the chapters of the window (STEP_TABLE left out);
+    - the standing questions: the one matrix, then the retro's answer to each question, the field
+      feedback answering the first, so it has no chapter of its own;
+    - the classes with their causes, fixes and homes, each naming its findings, and what went well."""
     template = retro_template()
     drafted = steps_of(text).fields
     classes = judged_classes(block, root)
@@ -2075,14 +2114,22 @@ def deck_parts(block: dict, text: str, root: Path | None = None
     def body(name: str) -> str:
         return review.demoted(str(drafted.get(name) or "None."), -1).strip()
 
-    heading = {name: template.field(name).heading for name in
-               ("field_feedback", "collect", "timeline", "matrix", "answers", "classes")}
-    steps = [(heading["field_feedback"], body("field_feedback")),
-             (heading["collect"], body("collect")),
-             (heading["timeline"], body("timeline")),
-             (heading["matrix"], f"{body('matrix')}\n\n## {heading['answers']}\n\n"
-                                 f"{str(drafted.get('answers') or 'None.').strip()}"),
-             (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block)), -1).strip())]
+    # The deck's chapters carry no step numbers: the field feedback is no chapter of its own.
+    heading = {name: re.sub(r"^\d+\.\s*", "", template.field(name).heading) for name in
+               ("collect", "timeline", "matrix", "answers", "classes")}
+    answers = re.sub(r"<!--.*?-->\s*", "", str(drafted.get("answers") or "None."), flags=re.DOTALL).strip()
+    first = questions().fields[0].heading
+    feedback = str(drafted.get("field_feedback") or "").strip()
+    if feedback:
+        marker = f"### {first}\n\n"
+        quoted = f"The person's field feedback:\n\n{review.demoted(feedback, 2)}\n\n"
+        answers = (answers.replace(marker, marker + quoted, 1) if marker in answers
+                   else f"{marker}{quoted}{answers}")
+    steps = [(heading["collect"], without_sections(body("collect"), (LANDED_SECTION, ANSWERS_SECTION))),
+             (heading["timeline"], without_table(body("timeline"), STEP_TABLE)),
+             (heading["matrix"], f"{body('matrix')}\n\n## {heading['answers']}\n\n{answers}"),
+             (heading["classes"], review.demoted("\n".join(judged_class_lines(classes, block, named_only=True)),
+                                                 -1).strip())]
     return steps, [finding_chapter(item, classes) for item in block["findings"]]
 
 

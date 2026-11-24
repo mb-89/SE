@@ -376,11 +376,15 @@ The deck is a document of the retro-deck template
 (`scripts/retro_deck.py`):
 
 - a title page: `Retro #<n>`, the report's kind and the window with its number of findings;
-- every step the retro ran, one chapter each: the field feedback, what was collected, the table of
-  what happened, the standing questions with their full matrix and answers, and the classes with
-  their findings, causes, fixes and homes;
-- then, on the last pages, one decision chapter per finding, each asking the person for a bless:
-  their go for a `work` finding, their decision for a `decision` finding.
+- every step the retro ran, one chapter each, each thing once: what was collected, the table of
+  what happened (its one table, the chapters of the window), the standing questions with their one
+  matrix and the field feedback answered in it, and the classes with their causes, fixes and
+  homes, each naming its findings;
+- then, on the last pages, one decision chapter per finding, each opening with its current
+  situation and asking the person for a bless: their go for a `work` finding, their decision for
+  a `decision` finding.
+
+A time of day reads `22 Nov 20:16`, in UTC, as obs-html refuses an ISO timestamp in a page.
 
 `--host` names where the answers go back to, as [`deck.py build`](../src/skills/decision/SKILL.md#bringing-decisions-to-the-person)
 takes it. It writes the one HTML file and nothing beside it, and never waits for the answers:

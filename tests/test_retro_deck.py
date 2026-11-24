@@ -93,6 +93,22 @@ def test_the_vault_writes_the_home_folder_as_a_tilde(tmp_path):
     assert "It read ~/.cache." in (tmp_path / "step-01.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(("text", "written"), [
+    ("from 2026-11-22T20:16:05Z to 2026-11-23 08:05", "from 22 Nov 20:16 to 23 Nov 08:05"),
+    ("at 2026-11-22T21:16:00+01:00.", "at 22 Nov 20:16."),
+    ("on 2026-11-22 only, version 2026-11-22T20", "on 2026-11-22 only, version 2026-11-22T20"),
+], ids=["utc", "offset", "dates-stay"])
+def test_iso_times_are_written_as_the_template_states_them(text, written):
+    """kern retro #56: obs-html's provenance check refuses an ISO time; the deck writes `22 Nov 20:16`."""
+    assert retro_deck.times(text) == written
+
+
+def test_the_vault_writes_times_as_the_template_states_them(tmp_path):
+    text = retro_deck.text("Retro #30", "x", [("Table", "| 1 | 2026-11-02T10:00:00Z | #11 |")], [])
+    retro_deck.vault(text, tmp_path)
+    assert "| 1 | 2 Nov 10:00 | #11 |" in (tmp_path / "step-01.md").read_text(encoding="utf-8")
+
+
 @pytest.mark.spawns("tool: the retro's deck builds with the real obs, obs-document in obs's own Python "
                     "environment, which runs only as a process")
 def test_the_real_build_writes_one_file_and_its_data_names_the_host_and_the_decisions(tmp_path, obs):

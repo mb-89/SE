@@ -159,8 +159,8 @@ what was decided without the person and their [tasks](#tasks-for-the-person), be
 2. Hand the deck to the person where they are, and end your turn; their answers arrive later, and
    nothing waits on them:
    - **The Claude app** (cloud and mobile), `--host claude-app`: publish `<deck>.html` with the
-     Artifact tool and the capabilities `deck.py --help` names, `artifact` and full-form
-     `comments`, and send the person its link.
+     Artifact tool and the capabilities `deck.py --help` names, `artifact`, full-form `comments`
+     and `downloads`, and send the person its link.
      - The publish's result says whether this session watches the artifact; where it does not,
        watch it with the `ArtifactComments` tool before sending the link, or no session can take
        the person's message (the deck tells them "No Claude session is listening").

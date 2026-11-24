@@ -25,11 +25,12 @@ skill (src/skills/decision/SKILL.md) says when to use it; this file owns what ea
       bundle picks its adapter (the bundle's header owns each): `claude-app`, `claude-code`, `copilot`, or
       `local`, obs-html's own sinks; without it, the host this command runs under (`default_host`).
       In the Claude app, publish the deck with the Artifact tool and `capabilities: {artifact: {},
-      comments: {}}`: `artifact` lets Send save answers.json (the record the session reads), and the
-      full-form `comments` lets it also send the answers to Claude as a comment, which wakes the
-      watching session where answers.json is refused. Send succeeds when either works; a deck published
-      without them shows the answers as text to copy. The bundle's header owns how Send uses them and
-      how the reader is told.
+      comments: {}, downloads: true}`: the full-form `comments` lets Send send the answers to Claude as a
+      comment, which wakes the watching session, and `artifact` lets it also save answers.json (the
+      record the session reads). Send succeeds when either works; a deck published without them shows
+      the answers as text to copy. `downloads` keeps obs-html's file offers (its download and export
+      links) working, which without it do nothing (obs-html's spec/capabilities/file-offers.md). The
+      bundle's header owns how Send uses them and how the reader is told.
   serve HTML --wait [--timeout S]   Serves the deck with obs-html serve: prints the URL to open first,
       then, once the person sends, the answers payload as one JSON line (also written to answers.json
       beside HTML). For Claude Code, Copilot and any local browser. Without --wait it serves until stopped
@@ -104,8 +105,8 @@ def build(folder: Path, destination: Path, answers: Path | None = None, host: st
     and agents read its chapters and versions there, never from the built page. Without ``asks`` a deck
     where no chapter asks for a bless is built all the same: a retro's deck with no finding to decide.
     A ``quoted`` deck holds text it quotes rather than authors (a retro's facts and findings), so the
-    warnings build_docs.py ``QUOTED`` names (obs's long-paragraph lint, obs-html's provenance findings of
-    a timestamp or an absolute path) refuse nothing there."""
+    warnings build_docs.py ``QUOTED`` names (obs's long-paragraph lint, obs-html's provenance finding of
+    an absolute path) refuse nothing there."""
     host = host or default_host(dict(os.environ))
     if host not in HOSTS:
         print(f"deck: --host {host} is none of {', '.join(HOSTS)}", file=sys.stderr)

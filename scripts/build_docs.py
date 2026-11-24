@@ -98,9 +98,9 @@ def obs_warnings(output: str, allowed: tuple[str, ...] = ()) -> list[str]:
 #: The warnings a build of text it quotes rather than authors passes as ``allowed``: a retro's deck,
 #: which quotes the committed retro doc that the public check already passed. obs's long-paragraph lint
 #: (its input-model, Long paragraphs), which never changes the Document, and obs-html's provenance
-#: findings of a timestamp or an absolute path (its architecture.md, Provenance check), which there are
-#: the collected facts, such as a chapter's start; a session id or a local term still warns.
-QUOTED = (": long paragraph (", "carries provenance (timestamp)", "carries provenance (absolute-path)")
+#: finding of an absolute path (its architecture.md, Provenance check), there a path a field report
+#: names; a timestamp (the deck writes times as `22 Nov 20:16`), a session id or a local term still warns.
+QUOTED = (": long paragraph (", "carries provenance (absolute-path)")
 
 
 def obs_document(obs: Path, arguments: list[str], tool: str, adapter: bool = True,
