@@ -938,6 +938,11 @@ def test_a_failed_read_names_its_part_and_the_remedy(setup):
         f"uv run python {setup['se'].as_posix()}/scripts/se_start.py check"]
 
 
+def test_the_status_budget_is_ten_seconds():
+    # The person, kern's retro of 24 Nov (SE#1934): "I feel like 10 is okay."
+    assert se_start.feedback.budget("se_start.py status") == 10.0
+
+
 def test_status_reads_the_seeded_cache_within_its_budget(setup):
     seed(setup, DUE)
     started = time.perf_counter()
