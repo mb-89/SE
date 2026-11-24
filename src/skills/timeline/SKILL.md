@@ -29,7 +29,7 @@ One table of the repositories in SE's `se.toml` `[timeline]`, newest first in ea
 | Waiting for integrator | open issues named by an open pull request to the integration branch that carries a field report |
 | Needs you | open issues labelled `se-person` |
 | Next | open issues labelled `ready` |
-| Backlog | ideas labelled `backlogged`, waiting for the person's input |
+| Backlog | ideas labelled `backlogged`, not yet work |
 | Done | closed issues and releases |
 
 [`<se>/scripts/timeline.py`](../../../scripts/timeline.py) owns the places, the read and the live read.
