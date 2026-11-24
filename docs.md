@@ -19,6 +19,7 @@ document type: Documentation
 - [[src/skills/decision/SKILL|Decision]]
 - [[src/skills/update/SKILL|Update]]
 - [[src/skills/fill-templates/SKILL|Fill templates]]
+- [[src/skills/timeline/SKILL|Timeline]]
 - [[src/skills/decision/references/decision-deck|A decision note]]
 - [[src/skills/work-model/references/rules|Rule book]]
 

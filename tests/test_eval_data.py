@@ -73,6 +73,7 @@ CASE_SKILL = {
     "work-model-field-report": "work-model",
     "update-follows-the-guide": "update",
     "fill-templates-names-the-gap": "fill-templates",
+    "timeline-gives-the-link": "timeline",
 }
 
 # For each case, the text its result grader reads: one a correct run writes, one it must refuse.
@@ -113,6 +114,14 @@ SAMPLES = {
             "input\n\nThe notes name no language, so Languages is not in the material.",
             "## Product\n\nPump X, a 230 V garden pump for home owners.\n\n## Languages\n\nEnglish and "
             "German.",
+        ),
+    },
+    "timeline-gives-the-link": {
+        "link-given": (
+            "Here it is: https://docs.example.com/project/timeline.html. The page reads GitHub when it "
+            "opens, so what is done and what waits for the integrator are current.",
+            "| Place | Issue |\n|---|---|\n| Today | #12 |\n| Waiting for integrator | #9 |\n\nI built this "
+            "table from the open issues.",
         ),
     },
     "work-model-field-report": {
