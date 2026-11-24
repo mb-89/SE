@@ -2549,10 +2549,12 @@ both.
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
 | `templates/merge-message.md` | An integration's squash commit: `Integrate <branch>` and one Release-kind trailer. |
 | `templates/overhaul.md` | An overhaul's report: verdicts, both question blocks, the findings and the judged block the next one reads. |
+| `templates/overhaul-judgment.md` | An overhaul's judged block: a verdict on every rule, what it looked at, the findings and what went well, as JSON under its marker. |
 | `templates/overhaul-questions.md` | The questions an overhaul asks beside the standing questions, one section each. |
 | `templates/pugh.md` | A Pugh matrix in obs's `pugh` fence: weighted criteria and at least two options. |
 | `templates/raid-entry.md` | One RAID entry: a risk, an assumption, an issue or a dependency, with its owner and status. |
 | `templates/raid-register.md` | A RAID register: its risks, assumptions, issues and dependencies, one raid-entry each. |
+| `templates/retro-judgment.md` | A retro's judged block: the findings, the classes and what went well, as JSON under its marker. |
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |

@@ -1,8 +1,8 @@
 ---
 # An overhaul's report, its closing comment: the verdicts, what was looked at, the standing
 # questions and the overhaul's own (two nested blocks), the findings and what follows, what went
-# well, the facts, then the judged block the next overhaul reads, which stays overhaul.py's own
-# (judgment_problems). overhaul.py lays the draft's questions out from this note and checks the
+# well, the facts, then the judged block the next overhaul reads, which is the adapter
+# templates/overhaul-judgment.md. overhaul.py lays the draft's questions out from this note and checks the
 # report before it files it. The person's decision of 22 Nov (SE#1678). scripts/templates.py's docstring owns
 # this note's format.
 name: overhaul

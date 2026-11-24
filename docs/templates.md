@@ -359,7 +359,9 @@ SE's templates are notes; the term list stays a TOML list until the guidance pac
 | `templates/boot-report.md` | `boot-report`: SE's start report, a snippet | interface | SE |
 | `templates/review.md` | `review`: prose, then its data node | document | SE |
 | `templates/retro.md` | `retro`: the six steps, whose answers node is the `standing-questions` block | document | SE |
+| `templates/retro-judgment.md` | `retro-judgment`: the retro draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/overhaul.md` | `overhaul`, whose question nodes are the `standing-questions` and `overhaul-questions` blocks | document | SE |
+| `templates/overhaul-judgment.md` | `overhaul-judgment`: the overhaul draft's judged block, checked by `judgment_problems` | block | SE |
 | `templates/routed.md` | `routed`: the routing section of an outside issue | block | SE |
 | `templates/standing-questions.md` | `standing-questions`: the questions the retro, the overhaul and the field report all ask | block | SE |
 | `templates/overhaul-questions.md` | `overhaul-questions`: the overhaul's own questions | block | SE |

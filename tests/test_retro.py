@@ -1206,6 +1206,35 @@ def test_a_class_s_optional_keys_are_checked(checkout, keys, refusal):
         retro.judged(judged_draft(checkout, classes=classes), 30)
 
 
+def cases_of(test) -> list[dict]:
+    """The judgment changes of a parametrized test's cases, as the test states them."""
+    return [case[0] for mark in test.pytestmark if mark.name == "parametrize" for case in mark.args[1]]
+
+
+def recurred_draft(checkout: Path) -> str:
+    """The judged draft whose first finding names a check that recurred after the previous retro."""
+    draft = judged_draft(checkout)
+    block = retro.read_block(draft)
+    block["previous"]["findings"] = [{"finding": 1, "check": "field-report", "recurred": True}]
+    return draft[:draft.rfind(retro.BLOCK_MARKER)] + retro.BLOCK_MARKER + "\n```yaml\n" + \
+        json.dumps(block) + "\n```\n"
+
+
+def test_the_judged_block_s_adapter_finds_what_judgment_problems_finds(checkout):
+    """templates/retro-judgment.md checks the block through judgment_problems: on the drafts of
+    the refusal tests, the complete judgment among them, its problems are the same."""
+    drafts = [judged_draft(checkout, **changes)
+              for changes in cases_of(test_file_refuses_an_incomplete_judgment_and_writes_nothing)]
+    drafts += [judged_draft(checkout, classes=[{**LOST_REPORTS, **keys}])
+               for keys in cases_of(test_a_class_s_optional_keys_are_checked)]
+    drafts += [judged_draft(checkout), recurred_draft(checkout)]
+    for draft in drafts:
+        assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, draft) == retro.judgment_problems(
+            retro.read_block(draft))
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-2]) == []
+    assert retro.adapter_problems(retro.JUDGMENT_TEMPLATE, drafts[-1]) != []
+
+
 def test_a_class_with_the_optional_keys_files_them_and_the_next_collect_measures_it_again(
         checkout, monkeypatch):
     """Retro #5 named two classes; the next collect measures each again, its rate before (its

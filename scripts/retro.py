@@ -63,8 +63,9 @@ Off by default, three additions leave that draft as it is without them:
   the classes that carry one (`class_patterns`). A block without them is scored and filed as
   before.
 
-`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment, writing nothing, a
-draft whose steps break the retro template (a step or a standing question left open;
+`retro.py file <retro issue> --draft FILE` refuses an incomplete judgment (`judgment_problems`,
+called through the adapter template `templates/retro-judgment.md`, JUDGMENT_TEMPLATE), writing
+nothing, a draft whose steps break the retro template (a step or a standing question left open;
 `steps_problems`) and a draft the integration branch does not hold as it stands; it files no issue
 (wrk-007). It posts the report proper, a document of the retro template (`report`): the draft's
 steps, the judgment in step 5, each class with its home and its state against the tree and each
@@ -147,6 +148,9 @@ FIXED, PAST, OPEN = "fixed", "past", "open"
 CHAPTER_HOURS = 6
 # The retro document template: the six steps, the standing questions nested in step 4.
 TEMPLATE_NAME = "retro"
+# The adapter template the judged block is checked through (templates/retro-judgment.md), whose
+# checker is judgment_problems.
+JUDGMENT_TEMPLATE = "retro-judgment"
 # The field report's answers that say whether a machine could do a step (step 3).
 MECHANIZE = ("machine_scripts", "shell_command")
 # The author associations `--refusals` counts as inside the fleet (outside_text.inside).
@@ -1730,6 +1734,22 @@ def judgment_problems(block: dict) -> list[str]:
     return problems
 
 
+def is_object(value: object) -> bool:
+    """Whether a judged block's data is an object, the only data the judgment adapters check
+    (templates/retro-judgment.md, templates/overhaul-judgment.md)."""
+    return isinstance(value, dict)
+
+
+def adapter_problems(name: str, text: str) -> list[str]:
+    """What SE's adapter template `name` refuses in `text`, each without the `<name>: ` every
+    adapter's finding opens with."""
+    engine = templates()
+    template = engine.own(name)
+    return [finding.fix.removeprefix(f"{template.name}: ")
+            for finding in engine.check(template, engine.parse(template, text))
+            if finding.severity == engine.REFUSE]
+
+
 def judged(text: str, number: int, filed: bool = False) -> dict:
     """The block of the draft `text`, its judgment checked, unless `filed` (a retro doc already
     filed, whose judgment was checked when it was, read back by the next collect); every refusal
@@ -1741,7 +1761,7 @@ def judged(text: str, number: int, filed: bool = False) -> dict:
     retro = (block.get("window") or {}).get("retro")
     if retro != number:
         raise QueueError(f"The draft is retro #{retro}'s, not #{number}'s")
-    problems = [] if filed else judgment_problems(block)
+    problems = [] if filed else adapter_problems(JUDGMENT_TEMPLATE, text)
     if problems:
         raise QueueError(f"The judgment of retro #{number} is not complete, so nothing was "
                          "written: " + "; ".join(problems))

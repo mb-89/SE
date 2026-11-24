@@ -121,7 +121,8 @@ uv run pytest
 
 
 ISSUE_TEMPLATES = ("ticket", "work", "routed")
-ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh")
+ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review", "pugh",
+            "retro-judgment", "overhaul-judgment")
 #: The documents whose nodes other templates check (docs/templates.md "Nesting"), and the entry.
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
@@ -296,7 +297,17 @@ def adapter_examples() -> dict[str, tuple[str, str | None]]:
         "merge-message": ("Release-kind: minor", merge_title()),
         "review": (review_comment(test_review.report()), None),
         "pugh": (test_deck.PUGH, None),
+        "retro-judgment": (judged_block(retro.BLOCK_MARKER, {"findings": [], "classes": [],
+                                                             "went_well": ["The fakes held."]}), None),
+        "overhaul-judgment": (judged_block(overhaul.BLOCK_MARKER, {
+            "verdicts": [], "looked_at": dict.fromkeys(overhaul.LOOKED_AT, "Nothing to change."),
+            "findings": [], "went_well": ["The fakes held."]}), None),
     }
+
+
+def judged_block(marker: str, block: dict) -> str:
+    """A draft's judged block as retro.py and overhaul.py write it: the marker, then its JSON."""
+    return f"{marker}\n{review.fenced(json.dumps(block, indent=2), 'yaml')}\n"
 
 
 @pytest.mark.parametrize("name", EVERY)

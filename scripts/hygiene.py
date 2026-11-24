@@ -55,6 +55,8 @@ BINARY_ALLOWED: dict[str, str] = {}
 
 # Tracked files over MAX_BYTES, each with the reason it is tracked.
 LARGE_ALLOWED: dict[str, str] = {
+    "README.md": "SE's manual, whose Templates section names every template with its says; its split "
+                 "is a package of its own",
     "scripts/templates.py": "the template engine, its two source forms one code path; its split is a "
                             "package of its own",
     "scripts/work_tickets.py": "the work model's one command; its split is a package of its own",
