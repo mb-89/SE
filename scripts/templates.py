@@ -3957,9 +3957,10 @@ def corrected_text(text: str, whole: bool = False) -> tuple[str, tuple[str, ...]
 
 def _correctable(item: Field) -> bool:
     """Whether the correction pass touches `item`'s value: never a title, a verbatim field, code, a
-    node or a snippet's rows and cases, which are kept as they stand."""
-    return not (item.source == "title" or item.verbatim or item.node or item.fence
-                or item.kind in ("code", *NODE_KINDS, *SNIPPET_KINDS))
+    fence node or a snippet's rows and cases, which are kept as they stand; a node's, a register's
+    and a list's items' text as any text, as inside a nested part as at the top."""
+    return not (item.source == "title" or item.verbatim or item.fence
+                or item.kind in ("code", *SNIPPET_KINDS))
 
 
 def correct(template: Template, values: dict[str, object]) -> tuple[dict[str, object], list[Correction]]:
@@ -3982,7 +3983,7 @@ def correct(template: Template, values: dict[str, object]) -> tuple[dict[str, ob
 
         value = given[item.name]
         if isinstance(value, str):
-            given[item.name] = fixed(value, item.kind != "text")
+            given[item.name] = fixed(value, item.kind not in ("text", *NODE_KINDS))
         elif isinstance(value, list):
             given[item.name] = [{**entry, "text": fixed(entry["text"])}
                                 if isinstance(entry, dict) and "text" in entry else fixed(entry)
