@@ -1,4 +1,4 @@
-"""`se new app` (README "New application"): an application from kern's template at SE's kern pin.
+"""`se new app` (docs/applications.md "New application"): an application from kern's template at SE's kern pin.
 
 These tests build no Go: they create applications from a small SE with a small kern, its clone at
 the pin (`se_modules.kern_dir`), in a temporary directory. The application's own test run, which builds the core, is the suite beside,
@@ -269,7 +269,7 @@ def test_the_pin_is_the_version_go_mod_requires_and_the_tag_the_clones_release_t
 
 
 def test_kern_pin_prints_the_version_and_where_its_release_is_published(tmp_path, capsys):
-    """bootstrap.sh reads the pin through this one reader (README "Kern")."""
+    """bootstrap.sh reads the pin through this one reader (docs/start.md "Kern")."""
     root = pinned(tmp_path, download="https://example.com/releases/download/v{version}")
     assert se_modules.main(["--root", str(root), "kern-pin"]) == 0
     assert capsys.readouterr().out == "1.2.3 https://example.com/releases/download/v1.2.3\n"

@@ -319,7 +319,7 @@ IDENTITY = '[project]\nidentity = "mb <mb>"\n'
 
 @pytest.fixture(autouse=True)
 def no_filing_check(monkeypatch) -> list[tuple[str, str]]:
-    """The filing check (README "Retro due") reads the whole tracker; these tests hold filing's
+    """The filing check (docs/fleet.md "Retro due") reads the whole tracker; these tests hold filing's
     other rules, so it records what it was asked and reads nothing. tests/test_filing_check.py
     holds the check itself."""
     asked: list[tuple[str, str]] = []
@@ -1526,7 +1526,7 @@ def test_deliver_is_idempotent_and_prints_configured_notification(
 
 def test_deliver_records_the_tip_it_delivers_and_a_later_push_names_the_stale_delivery(
         worktree, gh, monkeypatch, capsys, scripted_git):
-    """README "Late push": deliver records the delivered tip in the checkout; before it the
+    """docs/fleet.md "Late push": deliver records the delivered tip in the checkout; before it the
     pre-push hook's guard names no late push, after it a push at another commit is named."""
     run(worktree, "intake", "--issue", "5")
     draft_complete_field_report(worktree)
@@ -3692,7 +3692,7 @@ def delivered_worker(main_checkout: Path, monkeypatch,
 
 
 # The landing pull request's description for PR #7 of work issue #5: it names both and carries the
-# marker by which CI's field-report step reads the report from PR #7 (README "Landing on main").
+# marker by which CI's field-report step reads the report from PR #7 (docs/settings.md "Landing on main").
 LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
                 "Lands https://git.example/owner/repo/pull/7, whose description is the field report."
                 "\n\n<!-- se:field-report-in 7 -->\n")
@@ -3700,7 +3700,7 @@ LANDING_BODY = ("Refs https://git.example/owner/tracker/issues/5\n\n"
 
 def landing_body_and_metrics(body: str) -> tuple[str, dict | None]:
     """A handed-off landing body split into what precedes its last line and the integration's
-    metrics line that last line holds (README "Metrics")."""
+    metrics line that last line holds (docs/running.md "Metrics")."""
     head, _, last = body.rstrip("\n").rpartition("\n")
     return head, work_tickets.metrics.of_text(last)
 
@@ -4115,7 +4115,7 @@ TRUSTED = IDENTITY + "\n[tests]\ncommand = [\"true\"]\ntrust_integrator = true\n
 
 
 def trust_on(checkout: Path) -> None:
-    """se.toml [tests] trust_integrator on, pushed to origin's main (README "Trusted landings")."""
+    """se.toml [tests] trust_integrator on, pushed to origin's main (docs/tests.md "Trusted landings")."""
     (checkout / "se.toml").write_text(TRUSTED, encoding="utf-8")
     git_ok("-C", str(checkout), "pull", "-q", "origin", "main")
     git_ok("-C", str(checkout), "commit", "-q", "-am", "Trust the integrator")
@@ -4201,7 +4201,7 @@ def test_integrate_hands_off_the_record_as_steps_the_github_tools_make_where_tru
             "pull_request_read get reads it after step 6>") in plan["then"]
 
 
-# Landing without CI (README "Landing without CI"): where se.toml on main sets [tests] ci = false,
+# Landing without CI (docs/tests.md "Landing without CI"): where se.toml on main sets [tests] ci = false,
 # the integrator's commit status on the landing head is the verdict in place of check.
 
 NO_CI = IDENTITY + "\n[tests]\ncommand = [\"true\"]\nci = false\n"
@@ -5760,7 +5760,7 @@ def test_suite_refuses_a_tier_setting_it_cannot_load_before_running(
 @pytest.mark.spawns("contract: se's conftest writes the JUnit report `suite` reads, workers and setup "
                     "times among it, only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_own_suite_reports_its_parts_line_with_workers_and_setup_times(worktree, monkeypatch, capsys):
-    """se's conftest writes the JUnit report `suite` reads (README "Test budget")."""
+    """se's conftest writes the JUnit report `suite` reads (docs/tests.md "Test budget")."""
     root = Path(__file__).resolve().parents[1]
     command = [sys.executable, "-m", "pytest", "-q", "-n", "1", "-p", "no:cacheprovider",
                "--rootdir", str(root), str(root / "tests" / "test_se_plugin.py"), "-k", "layouts_match or one_source"]
@@ -5822,7 +5822,7 @@ def test_suite_without_keep_test_reports_keeps_nothing_and_prints_as_before(work
 @pytest.mark.spawns("contract: se's conftest writes the host's cpu and each test's start into se.xml "
                     "only in a real pytest -n 1 run, whose xdist worker is a process")
 def test_ses_report_names_its_cpu_and_when_each_test_started(worktree, monkeypatch, capsys, tmp_path):
-    """se's conftest writes the host's cpu and each test's start into se.xml (README "Test budget")."""
+    """se's conftest writes the host's cpu and each test's start into se.xml (docs/tests.md "Test budget")."""
     root = Path(__file__).resolve().parents[1]
     command = [sys.executable, "-m", "pytest", "-q", "-n", "1", "-p", "no:cacheprovider",
                "--rootdir", str(root), str(root / "tests" / "test_se_home.py")]
@@ -7366,7 +7366,7 @@ def test_integrate_closes_the_work_issue_with_a_comment_linking_the_pull_request
                       ", landed through https://git.example/owner/repo/pull/20 (check: https://git.example/owner/repo/runs/1). "
                       "Release kind: minor, recorded; the version moves when SE asks for a "
                       "release. Suite: 1 passed.\n"]
-    # The landing records its kind and releases nothing (README "Project settings").
+    # The landing records its kind and releases nothing (docs/settings.md "Project settings").
     assert (main_checkout / "se.toml").read_text(encoding="utf-8") == version
     assert [call[:3] for call in calls if call[:2] == ["issue", "close"]] == [["issue", "close", "5"]]
 
@@ -8183,7 +8183,7 @@ def test_switched_on_refresh_and_the_unread_refusal_mark_an_outside_comment(
     assert "outside text" not in lines[1]
 
 
-# The template check of the filing commands (README "Templates"): se.toml [templates] at the integration branch.
+# The template check of the filing commands (docs/templating.md "Templates"): se.toml [templates] at the integration branch.
 
 TEMPLATES = work_tickets.sibling("templates")
 WORK_TEMPLATE = TEMPLATES.load(PROJECT, tree=True)["work"]
@@ -8648,7 +8648,7 @@ def test_a_retro_filed_from_its_template_passes_while_the_work_template_refuses(
 def test_ses_own_settings_refuse_a_work_body_without_a_problem(worktree, gh, monkeypatch, capsys,
                                                                templates_home):
     """SE's own se.toml, read from the checkout, on the integration branch: `file` refuses a body
-    that lacks its Problem before any gh call, relay call or printed plan (README "Templates")."""
+    that lacks its Problem before any gh call, relay call or printed plan (docs/templating.md "Templates")."""
     fake_git.init(worktree)
     (worktree / "se.toml").write_text((PROJECT / "se.toml").read_text(encoding="utf-8"),
                                       encoding="utf-8")

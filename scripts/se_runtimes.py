@@ -61,7 +61,7 @@ def _arrow(path: tuple[str, ...]) -> str:
 
 def parse(data: Mapping, where: str, path: tuple[str, ...]) -> list[Need]:
     """The `[runtimes]` of a component's se.toml `data` (its file named `where`), the component at
-    `path`: each a known runtime with a version range in the form of a component pin (README
+    `path`: each a known runtime with a version range in the form of a component pin (docs/modules.md
     "Modules": `^1.22`, `~3.12.1`, `3.12` or `0.5.4`)."""
     table = data.get(TABLE, {})
     if not isinstance(table, dict):

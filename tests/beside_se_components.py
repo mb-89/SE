@@ -1,13 +1,13 @@
 """SE's components against the real core, the suite beside se.toml `[tests.beside.se-components]`
-(README "Commands as components"): where the `se` binary serves a checkout with SE's wiring,
+(docs/start.md "Commands as components"): where the `se` binary serves a checkout with SE's wiring,
 `se status` lists SE's four Python command groups placed and attached beside its Go components
 (fleet, github, origin, retro-due, template) in process, an interactive command answers through the core as it
-answers directly, and once the core has stopped it runs directly again; the Stop hook (README "Stop
+answers directly, and once the core has stopped it runs directly again; the Stop hook (docs/fleet.md "Stop
 hook") answers through the delivery component as stop-check answers directly.
 
 It builds the `se` binary (kern's core plus SE's Go components, components/cmd/se), so it runs beside
 the suite, after kern's tests have warmed Go's build cache, not in it (its file name keeps the suite
-from collecting it): README "Test budget".
+from collecting it): docs/tests.md "Test budget".
 """
 
 from __future__ import annotations

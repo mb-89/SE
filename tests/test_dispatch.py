@@ -1,4 +1,4 @@
-"""The dispatcher (README "Dispatcher"): `work_tickets.py dispatch` reads the startable work and
+"""The dispatcher (docs/fleet.md "Dispatcher"): `work_tickets.py dispatch` reads the startable work and
 whether an integrator runs from GitHub alone, and fires the scheduled task at most once."""
 import importlib.util
 import json

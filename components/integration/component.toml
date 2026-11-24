@@ -21,7 +21,7 @@ class = "batch"
 usage = "work_tickets.py release --worktree WORKTREE [--repo REPO] [--read-back TAG]\n                        [--kind COMMIT=KIND REASON]"
 summary = "release when SE asks: raise project.version by the highest Release- ..."
 group = "Integration"
-help = "release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (README \"Project settings\"); with nothing integrated since, it releases nothing"
+help = "release when SE asks: raise project.version by the highest Release-kind integrated since the last release, land the release commit through a landing pull request and tag it, or leave the tag to the release workflow (docs/settings.md \"Project settings\"); with nothing integrated since, it releases nothing"
 class = "batch"
 
 [commands."work_tickets.py release-trailer"]
@@ -49,21 +49,21 @@ class = "batch"
 usage = "work_tickets.py suite --worktree WORKTREE [--slowest N] [--compare REF] [--runs N] [--full]\n                      [--record-file-seconds PATH] [--keep-test-reports DIR]"
 summary = "run se.toml's complete suite against its [tests] time budget, as ..."
 group = "Integration"
-help = "run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (README \"Test budget\")"
+help = "run se.toml's complete suite against its [tests] time budget, as integrate does; exit code 1 when tests fail, 3 when they pass over the limit and the budget refuses them (docs/tests.md \"Test budget\")"
 class = "batch"
 
 [commands."work_tickets.py suite-shard"]
 usage = "work_tickets.py suite-shard --worktree WORKTREE --name NAME --record DIR ..."
 summary = "on CI, run one shard of a sharded suite, the COMMAND after --, show ..."
 group = "Integration"
-help = "on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (README \"Test budget\")"
+help = "on CI, run one shard of a sharded suite, the COMMAND after --, show its output, time it and write its record DIR/NAME.json for suite-time; exit code the command's (docs/tests.md \"Test budget\")"
 class = "batch"
 
 [commands."work_tickets.py suite-time"]
 usage = "work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]"
 summary = "in CI's check job, judge a sharded suite: its time is its slowest ..."
 group = "Integration"
-help = "in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README \"Test budget\")"
+help = "in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (docs/tests.md \"Test budget\")"
 class = "batch"
 
 [commands."work_tickets.py file-seconds"]
@@ -84,7 +84,7 @@ class = "batch"
 usage = "work_tickets.py metrics [--since DATE] [--file FILE]"
 summary = "print what the commands cost, from the line every run of a command ..."
 group = "Integration"
-help = "print what the commands cost, from the line every run of a command appends (README Metrics): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml)"
+help = "print what the commands cost, from the line every run of a command appends (docs/running.md \"Metrics\"): top spenders by total wall time and by GitHub calls, and each overrun of a declared budget (the suite's [tests] limit_seconds in se.toml)"
 class = "interactive"
 read-only = true
 mcp = "Prints what the commands cost from the line each run records: top spenders by wall time and GitHub calls, and each overrun of a budget. Use it to find what is slow."
@@ -162,9 +162,9 @@ class = "batch"
 
 [commands."work_tickets.py dispatch"]
 usage = "work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire | --dry-run]"
-summary = "the dispatcher (README \"Dispatcher\", scripts/dispatch.py): list the ..."
+summary = "the dispatcher (docs/fleet.md \"Dispatcher\", scripts/dispatch.py): ..."
 group = "Integration"
-help = "the dispatcher (README \"Dispatcher\", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none"
+help = "the dispatcher (docs/fleet.md \"Dispatcher\", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none"
 class = "batch"
 
 [commands."work_tickets.py fleet-check"]
@@ -198,7 +198,7 @@ mcp = "Compares two commits' trees, such as one branch on two remotes, path by p
 usage = "work_tickets.py docs [--check]"
 summary = "write the command groups' component declarations ..."
 group = "Integration"
-help = "write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs"
+help = "write the command groups' component declarations (components/<group>/component.toml) from this registry and the command reference in docs/work-commands.md from them; with --check, only refuse a declaration or a reference that differs"
 class = "batch"
 
 [commands."work_tickets.py format"]

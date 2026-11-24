@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A project's own commit checks: the commands its `se.toml` `[commit_checks]` names, run by se's
 commit hook (`.githooks/pre-commit`) on the staged tree, so a commit that breaks one is refused
-before it exists (README "Commit checks").
+before it exists (docs/settings.md "Commit checks").
 
 ```toml
 [commit_checks]

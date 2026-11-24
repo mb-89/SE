@@ -1,4 +1,4 @@
-"""Component versions assigned at the landing (README "Component versions").
+"""Component versions assigned at the landing (docs/settings.md "Component versions").
 
 A work branch that changes the `se` binary states its release kind in its field report,
 `**Component kinds:** se patch`, and leaves its `release.toml` version alone;

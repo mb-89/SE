@@ -1,4 +1,4 @@
-"""The refresh at the session's start (README "Start and refresh"): an installed SE one release behind
+"""The refresh at the session's start (docs/start.md "Start and refresh"): an installed SE one release behind
 moves to the latest release in the same start, and the core starts from the moved tree's pins; a
 remote that cannot be read starts the session with the SE it has, in one line.
 
