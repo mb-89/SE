@@ -1391,7 +1391,7 @@ def edited(catalog: dict, write, root: Path, project: Path | None):
         guess = templates.select(catalog, write.action, write.body or "", write.title,
                                  labels=write.labels or (),
                                  integration=work_tickets.integration_branch(root)).template
-        return None, [], "" if guess is None else unmarked_refusal(write, guess)
+        return None, [], "" if guess is None else unmarked_refusal(write, guess, project or root)
     found = []
     if before is not None and given is not None and named is None:
         found.append(templates.Finding("body", "template", templates.REFUSE,
@@ -1405,13 +1405,13 @@ def edited(catalog: dict, write, root: Path, project: Path | None):
     return template, found, ""
 
 
-def unmarked_refusal(write, guess) -> str:
+def unmarked_refusal(write, guess, root: Path) -> str:
     """The refusal of an edit whose document names no template (Which template, in the module
     docstring): it names the stamp, with `guess` the template a new document would get, and the fill."""
     target = (f"#{write.number}" if write.action == "issue.edit"
               else f"comment {getattr(write, 'comment', '')}")
-    stamp = (f"uv run python {HERE / 'work_tickets.py'} stamp {write.number} --repo {write.repo} "
-             f"--template {guess.name}" if write.action == "issue.edit" else "")
+    stamp = (f"uv run python {HERE / 'work_tickets.py'} stamp {write.number} --worktree {root} "
+             f"--repo {write.repo} --template {guess.name}" if write.action == "issue.edit" else "")
     lines = [f"{write.action} in {write.repo}: {target} names no template: its body carries no "
              "`<!-- se:template <repository>/<name> <version> <digest> -->` line, so SE does not know "
              "which template it derives from and judges the edit against none."]

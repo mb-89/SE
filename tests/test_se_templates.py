@@ -482,7 +482,7 @@ def test_an_edit_of_an_issue_that_names_no_template_is_refused_naming_the_stamp(
     monkeypatch.setattr(se_templates, "judged", lambda *given: found.append(given) or "")
     reason = denial(gate(capsys, monkeypatch, edit(project, body=unmarked(GOOD_WORK)), "--gate", "refuse"))
     assert reason.startswith(f"issue.edit in {OWNER}/{REPO_NAME}: #7 names no template")
-    assert f"work_tickets.py stamp 7 --repo {OWNER}/{REPO_NAME} --template work" in reason
+    assert f"work_tickets.py stamp 7 --worktree {project} --repo {OWNER}/{REPO_NAME} --template work" in reason
     assert "work_tickets.py file" in reason and "template refuses" not in reason
     assert found == []  # judged against no template at all
     labels_only = denial(gate(capsys, monkeypatch, edit(project, labels=["work", "in-progress"]),

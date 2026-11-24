@@ -7968,6 +7968,7 @@ TEMPLATES = work_tickets.sibling("templates")
 WORK_TEMPLATE = TEMPLATES.load(PROJECT, tree=True)["work"]
 WORK_TITLE = WORK_TEMPLATE.example["title"]
 WORK_FIELDS = dict(WORK_TEMPLATE.example["fields"])
+TICKET = TEMPLATES.load(PROJECT, tree=True)["ticket"]
 
 
 @pytest.fixture
@@ -8333,6 +8334,86 @@ def test_unhold_without_gh_reads_the_issue_file_and_prints_the_label_change(
     assert "with ready" in steps[0] and "without off-template" in steps[1]
     assert "Then: #2 is unheld: off-template removed, ready added" in out
     assert out[-1] == "Run the GitHub plan above to unhold #2"
+
+
+def unmarked_issues(monkeypatch) -> tuple[LabelledGh, list[list[str]]]:
+    """Issues filed over raw REST, without a template marker: #2 a work issue whose body passes
+    the work template, #3 one whose body does not, #4 a backlog ticket, #5 labelled neither, #6
+    labelled both."""
+    good = TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS).replace(WORK_TEMPLATE.marker_line + "\n", "")
+    url = "https://git.example/owner/repo/issues/{}"
+    github = LabelledGh({
+        2: {"number": 2, "title": WORK_TITLE, "body": good, "labels": ["work", "ready"], "url": url.format(2)},
+        3: {"number": 3, "title": WORK_TITLE, "body": "<!-- se:fleet -->\nA line.\n",
+            "labels": ["work"], "url": url.format(3)},
+        6: {"number": 6, "title": WORK_TITLE, "body": good, "labels": ["backlogged", "work"],
+            "url": url.format(6)},
+        4: {"number": 4, "title": TICKET.example["title"], "body": TEMPLATES.render(
+            TICKET, dict(TICKET.example["fields"])).replace(TICKET.marker_line + "\n", ""),
+            "labels": ["backlogged"], "url": url.format(4)},
+        5: {"number": 5, "title": "x", "body": "Something.\n", "labels": [], "url": url.format(5)}})
+    calls: list[list[str]] = []
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: (
+        calls.append(list(arguments)) or github(root, arguments)))
+    monkeypatch.setattr(work_tickets, "gh_usable", lambda: True)
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    return github, calls
+
+
+def test_stamp_adds_the_marker_to_an_issue_that_passes_its_template_and_changes_nothing_else(
+        worktree, monkeypatch, capsys, templates_home):
+    github, calls = unmarked_issues(monkeypatch)
+    enforce(worktree, "off")  # stamp checks whatever [templates] enforce says
+    before = github.issues[2]["body"]
+    assert run(worktree, "stamp", "2") == 0
+    assert capsys.readouterr().out == (
+        f"Stamped #2 https://git.example/owner/repo/issues/2: {WORK_TEMPLATE.marker_line}\n")
+    assert github.issues[2]["body"] == TEMPLATES.stamped(WORK_TEMPLATE, before)
+    assert github.issues[2]["body"].replace(WORK_TEMPLATE.marker_line + "\n", "") == before
+    assert github.issues[2]["labels"] == ["work", "ready"] and github.issues[2]["title"] == WORK_TITLE
+    calls.clear()
+    assert run(worktree, "stamp", "2") == 0
+    assert capsys.readouterr().out.startswith(
+        f"#2 names its template already, nothing stamped: {WORK_TEMPLATE.marker_line}")
+    assert edits(calls) == []
+    assert run(worktree, "stamp", "4") == 0
+    assert f"Stamped #4 https://git.example/owner/repo/issues/4: {TICKET.marker_line}" in capsys.readouterr().out
+    assert run(worktree, "stamp", "6") == 0  # labelled work and backlogged: the work template, as the gate names it
+    assert f"Stamped #6 https://git.example/owner/repo/issues/6: {WORK_TEMPLATE.marker_line}" in capsys.readouterr().out
+
+
+def test_stamp_refuses_an_issue_its_template_refuses_and_writes_nothing(
+        worktree, monkeypatch, capsys, templates_home):
+    github, calls = unmarked_issues(monkeypatch)
+    assert run(worktree, "stamp", "3") == 1
+    error = capsys.readouterr().err
+    assert "stamp #3: the work template refuses" in error and "Nothing was stamped" in error
+    assert run(worktree, "stamp", "5") == 1  # unlabelled: what a new issue would take, the ticket
+    assert "stamp #5: the ticket template refuses" in capsys.readouterr().err
+    assert run(worktree, "stamp", "5", "--template", "review") == 1
+    assert "the review template does not shape an issue's body" in capsys.readouterr().err
+    assert edits(calls) == [] and github.issues[3]["body"] == "<!-- se:fleet -->\nA line.\n"
+
+
+def test_stamp_without_gh_reads_the_issue_file_and_prints_the_edit(
+        worktree, monkeypatch, capsys, templates_home):
+    monkeypatch.setattr(work_tickets, "hand_off", lambda: True)
+    monkeypatch.setattr(work_tickets, "run_gh", lambda root, arguments: pytest.fail(
+        f"gh called: {arguments}"))
+    monkeypatch.setattr(work_tickets, "remote_repo", lambda root: "git.example/owner/repo")
+    assert run(worktree, "stamp", "2") == 1
+    assert "--issue-body <file>" in capsys.readouterr().err
+    body = TEMPLATES.render(WORK_TEMPLATE, WORK_FIELDS).replace(WORK_TEMPLATE.marker_line + "\n", "")
+    answer = worktree / "issue.json"
+    answer.write_text(json.dumps({"number": 2, "title": WORK_TITLE, "body": body, "state": "open",
+                                  "labels": ["work"]}), encoding="utf-8")
+    assert run(worktree, "stamp", "2", "--issue-body", str(answer)) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "GitHub plan: stamp #2"
+    step = json.loads(out[1].removeprefix("1. issue_write "))
+    assert step == {"owner": "owner", "repo": "repo", "method": "update", "issue_number": 2,
+                    "body": TEMPLATES.stamped(WORK_TEMPLATE, body)}
+    assert out[-1] == "Run the GitHub plan above to stamp #2"
 
 
 def test_every_held_line_and_the_off_template_label_name_unhold():

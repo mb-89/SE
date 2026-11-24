@@ -809,8 +809,7 @@ below, a positive number of hours, default 12; other keys are refused.
     plugin's hook (`scripts/se_hook.sh`) reads that file alone; once half the claim timeout has
     passed it starts `work_tickets.py beat` in the background, which sets the line to now.
   - A failed beat is due again 15 minutes later. Without gh, `beat` runs through kern's relay,
-    so the session runs its read and write when the hook tells it. The write carries the issue's
-    own labels, so the [template gate](#templates) judges it by the issue's own template.
+    so the session runs its read and write when the hook tells it.
   - The beat line is no change to the issue's text: refresh, the first hold, the body-read check
     and the template check ignore it.
 - **Live or stale.** `work_tickets.py ready` names each claimed issue live (beat younger than the
@@ -2125,6 +2124,7 @@ escalation, filing, routing, the backlog, blockers and the fleet's pause.
 | `work_tickets.py paused` | `work_tickets.py paused [--worktree WORKTREE] [--repo REPO]` | whether the fleet is paused: exit code 1 and the issue while an issue labelled pause is open in the repository (the owner's switch; closing it resumes), exit code 0 while none is. queue, start, integrate and route refuse while paused. Without gh it prints the search as a plan for the session's GitHub tools, exit code 2 |
 | `work_tickets.py refresh` | `work_tickets.py refresh --worktree WORKTREE [--issue ISSUE] [--repo REPO] [--json]` | re-read the work issue and its comments and report changes; each new or edited comment with its author, marked as intake marks it (--json: byOwner) |
 | `work_tickets.py route` | `work_tickets.py route --worktree WORKTREE [--title TITLE] [--type TYPE] (--routing-file ROUTING_FILE \| --fields FILE) [--hold] [--issue-title ISSUE_TITLE] [--issue-body ISSUE_BODY] [--issue-association ISSUE_ASSOCIATION] [--repo REPO] issue` | for SE: route a checked outside issue as a work issue in one edit: retitle it to its name, label it work, ready and repo:<name>, and append the routing section with the handled record to its body |
+| `work_tickets.py stamp` | `work_tickets.py stamp --worktree WORKTREE [--template NAME] [--issue-body FILE] [--repo REPO] issue` | for SE: give an unmarked issue its template's marker, where it passes that template's check |
 | `work_tickets.py unhold` | `work_tickets.py unhold --worktree WORKTREE [--issue-body FILE] [--repo REPO] issue` | for SE: check an issue filed with --hold against its template again and, where it passes, remove off-template and give a work issue ready back |
 
 #### Delivery
@@ -2628,8 +2628,6 @@ names the templates, `draft <template>` gives `draft --json`'s answer, and `chec
 commands below would refuse (private terms, the name rule, SE's commands too) or gives the
 Markdown to file.
 
-It only reads; `check`'s first line is `passes` or `refused: <n> findings`.
-
 - `draft` and `fill` give the template's guidance first, as
   [docs/guidance.md "Delivery"](docs/guidance.md#delivery) states: once per session (`--session`),
   in pages of kern's page limit, the template on the last page.
@@ -2696,9 +2694,8 @@ denied, naming the template, every finding and the templates tool).
   before. `SE_TEMPLATES_GATE=off` turns it off for a machine.
 - From `refusals` on, a refused issue write may be sent again labelled `off-template` and without
   `ready`, the hold `--hold` files; a private term is never held.
-- It fails open when it is slow: past 10 s, or where the host cancels it, the call runs.
-  It fails open where it cannot judge (no Python 3.11, a payload it cannot read), and logs it in
-  `.se/.runtime/templates-gate.log`; it fails closed only on a crash once it knows a template applies.
+- It fails open, logged, where it is slow or cannot judge; it fails closed only on a crash once it
+  knows a template applies.
 
 SE's templates backstop marks what reaches GitHub past every hook, where se.toml `[templates] backstop` is
 `on` (default `off`): a person's write on github.com, a session without SE's hooks, a label change.

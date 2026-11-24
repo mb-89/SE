@@ -1746,6 +1746,14 @@ def routed_issue(catalog, monkeypatch) -> list[Case]:
         OUTSIDE, "Proposal: make it work", ROUTING), "feat/make-it-work-20261116")]
 
 
+def stamped_issue(catalog, monkeypatch) -> list[Case]:
+    """A work issue filed without its marker, as `stamp` writes it back with the marker."""
+    work = catalog["work"]
+    bare = templates.render(work, dict(work.example["fields"])).replace(work.marker_line + "\n", "")
+    return [Case("issue.edit", "work", templates.stamped(work, bare), work.example["title"],
+                 labels=("work",))]
+
+
 def comment(text: str):
     return lambda catalog, monkeypatch: [Case("comment.create", FREE, text)]
 
@@ -1877,6 +1885,7 @@ def without_beats(plan):
 #: Each function in scripts/ that sends a body, and what the command it serves sends.
 CONTRACT = {
     "work_tickets:work_issue_filing": ("file", work_issue),
+    "work_tickets:stamp": ("stamp", stamped_issue),
     "work_tickets:filing_plan": ("file, backlog file and route", filing),
     "work_tickets:filed_once.create": ("file and backlog file",
                                        lambda c, m: work_issue(c, m) + backlog_issue(c, m)),
