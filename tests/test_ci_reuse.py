@@ -294,7 +294,7 @@ def test_the_trust_job_names_its_decision_step_with_the_key_a_later_run_reads() 
 
 def test_the_suite_the_go_checks_and_the_legs_run_only_where_the_decision_says_run() -> None:
     jobs = jobs_of_workflow()
-    for gated in ("kern-platforms", "kern-platforms-queue"):
+    for gated in ("kern-platforms", "kern-platforms-queue", "showcase"):
         assert "needs: trust\n    if: needs.trust.outputs.suite == 'run'" in jobs[gated], gated
     for step in ("SE's Go components vet", "Install obs's adapter component obs-html",
                  "The complete suite and the suites beside it", "Keep the suite's file seconds",

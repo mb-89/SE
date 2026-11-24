@@ -107,7 +107,7 @@
     (`se.toml` `[commit_checks]`).
   - It also fails where README.md is not one page with its one command first (`scripts/readme.py`,
     the guidance note [readme-is-one-page](guidance/readme-is-one-page.md)); the commit hook runs the
-    same check.
+    same check, and the `check` job's `showcase` runs that command on a fresh runner.
   - It also fails where SE's checkout fails its public check, with SE's own line of history
     ([Public safety](#public-safety)).
 - Dangling references:

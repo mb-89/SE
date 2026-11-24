@@ -441,13 +441,13 @@ def test_the_record_workflow_names_its_run_by_the_commit_and_tree_it_records() -
 def test_ses_check_gates_the_suite_and_kern_platforms_on_the_trust_job() -> None:
     workflow = (WORKFLOWS / "check.yml").read_text(encoding="utf-8")
     jobs = dict(re.findall(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow.split("\njobs:\n")[1]))
-    assert list(jobs) == ["check", "kern-platforms", "kern-platforms-queue", "trust"]
+    assert list(jobs) == ["check", "kern-platforms", "kern-platforms-queue", "showcase", "trust"]
     assert "mode: lookup" in jobs["trust"] and "fetch-depth: 0" in jobs["trust"]
     # The job's answer is the decision step's (scripts/ci_reuse.py), which takes lookup's first.
     assert "TRUSTED: ${{ steps.lookup.outputs.trusted }}" in jobs["trust"]
-    for gated in ("kern-platforms", "kern-platforms-queue"):
+    for gated in ("kern-platforms", "kern-platforms-queue", "showcase"):
         assert "needs: trust\n    if: needs.trust.outputs.suite == 'run'" in jobs[gated], gated
-    assert "needs: [trust, kern-platforms]" in jobs["check"]
+    assert "needs: [trust, kern-platforms, showcase]" in jobs["check"]
     suite = re.search(r"(?ms)- name: The complete suite.*?\n(?=      - )", jobs["check"])[0]
     assert "if: needs.trust.outputs.suite == 'run'" in suite
     # The cheap gates always run: the commits, the issue rule, the layout, the reference, the report.

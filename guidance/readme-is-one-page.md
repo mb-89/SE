@@ -36,6 +36,6 @@ shape, naming each finding. Run it at commit, as one of the project's
 [commit checks](../docs/settings.md#commit-checks) (se.toml `[commit_checks]`), and in CI.
 `readme.py showcase --url <clone address> --branch <branch>` prints the README's command with the
 clone address CI fetches, for a job on a fresh runner to run as a person would. SE's own README is
-held to it by its hygiene check `readme`.
+held to it by its hygiene check `readme` and its CI job `showcase`.
 
 Not picked: raising the size limit, which keeps the manual in the README.

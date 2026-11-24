@@ -4,8 +4,9 @@
 # hygiene of SE's own checkout, a pull request's field report and the complete suite within its
 # budget, SE's Go components on kern at the pin se.toml [components.kern] reads from components/go.mod,
 # and, through the job kern-platforms, SE's start, hook and setup scripts and its worktree removal
-# tests on Windows (darwin is built by the release, not tested); on a pull request also the work
-# model's issue rule. kern's own tests run in kern's repository, in its check.
+# tests on Windows (darwin is built by the release, not tested), and, through the job showcase, the
+# README's one command on a fresh runner (the guidance note readme-is-one-page); on a pull request
+# also the work model's issue rule. kern's own tests run in kern's repository, in its check.
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, the Go checks and kern-platforms do not run;
@@ -36,9 +37,9 @@ permissions:
 
 jobs:
   check:
-    needs: [trust, kern-platforms]
-    # It runs whatever kern-platforms answered, and its last step fails unless that passed (or was
-    # skipped for a trusted landing): a required check that is skipped would count as passed.
+    needs: [trust, kern-platforms, showcase]
+    # It runs whatever kern-platforms and showcase answered, and its last steps fail unless each passed
+    # (or was skipped for a trusted landing): a required check that is skipped would count as passed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-26.04
     steps:
@@ -218,6 +219,17 @@ jobs:
             echo "::error::kern-platforms answered $PLATFORMS: SE's start, hook, setup and worktree tests on Windows (the job kern-platforms of this run) must pass"
             exit 1
           fi
+      - name: The README's one command ran green on a fresh runner
+        env:
+          SHOWCASE: ${{ needs.showcase.result }}
+          SUITE: ${{ needs.trust.outputs.suite }}
+        run: |
+          if [ "$SUITE" != run ] && [ "$SHOWCASE" = skipped ]; then
+            echo "showcase did not run: this run's suite is $SUITE"
+          elif [ "$SHOWCASE" != success ]; then
+            echo "::error::showcase answered $SHOWCASE: the README's one command (the job showcase of this run) must run green on a fresh runner"
+            exit 1
+          fi
       # The safety net's bookkeeping, where trust_integrator is on (else they do nothing): a full
       # pass marks its commit; a failed full run names the trusted records since the last one.
       - name: Mark the full pass
@@ -294,6 +306,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_queue.py watch --jobs kern-platforms --queue-minutes 20
+  # The README's one command, as a person runs it on a machine with nothing of SE (the guidance note
+  # readme-is-one-page): scripts/readme.py prints it with this repository's address and the branch
+  # under test, and it runs from an empty folder: it gets SE, RUNME installs what the runner lacks,
+  # and the showcase exits non-zero when anything is broken. `check` needs it and fails unless it passed.
+  showcase:
+    needs: trust
+    if: needs.trust.outputs.suite == 'run'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: The README's one command on a fresh runner
+        env:
+          URL: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          command=$(python3 scripts/readme.py showcase --url "$URL" --branch "$BRANCH")
+          echo "$command"
+          folder=$(mktemp -d)
+          cd "$folder" && bash -c "$command"
   # Whether this run runs the suite, the Go checks and kern-platforms (output suite: run), or passes
   # on the integrator's record of exactly this tree (trusted, docs/tests.md "Trusted landings": only where
   # se.toml [tests] trust_integrator is on, never on the safety net's runs; its full history counts

@@ -117,3 +117,20 @@ def test_ses_own_readme_passes_and_its_showcase_runs_runme() -> None:
     command = readme.showcase(text, "https://example.com/o/se", "work")
     assert command.startswith("git clone --branch work https://example.com/o/se se && cd se && ./RUNME.sh ")
 
+
+def test_ci_runs_the_readmes_command_on_a_fresh_runner_and_check_needs_it() -> None:
+    """The job showcase of the required workflow (requirement 3): the command readme.py prints, with
+    this repository's address and the branch under test, from an empty folder, with nothing of SE
+    set up beforehand; check fails unless it passed."""
+    workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
+    jobs = workflow.split("\njobs:\n", 1)[1]
+    showcase = jobs[jobs.index("\n  showcase:\n"):jobs.index("\n  trust:\n")]
+    assert "    needs: trust\n    if: needs.trust.outputs.suite == 'run'\n" in showcase
+    assert "URL: ${{ github.server_url }}/${{ github.repository }}" in showcase
+    assert "BRANCH: ${{ github.head_ref || github.ref_name }}" in showcase
+    assert 'command=$(python3 scripts/readme.py showcase --url "$URL" --branch "$BRANCH")' in showcase
+    assert 'folder=$(mktemp -d)\n          cd "$folder" && bash -c "$command"' in showcase
+    assert "setup-uv" not in showcase and "setup-go" not in showcase, "a fresh runner: RUNME installs"
+    check = jobs[:jobs.index("\n  kern-platforms:\n")]
+    assert "    needs: [trust, kern-platforms, showcase]\n" in check
+    assert '"$SHOWCASE" != success' in check
