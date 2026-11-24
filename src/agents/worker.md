@@ -162,6 +162,8 @@ every package, so work issues and session prompts never repeat it.
        against the branch: it refuses, as the landing would, a report whose "Removed behaviour,
        deleted or weakened tests, and authored prose" does not name each test and authored
        sentence the branch deletes or rewrites, and nothing is pushed or posted.
+     - A sentence that stands with the same words in another file the branch tracks, its link
+       targets aside, is no deletion: a section moved to another page needs no naming.
      - A folder the branch moves with its tests to another repository is named there once, as
        the work model's [Tests](../skills/work-model/SKILL.md#tests) says (`Moved: <folder> to
        <repository> at <commit>`), never test by test.

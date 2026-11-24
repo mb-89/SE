@@ -570,6 +570,28 @@ def test_guard_ignores_a_sentence_whose_links_only_point_elsewhere(worktree: Pat
     assert work_tickets.prose_key("See [it](a.md#x) and [that](<b c.md>).") == "See [it]() and [that](<b c.md>)."
 
 
+def test_guard_keeps_a_sentence_moved_to_a_file_outside_the_authored_content(worktree: Path) -> None:
+    """A page the branch adds is no authored file of the integration branch's se.toml; a sentence
+    moved there keeps its words, while one reworded or dropped is still named (SE#1796)."""
+    repository, guide = authored_repository(
+        worktree.parent / "moved-across-files-case", "move-across-files",
+        "This sentence moves to the manual.\nThis sentence is reworded.\nThis sentence is dropped.\n"
+        "See [the rules](rules.md#use) first.\n",
+    )
+    guide.write_text("# Guide\n", encoding="utf-8", newline="\n")
+    (repository / "manual").mkdir()
+    (repository / "manual" / "install.md").write_text(
+        "This sentence moves to the manual.\nThis sentence was reworded.\n"
+        "See [the rules](../docs/rules.md#use) first.\n",
+        encoding="utf-8", newline="\n")
+    assert git(repository, "add", ".").returncode == 0
+    assert git(repository, "commit", "-m", "move prose to the manual").returncode == 0
+    assert work_tickets.deleted_authored_sentences(repository, "move-across-files") == [
+        "docs/guide.md: This sentence is reworded.",
+        "docs/guide.md: This sentence is dropped.",
+    ]
+
+
 MOVED_TESTS = "def test_renders_a_page():\n    pass\n\n\ndef test_renders_a_link():\n    pass\n"
 
 
