@@ -540,8 +540,8 @@ No token reaches code in a cloud session; the session's GitHub tools reach GitHu
 and `gh api` reach it through the session's proxy, which signs REST calls and refuses GraphQL.
 SE's Python commands take that REST path first, so they need none of the backends below (the
 work model's [Without gh](../src/skills/work-model/SKILL.md#without-gh)). The GitHub component is
-one I/O component with three backends, chosen at start; its output `github/backend` names the
-choice (kern's components/github/README.md "The backends" owns the details):
+one I/O component with three backends, chosen at start; its output `backend` names the choice
+(kern's components/github/README.md "The backends" owns the details):
 
 - **token**, where `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token` gives one outside a cloud session:
   the Go line's REST client, in process, with ETags, a refresh every 2 minutes and the rate-limit
