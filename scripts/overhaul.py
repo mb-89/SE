@@ -565,7 +565,8 @@ JUDGMENT_TEMPLATE = "overhaul-judgment"
 QUESTION_FIELDS = ("questions", "overhaul_questions")
 JUDGE_BEGIN, JUDGE_END = "<!-- se:overhaul-judge -->", "<!-- se:overhaul-judge:end -->"
 BLOCK_VERSION = 1
-# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`.
+# A work issue names each overhaul finding it takes as `overhaul #<n> finding <k>`, the message
+# retro.py's FINDING_TEMPLATE the report writes; finding one stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\boverhaul #(\d+) finding (\d+)\b", re.IGNORECASE)
 # What checks a rule, read from its live implementations.
 CHECKED_BY = ("test", "check", "judgment")
@@ -1088,9 +1089,10 @@ def report(text: str, block: dict, number: int) -> str:
         r"^## (?:" + "|".join(map(re.escape, headings)) + r")[ \t]*\n.*?(?=^## |^"
         + re.escape(JUDGE_BEGIN) + "|^" + re.escape(BLOCK_MARKER) + r"|\Z)", "", text,
         flags=re.MULTILINE | re.DOTALL)
+    reference = sibling("retro").finding_reference("overhaul", number)
     follows = (f"This overhaul filed no issue. SE bundles the {WORK} findings "
                f"({', '.join(map(str, work)) or 'none'}) into as few work issues as the work "
-               f"needs, each naming `overhaul #{number} finding <k>` for every finding it takes, "
+               f"needs, each naming `{reference}` for every finding it takes, "
                f"so the next overhaul scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}), every rule change among them, go "
                "on the owner's decision list.")

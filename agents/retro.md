@@ -60,5 +60,5 @@ README's [Work commands](../README.md#work-commands) and the run's issue templat
    `retro.py file <issue> --draft <draft>` (`overhaul.py file` for an overhaul) posts the report
    and closes the issue. Only now does SE file issues again.
 6. **Hand back.** Send SE's session one message: `<retro|overhaul> #<n> closed: <report link>`.
-   SE files the work findings as work issues, each naming `retro #<n> finding <k>` (`overhaul #<n>
-   finding <k>`).
+   SE files the work findings as work issues, each naming every finding it takes as the message
+   `templates/finding-ref.md` writes it.

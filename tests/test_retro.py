@@ -831,6 +831,16 @@ def test_the_doc_marker_is_the_retro_doc_message_and_reads_back():
     assert retro.DOC_PATTERN.fullmatch(retro.doc_marker("abc123", "docs/retro-30.md")) is None
 
 
+def test_the_finding_reference_is_the_finding_ref_message_that_collect_finds():
+    """templates/finding-ref.md writes the reference a work issue names a finding by, which
+    FINDING_REFERENCE finds in free text, the retro's and the overhaul's alike."""
+    assert retro.finding_reference("retro", 30) == "retro #30 finding <k>"
+    assert retro.FINDING_REFERENCE.search(f"Takes {retro.finding_reference('retro', 30, 2)}.").groups() == (
+        "30", "2")
+    assert retro.sibling("overhaul").FINDING_REFERENCE.search(
+        retro.finding_reference("overhaul", 50, 1)).groups() == ("50", "1")
+
+
 def test_a_report_proper_over_the_limit_posts_in_numbered_parts(checkout, monkeypatch):
     long = "\n".join(f"Line {index} of a long finding body." for index in range(4000))
     long += "\n" + "x" * 70000  # a line longer than a comment is cut within it, never dropped

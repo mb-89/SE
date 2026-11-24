@@ -127,7 +127,7 @@ ADAPTERS = ("field-report", "landing", "housekeeping", "merge-message", "review"
 NESTING = ("decision", "raid-register", "raid-entry", "retro", "overhaul", "standing-questions",
            "overhaul-questions")
 #: The interface templates with fields: the texts SE's sessions pass to each other.
-INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover", "retro-due", "retro-part", "retro-doc")
+INTERFACES = ("boot-report", "delivery-notice", "escalation", "handover", "retro-due", "retro-part", "retro-doc", "finding-ref")
 #: The templates that claim files (`file.write`): the work issue's body file.
 FILES = ("work-file",)
 EVERY = (*ISSUE_TEMPLATES, *ADAPTERS, *NESTING, *INTERFACES, *FILES)

@@ -138,8 +138,11 @@ PART_ROOM = 100
 # The label each part ends in (templates/retro-part.md).
 PART_TEMPLATE = "retro-part"
 JUDGE_BEGIN, JUDGE_END = "<!-- se:retro-judge -->", "<!-- se:retro-judge:end -->"
-# A work issue names each retro finding it takes as `retro #<n> finding <k>`.
+# A work issue names each retro finding it takes as `retro #<n> finding <k>`, the message
+# FINDING_TEMPLATE (templates/finding-ref.md) the reports write (`finding_reference`); finding one
+# stays a search in free text.
 FINDING_REFERENCE = re.compile(r"\bretro #(\d+) finding (\d+)\b", re.IGNORECASE)
+FINDING_TEMPLATE = "finding-ref"
 FINDING_FIELDS = ("title", "body", "class", "home", "controversial", "why", "check")
 # A class: one cause and one fix, the fix's home (the file it changes) and the kind of home it is,
 # one of HOMES.
@@ -1874,11 +1877,12 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     work = [item["finding"] for item in block["findings"] if item["kind"] == WORK]
     decisions = [item["finding"] for item in block["findings"] if item["kind"] == DECISION]
     still = [row["name"] for row in classes if row["tree"] == OPEN]
+    reference = finding_reference("retro", number)
     decided = [str(drafted.get("decisions") or "").strip(),
                "Open classes: " + (", ".join(still) or "none") + ".",
                f"This retro filed no issue. SE files what the person accepted: it bundles the "
                f"{WORK} findings ({', '.join(map(str, work)) or 'none'}) into as few work issues "
-               f"as the work needs, each naming `retro #{number} finding <k>` for every finding "
+               f"as the work needs, each naming `{reference}` for every finding "
                f"it takes, so the next retro scores it; the {DECISION} findings "
                f"({', '.join(map(str, decisions)) or 'none'}) go on the owner's decision list."]
     fields = {
@@ -1896,6 +1900,13 @@ def report(block: dict, number: int, doc: str, url: str, sha: str, text: str,
     body = templates().render(template, fields)
     return (f"{REPORT_MARKER}\n# Retro #{number}: the report\n\n{body.rstrip()}\n\n"
             f"{doc_marker(sha, doc)}\n")
+
+
+def finding_reference(kind: str, number: int, finding: str = "<k>") -> str:
+    """How a work issue names finding `finding` of retro or overhaul `number` (`kind`), the message
+    FINDING_TEMPLATE; the reports give `<k>` for the finding SE fills in."""
+    return sibling("interfaces").write(FINDING_TEMPLATE, {"kind": kind, "number": str(number),
+                                                          "finding": str(finding)})
 
 
 def doc_marker(sha: str, path: str) -> str:

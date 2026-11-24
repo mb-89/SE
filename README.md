@@ -2544,6 +2544,7 @@ both.
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
+| `templates/finding-ref.md` | A finding's reference in a work issue: the run's kind and number and the finding's number in its report. |
 | `templates/handover.md` | Where the work stands for the next session: state, open work, branches, parked decisions, how to resume. |
 | `templates/housekeeping.md` | The owner's housekeeping pull request: no field report, no field required. |
 | `templates/landing.md` | A landing pull request: it names the work issue, the work pull request and its report. |
@@ -2590,14 +2591,17 @@ choices) and the template's JSON Schema, which a model's strict tool use takes a
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
 The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`, `retro-due`,
-`retro-part`, `retro-doc`) shape the texts SE shows and its sessions pass to each other.
-`templates.py interfaces` writes each one's schema beside the code that uses it,
+`retro-part`, `retro-doc`, `finding-ref`) shape the texts SE shows and its sessions pass to each
+other. `templates.py interfaces` writes each one's schema beside the code that uses it,
 `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
 
-`work_tickets.py deliver` and `escalate` write their messages through `scripts/interfaces.py`,
-`se_start.py` its start report, a snippet of several lines with a table and a line of three cases,
-`retro.py due` its two countdown lines, and `retro.py file` its report's link to the retro doc and
-the label of each part of a split report.
+Through `scripts/interfaces.py`:
+
+- `work_tickets.py deliver` and `escalate` write their messages;
+- `se_start.py` its start report, a snippet of several lines with a table and a line of three
+  cases;
+- `retro.py due` its two countdown lines, `retro.py file` its report's link to the retro doc and the
+  label of each part of a split report, and both reports the finding reference work issues name.
 
 A `file.write` template claims files by its `applies.paths` globs, such as a milestone's steps.
 `templates.py list --owned` names each owned glob.
