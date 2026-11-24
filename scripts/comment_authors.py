@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# se:template se/python-module 1.0.0
 """Who wrote a work issue's comment: its author's login and one flag, written by the repository's
 owner account or not.
 

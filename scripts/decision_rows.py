@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Decision rows: every row of the Decisions table in the field reports of the landings of a window.
 
 `decision_rows.py list --since DATE [--until DATE]` lists, for each pull request merged into the
@@ -30,6 +32,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import se_script
 
 
 def sibling(name: str):
@@ -314,7 +317,7 @@ def run_list(args: argparse.Namespace) -> int:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="decision_rows.py", description=__doc__.split("\n\n")[0])
+    top = se_script.parser(prog="decision_rows.py", description=__doc__.split("\n\n")[0])
     commands = top.add_subparsers(dest="command", required=True)
     listing = commands.add_parser(
         "list", help="list the Decisions rows of the field reports of a window's landings",
@@ -347,4 +350,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

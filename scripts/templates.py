@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
@@ -18,7 +19,7 @@ another reader takes for something else (`off`, `yes`, `null`, `1.5`), or that h
 are refused until quoted. It declares:
 
 - `name`, the file's; `version`, the template's semantic version (`1.2.0`), which its marker
-  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry` or `interface`); `tags`, a list of
+  writes; `kind` (TEMPLATE_KINDS: `document`, `block`, `entry`, `interface` or `code`); `tags`, a list of
   words, the template's one link to guidance, which `scripts/se_guidance.py` reads
   (docs/guidance.md "Resolution"); `reader` (`owner` or `fleet`: who reads what it
   shapes) and `says`, one line. `version`, `kind` and `tags` are every template's own, never
@@ -77,6 +78,9 @@ owns the field's `heading` and its `says`, the instruction, so the front matter 
 title or label field keeps its `says` in the front matter. An inherited field's section stays in
 the note it is declared in. Outside the sections the body holds nothing but blank lines; an
 adapter's body, and an interface's, is empty.
+
+**Code templates** (`kind: code`, CODE, docs/templates.md "Code templates"): adapters whose body is
+the files they scaffold; scripts/code_templates.py owns their body, `scaffold` and its command.
 
 **Interfaces** (`kind: interface`, docs/templates.md "Nesting"): a text code sends and reads, whose
 document is data. Its body is empty and its fields are the whole template: each field keeps its
@@ -240,7 +244,8 @@ For a file, `path` (relative to the project root) selects:
 3. By `applies.order` (then name), the first allowed template whose conditions all hold, matched
    against every line, the front matter's too.
 4. None: a refused finding, `<path>: no template takes this file; name its template in the front matter,
-   derived_from: {template: <name>, version: <version>}`.
+   derived_from: {template: <name>, version: <version>}`, or, where every template that claims it is a
+   code template, one naming the scaffold: the file carries no template marker.
 
 **Severities.** `check` returns every finding at once, each with its field, rule, severity and fix.
 Refuse rules: `required` (missing, empty or placeholder, or the field's own `says` pasted back),
@@ -386,6 +391,10 @@ import tomllib
 from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
 from pathlib import Path
 
+import se_script
+
+if __name__ == "__main__":  # run as a command: scripts/code_templates.py imports this module
+    sys.modules.setdefault("templates", sys.modules[__name__])
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = "templates"
 TERMS_FILE = "terms.toml"
@@ -584,6 +593,8 @@ class Template:
     digest: str = ""
     #: A message interface's one line, its fields as `{<field>}` (scripts/interfaces.py owns it).
     message: str = ""
+    #: A code template's files, (path, text) each, as its note's body holds them (`scaffold`).
+    code: tuple[tuple[str, str], ...] = ()
     #: Whether the template is a template manifest with its nodes (Template manifests), not a note.
     manifest: bool = False
 
@@ -771,11 +782,14 @@ YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
 INSTRUCTION = re.compile(r"\A[ \t\r\n]*<!--[ \t\r\n]*([a-z_][a-z0-9_]*):[ \t\r\n]*(.*?)[ \t\r\n]*-->[ \t\r\n]*\Z",
                          re.DOTALL)
 SEMVER = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
-TEMPLATE_KINDS = ("document", "block", "entry", "interface")
+TEMPLATE_KINDS = ("document", "block", "entry", "interface", "code")
 #: The kind whose document is data only: its body is empty, its fields the whole template.
 INTERFACE = "interface"
+#: A code template's kind and where note_data keeps its files (scripts/code_templates.py).
+CODE, CODE_FILES = "code", "_code"
 #: The kinds that may be parts of a document only, shaping no action of their own (no `applies`).
 PART_KINDS = ("block", "entry")
+
 
 
 def _yaml_lines(text: str, where: str, first: int) -> list[tuple[int, int, str]]:
@@ -945,6 +959,8 @@ def note_data(text: str, where: str) -> dict[str, object]:
     level = int(scope.get("level", 2)) if isinstance(scope, dict) and scope else 2
     if data.get("kind") == INTERFACE:
         return _interface_data(data, body, where, first)
+    if data.get("kind") == CODE:
+        return _sibling("code_templates").code_data(data, body, where, first)
     sections = _skeleton(body, where, first, level)
     in_body = [entry for entry in fields if not entry.get("source") and not entry.get("label")
                and not entry.get("fence")]
@@ -1468,7 +1484,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
            seen: tuple[str, ...]) -> Template:
     data = raw[name]
     where = data["path"]
-    unknown = set(data) - TEMPLATE_KEYS - {"path", "manifest"}
+    unknown = set(data) - TEMPLATE_KEYS - {"path", "manifest", CODE_FILES}
     if unknown:
         raise TemplateError(f"{where}: unknown keys {', '.join(sorted(unknown))}; the template file format "
                         "is scripts/templates.py's docstring")
@@ -1574,6 +1590,7 @@ def _build(name: str, raw: dict[str, dict], terms: tuple[Term, ...],
         base=base_branch, fallback=bool(applies.get("fallback", False)),
         checker=str(data.get("checker", "")), adapter=adapter,
         paths=tuple(glob.strip().strip("/") for glob in paths), message=str(message),
+        code=tuple((str(path), str(text)) for path, text in data.get(CODE_FILES, [])),
         manifest=bool(data.get("manifest")))
 
 
@@ -2771,9 +2788,14 @@ def _select_file(templates: dict[str, Template], body: str, title: str | None, p
         if template.title_pattern and not re.search(template.title_pattern, title or ""):
             continue
         return Selection(template, tuple(refused))
-    refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
-                           f"template in the front matter, derived_from: {{template: <name>, version: "
-                           f"<version>}} (one of {names})"))
+    if all(template.kind == CODE for template in candidates):
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; it "
+                               f"carries no template marker: scaffold it, templates.py scaffold <template> --path "
+                               f"{path} --says <one line> (one of {names})"))
+    else:
+        refused.append(Finding("body", "template", REFUSE, f"{path}: no template takes this file; name its "
+                               f"template in the front matter, derived_from: {{template: <name>, version: "
+                               f"<version>}} (one of {names})"))
     return Selection(None, tuple(refused))
 
 
@@ -3591,6 +3613,9 @@ def fill(template: Template, values: dict[str, object], raw: str, *, title: str 
     input `raw` (`check(raw=)`). `title` fills the title field where the template has one.
     `existing`, the text of the file a file template fills again, keeps its head (front matter and
     page title) and the sections the template does not declare; its fields are the values alone."""
+    if template.kind == CODE:
+        raise TemplateError(f"templates: {template.name} is a code template and has no fields to fill; "
+                            f"its scaffold writes the file: {_sibling('code_templates').call(template, '<path>')}")
     if template.is_adapter:
         raise TemplateError(f"templates: {template.name} is an adapter and has no fields to fill; the "
                             "command that writes it writes its body")
@@ -4034,9 +4059,9 @@ def _capped(findings: list[Finding]) -> list[str]:
 
 
 def main(arguments: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="templates.py",
-                                     description="SE's templates: check, draft, schema, list, fill, "
-                                     "interfaces, stale, documents")
+    parser = se_script.parser(prog="templates.py",
+                              description="SE's templates: check, draft, schema, list, fill, scaffold, "
+                              "interfaces, stale, documents")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -4063,6 +4088,18 @@ def main(arguments: list[str] | None = None) -> int:
     listing.add_argument("--owned", action="store_true", help="the paths the templates own")
     listing.add_argument("--root", type=Path, help="the project whose templates/ and template "
                          "repositories resolve a name before SE's (default: SE's own checkout)")
+    scaffolding = commands.add_parser("scaffold", help="write a new script or module from a code template",
+                                      description="Write the files a code template makes, its "
+                                      "placeholders filled and its marker recording the template and "
+                                      "version, each checked against the template that claims it; "
+                                      "an existing file is refused.")
+    scaffolding.add_argument("template", help="the code template, such as python-script")
+    scaffolding.add_argument("--path", type=Path, required=True,
+                             help="the file, or for a template of several files their folder")
+    scaffolding.add_argument("--says", required=True, help="one line: what the script or module does")
+    scaffolding.add_argument("--name", help="its name (default: the file's stem, or the folder's name)")
+    scaffolding.add_argument("--root", type=Path, help="the project: the root of the templates' globs "
+                             "(default: the git checkout holding --path, else the working directory)")
     staling = commands.add_parser("stale", help="list the documents under a folder whose template has a "
                                   "newer version than the one they derive from")
     staling.add_argument("--path", type=Path, required=True, help="the folder of the documents")
@@ -4112,7 +4149,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling, staling, documenting):
+    for command in (checking, drafting, schemas, listing, filling, scaffolding, staling, documenting):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -4155,6 +4192,8 @@ def main(arguments: list[str] | None = None) -> int:
             return 1 if refused else 0
         if options.command == "fill":
             return _fill(templates, options)
+        if options.command == "scaffold":
+            return _sibling("code_templates").run(templates, options)
         if options.command in ("draft", "schema"):
             command = f"templates.py {options.command}"
             if (options.template is None) == (options.path is None):
@@ -4207,4 +4246,4 @@ def main(arguments: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

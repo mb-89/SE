@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Build the Timeline: one obs table of the repositories in se.toml `[timeline]`, newest first.
 
 The page builds itself from GitHub, so nobody maintains it: one read, then pure, then obs.
@@ -65,6 +67,7 @@ import urllib.request
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "se.toml"
@@ -627,7 +630,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="timeline.py", description=__doc__.split("\n\n")[0])
+    parser = se_script.parser(prog="timeline.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--destination", type=Path, required=True, help="the HTML file to write")
     parser.add_argument("--snapshot", type=Path, help="build from this snapshot file instead of reading GitHub")
     parser.add_argument("--save-snapshot", type=Path, help="also write the snapshot read to this file")
@@ -673,4 +676,4 @@ def main(argv: list[str] | None = None, post: Poster | None = None, now: datetim
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))
