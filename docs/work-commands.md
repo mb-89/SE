@@ -366,9 +366,9 @@ A report over GitHub's 65,536 characters is posted as numbered parts in order, n
 without its markers, so no part is checked as a whole report: `file` checked the whole first.
 Without gh it prints the comments and the close as a plan.
 
-`retro.py deck <retro> --draft <draft> --destination <deck>.html [--host <host>]` builds the
-retro's one report, a deck, from the judged draft, the person's decision of 24 Nov: the person
-reads one file, never a Markdown report beside a separate decision deck. It checks the draft as
+`retro.py deck` builds the retro's one report, a deck, from the judged draft into the one HTML
+file `--destination` names, the person's decision of 24 Nov: the person reads one file, never a
+Markdown report beside a separate decision deck. It checks the draft as
 `file` does and refuses, building nothing, what `file` refuses.
 
 The deck is a document of the retro-deck template
