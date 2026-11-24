@@ -24,6 +24,7 @@ both.
 | `templates/boot-report.md` | SE's start report: its version, what it loaded with links into the documentation, each component's loaded and newest version, and the one update command. |
 | `templates/delivery-notice.md` | A worker's delivery: the pull request whose description is its field report, and its branch. |
 | `templates/escalation.md` | An escalation to SE: the escalated issue and its question in one line. |
+| `templates/generated-marker.md` | A generated file's marker words. |
 | `templates/field-report.md` | A work pull request's description: the field report between its markers. |
 | `templates/finding-ref.md` | A finding's reference in a work issue: the run's kind and number and the finding's number in its report. |
 | `templates/go-module.md` | A Go module: its go.mod, its package with the entry Run, a test, and slots for its own content. |
@@ -47,7 +48,10 @@ both.
 | `templates/retro.md` | A retro's report and its draft: the six steps, the standing questions nested in step 4. |
 | `templates/review.md` | A cold review's one comment: what a person reads, then the JSON block the retro reads. |
 | `templates/routed.md` | The routing block SE appends to an outside issue: where it came from and what it lacks. |
+| `templates/rules-page.md` | The page `docs/rules.md`. |
+| `templates/skills-page.md` | The page `docs/skills.md`. |
 | `templates/standing-questions.md` | The standing questions every retro, overhaul and field report answers, one section each. |
+| `templates/sub-agents-page.md` | The page `docs/sub-agents.md`. |
 | `templates/terms.toml`, the term list and no template | Inside terms and the plain words to use instead. They only warn. |
 | `templates/ticket.md` | An issue the owner reads: what is, what is wrong, what should be, how, and how we know. |
 | `templates/work.md` | One package for one worker: the ticket's why, then numbered requirements and acceptance. |
@@ -75,16 +79,20 @@ where it holds them, else the working tree (`--tree` always).
 choices) and the template's JSON Schema, which a model's strict tool use takes as it stands;
 `templates.py schema <template>` prints that schema alone, generated from the template.
 
-The interface templates (`boot-report`, `delivery-notice`, `escalation`, `handover`,
-`retro-due`, `retro-part`, `retro-doc`, `finding-ref`) shape the texts SE shows and its sessions
-pass to each other. `templates.py interfaces` writes each one's schema beside the code that uses
-it, `scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
+The interface templates (`boot-report`, `delivery-notice`, `escalation`, `finding-ref`,
+`generated-marker`, `handover`, `retro-doc`, `retro-due`, `retro-part`, `rules-page`,
+`skills-page`, `sub-agents-page`) shape the texts SE shows, writes and its sessions pass to each
+other.
+
+`templates.py interfaces` writes each one's schema beside the code that uses it,
+`scripts/interfaces/<name>.json`, and `--check` names a file that differs from its template.
 
 Through `scripts/interfaces.py`:
 
 - `work_tickets.py deliver` and `escalate` write their messages;
 - `se_start.py` its start report, a snippet of several lines with a table and a line of three
   cases;
+- `se_plugin.py build` the three layout pages, and `generated.py` every generated file's marker;
 - `retro.py due` its two countdown lines, `retro.py file` its report's link to the retro doc and the
   label of each part of a split report, and both reports the finding reference work issues name.
 
