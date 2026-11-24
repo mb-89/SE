@@ -6,8 +6,13 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure,
 
 - Read: for each repository, one batched pass on GitHub's GraphQL API, which needs a token
   (`GITHUB_TOKEN`, in the workflow its own): each request carries a page of its issues (open and
-  closed) and a page of its tags, 100 each, until both are read; never a request per issue or tag.
-  The result is a snapshot (`--save-snapshot` writes it, `--snapshot` builds from one without the
+  closed), a page of its tags and a page of its open pull requests, 100 each, until all are read;
+  never a request per issue, tag or pull request. The first request also reads the repository's
+  `se.toml` at its default branch, for its integration branch (`[project] integration_branch`,
+  `main` where it names none). Of a pull request the snapshot keeps its number, link and base, the
+  issue its description's first line names (`pr_issues.py`, the one parser of how a pull request
+  names its issue) and whether it carries a field report (its `se:field-report` markers). The
+  result is a snapshot (`--save-snapshot` writes it, `--snapshot` builds from one without the
   network).
 - A repository GitHub refuses to the token (a private one the workflow's token cannot read, a name
   that does not exist) is one gap, not a failed build: the snapshot keeps it under `unreadable`
@@ -18,17 +23,22 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure,
   - closed as not planned or duplicate: hidden;
   - closed otherwise: Done, dated the day (UTC) it closed;
   - open and `backlogged`: Backlog;
+  - open and delivered, named by an open pull request to its repository's integration branch that
+    carries a field report: Waiting for integrator; its row keeps that pull request's link
+    (`delivery`);
   - open and `in-progress`: Today;
   - open and `ready`: Next;
   - open and `se-person`: Needs you;
   - any other open issue: hidden.
   An open issue is dated the day it was opened. A release is a tag `v<major>.<minor>.<patch>`, a
   Done row dated the day (UTC) it was tagged.
-- Status, from state and labels alone: done; waiting for your input (`backlogged`: a backlog idea
-  waits for the person before it is work); needs you (`se-person`); in progress; ready.
+- Status, from state, labels and delivery alone: done; waiting for your input (`backlogged`: a
+  backlog idea waits for the person before it is work); needs you (`se-person`); delivered, waiting
+  for the integrator; in progress; ready.
 - Mark, what only the build knows: an open issue of Today, Next or Needs you whose body plans it (a
   line `Planned: yyyy-mm-dd`) is marked `planned <day>`, or `late, planned <day>` once the day has
-  passed; it stays in its place.
+  passed; it stays in its place. A delivered issue is marked with its pull request, `pull request
+  #<n>`.
 - Ages, a setting off when absent: `[timeline] ages = true` in the `--config` file (se.toml by
   default) also reads each issue's last label events in the same request and keeps `person_since`,
   when it was last labelled `se-person`; the mark of an issue that needs you (`se-person`, not
@@ -38,7 +48,7 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure,
   without the setting; any other value is refused.
 - Show: the rows are obs notes, one per row, under a manifest whose one `base` table lists them in
   the scrolling layout (`vault`); obs builds the page (`build`). The table groups them by place
-  (Today, Needs you, Next, Backlog, Done), newest first in each, and pages them, `PAGE_SIZE` a page;
+  (Today, Waiting for integrator, Needs you, Next, Backlog, Done), newest first in each, and pages them, `PAGE_SIZE` a page;
   obs's table filter offers each column's values, the repository and the place among them. Opening
   a row shows the first paragraph of its Goal and its link. The text above the table names the day
   of the snapshot; obs refuses a time of day in a page.
@@ -46,7 +56,11 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure,
   public REST list of each repository's issues, with no token, for what changed since an hour
   before the snapshot, and an issue that changed moves to the place and status its state and labels
   give; obs's line under the table then says "Showing current data". Where GitHub does not answer,
-  the page shows the snapshot. The mark is never read live.
+  the page shows the snapshot. The mark is never read live. Neither is delivery: obs's live source
+  lays an item only over its own row, so a pull request cannot move the issue it names, and GitHub's
+  issue list says nothing of pull requests. A delivered row stays Waiting for integrator until a
+  read returns its issue changed, which then takes the place its state and labels give, until the
+  next build.
 
 Exit code 0: written, a gap included; 1: GitHub refused the read of every repository, or obs failed;
 2: setup error. docs/documentation.md "Documentation" says where the page is published.
@@ -79,6 +93,11 @@ IN_PROGRESS = "in-progress"
 READY = "ready"
 PERSON = "se-person"
 HIDDEN_REASONS = ("not_planned", "duplicate")
+# A field report sits in a pull request's description between these markers (work_tickets.py
+# REPORT_BEGIN and REPORT_END, which write it).
+REPORT_BEGIN = "<!-- se:field-report -->"
+REPORT_END = "<!-- se:field-report:end -->"
+DEFAULT_INTEGRATION_BRANCH = "main"  # work model "Integration branch"
 
 class ReadError(Exception):
     """GitHub refused the read."""
@@ -123,13 +142,15 @@ def ages_setting(config: Path = CONFIG) -> bool:
 
 # --- Read -------------------------------------------------------------------------------------
 
-# One query per page and repository: a page of its issues and a page of its tags, each with what the
-# page needs, so the read never asks per issue or per tag. A connection already read to its end is
+# One query per page and repository: a page of its issues, of its tags and of its open pull requests,
+# each with what the page needs, so the read never asks per issue, tag or pull request; the first
+# page also brings the repository's se.toml. A connection already read to its end is
 # left out of the next page's query.
 QUERY = """
-query($owner: String!, $name: String!, $issues: String, $tags: String,
-      $withIssues: Boolean!, $withTags: Boolean!) {
+query($owner: String!, $name: String!, $issues: String, $tags: String, $pulls: String,
+      $withIssues: Boolean!, $withTags: Boolean!, $withPulls: Boolean!, $withConfig: Boolean!) {
   repository(owner: $owner, name: $name) {
+    config: object(expression: "HEAD:se.toml") @include(if: $withConfig) { ... on Blob { text } }
     issues(first: 100, after: $issues) @include(if: $withIssues) {
       pageInfo { hasNextPage endCursor }
       nodes { number title url state stateReason createdAt closedAt body labels(first: 30) { nodes { name } } }
@@ -143,6 +164,10 @@ query($owner: String!, $name: String!, $issues: String, $tags: String,
           ... on Tag { tagger { date } target { ... on Commit { committedDate } } }
         }
       }
+    }
+    pullRequests(states: OPEN, first: 100, after: $pulls) @include(if: $withPulls) {
+      pageInfo { hasNextPage endCursor }
+      nodes { number url baseRefName body }
     }
   }
 }
@@ -230,15 +255,22 @@ def read_repository(name: str, post: Poster, ages: bool) -> dict:
     owner, repo = name.split("/", 1)
     issues: list[dict] = []
     tags: list[dict] = []
-    cursors: dict[str, str | None] = {"issues": None, "tags": None}
-    more = {"issues": True, "tags": True}
-    while more["issues"] or more["tags"]:
-        data = post(query(ages), {"owner": owner, "name": repo, **cursors,
-                                  "withIssues": more["issues"], "withTags": more["tags"]})
+    pulls: list[dict] = []
+    config: str | None = None
+    cursors: dict[str, str | None] = {"issues": None, "tags": None, "pulls": None}
+    more = {"issues": True, "tags": True, "pulls": True}
+    first = True
+    while any(more.values()):
+        data = post(query(ages), {"owner": owner, "name": repo, **cursors, "withIssues": more["issues"],
+                                  "withTags": more["tags"], "withPulls": more["pulls"], "withConfig": first})
         repository = data.get("repository")
         if repository is None:
             raise ReadError(f"GitHub returned no repository {name}; check [timeline] in se.toml")
-        for key, field, into in (("issues", "issues", issues), ("tags", "refs", tags)):
+        if first:
+            config = (repository.get("config") or {}).get("text")
+            first = False
+        for key, field, into in (("issues", "issues", issues), ("tags", "refs", tags),
+                                 ("pulls", "pullRequests", pulls)):
             if more[key]:
                 connection = repository[field]
                 into.extend(connection["nodes"])
@@ -262,18 +294,57 @@ def read_repository(name: str, post: Poster, ages: bool) -> dict:
             "url": f"https://github.com/{name}/releases/tag/{tag['name']}",
             "published_at": tag_date(tag.get("target")),
         } for tag in tags if RELEASE_TAG.fullmatch(tag["name"])],
+        "integration_branch": integration_branch(config),
+        "pull_requests": [{
+            "number": pull["number"],
+            "url": pull["url"],
+            "base": pull["baseRefName"],
+            "work_issue": sibling("pr_issues").work_issue(pull.get("body") or "", name),
+            "field_report": carries_field_report(pull.get("body") or ""),
+        } for pull in pulls],
     }
+
+
+def integration_branch(config: str | None) -> str:
+    """The integration branch a repository's se.toml names (`[project] integration_branch`), `main`
+    where it has none, names none or does not parse."""
+    try:
+        project = tomllib.loads(config or "").get("project", {})
+    except tomllib.TOMLDecodeError:
+        return DEFAULT_INTEGRATION_BRANCH
+    branch = project.get("integration_branch") if isinstance(project, dict) else None
+    return branch if isinstance(branch, str) and branch.strip() else DEFAULT_INTEGRATION_BRANCH
+
+
+def carries_field_report(body: str) -> bool:
+    """Whether a pull request's description holds a field report: its begin marker, then its end."""
+    begin = body.find(REPORT_BEGIN)
+    return begin >= 0 and body.find(REPORT_END, begin) >= 0
 
 
 # --- Compute ----------------------------------------------------------------------------------
 
 # The places an entry goes to, in the table's order, each with the name the page shows: open work
 # first, then the ideas waiting for the person, then what is done.
-PLACES = {"today": "Today", "needs-you": "Needs you", "next": "Next", "backlog": "Backlog", "done": "Done"}
+PLACES = {"today": "Today", "waiting": "Waiting for integrator", "needs-you": "Needs you", "next": "Next",
+          "backlog": "Backlog", "done": "Done"}
+DELIVERED = "delivered, waiting for the integrator"
+
+
+def deliveries(data: dict) -> dict[int, dict]:
+    """A repository's delivered issues, by number: each open pull request to its integration branch
+    that carries a field report, under the issue it names. A snapshot without pull requests has none."""
+    branch = data.get("integration_branch") or DEFAULT_INTEGRATION_BRANCH
+    found: dict[int, dict] = {}
+    for pull in sorted(data.get("pull_requests") or [], key=lambda pull: pull["number"]):
+        if pull["base"] == branch and pull["field_report"] and pull.get("work_issue") is not None:
+            found.setdefault(pull["work_issue"], pull)
+    return found
 
 
 def place(issue: dict) -> str | None:
-    """Where an issue goes: done, backlog, today, needs-you, next, or None (hidden)."""
+    """Where an issue goes: done, backlog, waiting, today, needs-you, next, or None (hidden). An issue
+    is delivered where its row keeps a pull request (`delivery`)."""
     labels = set(issue["labels"])
     if FIELD_REPORT in labels:
         return None
@@ -281,6 +352,8 @@ def place(issue: dict) -> str | None:
         return None if issue.get("state_reason") in HIDDEN_REASONS else "done"
     if BACKLOGGED in labels:
         return "backlog"
+    if issue.get("delivery"):
+        return "waiting"
     if IN_PROGRESS in labels:
         return "today"
     if READY in labels:
@@ -295,7 +368,7 @@ def needs_you(issue: dict) -> bool:
 
 
 def status(issue: dict) -> str:
-    """What an entry waits for, from its state and labels alone, so the live read derives it again."""
+    """What an entry waits for, from its state, labels and delivery alone, so the live read derives it again."""
     labels = set(issue["labels"])
     if issue["state"] == "closed":
         return "done"
@@ -303,6 +376,8 @@ def status(issue: dict) -> str:
         return "waiting for your input"
     if PERSON in labels:
         return "needs you"
+    if issue.get("delivery"):
+        return DELIVERED
     if IN_PROGRESS in labels:
         return "in progress"
     if READY in labels:
@@ -393,7 +468,7 @@ def needs_you_mark(waiting: int | None) -> str:
 def mark(issue: dict, where: str, today: str, ages: bool, read_at: str) -> str:
     """What the build alone knows of an open entry: its planned day ("planned", or "late" once passed)
     and, with ``ages``, how long it has needed you. Never read live, so it never moves a row."""
-    parts = []
+    parts = [f"pull request #{issue['delivery_number']}"] if where == "waiting" else []
     plan = planned(issue["body"]) if where in ("today", "next", "needs-you") else None
     if plan:
         parts.append(f"late, planned {plan}" if plan < today else f"planned {plan}")
@@ -418,14 +493,18 @@ def rows(snapshot: dict, ages: bool = False) -> list[dict]:
     the higher number or version. A hidden issue has no row.
 
     Each row holds its columns (repository, place, date, number, subject, status, mark), what the live
-    read compares (state, state_reason, labels), its note's `path`, its `url` and its `goal`.
+    read compares (state, state_reason, labels, delivery: the link of the pull request that delivered
+    it, or None), its note's `path`, its `url` and its `goal`.
     """
     read_at = snapshot["read_at"]
     today = day(read_at)
     found = []
     for name, data in snapshot["repositories"].items():
         lane = lane_name(name)
+        delivered = deliveries(data)
         for issue in data["issues"]:
+            pull = delivered.get(issue["number"]) if issue["state"] == "open" else None
+            issue = issue | ({"delivery": pull["url"], "delivery_number": pull["number"]} if pull else {})
             where = place(issue)
             if where is None:
                 continue
@@ -435,7 +514,7 @@ def rows(snapshot: dict, ages: bool = False) -> list[dict]:
                 "date": day(stamp) if stamp else "", "subject": quoted_links(issue["title"]), "status": status(issue),
                 "mark": mark(issue, where, today, ages, read_at), "state": issue["state"],
                 "state_reason": issue.get("state_reason"), "labels": sorted(issue["labels"]),
-                "path": f"entries/{lane}-{issue['number']}.md", "url": issue["url"], "goal": goal(issue["body"]),
+                "delivery": issue.get("delivery"), "path": f"entries/{lane}-{issue['number']}.md", "url": issue["url"], "goal": goal(issue["body"]),
             }, (0, (issue["number"],))))
         for release in data["releases"]:
             if not release.get("published_at"):
@@ -443,7 +522,7 @@ def rows(snapshot: dict, ages: bool = False) -> list[dict]:
             found.append(({
                 "repository": lane, "number": release["tag"], "place": PLACES["done"],
                 "date": day(release["published_at"]), "subject": f"Release {release['tag']}", "status": "done",
-                "mark": "", "state": "closed", "state_reason": None, "labels": [],
+                "mark": "", "state": "closed", "state_reason": None, "labels": [], "delivery": None,
                 "path": f"entries/{lane}-{release['tag']}.md", "url": release["url"], "goal": "",
             }, (1, version(release["tag"]))))
     order = list(PLACES.values())
@@ -470,7 +549,12 @@ def live_source(names: list[str]) -> dict:
     Its `derive` repeats `place` and `status` for an issue as GitHub's REST list gives it, so obs's
     check proves every saved row; the mark is the build's alone. An issue a read changes or adds
     moves to its place in the open page; a pull request is left out.
+
+    `delivery` is the build's too: its path names nothing GitHub's issue list gives, so a saved row
+    keeps it, which the check proves Waiting for integrator, and an issue a read returns changed has
+    none and takes the place its state and labels give (the module's docstring, Live).
     """
+    delivered = [{"field": "delivery", "exists": True}]
     hidden = [{"where": [{"field": "labels", "equals": FIELD_REPORT}], "value": "hidden"},
               *({"where": [{"field": "state_reason", "equals": reason}], "value": "hidden"} for reason in HIDDEN_REASONS)]
     return {
@@ -478,11 +562,13 @@ def live_source(names: list[str]) -> dict:
         "key": ["repository", "number"],
         "notePath": "entries/{repository}-{number}.md",
         "fields": {"number": "number", "subject": "title", "state": {"path": "state", "lowercase": True},
-                   "state_reason": "state_reason", "labels": "labels[].name", "pullRequest": "pull_request.url"},
+                   "state_reason": "state_reason", "labels": "labels[].name", "pullRequest": "pull_request.url",
+                   "delivery": "delivery"},
         "derive": {
             "place": [*hidden,
                       {"where": [{"field": "state", "equals": "closed"}], "value": PLACES["done"]},
                       {"where": [{"field": "labels", "equals": BACKLOGGED}], "value": PLACES["backlog"]},
+                      {"where": delivered, "value": PLACES["waiting"]},
                       {"where": [{"field": "labels", "equals": IN_PROGRESS}], "value": PLACES["today"]},
                       {"where": [{"field": "labels", "equals": READY}], "value": PLACES["next"]},
                       {"where": [{"field": "labels", "equals": PERSON}], "value": PLACES["needs-you"]},
@@ -490,6 +576,7 @@ def live_source(names: list[str]) -> dict:
             "status": [{"where": [{"field": "state", "equals": "closed"}], "value": "done"},
                        {"where": [{"field": "labels", "equals": BACKLOGGED}], "value": "waiting for your input"},
                        {"where": [{"field": "labels", "equals": PERSON}], "value": "needs you"},
+                       {"where": delivered, "value": DELIVERED},
                        {"where": [{"field": "labels", "equals": IN_PROGRESS}], "value": "in progress"},
                        {"where": [{"field": "labels", "equals": READY}], "value": "ready"},
                        {"value": "open"}],
@@ -546,6 +633,8 @@ def vault(snapshot: dict, ages: bool = False) -> dict[str, str]:
                    for name, reason in (snapshot.get("unreadable") or {}).items())
     live = ("When the page opens, it asks GitHub for what changed since; where GitHub answers, the "
             "line under the table says it shows current data. " if names else "")
+    live += ("An issue whose pull request is delivered waits for the integrator under Waiting for "
+             "integrator. " if any(row["delivery"] for row in table) else "")
     files = {"manifest.md": (
         frontmatter({"title": "Timeline"}).replace("\n---\n", "\nobsHtml:\n  layout: scrolling\n  heading: compact\n"
                                                    "  pages: [{page: abstract}]\n---\n")
@@ -555,7 +644,7 @@ def vault(snapshot: dict, ages: bool = False) -> dict[str, str]:
         + "```base\n" + json.dumps(base(names), indent=1) + "\n```\n")}
     for rank, row in enumerate(table):
         link = f"[Open {text(row['number'] if isinstance(row['number'], str) else '#' + str(row['number']))} on GitHub](<{row['url']}>)"
-        files[row["path"]] = (frontmatter({key: row[key] for key in (*COLUMNS, "state", "state_reason", "labels")}
+        files[row["path"]] = (frontmatter({key: row[key] for key in (*COLUMNS, "state", "state_reason", "labels", "delivery")}
                                           | {"rank": rank})
                               + "\n" + (text(row["goal"]) + "\n\n" if row["goal"] else "") + link + "\n")
     return files

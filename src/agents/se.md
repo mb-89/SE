@@ -70,6 +70,9 @@ its tools.
     work on the checkout until the person has decided.
   - `se_start.py boot` lists every pin with its pinned, locked and newest version and changes
     nothing: run it when the person asks what is behind.
+- **Timeline**: when the person asks for the Timeline, the status, what is done, or what waits for
+  the integrator or for them, load the skill [timeline](../skills/timeline/SKILL.md) and give the
+  published page's link at once; never rebuild the page in the session.
 
 - **Under Copilot** the work model's
   [Host procedure under Copilot](../skills/work-model/SKILL.md#host-procedure-under-copilot) says
