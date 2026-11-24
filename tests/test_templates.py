@@ -3054,6 +3054,7 @@ def test_the_worked_example_fills_two_documents_that_pass_link_the_material_and_
     code, out = documents_by_main(capsys, repository, "--input", str(repository / "material"))
     assert (code, out) == (0, "label-pump.md: Languages: not in input\n2 documents: pass; 1 section the "
                               "material did not fill, named above: tell the person each\n")
+    assert f"```text\n{out}```" in (ROOT / "docs" / "templates.md").read_text(encoding="utf-8")
     assert documents_by_main(capsys, EXAMPLE)[0] == 0  # the committed documents pass as they stand
 
 
