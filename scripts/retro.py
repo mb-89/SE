@@ -299,6 +299,32 @@ class GhDoor:
                 return found
             page += 1
 
+    def pages_until(self, door, path: str, stop) -> list[dict]:
+        """`pages` of `path` sorted newest update first, up to the first item `stop` refuses."""
+        found: list[dict] = []
+        page = 1
+        while True:
+            answer = door.api(f"{path}&sort=updated&direction=desc&per_page={self.PAGE}&page={page}")
+            items = [item for item in (answer if isinstance(answer, list) else [])
+                     if isinstance(item, dict)]
+            for item in items:
+                if stop(item):
+                    return found
+                found.append(item)
+            if len(items) < self.PAGE:
+                return found
+            page += 1
+
+    def closed_issues_until(self, stop) -> list[dict]:
+        return [item for item in self.pages_until(self.issues_door, "issues?state=closed", stop)
+                if "pull_request" not in item]
+
+    def closed_issues_labelled(self, label: str) -> list[dict]:
+        return self.pages(self.issues_door, f"issues?state=closed&labels={label}")
+
+    def pulls_until(self, stop) -> list[dict]:
+        return self.pages_until(self.pulls_door, "pulls?state=closed", stop)
+
     def closed_issues(self) -> list[dict]:
         return [item for item in self.pages(self.issues_door, "issues?state=closed")
                 if "pull_request" not in item]
@@ -810,15 +836,71 @@ def landed_issue(issue: Issue, naming: list[Pull], branch: str) -> bool:
     return landed(issue, landing_of(issue, naming, branch))
 
 
+def recent_reads(door, opened: list[Issue], overhauls: bool) -> tuple[list[Issue], list[Pull]]:
+    """The closed issues and pull requests the countdowns need, read newest update first and only
+    back to the start of the newest counted retro (and, with `overhauls`, overhaul): an older
+    item cannot count, as an item's update is never before its start or close."""
+    overhaul = sibling("overhaul")
+    newest: dict[str, datetime | None] = {"retro": None, "overhaul": None}
+
+    def note(issue: Issue) -> None:
+        start = run_start(issue)
+        if not start or not counted_run(issue):
+            return
+        for kind, test in (("retro", is_retro), ("overhaul", overhaul.is_overhaul)):
+            if test(issue) and (newest[kind] is None or start > newest[kind]):
+                newest[kind] = start
+
+    def cutoff(kinds: tuple[str, ...]) -> datetime | None:
+        starts = [newest[kind] for kind in kinds]
+        return None if None in starts else min(starts)
+
+    for issue in opened:
+        note(issue)
+    runs: list[Issue] = []
+    for label in (RETRO_LABEL, overhaul.OVERHAUL_LABEL):
+        for item in door.closed_issues_labelled(label):
+            issue = issue_of(item)
+            if "pull_request" not in item and (is_retro(issue) or overhaul.is_overhaul(issue)):
+                note(issue)
+                runs.append(issue)
+    kinds = ("retro",)
+    closed: list[Issue] = []
+
+    def stop_issue(item: dict) -> bool:
+        issue = issue_of(item)
+        limit, updated = cutoff(kinds), when(issue.updated_at)
+        if limit and updated and updated < limit:
+            return True
+        if "pull_request" not in item:
+            note(issue)
+            closed.append(issue)
+        return False
+
+    door.closed_issues_until(stop_issue)
+    seen = {issue.number for issue in closed}
+    closed += [issue for issue in runs if issue.number not in seen and not seen.add(issue.number)]
+    limit = cutoff(("retro",))
+
+    def stop_pull(item: dict) -> bool:
+        updated = when(str(item.get("updated_at") or item.get("updatedAt") or ""))
+        return bool(limit and updated and updated < limit)
+
+    return closed, [pull_of(item) for item in door.pulls_until(stop_pull)]
+
+
 def countdowns(door, tracker: str, branch: str, root: Path,
                now: datetime) -> dict[str, Countdown] | None:
     """The retro and the overhaul countdowns over what `door` reads: the closed and the open
     issues and the pull requests, each closed issue's close time read one by one where the list
     names none (the host's `list_issues`), only for those updated since the newest run started;
     None where the door is still missing answers."""
-    closed = [issue_of(item) for item in door.closed_issues()]
     opened = [issue_of(item) for item in door.open_issues()]
-    pulls = [pull_of(item) for item in door.pulls()]
+    if hasattr(door, "closed_issues_until"):
+        closed, pulls = recent_reads(door, opened, sibling("overhaul").countdown_on(root))
+    else:
+        closed = [issue_of(item) for item in door.closed_issues()]
+        pulls = [pull_of(item) for item in door.pulls()]
     if door.missing:
         return None
     overhaul = sibling("overhaul")
