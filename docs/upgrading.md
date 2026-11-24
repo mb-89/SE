@@ -356,6 +356,21 @@ On main, released as 15.0.0 at the next release.
 - **Check:** `uv run python <se>/scripts/se_templates.py check-files $(git ls-files 'scripts/*.py' go.mod '**/go.mod')`
   passes.
 
+## SE 16
+
+On main, released as 16.0.0 at the next release.
+
+### `start` and `claim` without gh read the landing queue
+
+- **Change:** no worker starts while more than `[workers] queue_limit` (default 10) delivered pull
+  requests wait ([docs/settings.md "Workers"](settings.md#workers)). Without gh and off kern's relay,
+  `work_tickets.py start` and `claim` refuse until `--delivered <file>` gives them the open pull
+  requests to the integration branch, as the GitHub tools' `list_pull_requests` answered them.
+- **Steps:** in every script or prompt of the project that runs `start` or `claim` with
+  `--issue-body` and no relay, save that answer and pass `--delivered <file>`.
+- **Check:** `git grep -nE 'work_tickets\.py (start|claim) .*--issue-body' | grep -v -- '--delivered'`
+  prints nothing.
+
 ## obs 6
 
 obs's sections stand here until obs keeps its own guide. A project moves obs once:

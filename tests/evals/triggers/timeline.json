@@ -1,0 +1,102 @@
+[
+  {
+    "query": "Show me the timeline.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Can you create the timeline for the repo so I can see it? I'm on my phone.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Where is the Timeline page?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "What is done and what is waiting for the integrator?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "What's the status of everything right now?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Which work is in progress today?",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Give me the link to SE's timeline.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "What waits for me at the moment?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Which pull requests are delivered and waiting to be landed?",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "I want to see what got done this week across the repos.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Add a column for the milestone to timeline.py's table.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Fix the failing test in tests/test_timeline.py.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Publish the next releases of kern and obs.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Mark issue 42 as in progress.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Start a worker on the next ready issue.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "What is the integrator's merge queue command?",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Write a status update email for my manager about the pump project.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Build the documentation page locally.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Change the published docs workflow to run every thirty minutes.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Land the pull request that waits for the integrator.",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]

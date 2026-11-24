@@ -110,10 +110,11 @@ def test_queue_lists_delivered_escalated_and_ready_work_over_rest(worktree, rest
     out = capsys.readouterr().out
     assert out.splitlines() == [
         f"delivered PR #7 feature/done-20261106 https://{HOST}/{SLUG}/pull/7",
+        "Landing queue: 1 delivered of at most 10 ([workers] queue_limit in se.toml)",
         f"escalated #3 feature/stuck-20261106 https://{HOST}/{SLUG}/issues/3",
-        out.splitlines()[2],  # the device's capacity
+        out.splitlines()[3],  # the device's capacity
         "ready #2 feature/ready-20261106"]
-    assert out.splitlines()[2].startswith("Capacity: ") and in_one_call(rest_gh, out, worktree)
+    assert out.splitlines()[3].startswith("Capacity: ") and in_one_call(rest_gh, out, worktree)
 
 
 def test_intake_outside_reads_each_repository_and_only_the_comments_it_judges_over_rest(

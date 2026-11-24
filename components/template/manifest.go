@@ -163,6 +163,15 @@ func templateNode(text, where, target, alias string) (Object, error) {
 	if heading == "" {
 		heading = target
 	}
-	return Object{{"name", field}, {"kind", "text"}, {"required", gate == "mandatory"},
-		{"heading", heading}, {"says", says(parts...)}}, nil
+	made := Object{{"name", field}, {"kind", "text"}, {"required", gate == "mandatory"},
+		{"heading", heading}, {"says", says(parts...)}}
+	if pinned, ok := front.Get("template"); ok { // the template its slot is filled by, resolved as a node's (nest)
+		text, isText := pinned.(string)
+		if !isText || nodePin.FindStringSubmatch(text) == nil {
+			return nil, fail("%s: template is %s; write the template the slot is filled by and the version it pins, `<template>@<version>`, such as requirement@1.0.0", where, repr(pinned))
+		}
+		made.Delete("kind")
+		made.Set("node", text)
+	}
+	return made, nil
 }

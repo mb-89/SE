@@ -202,6 +202,10 @@ merge or a start.
    ([docs/settings.md "Workers"](../docs/settings.md#workers)): `capacity`, or in the cloud without gh the
    queue's plan. The rest wait, and the next landing starts them as a worker finishes.
 
+   Start none while more delivered pull requests wait than `[workers] queue_limit`, default 10
+   ([docs/settings.md "Workers"](../docs/settings.md#workers)): `queue` prints the count
+   against the limit, and `start` and `claim` refuse beyond it. Land first; the startable wait.
+
    Then write what you did into the issue you landed, as one comment: each issue you started with
    its worker session, or `Started: none startable`.
 

@@ -846,6 +846,111 @@ obs:
 DONE = "---\nobs:\n  guidance: {contents: What is done., gate: judgment}\n---\n{{slot}}\n"
 
 
+# Nesting in both source forms (templates.py "Nesting"): a template manifest whose node names SE's
+# requirement template, and a note whose list takes requirement items, with carried and since.
+
+SPEC = """---
+obs:
+  template: {name: spec, version: "1"}
+---
+
+- [[purpose|Purpose]]
+- [[needs|Requirements]]
+"""
+SPEC_NODES = {
+    "purpose": "---\nobs:\n  guidance: {contents: What the product is for., gate: mandatory}\n---\n\n{{slot}}\n",
+    "needs": ("---\ntemplate: requirement@1.0.0\nobs:\n  guidance: {contents: The requirements one per item., "
+              "gate: mandatory}\n---\n\n{{slot}}\n"),
+}
+SPEC_OVERLAY = """---
+extends: spec
+example:
+  fields:
+    purpose: "The pump keeps the tank level between its limits."
+    needs: ["The pump stops at the high limit.\\nAcceptance: A test drives the level up.\\nSource: The brief.", "The pump starts at the low limit.\\nAcceptance: A test drains the tank.\\nSource: The brief."]
+---
+"""
+PLAN = """---
+name: plan
+version: 1.2.0
+kind: document
+tags: ["test"]
+reader: owner
+says: A plan of steps.
+applies:
+  actions: ["issue.create"]
+  marker: "<!-- se:plan -->"
+rules:
+  required: refuse
+fields:
+  - name: steps
+    items: requirement@1.0.0
+    carried: ["source"]
+    since: 1.1.0
+    numbered: true
+    required: true
+example:
+  fields:
+    steps: ["The plan names its owner.\\nAcceptance: A reader finds the name.", "<!-- kept -->", "The plan names its date.\\nAcceptance: A reader finds the date."]
+---
+
+## Steps
+
+<!-- steps: The steps, one requirement each, its acceptance below it. -->
+"""
+SPEC_DOCUMENT = """---
+derived_from: {template: spec, version: "1"}
+---
+
+## Purpose
+
+The pump keeps the tank level between its limits.
+
+## Requirements
+
+1. The pump stops at the high limit.
+   Acceptance: A test drives the level up.
+   Source: The brief.
+2. The pump starts at the low limit
+   once the level falls below it.
+   Acceptance: A test drains the tank.
+   Source: The brief.
+"""
+PLAN_BODY = """<!-- se:plan -->
+
+## Steps
+
+1. The plan names its owner.
+   Acceptance: A reader finds the name.
+2. The plan names its date. It also names the place.
+"""
+
+
+def _nested_files() -> dict[str, str]:
+    """The nesting fixture's files, `templates/<name>` relative: SE's requirement template beside them."""
+    return {"requirement.md": (ROOT / "templates" / "requirement.md").read_text(encoding="utf-8"),
+            "spec/manifest.md": SPEC, "spec.overlay.md": SPEC_OVERLAY, "plan.md": PLAN,
+            **{f"spec/{name}.md": text for name, text in SPEC_NODES.items()}}
+
+
+def _nested_bodies() -> dict[str, list[str]]:
+    """The bodies the nesting fixture checks: each nested refusal, by its path, and the skips."""
+    without = SPEC_DOCUMENT.replace("   Acceptance: A test drains the tank.\n", "")
+    return {
+        "spec": [SPEC_DOCUMENT, without,
+                 SPEC_DOCUMENT.replace("at the high limit.", "at the high limit. It also beeps."),
+                 SPEC_DOCUMENT.replace("at the high limit.", "at the high limit as needed."),
+                 SPEC_DOCUMENT.replace("1. The pump stops", "1) The pump stops").replace("Source: The brief.\n2.",
+                                                                                         "Source: The brief.  \n2."),
+                 SPEC_DOCUMENT.replace("## Requirements\n\n", "## Requirements\n\nNo list.\n\n", 1)
+                 .split("1. The pump")[0]],
+        "plan": [PLAN_BODY, PLAN_BODY.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.0.0 "
+                                                                   "sha256:00 -->"),
+                 PLAN_BODY.replace("<!-- se:plan -->", "<!-- se:template project/plan 1.2.0 sha256:00 -->"),
+                 PLAN_BODY.replace("   Acceptance: A reader finds the name.\n", "")],
+    }
+
+
 def _manifest_files(**changed: str | None) -> dict[str, str]:
     """The fixture's files, `templates/<name>` relative, each of `changed` (`__` for `/`, `_dot_`
     for `.`) replaced or, where None, left out."""
@@ -1158,6 +1263,30 @@ def _broken() -> list[tuple[str, dict[str, str]]]:
         "one.md": minimal.replace("    kind: text\n", "    node: two@2.0.0\n"), "two.md": two}))
     sets.append(("node-entry-kind", {
         "one.md": minimal.replace("    kind: text\n", "    entries: two@1.0.0\n"), "two.md": two}))
+    sets.append(("items-of-a-block", {
+        "one.md": minimal.replace("    kind: text\n", "    items: two@1.0.0\n"), "two.md": two}))
+    sets.append(("items-and-node", {
+        "one.md": minimal.replace("    kind: text\n", "    items: two@1.0.0\n    node: two@1.0.0\n"),
+        "two.md": two}))
+    sets.append(("items-of-a-text", {
+        "one.md": minimal.replace("    kind: text\n", "    kind: text\n    items: two@1.0.0\n"), "two.md": two}))
+    sets.append(("carried-of-a-node", {
+        "one.md": minimal.replace("    kind: text\n", '    node: two@1.0.0\n    carried: ["x"]\n'),
+        "two.md": two}))
+    sets.append(("carried-unknown", {**_nested_files(), "plan.md": PLAN.replace('carried: ["source"]',
+                                                                               'carried: ["origin"]')}))
+    sets.append(("since-alone", {"one.md": minimal.replace("    kind: text\n", "    kind: text\n    since: 1.1.0\n")}))
+    sets.append(("since-no-version", {
+        "one.md": minimal.replace("    kind: text\n", "    items: two@1.0.0\n    since: soon\n"), "two.md": two}))
+    sets.append(("items-checkable", {
+        "one.md": minimal.replace("    kind: text\n", "    items: two@1.0.0\n    checkable: true\n"), "two.md": two}))
+    nested = _nested_files()
+    sets.append(("slot-template-pin", {**nested, "spec/needs.md": nested["spec/needs.md"].replace(
+        "requirement@1.0.0", "requirement")}))
+    sets.append(("slot-template-version", {**nested, "spec/needs.md": nested["spec/needs.md"].replace(
+        "requirement@1.0.0", "requirement@2.0.0")}))
+    sets.append(("slot-template-missing", {**nested, "spec/needs.md": nested["spec/needs.md"].replace(
+        "requirement@1.0.0", "absent@1.0.0")}))
     return sets + _overlay_broken() + _manifest_broken()
 
 
@@ -1419,6 +1548,7 @@ def build() -> dict[str, str]:
                                   "- Out of scope: the pump drives, which the drive supplier owns.\n\n", ""),
     ], "checks": ["---\nderived_from: {template: checks, version: 1.3}\n---\n\n## done\n\nAll.\n",
                   "---\nderived_from: {template: checks}\n---\n\n## done\n\n```\n{{slot}}\n```\n"]})
+    made["nested.json"] = _fixture("nested", _nested_files(), _nested_bodies())
     made["corrections.json"] = _corrections_set()
     made["reasons.json"] = {"generated": GENERATED.format(source="its REASONS"), "set": "reasons",
                             "reasons": templates.REASONS, "corrections": list(templates.CORRECTIONS)}
