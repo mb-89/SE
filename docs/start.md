@@ -51,9 +51,9 @@ uv run python <se>/scripts/se_start.py update
 - `check` reads the version tags of SE's own remote and of every module's remote, once each and in
   parallel. A failed read is named in the greeting with its remote, its cause and the command to see
   it; the greeting still appears.
-- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts what came back since the
-  newest retro started ([Retro due](fleet.md#retro-due)), the retros closed since the newest overhaul
-  started where that countdown is on, runs the [fleet check](fleet.md#fleet-check), and caches them.
+- What is due in the work: where gh reaches GitHub, signed in or over REST, `check` also counts
+  the [retro](fleet.md#retro-due) and, where it is on, the [overhaul](fleet.md#overhaul-due)
+  countdown, runs the [fleet check](fleet.md#fleet-check), and caches them.
   - The greeting then names a retro that is [due or open](fleet.md#retro-due), an overhaul that is
     [due or open](fleet.md#overhaul-due) and the fleet's findings by kind and issue, one line each with the
     command to run, and a part whose read failed with its cause.
