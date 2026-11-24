@@ -79,7 +79,7 @@ the filing check runs before every filing. It reads the closed issues and pull r
 update first and only as far back as they can count: the runs by their label, then back to the
 start of the newest counted retro (and overhaul, where its countdown is on), the pull requests
 on until each work issue closed since then has its landing; where no run exists, everything
-(`recent_reads`). A door without the cut-off reads is read whole, with the same countdowns.
+(`recent_reads`). The answer files are read whole, with the same countdowns.
 
 GitHub is read through work_tickets.py's door (gh). Where gh is not signed in (Claude's cloud) the
 command prints its GitHub steps as a plan for the session's GitHub tools and reads their answers
@@ -432,7 +432,9 @@ class FileDoor:
 
 class ToolDoor:
     """The countdowns' reads through kern's relay door (work_tickets.RelayDoor), where a command
-    runs as one call: each list page by page, as the host's GitHub tools answer it."""
+    runs as one call: each list page by page, as the host's GitHub tools answer it; the closed
+    issues and pull requests newest update first, up to where the countdowns stop it, and the
+    runs by their label (`recent_reads`)."""
 
     def __init__(self, door) -> None:
         self.door = door
@@ -444,16 +446,49 @@ class ToolDoor:
     def open_issues(self) -> list[dict]:
         return self.door.issues("OPEN")
 
-    def pulls(self) -> list[dict]:
+    def closed_until(self, arguments: dict[str, object], stop=None) -> list[dict]:
+        """The closed issues list_issues answers for `arguments`, page by page (with `after`),
+        up to the first item `stop` refuses."""
+        found: list[dict] = []
+        after = ""
+        while True:
+            data = self.door.ask("list_issues", {"state": "CLOSED", "perPage": 100, **arguments,
+                                                 **({"after": after} if after else {})})
+            for item in work_tickets.tool_items(data, "issues"):
+                item = {"state": "closed", **item}
+                if stop is not None and stop(item):
+                    return found
+                found.append(item)
+            page = data.get("pageInfo") if isinstance(data, dict) else None
+            after = str((page or {}).get("endCursor") or "") if (page or {}).get("hasNextPage") else ""
+            if not after:
+                return found
+
+    def closed_issues_until(self, stop) -> list[dict]:
+        return self.closed_until({"orderBy": "UPDATED_AT", "direction": "DESC"}, stop)
+
+    def closed_issues_labelled(self, label: str) -> list[dict]:
+        return self.closed_until({"labels": [label]})
+
+    def pulls_until(self, stop=None) -> list[dict]:
+        """The closed pull requests, newest update first, page by page, up to the first item
+        `stop` refuses."""
         found: list[dict] = []
         page = 1
         while True:
             items = work_tickets.tool_items(self.door.ask("list_pull_requests", {
-                "state": "closed", "perPage": 100, "page": page}), "pull_requests")
-            found += items
+                "state": "closed", "sort": "updated", "direction": "desc", "perPage": 100,
+                "page": page}), "pull_requests")
+            for item in items:
+                if stop is not None and stop(item):
+                    return found
+                found.append(item)
             if len(items) < 100:
                 return found
             page += 1
+
+    def pulls(self) -> list[dict]:
+        return self.pulls_until()
 
     def issue(self, number: int) -> dict:
         answer = self.door.ask("issue_read", {"method": "get", "issue_number": number})
@@ -924,7 +959,7 @@ def countdowns(door, tracker: str, branch: str, root: Path,
                now: datetime) -> dict[str, Countdown] | None:
     """The retro and the overhaul countdowns over what `door` reads: the open issues whole; the
     closed issues and the pull requests only as far back as `recent_reads` says, where the door
-    has the cut-off reads (CUT_OFF_READS: GhDoor), else whole (FileDoor, ToolDoor), with the same
+    has the cut-off reads (CUT_OFF_READS: GhDoor, ToolDoor), else whole (FileDoor), with the same
     countdowns; each closed issue's close time read one by one where the list names none (the
     host's `list_issues`), only for those updated since the newest run started; None where the
     door is still missing answers."""

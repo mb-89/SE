@@ -802,6 +802,96 @@ def test_with_no_run_yet_the_cut_off_read_reads_the_whole_history(tmp_path):
     assert len(cut.read["issues"]) == len(history["closed"])
 
 
+class FakeRelay:
+    """kern's relay door as the host's GitHub tools answer over `history`: list_issues in pages
+    of `size` with a cursor, newest update first with orderBy, by label, without close times
+    (the tools name none) and labels as names; list_pull_requests by page; issue_read whole."""
+
+    def __init__(self, history: dict[str, list[dict]], size: int = 100) -> None:
+        self.history, self.size, self.calls = history, size, []
+
+    def ask(self, tool, arguments, note="", wait=""):
+        self.calls.append((tool, dict(arguments)))
+        if tool == "issue_read":
+            return next(item for item in self.history["closed"]
+                        if item["number"] == arguments["issue_number"])
+        if tool == "list_pull_requests":
+            items = self.history["pulls"]
+            if arguments.get("sort") == "updated":
+                items = newest_first(items)
+            start = (arguments["page"] - 1) * arguments["perPage"]
+            return items[start:start + arguments["perPage"]]
+        items = self.history["closed" if arguments["state"] == "CLOSED" else "open"]
+        if arguments.get("orderBy") == "UPDATED_AT":
+            assert arguments["direction"] == "DESC"
+            items = newest_first(items)
+        if arguments.get("labels"):
+            items = [item for item in items if set(arguments["labels"]) <= set(retro.label_names(item))]
+        start = int(arguments.get("after") or 0)
+        page = [{**{key: value for key, value in item.items() if key != "closed_at"},
+                 "labels": retro.label_names(item)} for item in items[start:start + self.size]]
+        more = start + self.size < len(items)
+        return {"issues": page, "pageInfo": {"hasNextPage": more,
+                                             "endCursor": str(start + self.size) if more else ""}}
+
+    def issues(self, state):
+        found, after = [], ""
+        while True:
+            data = self.ask("list_issues", {"state": state, "perPage": 100,
+                                            **({"after": after} if after else {})})
+            found += data["issues"]
+            after = data["pageInfo"]["endCursor"]
+            if not after:
+                return found
+
+
+def test_the_relay_and_gh_doors_read_cut_off_and_the_answer_files_whole(tmp_path, monkeypatch):
+    """kern's relay door (ToolDoor) reads newest update first and by label, page by page up to
+    where the countdowns stop it, and reads each close time its list does not name: the
+    countdowns of the whole read. gh's door (GhDoor) asks the REST API sorted the same and
+    stops within a page. The answer files (FileDoor) have no cut-off read and are read whole."""
+    relay = FakeRelay(run_history(), size=3)
+    found = retro.countdowns(retro.ToolDoor(relay), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    lists = [arguments for tool, arguments in relay.calls if tool == "list_issues"
+             and arguments["state"] == "CLOSED"]
+    assert [item.get("labels") for item in lists if "labels" in item] == [["retro"], ["discovery"]]
+    ordered = [item for item in lists if item.get("orderBy") == "UPDATED_AT"]
+    assert [item.get("after") for item in ordered] == [None, "3", "6", "9"]
+    assert [arguments for tool, arguments in relay.calls if tool == "list_pull_requests"] == [
+        {"state": "closed", "sort": "updated", "direction": "desc", "perPage": 100, "page": 1}]
+
+    calls = []
+    history = run_history()
+
+    class FakeGitHub:
+        def __init__(self, root, repo):
+            pass
+
+        def api(self, path):
+            calls.append(path)
+            if path.startswith("pulls?"):
+                return newest_first(history["pulls"])
+            if "labels=" in path:
+                label = path.split("labels=")[1].split("&")[0]
+                return [item for item in history["closed"] if label in retro.label_names(item)]
+            if "state=open" in path:
+                return history["open"]
+            return newest_first(history["closed"]) + [{"number": 99, "pull_request": {},
+                                                       "updated_at": "2026-01-01T00:00:00Z"}]
+
+    monkeypatch.setattr(work_tickets, "GitHub", FakeGitHub)
+    found = retro.countdowns(retro.GhDoor(tmp_path, REPO, REPO), REPO, "main", tmp_path, NOW)
+    assert found == retro.countdowns(WholeDoor(run_history()), REPO, "main", tmp_path, NOW)
+    assert "issues?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1" in calls
+    assert "issues?state=closed&labels=retro&per_page=100&page=1" in calls
+
+    assert not any(hasattr(retro.FileDoor, name) for name in retro.CUT_OFF_READS)
+    assert all(hasattr(door, name) for door in (retro.GhDoor, retro.ToolDoor)
+               for name in retro.CUT_OFF_READS)
+
+
 LOST_REPORTS = {"name": "Lost reports", "cause": "a landing need not name a field report",
                 "fix": "`integrate` refuses a landing without one",
                 "home": "scripts/work_tickets.py", "home_kind": "refusal"}
