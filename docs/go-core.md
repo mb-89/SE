@@ -417,6 +417,12 @@ so each cloud session has its own core.
   outright, is given up within the lease lapse ([A call given up](#a-call-given-up)).
 - It ends with the container in the cloud whatever the lease says; nothing in it needs to
   survive, because GitHub and the disk own every durable fact.
+- A placed process lives as long as the core: the core starts it once and never restarts it.
+  SE's Python components therefore answer only from the code on disk. Before each call one
+  compares SE's version and the digest of each script it imported with the files, and reloads
+  them, saying so in one line. Where it cannot, it refuses, and the command runs directly
+  (`scripts/se_components.py` "Fresh"). `se_start.py update` restarts the core once it moves SE
+  ([The update](boot.md#the-update)).
 
 ### The start budget: feedback within 1 s
 

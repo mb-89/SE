@@ -2144,3 +2144,60 @@ def test_a_lock_outside_its_pin_is_one_the_upgrade_moves_into_it(booted):
     lines, _ = boot(booted)
     assert any(line.startswith(f"  {holder} pins lib ^1, locked 2.0.0, newest 2.0.0: the upgrade takes 1.1.0")
                for line in lines), lines
+
+
+def test_the_update_restarts_the_core_once_it_moves_se_and_not_when_se_stays(booted, monkeypatch):
+    release(booted["upstream"], "3.0.0")
+    asked = []
+    monkeypatch.setattr(se_start, "restart_cores", lambda se, root, world: asked.append((se, root)) or (
+        ["kern: restarted the core of x with se-1.0.0, so its components load the moved SE"], False))
+    se, project = booted["se"], booted["project"]
+    lines, failed = se_start.update(se, project, booted["config"], booted["world"])
+    assert not failed and asked == [(se, project)], lines
+    assert lines[3] == "kern: restarted the core of x with se-1.0.0, so its components load the moved SE"
+    again, failed = se_start.update(se, project, booted["config"], booted["world"])
+    assert not failed and asked == [(se, project)], again  # SE stayed: nothing restarted
+
+
+def test_the_restart_stops_and_starts_each_standing_core_and_hands_it_the_sessions_start(tmp_path):
+    """Each core that stands for the session's checkout or SE's root is stopped and started again
+    with the binary bootstrap.sh named, then handed the session's start; a root where none stands is
+    left alone, and a core that does not stop or start again fails the update, naming why."""
+    se, project = tmp_path / "se", tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    se.mkdir()
+    runtime = project / ".se" / ".runtime"
+    runtime.mkdir(parents=True)
+    binary = tmp_path / "bin" / "se-1.0.0"
+    (runtime / "kern.path").write_text(f"{binary}\n", encoding="utf-8")
+    (runtime / "standing.json").write_text("{}", encoding="utf-8")
+    (runtime / "kern-session-start.json").write_text('{"session_id": "s"}', encoding="utf-8")
+    ran, answers = [], {"stop": (0, f"se: stopped pid 5 in {project}\n", ""),
+                        "start": (0, f"se: started in {project}\n", ""), "hook": (0, "", "")}
+
+    def run(argv, cwd, timeout, stdin=None):
+        ran.append((argv[1:], cwd, stdin))
+        return answers[argv[1]]
+
+    world = dataclasses.replace(se_start.World(), run=run)
+    lines, failed = se_start.restart_cores(se, project, world)
+    assert not failed and lines == [f"kern: restarted the core of {project.as_posix()} with se-1.0.0, so its "
+                                    "components load the moved SE"]
+    assert ran == [(["stop", "--root", str(project)], project, None),
+                   (["start", "--root", str(project), "--home", str(se)], project, None),
+                   (["hook", "SessionStart", "--root", str(project)], project,
+                    runtime / "kern-session-start.json")]
+
+    ran.clear()
+    answers["stop"] = (0, f"se: not running in {project}\n", "")
+    assert se_start.restart_cores(se, project, world) == ([], False)  # none ran: none started
+    assert [argv[0] for argv, _, _ in ran] == ["stop"]
+
+    answers["stop"] = (2, "", "the core did not exit\n")
+    lines, failed = se_start.restart_cores(se, project, world)
+    assert failed and lines == [f"kern: the core of {project.as_posix()} did not stop, so its components may "
+                                "still run the code they loaded: the core did not exit"]
+    answers["stop"], answers["start"] = (0, "se: stopped pid 5\n", ""), (2, "", "no bus\n")
+    lines, failed = se_start.restart_cores(se, project, world)
+    assert failed and lines[0].startswith(f"kern: the core of {project.as_posix()} stopped and did not start "
+                                          "again: no bus; see ")

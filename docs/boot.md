@@ -131,6 +131,9 @@ each named in its line.
 2. **SE to its newest release**, across a major too, as `refresh` moves it, trial start included;
    where the project pins se (`[components.se]`), that pin moves with it. A development checkout
    stays.
+   - Once SE moved, each core that stands for the project or SE's root restarts with the binary the
+     start named and is handed the session's start, so no component answers with the code it
+     loaded before. One line each; a core that does not come back fails the update.
 3. **Every pin the newest releases need.** Each of the project's own pins whose newest release lies
    beyond it moves to that release: a range to `^<newest>` in `se.toml`, a go pin's require in
    its `go.mod`. A component's own pin is a ticket for its repository; a commit pin is named with

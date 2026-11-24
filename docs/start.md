@@ -195,6 +195,12 @@ SE's script commands attach to kern as Python components ([docs/go-core.md
   `se` binary, so the core the hooks start in SE's checkout lists them all: `se status --json` names
   the instances, those attached (a placed one once its process attached, a Go one with the core)
   and, under `backends`, the backend each chose (`github`: `relay` or `token`).
+- **Fresh:** a component answers only with the code on disk. Before each call it compares SE's
+  version and the digest of each script it imported with the files; where one changed, it reloads
+  them and says so in one line (`se: component <name> reloaded SE's code before answering: ...`).
+  - Where it cannot reload, because another of its calls still runs on the old code or its run
+    loop, `se_components.py`, changed, it refuses, and the command runs directly, saying so.
+  - `se_start.py update` restarts the core once it moves SE ([The update](boot.md#the-update)).
 - **Discovered:** `se_components.py commands [--json]` lists every command the checkout's
   components declare, with its usage, summary and class, from the declarations alone. It holds
   the discovery budget, the guidance note
