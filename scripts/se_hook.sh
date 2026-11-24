@@ -7,14 +7,14 @@
 # The binary is the one bootstrap.sh named for the project at the session's start, in
 # <project>/.se/.runtime/kern.path. It fails open: where that names no binary on this machine yet or
 # no core answers, it prints nothing and exits 0. Builtins only up to the one exec, so a hook costs
-# kern's own start; README "Kern" owns the measurements.
+# kern's own start; docs/start.md "Kern" owns the measurements.
 #
-# Stop and SubagentStop (README "Stop hook") are answered by the command wiring.toml binds to them,
+# Stop and SubagentStop (docs/fleet.md "Stop hook") are answered by the command wiring.toml binds to them,
 # stop-check in the delivery component's process; where no command answers (no binary, no core,
 # none bound, its process not attached yet, or it failed), work_tickets.py stop-check answers as a
 # process of its own.
 #
-# A late checkout (README "Cloud sessions"): where the hook's JSON names a working directory inside
+# A late checkout (docs/install.md "Cloud sessions"): where the hook's JSON names a working directory inside
 # another git checkout than the project, with an se.toml and no binary named for it yet (cloned after
 # the session's start, so SessionStart never ran for it), the first hook there starts it as
 # SessionStart would have, `bootstrap.sh --hook` for that checkout in the background, claimed once
@@ -26,7 +26,7 @@
 # stop hook does not read, so its text goes to stderr with exit code 2, which Copilot shows the
 # person as a warning and the run goes on.
 #
-# The template gate (README "Templates"): a PreToolUse whose tool is one of SE's guarded GitHub writes
+# The template gate (docs/templating.md "Templates"): a PreToolUse whose tool is one of SE's guarded GitHub writes
 # (GATE_TOOLS below, the table of scripts/se_templates.py's docstring) runs `se_templates.py gate` with the
 # payload, through uv without a Python download, else python3 where it is 3.11 or later; its answer,
 # a JSON deny or nothing, is the hook's whole stdout, and kern still gets the payload, its answer
@@ -54,7 +54,7 @@ se_payload "$payload"
 payload="$se_payload_text"
 se_project "$payload"
 project="$se_project"
-# SE_HOOK_CORE=off in the environment (README "Machine-local `~/.se/local.toml`"): no late checkout
+# SE_HOOK_CORE=off in the environment (docs/running.md "Machine-local `~/.se/local.toml`"): no late checkout
 # is started, kern.path is not read and no core is posted to, so every event but Stop and
 # SubagentStop ends here quietly and those go to stop-check. Off through the local file, the
 # session's start left no kern.path (scripts/bootstrap.sh), so the hooks answer as without a binary.
@@ -196,7 +196,7 @@ gate() { # <payload>
       "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" >>"$project/.se/.runtime/templates-gate.log" 2>/dev/null
   fi
 }
-# The claim's heartbeat (README "Workers"): on every tool call (PreToolUse) in the project or the
+# The claim's heartbeat (docs/settings.md "Workers"): on every tool call (PreToolUse) in the project or the
 # checkout holding the cwd whose beat record, .se/work/beat.yaml (work_tickets.py intake writes it
 # for a work issue in progress), is due by its `due` line, the hook starts `work_tickets.py beat`
 # once, detached, its output appended to .se/work/beat.log; the claim .se/work/beat.claim, which

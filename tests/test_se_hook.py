@@ -1,4 +1,4 @@
-"""se_hook.sh posts one session event to the kern SE pins, and fails open (README "Kern")."""
+"""se_hook.sh posts one session event to the kern SE pins, and fails open (docs/start.md "Kern")."""
 from pathlib import Path
 import json
 import os
@@ -250,7 +250,7 @@ def test_an_empty_copilot_stop_payload_gets_the_host_field_alone(machine):
     assert (home / "calls").read_text(encoding="utf-8").endswith('<<{"se_host":"copilot" }\n')
 
 
-# A late checkout (README "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
+# A late checkout (docs/install.md "Cloud sessions"): a fake bootstrap.sh beside a copy of the hook logs each
 # start it is asked for, with the checkout it was asked for and the hook's JSON.
 # The detached start of bootstrap.sh: logs its arguments and stdin, then rings the test's bell
 # (tests/waiting.py), found beside the home.
@@ -350,7 +350,7 @@ def test_a_late_claim_older_than_ten_minutes_is_taken_anew(machine):
     assert len(starts(home, 2)) == 2 and claim.stat().st_mtime > stale + 300
 
 
-# SE_HOOK_CORE (README "Machine-local `~/.se/local.toml`"): exactly `off`, in any case, keeps the
+# SE_HOOK_CORE (docs/running.md "Machine-local `~/.se/local.toml`"): exactly `off`, in any case, keeps the
 # hooks from the core; every other value, the empty string among them, leaves them as unset.
 OFF_VALUES = ("off", "OFF", "Off")
 ON_VALUES = ("", " off", "off ", "0", "false", "on")
@@ -515,7 +515,7 @@ def test_copilots_stop_hook_passes_the_warning_through_and_fails_open_else(
     assert start.returncode == 0
 
 
-# The file gate's filter (README "Templates"): the file tools reach se_templates.py gate only where SE's
+# The file gate's filter (docs/templating.md "Templates"): the file tools reach se_templates.py gate only where SE's
 # start left `claimed` in templates-files, and only for a file in the project whose path matches a glob
 # the templates own, the file's other lines; the fake uv logs each run.
 
@@ -588,7 +588,7 @@ def test_a_file_tool_reaches_the_gate_only_for_a_path_an_owned_glob_matches(mach
     assert gate_runs(home) == 4
 
 
-# The claim's heartbeat (README "Workers"): a fake uv logs each beat the hook starts, detached, and
+# The claim's heartbeat (docs/settings.md "Workers"): a fake uv logs each beat the hook starts, detached, and
 # rings the test's bell (tests/waiting.py), found beside the home.
 FAKE_BEAT_UV = """#!/bin/sh
 echo "$*" >> "$HOME/beats"

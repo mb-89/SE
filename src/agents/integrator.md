@@ -119,9 +119,8 @@ merge or a start.
    `--build-command` when the project declares one).
    - It merges into origin's newest integration branch on `land/<branch>`, checks the report, runs
      the complete suite against its time budget (`[tests]` in `se.toml`,
-     [Test budget](../../README.md#test-budget)) and regenerates.
-   - It lands the result through a squash pull request (README
-     [Landing on main](../../README.md#landing-on-main)), then closes the work issue, cleans up
+     [Test budget](../../docs/tests.md#test-budget)) and regenerates.
+   - It lands the result through a squash pull request ([Landing on main](../../docs/settings.md#landing-on-main)), then closes the work issue, cleans up
      and starts work.
    - In the cloud, where `gh` is not signed in, it hands off: it pushes `land/<branch>` and prints
      the GitHub steps as a plan, you run them, and `integrate --read-back
@@ -133,7 +132,7 @@ merge or a start.
      lands, reads back and closes out by itself, with no `--read-back`
      ([One call through kern](../skills/work-model/SKILL.md#without-gh)).
    - The landing pull request ends in its `Metrics:` line, step 2's body unedited, which
-     `retro.py collect` reads back (README [Metrics](../../README.md#metrics)).
+     `retro.py collect` reads back ([Metrics](../../docs/running.md#metrics)).
    - Never merge a landing pull request on GitHub yourself: a squash landing merges only through
      its plan's step, and with fast-forward landing (`se.toml` `[integrate] landing`) the plan ends
      at the check and `--read-back` pushes main.
@@ -142,7 +141,7 @@ merge or a start.
      through the relay, run `--read-back` without that flag and it reads the description from the
      relay. Without the `Metrics:` line the read-back fails and closes nothing: update the body to
      step 2's and read back again.
-   - A suite the [Test budget](../../README.md#test-budget) refuses: escalate it to the worker
+   - A suite the [Test budget](../../docs/tests.md#test-budget) refuses: escalate it to the worker
      with the gate's remedy.
    - Commits on the branch after the report's Branch tip are refused, named: escalate them to the
      worker to update the report in the pull request description, or include them with
@@ -191,17 +190,17 @@ merge or a start.
 
    `ready` also names each claimed issue live or stale by its beat; put the stale ones it names
    into your report to SE, and release none
-   ([README "Workers"](../../README.md#workers)).
+   ([docs/settings.md "Workers"](../../docs/settings.md#workers)).
 
    Start no more workers than the worker limit leaves room for
-   ([README "Workers"](../../README.md#workers)): `capacity`, or in the cloud without gh the
+   ([docs/settings.md "Workers"](../../docs/settings.md#workers)): `capacity`, or in the cloud without gh the
    queue's plan. The rest wait, and the next landing starts them as a worker finishes.
 
    Then write what you did into the issue you landed, as one comment: each issue you started with
    its worker session, or `Started: none startable`.
 
    A landing that frees work so starts it at once; the dispatcher
-   ([README "Dispatcher"](../../README.md#dispatcher)) only restarts a fleet where no integrator
+   ([docs/fleet.md "Dispatcher"](../../docs/fleet.md#dispatcher)) only restarts a fleet where no integrator
    runs.
 
    It also gets a worker session whose `workspace` is that worktree folder, only within
@@ -253,7 +252,7 @@ Read your queued messages first, as before a merge, then:
    finishes before the release starts.
 2. Run `work_tickets.py release`. It raises `se.toml`'s version by the highest release kind the
    landings recorded since the last release and lands that one commit as `integrate` lands
-   (README [Project settings](../../README.md#project-settings)); without gh, run its plan's
+   ([Project settings](../../docs/settings.md#project-settings)); without gh, run its plan's
    steps, then `work_tickets.py release --read-back <tag>`.
 3. Report the line it prints to SE: `Released v<version> in <commit> on <branch>`, or `Nothing to
    release`, and where the release workflow tags it, that the tag follows its run.
@@ -286,6 +285,6 @@ person sets the version by hand in a pull request, which the next release tags a
   ([wrk-007](../skills/work-model/references/rules.md#wrk-007-one-piece-of-work-one-issue-no-command-files-issues-on-its-own)).
 - Report per integration, as a statement, never a question: squash commit, landing pull request
   and its `check` run, suite result, the integration's own metrics line (`Metrics: {...}`, which
-  `integrate` prints last, README [Metrics](../../README.md#metrics)), output
+  `integrate` prints last, [Metrics](../../docs/running.md#metrics)), output
   check, each issue's GitHub state as `integrate` read it after the merge (never as intended),
   escalations, and anything SE must decide or file.

@@ -30,7 +30,7 @@ def test_the_required_check_vets_ses_go_components_on_kern_at_the_pin_their_go_m
                                                          "trust"], (
         "the Go components run in the required job check, SE's start and hook on Windows in "
         "kern-platforms, which check needs and kern-platforms-queue bounds the queue of; trust "
-        "decides whether either runs (README \"Trusted landings\")"
+        "decides whether either runs (docs/tests.md \"Trusted landings\")"
     )
     setups = re.findall(r"uses: actions/setup-go@v(\d+)\n        with:\n((?:          .*\n)+)", workflow)
     assert len(setups) == 1, "Go is set up on Linux only, for SE's Go components"
@@ -136,7 +136,7 @@ UNTRUSTED = "needs.trust.outputs.trusted != 'true'"
 KERN_AT_THE_PIN = {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}",
                    "path": ".kern-battery"}
 INTEGRATOR_PASS = "./.kern-battery/.github/actions/integrator-pass"
-# The one action that places kern, the battery's and the release's (README "Workflows").
+# The one action that places kern, the battery's and the release's (docs/running.md "Workflows").
 KERN_AT_PIN = "./.github/actions/kern-at-pin"
 ACTION = PROJECT / KERN_AT_PIN / "action.yml"
 
@@ -156,7 +156,7 @@ def test_the_battery_holds_the_applications_tests_to_se_toml_tests() -> None:
 
 
 def test_the_battery_passes_on_the_integrators_record_through_kern_at_the_applications_pin() -> None:
-    """SE's README "Trusted landings": the job trust runs integrator-pass from the kern commit the
+    """SE's docs/tests.md "Trusted landings": the job trust runs integrator-pass from the kern commit the
     battery runs at, the tag the application pins, and the battery's vet and tests run only where
     it does not vouch for the tree."""
     battery = workflow(BATTERY)

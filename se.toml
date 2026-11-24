@@ -1,21 +1,32 @@
 [project]
-# The project's one semantic version, raised by work_tickets.py release when SE asks (README
+# The project's one semantic version, raised by work_tickets.py release when SE asks (docs/settings.md
 # "Project settings").
 version = "13.1.0"
-# Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (README
+# Its tag v<version> is pushed by the release workflow, not by work_tickets.py release (docs/settings.md
 # "Release tags").
 release = "workflow"
 # Regenerates what copies the version (the plugin manifests) into each release commit.
 release_build = ["uv", "run", "python", "scripts/se_plugin.py", "build"]
-# The commit identity sync sets where the machine sets no public_identity (README "Project settings").
+# The commit identity sync sets where the machine sets no public_identity (docs/settings.md "Project settings").
 identity = "mb <mb>"
-# Every push to the integration branch runs se's public check first (README "Project settings").
+# Every push to the integration branch runs se's public check first (docs/settings.md "Project settings").
 public_check = true
 # Where the documentation built from docs.md is published is derived from origin: no docs_url
-# here (README "Documentation").
+# here (docs/documentation.md "Documentation").
 authored_content = [
     "AGENTS.md",
     "README.md",
+    "docs/install.md",
+    "docs/start.md",
+    "docs/documentation.md",
+    "docs/modules.md",
+    "docs/settings.md",
+    "docs/fleet.md",
+    "docs/tests.md",
+    "docs/running.md",
+    "docs/applications.md",
+    "docs/work-commands.md",
+    "docs/templating.md",
     ".github/ISSUE_TEMPLATE/*.md",
     ".github/pull_request_template.md",
     "src/**/*.md",
@@ -29,18 +40,18 @@ authored_content = [
 [binary]
 release = "components/release.toml"
 
-# The project's own commit checks, run by se's commit hook on the staged tree (README "Commit
+# The project's own commit checks, run by se's commit hook on the staged tree (docs/settings.md "Commit
 # checks"): every generated file marked and declared (scripts/generated.py), without its fresh runs,
 # which CI's hygiene step adds.
 [commit_checks]
 generated = ["uv", "run", "--no-project", "python", "scripts/generated.py", "check", "--no-rerun"]
 
 # How a landing reaches main: "fast-forward" moves main to the tested landing commit, the
-# integrator's own, so no commit on main carries an address (README "Landing on main").
+# integrator's own, so no commit on main carries an address (docs/settings.md "Landing on main").
 [integrate]
 landing = "fast-forward"
 
-# The filing commands check each ticket against its template (README "Templates"): `refuse` files none that
+# The filing commands check each ticket against its template (docs/templating.md "Templates"): `refuse` files none that
 # lacks a part its template requires. Read from the integration branch, so a branch cannot switch it off.
 [templates]
 enforce = "refuse"
@@ -48,11 +59,11 @@ enforce = "refuse"
 # in this order, each a [components.<name>] (docs/templates.md "Template repositories"). SE uses none.
 repositories = []
 # SE's PreToolUse hook refuses a GitHub write through the GitHub tools whose body breaks its template
-# (README "Templates"); read from the integration branch like enforce.
+# (docs/templating.md "Templates"); read from the integration branch like enforce.
 gate = "refuse"
 
 # The complete suite and its time budget; work_tickets.py integrate holds every integration to it
-# (README "Test budget").
+# (docs/tests.md "Test budget").
 [tests]
 command = ["uv", "run", "pytest", "-q"]
 target_seconds = 60
@@ -71,7 +82,7 @@ limit_seconds = 60
 # The released binaries hold what the checkout builds (docs/go-core.md "How the binary arrives"):
 # kern's release tool refuses where SE's release.toml names a tag already cut and a file its binary
 # is built from changed since that tag, components/go.mod's require kern among them; the remedy is a kind stated in the field report,
-# whose version the landing assigns (README "Component versions"). It reads the tags git fetched; a
+# whose version the landing assigns (docs/settings.md "Component versions"). It reads the tags git fetched; a
 # tag not fetched yet refuses nothing.
 [tests.beside.release-guard]
 setup = ["uv", "run", "python", "../scripts/se_modules.py", "sync", "kern"]
@@ -80,7 +91,7 @@ directory = "components"
 target_seconds = 10
 limit_seconds = 30
 
-# `se new app`'s acceptance (README "New application"): an application created from this SE passes
+# `se new app`'s acceptance (docs/applications.md "New application"): an application created from this SE passes
 # its own test run, which builds its core. After the components' tests Go's build cache is warm:
 # 6.8 s here; with a cold cache 25 s. Like every pytest run, it places kern first (tests/conftest.py).
 [tests.beside.new-app]
@@ -88,14 +99,14 @@ command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_new_app.py"]
 target_seconds = 30
 limit_seconds = 90
 
-# SE's commands as components against the real core (README "Commands as components"): it builds
+# SE's commands as components against the real core (docs/start.md "Commands as components"): it builds
 # kern's binary with Go's cache warm, places the four components and calls through them.
 [tests.beside.se-components]
 command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_components.py"]
 target_seconds = 30
 limit_seconds = 90
 
-# SE's GitHub reads through kern's relay against the real core (README "Hand-offs through the
+# SE's GitHub reads through kern's relay against the real core (docs/settings.md "Hand-offs through the
 # relay"): it builds kern's binary with Go's cache warm, lands a PostToolUse answer and reads it.
 [tests.beside.se-relay]
 command = ["uv", "run", "pytest", "-q", "-n", "0", "tests/beside_se_relay.py"]
@@ -120,14 +131,14 @@ target_seconds = 30
 limit_seconds = 90
 
 # kern, the Go core SE's binary is built on (docs/go-core.md "Pinning it"): its pin is the version
-# components/go.mod requires, so a move of that line is a change of se's inputs (README "Modules").
+# components/go.mod requires, so a move of that line is a change of se's inputs (docs/modules.md "Modules").
 [components.kern]
 go = "components/go.mod"
 
-# SE's other components, found by name under the owners of the checkout's remotes (README
+# SE's other components, found by name under the owners of the checkout's remotes (docs/modules.md
 # "Modules"). kern above, obs and obs-html are each required: every start loads all of them from SE's root, wherever the session starts, and
 # stops where one does not answer (docs/boot.md "Required components"). obs builds the
-# documentation (README "Documentation") with its adapter component obs-html, which obs installs at
+# documentation (docs/documentation.md "Documentation") with its adapter component obs-html, which obs installs at
 # the version locked here.
 [components.obs]
 version = "^10.3.2"
@@ -137,7 +148,7 @@ version = "^0.5.2"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
-# At most this many working agents run at once (README "Workers"): 4 on a local device; the cloud
+# At most this many working agents run at once (docs/settings.md "Workers"): 4 on a local device; the cloud
 # is left open.
 [workers]
 local = 4
@@ -153,9 +164,9 @@ repositories = ["SE", "obs", "kern"]
 
 # The plugin's build (scripts/se_plugin.py): `root_mcp` writes a root .mcp.json declaring SE's MCP
 # door. Off, as Claude Code reads that file too; Copilot reads .github/mcp.json, always written
-# (README "MCP door").
+# (docs/start.md "The MCP door").
 # `claude_mcp` declares the door in the Claude Code manifest, .claude-plugin/plugin.json: on, every
-# Claude Code session with SE's plugin starts the door (README "The MCP door"). Off on this branch
+# Claude Code session with SE's plugin starts the door (docs/start.md "The MCP door"). Off on this branch
 # until the owner answers whether SE's own default is on.
 [plugin]
 root_mcp = false

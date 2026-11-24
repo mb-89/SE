@@ -14,7 +14,7 @@ The template system that uses guidance is designed beside this one, in
 [docs/templates.md](templates.md). This note relies on one fact of it only: a template carries
 tags and calls "collect the guidance for this template"
 ([Tags and guidance](templates.md#tags-and-guidance)). SE's templates are its template notes,
-`templates/<name>.md` (README [Templates](../README.md#templates)), each with its tags.
+`templates/<name>.md` ([Templates](templating.md#templates)), each with its tags.
 
 ## Words
 
@@ -75,7 +75,7 @@ notes:
    specific note may replace a general one, so an override never reaches a template the
    overridden note did not.
 4. **Modules come first.** A project's resolution reads the guidance trees of its modules
-   (README [Modules](../README.md#modules)), se's among them, then its own. At equal rank a
+   ([Modules](modules.md#modules)), se's among them, then its own. At equal rank a
    module's note prints before the project's, and a project note may override a module's note;
    a module never overrides the project.
 

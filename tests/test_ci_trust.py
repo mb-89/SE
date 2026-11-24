@@ -1,4 +1,4 @@
-"""CI's trust in the integrator's run (scripts/ci_trust.py, README "Trusted landings"): who may write
+"""CI's trust in the integrator's run (scripts/ci_trust.py, docs/tests.md "Trusted landings"): who may write
 the record, which record is trusted, when the full suite runs anyway, and the safety net's
 bookkeeping. GitHub is a fake door, or for the end-to-end lookup a local HTTP server; the workflows
 that call it are read as text."""
@@ -467,7 +467,7 @@ def test_the_action_runs_ses_script_from_its_own_checkout() -> None:
     assert set(ci_trust.COMMANDS) == {"lookup", "record", "full-pass", "finding"}
 
 
-# Landing without CI (README "Landing without CI"): the integrator's commit status, judged.
+# Landing without CI (docs/tests.md "Landing without CI"): the integrator's commit status, judged.
 
 NO_CI = '[tests]\ncommand = ["uv", "run", "pytest", "-q"]\nci = false\n'
 TREE, SUITE = "a" * 40, "b" * 64

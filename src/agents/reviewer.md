@@ -15,7 +15,7 @@ The rules shared by all roles are owned by the skill [work-model](../skills/work
 the rules you review against by its [rule book](../skills/work-model/references/rules.md), the
 project's commands by the project's `AGENTS.md`. What `review.py brief` and `review.py file` read,
 check and write is owned by the README's
-[Work commands](../../README.md#work-commands); this file is how you use them.
+[Work commands](../../docs/work-commands.md#work-commands); this file is how you use them.
 
 ## The box
 

@@ -5,7 +5,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
 
 - **Python, declared** by their `component.toml` and placed by the checkout's `wiring.toml`:
   tickets, issues, delivery, integration, review, retro, overhaul, render and scaffold, SE's
-  script commands (README ["Commands as components"](../README.md#commands-as-components)).
+  script commands (["Commands as components"](../docs/start.md#commands-as-components)).
 - **Go, compiled into the `se` binary**: fleet, retro-due, origin and template, SE's Go module
   `se/components` (`go.mod` here: it requires kern at the version `se.toml` `[components.kern]` pins
   and replaces it by the clone `se_modules.py sync kern` places in `../.se/modules/kern`).
@@ -29,7 +29,7 @@ the rules they compute are SE's work model. Two kinds live here, one folder each
   each output names how many issues it read, and a reader takes it only where that is above 0.
 - **No comments.** The names carry no issue comments, so the lease of in-progress work without a
   branch is never counted from its `Started:` comment: it is `no branch` at once, as the Python check
-  answers where it read no comments ([README "Fleet check"](../README.md#fleet-check)).
+  answers where it read no comments ([docs/fleet.md "Fleet check"](../docs/fleet.md#fleet-check)).
 - **The binary.** `cmd/se` is the `se` binary: kern's command line carrying kern's GitHub
   component and these three, and SE's start, `se agent`: it starts the SE agent in the caller's
   folder with SE loaded from its clone, Claude Code's directory marketplace `se` (`--host copilot`:

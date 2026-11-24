@@ -20,9 +20,9 @@ An SE that has the update (`se_start.py update`, from SE 13.1 on) runs steps 1 t
 `/se:update` ([docs/boot.md "The update"](boot.md#the-update)). An older one follows them by hand.
 
 1. **Install the newest SE.** The start's refresh moves SE only within its major, so a newer major
-   is an install again, as README [Install](../README.md#install) says: for a clone,
+   is an install again, as [Install](install.md#install) says: for a clone,
    `git -C <se> fetch --tags` and `git -C <se> checkout v<newest>`; for the cloud, the
-   environment's setup script ([README "Cloud sessions"](../README.md#cloud-sessions)).
+   environment's setup script ([docs/install.md "Cloud sessions"](install.md#cloud-sessions)).
    - Then run `bash <se>/scripts/setup.sh <project>` once, so the project's hooks are the new SE's.
    - Check: `grep -m1 '^version' <se>/se.toml` prints the newest version, and
      `git -C <project> config core.hooksPath` names `<se>/.githooks`.
@@ -225,7 +225,7 @@ Components are found by name under the owners of the checkout's remotes
 
 - **Change:** `work_tickets.py push` and `integrate` no longer raise `[project] version` or push a
   tag; `integrate` records the release kind, and `work_tickets.py release` raises the version when
-  SE asks ([README "Project settings"](../README.md#project-settings)).
+  SE asks ([docs/settings.md "Project settings"](settings.md#project-settings)).
 - **Steps:** remove any project automation or instruction that expects a tag per landing.
 - **Check:** `git grep -nE 'tag (per|each) landing|push(es)? (the|a) tag'` prints nothing.
 
@@ -266,7 +266,7 @@ Components are found by name under the owners of the checkout's remotes
   read `agents/<name>.md` and `skills/`.
 - **Steps:** rewrite every prompt that names `<se>/.github/agents/<name>.agent.md`, in the project's
   files, its scheduled tasks and its cloud environments, to `<se>/agents/<name>.md`; update each
-  host's install as README [Install](../README.md#install) says.
+  host's install as [Install](install.md#install) says.
 - **Check:** `git grep -nE '\.github/agents/[a-z-]+\.agent\.md|\.github/skills/'` prints nothing.
 
 ### The guidance comes first; `fill` is a writing tool

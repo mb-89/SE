@@ -1,4 +1,4 @@
-"""SE's GitHub reads through kern's relay (README "Hand-offs through the relay"): a command reads a
+"""SE's GitHub reads through kern's relay (docs/settings.md "Hand-offs through the relay"): a command reads a
 GitHub answer from kern's snapshot names instead of a file the session retypes. The reads are held
 to the snapshot shape kern's github component writes (`{repo, number, read, via, data}`) and to the
 PostToolUse-landed answers a cloud session's hook hands kern, against a fake relay; the end-to-end

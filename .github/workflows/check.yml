@@ -1,6 +1,6 @@
 # SE's CI, the one check main's ruleset requires by its name `check` (AGENTS.md "Public safety"):
 # on every pull request and every push to the integration branch, every check the integration runs:
-# the public check's commit gate, the generated layout, the README's command reference, the
+# the public check's commit gate, the generated layout, the command reference, the
 # hygiene of SE's own checkout, a pull request's field report and the complete suite within its
 # budget, SE's Go components on kern at the pin se.toml [components.kern] reads from components/go.mod,
 # and, through the job kern-platforms, SE's start, hook and setup scripts and its worktree removal
@@ -9,12 +9,12 @@
 # The job passes only when all pass, so a push or pull request the hooks did not see still fails
 # here. Where se.toml [tests] trust_integrator is on, the job trust passes it on the integrator's
 # record of exactly the tree checked out, and the suite, the Go checks and kern-platforms do not run;
-# a nightly run is the safety net (README "Trusted landings"). SE keeps it off: everything runs.
+# a nightly run is the safety net (docs/tests.md "Trusted landings"). SE keeps it off: everything runs.
 # A pull request's edit or label change (edited, labeled, unlabeled) checks the field report and the
 # issue rule again and takes the result of the suite, the Go checks and kern-platforms from the
 # newest completed run for the same head that ran them on the same tree and Component kinds, naming
 # that run; a failed result stays failed, and where there is none, or the newest completed run was
-# cancelled, or the run is a re-run, everything runs (scripts/ci_reuse.py, README "Edits reuse the
+# cancelled, or the run is a re-run, everything runs (scripts/ci_reuse.py, docs/tests.md "Edits reuse the
 # suite"). Every other event runs everything, as always.
 name: check
 
@@ -64,7 +64,7 @@ jobs:
           # those after its old tip, or all its commits where that tip is unknown, without those
           # the integration branch holds; otherwise as to the integration branch. Its git goes
           # through se's git door (scripts/git_door.py).
-          refused="::error::public-check (scripts/public_check.py, AGENTS.md 'Public safety') refused the commits it names: amend each named commit as its line says (for a Co-authored-by line, without the line, and turn off the editor's co-author setting, README 'Install'), then push again"
+          refused="::error::public-check (scripts/public_check.py, AGENTS.md 'Public safety') refused the commits it names: amend each named commit as its line says (for a Co-authored-by line, without the line, and turn off the editor's co-author setting, docs/install.md 'Install'), then push again"
           if [ -n "$BASE_REF" ]; then
             range="refs/remotes/origin/$BASE_REF..$AFTER"
             echo "public-check: gating $range, the commits of the pull request into $BRANCH"
@@ -82,7 +82,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/pr_issues.py
       - uses: astral-sh/setup-uv@v7
-      # kern at the version components/go.mod requires (se.toml [components.kern], README "Modules"),
+      # kern at the version components/go.mod requires (se.toml [components.kern], docs/modules.md "Modules"),
       # in .se/modules/kern, which go.mod's replace names; a committed se.lock that lags the require
       # fails here. First, as the command reference (kern's SDK) and the suite read it.
       - name: kern at the pin components/go.mod requires
@@ -95,7 +95,7 @@ jobs:
       # Before the suite, whose start regenerates the layout (tests/conftest.py).
       - name: The generated layout matches src/
         run: uv run python scripts/se_plugin.py check
-      - name: The README's command reference is up to date
+      - name: The command reference is up to date
         run: uv run python scripts/work_tickets.py docs --check
       # The checks of SE's own checkout, not of its code, through git's real door (scripts/hygiene.py,
       # AGENTS.md "Tests"): tracked files, the git door, dangling references and the public check
@@ -113,7 +113,7 @@ jobs:
           # the issue its first line `Fixes|Refs <issue url>` names. A pull request without the
           # report's marker (a switch pull request) has none to check. A landing pull request
           # carries `<!-- se:field-report-in <n> -->` instead: the report is the description of the
-          # work pull request <n>, read from there (README "Landing on main").
+          # work pull request <n>, read from there (docs/settings.md "Landing on main").
           body="$RUNNER_TEMP/pr-body.md"
           printf '%s\n' "$PR_BODY" > "$body"
           work=$(sed -nE 's#^<!-- se:field-report-in ([0-9]+) -->[[:space:]]*$#\1#p' "$body" | head -n 1)
@@ -132,12 +132,12 @@ jobs:
           fi
           gh api "repos/$REPOSITORY/issues/$issue" --jq .body > "$RUNNER_TEMP/issue-body.md"
           # A work pull request's Component kinds reach the suite's release guard, which passes a
-          # changed component of a stated kind, as the landing assigns its version (README
+          # changed component of a stated kind, as the landing assigns its version (docs/settings.md
           # "Component versions"); a landing's release commit carries the versions, so it sets none.
           kinds=()
           if [ -z "$work" ]; then kinds=(--component-kinds-to "$GITHUB_ENV"); fi
           uv run python scripts/work_tickets.py field-report --check "$body" --issue-body "$RUNNER_TEMP/issue-body.md" "${kinds[@]}"
-      # The changed files a template claims (README "Templates"): the command passes, reading no git,
+      # The changed files a template claims (docs/templating.md "Templates"): the command passes, reading no git,
       # where no template claims a path.
       - name: The changed files a template claims follow their templates
         if: github.event_name == 'pull_request'
@@ -156,10 +156,10 @@ jobs:
         if: needs.trust.outputs.suite == 'run'
         working-directory: components
         run: time go vet ./...
-      # The budget's reference run (README "Test budget"): over a limit here, check fails. The
+      # The budget's reference run (docs/tests.md "Test budget"): over a limit here, check fails. The
       # nightly run is full: it runs every suite beside, also one whose paths the change does not
       # touch.
-      # The suite's docs and deck builds run through obs's adapter component obs-html (README
+      # The suite's docs and deck builds run through obs's adapter component obs-html (docs/documentation.md
       # "Documentation"), installed first.
       - name: Install obs's adapter component obs-html
         if: needs.trust.outputs.suite == 'run'
@@ -241,7 +241,7 @@ jobs:
     needs: trust
     if: needs.trust.outputs.suite == 'run'
     # A leg that runs is bounded here; the time it waits for a runner counts against nothing here,
-    # so kern-platforms-queue bounds that (README "Platform legs and their queue").
+    # so kern-platforms-queue bounds that (docs/tests.md "Platform legs and their queue").
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -277,7 +277,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: uv run pytest -q tests/test_windows_entry.py
-  # The queue bound of kern-platforms (README "Platform legs and their queue"): a leg still waiting
+  # The queue bound of kern-platforms (docs/tests.md "Platform legs and their queue"): a leg still waiting
   # for a runner after 20 minutes is reported as never run, not as a test failure, and the run is
   # cancelled; check-rerun.yml re-runs a first attempt so cancelled once.
   kern-platforms-queue:
@@ -295,10 +295,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/ci_queue.py watch --jobs kern-platforms --queue-minutes 20
   # Whether this run runs the suite, the Go checks and kern-platforms (output suite: run), or passes
-  # on the integrator's record of exactly this tree (trusted, README "Trusted landings": only where
+  # on the integrator's record of exactly this tree (trusted, docs/tests.md "Trusted landings": only where
   # se.toml [tests] trust_integrator is on, never on the safety net's runs; its full history counts
   # the landings for se.toml [tests] full_every), or, on an edit or label change, takes an earlier
-  # run's result for this tree (reused, with source, result and why; README "Edits reuse the
+  # run's result for this tree (reused, with source, result and why; docs/tests.md "Edits reuse the
   # suite"). The decision step is named with this run's reuse key, from which a later run reads it.
   trust:
     runs-on: ubuntu-26.04

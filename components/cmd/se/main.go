@@ -20,7 +20,7 @@ import (
 )
 
 // Greeting is what the MCP door's greeting tool reads, the live part of SE's
-// start greeting (README "Start and refresh"): what is due, the retro and the
+// start greeting (docs/start.md "Start and refresh"): what is due, the retro and the
 // fleet's findings. What is queued, `work_tickets.py queue`, syncs the
 // checkout, so it is not read-only and stays out (the greeting only reads).
 var Greeting = []string{"retro-due/due", "fleet/findings"}

@@ -85,7 +85,7 @@ One issue in, one issue out; the same for local sessions and cloud agents.
   one is open, until the person has decided its findings; running work goes on. Each runs in a
   session of SE's [retro agent](../../agents/retro.md), which
   [dec-012](references/rules.md#dec-012-only-se-asks-the-person) counts as SE
-  (README ["Retro due"](../../../README.md#retro-due)).
+  (["Retro due"](../../../docs/fleet.md#retro-due)).
 
 ## Issues
 
@@ -129,7 +129,7 @@ pull request carries its field report.
     issue.
   - `in-progress` is the claim's flag; its heartbeat is one beat line in the issue's body, which
     the worker's hook renews, so `ready` names a claim live or stale from the issue alone
-    ([README "Workers"](../../../README.md#workers)).
+    ([docs/settings.md "Workers"](../../../docs/settings.md#workers)).
   - Nothing frees a stale claim on its own: releasing it (its branch deleted, `in-progress` and
     the beat line removed) is the person's step, which SE prepares.
   - `file --blocked-by <n>` links the blockers before it adds `ready`.
@@ -171,7 +171,7 @@ then person. Every level decides, and writes what it sends up, as the
 
 - **One rank at a time**: what does not work goes up one rank, never two. A worker that cannot
   proceed goes to its integrator; an integrator that cannot resolve it, or a review that declines
-  a pull request (README [Work commands](../../../README.md#work-commands), `review.py file`),
+  a pull request ([Work commands](../../../docs/work-commands.md#work-commands), `review.py file`),
   goes to SE; SE goes to the person. A rank is skipped only where the rank below cannot act at
   all, as for [steps only the person approves](#steps-only-the-person-approves).
 
@@ -276,7 +276,7 @@ integration_branch = "next"
 `integrate` refuses a main checkout that is not on it. Below, `main` means the integration branch.
 Nothing is pushed to it directly: `integrate` lands each integration as a squash pull request that
 waits for the required check `check`, as the README's
-[Landing on main](../../../README.md#landing-on-main) says.
+[Landing on main](../../../docs/settings.md#landing-on-main) says.
 
 Every pull request into the integration branch names the work it does, so no work is done outside
 the issues dispatch reads:
@@ -306,7 +306,7 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 - `work_tickets.py suite` (which `integrate` runs) records its verdict on the tree of the commit
   it ran on, where the checkout holds exactly that commit; `public_check.py --rev <commit>` records
   its verdict on that commit's tree. A failure, or a suite its
-  [budget](../../../README.md#test-budget) refuses, records a failure.
+  [budget](../../../docs/tests.md#test-budget) refuses, records a failure.
 - `integrate` refuses to push a landing branch without both passing verdicts on its tree, and
   reads the squash commit back only with that tree; `work_tickets.py push` and se's pre-push hook
   (`work_tickets.py verified`) refuse a push of the integration branch itself the same way, naming
@@ -321,7 +321,7 @@ Nothing reaches the integration branch without a passing complete suite and, unl
 
 Where the host gives a repository no runners, nothing can wait for `check`. There, and only where
 se.toml on the integration branch sets `[tests] ci = false`, the integrator's own complete run is
-the verdict, through the same landing ([README "Landing without CI"](../../../README.md#landing-without-ci)).
+the verdict, through the same landing ([docs/tests.md "Landing without CI"](../../../docs/tests.md#landing-without-ci)).
 
 - The mode is chosen once, by that setting; se never infers it from the host's answer, and with
   it off every landing waits for `check` as above.
@@ -336,7 +336,7 @@ the verdict, through the same landing ([README "Landing without CI"](../../../RE
 
 A release's kind follows what changed, never the branch name: the worker declares it in the field
 report's "Release kind" (patch, minor or major, with a one-line reason), and
-[releases](../../../README.md#project-settings) bump by it. `field-report --draft` only proposes a
+[releases](../../../docs/settings.md#project-settings) bump by it. `field-report --draft` only proposes a
 kind, which the worker keeps or replaces by what changed.
 
 - **Breaking means major**, as Semantic Versioning 2.0.0 (item 8) defines it: removing or
@@ -436,9 +436,9 @@ The rule holds for SE, obs and kern alike, and for every repository that uses SE
   Each remote sees one neutral tree, as if it were the only one.
 - **How modules and plugins are named**: by a relative address (`../obs.git`), resolved against the
   checkout's origin, or by name (`<plugin>@<marketplace>`), never by a host's absolute address
-  ([README "Modules"](../../../README.md#modules)).
+  ([docs/modules.md "Modules"](../../../docs/modules.md#modules)).
 - **How a change lands**: every change lands through SE's landing step, `work_tickets.py
-  integrate` ([README "Landing on main"](../../../README.md#landing-on-main)), never a host's merge
+  integrate` ([docs/settings.md "Landing on main"](../../../docs/settings.md#landing-on-main)), never a host's merge
   button, whose commit carries the host's account identity.
 - **Which line a module follows**: every checkout follows one line of each module, the module's
   `main` (obs `main`); a pin is a commit on that line, and every remote's tree pins the same.
@@ -447,13 +447,13 @@ The checks that hold it:
 
 | Part of the rule | Check |
 |---|---|
-| History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([README "Project settings"](../../../README.md#project-settings), `tests/test_push_guard.py`) |
-| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([README "Work publication"](../../../README.md#work-publication), `tests/test_push_guard.py`) |
-| Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([README "Modules"](../../../README.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
+| History held only by another remote is never pushed | `work_tickets.py push`, and every command that pushes through it, pushes only a local branch and refuses one carrying commits another remote holds but origin does not; a local tag proves nothing ([docs/settings.md "Project settings"](../../../docs/settings.md#project-settings), `tests/test_push_guard.py`) |
+| A work branch goes only to the remote the workflow intends | `work_tickets.py push`, and `deliver` through it, publishes a work branch only where origin's repository name is the one its work issue is for, by its `repo:` label ([docs/fleet.md "Work publication"](../../../docs/fleet.md#work-publication), `tests/test_push_guard.py`) |
+| Relative addresses resolve against the checkout's origin | `<se>/scripts/se_home.py` (`module_url`), through a clean sync too ([docs/modules.md "Modules"](../../../docs/modules.md#modules), `tests/test_se_home.py`, `tests/test_se_modules.py`) |
 | The private-term scan runs on every push to any remote | the pre-push hook (`.githooks/pre-push`) runs `<se>/scripts/public_check.py` on every push whatever its remote; `integrate` runs the project check before each public mirror push ([Mirrors](#mirrors)); CI's `check` on the host ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | No tracked line names the home | `<se>/scripts/hygiene.py`'s check `neutral-home` ([AGENTS.md "Neutral home"](../../../AGENTS.md#neutral-home)), and each source's local list for every other remote's names |
-| No issue or comment text names another remote | a filing's template check (`<se>/scripts/work_tickets.py` `template_findings`) refuses each private term in the title and body, at the filing commands and the template gate ([README "Templates"](../../../README.md#templates)) |
-| Trees compare equal apart from lock files | `<se>/scripts/work_tickets.py parity` names every path two commits' trees differ in apart from `se.lock` and `uv.lock` at any depth ([README "Source parity"](../../../README.md#source-parity), `tests/test_parity.py`) |
+| No issue or comment text names another remote | a filing's template check (`<se>/scripts/work_tickets.py` `template_findings`) refuses each private term in the title and body, at the filing commands and the template gate ([docs/templating.md "Templates"](../../../docs/templating.md#templates)) |
+| Trees compare equal apart from lock files | `<se>/scripts/work_tickets.py parity` names every path two commits' trees differ in apart from `se.lock` and `uv.lock` at any depth ([docs/fleet.md "Source parity"](../../../docs/fleet.md#source-parity), `tests/test_parity.py`) |
 | Every change lands through SE's landing step | with `[integrate] landing = "fast-forward"`, the public check's identity gate refuses a commit the host made, so a merge-button commit turns `check` red ([AGENTS.md "Public safety"](../../../AGENTS.md#public-safety)) |
 | A generic commit identity on every remote | the commit gates of the hooks and of `check` ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)) |
 
@@ -462,8 +462,7 @@ Not picked: separate repositories merged by hand, the fallback if a guard ever m
 ### Neutral workflows
 
 A project calls SE's reusable workflows and actions as generated local copies, `uses:
-./.github/...`, which SE writes into it at its SE pin and keeps current (README
-[Workflows](../../../README.md#workflows)). The copies reach SE as the repository beside the
+./.github/...`, which SE writes into it at its SE pin and keeps current ([Workflows](../../../docs/running.md#workflows)). The copies reach SE as the repository beside the
 project, `${{ github.repository_owner }}/<name>`, so no tracked line names an owner.
 
 The alternatives weighed:
@@ -500,7 +499,7 @@ session list."
   - A role reads its own effort (`get_session` without an id) and passes that level, or a lower
     one where the work is lighter, as the session tool's `effort` (`create_session`).
   - A scheduled task that starts an integrator, such as the
-    [dispatcher's](../../../README.md#dispatcher), is set at or below the SE agent's effort; the
+    [dispatcher's](../../../docs/fleet.md#dispatcher), is set at or below the SE agent's effort; the
     person sets it when creating the task.
 - **Integrators' workflows**: an integrator may run a workflow (the host's multi-agent
   orchestration, Claude Code's `Workflow`) to plan and run its own work, such as checks across
@@ -584,11 +583,11 @@ Pull requests built on an old `main` cause most integration trouble.
   assigned to someone (`work_tickets.py ready`).
 - **Dispatcher**: where no integrator runs, a four-hourly workflow with no model fires the
   scheduled task whose session is a fresh integrator, once, while startable work waits
-  ([README "Dispatcher"](../../../README.md#dispatcher)).
+  ([docs/fleet.md "Dispatcher"](../../../docs/fleet.md#dispatcher)).
 - Nobody watches for deliveries. Triggers: the worker's delivery notification (its only message
   to another agent, never a question); `work_tickets.py queue` at the start of every integrator and
   SE turn, so a missed notification is handled as soon as either session is talked to; in the
-  cloud only, the scheduled task of the [dispatcher](../../../README.md#dispatcher).
+  cloud only, the scheduled task of the [dispatcher](../../../docs/fleet.md#dispatcher).
 - **Delivered, waiting for integration** is an open pull request to the integration branch whose
   description carries a complete field report (one that follows its template); `queue` lists them.
 - **Closing**: `integrate` closes the work issue with a comment that links the pull request and
@@ -596,7 +595,7 @@ Pull requests built on an old `main` cause most integration trouble.
   pieces left ([integrator](../../agents/integrator.md)), the issue stays open and the comment names
   what it waits for.
 - At most `[workers]` working agents run at once, 4 on a local device by default, the cloud open
-  unless set ([README "Workers"](../../../README.md#workers)); a local device also counts its CPU
+  unless set ([docs/settings.md "Workers"](../../../docs/settings.md#workers)); a local device also counts its CPU
   cores and memory. File clashes and the serial merge queue apply everywhere.
 - An integrated worker session is deleted once its branch is on `main` and its worktree is
   removed; a session is kept only while it holds an unresolved discussion with a handover issue.
@@ -693,7 +692,7 @@ A worker splits its work issue into local tickets in its worktree:
 This section is the one statement of how tests are written
 ([tst-002](references/rules.md#tst-002-fast-tests), fast tests); work
 issues point here and never restate it. The project's suite and its time budget are `[tests]` in
-`se.toml` ([Test budget](../../../README.md#test-budget)), which the integration gate enforces.
+`se.toml` ([Test budget](../../../docs/tests.md#test-budget)), which the integration gate enforces.
 
 Where CI runs the suite in shards (`[tests] shards`), the limit is each shard's, and a local run
 of the whole suite is judged against the shards times it; otherwise it is the whole suite's.
@@ -740,7 +739,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 - the focused and the complete test commands, including gated test tiers if there are any, and
   the focused tests a kind of change adds (in se, the docs build for published Markdown);
 - its public check with the hooks that run it; `public_check` in its `se.toml`
-  ([Project settings](../../../README.md#project-settings)) gates every push to the integration
+  ([Project settings](../../../docs/settings.md#project-settings)) gates every push to the integration
   branch on it, on unless the project sets it to `false`;
 - its integration project checks as JSON argument arrays passed to `integrate --check-command`, for
   example `--check-command '[["uv", "run", "pytest", "-q"], ["uv", "run", "python", "check.py"]]'`.
@@ -754,7 +753,7 @@ se is project-neutral. A project that uses it states in its `AGENTS.md`:
 
 The repository and its host come from the checkout's git remote `origin` (or `--repo`). Machine-local
 facts never go into a repository; they live in `~/.se/local.toml`. The
-[Modules guide](../../../README.md#modules) owns the module-specific settings; command-line arguments
+[Modules guide](../../../docs/modules.md#modules) owns the module-specific settings; command-line arguments
 override the settings below, and `work_tickets.py config` shows what is in effect:
 
 ```toml
@@ -774,8 +773,8 @@ integrator_session = "<session>"
 
 **Commit identity and public check**
 ([pub-002](references/rules.md#pub-002-a-generic-commit-identity)): every role commits as `public_identity` where the machine
-sets it (the [Modules guide](../../../README.md#machine-local-selocaltoml) owns what it pins), else
-as the project's `identity` in its `se.toml` ([Project settings](../../../README.md#project-settings)).
+sets it (the [Modules guide](../../../docs/running.md#machine-local-selocaltoml) owns what it pins), else
+as the project's `identity` in its `se.toml` ([Project settings](../../../docs/settings.md#project-settings)).
 Claude's cloud has no `~/.se/local.toml`, so there the project's identity applies. No session prompt
 repeats any of this section's rules:
 
@@ -897,8 +896,7 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     request from the relay. `SE_KERN=off`, no kern or a token backend keeps the file-based path
     above, the fallback; `<se>/scripts/se_relay.py` owns which path a command takes.
 - **One call through kern**: there `integrate`, `refs request`, `refs apply`, `file`, `route`,
-  `fleet-check` and `start` run as one call, each GitHub step of their plan asked through kern (README
-  [Hand-offs through the relay](../../../README.md#hand-offs-through-the-relay)).
+  `fleet-check` and `start` run as one call, each GitHub step of their plan asked through kern ([Hand-offs through the relay](../../../docs/settings.md#hand-offs-through-the-relay)).
   - Run the command in the background (in Claude Code, Bash's `run_in_background`), so the
     session can run its steps while it waits; each one prints `GitHub step through kern's relay:
     <tool>`.
@@ -906,8 +904,7 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     command through the PostToolUse hook. No file is saved and no `--read-back` follows: the
     command finishes on its own and prints its result.
   - After each step, call `uv run python <se>/scripts/se_relay.py next --root <checkout>` for the
-    next one (README
-    [Hand-offs through the relay](../../../README.md#hand-offs-through-the-relay)).
+    next one ([Hand-offs through the relay](../../../docs/settings.md#hand-offs-through-the-relay)).
 - **Kern in the cloud, always**: in a cloud session, integrators and workers run SE's commands
   with kern, never with `SE_KERN=off`; the fallback works but bypasses kern, which SE requires
   for everything mechanical.
@@ -925,10 +922,9 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
     local verdicts decide.
 - **Commands that hand off** their GitHub steps: `integrate`, `refs request` and `refs apply`
   do everything local, print their GitHub steps as a plan of tool names and arguments, and
-  check the result through git with `--read-back` (README
-  [Landing on main](../../../README.md#landing-on-main)).
+  check the result through git with `--read-back` ([Landing on main](../../../docs/settings.md#landing-on-main)).
   - `fleet-check` prints its reading plan and takes the lists the GitHub tools read as files
-    (README [Fleet check](../../../README.md#fleet-check)).
+    ([Fleet check](../../../docs/fleet.md#fleet-check)).
   - `paused` prints its search as a plan, and `route` prints it before its own
     ([Pause](#pause)).
   - `queue` syncs the checkout and prints its reads as a plan: the pause search, the
@@ -940,7 +936,7 @@ A `gh` that is installed but neither signed in nor answered over REST counts as 
   - `start --issue-body <file>`, the issue as `issue_read` (method `get`) answered it, creates
     the worktree and prints the pause search, the label change (`ready` off, `in-progress` on)
     and the `Started:` comment as its plan; through kern's relay it runs them as one call.
-  - Where a [worker limit](../../../README.md#workers) holds, it refuses once that many run. It
+  - Where a [worker limit](../../../docs/settings.md#workers) holds, it refuses once that many run. It
     reads them through kern's relay, else from `--running <file>`, their `list_issues` answer.
   - It refuses while a blocker holds the issue: a link its answer counts, or an issue its
     Blocked by names. It reads those through kern's relay, else from `--blockers <file>`, their
@@ -976,7 +972,7 @@ for example:
 - `deliver`:
   - Once the pull request is open or updated, `stop-check --pull <number> --pr-description
     <file>` (its description as the GitHub tools read it) records it for the Stop hook
-    ([README "Stop hook"](../../../README.md#stop-hook)), which judges without gh by that record.
+    ([docs/fleet.md "Stop hook"](../../../docs/fleet.md#stop-hook)), which judges without gh by that record.
   - The field report comes from `field-report.md`, which `field-report --draft
     .se/work/field-report.md --worktree <worktree> --issue-body <file>` writes from the issue as
     the tools answered it (or from `intake`'s snapshot without `--issue-body`); it refuses
@@ -1024,7 +1020,7 @@ for example:
 
 The hand-off steps that land a pull request, by hand:
 
-- `integrate`: the hand-off, the cloud path of [Landing on main](../../../README.md#landing-on-main).
+- `integrate`: the hand-off, the cloud path of [Landing on main](../../../docs/settings.md#landing-on-main).
   - Save the pull request's description and its work issue's body to files, then run
     `integrate <pull request> --pr-description <file> --issue-body <file> --branch <its head
     branch>`. Where kern's relay serves the checkout, run `integrate <pull request>` alone: it
@@ -1061,7 +1057,7 @@ host's name or its layout. Out of scope: the Copilot cloud agent, and VS Code's 
 harnesses.
 
 - **SE's commands through the `se` tools, where present**: the MCP door
-  ([README "The MCP door"](../../../README.md#the-mcp-door)) offers SE's read-only commands as the
+  ([docs/start.md "The MCP door"](../../../docs/start.md#the-mcp-door)) offers SE's read-only commands as the
   tools `se/status`, `se/greeting`, `se/tickets`, `se/integration` and `se/overhaul`, each taking
   `command`, `args` and `page`.
   - Where a tool answers `starting`, call it again in a few seconds; where it answers

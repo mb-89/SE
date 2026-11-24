@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The launcher of SE's MCP door (`se mcp`, README "MCP door"): what a host's MCP configuration runs.
+# The launcher of SE's MCP door (`se mcp`, docs/start.md "The MCP door"): what a host's MCP configuration runs.
 # Standalone: it reads nothing of SE but the release pin, components/release.toml, beside it.
 #
 #   se_mcp.sh --root <project>

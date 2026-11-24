@@ -10,7 +10,7 @@ template system for everything agents write; the names template, schema and docu
 separate guidance system that templates use. The guidance system has its own design; this note
 states only the one call a template makes to it ([Tags and guidance](#tags-and-guidance)).
 
-Until the packages land, README ["Templates"](../README.md#templates) describes the engine as it
+Until the packages land, ["Templates"](templating.md#templates) describes the engine as it
 runs today; the [Map](#map) says where each of its parts goes.
 
 ## Names
@@ -187,7 +187,7 @@ se.toml.
 
 - se.toml lists them by name, `[templates] repositories = ["<name>", ...]`, each a component
   `[components.<name>]` pinned by `ref` or `version` as any other and placed by `se_modules.py
-  sync` ([README "Modules"](../README.md#modules)); its templates are its `templates/`, under its
+  sync` ([docs/modules.md "Modules"](modules.md#modules)); its templates are its `templates/`, under its
   `path` where it sets one.
 - The engine resolves a template name in order: the project's own `templates/`, then each pinned
   template repository in the order se.toml lists them, then SE's own.

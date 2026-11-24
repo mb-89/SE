@@ -1,5 +1,5 @@
 """A pull request's edit or label change reuses the suite's result of an earlier run of the same tree
-(scripts/ci_reuse.py, README "Edits reuse the suite"): which earlier run counts, that a failed one
+(scripts/ci_reuse.py, docs/tests.md "Edits reuse the suite"): which earlier run counts, that a failed one
 keeps `check` failed, when everything runs, and the workflow steps that act on the decision.
 GitHub is a fake door, or for the end-to-end decision a local HTTP server; the workflow is read as
 text and its decision steps run as its runner runs them."""
