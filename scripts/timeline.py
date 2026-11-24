@@ -47,7 +47,7 @@ The page builds itself from GitHub, so nobody maintains it: one read, then pure,
   the page shows the snapshot. The mark is never read live.
 
 Exit code 0: written, a gap included; 1: GitHub refused the read of every repository, or obs failed;
-2: setup error. The README section "Documentation" says where the page is published.
+2: setup error. docs/documentation.md "Documentation" says where the page is published.
 """
 
 from __future__ import annotations
@@ -156,7 +156,7 @@ def query(ages: bool = False) -> str:
     return AGES_QUERY if ages else QUERY
 
 
-# A release is a tag v<major>.<minor>.<patch> (README "Release tags"); the moving v<major> is none.
+# A release is a tag v<major>.<minor>.<patch> (docs/settings.md "Release tags"); the moving v<major> is none.
 RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 
 # A poster sends one GraphQL query with its variables and returns the response's `data`.
@@ -613,7 +613,7 @@ def sibling(name: str):
     return module
 
 
-#: The pages SE renders as one kern component (README "Commands as components"), timeline.py's
+#: The pages SE renders as one kern component (docs/start.md "Commands as components"), timeline.py's
 #: command first, then deck.py's, which names this group; each command's usage and help come from
 #: its script's make_parser.
 COMPONENTS = (sibling("se_components").Group(

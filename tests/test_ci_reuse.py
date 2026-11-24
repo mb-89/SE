@@ -1,5 +1,5 @@
 """A pull request's edit or label change reuses the suite's result of an earlier run of the same tree
-(scripts/ci_reuse.py, README "Edits reuse the suite"): which earlier run counts, that a failed one
+(scripts/ci_reuse.py, docs/tests.md "Edits reuse the suite"): which earlier run counts, that a failed one
 keeps `check` failed, when everything runs, and the workflow steps that act on the decision.
 GitHub is a fake door, or for the end-to-end decision a local HTTP server; the workflow is read as
 text and its decision steps run as its runner runs them."""
@@ -294,7 +294,7 @@ def test_the_trust_job_names_its_decision_step_with_the_key_a_later_run_reads() 
 
 def test_the_suite_the_go_checks_and_the_legs_run_only_where_the_decision_says_run() -> None:
     jobs = jobs_of_workflow()
-    for gated in ("kern-platforms", "kern-platforms-queue"):
+    for gated in ("kern-platforms", "kern-platforms-queue", "showcase"):
         assert "needs: trust\n    if: needs.trust.outputs.suite == 'run'" in jobs[gated], gated
     for step in ("SE's Go components vet", "Install obs's adapter component obs-html",
                  "The complete suite and the suites beside it", "Keep the suite's file seconds",

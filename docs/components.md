@@ -9,7 +9,7 @@ its one main command, and that command's `components` verb.
 It is a design: [The packages](#the-packages) lists the implementation in order, and until each
 lands the README describes what runs. It extends obs's design of its own components (obs's
 `spec/design_input/components.md`, work issue obs#860) to every host, and it replaced the address in
-each `se.toml` module entry by the name alone ([README "Modules"](../README.md#modules)).
+each `se.toml` module entry by the name alone ([docs/modules.md "Modules"](modules.md#modules)).
 
 ## A component
 
@@ -81,7 +81,7 @@ optional = true                   # absent: required
 ```
 
 - An entry names a component and its pin, and nothing else: no address, no owner, no host, no
-  provenance. The pin keys stay as the README's [Modules](../README.md#modules) defines them (`ref`,
+  provenance. The pin keys stay as the README's [Modules](modules.md#modules) defines them (`ref`,
   `version`, `go`, `path`), and `se.lock` records each pin's version and commit.
 - `optional = true` marks a component the host works without; an entry without it is **required**.
   Required is the default, since a missing required component should fail where it is declared, not
@@ -96,7 +96,7 @@ optional = true                   # absent: required
   hand is read the same way.
 
 A machine that needs another place, such as a mirror or a local checkout, says so in the
-machine-local file ([README "Modules"](../README.md#modules)), which wins over finding and is never
+machine-local file ([docs/modules.md "Modules"](modules.md#modules)), which wins over finding and is never
 committed.
 
 ## Finding a component
@@ -228,7 +228,7 @@ belong to (the person's decision of 22 Nov 2026, runtimes blessed).
 
 - **Each component declares its own**, in its `se.toml` beside its `[components]`, as the table
   `[runtimes]`: a runtime's name and the range of its versions it admits, in the form of a
-  component's `version` pin ([README "Modules"](../README.md#modules)). The root declares its own
+  component's `version` pin ([docs/modules.md "Modules"](modules.md#modules)). The root declares its own
   the same way.
 
   ```toml
@@ -529,7 +529,7 @@ built and changes:
 | the start's placed check, its stop message and its optional line | unchanged, but the message names the mark instead of the topic, and a lock that disagrees names `se components update <name>` | se 4 |
 | the start's finding of a missing component through `se_modules.py` | `se components sync`, with the binary placed in the foreground first ([The one owner](#the-one-owner)) | se 4 |
 | `[project] components`, the project's listing command, whose table the greeting parses | gone: the greeting reads `<main> components list --json`, the main command from `RUNME.conf` | se 4 |
-| `se.py component add`, which scaffolds an ad hoc component ([README "Ad hoc components"](../README.md#ad-hoc-components)) | `se components new <name>`, so one verb owns components and `add` means one thing, as `uv init` and `uv add` differ | se 4 |
+| `se.py component add`, which scaffolds an ad hoc component ([docs/applications.md "Ad hoc components"](applications.md#ad-hoc-components)) | `se components new <name>`, so one verb owns components and `add` means one thing, as `uv init` and `uv add` differ | se 4 |
 
 ## Steps only the person takes
 
@@ -581,12 +581,12 @@ person takes](#steps-only-the-person-takes)); its package 4, obs's, is package 3
    - The greeting reads `se components list --json`, and `[project] components` goes.
    - `se.py component add` becomes `se components new`; `build_docs.py` adds the html adapter with
      `obs components add obs-html` at obs's new major; `RUNME.conf` declares `service github`.
-   - README "Modules", "Start and refresh", "Ad hoc components" and "Project settings";
+   - docs/modules.md "Modules", "Start and refresh", "Ad hoc components" and "Project settings";
      `tests/test_se_modules.py`, `tests/test_se_start.py`.
    - Removing `se_modules.py`'s commands and a setting breaks every project that calls them, so it
      lands as a major release of se.
 5. **se: every command through `se`** (se). SE's script commands, each declared by its component's
-   `component.toml` ([README "Commands as components"](../README.md#commands-as-components)), become
+   `component.toml` ([docs/start.md "Commands as components"](start.md#commands-as-components)), become
    verbs of `se`, so skills, agents and AGENTS.md name `se <command>`, not `uv run python
    <se>/scripts/<name>.py`. It changes the command line of every role, so it starts as a design
    package owned by [go-core.md "Migration"](go-core.md#migration).

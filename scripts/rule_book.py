@@ -8,7 +8,7 @@ Exit code 0: the book passed; 1: it has problems (each printed as `<book>:<line>
 2: setup error (the book is missing).
 
 `documentation` makes the documentation's page of the book from the same parse: one table of its
-rules and one note per rule (README "Documentation").
+rules and one note per rule (docs/documentation.md "Documentation").
 """
 
 from __future__ import annotations

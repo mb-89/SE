@@ -1,5 +1,5 @@
 # kern at the commit a project's se.lock locks, in <folder>/.se/modules/kern, the clone its go.mod
-# replaces kern by (SE's README "Modules"): the one way CI places kern, for the battery's vet and
+# replaces kern by (SE's docs/modules.md "Modules"): the one way CI places kern, for the battery's vet and
 # tests and for the release's build (kern-battery.yml, kern-release.yml). It refuses a lock whose
 # version is not the one the go.mod requires that the folder's se.toml [components.kern] go names,
 # naming both lines. An application whose se.lock locks no kern and that carries kern's source in
