@@ -145,7 +145,9 @@ def test_the_module_imports_only_the_standard_library():
     modules = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import)
                for alias in node.names}
     modules |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert modules and modules <= set(sys.stdlib_module_names) | {"__future__"}, modules
+    # se_script, the shared part of every script, is itself standard library only
+    # (tests/test_code_templates.py holds it to that)
+    assert modules and modules <= set(sys.stdlib_module_names) | {"__future__", "se_script"}, modules
 
 
 def test_nothing_names_the_checker():

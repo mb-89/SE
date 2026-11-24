@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Rewrite a fresh clone's history once so no commit or tag carries an address or a foreign identity.
 
 Every branch of the clone's origin gets a local branch first; then every local branch and tag is
@@ -42,6 +43,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import git_door
+import se_script
 
 def _public_check():
     """scripts/public_check.py beside this script, whose detectors the commit gates apply."""
@@ -380,7 +382,7 @@ def rewrite(repo: Path, identity: tuple[str, str]) -> tuple[Counts, dict[str, st
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser = se_script.parser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--repo", type=Path, required=True,
                         help="the fresh full clone to rewrite in place")
     parser.add_argument("--identity", help="'Name <email>'; default: the project identity "
@@ -431,4 +433,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

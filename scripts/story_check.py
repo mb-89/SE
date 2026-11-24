@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """Check a story deck: one actor, then problem, start, one to six steps and result, one claim per slide.
 
 A story deck is an obs vault whose manifest names the actor and links its slides in order. Each slide
@@ -15,6 +17,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+import se_script
 
 # The evidence half of a slide whose run has not happened yet, exactly.
 NOT_YET_RUN = "> [!todo] Not yet run\n> Added from the record of the run once the run has happened."
@@ -221,7 +224,7 @@ def _read(path: Path) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = se_script.parser(description=__doc__.splitlines()[0])
     parser.add_argument("manifest", type=Path, metavar="MANIFEST", help="the story's manifest note")
     arguments = parser.parse_args(argv)
     manifest = arguments.manifest
@@ -236,4 +239,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

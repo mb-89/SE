@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's switches and which of them are on: a read-only view over the table `scripts/switches/`.
 
 The table is a folder of TOML files, one per group (`core.toml` first); a later module adds a
@@ -33,6 +34,7 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import se_script
 
 SE_ROOT = Path(__file__).resolve().parents[1]
 TABLE = Path(__file__).resolve().parent / "switches"
@@ -326,7 +328,7 @@ def code_texts(root: Path = SE_ROOT) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Print SE's switches, whether each is on and "
+    parser = se_script.parser(description="Print SE's switches, whether each is on and "
                                      "which layer answered; read-only, always exits 0.")
     parser.add_argument("--json", action="store_true", help="print JSON")
     parser.add_argument("--root", type=Path, default=Path.cwd(),
@@ -374,4 +376,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

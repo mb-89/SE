@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's side of templates: the templates engine (`templates.py`) with the checks SE's filing commands add, as
 the command component `templates` that kern's MCP door serves as its tool `templates` (docs/templating.md "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
@@ -228,6 +229,8 @@ import threading
 import time
 import tomllib
 from pathlib import Path
+
+import se_script
 
 HERE = Path(__file__).resolve().parent
 #: The title shape of the templates whose title is a ticket's name (templates/ticket.md, templates/work.md).
@@ -739,7 +742,7 @@ def kern_problems(template) -> list[str]:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se_templates.py", description=__doc__.splitlines()[0])
+    top = se_script.parser(prog="se_templates.py", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
     tree = {"action": "store_true", "help": "read the working tree's templates/ (default: templates/ at "
                                             "origin/<integration branch> where it holds them)"}
@@ -1506,6 +1509,7 @@ def judged_write(write: Write, what: str, repo: str, root: Path, catalog: dict,
     templates = sibling("templates")
     environ = {"SE_SESSION": write.session} if write.session else None
     lines = []
+    scaffolded = False
     for relative, owners in claims:
         text = results.get(relative)
         found = [] if text is None else refusals(catalog, root, relative, text)[1]
@@ -1513,17 +1517,30 @@ def judged_write(write: Write, what: str, repo: str, root: Path, catalog: dict,
             continue
         templates.count_refusal(templates.target(owners[0], repo, templates.FILE_ACTION, title=relative),
                                 environ)
+        lines += [f"  {line}" for line in found]
+        code = [name for name in owners if getattr(catalog.get(name), "kind", "") == templates.CODE]
+        if code:  # a code template's file is scaffolded, never filled (templates.py: Code templates)
+            scaffolded = True
+            for name in code:
+                call = (f"uv run python {HERE / 'templates.py'} scaffold {name} --path {root / relative} "
+                        f"--says <one line> --root {root}")
+                lines.append(f"  {relative}: its scaffold ({name}): {call}"
+                             + (f" --templates {source}" if source is not None else ""))
+            continue
         name = owners[0] if len(owners) == 1 else "<template>"
         fill = f"uv run python {HERE / 'templates.py'} fill {name} --path {root / relative} --root {root}"
         if source is not None:
             fill += f" --templates {source}"
-        lines += [f"  {line}" for line in found] + [f"  {relative}: its fill: {fill}"]
+        lines.append(f"  {relative}: its fill: {fill}")
     if not lines:
         return ""
+    advice = ("Fix the write so the file keeps its template's shape, or scaffold a new file: the "
+              "scaffold writes it with its marker and shape, its slots for the rest, and an edit "
+              "that keeps them passes" if scaffolded else
+              "Fix the write so the file parses, or fill it: without --fields the fill answers the "
+              "template's instructions; with --fields and --input it writes the file")
     return deny("\n".join([f"{what}: the file it leaves breaks the template that claims its path:", *lines,
-                           "Fix the write so the file parses, or fill it: without --fields the fill "
-                           "answers the template's instructions; with --fields and --input it writes "
-                           "the file"]))
+                           advice]))
 
 
 def run_runtime(root: Path) -> int:
@@ -1713,9 +1730,14 @@ def text_lines(catalog: dict, root: Path, texts: list[tuple[str, str]], source: 
 def changed_refusal(root: Path, ref: str) -> list[str] | None:
     """check-files --changed `ref` for the checkout `root` as stop-check and push run it: its
     lines where a changed claimed file breaks its template; None where no template claims a path
-    outside LOCAL_STATE or every such file passes. Errors raise."""
+    outside LOCAL_STATE, where `ref` shares no merge base with HEAD (no such ref yet: a checkout
+    with nothing published to compare with, whose pull request CI's check job checks against its
+    base), or where every such file passes. Errors raise."""
     catalog, source = claim_templates(root, None)
     if not claims_a_carried_path(catalog):
+        return None
+    base = sibling("git_door").run("merge-base", ref, "HEAD", root=root)
+    if base.returncode != 0 or not base.stdout.strip():
         return None
     lines, code = file_lines(catalog, root, changed_files(root, ref), source, claimed_only=True)
     return lines if code else None
@@ -1855,4 +1877,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

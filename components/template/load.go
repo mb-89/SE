@@ -20,6 +20,7 @@ const (
 	FileAction        = "file.write"
 	MessageAction     = "message.send"
 	interfaceKind     = "interface"
+	codeKind          = "code"
 	NotInInput        = "Not in input"
 	Refuse            = "refuse"
 	Warn              = "warn"
@@ -37,7 +38,7 @@ var (
 	Actions        = []string{"issue.create", "issue.edit", "pr.create", "pr.edit", "pr.merge", "comment.create", "comment.edit", "deck.build", FileAction, MessageAction}
 	readers        = []string{"owner", "fleet"}
 	fieldKinds     = []string{"line", "text", "choice", "list", "object", "issue", "checklist", "code", "node", "register", "rows", "case"}
-	templateKinds  = []string{"document", "block", "entry", "interface"}
+	templateKinds  = []string{"document", "block", "entry", "interface", "code"}
 	partKinds      = []string{"block", "entry"}
 	refuseRules    = []string{"required", "choice", "not-picked", "duplicate", "dangling"}
 	warnRules      = []string{"words", "first-sentence", "actor", "one-sentence", "bare-number", "board", "terms", "unnamed-entry", "title-shape"}
@@ -459,6 +460,15 @@ func noteData(text, where string) (Object, error) {
 	}
 	if data.Value("kind") == interfaceKind {
 		return interfaceData(data, list, body, where, first)
+	}
+	if data.Value("kind") == codeKind {
+		// A code template's body is the files scripts/templates.py's scaffold writes (its docstring:
+		// Code templates); the Go engine checks the files it claims by the adapter's lines and
+		// scaffolds none, so it keeps the body unread.
+		if len(list) > 0 {
+			return nil, fail("%s: a code template has no fields; its adapter's lines hold its shape", where)
+		}
+		return data, nil
 	}
 	sections, err := skeleton(body, where, first, level)
 	if err != nil {

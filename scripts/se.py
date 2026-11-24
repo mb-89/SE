@@ -1,3 +1,5 @@
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """The `se` command: `uv run python <se>/scripts/se.py <command>`. Each command's module owns what it
 does; this file only names them (docs/applications.md "New application")."""
 
@@ -7,6 +9,7 @@ import argparse
 import importlib.util
 import sys
 from pathlib import Path
+import se_script
 
 
 def _sibling(name: str):
@@ -30,7 +33,7 @@ INTERACTIVE_COMMANDS: frozenset[str] = frozenset()
 
 
 def make_parser() -> argparse.ArgumentParser:
-    top = argparse.ArgumentParser(prog="se.py", description="SE's commands.")
+    top = se_script.parser(prog="se.py", description="SE's commands.")
     commands = top.add_subparsers(dest="command", required=True)
     new = commands.add_parser("new", help="create something new").add_subparsers(dest="what", required=True)
     app = new.add_parser("app", help="create an application on kern from kern's template at SE's kern pin")
@@ -80,4 +83,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

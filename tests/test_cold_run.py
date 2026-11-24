@@ -199,7 +199,8 @@ def imported(source: str) -> set[str]:
 
 def test_the_reader_imports_nothing_from_se_and_nothing_that_reaches_outside():
     names = imported(Path(cold_run.__file__).read_text(encoding="utf-8"))
-    assert names <= {"__future__", "argparse", "dataclasses", "re", "sys", "tomllib"}
+    # se_script is the script entry's shared part, standard library only (tests/test_code_templates.py)
+    assert names <= {"__future__", "argparse", "dataclasses", "re", "sys", "tomllib", "se_script"}
 
 
 def test_the_report_function_opens_no_file():

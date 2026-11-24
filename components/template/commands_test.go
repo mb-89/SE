@@ -15,6 +15,7 @@ func TestTheReadingFollowsEachWayAScriptBuildsItsParser(t *testing.T) {
 	}{
 		{"no argparse", "def main(argv=None):\n    return 0\n", Tree{}},
 		{"no main", "import argparse\nparser = argparse.ArgumentParser()\nparser.add_subparsers().add_parser('x')\n", Tree{}},
+		{"se_script's parser", "import se_script\n\n\ndef main(argv=None):\n    parser = se_script.parser(prog=\"x.py\")\n    commands = parser.add_subparsers(dest=\"command\")\n    commands.add_parser(\"run\")\n    parser.parse_args(argv)\n", Tree{"run": Tree{}}},
 		{"subparsers, nested", `import argparse
 
 def main(argv=None):

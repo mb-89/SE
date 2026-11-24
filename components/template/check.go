@@ -1016,7 +1016,15 @@ func selectFile(templates Catalog, body string, title *string, path string) Sele
 			return Selection{t, refused}
 		}
 	}
-	refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: no template takes this file; name its template in the front matter, derived_from: {template: <name>, version: <version>} (one of %s)", path, joinStrings(names))})
+	code := true
+	for _, t := range candidates {
+		code = code && t.Kind == codeKind
+	}
+	if code {
+		refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: no template takes this file; it carries no template marker: scaffold it, templates.py scaffold <template> --path %s --says <one line> (one of %s)", path, path, joinStrings(names))})
+	} else {
+		refused = append(refused, Finding{"body", "template", Refuse, fmt.Sprintf("%s: no template takes this file; name its template in the front matter, derived_from: {template: <name>, version: <version>} (one of %s)", path, joinStrings(names))})
+	}
 	return Selection{nil, refused}
 }
 

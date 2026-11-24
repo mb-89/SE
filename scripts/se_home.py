@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
+# se:template se/python-script 1.0.0
 """SE's home, from the checkout's origin: the one answer to where a checkout lives.
 
 The same tree may live on more than one Git host, and only a machine that holds both remotes knows
@@ -45,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 import git_door
+import se_script
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -209,7 +211,7 @@ def anchored(root: Path, origin_url: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="se_home.py", description=__doc__.splitlines()[0])
+    parser = se_script.parser(prog="se_home.py", description=__doc__.splitlines()[0])
     parser.add_argument("--repo", type=Path, default=ROOT, help="the checkout (default: SE's own)")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("url", help="https://<host>/<owner>/<repository>")
@@ -235,4 +237,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(se_script.run(main))

@@ -1,3 +1,4 @@
+# se:template se/python-module 1.0.0
 """The fleet's settings as the repository records them, compared with the live settings: an
 advisory check, standalone, that nothing runs on its own and that never blocks a landing, a push
 or a session start. This docstring owns the file's format and the check.
