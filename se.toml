@@ -133,7 +133,7 @@ go = "components/go.mod"
 version = "^10.4.0"
 
 [components.obs-html]
-version = "^0.5.2"
+version = "^0.6.0"
 
 # The repositories the Timeline page shows, one lane each (scripts/timeline.py): a bare name beside
 # SE's home, which comes from origin (scripts/se_home.py).
