@@ -76,14 +76,15 @@ def test_a_snippet_writes_its_rows_and_its_case_and_reads_back_through_schema_an
     template = catalog["boot-report"]
     values = dict(template.example["fields"])
     text = interfaces.write("boot-report", values)
-    assert text.splitlines()[-6:] == ["| SE | 12.0.1 | 13.0.0 |", "| kern | 2.1.0 | 2.1.0 |", "| obs | 10.3.2 | 10.3.2 |",
-                                      "| obs-html | 0.5.2 | 0.5.2 |", "", "To update: /se:update"]
+    assert text.splitlines()[-6:] == ["| SE | 12.0.1 | 13.0.0 |", "| kern | 2.1.0 | 2.2.0 |", "| obs | 10.3.2 | 10.3.2 |",
+                                      "| obs-html | 0.5.2 | 0.5.2 |", "",
+                                      "To update: /se:update. The next SE release brings kern 2.2.0."]
     assert text + "\n" == templates.render(template, values)
     assert interfaces.read("boot-report", text) == values
     assert templates.parse(template, text).fields == values
     assert templates.check(template, templates.parse(template, text)) == []
     one = [{"name": "SE", "loaded": "12.0.1", "newest": "12.0.1"}]
-    current = interfaces.write("boot-report", {**values, "components": one, "update": "current"})
+    current = interfaces.write("boot-report", {**values, "components": one, "update": "current", "names": ""})
     assert current.endswith("|---|---|---|\n| SE | 12.0.1 | 12.0.1 |\n\nEverything is current.")
     assert interfaces.read("boot-report", current)["components"] == one
     assert interfaces.read("boot-report", text + "\nmore text") is None
@@ -91,7 +92,7 @@ def test_a_snippet_writes_its_rows_and_its_case_and_reads_back_through_schema_an
 
 def test_a_snippet_refuses_a_case_it_does_not_hold_and_a_row_without_its_columns(catalog):
     values = dict(catalog["boot-report"].example["fields"])
-    with pytest.raises(interfaces.InterfaceError, match="update is 'maybe'; one of due, current, unknown"):
+    with pytest.raises(interfaces.InterfaceError, match="update is 'maybe'; one of due, next, due_next, stopped, current, unknown"):
         interfaces.write("boot-report", {**values, "update": "maybe"})
     with pytest.raises(interfaces.InterfaceError, match="components item 1: loaded is required"):
         interfaces.write("boot-report", {**values, "components": [{"name": "SE"}]})

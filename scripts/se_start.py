@@ -599,17 +599,43 @@ def report_row(state: State) -> dict[str, str]:
     return {"name": item.name, "loaded": _v(item.version) if item.version else "none", "newest": newest}
 
 
-def update_case(states: list[State], read: list[State] = ()) -> str:
-    """`due` where a newer release than one loaded is known, else `unknown` where a newest version
-    is not read, else `current`; from versions alone. `read` (SE's required rows) counts only for
-    `unknown`: /se:update moves SE and the project, never an installed SE's own lock."""
-    if any(s.latest and s.item.kind != "local" and (s.item.version is None or s.latest > s.item.version)
-           for s in states if not s.error):
-        return "due"
-    if any(s.error or s.unchecked or (s.latest is None and s.item.url) for s in [*states, *read]
-           if s.item.kind != "local"):
-        return "unknown"
-    return "current"
+def _and(names: list[str]) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def behind(row: dict[str, str]) -> bool:
+    """Whether a table row's newest release is newer than its loaded version, from its text alone:
+    `local` and `unknown` never are, a loaded `none` (not installed) is behind any release, and a
+    loaded value that is no version (`off`, a core the person switched off) moves with none."""
+    newest = se_modules.parse_version(row["newest"])
+    if newest is None:
+        return False
+    if row["loaded"] == "none":
+        return True
+    loaded = se_modules.parse_version(row["loaded"])
+    return loaded is not None and newest > loaded
+
+
+def update_line(rows: list[tuple[dict[str, str], bool]]) -> dict[str, str]:
+    """The report's last line from the table's rows alone, each with whether SE locks it (one of SE's
+    required rows), as the template's `update` case and the `names` it names (docs/boot.md "The start
+    report"): `stopped` where a required row did not load; else, where rows are behind, `next` for
+    those SE locks (only the next SE release moves them), `due` for any other (/se:update moves it),
+    `due_next` for both; else `unknown` where a newest release is not read; else `current`."""
+    stopped = [row["name"] for row, locked in rows if locked and row["loaded"] == "none"]
+    if stopped:
+        return {"update": "stopped", "names": _and(stopped)}
+    late = [(row, locked) for row, locked in rows if behind(row)]
+    arriving = [f"{row['name']} {row['newest']}" for row, locked in late if locked]
+    due = any(not locked for _, locked in late)
+    if arriving:
+        return {"update": "due_next" if due else "next", "names": _and(arriving)}
+    if due:
+        return {"update": "due", "names": ""}
+    if any(row["newest"] == "unknown" for row, _ in rows):
+        return {"update": "unknown", "names": ""}
+    return {"update": "current", "names": ""}
 
 
 def required_row(loaded: Loaded, states: list[State]) -> dict[str, str]:
@@ -622,18 +648,19 @@ def required_row(loaded: Loaded, states: list[State]) -> dict[str, str]:
 
 def report_values(report: Report) -> dict[str, object]:
     """The fields of the start report: SE's version, the counts and their pages, the table and the
-    update line's case. The table holds SE, then SE's required components as they answered, then the
-    project's own components but those, which the required rows already show."""
+    update line from its rows. The table holds SE, then SE's required components as they answered,
+    then the project's own components but those, which the required rows already show."""
     local, c = report.local, report.local.counts
     states = [s for s in report.states if s.item.name != "se"]  # SE itself is its first row, "SE"
     required = {loaded.name.lower() for loaded in report.required}
     se, *own = states  # read_local lists SE first
-    table = ([report_row(se)] + [required_row(loaded, report.required_states) for loaded in report.required]
-             + [report_row(state) for state in own if state.item.name.lower() not in required])
+    rows = ([(report_row(se), False)]
+            + [(required_row(loaded, report.required_states), True) for loaded in report.required]
+            + [(report_row(state), False) for state in own if state.item.name.lower() not in required])
     return {"version": _v(local.se_version), "skills": str(c.skills), "rules": str(c.rules),
             "subagents": str(c.subagents), "docs": local.docs_url or ".",
             **{key: page_link(local.docs_url, page) for key, page in PAGE_OF.items()},
-            "components": table, "update": update_case(states, report.required_states if report.required else [])}
+            "components": [row for row, _ in rows], **update_line(rows)}
 
 
 def greeting(report: Report, se_root: Path) -> list[str]:
