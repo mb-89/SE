@@ -1,0 +1,102 @@
+[
+  {
+    "query": "Write me a label spec, the template is label-spec, my raw data is in notes/.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Here are three templates and a folder of interview notes; fill each one into a new repo.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Fill the test-plan template from the material in raw/ and give me the documents.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "I have a requirements template and some meeting notes. Turn them into the finished requirements document.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Draft a datasheet from this template using the measurements in the data folder.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Use the template manifest in templates/brief and my research folder to write the product brief.",
+    "should_trigger": true,
+    "split": "train"
+  },
+  {
+    "query": "Take my Markdown template for a risk assessment and the notes in project-notes/, and write the assessment.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Make a small repository with the label spec filled from these raw notes.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "There is a template for an onboarding guide and a pile of wiki exports; produce the guide.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Fill these two templates from the repository of design notes, nothing else as a prompt.",
+    "should_trigger": true,
+    "split": "validation"
+  },
+  {
+    "query": "Write a new template for a label spec; I will fill it in myself later.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Check whether the work issue body passes its template.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Create a new repository for the obs styles and push it.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Summarise the notes in this folder in three bullets.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Rename the section headings in the README to plain words.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Draft the field report for the pull request I just pushed.",
+    "should_trigger": false,
+    "split": "train"
+  },
+  {
+    "query": "Link every rule in the rule book to the check that enforces it.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Import the templates from our old wiki into a template repository.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "What is a template manifest? Explain it, change nothing.",
+    "should_trigger": false,
+    "split": "validation"
+  },
+  {
+    "query": "Find the raw data file the failing test reads.",
+    "should_trigger": false,
+    "split": "validation"
+  }
+]

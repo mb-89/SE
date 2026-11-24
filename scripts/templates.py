@@ -2,7 +2,7 @@
 """Templates: the shape of the text SE writes, kept as data, read, checked and written by one engine.
 
 The commands that file issues (`work_tickets.py file`, `backlog file` and `route`) check with it
-where se.toml `[templates] enforce` is on (README "Templates"); this module owns that switch's reading
+where se.toml `[templates] enforce` is on (docs/templating.md); this module owns that switch's reading
 (`enforcement`), the private-term findings (`private_findings`), the refusal text (`report`) and
 the count of refusals behind `--hold` (`target`, `refusals`, `count_refusal`).
 
@@ -350,7 +350,14 @@ lists each file document under DIR, outside hidden folders, whose `derived_from`
 an older version than the template's now, `<file>: derived from <template> <version>; the template
 is at <version>`, and warns on stderr of one whose template does not resolve; a version that is
 none of its template's form cannot be ordered and counts as older where it differs (`stale`). Exit
-0. `templates.py list` names every template with its actions, then the paths it claims and, for an
+0. `templates.py documents --path DIR [--input FILE|DIR]` checks each file document under DIR,
+outside hidden folders, against the template its `derived_from` names and, with `--input`, the raw
+input (`documents`): a line per finding, `<file>: <finding>`; a line per section its material did
+not fill, `<file>: <heading>: not in input` or `: empty` (`gaps`); then `<n> documents: pass` or
+`refused`, naming the count of those sections. A document whose template does not resolve, and a
+folder that holds none, refuse; exit 1 where anything refuses, else 0
+(docs/templates.md "Filling templates from material"). `templates.py list` names every template
+with its actions, then the paths it claims and, for an
 adapter, its checker; `list --owned` names each owned glob, `<glob>: <template>`
 (`owned`). Each command resolves its template names by `catalog` for the project
 `--root` names, else the checkout holding `--path` (`_root`), else SE's own checkout. `--tree` reads
@@ -374,8 +381,9 @@ fields.
   `says`, the rules of honest fields (HONEST, and one per `quote` field), the guidance its tags
   resolve in `--root`'s trees (`guidance`, through `scripts/se_guidance.py`), then the empty draft
   as Markdown (`draft`) and `draft --json`'s fields, field_says, field_shape and schema. Exit 0.
-- With fields it needs the raw input, and checks the document the fields render against the
-  template and that input (`fill`: `check(raw=)`, so a `quote` field's quotes must be in it).
+- With fields it needs the raw input, `--input` a file or a folder of material (`raw_input`: each
+  text file under it, outside hidden folders, after a line naming it), and checks the document the
+  fields render against the template and that input (`fill`: `check(raw=)`, so a `quote` field's quotes must be in it).
   `--body-file` gives the whole document in place of the fields (Corrections, above).
   A refusal prints every finding, at most 10 lines, then each correction, then `templates.py fill:
   nothing was written; fix every finding and fill again`, exit 1, and writes nothing; warnings and
@@ -3486,11 +3494,11 @@ def enforcement(root: Path) -> Enforcement:
     enforce = table.get("enforce", OFF)
     if enforce not in ENFORCE_VALUES:
         raise TemplateError(f"templates: [templates] enforce = {enforce!r} in {where} is none of "
-                        f"{', '.join(ENFORCE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(ENFORCE_VALUES)}; set one of them (docs/templating.md)")
     gate = table.get("gate", OFF)
     if gate not in GATE_VALUES:
         raise TemplateError(f"templates: [templates] gate = {gate!r} in {where} is none of "
-                        f"{', '.join(GATE_VALUES)}; set one of them (README \"Templates\")")
+                        f"{', '.join(GATE_VALUES)}; set one of them (docs/templating.md)")
     refusals = table.get("refusals", DEFAULT_REFUSALS)
     if isinstance(refusals, bool) or not isinstance(refusals, int) or refusals < 1:
         raise TemplateError(f"templates: [templates] refusals = {refusals!r} in {where} must be a whole "
@@ -3990,6 +3998,95 @@ def stale(templates: dict[str, Template], folder: Path) -> tuple[list[str], list
     return older, unresolved
 
 
+
+def _file_documents(folder: Path) -> list[tuple[str, str, tuple[int, int, str, str] | None]]:
+    """Each `*.md` under `folder`, outside hidden folders, readable as text: its path relative to
+    `folder`, its text and its `derived_from` (`derived_from`, None where it records none)."""
+    found = []
+    for path in sorted(folder.rglob(f"*{TEMPLATE_SUFFIX}")):
+        relative = path.relative_to(folder)
+        if not path.is_file() or any(part.startswith(".") for part in relative.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        front = FRONT_MATTER.match(text)
+        found.append((relative.as_posix(), text, derived_from(front.group(0)) if front else None))
+    return found
+
+
+def raw_input(path: Path, command: str = "templates.py fill") -> str:
+    """The raw input `--input` names: a file's text, or a folder's material, each text file under it
+    outside hidden folders in path order, after a line `--- <path relative to the folder> ---`."""
+    if not path.is_dir():
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise TemplateError(f"{command}: cannot read --input {path} ({error})") from error
+    parts = []
+    for file in sorted(path.rglob("*")):
+        relative = file.relative_to(path)
+        if not file.is_file() or any(part.startswith(".") for part in relative.parts):
+            continue
+        try:
+            parts.append(f"--- {relative.as_posix()} ---\n{file.read_text(encoding='utf-8')}")
+        except (OSError, UnicodeDecodeError):
+            continue
+    if not parts:
+        raise TemplateError(f"{command}: --input {path} holds no text file; name the folder or the file "
+                            "the fields come from")
+    return "\n".join(parts)
+
+
+def gaps(template: Template, document: Document) -> list[tuple[str, str]]:
+    """The sections of `document` its material did not fill: each field with a section, its heading
+    and why, `not in input` (NOT_IN_INPUT) or `empty` (missing or empty), in the template's order."""
+    found = []
+    for item in template.fields:
+        if not item.in_body:
+            continue
+        value = document.fields.get(item.name)
+        why = ("not in input" if not_in_input(value)
+               else "empty" if _emptiness(item, value) in ("missing", "empty") else "")
+        if why:
+            found.append((item.heading or item.name, why))
+    return found
+
+
+def documents(templates: dict[str, Template], folder: Path, raw: str | None = None
+              ) -> tuple[list[str], list[str], int, bool]:
+    """Every file document under `folder` (each `*.md`, outside hidden folders, whose `derived_from`
+    names a template) checked against that template and, where given, the raw input `raw`: one line
+    per finding, `<file>: <finding>`, and per document whose template does not resolve; one line per
+    gap (`gaps`), `<file>: <heading>: not in input` or `: empty`; the count of documents; and whether
+    anything refused. A folder without a document refuses."""
+    if not folder.is_dir():
+        raise TemplateError(f"templates.py documents: --path {folder} is no folder; name the folder "
+                            "that holds the documents")
+    lines, holes, count, refused = [], [], 0, False
+    for where, text, found in _file_documents(folder):
+        if found is None or not found[2]:
+            continue
+        count += 1
+        name = found[2].rsplit("/", 1)[-1]
+        template = templates.get(name)
+        if template is None:
+            lines.append(f"{where}: refuse: derived_from [template]: {name} is no template here; put "
+                         f"it in the project's {TEMPLATES}/ or name the template the document derives from")
+            refused = True
+            continue
+        document = parse(template, text)
+        findings = check(template, document, raw=raw)
+        refused = refused or any(item.severity == REFUSE for item in findings)
+        lines += [f"{where}: {line}" for line in _capped(findings)]
+        holes += [f"{where}: {heading}: {why}" for heading, why in gaps(template, document)]
+    if not count:
+        lines.append(f"{folder}: no document here derives from a template; fill one with "
+                     "`templates.py fill`, which records its derived_from")
+        refused = True
+    return lines, holes, count, refused
+
 def refresh(root: Path = ROOT, *, folder: Path | None = None) -> tuple[list[str], bool]:
     """Bring every imported template the fill may resolve up to date before it loads them
     (docs/templates.md "Template repositories"; scripts/template_import.py owns each step): those
@@ -4198,7 +4295,7 @@ def _fill(templates: dict[str, Template], options: argparse.Namespace) -> int:
     if options.fields is None and options.fields_json is None and options.body_file is None:
         print(json.dumps(instructions(template, prompt, root), indent=2))
         return 0
-    raw = _text_option(options, "input_text", "input", "input")
+    raw = raw_input(options.input) if options.input is not None else options.input_text
     if raw is None:
         raise TemplateError(f"{FILL}: give the raw input the fields come from: --input FILE or "
                             "--input-text TEXT")
@@ -4252,7 +4349,7 @@ def _capped(findings: list[Finding]) -> list[str]:
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="templates.py",
                                      description="SE's templates: check, draft, schema, list, fill, "
-                                     "interfaces, stale")
+                                     "interfaces, stale, documents")
     commands = parser.add_subparsers(dest="command", required=True)
     checking = commands.add_parser("check", help="check a body or a set of fields against a template")
     checking.add_argument("template", nargs="?",
@@ -4277,12 +4374,23 @@ def main(arguments: list[str] | None = None) -> int:
     schemas.add_argument("template", nargs="?", help="the template; without it, --path selects one")
     listing = commands.add_parser("list", help="name every template with its actions")
     listing.add_argument("--owned", action="store_true", help="the paths the templates own")
+    listing.add_argument("--root", type=Path, help="the project whose templates/ and template "
+                         "repositories resolve a name before SE's (default: SE's own checkout)")
     staling = commands.add_parser("stale", help="list the documents under a folder whose template has a "
                                   "newer version than the one they derive from")
     staling.add_argument("--path", type=Path, required=True, help="the folder of the documents")
     staling.add_argument("--root", type=Path, help="the project whose templates/ and template "
                          "repositories resolve a name before SE's (default: the git checkout holding "
                          "--path, else the working directory)")
+    documenting = commands.add_parser("documents", help="check every document under a folder against "
+                                      "the template its derived_from names, and name each section "
+                                      "its material did not fill")
+    documenting.add_argument("--path", type=Path, required=True, help="the folder of the documents")
+    documenting.add_argument("--input", type=Path, help="the raw input the documents were filled from, "
+                             "a file or a folder, which a quote field's quotes must hold")
+    documenting.add_argument("--root", type=Path, help="the project whose templates/ and template "
+                             "repositories resolve a name before SE's (default: the git checkout "
+                             "holding --path, else the working directory)")
     interfacing = commands.add_parser("interfaces", help="write the generated schema of each "
                                       "interface template beside the code that uses it "
                                       "(scripts/interfaces/), from the working tree's templates/")
@@ -4295,7 +4403,8 @@ def main(arguments: list[str] | None = None) -> int:
     prompts.add_argument("--prompt", help="what the agent was asked to write, as text")
     prompts.add_argument("--prompt-file", type=Path, help="the prompt as a file")
     raws = filling.add_mutually_exclusive_group()
-    raws.add_argument("--input", type=Path, help="the raw input the fields come from, as a file")
+    raws.add_argument("--input", type=Path, help="the raw input the fields come from: a file, or a "
+                      "folder of material, each text file under it")
     raws.add_argument("--input-text", help="the raw input as text")
     values = filling.add_mutually_exclusive_group()
     values.add_argument("--fields", type=Path, help="the field values as a JSON file; without them "
@@ -4318,7 +4427,7 @@ def main(arguments: list[str] | None = None) -> int:
         command.add_argument("--root", type=Path, help="the project: the root of --path's globs "
                              "(default: the git checkout holding it, else the working directory), "
                              "whose templates/ and template repositories resolve a name before SE's")
-    for command in (checking, drafting, schemas, listing, filling, staling):
+    for command in (checking, drafting, schemas, listing, filling, staling, documenting):
         command.add_argument("--tree", action="store_true", help="read the working tree's templates/")
         command.add_argument("--templates", type=Path, help="read the templates and terms.toml from this "
                              "folder instead of SE's templates/")
@@ -4351,6 +4460,14 @@ def main(arguments: list[str] | None = None) -> int:
             if older:
                 print("\n".join(older))
             return 0
+        if options.command == "documents":
+            raw = raw_input(options.input, "templates.py documents") if options.input is not None else None
+            lines, holes, count, refused = documents(templates, options.path, raw)
+            print("\n".join([*lines, *holes, f"{count} document{'s' * (count != 1)}: "
+                             + ("refused; fix every finding and fill again" if refused else "pass")
+                             + (f"; {len(holes)} section{'s' * (len(holes) != 1)} the material did "
+                                "not fill, named above: tell the person each" if holes else "")]))
+            return 1 if refused else 0
         if options.command == "fill":
             return _fill(templates, options)
         if options.command in ("draft", "schema"):

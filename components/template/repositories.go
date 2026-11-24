@@ -215,7 +215,7 @@ var (
 	localKeys     = []string{"paths", "urls", "integrator_session", "trackers", "worktree_roots", "repos", "mirrors", "public_identity", "hooks"}
 )
 
-const renamed = `[modules] is [components] since se 8: rename each [modules.<name>] to [components.<name>] and drop its url, as a component is found by its name (README "Modules")`
+const renamed = `[modules] is [components] since se 8: rename each [modules.<name>] to [components.<name>] and drop its url, as a component is found by its name (docs/modules.md "Modules")`
 
 // localConfig is where the machine's settings are: ~/.se/local.toml.
 var localConfig = func() string {
@@ -649,7 +649,7 @@ func templateRepositories(root string) ([]templateRepository, error) {
 	for _, name := range listed {
 		c, ok := byName[strings.ToLower(name)]
 		if !ok {
-			return nil, moduleFail(`template repository %s: %s lists it, but se.toml declares no [components.%s]; pin it there with ref or version as any component (README "Modules")`, name, where, name)
+			return nil, moduleFail(`template repository %s: %s lists it, but se.toml declares no [components.%s]; pin it there with ref or version as any component (docs/modules.md "Modules")`, name, where, name)
 		}
 		checkout, local := paths[c.name], true
 		if !isDir(checkout) {

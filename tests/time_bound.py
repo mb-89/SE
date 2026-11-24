@@ -8,7 +8,7 @@ include `obs` (the tests of tests/test_deck.py count through `decks`) gets the o
 its lock on top: on a fresh checkout its setup clones and builds obs over the network, which no
 measurement on one host bounds. A test that carries its own `timeout` mark keeps it. A test in
 `tests/beside_*.py` gets none: those files run under their own `se.toml` `[tests.beside.*]` limit,
-or only where the owner adds them (README "Host validators").
+or only where the owner adds them (docs/applications.md "Host validators").
 
 `explain` adds one section to the report of a test pytest-timeout stopped: the test, its bound,
 this file as where the bound is set and measured, and the remedy.

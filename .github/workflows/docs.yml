@@ -1,4 +1,4 @@
-# Builds se's GitHub Pages site and publishes it (README "Documentation"): the documentation as
+# Builds se's GitHub Pages site and publishes it (docs/documentation.md "Documentation"): the documentation as
 # index.html and the Timeline as timeline.html. Pages publishes one artifact, so both are built in
 # every run. The Timeline rebuilds hourly (which also follows the other repositories it shows) and
 # on each issue event here; the documentation changes only with a push.
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       # The build runs RUNME in its copy of the repository, which takes the pinned se from ~/.se/bin
-      # (README "Documentation"): placed here from the checkout, fetched from its release, or built
+      # (docs/documentation.md "Documentation"): placed here from the checkout, fetched from its release, or built
       # with go where that release is not out yet. The cache keeps each se version and the claude
       # RUNME installs, so each is fetched or built once.
       - uses: actions/setup-go@v6
@@ -48,7 +48,7 @@ jobs:
         run: |
           python3 scripts/se_modules.py sync
           bash scripts/bootstrap.sh --binary
-      # obs builds with the adapter component obs-html, found among the installed ones (README
+      # obs builds with the adapter component obs-html, found among the installed ones (docs/documentation.md
       # "Documentation"); a build installs it where it is missing, and fails naming
       # obs-components install obs-html where it cannot.
       - name: Install obs's adapter component obs-html

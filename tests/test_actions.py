@@ -1,7 +1,8 @@
-"""SE's composite actions for a sharded suite (README "Test budget")."""
+"""SE's composite actions for a sharded suite (docs/tests.md "Test budget")."""
 
 import re
 from pathlib import Path
+from manual import page
 
 PROJECT = Path(__file__).resolve().parents[1]
 ACTIONS = sorted((PROJECT / ".github" / "actions").glob("*/action.yml"))
@@ -27,9 +28,9 @@ def test_the_actions_run_python_unbuffered_so_their_output_stays_in_order():
 
 
 def test_the_readme_states_the_actions_python_requirement_and_notice():
-    readme = (PROJECT / "README.md").read_text(encoding="utf-8")
-    budget = readme[readme.index("### Test budget"):]
-    budget = budget[:budget.index("\n### ", 1)]
+    readme = page("tests")
+    budget = readme[readme.index("## Test budget"):]
+    budget = budget[:budget.index("\n## ", 1)]
     assert "Python 3.11 or later" in budget and "`tomllib`" in budget
     assert "Node 24" in budget
     assert ("`Suite time: 66.1 s (limit 120 s; slowest of 2 shards: 66.1 s (shard\n  1))`"

@@ -1,5 +1,5 @@
 """SE's retro commands as a kern component: retro.py's own code answers each command its
-component.toml declares (README "Commands as components")."""
+component.toml declares (docs/start.md "Commands as components")."""
 
 from pathlib import Path
 

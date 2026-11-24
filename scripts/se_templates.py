@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SE's side of templates: the templates engine (`templates.py`) with the checks SE's filing commands add, as
-the command component `templates` that kern's MCP door serves as its tool `templates` (README "Templates"),
+the command component `templates` that kern's MCP door serves as its tool `templates` (docs/templating.md "Templates"),
 and the template gate SE's PreToolUse hook runs on a write through the GitHub tools or `gh`.
 
 The engine stays free of SE's own scripts; this script joins it to them. Of its four door
@@ -74,7 +74,7 @@ and says `free: no template applies (<action>)` (on stderr with `--render`, the 
 
 **The gate.** `se_templates.py gate` reads one PreToolUse payload on stdin (Claude Code's, or
 Copilot's with `toolName` and `toolArgs`) and answers on stdout one JSON object or nothing; it
-exits 0. `scripts/se_hook.sh` runs it only for a guarded call (README "Templates"), with
+exits 0. `scripts/se_hook.sh` runs it only for a guarded call (docs/templating.md "Templates"), with
 `--no-python-downloads`, and the hook prints its answer as its whole stdout. The file tools are
 judged by their own rules (The file tools, below).
 
@@ -175,7 +175,7 @@ bash pattern, a superset of the engine's match (a `*` there also crosses folders
 **Claimed files.** `se_templates.py check-files [PATH ...] [--changed REF] [--root DIR] [--templates DIR]`
 checks the files a `file.write` template claims by its `[applies] paths`, each as `templates.py check
 --path` checks one. It is neither the door's nor the gate's: `work_tickets.py stop-check`, `push`
-and CI's `check` job run it (README "Templates").
+and CI's `check` job run it (docs/templating.md "Templates").
 
 - Which files: the PATHs given; or, with `--changed REF`, every file that differs between REF's
   merge base with HEAD and the working tree (committed, staged or not) and every untracked file
@@ -195,7 +195,7 @@ and CI's `check` job run it (README "Templates").
 **The backstop.** `se_templates.py backstop --event-name NAME --event FILE [--backstop off|on]
 [--worktree DIR]` reads one GitHub event, as `.github/workflows/templates.yml` hands it over from
 `$GITHUB_EVENT_PATH`, and prints one JSON plan, `{"repo", "number", "add_labels", "summary",
-"failed"}`; it never calls GitHub and exits 0, 2 on a usage error (README "Templates").
+"failed"}`; it never calls GitHub and exits 0, 2 on a usage error (docs/templating.md "Templates").
 
 - What it checks (BACKSTOP_EVENTS): `issues` opened (`issue.create`), edited, reopened or labeled
   (`issue.edit`), for an issue whose body carries the fleet marker or whose labels hold `work`,
@@ -250,7 +250,7 @@ TEMPLATE_HEADING = "## The template {name}"
 GATE_SECONDS = 10.0
 #: The gate's log of the writes it let pass without judging, under the project.
 GATE_LOG = Path(".se") / ".runtime" / "templates-gate.log"
-#: The machine's switch of the gate (README "Machine-local `~/.se/local.toml`").
+#: The machine's switch of the gate (docs/running.md "Machine-local `~/.se/local.toml`").
 GATE_SWITCH = "SE_TEMPLATES_GATE"
 #: The server part of a guarded tool's name holds this.
 GATE_SERVER = "github"
@@ -677,7 +677,7 @@ def sibling(name: str):
     return importlib.import_module(name)
 
 
-#: se_templates.py's commands as one kern component (README "Commands as components"); each command's
+#: se_templates.py's commands as one kern component (docs/start.md "Commands as components"); each command's
 #: usage and help come from make_parser.
 COMPONENTS = (sibling("se_components").Group(
     "templates", "Templates",
@@ -1765,7 +1765,7 @@ def backstop_switch(root: Path) -> str:
     value = section.get("backstop", "off") if isinstance(section, dict) else "off"
     if value not in BACKSTOP_VALUES:
         raise Usage(f"{BACKSTOP_COMMAND}: [templates] backstop = {value!r} in {path} is none of "
-                    f"{', '.join(BACKSTOP_VALUES)}; set one of them (README \"Templates\")")
+                    f"{', '.join(BACKSTOP_VALUES)}; set one of them (docs/templating.md \"Templates\")")
     return value
 
 

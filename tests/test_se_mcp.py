@@ -1,4 +1,4 @@
-"""The MCP door's launcher, scripts/se_mcp.sh and its PowerShell twin se_mcp.ps1 (README "MCP door"):
+"""The MCP door's launcher, scripts/se_mcp.sh and its PowerShell twin se_mcp.ps1 (docs/start.md "The MCP door"):
 MCP alone on standard output, the rest in a log, and an answer at once where the binary is missing."""
 from __future__ import annotations
 
@@ -156,7 +156,7 @@ def test_a_project_it_cannot_write_logs_to_the_temporary_folder(tmp_path):
 
 
 def test_the_launcher_reads_nothing_of_se_but_the_release_pin():
-    """Standalone (README "MCP door"): no other script of SE is sourced or run, in either twin."""
+    """Standalone (docs/start.md "The MCP door"): no other script of SE is sourced or run, in either twin."""
     for path in (SCRIPT, TWIN):
         text = path.read_text(encoding="utf-8")
         named = {word for word in text.replace("'", " ").replace('"', " ").split()
@@ -168,7 +168,7 @@ def test_the_launcher_reads_nothing_of_se_but_the_release_pin():
         assert "release.toml" in text
 
 
-# A plugin install (README "MCP door"): Copilot runs the launcher in the plugin folder with --root .,
+# A plugin install (docs/start.md "The MCP door"): Copilot runs the launcher in the plugin folder with --root .,
 # PLUGIN_ROOT the plugin folder; the launcher serves the session's repository instead.
 
 
@@ -437,7 +437,7 @@ def test_the_checkouts_own_config_keeps_its_root_whatever_the_session_folder(tmp
         tmp_path, checkout)
 
 
-# A session folder that is no checkout (README "MCP door"): the plugin case keeps it as the root, and
+# A session folder that is no checkout (docs/start.md "The MCP door"): the plugin case keeps it as the root, and
 # the launcher logs at home, so that folder gets no .se.
 
 
@@ -510,7 +510,7 @@ def test_a_parent_folder_that_is_no_checkout_gets_no_se(tmp_path):
     assert "from parent cwd" in home_log(tmp_path).read_text(encoding="utf-8")
 
 
-# Claude Code's plugin install (README "The MCP door"): .claude-plugin/plugin.json runs the launcher
+# Claude Code's plugin install (docs/start.md "The MCP door"): .claude-plugin/plugin.json runs the launcher
 # from ${CLAUDE_PLUGIN_ROOT} with --root .; Claude Code sets CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR
 # in the server's environment and starts it in the project (scripts/host-limits.toml).
 

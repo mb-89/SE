@@ -2,7 +2,7 @@
 
 # Rules
 
-The 70 rules in force: the rule book's 61 and 9 guidance notes, the notes after the book.
+The 71 rules in force: the rule book's 61 and 10 guidance notes, the notes after the book.
 
 | Rule | What it says |
 |---|---|
@@ -74,5 +74,6 @@ The 70 rules in force: the rule book's 61 and 9 guidance notes, the notes after 
 | `parse-dont-validate` | Parse, do not validate: a value is checked once, when its type is made, and relied on afterwards. Read it before you add a type, a check of a value, or a target that takes one. |
 | `platform-code-legs` | How a branch that changes platform code is delivered: after its own kern-platforms legs pass, linked in the field report. Load it before delivering a branch that touches code Windows or macOS runs differently. |
 | `python-ad-hoc-go-system` | Python for ad hoc work, Go for what is part of the system: where new code goes, and when to port. Read it before you write a script, a component or a port. |
+| `readme-is-one-page` | A README is one A4 page: the one command that installs the software and runs its showcase first, then the documentation link, the pitch in five sentences and links. Read it before you write or change a README. |
 | `test-paths-on-windows` | How a new test builds and compares paths so the Windows leg of CI passes. Load it before writing a test that builds a path. |
 | `tests-spawn-no-processes` | Tests start no processes: code under test runs in-process, each door is real in one contract test only. Load it before writing or changing a test. |

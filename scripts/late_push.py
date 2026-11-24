@@ -10,7 +10,7 @@ would refuse it, so it prints one line saying so and that `deliver` must run aga
 se.toml `[deliver] late_push` says what that line does: `"warn"` (built in) lets the push through,
 `"refuse"` refuses it. `work_tickets.py push --redeliver` records the tip it pushes first, the
 redelivery's own push without gh. Everything here is pure but `load` and `record`, which read and
-write the record (README "Late push").
+write the record (docs/fleet.md "Late push").
 """
 
 from __future__ import annotations

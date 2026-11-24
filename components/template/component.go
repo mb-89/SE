@@ -241,7 +241,7 @@ func checkVerb(_ context.Context, req CheckRequest) (Checked, error) {
 }
 
 // Component is the component a binary carries: SE's template engine, whose verb fill makes the
-// filled templates every templated target takes (README "Templates", components/README.md).
+// filled templates every templated target takes (docs/templating.md "Templates", components/README.md).
 var Component = index.Declare(Name, "SE's template engine in Go: fill makes a filled template, the one value a templated target takes, after checking it; check gives a text's findings.",
 	index.IO(),
 	index.Config("root", ".", "The checkout whose templates/ the engine reads; a detached core runs in its root."),

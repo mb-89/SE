@@ -42,14 +42,14 @@ class = "batch"
 usage = "work_tickets.py push [--worktree WORKTREE] [--redeliver] [branch]"
 summary = "se_templates.py check-files --changed origin/<integration branch> first"
 group = "Delivery"
-help = "se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (README \"Work publication\"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
+help = "se_templates.py check-files --changed origin/<integration branch> first; public check's push gate; a work branch only where origin is the repository its recorded work issue is for (docs/fleet.md \"Work publication\"); then git push -u origin <branch>; retries a transient refusal once a minute, ten attempts; the integration branch needs a passing suite and public check recorded on the tree pushed"
 class = "batch"
 
 [commands."work_tickets.py verified"]
 usage = "work_tickets.py verified [--worktree WORKTREE] remote_ref commit"
 summary = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> ..."
 group = "Delivery"
-help = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = \"refuse\" is refused (README \"Late push\")"
+help = "the pre-push hook's guard: refuse a push of <commit> to <remote ref> where the ref is the integration branch and no passing suite and public check are recorded on its tree; push runs the same check. A push of the delivered work branch at another commit than its delivered tip prints the late-push line, or with se.toml [deliver] late_push = \"refuse\" is refused (docs/fleet.md \"Late push\")"
 class = "batch"
 
 [commands."work_tickets.py pr-body"]

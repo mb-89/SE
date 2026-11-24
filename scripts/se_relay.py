@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SE's GitHub reads through kern's GitHub relay (README "Hand-offs through the relay").
+"""SE's GitHub reads through kern's GitHub relay (docs/settings.md "Hand-offs through the relay").
 
 Without gh (Claude's cloud) SE's commands hand their GitHub steps to the session. Where kern serves
 the checkout with its GitHub component on the relay backend, a command reads GitHub through kern

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Whether a run of `check` on a pull request's edit or label change takes the suite's result from
-an earlier run of the same tree instead of running it again (README "Edits reuse the suite").
+an earlier run of the same tree instead of running it again (docs/tests.md "Edits reuse the suite").
 
 A pull request's description and labels change many times without a new commit: the worker
 corrects its field report, the integrator moves labels. Such a run (`edited`, `labeled`,
