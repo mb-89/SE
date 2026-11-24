@@ -801,8 +801,6 @@ below, a positive number of hours, default 12; other keys are refused.
   starts no more, and after each landing starts the next startable issue, so a worker that
   finished frees its place. The [dispatcher](#dispatcher) fires nothing while the limit is
   reached.
-  - In the cloud the landing itself starts nothing; the integrator starts its workers with the
-    host's session tool.
 - **Not limited.** Integrators, reviewers and SE's own session.
 - **The claim's beat.** A claim carries its heartbeat on the issue: the `in-progress` label, and
   one line in the body, `<!-- se:beat <UTC time to the minute> -->`. `start` writes the first
@@ -821,11 +819,6 @@ below, a positive number of hours, default 12; other keys are refused.
   <file>` judges the `list_issues` answer that `queue`'s plan reads.
   - Nothing frees a claim on its own. Releasing one is the person's step, which SE prepares:
     delete its branch, take off `in-progress` and remove the beat line.
-  - A claim no worker took is undone with `work_tickets.py unclaim`, for one or more issues: the
-    beat line removed, `ready` set where `in-progress` is, and the `Started:` comment answered
-    with one line. It refuses an issue whose branch holds commits beyond main, a worker's.
-  - Its branch stays as an unused claim, behind main with no commit of its own, which `ready`
-    lists and `claim` and `start` take ([Worktrees](src/skills/work-model/SKILL.md#worktrees)).
 
 #### Commit checks
 
@@ -2161,7 +2154,7 @@ settings checks and the generated docs.
 | Command | Usage | What it does |
 |---|---|---|
 | `work_tickets.py capacity` | `work_tickets.py capacity [--worktree WORKTREE] [--repo REPO] [--all-repos]` | show how many more workers may start: the worker limit ([workers] in se.toml), on a local device also its cores and memory, less those running |
-| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue` | claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there, unless it is an unused claim (behind main, no commit of its own) of an issue not in progress, which it moves to the newest main; start of the issue in this checkout then takes this claim and changes its labels |
+| `work_tickets.py claim` | `work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue` | claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it |
 | `work_tickets.py config` | `work_tickets.py config --worktree WORKTREE [--repo REPO] [--worktree-root WORKTREE_ROOT] [--integrator-session INTEGRATOR_SESSION]` | show the repository and the machine-local settings in effect |
 | `work_tickets.py dispatch` | `work_tickets.py dispatch [--worktree WORKTREE] [--repo REPO] [--fire \| --dry-run]` | the dispatcher (README "Dispatcher", scripts/dispatch.py): list the startable work issues (ready, not waiting on a person, no open blocker) and whether an integrator runs (an open landing pull request, or in-progress work that moved within the fleet lease), all read from GitHub with no model; with --fire it fires the scheduled task whose fire URL is in SE_DISPATCH_TRIGGER with the token in SE_DISPATCH_TOKEN once where startable work waits, none runs and the fleet is not paused; with --dry-run it prints that fire and makes none |
 | `work_tickets.py docs` | `work_tickets.py docs [--check]` | write the command groups' component declarations (components/<group>/component.toml) from this registry and the README's command reference from them; with --check, only refuse a declaration or a README that differs |
@@ -2186,7 +2179,7 @@ settings checks and the generated docs.
 | `work_tickets.py suite-time` | `work_tickets.py suite-time --worktree WORKTREE --shards DIR [--expect N]` | in CI's check job, judge a sharded suite: its time is its slowest shard's, from the records suite-shard wrote; prints it as the notice CI's suite time is read from, and no time when a shard failed; refusals and warnings are workflow annotations; exit code 1 when a shard failed or is missing, 3 when the time is over the limit and the budget refuses it (README "Test budget") |
 | `work_tickets.py test-seconds` | `work_tickets.py test-seconds [--worktree WORKTREE] [--runs N] [--run ID] [--report FILE] [--slowest N]` | print each test's seconds from CI's kept test reports: per run its wall, cpu and when each worker started and finished, then the slowest tests' median over the runs; by default the artifact test-reports of the newest passing check runs of a push to the integration branch that kept it; writes nothing |
 | `work_tickets.py turn-start` | `work_tickets.py turn-start [--worktree WORKTREE] [--repo REPO] [--all-repos]` | what SE reads at each turn's start, in one call: the pause state, the escalations, the delivered pull requests, the capacity, the startable and the claimed work, the outside issues and the fleet's findings, read at once while the checkout syncs; a part whose read fails names its cause. Exit code 1 while the fleet is paused. Without gh it prints the queue's and the fleet check's plans, exit code 2 |
-| `work_tickets.py unclaim` | `work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]` | undo claims no worker took, such as those a landing in the cloud made: each issue's beat line removed, ready set where in-progress is, its Started comment answered with one line; refused for an issue whose branch holds commits beyond main |
+| `work_tickets.py unclaim` | `work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]` | undo claims no worker took |
 
 #### Review
 

@@ -107,16 +107,16 @@ class = "batch"
 
 [commands."work_tickets.py claim"]
 usage = "work_tickets.py claim --worktree WORKTREE [--repo REPO] [--issue-body FILE] issue"
-summary = "claim a ready work issue for a worker your session tool starts: ..."
+summary = "claim a ready issue for a session-tool start: its branch at the ..."
 group = "Integration"
-help = "claim a ready work issue for a worker your session tool starts: create its branch at the newest main on the remote that hosts the issue's repository; refused, changing nothing, where that branch exists there, unless it is an unused claim (behind main, no commit of its own) of an issue not in progress, which it moves to the newest main; start of the issue in this checkout then takes this claim and changes its labels"
+help = "claim a ready issue for a session-tool start: its branch at the newest main on the issue's remote, or an unused claim there; refused where another start holds it"
 class = "batch"
 
 [commands."work_tickets.py unclaim"]
 usage = "work_tickets.py unclaim --worktree WORKTREE [--repo REPO] issue [issue ...]"
-summary = "undo claims no worker took, such as those a landing in the cloud ..."
+summary = "undo claims no worker took"
 group = "Integration"
-help = "undo claims no worker took, such as those a landing in the cloud made: each issue's beat line removed, ready set where in-progress is, its Started comment answered with one line; refused for an issue whose branch holds commits beyond main"
+help = "undo claims no worker took"
 class = "batch"
 
 [commands."work_tickets.py session-title"]

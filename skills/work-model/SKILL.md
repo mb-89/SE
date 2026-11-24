@@ -615,6 +615,11 @@ Pull requests built on an old `main` cause most integration trouble.
     issue not labelled `in-progress`. `ready` lists its issue, and `claim` and `start` take it,
     moving it to the newest `main` with a lease on its tip, so only the first of two starts does.
     A branch at the newest `main` is a start's claim in flight and stays refused.
+  - A claim no worker took, such as one a landing made before it started nothing in the cloud,
+    is undone with `work_tickets.py unclaim`, for one or more issues: the beat line removed,
+    `ready` set where `in-progress` is, and the `Started:` comment answered with one line. It
+    refuses an issue whose branch holds commits beyond `main`, a worker's; the branch stays, an
+    unused claim.
 - One worktree per local worker, created when its work starts, from the newest `main`, by
   `work_tickets.py start <issue> --worktree <main checkout>`:
   - it refuses an issue that is not startable (including open blockers, an existing branch that

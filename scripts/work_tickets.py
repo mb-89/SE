@@ -12331,12 +12331,9 @@ def run_start(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-@command("claim", "claim a ready work issue for a worker your session tool starts: create its "
-                  "branch at the newest main on the remote that hosts the issue's repository; "
-                  "refused, changing nothing, where that branch exists there, unless it is an "
-                  "unused claim (behind main, no commit of its own) of an issue not in progress, "
-                  "which it moves to the newest main; start of the issue in this checkout then "
-                  "takes this claim and changes its labels",
+@command("claim", "claim a ready issue for a session-tool start: its branch at the newest main "
+                  "on the issue's remote, or an unused claim there; refused where another start "
+                  "holds it",
          WORKTREE,
          arg("issue", type=int),
          REPO,
@@ -12376,10 +12373,7 @@ def claimed_issue(root: Path, number: int, repo: str, issue_file: Path | None) -
     return issue
 
 
-@command("unclaim", "undo claims no worker took, such as those a landing in the cloud made: each "
-                    "issue's beat line removed, ready set where in-progress is, its Started "
-                    "comment answered with one line; refused for an issue whose branch holds "
-                    "commits beyond main",
+@command("unclaim", "undo claims no worker took",
          WORKTREE,
          arg("issues", type=int, nargs="+", metavar="issue"),
          REPO)
