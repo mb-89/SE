@@ -9511,8 +9511,8 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
                        run_url: str, door: GitHub | None) -> str:
     """After the read-back: the checkout at the landed commit, the landing branch
     gone, the mirrors pushed, the close-out plan run through `door` (or, without one, printed for
-    the session), the worker's worktree and branch removed and, with a door, what is unblocked
-    started."""
+    the session), the worker's worktree and branch removed and, with a door on a local device,
+    what is unblocked started; in the cloud it starts nothing, whatever door it has."""
     target, landing = str(state["target"]), str(state["landing"])
     tracker, remote = str(state["tracker"]), str(state["remote"])
     pull_number, work_number = int(state["pull_number"]), int(state["work_number"])
@@ -9624,12 +9624,20 @@ def finish_integration(root: Path, state: dict[str, object], commit: str, landin
     if summary:
         print(summary)
     if door is None or getattr(door, "relayed", False):
-        print(f"Started: none here; start what is unblocked with the host's session tool ({WITHOUT_GH})")
+        print(f"{STARTED_NONE_HERE} ({WITHOUT_GH})")
+        return short
+    if in_cloud():  # a cloud claim starts no session: the integrator starts its own (SE#1881)
+        print(STARTED_NONE_HERE)
         return short
     started, waiting = start_startable(root, tracker)
     print(f"Started: {started}" + (f"; {waiting} startable wait for capacity, the next landing "
                                    "starts them" if waiting else ""))
     return short
+
+
+# What the close-out prints where it starts nothing itself: without a door, through kern's relay,
+# and in the cloud, where a claim starts no worker session and the integrator starts its own.
+STARTED_NONE_HERE = "Started: none here; start what is unblocked with the host's session tool"
 
 
 def start_startable(root: Path, repo: str) -> tuple[int, int]:

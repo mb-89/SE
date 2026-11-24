@@ -2833,8 +2833,13 @@ def test_start_through_kerns_relay_sends_the_label_change_and_the_started_commen
     assert "GitHub plan:" not in out and "Started #5\n" in out
 
 
+@pytest.mark.parametrize("cloud", [False, True])
 def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity(
-        main_checkout, local_config, monkeypatch, capsys):
+        main_checkout, local_config, monkeypatch, capsys, cloud):
+    """On a local device the close-out starts what capacity leaves room for; in the cloud, with
+    the same GitHub access, it claims and starts none of the three ready issues (SE#1881)."""
+    if cloud:
+        monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
     local_config.parent.mkdir(parents=True)
     local_config.write_text(
         'commit_trailer = "Co-authored-by: Agent <agent@users.noreply.github.com>"\n',
@@ -2889,8 +2894,9 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     monkeypatch.setattr(
         work_tickets, "guard", lambda root, branch, report: guarded.append((branch, report)) or [],
     )
-    monkeypatch.setattr(work_tickets, "ready_issues", lambda root, repo: [{"number": 9}])
-    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1)
+    monkeypatch.setattr(work_tickets, "ready_issues",
+                        lambda root, repo: [{"number": 9}, {"number": 10}, {"number": 11}])
+    monkeypatch.setattr(work_tickets, "capacity", lambda root, repo, **_: 1 - len(started))
     monkeypatch.setattr(
         work_tickets, "start", lambda root, number, repo, directory, create: started.append(number)
     )
@@ -2898,7 +2904,7 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     commit = work_tickets.integrate(main_checkout, 7, None, "build", [["check"]])
     assert (main_checkout / "worker.txt").is_file()
     assert squashed_onto_origin(main_checkout, commit)
-    assert commit and started == [9]
+    assert commit and started == ([] if cloud else [9])
     message = git_run(main_checkout, "log", "-1", "--format=%B").stdout
     assert "work issue #5, PR #7" in message
     assert message.rstrip().endswith("Co-authored-by: Agent <agent@users.noreply.github.com>")
@@ -2910,7 +2916,8 @@ def test_integrate_merges_a_worker_from_a_bare_origin_and_starts_within_capacity
     output = capsys.readouterr().out
     assert "Suite: 214 passed" in output
     assert "Cleanup: worker worktree removed" in output
-    assert "Started: 1" in output
+    assert ("Started: none here; start what is unblocked with the host's session tool\n" if cloud
+            else "Started: 1; 2 startable wait for capacity") in output
     closes = [call for call in calls if call[:2] == ["issue", "close"]]
     assert closes == [["issue", "close", "5", "--repo", "git.example/owner/tracker"]]  # only the work issue
     pause = ["issue", "list", "--state", "open", "--label", "pause"]
