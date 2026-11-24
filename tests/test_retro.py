@@ -144,6 +144,12 @@ def pull(number: int, head: str, body: str, merged: str | None = None, sha: str 
             "merge_commit_sha": sha or None}
 
 
+def run(conclusion: str, completed: str | None, name: str = "check") -> dict:
+    """A check run as the host's tools answer it, completed at `completed` (None: still running)."""
+    return {"name": name, "status": "completed" if completed else "in_progress",
+            "conclusion": conclusion if completed else None, "completed_at": completed}
+
+
 def answers(checkout: Path) -> dict[str, object]:
     """A window after retro #5 closed: #11 landed after one refused delivery, #12 landed but
     escalated and its landing's check failed, #13 a duplicate, #14 closed without a field report;
@@ -190,11 +196,9 @@ def answers(checkout: Path) -> dict[str, object]:
         "comments-3.json": [], "comments-13.json": [], "comments-14.json": [],
         "open-issues.json": [],
         "checks-21.json": {"total_count": 1, "check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
-        "checks-23.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "failure"}]},
-        "checks-25.json": {"check_runs": [
-            {"name": "check", "status": "completed", "conclusion": "success"}]},
+            run("success", "2026-11-02T09:50:00Z")]},
+        "checks-23.json": {"check_runs": [run("failure", "2026-11-03T09:50:00Z")]},
+        "checks-25.json": {"check_runs": [run("success", "2026-11-03T10:50:00Z")]},
     }
 
 
@@ -279,6 +283,27 @@ def test_each_rule_check_names_what_broke_it_and_keeps_the_rest(checkout):
     checks = {check.name: check for check in collected(checkout, given).checks}
     assert checks["work-issue"].kept and checks["check"].kept
     assert not checks["outside-pr"].kept and not checks["field-report"].kept
+
+
+def test_the_check_rule_judges_a_landing_by_the_run_that_gated_its_merge(checkout):
+    """The `check` rule reads the last `check` run that completed before the landing merged: a
+    scheduled run on the same commit that failed after the merge, a run still going or another
+    check's run does not count; a landing with no run completed before its merge breaks it."""
+    given = answers(checkout)
+    given["checks-21.json"] = {"check_runs": [
+        run("failure", "2026-11-03T02:00:00Z"),  # the nightly run, a day after the merge
+        run("success", "2026-11-02T09:50:00Z"),
+        run("failure", "2026-11-02T09:40:00Z"),  # an earlier push's run, rerun green
+        run("failure", "2026-11-02T09:55:00Z", name="kern-platforms (windows-2025)"),
+        run("failure", None)]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    assert broken == [{"item": "#23", "what": "check failure"}]
+
+    given["checks-21.json"] = {"check_runs": [run("success", "2026-11-02T10:05:00Z")]}
+    broken = {check.name: check for check in collected(checkout, given).checks}["check"].broken
+    head = f"{21:040d}"[:12]
+    assert broken[0] == {"item": "#21", "what": f"no check run on {head} completed before it "
+                                                 "merged at 2026-11-02T10:00:00Z"}
 
 
 def test_a_landing_naming_a_closed_or_foreign_issue_breaks_the_work_issue_check(checkout):

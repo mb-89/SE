@@ -278,9 +278,9 @@ field report's Retro section ask alike. Collect fills step 2 with what it read:
 - the field reports' answers to the standing questions, by question, and their "Not delivered"
   items, the planning misses;
 - the rule checks, each broken one with what broke it: every landing pull request names a work
-  issue open when it merged (`work-issue`), its `check` passed (`check`), no commit reached the
-  integration branch outside a pull request (`outside-pr`), every closed work issue has a field
-  report (`field-report`);
+  issue open when it merged (`work-issue`), its `check` passed in its last run before the merge,
+  not a later nightly one (`check`), no commit reached the integration branch outside a pull
+  request (`outside-pr`), every closed work issue has a field report (`field-report`);
 - the window's [metrics](running.md#metrics) report: the line each landing pull request's description ends
   in, merged with the lines of the local metrics file that started in the window, a run in both
   counted once (by its command and start, the local line winning);

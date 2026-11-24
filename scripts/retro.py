@@ -21,7 +21,8 @@ template's. Step 2, collect, holds
 - the field reports' answers to the standing questions (their Retro section, the block
   work_tickets.py `standing_questions` nests; `retro_entries`) by question, and their "Not
   delivered" items, the planning misses;
-- the rule checks (RULE_CHECKS), each broken one with what broke it;
+- the rule checks (RULE_CHECKS), each broken one with what broke it; the `check` rule judges a
+  landing by its last `check` run completed before it merged (`gating_run`), not by a later one;
 - the metrics of the window: the line each landing pull request's description ends in and the
   local metrics file's lines that started in the window, each run once (docs/running.md "Metrics");
 - the previous retro's sizes, where its block is found;
@@ -195,7 +196,8 @@ REFERENCE = re.compile(
 # The rule checks, by name: what each holds.
 RULE_CHECKS = {
     "work-issue": "every landing pull request names a work issue that was open when it merged",
-    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head",
+    "check": f"the check `{work_tickets.CHECK_NAME}` passed on every landing pull request's head "
+             "in its last run before the merge",
     "outside-pr": "no commit reached the integration branch outside a pull request",
     "field-report": "every closed work issue has a field report",
 }
@@ -712,6 +714,17 @@ def read_window(door, number: int, since: str | None = None,
     return found
 
 
+def gating_run(runs: list[dict], merged_at: str) -> dict | None:
+    """The `check` run of `runs` (the check runs on a landing's head) that gated its merge at
+    `merged_at`: the last to complete before it. A later run on the same commit, a nightly one
+    say, judges the commit, not the landing; one still running gated nothing."""
+    merged = when(merged_at)
+    gating = [(moment, run) for run in runs if run.get("name") == work_tickets.CHECK_NAME
+              and (moment := when(first(run, "completed_at", "completedAt"))) is not None
+              and merged is not None and moment <= merged]
+    return max(gating, key=lambda item: item[0])[1] if gating else None
+
+
 def landing_of(issue: Issue, naming: list[Pull], branch: str) -> Pull | None:
     """The newest pull request of `naming` (those naming `issue`) merged into `branch`."""
     return next((pull for pull in sorted(naming, key=lambda p: -p.number)
@@ -955,13 +968,14 @@ def collect(root: Path, number: int, door, tracker: str, branch: str, ref: str,
         if problem:
             checks["work-issue"].broken.append({"item": f"#{pull.number}", "what": problem})
         checks["check"].checked += 1
-        runs = [run for run in door.checks(pull) if run.get("name") == work_tickets.CHECK_NAME]
-        conclusion = str(runs[0].get("conclusion") or runs[0].get("status") or "") if runs else ""
+        gate = gating_run(door.checks(pull), pull.merged_at)
+        conclusion = str(gate.get("conclusion") or gate.get("status") or "") if gate else ""
         if conclusion != "success":
             checks["check"].broken.append({
                 "item": f"#{pull.number}",
-                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if conclusion
-                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]}"})
+                "what": f"{work_tickets.CHECK_NAME} {conclusion}" if gate
+                else f"no {work_tickets.CHECK_NAME} run on {pull.head_sha[:12]} completed before "
+                     f"it merged at {pull.merged_at}"})
     merge_shas = {pull.merge_sha for pull in merged if pull.merge_sha}
     # The host's tools name no merge commit: a squash merge's commit carries the pull request's
     # title as its subject (or GitHub's ` (#<n>)`) and its merge time as its committer time.
